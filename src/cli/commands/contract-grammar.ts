@@ -61,6 +61,13 @@ export type ParsedDeliver = Output &
     materializeConflict: boolean;
     overwrite: boolean;
   }>;
+export type ParsedVerify = Output &
+  Readonly<{
+    command: "verify";
+    contract?: string;
+    index?: number;
+    includeDirty: boolean;
+  }>;
 export type ParsedReview = Output &
   Actor &
   Readonly<{
@@ -128,6 +135,7 @@ export type ParsedContractCommand =
   | ParsedBind
   | ParsedAmend
   | ParsedDeliver
+  | ParsedVerify
   | ParsedReview
   | ParsedArc
   | ParsedAbandon
@@ -252,6 +260,20 @@ function parseDeliver(parts: ParsedContractParts): ParsedDeliver {
     includeDirty: parts.flags["include-dirty"] === true,
     materializeConflict: parts.flags["materialize-conflict"] === true,
     overwrite: parts.flags.overwrite === true,
+    output: parts.output,
+  };
+}
+
+function parseVerify(parts: ParsedContractParts): ParsedVerify {
+  const contract = parts.positionals[0];
+  const index = optionalFlag(parts.flags, "index");
+  if (index !== undefined && (!/^[1-9][0-9]*$/u.test(index) || !Number.isSafeInteger(Number(index))))
+    refuse("verify", "--index requires a positive safe integer");
+  return {
+    command: "verify",
+    ...(contract === undefined ? {} : { contract }),
+    ...(index === undefined ? {} : { index: Number(index) }),
+    includeDirty: parts.flags["include-dirty"] === true,
     output: parts.output,
   };
 }
@@ -436,6 +458,8 @@ export function parseContractCommand(parts: ParsedContractParts): ParsedContract
       return parseAmend(parts);
     case "deliver":
       return parseDeliver(parts);
+    case "verify":
+      return parseVerify(parts);
     case "review":
       return parseReview(parts);
     case "arc": {

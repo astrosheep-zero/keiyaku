@@ -52,22 +52,48 @@ Each act changes a different part of the world:
 - **Delivery preview:** `deliver --dry-run` shows the candidate, existing
   Verification evidence, and target followability without submitting work or
   running Verification or hooks. With the `verified` gate, missing or stale
-  evidence still needs Verification; preview never promises acceptance.
+  evidence remains unmet; preview never promises acceptance.
+- **Verify:** `verify [<contract>] [--index <n>] [--include-dirty]` explicitly
+  executes all current declarations or one by positive one-based position. It
+  captures the appointed worktree under delivery's clean-worktree and dirty
+  authorization rules and prepares the exact prospective integration without
+  delivering it. Conflicts refuse without a handoff. Each check gets independent
+  scratch, setup, cleanup, and requirement testimony. Normal failure or timeout
+  does not stop other selected checks; operational stops admit no verdict for
+  the affected check and preserve earlier results. Verify always executes its
+  selection, even if identical testimony can reuse admission. It then requests
+  ordinary placement of an already-delivered Contract when every prerequisite
+  and gate passes; pre-delivery verify records evidence without placement.
 - **Deliver:** Captures a tender and integration against the observed target;
-  journal gains a delivered candidate. Ready prerequisites and gates trigger
-  placement and claim in this invocation; otherwise the candidate waits.
+  journal gains a delivered candidate. It never executes Verification. Ready
+  prerequisites and existing gate evidence trigger placement and claim in this
+  invocation; otherwise the candidate waits.
   Changed candidate content stales earlier review. Identical content retains
   review across rebase or target movement.
 - **Review:** Records verdict evidence for the current document and worktree
   content, even before delivery. Satisfied review requests placement: with a
   delivered candidate, current gates, and ready prerequisites, it accepts in
   this invocation. Unsatisfied review records testimony without placement.
+  Neither verdict executes Verification.
 - **Abandon:** Records the alternate terminal outcome without accepting. Accepted
   and abandoned Contracts cannot be reopened.
 
-Placement judges declared gates, not the producer's identity. Review does not
-replace Verification; delivery preview never requests placement. Read the final receipt
-for stops and reconciliation lag after an admitted act.
+Placement judges declared gates, not the producer's identity. Every current
+requirement needs current satisfied testimony; missing, stale, and current
+unsatisfied evidence remain distinct. Whole-gate satisfaction follows the generic
+judgment over all requirements. Verification requirement identity follows
+canonical executor, script, and declared deadline; declaration position only
+selects work. Reordering preserves evidence,
+editing one check affects only that requirement, and exact duplicates share a
+requirement. Removed declarations leave historical testimony intact.
+
+Deliver, review, target refresh, and dependent completion consume existing
+evidence only. Review does not replace Verification; preview never requests
+placement. Verify evidence applies to its exact captured integration snapshot:
+an unchanged later delivery can use pre-delivery evidence, while target or
+candidate movement cannot retarget it. Read the final receipt for every executed
+check, admission or admission reuse, stops, retained scenes, completion, and
+reconciliation lag.
 
 ## 4. Handing A Role To An Akuma
 
@@ -77,7 +103,7 @@ authority.
 | Role | Commission | Return |
 | --- | --- | --- |
 | Holder | Commission the `kei`, current Arc when one exists, appointed worktree, and holder duties. | Acceptance or abandonment, with receipts. |
-| Deliverer | `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The delivery receipt. |
+| Deliverer | `keiyaku -C <repo> call worker --alias @deliverer --contract <kei/...> --workdir <appointed-path> -` | The verify results when commissioned, and the delivery receipt. |
 | Reviewer | `keiyaku -C <repo> call review-akuma --alias @reviewer --contract <kei/...> --workdir <appointed-path> -` | The verdict receipt. |
 
 Commission with a clear objective, current Arc when one exists, appointed
@@ -89,8 +115,8 @@ help for exact syntax.
 
 The holder checks candidate, verification, review, prerequisites, and gates.
 
-- A ready delivered candidate claims automatically on delivery or satisfied
-  review; no separate claim command is needed.
+- A ready delivered candidate claims on delivery, satisfied review, or explicit
+  verify after its selected work; no separate claim command is needed.
 - Missing evidence or unfinished work calls for another commission or chapter.
 - Amend when the objective and acceptance boundary remain the same but terms
   must change.

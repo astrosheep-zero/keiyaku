@@ -164,6 +164,7 @@ export type {
   BindResult,
   DeliverOutcome,
   ReviewOutcome,
+  VerifyOutcome,
 } from "./library/contract-outcomes.js";
 export type {
   AbandonInput,
@@ -182,6 +183,7 @@ export type {
   KeiyakuSelectInput,
   LocalContractComposition,
   ReviewInput,
+  VerifyInput,
 } from "./library/contract-types.js";
 export { nukeKeiyaku as nuke } from "./library/nuke.js";
 export type { NukeInput, NukeResult } from "./library/nuke.js";
@@ -192,6 +194,7 @@ export type {
   PendingSurface,
   ReconciliationLag,
   Review,
+  Verify,
 } from "./library/outcome.js";
 export type { ReconcileCompletion, RepoContractReconcileReport, RepoReconcileReport } from "./library/reconcile.js";
 export type {
@@ -218,8 +221,9 @@ export type {
   PluginSignal,
   PluginSignalMap,
 } from "./plugin/public.js";
+export type { VerifyValue, VerificationCheck } from "./protocol/verify.js";
 export type { DeliveryPreviewReport } from "./protocol/delivery-preview.js";
-export type { IntegrationConflictMaterialized, VerificationReuse } from "./protocol/deliver.js";
+export type { IntegrationConflictMaterialized } from "./protocol/deliver.js";
 export type { ExecutionObservation, ExecutionObserver } from "./protocol/execution-observation.js";
 export type { PlacementStop, VerificationStop } from "./protocol/operations.js";
 export type { ExecutionCleanup, ExecutionStop } from "./protocol/progress.js";

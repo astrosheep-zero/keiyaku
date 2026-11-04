@@ -5,6 +5,7 @@
     "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
+      "@astrosheep/keiyaku": ["src/index.ts"],
       "@astrosheep/keiyaku/plugin": ["src/plugin/public.ts"]
     }
   },

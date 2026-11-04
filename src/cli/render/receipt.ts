@@ -1,6 +1,7 @@
 import type { ExecutionCleanup, ExecutionStop, PartialOutcomeEnvelope, ReconciliationLag } from "../../index.js";
 import type { PlacementStop, VerificationStop } from "../../index.js";
-import { gateDisplayName, contractOperationName } from "./contract-observation.js";
+import type { Review as CompletionEvidence } from "../../index.js";
+import { gateGlyph, requirementDisplayName, contractOperationName } from "./contract-observation.js";
 import { renderRefusalFacts } from "./refusal.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -94,6 +95,47 @@ export function appendHookPayload(lines: string[], failure: HookFailure): void {
   if (failure.stderr !== undefined && failure.stderr.length > 0) receiptPayload(lines, "stderr", failure.stderr);
 }
 
+/** Standing evidence is already adjudicated; every requirement keeps its own verdict or absence. */
+export function standingGateLines(
+  reports:
+    | readonly Readonly<{
+        gate: string;
+        requirements: readonly Readonly<{
+          requirement: string;
+          index?: number | undefined;
+          current: NonNullable<CompletionEvidence["gates"]>[number]["current"];
+        }>[];
+      }>[]
+    | undefined,
+  columns: number,
+): readonly string[] {
+  const lines: string[] = [];
+  for (const report of reports ?? []) {
+    for (const requirement of report.requirements) {
+      const { current } = requirement;
+      receiptRow(
+        lines,
+        gateGlyph(requirement),
+        requirementDisplayName(report.gate, requirement),
+        [{ text: current.kind === "attested" ? `recorded ${current.verdict} · at ${current.at}` : current.kind }],
+        columns,
+      );
+      if (current.kind === "attested" && current.summary !== undefined)
+        receiptPayload(lines, "summary", current.summary);
+    }
+  }
+  return lines;
+}
+
+/** A receipt with standingGateLines has already named gate evidence once. */
+export function placementLines(stop: PlacementStop, columns: number, addressed: string): readonly string[] {
+  if (!("refusal" in stop) || stop.refusal.kind !== "gates-unsatisfied") return stopLines(stop, columns, addressed);
+  const lines: string[] = [];
+  if (stop.refusal.target !== undefined)
+    receiptRow(lines, " ", "target", [{ text: stop.refusal.target, opaque: true }, { text: "· unchanged" }], columns);
+  return lines;
+}
+
 function prerequisiteRows(stop: VerificationStop | PlacementStop, columns: number): readonly string[] {
   if (!("refusal" in stop) || stop.refusal?.kind !== "prerequisites-unsatisfied") return [];
   const lines: string[] = [];
@@ -114,16 +156,18 @@ function gateAlarmRows(stop: VerificationStop | PlacementStop, columns: number):
   if (!("refusal" in stop) || stop.refusal?.kind !== "gates-unsatisfied") return [];
   const lines: string[] = [];
   for (const report of stop.refusal.unmet) {
-    const { gate, current } = report;
-    if (current.kind !== "attested") continue;
-    receiptRow(
-      lines,
-      "!",
-      gateDisplayName(gate),
-      [{ text: `· ${current.verdict}` }, { text: `· at ${current.at}` }],
-      columns,
-    );
-    if (current.summary !== undefined) receiptPayload(lines, "  summary", current.summary);
+    for (const requirement of report.requirements) {
+      const { current } = requirement;
+      if (current.kind !== "attested" || current.verdict !== "unsatisfied") continue;
+      receiptRow(
+        lines,
+        "!",
+        requirementDisplayName(report.gate, requirement),
+        [{ text: `· ${current.verdict}` }, { text: `· at ${current.at}` }],
+        columns,
+      );
+      if (current.summary !== undefined) receiptPayload(lines, "  summary", current.summary);
+    }
   }
   return lines;
 }
@@ -136,9 +180,11 @@ function gateAlarmRows(stop: VerificationStop | PlacementStop, columns: number):
 export function gatesAwaitLines(placement: VerificationStop | PlacementStop | undefined): readonly string[] {
   if (placement === undefined || !("refusal" in placement) || placement.refusal?.kind !== "gates-unsatisfied")
     return [];
-  const events = placement.refusal.unmet
-    .filter((report) => report.current.kind !== "attested")
-    .map((report) => gateDisplayName(report.gate));
+  const events = placement.refusal.unmet.flatMap((report) =>
+    report.requirements
+      .filter((requirement) => requirement.current.kind !== "attested")
+      .map((requirement) => requirementDisplayName(report.gate, requirement)),
+  );
   if (events.length === 0) return [];
   return [`⧗ awaiting ${events.join(", ")}`];
 }

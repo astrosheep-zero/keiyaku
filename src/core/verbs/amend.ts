@@ -34,6 +34,16 @@ export function decideAmend<Failure>({
     source.segments.every((value, index) => value === current.terms.segments[index]) &&
     source.gates.length === current.terms.gates.length &&
     source.gates.every((value, index) => value === current.terms.gates[index]) &&
+    Object.keys(source.requirements).length === Object.keys(current.terms.requirements).length &&
+    source.gates.every((gate) => {
+      const expected = source.requirements[gate]!;
+      const actual = current.terms.requirements[gate];
+      return (
+        actual !== undefined &&
+        expected.length === actual.length &&
+        expected.every((value, index) => value === actual[index])
+      );
+    }) &&
     samePrerequisites(source.after, current.terms.after);
   if (!termsCurrent) {
     return { kind: "refused", refusal: { kind: "terms-moved", contractId: id } };

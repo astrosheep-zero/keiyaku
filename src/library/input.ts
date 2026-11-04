@@ -6,7 +6,7 @@ import type { DecodedContractDocument } from "../body/types.js";
 import { actorId, type ActorId, type ContractId, type ContractTerms, type Gate } from "../core/facts/types.js";
 import { parseDebtId, type DebtId } from "../debt/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";
-import { prepareVerificationDeclaration } from "../verification/declaration.js";
+import { gateRequirements, prepareVerificationDeclaration } from "../verification/declaration.js";
 
 export function actorOption(actor: unknown): Readonly<{ actor?: ActorId }> {
   if (actor === undefined) return {};
@@ -88,6 +88,7 @@ export function contractTerms(
     document: document.document,
     segments: document.segments,
     gates,
+    requirements: gateRequirements(gates, verificationDefinition(document)),
     after,
   };
 }

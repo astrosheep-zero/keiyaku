@@ -52,6 +52,17 @@ function contractChannel(
 
 function contractUpstream(processConfiguration: BodyProcessConfiguration): ContractRequestPort {
   return {
+    verify: async (input) => {
+      const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
+      return await contractChannel(repo, input.contractId, input.requester, configuration).verify(
+        {
+          ...(input.index === undefined ? {} : { index: input.index }),
+          includeDirty: input.includeDirty,
+          signal: input.signal,
+        },
+        input.observe === undefined ? undefined : { observe: input.observe },
+      );
+    },
     previewDelivery: async (input) => {
       const [repo, configuration] = await contractDependencies(input.repoRoot, processConfiguration);
       return await contractChannel(repo, input.contractId, input.requester, configuration).previewDelivery(

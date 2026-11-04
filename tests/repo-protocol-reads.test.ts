@@ -23,13 +23,7 @@ import { contractJournalPath, contractJournalPaths } from "../src/git/identity.j
 import { bindOperation } from "../src/protocol/bind.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
 import { contractObservationOperation, contractsOperation, scopeOperation } from "../src/protocol/operations.js";
-import {
-  changeId,
-  entryUlid,
-  snapshotId,
-  type ContractId,
-  type JournalEntry,
-} from "../src/core/facts/types.js";
+import { changeId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
 import { renderContractCatalogue } from "../src/cli/render/catalog.js";
 import { protocolContractId } from "./support/git.js";
 
@@ -51,7 +45,7 @@ function terms(title: string, after: readonly ContractId[] = []) {
       Criteria: "### Protocol result\nThe operation returns only plain data.\n",
     }),
   );
-  return { document: document.document, segments: document.segments, gates: [], after };
+  return { document: document.document, segments: document.segments, gates: [], requirements: {}, after };
 }
 
 async function bind(
@@ -72,7 +66,7 @@ async function bind(
       workspace,
     }),
   );
-  assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
+  assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
   return result.value.contractId;
 }
 
@@ -341,10 +335,12 @@ test("repo reconcile leaves a refused foreign worktree untouched until recovery 
   writeFileSync(join(path, "foreign.txt"), "foreign bytes\n");
 
   const scope = await scopeOperation({ coordinate: repository.path });
-  const refused = await withGitDecodeChannel(scope, async (channel) =>
-    await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
+  const refused = await withGitDecodeChannel(
+    scope,
+    async (channel) =>
+      await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
   );
-  assert.ok(refused.kind === "completed", "expected refused.kind = \"completed\"");
+  assert.ok(refused.kind === "completed", 'expected refused.kind = "completed"');
   assert.equal(refused.contracts[0]?.report.lag[0]?.kind, "reconcile-failed");
   assert.equal(readFileSync(guidance, "utf8"), foreignBytes);
   assert.equal(readFileSync(join(path, "foreign.txt"), "utf8"), "foreign bytes\n");
@@ -352,10 +348,12 @@ test("repo reconcile leaves a refused foreign worktree untouched until recovery 
 
   const foreignPath = `${path}-foreign`;
   renameSync(path, foreignPath);
-  const recovered = await withGitDecodeChannel(scope, async (channel) =>
-    await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
+  const recovered = await withGitDecodeChannel(
+    scope,
+    async (channel) =>
+      await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
   );
-  assert.ok(recovered.kind === "completed", "expected recovered.kind = \"completed\"");
+  assert.ok(recovered.kind === "completed", 'expected recovered.kind = "completed"');
   assert.deepEqual(recovered.contracts[0]?.report.lag, []);
   assert.match(readFileSync(guidance, "utf8"), new RegExp(id));
   assert.equal(readFileSync(join(foreignPath, ".keiyaku", "KEIYAKU.md"), "utf8"), foreignBytes);

@@ -168,6 +168,7 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
     case "bind":
     case "amend":
     case "deliver":
+    case "verify":
     case "review":
     case "arc":
     case "abandon":

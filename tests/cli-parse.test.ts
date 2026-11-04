@@ -104,10 +104,18 @@ test("global coordinates are independent of command position", () => {
     output: "text",
   });
   assert.deepEqual(command(["call", "worker", "--bare"]), {
-    command: "call", archetype: "worker", mode: "detach", bare: true, output: "text",
+    command: "call",
+    archetype: "worker",
+    mode: "detach",
+    bare: true,
+    output: "text",
   });
   assert.deepEqual(command(["fork", "@worker", "--at", "turn/1", "--bare"]), {
-    command: "fork", akuma: "@worker", at: "turn/1", bare: true, output: "text",
+    command: "fork",
+    akuma: "@worker",
+    at: "turn/1",
+    bare: true,
+    output: "text",
   });
   assert.throws(() => parseArgv(["call", "worker", "--schema", "answer.json"]), /call --schema requires a prompt/u);
   assert.throws(() => parseArgv(["call", "worker", "--wait", "1s"]), /call --wait requires a prompt/u);
@@ -127,10 +135,16 @@ test("global coordinates are independent of command position", () => {
 
 test("call repeats native writable-directory grants and refuses retired options", () => {
   assert.deepEqual(command(["call", "worker", "--add-dir", "../runtime", "--add-dir", "/square"]), {
-    command: "call", archetype: "worker", mode: "detach", output: "text",
+    command: "call",
+    archetype: "worker",
+    mode: "detach",
+    output: "text",
     writableDirectories: ["../runtime", "/square"],
   });
-  assert.throws(() => command(["call", "worker", "--allowed", "contract.review"]), /option --allowed is not valid for call/u);
+  assert.throws(
+    () => command(["call", "worker", "--allowed", "contract.review"]),
+    /option --allowed is not valid for call/u,
+  );
   assert.throws(() => command(["call", "worker", "--add-dir"]), /--add-dir requires/u);
   assert.throws(() => command(["fork", "@worker", "--at", "turn/1", "--add-dir", "/square"]), /--add-dir/u);
 });
@@ -155,18 +169,50 @@ test("root version is recognized only after coordinates and help", () => {
   );
 });
 
+test("verify parses contextual and indexed execution and refuses malformed index syntax", () => {
+  assert.deepEqual(command(["verify"]), { command: "verify", includeDirty: false, output: "text" });
+  assert.deepEqual(command(["verify", "@example", "--index", "2", "--include-dirty", "--json"]), {
+    command: "verify",
+    contract: "@example",
+    index: 2,
+    includeDirty: true,
+    output: "json",
+  });
+  for (const value of ["0", "-1", "+1", "01", "1.0", "1e2", "2x", "9007199254740992"]) {
+    assert.throws(() => parseArgv(["verify", "--index", value]), CliUsageError, value);
+  }
+  assert.throws(() => parseArgv(["verify", "--index", "1", "--index", "2"]), /duplicate option/u);
+  assert.throws(() => parseArgv(["verify", "kei/one", "kei/two"]), /at most one contract/u);
+  assert.throws(() => parseArgv(["verify", "-"]), /verify reads no stdin/u);
+  assert.throws(() => parseArgv(["verify", "--dry-run"]), /not valid for verify/u);
+  assert.doesNotThrow(() => assertExplicitRepoUse(command(["verify"]), "/repo"));
+});
+
 test("delivery dry-run parses preview options and rejects unused mutation options", () => {
   const normal = {
-    command: "deliver", includeDirty: false, materializeConflict: false,
-    overwrite: false, dryRun: false, showDiff: false, output: "text",
+    command: "deliver",
+    includeDirty: false,
+    materializeConflict: false,
+    overwrite: false,
+    dryRun: false,
+    showDiff: false,
+    output: "text",
   };
   assert.deepEqual(command(["deliver"]), normal);
   assert.deepEqual(command(["deliver", "--dry-run"]), { ...normal, dryRun: true });
   assert.deepEqual(command(["deliver", "kei/example", "--dry-run", "--show-diff", "--include-dirty"]), {
-    ...normal, contract: "kei/example", dryRun: true, includeDirty: true, showDiff: true,
+    ...normal,
+    contract: "kei/example",
+    dryRun: true,
+    includeDirty: true,
+    showDiff: true,
   });
   assert.deepEqual(command(["deliver", "@example", "--dry-run", "--show-diff", "--json"]), {
-    ...normal, contract: "@example", dryRun: true, showDiff: true, output: "json",
+    ...normal,
+    contract: "@example",
+    dryRun: true,
+    showDiff: true,
+    output: "json",
   });
   assert.throws(() => parseArgv(["deliver", "--dry-run", "--diff"]), /option --diff is not valid for deliver/u);
   assert.throws(() => parseArgv(["deliver", "--show-diff"]), /--show-diff requires --dry-run/u);
@@ -672,7 +718,8 @@ test("history accepts separate paged, exact, last, and Contract forms", () => {
     ["history", "@worker", "--id", "turn/3"],
     ["history", "@worker", "--last"],
     ["history", "kei/example", "--full", "--json"],
-  ]) assert.doesNotThrow(() => parseArgv(args));
+  ])
+    assert.doesNotThrow(() => parseArgv(args));
   assert.throws(() => parseArgv(["history", "@worker", "--last", "--limit", "4"]), /cannot be combined/u);
 });
 

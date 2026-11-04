@@ -1,8 +1,15 @@
 import type { DeliveryPreviewOutcome, DeliveryPreviewReport } from "../../index.js";
 import { effectCleanup, effectExecutionStops } from "./effects.js";
-import { executionCleanupLines, executionStopLines, receiptPayload, receiptRow, titleLines } from "./receipt.js";
+import {
+  executionCleanupLines,
+  executionStopLines,
+  standingGateLines,
+  receiptPayload,
+  receiptRow,
+  titleLines,
+} from "./receipt.js";
 import { renderRefusalFacts } from "./refusal.js";
-import { abbreviateGitIds, displayGitId, gateFact } from "./contract-observation.js";
+import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import { DEFAULT_CLI_COLUMNS, gitShortStat, renderTextBlock, safeText, type TextRenderContext } from "./terminal.js";
 
 const CHILD = "  ";
@@ -38,7 +45,12 @@ function candidateLines(
   if (!/^0{40}$/u.test(identity.integration.changeId))
     lines.push(`${CHILD}content identity  ${displayGitId(identity.integration.changeId, abbreviations)}`);
   lines.push(...workspaceEvidence(candidate.workspace));
-  for (const report of candidate.requirements.gates) lines.push(`${CHILD}${gateFact(report)}`);
+  lines.push(
+    ...standingGateLines(
+      candidate.requirements.gates.filter((report) => report.gate !== "verified"),
+      columns,
+    ),
+  );
   for (const prerequisite of candidate.requirements.unmetPrerequisites) {
     receiptRow(lines, "!", "prerequisite", [{ text: prerequisite.contractId }, { text: prerequisite.state }], columns);
   }
@@ -53,48 +65,32 @@ function candidateLines(
 }
 
 function verificationLines(verification: DeliveryPreviewReport["verification"], columns: number): readonly string[] {
+  if (verification.kind === "requirements")
+    return standingGateLines([{ gate: "verified", requirements: verification.requirements }], columns);
   const lines: string[] = [];
-  if (verification.kind !== "recorded") {
-    const text =
-      verification.kind === "undeclared"
-        ? "none declared"
-        : verification.kind === "required"
-          ? "required · not run"
-          : "not run";
-    receiptRow(lines, " ", "verification", [{ text }], columns);
-    return lines;
-  }
   receiptRow(
     lines,
-    verification.verdict === "unsatisfied" ? "!" : " ",
+    " ",
     "verification",
-    [{ text: "recorded" }, { text: verification.verdict }],
+    [{ text: verification.kind === "undeclared" ? "none declared" : "not run" }],
     columns,
   );
-  if (verification.summary !== undefined) receiptPayload(lines, "summary", previewSummary(verification.summary));
   return lines;
 }
 
-function previewSummary(summary: string): string {
-  return summary.replace(
-    /\[(\d+) (bash|zsh|pwsh) exit (-?\d+)( output-truncated)?\]/gu,
-    (_, number: string, executor: string, exit: string, truncated: string | undefined) =>
-      `declaration ${number} · ${executor} exit ${exit}${truncated ?? ""}`,
-  );
-}
-
 function admittedCandidateLines(report: DeliveryPreviewReport, columns: number): readonly string[] {
-  const delivery = report.delivery;
-  if (delivery === undefined) return [];
-  const verification = delivery.verification;
-  if (verification.kind === "undeclared") return [];
-  const detail = verification.kind === "recorded" ? `${verification.kind} ${verification.verdict}` : verification.kind;
+  if (report.delivery === undefined) return [];
   const lines: string[] = [];
   receiptRow(
     lines,
-    verification.kind === "unrecorded" ? "!" : " ",
-    "admitted verification",
-    [{ text: detail }],
+    " ",
+    "admitted candidate",
+    [
+      { text: report.delivery.relation },
+      {
+        text: `· content identity ${displayGitId(report.delivery.changeId, abbreviateGitIds([report.delivery.changeId]))}`,
+      },
+    ],
     columns,
   );
   return lines;

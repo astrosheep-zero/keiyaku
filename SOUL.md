@@ -26,7 +26,7 @@ worktree、动了哪个 ref、Git 变了什么——在命令返回里清晰但�
 - **提醒可以，指路不行。** Keiyaku 存在的目的就是助力，所以能助力的提醒是好的：当前契约在什么状态、卡在哪个关卡、这只 akuma 跑了多久、还可以 `wait --any` 等一群、`tell` 中途 steer——把**状态和可用的手**摆到她眼前。deliver --dry-run 显示现有 verification evidence、落后主线几个 commit、diff preview，都是助力。但到"摆出来"为止：**"下一步修测试"、"全绿了，请 merge"——这种话一个字不说。** 邮件列表从不告诉 Linus 该合哪个 patch。
 - **不照做有代价，但那是天然的代价，不是 Keiyaku 加的刑罚。** Linus 不用邮件列表，协作成本就得自己扛——世界自己会收费，工具不在账单上再加一笔。绕开它，你只是拿不到它的助力；回来时，账本照样认你。决策权永远在她手里。
 - 不固化 workflow。每个动词都是她可以选的工具，不是她必须走的关卡。
-- spec 化契约、写面 region 重叠预警、自动 verification、merge/conflict 便利、review 绑 patch diff（mini gerrit）——这些存在的理由只有一个：让她对状态有**清晰的掌控**，而不是让她多填一张表。
+- spec 化契约、写面 region 重叠预警、显式独立 verification、merge/conflict 便利、review 绑 patch diff（mini gerrit）——这些存在的理由只有一个：让她对状态有**清晰的掌控**，而不是让她多填一张表。
 
 一条规则如果只能用"不然 agent 会乱来"来辩护，它不属于这里。旗舰不会乱来。会乱来的不是旗舰。
 
@@ -52,14 +52,20 @@ keiyaku akuma    subagent    跨 harness 派工、观察、steer、fork
 
 ## Evidence 不问出身
 
-review evidence 和 workflow **解耦**。
+review evidence 和 workflow **解耦**。Verification 也一样：旗舰明确调用 verify，
+每项声明独立执行、独立留证。deliver、review、preview 和后续 completion
+只消费已有证据，绝不顺手启动检查。
 
-gate 只问两件事：
+gate 的每项 requirement 都要有当前有效的 satisfied testimony，缺一项就还没满足。
+一条绿不能替整扇 gate 作证，也没有第二张汇总 attestation。每项各认自己的最新
+证据，后来失败只覆盖同一项、同一 subject 的先前成功。
 
-1. 这个 evidence **在不在**？
-2. 它对应的 **diff 还有效吗**？
-
-"有效"按 **diff 内容**判定（patch-id），不按 head 坐标判定：pure rebase 之后内容逐字节没变，旧 review 就还算数——不为坐标移动设仪式。内容变了，evidence 自然失效，诚实地说失效，重新来。
+review 的有效性按 **diff 内容**判定（patch-id），不按 head 坐标判定：pure rebase
+之后内容逐字节没变，旧 review 就还算数——不为坐标移动设仪式。
+Verification 则认执行时捕获的**精确 integration snapshot**，每项 requirement
+认自己的执行内容；调整声明顺序不作废证据，改一项不拖累其他项。
+目标或候选变了，旧证据不能偷偷改认新 snapshot。内容变了，证据自然失效，
+诚实地说失效，重新来。
 
 不问 evidence 从哪来、怎么来、是谁的 review 工具产的、走没走"正确的流程"——**也不问是谁运行的**。gate 对身份彻底失明：没有 actor 独立性开关，连 knob 都没有。要更强的信任，把信任放进 evidence 本身（比如将来用非对称加密签名 evidence），而不是放进"运行者是谁"的账本里。
 
@@ -71,7 +77,7 @@ gate 只问两件事：
 
 恶魔不是被魔法阵召唤出来的仆从；恶魔是**缔约的对象**——有用、危险、便宜、会死，通过契约驱动，按契约交付。而旗舰是玛奇玛：不吼、不催、不亲自动手，只是看着一切，握着所有契约。
 
-现行契约动词是 bind、amend、deliver、review、abandon——**一词一义，永不复用**。一个 entry kind 承载一个动词含义，词汇表是封闭的。哪天有人想加 `sync --force-update` 这种无味的词，拿这一节拦住他。
+现行契约动词是 bind、amend、verify、deliver、review、abandon——**一词一义，永不复用**。执行检查、提交候选、记录评审各有自己的动词，不能暗中捆成一次操作；词汇表是封闭的。哪天有人想加 `sync --force-update` 这种无味的词，拿这一节拦住他。
 
 ## Text 是第一 UI
 

@@ -23,6 +23,7 @@ function checkpoint(id = "kei/progress", head = "initial"): ContractCheckpoint {
       document: { bytes: "contract", key: "document" as ContractState["terms"]["document"]["key"] },
       segments: [],
       gates: [],
+      requirements: {},
       after: [],
     },
     delivery: null,

@@ -21,6 +21,7 @@ import {
   documentSegmentKey,
   entryUlid,
   gate,
+  requirementId,
   snapshotId,
 } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
@@ -55,7 +56,10 @@ test("call preserves a definition failure instead of reporting a missing Akuma",
   const json = await runCli(["call", "broken", "go", "--json"], runtime);
   assert.equal(json.exit, 1);
   assert.deepEqual(JSON.parse(json.stdout), {
-    kind: "refused", diagnostic: "is invalid: Akuma provider must be a nonblank string", archetype: "broken", searched: [invalidPath],
+    kind: "refused",
+    diagnostic: "is invalid: Akuma provider must be a nonblank string",
+    archetype: "broken",
+    searched: [invalidPath],
   });
 });
 
@@ -208,6 +212,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
     document: { key: documentKey("private-document-blob"), bytes: "private document bytes" },
     segments: [],
     gates: [],
+    requirements: {},
     after: [],
   };
   const base = { v: 1 as const, contract: id, at, actor: actorId("reviewer") };
@@ -242,6 +247,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
       entry: entries[3]!,
       data: {
         gate: gate("verified"),
+        requirement: requirementId("verification:sha256:original-check"),
         subject: dependencyKeySet([
           { kind: "segment", value: documentSegmentKey("segment:sha256:private") },
           { kind: "snapshot", value: verificationSnapshot },
@@ -276,6 +282,7 @@ test("Contract history keeps event evidence and commit labels without exposing d
       "  require branches up to date  false",
       `${at} attestation · ${entries[3]} · reviewer`,
       "  gate  verified",
+      "  requirement  verification:sha256:original-check",
       "  verdict  satisfied",
       `  snapshot  ${verificationSnapshot.slice(0, 7)}`,
     ].join("\n"),
@@ -289,7 +296,23 @@ test("Contract history keeps event evidence and commit labels without exposing d
 
 const verifiedRow = (): ContractKanshiRow =>
   contractRow({
-    verification: { kind: "recorded", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", snapshot: snapshotId("4".repeat(40)) },
+    gates: {
+      satisfied: true,
+      reports: [
+        {
+          gate: gate("verified"),
+          current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+          satisfied: true,
+          requirements: [
+            {
+              requirement: requirementId("check-original"),
+              index: 1,
+              current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+            },
+          ],
+        },
+      ],
+    },
   });
 
 test("terminal catalogue and Kanshi cards do not repeat unattached verification", () => {
@@ -303,10 +326,7 @@ test("terminal catalogue and Kanshi cards do not repeat unattached verification"
   });
   assert.doesNotMatch(renderKanshiText(report, { columns: 80, color: false }, "contract"), /verification|candidate/u);
 
-  const bareRow = {
-    ...row,
-    verification: { kind: "recorded" as const, verdict: "unsatisfied" as const, at: catalog.observedAt },
-  };
+  const bareRow = row;
   const bareReport = kanshiReport({
     kind: "present",
     value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [bareRow], hasMore: false },
@@ -315,7 +335,7 @@ test("terminal catalogue and Kanshi cards do not repeat unattached verification"
   assert.doesNotMatch(bareSelected, /candidate|verification|integration result/u);
 });
 
-test("selected delivered Kanshi folds matching verification into the integration result", () => {
+test("selected delivered Kanshi keeps requirement evidence separate from the integration result", () => {
   const integration = snapshotId("4".repeat(40));
   const row: ContractKanshiRow = {
     ...verifiedRow(),
@@ -337,9 +357,11 @@ test("selected delivered Kanshi folds matching verification into the integration
     value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [row], hasMore: false },
   });
   const catalogText = renderContractCatalogue(catalog);
-  assert.doesNotMatch(catalogText, /integration result|predecessor|verification/u);
+  assert.doesNotMatch(catalogText, /integration result|predecessor/u);
+  assert.match(catalogText, /✓ verification 1/u);
   const selected = renderKanshiText(report, { columns: 120, color: false }, "contract");
-  assert.equal((selected.match(/^  integration result  4444444 · verification satisfied$/gmu) ?? []).length, 1);
+  assert.equal((selected.match(/^  integration result  4444444$/gmu) ?? []).length, 1);
+  assert.match(selected, /✓ verification 1/u);
   assert.doesNotMatch(selected, /predecessor|verification satisfied · on 4444444/u);
   const world = renderKanshiText(report, { columns: 120, color: false });
   assert.doesNotMatch(world, /integration result|verification satisfied/u);
@@ -360,11 +382,22 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
       method: "squash",
       policy: { requireBranchesToBeUpToDate: false },
     },
-    verification: {
-      kind: "recorded",
-      verdict: "satisfied",
-      at: "2026-08-12T00:00:00.000Z",
-      snapshot: snapshotId("5".repeat(40)),
+    gates: {
+      satisfied: false,
+      reports: [
+        {
+          gate: gate("verified"),
+          current: { kind: "stale", priorVerdict: "satisfied" },
+          satisfied: false,
+          requirements: [
+            {
+              requirement: requirementId("check-original"),
+              index: 1,
+              current: { kind: "stale", priorVerdict: "satisfied" },
+            },
+          ],
+        },
+      ],
     },
   };
   const catalog = contractCatalog([row]);
@@ -373,10 +406,11 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
     value: { root: "/repo", state: null, observedAt: catalog.observedAt, rows: [row], hasMore: false },
   });
   const catalogText = renderContractCatalogue(catalog);
-  assert.doesNotMatch(catalogText, /integration result|verification/u);
+  assert.doesNotMatch(catalogText, /integration result/u);
+  assert.match(catalogText, /! verification 1 · stale/u);
   const selected = renderKanshiText(report, { columns: 120, color: false }, "contract");
   assert.match(selected, /(?:^|\n)  integration result  4444444$/mu);
-  assert.match(selected, /(?:^|\n)  verification satisfied · snapshot 5555555$/mu);
+  assert.match(selected, /(?:^|\n)  ! verification 1 · stale$/mu);
   assert.doesNotMatch(selected, /integration result  4444444 · verification satisfied/u);
   const world = renderKanshiText(report, { columns: 120, color: false });
   assert.doesNotMatch(world, /integration result|verification satisfied/u);

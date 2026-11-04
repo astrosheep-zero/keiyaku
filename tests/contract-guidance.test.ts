@@ -34,6 +34,7 @@ function state(currentArc: ContractState["currentArc"]): ContractState {
       document: { bytes: source, key: documentKey("document") },
       segments: [],
       gates: [],
+      requirements: {},
       after: [],
     },
     delivery: null,

@@ -30,9 +30,10 @@ import {
   contractId,
   contractIdFromSegment,
   documentKey,
-  entryUlid, type AmendData,
+  entryUlid,
+  type AmendData,
   type ContractId,
-  type ContractTerms
+  type ContractTerms,
 } from "../src/core/facts/types.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { decideDeliver } from "../src/core/verbs/deliver.js";
@@ -137,17 +138,20 @@ function terms(after: readonly ContractId[]) {
     document: { bytes: "# Targeted\n", key: documentKey("targeted") },
     segments: [],
     gates: [],
+    requirements: {},
     after,
   } as const;
 }
 
 async function boundObservedContract(repository: TestGitRepository) {
-  const bound = accepted(await Keiyaku.with().bind({
-    repo: await cachedRepoAt(repository.path),
-    markdown: contractBody(),
-    workspace: "worktree",
-  }));
-  const id = (present(await bound.value.keiyaku.state())).id;
+  const bound = accepted(
+    await Keiyaku.with().bind({
+      repo: await cachedRepoAt(repository.path),
+      markdown: contractBody(),
+      workspace: "worktree",
+    }),
+  );
+  const id = present(await bound.value.keiyaku.state()).id;
   const git = await repositoryAt(repository.path);
   return { bound, id, git };
 }
@@ -190,7 +194,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       terms: terms([]),
       workspace: "worktree",
     });
-    assert.ok(bound.kind === "accepted", "expected bound.kind = \"accepted\"");
+    assert.ok(bound.kind === "accepted", 'expected bound.kind = "accepted"');
     assert.equal(bound.facts.length > 0, true);
     assert.deepEqual(bound.seatClose, [
       {
@@ -277,7 +281,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
         observation: observation.decision,
       });
-      assert.ok(decision.kind === "offer", "expected decision.kind = \"offer\"");
+      assert.ok(decision.kind === "offer", 'expected decision.kind = "offer"');
 
       const foreignJournal = contractJournalPath(contractId("kei/foreign-companion-target"));
       await assert.rejects(
@@ -317,7 +321,9 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
   test("a failed Git CAS publishes neither its journal append nor its companion", async () => {
     const repository = repositoryWithHead();
     const { id, git } = await boundObservedContract(repository);
-    const observation = await withGitDecodeChannel(git, (channel) => observeContractsForAdmissionAt(git, channel, [id]));
+    const observation = await withGitDecodeChannel(git, (channel) =>
+      observeContractsForAdmissionAt(git, channel, [id]),
+    );
     const before = observation.admission.snapshot.paths.get(contractJournalPath(id));
     assert.ok(before);
     const decision = decideArc({
@@ -329,7 +335,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
       observation: observation.decision,
     });
-    assert.ok(decision.kind === "offer", "expected decision.kind = \"offer\"");
+    assert.ok(decision.kind === "offer", 'expected decision.kind = "offer"');
 
     const winnerBlob = await writeBlob(git, "winner\n");
     const winnerTree = await updateGitTree(
@@ -375,24 +381,21 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const repository = repositoryWithHead();
     const { id, git } = await boundObservedContract(repository);
     const foreign = contractId("kei/foreign-admission-entry");
-    const observation = await withGitDecodeChannel(git, (channel) => observeContractsForAdmissionAt(git, channel, [id]));
+    const observation = await withGitDecodeChannel(git, (channel) =>
+      observeContractsForAdmissionAt(git, channel, [id]),
+    );
     const decision = decideAbandon({
       input: { contractId: id, at: "2026-08-06T00:00:00Z" },
       attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
       observation: observation.decision,
     });
-    assert.ok(decision.kind === "offer", "expected decision.kind = \"offer\"");
+    assert.ok(decision.kind === "offer", 'expected decision.kind = "offer"');
     const append = decision.offer.facts[0]!;
     const foreignEntry = { ...append.entries[0]!, contract: foreign };
     const before = await readGitPaths(git, [contractJournalPath(id), contractJournalPath(id, "terminal")]);
 
     await assert.rejects(
-      () =>
-        admit(
-          git,
-          { ...decision.offer, facts: [{ ...append, entries: [foreignEntry] }] },
-          observation.admission,
-        ),
+      () => admit(git, { ...decision.offer, facts: [{ ...append, entries: [foreignEntry] }] }, observation.admission),
       (error: unknown) =>
         error instanceof AuthorityCorruptionError &&
         error.message === `candidate journal entry belongs to ${foreign}, not ${id}`,
@@ -420,9 +423,12 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
       observation: activeObservation.decision,
     });
-    assert.ok(activeDecision.kind === "offer", "expected activeDecision.kind = \"offer\"");
+    assert.ok(activeDecision.kind === "offer", 'expected activeDecision.kind = "offer"');
     assert.equal((await admit(git, activeDecision.offer, activeObservation.admission)).kind, "accepted");
-    const afterActive = await readGitPaths(git, [contractJournalPath(id, "active"), contractJournalPath(id, "terminal")]);
+    const afterActive = await readGitPaths(git, [
+      contractJournalPath(id, "active"),
+      contractJournalPath(id, "terminal"),
+    ]);
     assert.equal(afterActive.paths.has(contractJournalPath(id, "active")), true);
     assert.equal(afterActive.paths.has(contractJournalPath(id, "terminal")), false);
 
@@ -434,9 +440,12 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW")] },
       observation: terminalObservation.decision,
     });
-    assert.ok(terminalDecision.kind === "offer", "expected terminalDecision.kind = \"offer\"");
+    assert.ok(terminalDecision.kind === "offer", 'expected terminalDecision.kind = "offer"');
     assert.equal((await admit(git, terminalDecision.offer, terminalObservation.admission)).kind, "accepted");
-    const afterTerminal = await readGitPaths(git, [contractJournalPath(id, "active"), contractJournalPath(id, "terminal")]);
+    const afterTerminal = await readGitPaths(git, [
+      contractJournalPath(id, "active"),
+      contractJournalPath(id, "terminal"),
+    ]);
     assert.equal(afterTerminal.paths.has(contractJournalPath(id, "active")), false);
     assert.equal(afterTerminal.paths.has(contractJournalPath(id, "terminal")), true);
   });
@@ -472,7 +481,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         }),
     );
 
-    assert.ok(bound.kind === "accepted", "expected bound.kind = \"accepted\"");
+    assert.ok(bound.kind === "accepted", 'expected bound.kind = "accepted"');
     const state = (await observeContract(git, bound.value.contractId)).state;
     assert.equal(state?.coordinates.start, moved);
     assert.equal(bound.value.contractId, protocolContractId("Moving target"));
@@ -488,7 +497,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       terms: terms([]),
       workspace: "worktree",
     });
-    assert.ok(first.kind === "accepted", "expected first.kind = \"accepted\"");
+    assert.ok(first.kind === "accepted", 'expected first.kind = "accepted"');
     assert.equal(first.value.contractId, id);
 
     const collision = await bindOperation({
@@ -530,7 +539,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         }),
     );
 
-    assert.ok(bound.kind === "accepted", "expected bound.kind = \"accepted\"");
+    assert.ok(bound.kind === "accepted", 'expected bound.kind = "accepted"');
     assert.equal(repository.run(["symbolic-ref", "HEAD"]).trim(), "refs/heads/feature");
     assert.equal((await observeContract(git, bound.value.contractId)).state?.coordinates.start, moved);
   });
@@ -570,7 +579,10 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     await assert.rejects(
       () => Keiyaku.with().reconcile({ repo, contract: id }),
       (error: unknown) =>
-        error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError && /journal entry is not canonical/.test(error.message),
+        error instanceof KeiyakuError &&
+        error.category === "authority-corruption" &&
+        error.cause instanceof AuthorityCorruptionError &&
+        /journal entry is not canonical/.test(error.message),
     );
   });
 
@@ -583,7 +595,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       terms: terms([missing]),
       workspace: "worktree",
     });
-    assert.ok(bound.kind === "refused", "expected bound.kind = \"refused\"");
+    assert.ok(bound.kind === "refused", 'expected bound.kind = "refused"');
     assert.equal(bound.refusal.kind, "unknown-prerequisite");
 
     const existing = await bindOperation({
@@ -591,7 +603,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       terms: terms([]),
       workspace: "worktree",
     });
-    assert.ok(existing.kind === "accepted", "expected existing.kind = \"accepted\"");
+    assert.ok(existing.kind === "accepted", 'expected existing.kind = "accepted"');
     const existingState = (await observeContract(git, existing.value.contractId)).state;
     if (existingState === null) throw new Error("existing contract state was not observed");
     const amended = await amendOperation({
@@ -613,20 +625,20 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       terms: terms([]),
       workspace: "worktree",
     });
-    assert.ok(activeDependency.kind === "accepted", "expected activeDependency.kind = \"accepted\"");
+    assert.ok(activeDependency.kind === "accepted", 'expected activeDependency.kind = "accepted"');
     const waiting = await bindOperation({
       scope: await repositoryAt(repository.path),
       terms: terms([activeDependency.value.contractId]),
       workspace: "worktree",
     });
-    assert.ok(waiting.kind === "accepted", "expected waiting.kind = \"accepted\"");
+    assert.ok(waiting.kind === "accepted", 'expected waiting.kind = "accepted"');
 
     const claimedDependency = await bindOperation({
       scope: await repositoryAt(repository.path),
       terms: terms([]),
       workspace: "worktree",
     });
-    assert.ok(claimedDependency.kind === "accepted", "expected claimedDependency.kind = \"accepted\"");
+    assert.ok(claimedDependency.kind === "accepted", 'expected claimedDependency.kind = "accepted"');
     const git = await repositoryAt(repository.path);
     const state = (
       await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, observeContractWorld))
@@ -636,7 +648,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       title: "Targeted",
       document: DELIVERY_DOCUMENT,
     });
-    assert.ok(delivery.kind === "prepared", "expected delivery.kind = \"prepared\"");
+    assert.ok(delivery.kind === "prepared", 'expected delivery.kind = "prepared"');
     const delivered = await withGitDecodeChannel(git, (channel) =>
       admitIntent(
         channel,
@@ -665,7 +677,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       terms: terms([claimedDependency.value.contractId]),
       workspace: "worktree",
     });
-    assert.ok(immediatelyBound.kind === "accepted", "expected immediatelyBound.kind = \"accepted\"");
+    assert.ok(immediatelyBound.kind === "accepted", 'expected immediatelyBound.kind = "accepted"');
     assert.deepEqual(
       immediatelyBound.facts.map((entry) => entry.kind),
       ["bind"],
@@ -680,7 +692,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       source: waitingState.terms,
       terms: terms([claimedDependency.value.contractId]),
     });
-    assert.ok(amended.kind === "accepted", "expected amended.kind = \"accepted\"");
+    assert.ok(amended.kind === "accepted", 'expected amended.kind = "accepted"');
     assert.deepEqual(
       amended.facts.map((entry) => entry.kind),
       ["amend"],

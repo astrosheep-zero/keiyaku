@@ -1,16 +1,10 @@
 import { z } from "zod";
-import {
-  snapshotIdSchema,
-  verdictSchema,
-  verificationStopSchema,
-  placementStopSchema,
-  entryUlidSchema,
-} from "./operations.js";
-import { targetName, type ActorId, type ContractId, type EntryUlid } from "../core/facts/types.js";
+import { snapshotIdSchema, placementStopSchema, gateReportSchema } from "./operations.js";
+import { targetName, type ActorId, type ContractId } from "../core/facts/types.js";
+import { gateReports } from "../core/facts/gate.js";
 import { deliveryDiffScopeSchema, readDeliveryScope } from "../git/integration.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { currentVerifiedAttestation, verifyDelivery } from "./intent.js";
 import { admitPlacement, observeTargetPlacement, observeIntegrationTargetMovement } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
 import {
@@ -23,23 +17,11 @@ import {
   type ExecutionStage,
   type ExecutionStop,
 } from "./progress.js";
-import type { DocumentDerivation, PlacementStop, VerificationStop } from "./operations.js";
-import { placementStop, timestamp, unpackVerificationOutcome } from "./operations.js";
+import type { PlacementStop } from "./operations.js";
+import { placementStop, timestamp } from "./operations.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
-const verificationVerdictSchema = z.object({
-  snapshot: snapshotIdSchema,
-  verdict: verdictSchema,
-  entry: entryUlidSchema,
-  summary: z.string().optional(),
-});
-const verificationEvidenceSchema = z.discriminatedUnion("kind", [
-  verificationVerdictSchema.extend({ kind: z.literal("ran"), entry: entryUlidSchema.optional() }).strict(),
-  verificationVerdictSchema.extend({ kind: z.literal("reused") }).strict(),
-  z.object({ kind: z.literal("stopped"), stop: verificationStopSchema }).strict(),
-]);
-export type VerificationEvidence = z.infer<typeof verificationEvidenceSchema>;
 const candidateCompletionSchema = z
   .object({
     integration: snapshotIdSchema,
@@ -55,7 +37,7 @@ export type CandidateCompletion = z.infer<typeof candidateCompletionSchema>;
 export const completionEvidenceSchema = z
   .object({
     completion: candidateCompletionSchema.optional(),
-    verification: verificationEvidenceSchema.optional(),
+    gates: z.array(gateReportSchema).readonly().optional(),
     placement: placementStopSchema.optional(),
   })
   .strict();
@@ -65,8 +47,6 @@ export type CompletionInput = Readonly<{
   repository: GitRepository;
   checkpoint: ContractCheckpoint;
   progress: ProtocolProgress;
-  start: "verification" | "placement";
-  deriveDocument(state: ContractCheckpoint["state"]): DocumentDerivation;
   actor?: ActorId;
   signal?: AbortSignal;
 }>;
@@ -81,14 +61,13 @@ export type CompletionResult =
       kind: "stopped";
       checkpoint: ContractCheckpoint;
       evidence: CompletionEvidence;
-      stop: PlacementStop | VerificationStop | ExecutionStop;
+      stop: PlacementStop | ExecutionStop;
     }>;
 
 // A cursor controls this node only; it is neither a receipt nor a persisted lifecycle.
 type CompletionCursor = {
   checkpoint: ContractCheckpoint;
   evidence: CompletionEvidence;
-  ran: EntryUlid | undefined;
   completion?: CandidateCompletion;
   stage: ExecutionStage;
 };
@@ -97,70 +76,6 @@ function reintegrationStop(result: Exclude<ReintegrationResult, { kind: "accepte
   if (result.kind === "placement-failed") return { failure: "target-placement-failed", diagnostic: result.diagnostic };
   if (result.kind === "refused") return { refusal: result.refusal };
   return { retry: result.reason };
-}
-
-async function verifyCurrentCandidate(input: CompletionInput, cursor: CompletionCursor): Promise<void> {
-  cursor.stage = "verification";
-  input.signal?.throwIfAborted();
-  const state = cursor.checkpoint.state;
-  const snapshot = state.currentIntegration?.snapshot;
-  if (snapshot === undefined) throw new Error("delivery completion requires an integration snapshot");
-  cursor.evidence = {};
-  cursor.ran = undefined;
-  input.progress.recordCandidate(state.id, cursor.evidence);
-  const declaration = input.deriveDocument(state).verification;
-  if (declaration.kind === "refused") {
-    cursor.evidence = { verification: { kind: "stopped", stop: { refusal: declaration.refusal } } };
-    input.progress.recordCandidate(state.id, cursor.evidence);
-    return;
-  }
-  if (declaration.data === null) return;
-  const current = currentVerifiedAttestation(state);
-  if (current?.verdict === "satisfied") {
-    cursor.evidence = {
-      verification: { kind: "reused", snapshot, ...current },
-    };
-    input.progress.recordCandidate(state.id, cursor.evidence);
-    return;
-  }
-  const result = await verifyDelivery({
-    channel: input.channel,
-    repository: input.repository,
-    contractId: state.id,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
-    at: timestamp(),
-    state,
-    snapshot,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    progress: input.progress,
-    verification: declaration.data,
-  });
-  if (result === null) return;
-  const verified = unpackVerificationOutcome(result);
-  if (verified.admission !== undefined) {
-    cursor.checkpoint = contractCheckpoint(verified.admission);
-    input.progress.recordResidue(state.id, verified.admission);
-    cursor.ran = verified.admission.facts.find(
-      (fact) => fact.kind === "attestation" && fact.data.gate === "verified",
-    )?.entry;
-  }
-  if (verified.reuse !== undefined) cursor.ran = verified.reuse.entry;
-  const verification: VerificationEvidence | undefined =
-    verified.stop !== undefined
-      ? { kind: "stopped", stop: verified.stop }
-      : verified.reuse !== undefined
-        ? { kind: "reused", snapshot, ...verified.reuse }
-        : verified.counts === undefined
-          ? undefined
-          : {
-              kind: "ran",
-              snapshot,
-              verdict: verified.counts.verdict,
-              ...(cursor.ran === undefined ? {} : { entry: cursor.ran }),
-              ...(verified.counts.verdict === "unsatisfied" ? { summary: verified.counts.summary } : {}),
-            };
-  cursor.evidence = verification === undefined ? {} : { verification };
-  input.progress.recordCandidate(state.id, cursor.evidence);
 }
 
 async function observeCandidateTarget(
@@ -201,13 +116,7 @@ async function completedResult(
     ...(predecessor === undefined || target === undefined ? {} : { predecessor, target: targetName(target) }),
   };
   input.progress.recordCompletion(state.id, cursor.completion);
-  const declaration = input.deriveDocument(state).verification;
-  const current = declaration.data == null ? undefined : currentVerifiedAttestation(state);
-  const verification: VerificationEvidence | undefined =
-    current === undefined
-      ? undefined
-      : { kind: cursor.ran === current.entry ? "ran" : "reused", snapshot: integration, ...current };
-  cursor.evidence = verification === undefined ? {} : { verification };
+  cursor.evidence = { gates: gateReports(state).reports };
   input.progress.recordCandidate(state.id, { ...cursor.evidence, completion: cursor.completion });
   const scope =
     predecessor === undefined ? undefined : await readDeliveryScope(input.repository, predecessor, integration, false);
@@ -284,37 +193,20 @@ async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionC
   return result;
 }
 
-async function verifyCandidateReadiness(
-  input: CompletionInput,
-  cursor: CompletionCursor,
-): Promise<CompletionResult | undefined> {
-  const observedPlacement = await observeCandidateTarget(input, cursor);
-  await verifyCurrentCandidate(input, cursor);
-  const stop = cursor.evidence.verification?.kind === "stopped" ? cursor.evidence.verification.stop : observedPlacement;
-  if (stop !== undefined) {
-    return {
-      kind: "stopped",
-      checkpoint: cursor.checkpoint,
-      evidence: { ...cursor.evidence, ...(observedPlacement === undefined ? {} : { placement: observedPlacement }) },
-      stop,
-    };
-  }
-  return undefined;
-}
-
 async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor): Promise<CompletionResult> {
   const target = cursor.checkpoint.state.coordinates.target;
-  let needsVerification = input.start === "verification";
   for (let cycles = 0; ; cycles += 1) {
     input.signal?.throwIfAborted();
+    cursor.evidence = { gates: gateReports(cursor.checkpoint.state).reports };
+    input.progress.recordCandidate(cursor.checkpoint.state.id, cursor.evidence);
     let placement: Awaited<ReturnType<typeof placeCurrentCandidate>> | undefined =
       await observeIntegrationTargetMovement(input.repository, cursor.checkpoint.state);
     if (placement === undefined) {
-      if (needsVerification) {
-        const stopped = await verifyCandidateReadiness(input, cursor);
-        if (stopped !== undefined) return stopped;
-      }
+      const targetStop = await observeCandidateTarget(input, cursor);
+      if (targetStop !== undefined) return stoppedResult(cursor, targetStop);
       placement = await placeCurrentCandidate(input, cursor);
+      cursor.evidence = { gates: gateReports(cursor.checkpoint.state).reports };
+      input.progress.recordCandidate(cursor.checkpoint.state.id, cursor.evidence);
     }
     if (placement.kind === "accepted") return await completedResult(input, cursor);
     if (placement.kind !== "target-moved" || target === undefined || placement.observedTreeEqualsCandidate) {
@@ -346,13 +238,12 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
     if (reintegrated.kind !== "accepted") return stoppedResult(cursor, reintegrationStop(reintegrated));
     cursor.checkpoint = contractCheckpoint(reintegrated);
     input.progress.recordResidue(reintegrated.state.id, reintegrated);
-    needsVerification = true;
   }
 }
 
 /** Advance one contract. The trigger owns the leading act; this node owns no other contract. */
 export async function completeCandidate(input: CompletionInput): Promise<CompletionResult> {
-  const cursor: CompletionCursor = { checkpoint: input.checkpoint, evidence: {}, ran: undefined, stage: "placement" };
+  const cursor: CompletionCursor = { checkpoint: input.checkpoint, evidence: {}, stage: "placement" };
   try {
     return await advanceCandidate(input, cursor);
   } catch (error) {

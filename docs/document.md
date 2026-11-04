@@ -37,6 +37,24 @@ extensions. Reserved names cannot silently become structured Contract terms.
 Forking creates an ordinary new Contract from the source terms with a forked
 title; it creates neither a source relationship nor a second document dialect.
 
+## Requirement Derivation
+
+Bind, amend, and fork derive each selected gate's current opaque requirements
+from the effective document and gate selection. Review and custom gates use a
+singleton derived from gate identity. Selected Verification requires valid
+declarations and derives one requirement per distinct canonical execution
+content: executor, script, and declared deadline. Exact duplicates share one
+requirement. An unselected Verification section is inert and creates no
+requirements.
+
+Declaration identity survives reordering. A declaration's current one-based
+position is only an invocation and display selector, never durable requirement
+identity. Adding or changing content creates its requirement without invalidating
+other matching requirements; removing content removes only that current
+obligation, preserving historical testimony. Requirement ordering carries no
+evidence semantics. The boundary passes opaque requirements to core, which
+neither parses declarations nor knows their positions.
+
 ## Amendments And Arcs
 
 An amendment is an explicit operation over whole Contract sections. It may

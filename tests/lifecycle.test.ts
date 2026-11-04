@@ -2,15 +2,24 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import { gateReportSchema, activeContractRefusalSchema, bindRefusalSchema, amendRefusalSchema, deliverRefusalSchema, placementRefusalSchema } from "../src/protocol/operations.js";
+import {
+  gateReportSchema,
+  activeContractRefusalSchema,
+  bindRefusalSchema,
+  amendRefusalSchema,
+  deliverRefusalSchema,
+  placementRefusalSchema,
+} from "../src/protocol/operations.js";
 import {
   changeId,
   contractId,
   documentKey,
   gate,
   snapshotId,
-  type ContractId, type JournalEntry
+  type ContractId,
+  type JournalEntry,
 } from "../src/core/facts/types.js";
+import { singletonRequirement } from "../src/verification/declaration.js";
 import { uniqueEntryUlid } from "./support/journal.js";
 import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
@@ -25,6 +34,7 @@ function terms(after: readonly ContractId[] = [], gates: readonly ReturnType<typ
     document: { bytes: "# Lifecycle cycle\n", key: documentKey("lifecycle-cycle") },
     segments: [],
     gates,
+    requirements: Object.fromEntries(gates.map((declaredGate) => [declaredGate, [singletonRequirement(declaredGate)]])),
     after,
   };
 }
@@ -70,9 +80,6 @@ function deliveryData(snapshot: string) {
   };
 }
 
-
-
-
 test("delivery notes round-trip without changing older note-free facts", () => {
   const original = entry("deliver", deliveryData("candidate"), 2);
   const originalBytes = encodeEntry(original);
@@ -105,24 +112,21 @@ test("malformed inherited refusals, journals, and folds refuse without inventing
   );
 
   const malformed = { kind: "terminal", contractId: String(id), extra: true };
-  for (const schema of [
-    bindRefusalSchema,
-    amendRefusalSchema,
-    deliverRefusalSchema,
-    activeContractRefusalSchema,
-  ]) {
+  for (const schema of [bindRefusalSchema, amendRefusalSchema, deliverRefusalSchema, activeContractRefusalSchema]) {
     assert.equal(schema.safeParse(malformed).success, false);
   }
-  assert.throws(
-    () =>
-      placementRefusalSchema.parse({
-        kind: "prerequisites-unsatisfied",
-        contractId: String(id),
-        unmet: [{ contractId: String(prerequisite), state: "unknown" }],
-      }),
+  assert.throws(() =>
+    placementRefusalSchema.parse({
+      kind: "prerequisites-unsatisfied",
+      contractId: String(id),
+      unmet: [{ contractId: String(prerequisite), state: "unknown" }],
+    }),
   );
-  assert.throws(
-    () => gateReportSchema.parse({ gate: "reviewed", current: { kind: "attested", verdict: "passed", at: "2026-08-07T00:00:00Z" } }),
+  assert.throws(() =>
+    gateReportSchema.parse({
+      gate: "reviewed",
+      current: { kind: "attested", verdict: "passed", at: "2026-08-07T00:00:00Z" },
+    }),
   );
   assert.deepEqual(placementRefusalSchema.parse({ kind: "delivery-missing", contractId: String(id) }), {
     kind: "delivery-missing",

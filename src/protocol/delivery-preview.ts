@@ -3,14 +3,12 @@ import {
   deliverDataSchema,
   deliveryPreparationRefusalSchema,
   changeIdSchema,
-  verdictSchema,
-  entryUlidSchema,
   contractIdSchema,
   gateReportSchema,
-  recordedIntegrationSnapshots,
+  requirementReportSchema,
 } from "./operations.js";
 import { previewTargetAnswerSchema, adjudicatePreviewTarget } from "../git/target-placement.js";
-import { verificationReuseSchema, currentVerifiedAttestation } from "./intent.js";
+import { verificationRequirement } from "../verification/declaration.js";
 import { deliveryDiffScopeSchema, readDeliveryDiff, readDeliveryScope } from "../git/integration.js";
 import { observeGitForAdmissionAt } from "../git/observe.js";
 import { activeContract, documentIsCurrent, targetContractRefusal } from "../core/facts/observation.js";
@@ -20,7 +18,7 @@ import type { ContractState, DeliverData } from "../core/facts/types.js";
 import { observeTargetLag, contractTargetLagSchema, worktreeWorkspaceSchema } from "../git/workspace.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { accepted } from "./outcome.js";
-import { prepareDelivery } from "./deliver.js";
+import { deliveryIntegrationSnapshots, prepareDelivery } from "./deliver.js";
 import type {
   DeliveryPreparationRefusal,
   DocumentDerivation,
@@ -61,8 +59,20 @@ export const deliveryPreviewReportSchema = z
     verification: z.union([
       z.object({ kind: z.literal("not-run") }).strict(),
       z.object({ kind: z.literal("undeclared") }).strict(),
-      z.object({ kind: z.literal("required") }).strict(),
-      verificationReuseSchema.extend({ kind: z.literal("recorded") }).strict(),
+      z
+        .object({
+          kind: z.literal("requirements"),
+          requirements: z
+            .array(
+              requirementReportSchema
+                .extend({
+                  index: z.number().int().positive().optional(),
+                })
+                .strict(),
+            )
+            .readonly(),
+        })
+        .strict(),
     ]),
     target: z.union([z.object({ kind: z.literal("not-observed") }).strict(), previewTargetAnswerSchema]),
     targetLag: contractTargetLagSchema.optional(),
@@ -70,10 +80,6 @@ export const deliveryPreviewReportSchema = z
       .object({
         changeId: changeIdSchema,
         relation: z.enum(["identical", "differs"]),
-        verification: z.union([
-          z.object({ kind: z.enum(["undeclared", "unrecorded"]) }).strict(),
-          z.object({ kind: z.literal("recorded"), verdict: verdictSchema, fact: entryUlidSchema }).strict(),
-        ]),
       })
       .strict()
       .optional(),
@@ -90,23 +96,12 @@ type DeliveryPreviewOperationInput = MutationOperationInput &
     signal?: AbortSignal;
   }>;
 
-function deliveryRelation(
-  state: ContractState,
-  candidate: DeliverData,
-  declaration: DocumentDerivation["verification"]["data"],
-): DeliveryPreviewReport["delivery"] {
+function deliveryRelation(state: ContractState, candidate: DeliverData): DeliveryPreviewReport["delivery"] {
   const recorded = state.delivery?.data.integration.changeId;
   if (recorded === undefined) return undefined;
-  const verification = declaration === null ? undefined : currentVerifiedAttestation(state);
   return {
     changeId: recorded,
     relation: recorded === candidate.integration.changeId ? "identical" : "differs",
-    verification:
-      declaration === null
-        ? { kind: "undeclared" }
-        : verification === undefined
-          ? { kind: "unrecorded" }
-          : { kind: "recorded", verdict: verification.verdict, fact: verification.entry },
   };
 }
 
@@ -114,9 +109,16 @@ function verificationAnswer(
   prospective: ContractState,
   declaration: DocumentDerivation["verification"]["data"],
 ): DeliveryPreviewReport["verification"] {
-  if (declaration === null) return { kind: "undeclared" };
-  const evidence = currentVerifiedAttestation(prospective);
-  return evidence === undefined ? { kind: "required" } : { kind: "recorded", ...evidence };
+  if (declaration == null) return { kind: "undeclared" };
+  const verified = gateReports(prospective).reports.find((report) => report.gate === "verified");
+  if (verified === undefined) return { kind: "undeclared" };
+  return {
+    kind: "requirements",
+    requirements: verified.requirements.map((report) => {
+      const index = declaration.declarations.findIndex((item) => verificationRequirement(item) === report.requirement);
+      return { ...report, ...(index < 0 ? {} : { index: index + 1 }) };
+    }),
+  };
 }
 
 async function readyCandidate(
@@ -191,7 +193,7 @@ export async function previewDeliveryOperation(
     {
       contractId: state.id,
       coordinates: state.coordinates,
-      recordedIntegrations: recordedIntegrationSnapshots(observed.journals.get(state.id)?.entries ?? []),
+      recordedIntegrations: deliveryIntegrationSnapshots(observed.journals.get(state.id)?.entries ?? []),
       appointment,
     },
     {
@@ -217,7 +219,7 @@ export async function previewDeliveryOperation(
   );
   input.progress?.recordDeliveryPreview(state.id, { candidate });
   const verification = verificationAnswer(prospective, derivation.verification.data);
-  const delivery = deliveryRelation(state, prepared.data, derivation.verification.data);
+  const delivery = deliveryRelation(state, prepared.data);
   input.progress?.recordDeliveryPreview(state.id, { verification, ...(delivery === undefined ? {} : { delivery }) });
   const target = await targetAnswer(input.scope, state, prepared.data);
   input.progress?.recordDeliveryPreview(state.id, { target });

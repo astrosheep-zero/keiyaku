@@ -48,6 +48,20 @@ do not duplicate the invocation's facts, while conflicting bytes for that
 identity remain corruption. The addressed Contract's receipt head is not a
 later observation and cannot be replaced by another Contract's completion.
 
+## Gate Requirements And Testimony
+
+Contract terms declare one or more opaque requirements for every selected gate.
+Each attestation addresses a gate, one requirement, and its captured subject;
+there is no additional gate-level aggregate testimony or legacy unaddressed form.
+Requirements belong to the effective terms, while testimony remains durable
+history even when its requirement is no longer declared. Requirement order is
+presentation and persistence order only, never evidence identity or judgment.
+
+The document boundary derives requirement identities. Core stores and judges
+these opaque identities without learning declaration content, display indexes,
+Markdown, or execution methodology. Generic currentness and universal gate
+satisfaction belong to [lifecycle.md](lifecycle.md), not a producer-specific fold.
+
 ## Identity And Custody
 
 Public coordinates are complete, prefixed identities. Each product family owns

@@ -7,74 +7,88 @@ declaration type, or a core-derived gate. Attestation storage belongs to
 
 ## Verification Producer
 
-The document boundary supplies an ordered private declaration set. Each
-declaration is an executable shell script and may state its own deadline; there
-is no global Verification deadline, setting, flag, or environment override.
-Exact Markdown and duration grammar belong to document parsing, help, and
-executable specifications. The declaration set, its preparation, and its
-dependency selection remain attempt-local and are never core terms, cache,
-producer registry, or durable execution authority.
+The document boundary supplies private declarations and their stable opaque
+requirements. Each declaration is an executable shell script and may state its
+own deadline; there is no global Verification deadline, setting, flag, or
+environment override. Exact Markdown and duration grammar belong to document
+parsing, help, and executable specifications. Execution preparation remains
+attempt-local, never a producer registry, cache, or durable run authority.
+Requirement derivation and declaration identity belong to
+[document.md](document.md).
 
-Verification runs only as the obligation of a selected `verified` gate. Without
-that selection, no verb runs the producer and a Verification section is inert
-document text. Selecting the gate requires a declaration.
+Only explicit verify invokes this producer. It requires an active Contract with
+a selected `verified` gate and valid declarations, and selects all current
+declarations or one by its current one-based position. An out-of-range selection
+refuses before execution or admission. An unselected section is inert text.
+Delivery, review, preview, refreshed-target completion, and dependent continuation
+never execute declarations or their hooks; they consume standing evidence only.
 
-Verification runs the selected declarations against the exact integration
-snapshot in its own clean scratch worktree for each attempt. Attempts never
-wait for or remove one another's running scenes. Project-configured
-setup prepares that worktree before declarations, and configured cleanup runs
-after the attempt, including after setup or declaration failure. Mutable
-ignored and untracked state from another checkout is not automatically copied
-or linked into the scratch. Dependency installation and any intentional reuse
-belong to the project's hooks, not ecosystem inference by Keiyaku. This is a
-local execution convenience, not a permission sandbox, dependency-freshness
-policy, or reproducibility claim.
+Verify captures the appointed worktree and prepares the same prospective target
+integration as delivery, under the same clean-worktree rule and explicit dirty
+capture authorization. Preparation admits no candidate, delivery, review, or
+reintegration. Conflicts and unavailable preparation are typed non-admission,
+never conflict handoff. Each check's subject is that exact captured integration
+snapshot. Reuse of an already-recorded integration with matching tree and
+predecessor permits evidence before or after delivery to apply to an unchanged
+delivery. Changed target or candidate cannot retarget earlier testimony.
 
-Each declaration and scratch setup or cleanup hook inherits the caller process
-environment through the shared runtime. Candidate-owned settings remain the
-only settings authority for those hooks. Declarations run in order even after a
-failing command. A terminal run records one ordinary `verified` attestation
-with a satisfied or unsatisfied verdict. When the current attestation for the
-same Contract, gate, verdict, captured snapshot, and declaration subject already exists, result
-admission records no new fact. This admission reuse does not erase execution:
-an invocation that executed declarations reports its own verdict and counts,
-while only an invocation that skipped execution reports standing-evidence reuse.
-A timeout is terminal
-unsatisfied evidence; candidate unavailability, environment/setup failure,
-spawn failure, unknown exit, and caller cancellation admit no attestation.
+Each selected declaration executes in its own independent clean scratch with
+project-configured setup and cleanup, including cleanup after setup or
+declaration failure. No declaration inherits mutable scratch state from another.
+A prerequisite must be in that declaration's script or setup hook. Full verify
+may schedule in document order, but order has no correctness or evidence meaning.
+Attempts never wait for or remove one another's running scenes. Mutable ignored
+and untracked state from another checkout is not automatically copied or linked
+into scratch. Dependency installation and intentional reuse belong to the
+project's hooks, not ecosystem inference by Keiyaku. This is a local execution
+convenience, not a permission sandbox, dependency-freshness policy, or
+reproducibility claim.
 
-The producer captures its subject before execution, and admission never
-retargets it. A completed older observation remains truthful history even when
-it is no longer current. Generic lifecycle currentness alone decides whether
-that evidence satisfies a declared gate. Delivery preview only observes existing
-testimony against a prospective integration; it never executes or admits producer
-evidence. Deliver reuses matching current satisfied evidence.
-A current unsatisfied verdict remains evidence, but does not suppress execution
-on a later delivery:
-that invocation runs Verification once against its candidate and may supersede
-the failure with satisfaction. Repeated failure may deduplicate its testimony;
-there is no automatic retry loop, cache, or another evidence source. `verified`
-is only this producer's conventional token; other opaque gates are outside this
-chapter.
+Each declaration and scratch hook inherits the executing caller process
+environment through the shared runtime. Candidate-owned settings remain the only
+settings authority for those hooks. Verify always executes its selection, even
+when current satisfied evidence exists. Each terminal check admits its own
+attestation before later checks begin. Identical current testimony may reuse an
+admission, but the result still reports execution and its verdict separately
+from admission reuse. Reuse requires identical testimony, including the bounded
+failure summary; changed diagnostic testimony is new evidence even when its
+verdict and captured subject match. No aggregate attestation is produced.
 
-Terminal failure output may be rendered as bounded contextual summary on the
-attestation. Successful declaration output remains live execution evidence,
-not summary material that can displace failure diagnostics. The summary is not
-a log, artifact, report store, or source for callers to parse counts. A stopped producer is a typed public stop. Delivery can still
-report its independently observed placement stop, but does not perform placement
-until Verification and gates permit it. Delivery preview independently observes target
-followability without placing it or running Verification.
+Normal failure and timeout are terminal unsatisfied testimony for that
+requirement only; full verify continues with remaining declarations after those
+results. Candidate unavailability, environment/setup failure, spawn failure,
+unknown exit, and caller cancellation admit no testimony for the affected
+check. An operational stop may stop further scheduling; cancellation stops later
+owned work. Earlier admissions and cleanup residue remain visible. A terminal
+execution result survives a later cancelled admission: the check retains its
+verdict and identifies the admission stop without claiming testimony was recorded.
 
-Environment failures from configured scratch hooks preserve the hook's configured
-name and typed failure detail as their public recovery identity; the hook's
-private array position is never exposed.
+Admission never retargets captured testimony, even when the Contract has moved.
+Requirement identity carries declaration currency; no whole-section subject
+invalidates unrelated checks. Generic lifecycle currentness alone decides gate
+satisfaction. After execution and admissions, verify invokes ordinary completion
+using current evidence. Only an already-delivered Contract with ready
+prerequisites and all gates satisfied may place; a selected success alone makes
+no whole-gate promise. `verified` is this producer's conventional token; other
+opaque gates remain outside this chapter.
 
-An attempt can emit ephemeral observations for materialization, configured
-setup and cleanup, declarations, and their stdout or stderr. They name only
-witnessed phases and known execution directories; they neither claim liveness
-nor become testimony, a run log, or replay
-authority. Stopped process outcomes retain bounded output tails and explicit
-truncation facts. Observer failure cannot affect child custody or final result.
+Terminal failure output may be rendered as bounded contextual summary on its
+attestation. Successful output remains live execution evidence, not summary
+material that can displace failure diagnostics. A summary is not a log, artifact,
+report store, or source for parsing counts. A stopped producer is a typed public
+stop, distinct from a terminal unsatisfied verdict.
+
+Environment failures from configured scratch hooks preserve the hook's
+configured name and typed failure detail as their public recovery identity;
+the hook's private array position is never exposed.
+
+An attempt can emit ephemeral observations for materialization, setup, cleanup,
+declarations, and their stdout or stderr. Check observations identify the
+current declaration position, stable requirement, and exact snapshot, naming
+only witnessed phases and known execution directories. They never become
+testimony, a run log, liveness authority, or replay data. Stopped process outcomes
+retain bounded output tails and explicit truncation facts. Observer failure
+cannot affect child custody or the final result.
 
 ## Process And Cleanup Boundary
 
@@ -97,14 +111,17 @@ cancelled attempts dispose their scratch. Unsatisfied verdicts, including
 timeouts, and setup or declaration failures retain the whole scratch for
 diagnosis after configured cleanup; the invocation reports its path. This is
 not an archive, a log store, candidate content, or replay authority. Each Contract
-has at most one retained scratch. A failing attempt replaces the previous
-retained scene during retirement under bounded custody, never during
-materialization or execution. Failed retention reports its reason and names a
-path only when this attempt's own scene remains; it retires only that attempt's
+and requirement pair has at most one retained diagnostic scene. A failing check
+replaces only that requirement's previous scene during retirement under bounded
+custody, never during materialization or execution. Replacement or cleanup for
+one requirement cannot erase another's scene. Public failure results identify
+the requirement, its current declaration position, and any retained path.
+Failed retention reports its reason and names a path only when this attempt's
+own scene remains; it retires only that attempt's
 execution scene without changing its verdict. Successful and cancelled attempts
-leave the retained scene untouched; acceptance or abandonment removes it
-through terminal cleanup. Git proves association and ownership without a
-journal fact or durable run record.
+leave retained scenes untouched; acceptance or abandonment retires all scenes
+whose ownership can be proved through terminal cleanup. Git proves association
+and ownership without a journal fact or durable run record.
 
 Disposal is one independently bounded removal attempt; expiry or failure becomes
 that attempt's removal diagnostic. A failed destroy action or retained scratch
@@ -129,18 +146,16 @@ contract or to production provider environments.
 
 ## Ownership
 
-Verification resolves declarations and produces terminal verdicts. Protocol
-admits only terminal verdicts as testimony and consults the one generic
-currentness judgment for reusable `verified` evidence. The producer owns its
-terminal counts; package and CLI readers render adjudicated reports without
-parsing process output or creating a timeline, rework count, or elapsed-time
-authority.
+Verification executes declarations and produces terminal verdicts. Protocol
+calls the producer only for explicit verify, admits each check's testimony, and
+uses the one generic requirement judgment for completion. Package and CLI
+readers render adjudicated reports without parsing process output or creating a
+timeline, rework count, elapsed-time authority, or derived aggregate attestation.
 
-Each verification attempt retains its captured snapshot and declaration subject.
-After reintegration, completion obtains the then-applicable declaration for the
-new candidate, without retargeting testimony already produced. A completion's
-verification conclusion must belong to its final integration; an older run's
-verdict is never attached merely because it ran earlier in the invocation.
+Each check retains its captured snapshot and stable requirement. Completion
+never executes a replacement check after reintegration. It judges the evidence
+applicable to its final integration; an older verdict is never attached merely
+because it ran earlier in the invocation.
 
 Scratch retirement uses bounded custody independent of caller cancellation.
 Resource problems from successive attempts and dependent Contracts accumulate

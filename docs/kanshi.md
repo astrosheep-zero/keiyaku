@@ -46,6 +46,12 @@ to explain.
 Its judgment is phase-driven: active Contracts foreground the outstanding hand
 and acceptance evidence, while terminal Contracts foreground the settled outcome.
 The World Contract section offers the same concise judgment at catalogue scale.
+Contract evidence retains the owner's per-requirement currentness and verdicts,
+including missing, stale, and unsatisfied requirements. A selected successful
+check cannot appear as satisfaction of the whole gate. Current declaration
+positions may label current requirements, while removed historical requirements
+remain identifiable by stable identity. Kanshi never recomputes aggregation or
+infers a producer run from pending evidence.
 An association outside that aperture is unavailable rather than missing; Kanshi
 uses missing only when the Contract observation is complete enough to establish
 absence.

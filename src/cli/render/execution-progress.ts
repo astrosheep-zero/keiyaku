@@ -1,4 +1,5 @@
 import type { ExecutionObservation } from "../../protocol/execution-observation.js";
+import { shortGitId } from "./contract-observation.js";
 import { StatusLine, type StatusLineOptions, type StatusLineStream } from "./status-line.js";
 import { renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 
@@ -25,8 +26,11 @@ function elapsed(ms: number): string {
 }
 
 function phaseDetail(observation: Extract<ExecutionObservation, { kind: "verification" }>["observation"]): string {
-  if (observation.phase === "declaration") return `declaration ${observation.index ?? "?"}/${observation.total ?? "?"}`;
-  return observation.name === undefined ? observation.phase : `${observation.phase} · ${safeText(observation.name)}`;
+  const detail =
+    observation.phase === "declaration"
+      ? `declaration ${observation.index}/${observation.total}`
+      : `${observation.phase} · check ${observation.index}/${observation.total}${observation.name === undefined ? "" : ` · ${safeText(observation.name)}`}`;
+  return `${detail} · snapshot ${shortGitId(observation.snapshot)} · ${safeText(observation.requirement)}`;
 }
 
 function phaseMark(outcome: string | undefined): "✓" | "×" | "?" {
@@ -171,7 +175,7 @@ export type ExecutionProgressOptions = StatusLineOptions &
 export class ExecutionProgressRenderer {
   private readonly status: StatusLine;
   private verificationStartedAt: number | undefined;
-  private declarations: Readonly<{ passed: number; total: number }> | undefined;
+  private declarations: Readonly<{ passed: number; finished: number }> | undefined;
   private declarationFailed = false;
   private phaseFailed = false;
   private phaseUnknown = false;
@@ -194,8 +198,8 @@ export class ExecutionProgressRenderer {
     const now = this.input.now ?? (() => performance.now());
     const duration = elapsed(now() - this.verificationStartedAt);
     if (this.declarations !== undefined) {
-      const { passed, total } = this.declarations;
-      this.status.finish(`verify  ${this.finalMark()} ${passed}/${total} · ${duration}`);
+      const { passed, finished } = this.declarations;
+      this.status.finish(`verify  ${this.finalMark()} ${passed}/${finished} checks · ${duration}`);
       return;
     }
     this.status.finish(`verify  ${this.finalMark()} · ${duration}`);
@@ -220,9 +224,9 @@ export class ExecutionProgressRenderer {
     this.phaseFailed ||= mark === "×";
     this.phaseUnknown ||= mark === "?";
     if (observation.phase === "declaration") {
-      const total = observation.total ?? this.declarations?.total ?? 0;
+      const finished = (this.declarations?.finished ?? 0) + 1;
       const passed = (this.declarations?.passed ?? 0) + (mark === "✓" ? 1 : 0);
-      this.declarations = { passed, total };
+      this.declarations = { passed, finished };
       this.declarationFailed ||= mark !== "✓";
     }
     if (this.status.isTTY)

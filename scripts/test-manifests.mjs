@@ -26,6 +26,7 @@ export const LOCAL_TEST_FILES = [
   "tests/dependency-currentness.test.ts",
   "tests/duration.test.ts",
   "tests/fold.test.ts",
+  "tests/gate-requirements.test.ts",
   "tests/lifecycle.test.ts",
   "tests/maintainability.test.js",
   "tests/markdown-ast.test.ts",
@@ -52,6 +53,7 @@ export const LOCAL_TEST_FILES = [
   "tests/region.test.ts",
   "tests/settings.test.ts",
   "tests/v4-cut.test.ts",
+  "tests/verification-declaration.test.ts",
 ];
 
 export const INTEGRATION_TEST_FILES = [
@@ -80,6 +82,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/akuma-schema.test.ts",
   "tests/akuma-stream.test.ts",
   "tests/akuma-turn-wait.test.ts",
+  "tests/akuma-verification-requests.test.ts",
   "tests/arc.test.ts",
   "tests/boundary-validation.test.ts",
   "tests/cli-adaptation.test.ts",
@@ -100,6 +103,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/debt-store.test.ts",
   "tests/delivery-preview.test.ts",
   "tests/dispatch-alias.test.ts",
+  "tests/explicit-verification.test.ts",
   "tests/facade-selection.test.ts",
   "tests/fixture-retention.test.ts",
   "tests/git-change-id.test.ts",

@@ -9,6 +9,7 @@ import {
   deliveryPreparationRefusalSchema,
   deliverConflictRefusalSchema,
   verificationDeclarationRefusalSchema,
+  verifyRefusalSchema,
 } from "../protocol/operations.js";
 import { targetInputRefusalSchema, forkSourceMovedRefusalSchema } from "../protocol/bind.js";
 import { protocolTerminalSchema } from "../protocol/run.js";
@@ -47,6 +48,7 @@ export const operationRetrySchemas = {
   bind: protocolTerminalSchema,
   amend: protocolTerminalSchema,
   deliver: keiyakuRetryReasonSchema,
+  verify: keiyakuRetryReasonSchema,
   review: keiyakuRetryReasonSchema,
   "deliver-preview": keiyakuRetryReasonSchema,
   arc: protocolTerminalSchema,
@@ -68,6 +70,13 @@ export const operationRefusalSchemas = {
     deliveryPreparationRefusalSchema,
     deliverConflictRefusalSchema,
     verificationDeclarationRefusalSchema,
+  ]),
+  verify: z.union([
+    activeContractRefusalSchema,
+    deliverRefusalSchema,
+    deliveryPreparationRefusalSchema,
+    verificationDeclarationRefusalSchema,
+    verifyRefusalSchema,
   ]),
   review: z.union([activeContractRefusalSchema, worktreeMissingRefusalSchema, dirtyWorkspaceRefusalSchema]),
   "deliver-preview": z.union([deliverRefusalSchema, verificationDeclarationRefusalSchema]),

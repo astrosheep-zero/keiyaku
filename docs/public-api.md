@@ -47,7 +47,8 @@ coordinate is caller-invalid input, never quietly replaced by an ambient
 current directory. `Keiyaku` is the native branded Contract handle created by
 binding or by selecting a complete Contract identity within that repository; instance operations never accept a
 second repository coordinate. A handle offers state and guidance reads, history,
-amendment, delivery and its read-only preview, review, abandonment, and arc. `Keiyaku.with()`
+amendment, explicit Verification, delivery and its read-only preview, review,
+abandonment, and arc. `Keiyaku.with()`
 synchronously captures one already-loaded immutable Settings value and the
 Contract-local actor, then exposes the Contract collection operations bind,
 select, resolve, list, observe, and wait, and the one public repair entry that reconciles
@@ -66,7 +67,7 @@ associate a Debt through the post-admission association owned by
 [settlement.md](settlement.md), but a Contract never makes Debt lifecycle a
 Contract fact. Markdown is decoded only at the library edge; public callers do
 not receive a decoded document, direct journal writer, Git handle, placement
-operation, or verification runner.
+operation, or private verification runner.
 
 A bind target carries exactly three caller intents, and this chapter is their
 sole owner. An explicit target is either a caller-selected existing branch or an active
@@ -127,6 +128,18 @@ The listing is the live board: terminal Contracts leave it, and their record
 stays in the journal and Git.
 Listing remains a read-time projection, not a lifecycle judgment.
 
+Explicit verify is a native Contract operation selecting all current
+declarations or one by its current one-based position. Selection is only an
+invocation convenience, never persisted evidence identity. It captures the
+appointed worktree under delivery's clean-worktree and explicit dirty-capture
+rules and prepares the exact prospective integration without admitting a
+candidate, delivery, review, or reintegration. Preparation conflict is typed
+non-admission, not conflict handoff. It always executes the selected work,
+admits each terminal check independently, then requests ordinary completion
+using current generic requirement evidence. Only an already-delivered Contract
+can place. Local and direct-parent execution return the same public result;
+mutable Verification has its own permission, independent of review and delivery.
+
 Delivery preview observes a prospective candidate through a dedicated native handle
 operation, separate from delivery admission. CLI and other adapters consume that
 same typed result. It never runs Verification, reconciles, settles, or continues
@@ -143,8 +156,8 @@ JSON projection retains public result data. Forwarded delivery revives its local
 diff ability from owner evidence, never from serialized callbacks or transport
 state.
 
-Delivery, review, and delivery preview each expose one promised answer and an optional
-observation callback. Execution never depends on observation; a callback cannot
+Delivery, review, verify, and delivery preview each expose one promised answer
+and an optional observation callback. Execution never depends on observation; a callback cannot
 hold custody, cancel execution, or change finality, even when it throws or
 rejects asynchronously. Caller cancellation alone requests a stop. Observations
 name confirmed admission and witnessed trailing work, including transport gaps,
@@ -176,7 +189,9 @@ without lookup, and a fork copies the source gates without expansion. A
 malformed selected bundle or unavailable selected namespace fails the consuming
 operation as caller-invalid input retaining the native Settings error, before
 any admission, rather than falling back or refusing partially. Later
-configuration changes never rewrite admitted gates.
+configuration changes never rewrite admitted gates. Bind, amend, and fork derive
+the effective requirements from the selected gates and current document;
+unchanged gate selection does not freeze requirements from an older document.
 
 World construction and destructive world reset are owned by
 [world.md](world.md). The package root names the reset operation `nuke`; it
@@ -205,8 +220,9 @@ is owned by [lifecycle.md](lifecycle.md).
 
 ## Cancellation And Confirmed Effects
 
-Review, delivery, and delivery preview carry caller cancellation through their local or
-parent-served execution. A signal is a request to stop further work, not proof
+Review, delivery, verify, and delivery preview carry caller cancellation through
+their local or parent-served execution. A signal is a request to stop further
+work, not proof
 that publication did not occur. Once a leading act has been accepted, cancellation
 preserves its receipt and identifies the unfinished stage. An unknown Git
 publication is still adjudicated under independent, bounded read custody before

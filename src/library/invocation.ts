@@ -43,7 +43,7 @@ type ReconciliationRecord = Readonly<{
   retainedWorktree?: string;
 }>;
 
-const CANDIDATE_CONCLUSION_KEYS = ["completion", "verification", "placement"] as const;
+const CANDIDATE_CONCLUSION_KEYS = ["completion", "gates", "placement"] as const;
 
 function entryKey(fact: JournalEntry): string {
   return `${fact.contract}\u0000${fact.entry}`;
@@ -139,6 +139,7 @@ export class InvocationAccumulator implements ProtocolProgress {
     contract: ContractId,
     snapshot: Parameters<ProtocolProgress["recordVerification"]>[1],
     result: VerificationResidue,
+    coordinate?: Readonly<{ requirement: string; index: number }>,
   ): void {
     if (result.cleanup !== undefined)
       this.records.push({
@@ -148,6 +149,7 @@ export class InvocationAccumulator implements ProtocolProgress {
           kind: "verification-cleanup",
           contractId: contract,
           ...(snapshot === undefined ? {} : { snapshot }),
+          ...coordinate,
           failure: result.cleanup,
         },
       });
@@ -159,9 +161,16 @@ export class InvocationAccumulator implements ProtocolProgress {
           kind: "worktree-leak",
           contractId: contract,
           ...(snapshot === undefined ? {} : { snapshot }),
+          ...coordinate,
           leak: result.leak,
         },
       });
+  }
+
+  recordVerificationCheck(contract: ContractId, check: import("../protocol/verify.js").VerificationCheck): void {
+    const previous = this.candidateConclusions.get(contract);
+    const checks = (previous?.checks ?? []) as readonly import("../protocol/verify.js").VerificationCheck[];
+    this.extendConclusions(contract, { snapshot: check.snapshot, checks: [...checks, check] });
   }
 
   /** Replace the current candidate's conclusions; accumulated resources are never erased. */

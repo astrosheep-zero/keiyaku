@@ -3,7 +3,14 @@ import { akumaCallerKey, type AkumaCaller } from "../../akuma/caller.js";
 import type { ArchetypeCatalog } from "../../index.js";
 import type { ContractList } from "../../library/contract-types.js";
 import type { DebtPage, DebtRow } from "../../debt/index.js";
-import { abbreviateGitIds, displayGitId, gitIdsInRow, lifecycleWord, progressStrip } from "./contract-observation.js";
+import {
+  abbreviateGitIds,
+  displayGitId,
+  gateRequirementFacts,
+  gitIdsInRow,
+  lifecycleWord,
+  progressStrip,
+} from "./contract-observation.js";
 import { ageText, emptyCatalogue, renderBoundedPayload, safeText } from "./terminal.js";
 import { akumaMark, contractMark } from "./marks.js";
 import { dispositionText, debtFrameHead, debtMark } from "./debt.js";
@@ -72,6 +79,12 @@ export function renderContractCatalogue(list: ContractList): string {
     const lines = [
       `${contractMark(row)} ${safeText(row.id)} · ${formatAge(row.phaseAt, list.observedAt)} · ${safeText(row.title ?? "title unavailable")}`,
       `  ${terminal ? outcome : progressStrip(row)}`,
+      ...(terminal
+        ? []
+        : row.gates.reports
+            .filter((report) => report.gate === "verified")
+            .flatMap(gateRequirementFacts)
+            .map((fact) => `  ${safeText(fact)}`)),
       ...(testimony === undefined
         ? []
         : renderBoundedPayload({

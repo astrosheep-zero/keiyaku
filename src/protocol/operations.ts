@@ -2,16 +2,8 @@ import { z } from "zod";
 import { boundedListLimit } from "../bounded-list.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import type { ActiveContractRefusal } from "../core/facts/observation.js";
-import type {
-  ActorId,
-  ContractId,
-  ContractState,
-  DeliverData,
-  DocumentKey,
-  JournalEntry,
-  SnapshotId,
-} from "../core/facts/types.js";
-import { gate } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
+import { gate, requirementId } from "../core/facts/types.js";
 import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
 import { integrationPreparationRefusalSchema, readDeliveryDiff } from "../git/integration.js";
@@ -32,7 +24,8 @@ import type { VerificationDeclarationPreparation } from "../verification/declara
 import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
 import { forkSourceMovedRefusalSchema, targetInputRefusalSchema } from "./bind.js";
 import { admitIntent, type IntentAdmissionOptions } from "./intent.js";
-import type { VerificationCleanupFailure, VerificationResult } from "./intent.js";
+import type { VerificationResult } from "./intent.js";
+import type { VerificationCleanupFailure } from "./progress.js";
 import { verificationRuntimeStopSchema } from "./intent.js";
 import { complete, type AcceptedProtocolStep, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
 import type { PlacementProtocolResult } from "./placement.js";
@@ -73,18 +66,6 @@ export const deliverDataSchema = z
     policy: z.object({ requireBranchesToBeUpToDate: z.boolean() }).strict(),
   })
   .strict();
-export function recordedIntegrationSnapshots(journal: readonly JournalEntry[]): readonly SnapshotId[] {
-  return journal
-    .flatMap((entry) =>
-      entry.kind === "deliver"
-        ? [entry.data.integration.snapshot]
-        : entry.kind === "reintegrated"
-          ? [entry.data.snapshot]
-          : [],
-    )
-    .reverse();
-}
-
 export const verdictSchema = z.enum(["satisfied", "unsatisfied"]);
 export const activeContractRefusalSchema = z
   .object({ kind: z.enum(["contract-missing", "terminal"]), contractId: contractIdSchema })
@@ -132,24 +113,44 @@ export const candidateContentChangeSchema = z
     currentChange: changeIdSchema,
   })
   .strict();
+export const gateCurrentSchema = z.union([
+  z.object({ kind: z.literal("missing") }).strict(),
+  z
+    .object({ kind: z.literal("attested"), verdict: verdictSchema, at: z.string(), summary: z.string().optional() })
+    .strict(),
+  z
+    .object({ kind: z.literal("stale"), priorVerdict: verdictSchema, reason: candidateContentChangeSchema.optional() })
+    .strict(),
+]);
+export const requirementIdSchema = z
+  .string()
+  .min(1)
+  .transform((value) => requirementId(value));
+export const requirementReportSchema = z
+  .object({
+    requirement: requirementIdSchema,
+    current: gateCurrentSchema,
+  })
+  .strict();
 export const gateReportSchema = z
   .object({
     gate: gateSchema,
-    current: z.union([
-      z.object({ kind: z.literal("missing") }).strict(),
-      z
-        .object({ kind: z.literal("attested"), verdict: verdictSchema, at: z.string(), summary: z.string().optional() })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("stale"),
-          priorVerdict: verdictSchema,
-          reason: candidateContentChangeSchema.optional(),
-        })
-        .strict(),
-    ]),
+    requirements: z.array(requirementReportSchema).readonly(),
+    satisfied: z.boolean(),
+    current: gateCurrentSchema,
   })
   .strict();
+export const verifyRefusalSchema = z.union([
+  z.object({ kind: z.literal("verification-not-selected"), contractId: contractIdSchema }).strict(),
+  z
+    .object({
+      kind: z.literal("verification-index-out-of-range"),
+      contractId: contractIdSchema,
+      index: z.number().int().positive(),
+      total: z.number().int().nonnegative(),
+    })
+    .strict(),
+]);
 export const placementRefusalSchema = z.union([
   z
     .object({
@@ -219,6 +220,7 @@ export const intentRefusalSchema = z.union([
   placementRefusalSchema,
   targetInputRefusalSchema,
   verificationDeclarationRefusalSchema,
+  verifyRefusalSchema,
 ]);
 type IntentRefusal = z.infer<typeof intentRefusalSchema>;
 

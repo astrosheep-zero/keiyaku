@@ -24,7 +24,8 @@ import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { GitRefAssertion } from "../git/repository.js";
 import { admitDecidedOffer, mintAttempts, type AcceptedAdmission, type AttemptTerminal } from "./attempt.js";
-import { recordedIntegrationSnapshots, timestamp } from "./operations.js";
+import { timestamp } from "./operations.js";
+import { deliveryIntegrationSnapshots } from "./deliver.js";
 import {
   externalPreparation,
   protocolSeatClose,
@@ -77,7 +78,7 @@ async function prepareExternalReintegration(input: ReintegrationInput): Promise<
     planReintegrationArtifacts(
       input,
       state,
-      recordedIntegrationSnapshots(observation.journals.get(state.id)?.entries ?? []),
+      deliveryIntegrationSnapshots(observation.journals.get(state.id)?.entries ?? []),
     ),
   );
 }

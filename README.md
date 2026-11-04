@@ -50,7 +50,7 @@ are not rewritten or orphaned. Do not run old and new writers concurrently.
 
 ## What a contract looks like
 
-```markdown
+````markdown
 # Ship typed Debt query
 
 ## Context
@@ -79,48 +79,85 @@ Query reads only Debt facts. No Contract. No Akuma.
 ```bash timeout=2m
 npm test
 ```
-```
+````
 
 ## What a deal looks like
 
 ```bash
-keiyaku bind - < contract.md                        # terms written; an isolated worktree appears
-keiyaku call worker -                               # a worker goes in
-keiyaku deliver <contract>                          # delivered; Verification runs; gates judge
-keiyaku review <contract> --satisfied --summary -   # attested; main moves with a commit receipt
+keiyaku bind --gates reviewed,verified - < contract.md # terms written; an isolated worktree appears
+keiyaku call worker -                                  # commission names Contract and appointed worktree
+keiyaku verify <contract>                              # each declared check executes and attests independently
+keiyaku deliver <contract>                             # delivered; existing evidence judges placement
+keiyaku review <contract> --satisfied --summary -       # review attested; ready delivery can land
 ```
+
+## Explicit Verification
+
+Only `verify` executes a Contract's Verification declarations. Select `verified`
+at bind or amendment to make them placement requirements; otherwise the section
+is inert. Run verify from the appointed worktree, with the Contract selector
+optional there:
+
+```bash
+keiyaku verify <contract>                        # execute all current declarations
+keiyaku verify <contract> --index 2              # execute only the current second declaration
+keiyaku verify --index 1 --include-dirty         # contextual Contract; explicitly capture local edits
+keiyaku deliver <contract> --dry-run             # observe prospective evidence without execution
+```
+
+`--index` is a positive one-based position in the current document. Invalid syntax
+is a usage error; an out-of-range position refuses before execution or admission.
+Verify uses delivery's clean-worktree rule unless `--include-dirty` authorizes
+capture. It prepares the exact prospective target integration without delivering
+it; integration conflicts refuse without materializing a handoff. Evidence
+produced before delivery applies when that delivery names the same integration
+snapshot. A changed target or candidate needs evidence for its new snapshot.
+
+Every declaration gets its own clean scratch, setup, and cleanup. Put a build or
+other prerequisite in the same script as the check that needs it, or in setup;
+separate fences cannot share generated files. Normal failure or timeout attests
+only that requirement as unsatisfied, and full verify continues. Setup, spawn,
+unknown-exit, or cancellation stops admit no verdict for the affected check;
+previous admissions survive. Failed scenes are retained independently per
+Contract and requirement, with diagnostic paths in the result.
+
+All current requirements need current satisfied testimony to satisfy a gate.
+A selected green check is only one check. Identity follows canonical executor,
+script, and declared timeout, so reordering preserves evidence, editing one
+check affects only that requirement, and exact duplicates share a requirement.
+Removing a check removes its obligation while leaving its testimony in history.
+Every verify invocation executes its selection again; an identical attestation
+may reuse admission without skipping execution.
+
+Delivery, review, preview, and dependent completion never execute Verification.
+They consume existing evidence, leaving missing, stale, or unsatisfied
+requirements pending. Verify can also complete an already-delivered Contract
+when prerequisites and every gate pass. Pre-delivery verify records evidence
+without placement. Review remains an independent obligation.
 
 ## What the journal records
 
-One real deal, read back with `keiyaku history`:
+Inspect durable facts and their requirement scope separately from live execution:
 
-```text
-history  kei/ship-typed-debt-query-b186 · accepted · 9 entries
-
-2026-10-04
-
-16:53 bound to targetless @ 3c5d8c0 · gate review
-16:53 delivered 210eeed · ✓ verification · 10 lines
-16:53 × review · 6 lines
-16:53 delivered aebef87 · ✓ verification · 10 lines
-16:53 ✓ review · 6 lines
-16:53 accepted
+```bash
+keiyaku history <contract>
+keiyaku history <contract> --json
+keiyaku status <contract>
+keiyaku deliver <contract> --dry-run --json
 ```
 
-The review said no, and the deal did not land. The verdict and its reason
-stay on the journal as bytes — `keiyaku history --json` reads them:
+Each terminal check records testimony for its gate, stable requirement, and exact
+captured snapshot; there is no aggregate Verification attestation. A later
+unsatisfied result supersedes earlier satisfaction only for the same requirement
+and subject. Review testifies to the current document and candidate content.
+Historical testimony stays readable even after its declaration is removed.
 
-```json
-{
-  "kind": "attestation",
-  "contract": "kei/ship-typed-debt-query-b186",
-  "data": {
-    "gate": "reviewed",
-    "verdict": "unsatisfied",
-    "summary": "Query evaluator still reaches for Contract facts; reads are not Debt-owned."
-  }
-}
-```
+Status, preview, history, receipts, and JSON preserve each requirement's missing,
+stale, satisfied, or unsatisfied evidence. Current declarations can use their
+one-based positions; removed requirements keep their stable identities. Verify
+receipts distinguish executed verdicts, new or reused admissions, operational
+stops, retained scenes, and completion. Live observations identify the check and
+snapshot but create no log store or replay authority.
 
 ## The board
 
@@ -179,7 +216,12 @@ Amending without `--gates` keeps the existing gates:
 Selections accept the built-in names `reviewed` and `verified`, or configured
 group names. Unknown names are rejected with the known names listed. Custom gates
 must be declared inside a configured group; they stay unsatisfied until a producer
-attests them.
+attests every current requirement. `reviewed` and custom gates each have one
+requirement; `verified` derives its requirements from distinct current
+declarations. There is no separate aggregate gate attestation.
+
+Only explicit verify executes checks. Forwarded verify returns the same typed
+result as local execution under the serving parent's Git and process custody.
 
 Worktree hooks run commands when a Contract's managed worktree is created or
 destroyed — dependency installs are the usual suspect:

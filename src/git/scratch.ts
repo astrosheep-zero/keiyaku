@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { lstat, realpath, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
@@ -15,7 +15,7 @@ import { registeredWorktreePaths } from "./repository.js";
 
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
 const SCRATCH_ROOT = await realpath(tmpdir());
-const SCRATCH_PATTERN = /^keiyaku-v4-verify-([0-9a-f]{24}|[0-9a-f]{64}-[0-9a-f]{64})$/;
+const SCRATCH_PATTERN = /^keiyaku-v4-verify-([0-9a-f]{24}|[0-9a-f]{64}-[0-9a-f]{64}-[0-9a-f]{64})$/;
 /** One bounded removal attempt per scratch; expiry is reported, never retried inside this call. */
 const SCRATCH_REMOVAL_TIMEOUT_MS = 120_000;
 
@@ -57,11 +57,13 @@ function scratchPath(): string {
   return join(SCRATCH_ROOT, `${SCRATCH_PREFIX}${randomBytes(12).toString("hex")}`);
 }
 
-function retainedScratchPath(repository: GitRepository, contract: ContractId): string {
-  return join(
-    SCRATCH_ROOT,
-    `${SCRATCH_PREFIX}${gitRefLocator(repository.commonDirectory)}-${contractLocator(contract)}`,
-  );
+function retainedScratchPrefix(repository: GitRepository, contract: ContractId): string {
+  return `${SCRATCH_PREFIX}${gitRefLocator(repository.commonDirectory)}-${contractLocator(contract)}-`;
+}
+
+function retainedScratchPath(repository: GitRepository, contract: ContractId, requirement: string): string {
+  const locator = createHash("sha256").update(requirement, "utf8").digest("hex");
+  return join(SCRATCH_ROOT, `${retainedScratchPrefix(repository, contract)}${locator}`);
 }
 
 function ownershipLockPath(path: string): string | null {
@@ -76,19 +78,21 @@ async function removeOwnershipLock(lockPath: string): Promise<void> {
   });
 }
 
-async function collectableScratchWorktrees(
+async function* collectableScratchWorktrees(
   paths: Iterable<string>,
-  terminalScratch?: string,
-): Promise<readonly CollectableScratchWorktree[]> {
-  const collectable: CollectableScratchWorktree[] = [];
+  terminalPrefix?: string,
+): AsyncGenerator<CollectableScratchWorktree> {
   for (const path of paths) {
     const lockPath = ownershipLockPath(path);
     if (lockPath === null) continue;
-    if (basename(path).length !== SCRATCH_PREFIX.length + 24 && path !== terminalScratch) continue;
+    if (
+      basename(path).length !== SCRATCH_PREFIX.length + 24 &&
+      (terminalPrefix === undefined || !basename(path).startsWith(terminalPrefix))
+    )
+      continue;
     const lock = await tryAcquireSqliteTransactionLock({ path: lockPath, mode: "exclusive" });
-    if (lock !== null) collectable.push({ path, lockPath, release: () => lock.close() });
+    if (lock !== null) yield { path, lockPath, release: () => lock.close() };
   }
-  return collectable;
 }
 
 /** Absence is ENOENT on the path entry itself: a dangling symlink is present residue, not a missing path. */
@@ -137,9 +141,9 @@ export async function removeCollectableScratchWorktrees(
   terminalContract?: ContractId,
 ): Promise<readonly CollectableScratchRemoval[]> {
   const removals: CollectableScratchRemoval[] = [];
-  const terminalScratch =
-    terminalContract === undefined ? undefined : retainedScratchPath(repository, terminalContract);
-  for (const scratch of await collectableScratchWorktrees(paths, terminalScratch)) {
+  const terminalPrefix =
+    terminalContract === undefined ? undefined : retainedScratchPrefix(repository, terminalContract);
+  for await (const scratch of collectableScratchWorktrees(paths, terminalPrefix)) {
     let removed = false;
     try {
       const leak = await removeScratch(repository, scratch.path);
@@ -152,14 +156,20 @@ export async function removeCollectableScratchWorktrees(
       removals.push({ path: scratch.path, retained: false });
     } finally {
       scratch.release();
-      if (removed && scratch.path !== terminalScratch) await removeOwnershipLock(scratch.lockPath);
+      if (removed && basename(scratch.path).length === SCRATCH_PREFIX.length + 24)
+        await removeOwnershipLock(scratch.lockPath);
     }
   }
   return removals;
 }
 
-async function retainScratch(repository: GitRepository, cwd: string, contract: ContractId): Promise<WorktreeLeak> {
-  const retained = retainedScratchPath(repository, contract);
+async function retainScratch(
+  repository: GitRepository,
+  cwd: string,
+  contract: ContractId,
+  requirement: string,
+): Promise<WorktreeLeak> {
+  const retained = retainedScratchPath(repository, contract, requirement);
   const lockPath = ownershipLockPath(retained);
   if (lockPath === null) throw new Error("scratch ownership lock path is invalid");
   const { signal: _signal, ...retirementRepository } = repository;
@@ -204,7 +214,8 @@ async function retainScratch(repository: GitRepository, cwd: string, contract: C
 export async function materializeScratchCandidate(
   repository: GitRepository,
   candidate: SnapshotId,
-  contract?: ContractId,
+  contract: ContractId,
+  requirement: string,
 ): Promise<MaterializedScratchCandidate> {
   const cwd = scratchPath();
   const lockPath = ownershipLockPath(cwd);
@@ -235,9 +246,7 @@ export async function materializeScratchCandidate(
       disposed = true;
       try {
         if (!retain) return await removeScratch(repository, cwd);
-        if (contract === undefined)
-          return { path: cwd, diagnostic: "failed Verification scratch retained for diagnosis" };
-        return await retainScratch(repository, cwd, contract);
+        return await retainScratch(repository, cwd, contract, requirement);
       } finally {
         ownership.close();
         if (!(await pathExists(cwd))) await removeOwnershipLock(lockPath);

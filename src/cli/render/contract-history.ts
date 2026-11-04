@@ -70,6 +70,7 @@ function journalBody(fact: Fact, workspace?: Readonly<{ kind: "worktree"; path: 
       const snapshot = subjectValue(fact.data.subject, "snapshot");
       const lines = [
         `  gate  ${fact.data.gate}`,
+        `  requirement  ${fact.data.requirement}`,
         `  verdict  ${fact.data.verdict}`,
         ...(snapshot === undefined ? [] : [`  snapshot  ${shortGitId(snapshot)}`]),
       ];
@@ -150,17 +151,6 @@ function foldedPayloadLines(full: readonly string[]): number {
   return Math.max(0, full.length - 1);
 }
 
-/** The latest verification attestation fused into a deliver or reintegration beat. */
-function latestVerification(beat: Beat): Extract<Fact, { kind: "attestation" }> | undefined {
-  let latest: Extract<Fact, { kind: "attestation" }> | undefined;
-  for (const event of beat.events) {
-    if (event.source === "journal" && event.fact.kind === "attestation" && event.fact.data.gate === "verified") {
-      latest = event.fact;
-    }
-  }
-  return latest;
-}
-
 const lineCount = (count: number): string => `${count} line${count === 1 ? "" : "s"}`;
 
 function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly string[] {
@@ -180,20 +170,23 @@ function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly strin
       const dispatch = beat.events.find((event) => event.source === "dispatch");
       return [`${clock(first)} ${bindLine(fact, dispatch)}`];
     }
-    case "deliver": {
-      const verdict = latestVerification(beat)?.data.verdict;
+    case "deliver":
+      return [`${clock(first)} delivered ${shortGitId(fact.data.tenderSnapshot)}${evidenceSuffix()}`];
+    case "reintegrated":
       return [
-        `${clock(first)} delivered ${shortGitId(fact.data.tenderSnapshot)}${verdict === undefined ? "" : ` · ${mark(verdict)} verification`}${evidenceSuffix()}`,
+        `${clock(first)} integrated ${shortGitId(fact.data.predecessor)}..${shortGitId(fact.data.snapshot)}${evidenceSuffix()}`,
+      ];
+    case "attestation": {
+      const name = gateDisplayName(fact.data.gate);
+      const requirement =
+        fact.data.gate === "verified" || fact.data.requirement !== `gate:${fact.data.gate}`
+          ? ` ${fact.data.requirement}`
+          : "";
+      const snapshot = subjectValue(fact.data.subject, "snapshot");
+      return [
+        `${clock(first)} ${mark(fact.data.verdict)} ${name}${requirement}${snapshot === undefined ? "" : ` · snapshot ${shortGitId(snapshot)}`}${evidenceSuffix()}`,
       ];
     }
-    case "reintegrated": {
-      const verdict = latestVerification(beat)?.data.verdict;
-      return [
-        `${clock(first)} integrated ${shortGitId(fact.data.predecessor)}..${shortGitId(fact.data.snapshot)}${verdict === undefined ? "" : ` · ${mark(verdict)} verification`}${evidenceSuffix()}`,
-      ];
-    }
-    case "attestation":
-      return [`${clock(first)} ${mark(fact.data.verdict)} ${gateDisplayName(fact.data.gate)}${evidenceSuffix()}`];
     case "amend": {
       const changed = [fact.data.gates.length > 0 ? "gates" : "", fact.data.after.length > 0 ? "after" : ""]
         .filter((value) => value.length > 0)
@@ -247,24 +240,6 @@ function skeletonBeats(history: ContractHistory): readonly Beat[] {
         if (candidate.source !== "dispatch") break;
         grouped.push(candidate);
         consumed.add(next);
-      }
-    }
-    if (event.source === "journal" && (event.fact.kind === "deliver" || event.fact.kind === "reintegrated")) {
-      const snapshot = event.fact.kind === "deliver" ? event.fact.data.integration.snapshot : event.fact.data.snapshot;
-      for (let next = index + 1; next < events.length; next += 1) {
-        const candidate = events[next]!;
-        if (candidate.source !== "journal") continue;
-        if (["bind", "deliver", "reintegrated", "amend", "arc", "claimed", "abandoned"].includes(candidate.fact.kind))
-          break;
-        if (
-          candidate.fact.kind === "attestation" &&
-          candidate.fact.data.gate === "verified" &&
-          (subjectValue(candidate.fact.data.subject, "snapshot") === snapshot ||
-            subjectValue(candidate.fact.data.subject, "change") === snapshot)
-        ) {
-          grouped.push(candidate);
-          consumed.add(next);
-        }
       }
     }
     beats.push({ events: grouped });

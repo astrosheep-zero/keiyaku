@@ -9,6 +9,7 @@ import {
   documentSegmentKey,
   entryUlid,
   gate,
+  requirementId,
   snapshotId,
   type ContractState,
   type JournalEntry,
@@ -40,6 +41,7 @@ function state(candidate: string, document = "document-1"): ContractState {
       document: { bytes: "# Current", key: documentKeyValue },
       segments: [segment],
       gates: [gate("reviewed"), gate("verified")],
+      requirements: { reviewed: [requirementId("review")], verified: [requirementId("check")] },
       after: [],
     },
     delivery,
@@ -53,6 +55,7 @@ function state(candidate: string, document = "document-1"): ContractState {
         at: "2026-08-06T00:00:01Z",
         data: {
           gate: gate("reviewed"),
+          requirement: requirementId("review"),
           subject: dependencyKeySet([
             { kind: "document", value: documentKeyValue },
             { kind: "change", value: patch },
@@ -68,10 +71,8 @@ function state(candidate: string, document = "document-1"): ContractState {
         at: "2026-08-06T00:00:02Z",
         data: {
           gate: gate("verified"),
-          subject: dependencyKeySet([
-            { kind: "segment", value: segment },
-            { kind: "snapshot", value: snapshotId("candidate-a") },
-          ]),
+          requirement: requirementId("check"),
+          subject: dependencyKeySet([{ kind: "snapshot", value: snapshotId("candidate-a") }]),
           verdict: "satisfied",
         },
       },
@@ -83,7 +84,7 @@ function state(candidate: string, document = "document-1"): ContractState {
 function oneGateSatisfied(current: ContractState, selected: ReturnType<typeof gate>): boolean {
   return gatesSatisfied({
     ...current,
-    terms: { ...current.terms, gates: [selected] },
+    terms: { ...current.terms, gates: [selected], requirements: { [selected]: current.terms.requirements[selected]! } },
   });
 }
 

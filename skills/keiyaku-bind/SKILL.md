@@ -139,18 +139,40 @@ bare lines; those forms are combined. Region patterns are planning evidence,
 not a prediction of the exact diff.
 
 Verification is optional. Each declaration is a closed bash, zsh, or pwsh
-fence containing commands runnable as written. Use separate fences when checks
-need different timeouts or results. Use an explicit timeout for bounded
-commands; `5m` is the normal baseline.
+fence containing commands runnable as written. Separate fences give independent
+checks and deadlines. Each check gets its own clean scratch, setup, and cleanup;
+put any prerequisite build in that check's script or setup, never in a preceding
+fence. Use an explicit timeout for bounded commands; `5m` is the normal baseline.
 
-Verification runs only when the Contract selects the `verified` gate, against
-the exact integration snapshot in a clean disposable worktree for that attempt.
-`deliver` reuses current satisfied evidence or runs the declarations; unsatisfied
-results and runtime stops prevent placement. `deliver --dry-run` only observes
-standing evidence for a prospective candidate; it never executes declarations.
-Without `verified`, no verb runs Verification and the
-section is inert document text. `reviewed` independently requires review
-evidence. Selected gates are checked at placement.
+Only explicit `verify` executes declarations, and only with the `verified` gate
+selected. It captures the exact prospective integration using delivery's clean
+worktree rule and explicit dirty-capture authorization, without admitting a
+delivery. `deliver`, `review`, `deliver --dry-run`, and dependent completion only
+consume existing evidence. Without `verified`, the section is inert and creates
+no requirements. `reviewed` independently requires review evidence.
+
+```bash
+keiyaku -C <appointed-path> verify <kei/...>
+keiyaku -C <appointed-path> verify <kei/...> --index 1 --include-dirty
+```
+
+Omit `--index` to execute all declarations; a positive one-based index selects
+one current declaration. Every invocation executes its selection, even when
+satisfied testimony already exists. Each terminal check admits testimony before
+later checks begin; an identical admission may be reused without skipping
+execution. Normal failures and timeouts affect only their requirement and full
+verify continues; operational stops admit no verdict for the affected check and
+preserve earlier results.
+
+Every selected gate needs current satisfied testimony for every requirement.
+Review and custom gates have a singleton requirement. Verification requirements
+follow canonical executor, script, and declared deadline, never declaration
+position: reordering preserves evidence, changing one check affects only that
+requirement, and exact duplicates share one requirement. Removing a declaration
+removes its obligation but preserves historical testimony. Evidence captured
+before delivery can satisfy a later delivery of the exact same integration;
+changed candidate or target snapshots need applicable evidence. Verify can place
+only an already-delivered Contract when all gates and prerequisites pass.
 
 For an existing Debt that this delivery settles:
 
@@ -197,8 +219,10 @@ The holder now owns the lifecycle:
 1. Start the work directly or delegate Debts, Arc chapters, Akumas, or Contract roles.
 2. Run independent work in parallel and let it converge on the one acceptance
    boundary.
-3. Prepare and deliver the candidate.
-4. Coordinate verification, review evidence, gates, and prerequisites.
+3. Prepare the candidate and explicitly verify selected declarations when
+   `verified` is required; deliver those same bytes before or after verification.
+4. Coordinate requirement evidence, review, gates, and prerequisites; inspect
+   per-check verdicts, admission reuse, stops, and retained diagnostic paths.
 5. Continue until the `kei` is accepted, amend terms while keeping the same
    objective and acceptance boundary, or abandon it when either has changed.
 

@@ -29,6 +29,7 @@ import {
   type ContractCheckpoint,
 } from "../protocol/progress.js";
 import { admitReviewOperation } from "../protocol/review.js";
+import { verifyOperation } from "../protocol/verify.js";
 import { releaseDebtHolder, releaseDebtHolderWithFence, debtHolderObservationSelection } from "../settlement/holder.js";
 import { continueDeliveredDependents } from "./continuation.js";
 import { requestForwardedContractLive, type ContractRequest } from "./contract-operations.js";
@@ -42,6 +43,7 @@ import type {
   DeliverOutcome,
   MutationObservation,
   ReviewOutcome,
+  VerifyOutcome,
 } from "./contract-outcomes.js";
 import { acceptedOutcome, expected, retainAdmission } from "./contract-outcomes.js";
 import {
@@ -52,7 +54,7 @@ import {
   gateNames,
   type LocalContractCompositionCapture,
 } from "./contract-settings.js";
-import type { AbandonInput, AmendInput, ArcInput, DeliverInput, ReviewInput } from "./contract-types.js";
+import type { AbandonInput, AmendInput, ArcInput, DeliverInput, ReviewInput, VerifyInput } from "./contract-types.js";
 import { deliveryForContract, type Delivery, type DeliveryValue } from "./delivery.js";
 import {
   actorOption,
@@ -76,6 +78,7 @@ import {
   type Projected,
   type ProjectedOutcome,
   type Review,
+  type Verify,
 } from "./outcome.js";
 import { reconcileAffectedContracts } from "./reconcile.js";
 import type { OperationRefusals } from "./refusal.js";
@@ -143,15 +146,7 @@ export class ContractExecution {
             changedSections = amendment?.changedSections;
             const amended =
               amendment === undefined ? current : validated(() => decodeContractDocument(amendment.document));
-            const terms =
-              markdown === undefined
-                ? {
-                    document: source.document,
-                    segments: source.segments,
-                    gates: gates ?? source.gates,
-                    after: prerequisites ?? source.after,
-                  }
-                : contractTerms(amended, gates ?? source.gates, prerequisites ?? source.after);
+            const terms = contractTerms(amended, gates ?? source.gates, prerequisites ?? source.after);
             return { terms, verification: documentDerivation(amended, terms.gates, this.id).verification };
           },
         });
@@ -239,17 +234,8 @@ export class ContractExecution {
           if (outcome.kind !== "accepted") return expected(this.id, outcome);
           leadingValue = outcome.value;
           accumulator.extendConclusions(this.id, { leading: outcome.value.leading });
-          stage = "verification";
-          await advanceAndContinue(
-            accumulator,
-            scope,
-            localChannel,
-            this.id,
-            this.composition,
-            outcome,
-            values.signal,
-            "verification",
-          );
+          stage = "placement";
+          await advanceAndContinue(accumulator, scope, localChannel, this.id, this.composition, outcome, values.signal);
         } catch (error) {
           retainTrailingFailure(accumulator, this.id, error, values.signal, stage);
         }
@@ -262,6 +248,86 @@ export class ContractExecution {
         return acceptedOutcome("deliver", this.id, accumulator, deliveryForContract(this.scope, value));
       },
       values.signal,
+      observer,
+    );
+  }
+
+  async verify(input?: VerifyInput, options?: MutationObservation): Promise<VerifyOutcome> {
+    const values = validated(() =>
+      input === undefined ? undefined : requireInput(input, "verify input", ["index", "includeDirty", "signal"]),
+    );
+    const index = validated(() => {
+      if (values?.index === undefined) return undefined;
+      if (typeof values.index !== "number" || !Number.isSafeInteger(values.index) || values.index < 1)
+        throw new TypeError("verification index must be a positive safe integer");
+      return values.index;
+    });
+    const includeDirty = validated(() => optionalBoolean(values?.includeDirty, "includeDirty") ?? false);
+    const signal = validated(() => optionalSignal(values?.signal));
+    const observer = validated(() => observationOptions(options));
+    const channel = executionChannel(this.execution);
+    if (channel.kind === "body-request")
+      return await forwardedContractOutcome<"verify", Verify>({
+        directory: channel.directory,
+        action: "contract.verify",
+        request: {
+          action: "contract.verify",
+          repoRoot: this.scope.primaryWorktree,
+          contractId: this.id,
+          includeDirty,
+          ...(index === undefined ? {} : { index }),
+        },
+        ...(signal === undefined ? {} : { signal }),
+        ...(observer === undefined ? {} : { observe: observer }),
+      });
+    const { hooks, requireBranchesToBeUpToDate } = derivedContractPolicy(this.composition);
+    return await this.local(
+      "verify",
+      async (
+        accumulator,
+        localChannel,
+        scope,
+      ): Promise<OutcomeProjection<"verify", Verify, OperationRefusals["verify"]>> => {
+        const outcome = await verifyOperation({
+          scope,
+          channel: localChannel,
+          contractId: this.id,
+          progress: accumulator,
+          deriveDocument: derivedDocument,
+          includeDirty,
+          requireBranchesToBeUpToDate,
+          ...(index === undefined ? {} : { index }),
+          ...(signal === undefined ? {} : { signal }),
+          ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
+        });
+        if (outcome.kind !== "accepted") return expected(this.id, outcome);
+        accumulator.extendConclusions(this.id, outcome.value);
+        let completion: CompletionEvidence & Pick<DeliveryValue, "continuation"> = {};
+        try {
+          if (!signal?.aborted)
+            completion = await advanceAndContinue(
+              accumulator,
+              scope,
+              localChannel,
+              this.id,
+              this.composition,
+              {
+                kind: "accepted",
+                facts: [],
+                state: outcome.checkpoint.state,
+                journal: outcome.checkpoint.journal,
+              },
+              signal,
+            );
+        } catch (error) {
+          retainTrailingFailure(accumulator, this.id, error, signal, "placement");
+        }
+        const value: Verify = { ...outcome.value, ...completion };
+        accumulator.extendConclusions(this.id, value);
+        await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
+        return acceptedOutcome("verify", this.id, accumulator, value);
+      },
+      signal,
       observer,
     );
   }
@@ -331,7 +397,6 @@ export class ContractExecution {
                 this.composition,
                 outcome,
                 signal,
-                "placement",
               )),
             };
         } catch (error) {
@@ -613,7 +678,6 @@ async function advanceAndContinue(
   composition: LocalContractCompositionCapture,
   outcome: AcceptedProtocolStep,
   signal: AbortSignal | undefined,
-  start: "verification" | "placement",
 ): Promise<CompletionEvidence & Pick<DeliveryValue, "continuation">> {
   const checkpoint: ContractCheckpoint = { state: outcome.state, journal: outcome.journal };
   const result = await completeCandidate({
@@ -621,8 +685,6 @@ async function advanceAndContinue(
     channel,
     checkpoint,
     progress: accumulator,
-    start,
-    deriveDocument: derivedDocument,
     ...(composition.actor === undefined ? {} : { actor: composition.actor }),
     ...(signal === undefined ? {} : { signal }),
   });
@@ -634,7 +696,6 @@ async function advanceAndContinue(
     channel,
     progress: accumulator,
     completed: result,
-    deriveDocument: derivedDocument,
     ...(composition.actor === undefined ? {} : { actor: composition.actor }),
     ...(signal === undefined ? {} : { signal }),
   });
@@ -658,7 +719,7 @@ function admittedDeliveryValue(accumulator: InvocationAccumulator, contractId: C
   throw new Error("confirmed delivery requires its own receipt");
 }
 
-async function forwardedContractOutcome<Operation extends "deliver" | "review" | "deliver-preview", Value>(
+async function forwardedContractOutcome<Operation extends "deliver" | "verify" | "review" | "deliver-preview", Value>(
   input: Readonly<{
     directory: string;
     action: ContractRequest["action"];

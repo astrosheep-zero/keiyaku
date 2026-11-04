@@ -25,6 +25,7 @@ import type {
   DeliverOutcome,
   MutationObservation,
   ReviewOutcome,
+  VerifyOutcome,
 } from "./contract-outcomes.js";
 import type { LocalContractCompositionCapture } from "./contract-settings.js";
 import type {
@@ -36,6 +37,7 @@ import type {
   DeliverInput,
   LocalContractComposition,
   ReviewInput,
+  VerifyInput,
 } from "./contract-types.js";
 import { deliveryForContract, type Delivery } from "./delivery.js";
 import { validateContractWaitHandle, type ContractWaitOptions, type ContractWaitResult } from "./contract-wait.js";
@@ -164,6 +166,10 @@ export class Keiyaku {
 
   async deliver(input?: DeliverInput, options?: MutationObservation): Promise<DeliverOutcome> {
     return await this.operations.deliver(input, options);
+  }
+
+  async verify(input?: VerifyInput, options?: MutationObservation): Promise<VerifyOutcome> {
+    return await this.operations.verify(input, options);
   }
 
   async review(input: ReviewInput, options?: MutationObservation): Promise<ReviewOutcome> {

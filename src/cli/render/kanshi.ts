@@ -12,12 +12,11 @@ import {
   afterWording,
   progressStrip,
   displayGitId,
-  gateFact,
+  gateRequirementFacts,
   gitIdsInRow,
   lifecycleWord,
   mergeSummary,
   targetMovementFacts,
-  verificationFact,
 } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -175,13 +174,6 @@ function terminalFacts(
   ];
 }
 
-function staleVerificationFacts(row: ContractKanshiRow): readonly string[] {
-  if (row.verification?.kind !== "recorded" || row.verification.snapshot === row.delivery?.integration.snapshot)
-    return [];
-  const fact = verificationFact(row.verification);
-  return fact === undefined ? [] : [fact];
-}
-
 function renderSelectedContractRow(
   row: ContractKanshiRow,
   facts: ContractBoardFacts,
@@ -213,11 +205,10 @@ function renderSelectedContractRow(
     ...semanticBlock(
       "gates",
       row.gates.reports
-        .filter((gate) => gate.current.kind !== "missing")
         .filter(
           (gate) => gate !== deniedReview || gate.current.kind !== "attested" || gate.current.summary === undefined,
         )
-        .map(gateFact),
+        .flatMap(gateRequirementFacts),
       context,
     ),
   );
@@ -234,13 +225,12 @@ function renderSelectedContractRow(
         "candidate",
         [
           `candidate  ${displayGitId(row.delivery.tenderSnapshot, abbreviations)}`,
-          `integration result  ${displayGitId(row.delivery.integration.snapshot, abbreviations)}${row.verification?.kind === "recorded" && row.verification.snapshot === row.delivery.integration.snapshot ? ` · verification ${row.verification.verdict}` : ""}${row.targetObservation?.drift === true ? " · target moved since" : ""}`,
+          `integration result  ${displayGitId(row.delivery.integration.snapshot, abbreviations)}${row.targetObservation?.drift === true ? " · target moved since" : ""}`,
           ...(row.targetObservation?.drift === true ? targetMovementFacts(row, abbreviations) : []),
         ],
         context,
       ),
     );
-    lines.push(...semanticBlock("verification", staleVerificationFacts(row), context));
   }
   if (deniedReview?.current.kind === "attested" && deniedReview.current.summary !== undefined)
     lines.push(...payload("review  ×", deniedReview.current.summary, context));
@@ -265,6 +255,7 @@ function renderWorldContractRow(
           .slice(0, 1)
       : [
           progressStrip(row),
+          ...row.gates.reports.filter((gate) => gate.gate === "verified").flatMap(gateRequirementFacts),
           ...(linkedAkumaSummary(row, facts.akuma) === undefined ? [] : [linkedAkumaSummary(row, facts.akuma)!]),
           ...liveAlarms(row, facts.debts),
         ];

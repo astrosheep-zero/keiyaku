@@ -4,7 +4,14 @@ import type { DeliveryPreviewReport } from "../src/index.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project, KeiyakuError } from "../src/library/outcome.js";
 import { concatenatePrivateStateSeatClose } from "../src/git/private-state-seat.js";
-import { contractId, documentKey, snapshotId, type ContractHead, type ContractState } from "../src/core/facts/types.js";
+import {
+  contractId,
+  documentKey,
+  requirementId,
+  snapshotId,
+  type ContractHead,
+  type ContractState,
+} from "../src/core/facts/types.js";
 const id = contractId("kei/mutation-finality-test");
 function outcome(
   progress: InvocationAccumulator,
@@ -28,7 +35,10 @@ function previewReport(): DeliveryPreviewReport {
       kind: "blocked",
       refusal: { kind: "target-missing", contractId: contractId("kei/mutation-finality-test") },
     },
-    verification: { kind: "required" },
+    verification: {
+      kind: "requirements",
+      requirements: [{ requirement: requirementId("check"), current: { kind: "missing" } }],
+    },
     target: { kind: "not-observed" },
   };
 }
@@ -74,7 +84,13 @@ test("merged admissions concatenate every confirmed seat-close lag in order", ()
     id: contractId("kei/mutation-finality-test"),
     head: "head" as ContractHead,
     coordinates: { start: snapshotId("base"), workspace: "worktree" },
-    terms: { document: { bytes: "# Test", key: documentKey("document") }, segments: [], gates: [], after: [] },
+    terms: {
+      document: { bytes: "# Test", key: documentKey("document") },
+      segments: [],
+      gates: [],
+      requirements: {},
+      after: [],
+    },
     delivery: null,
     currentIntegration: null,
     attestations: [],
@@ -170,7 +186,11 @@ test("the local failure projector never decodes partial owner evidence or masks 
   const progress = new InvocationAccumulator();
   const native = new TypeError("later programming failure");
   // Owner conclusions can be genuinely incomplete; strict wire decoding is not a local failure gate.
-  progress.recordDeliveryPreview(id, { verification: { kind: "required" } });
+  const verification = {
+    kind: "requirements" as const,
+    requirements: [{ requirement: requirementId("check"), current: { kind: "missing" as const } }],
+  };
+  progress.recordDeliveryPreview(id, { verification });
   const first = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: native });
   assert.ok(first.kind === "failed");
   assert.equal(first.error.cause, native);
@@ -185,5 +205,5 @@ test("the local failure projector never decodes partial owner evidence or masks 
   assert.equal(Object.getOwnPropertyDescriptor(final.error, "requestOutcome")?.value, "unproven");
   assert.equal(final.error.outcome?.effects.length, 1);
   assert.deepEqual(first.error.outcome?.effects, []);
-  assert.deepEqual(final.error.outcome?.value, { verification: { kind: "required" } });
+  assert.deepEqual(final.error.outcome?.value, { verification });
 });

@@ -32,16 +32,18 @@ and operational failure. Text labels name a candidate and its integration result
 and a content identity is distinguished from a commit by its kind name alone —
 the teaching that a content identity is never Git-addressable lives in leaf
 help, not on receipt rows. Journal blobs, entry ids, and record-field
-enumeration stay out of ordinary text —
-evidence handles live in JSON and `history` alone. Recorded verification folds
-into a delivery row only when its snapshot matches; otherwise it remains an
-independent verdict fact. A row without a delivery association states no
-candidate and shows recorded verification independently. A receipt that reports
-a Verification verdict names the snapshot that verdict covers and says whether
-this command reused a standing attestation or executed declarations, in the
-words the standing-evidence surface already uses; when that snapshot later lands, the
-landing row names the same identity, and a completed placement also names the
-landed diff's shape in the one shared diffstat vocabulary. A terminal receipt
+enumeration stay out of ordinary text -
+evidence handles live in JSON and `history` alone. Verification evidence remains
+associated with its exact captured snapshot and individual requirement. A verify
+receipt exposes every executed check's verdict or stop, its current declaration
+position and requirement, and testimony admission or admission reuse. Execution
+and admission reuse remain distinct. Delivery and review receipts consume
+standing evidence without claiming they executed or reused a producer run.
+No selected satisfied check or compact delivery association can imply whole-gate
+satisfaction; only the owner's universal requirement judgment establishes that.
+When a verified snapshot later lands, the landing names the same identity, and
+a completed placement also names the landed diff's shape in the shared diffstat
+vocabulary. A terminal receipt
 names its appointed worktree's short name when it retired the worktree, and
 names the retained worktree's path when its own removal failed. A landed
 placement is never vetoed by uncommitted checkout state: the receipt names each
@@ -51,9 +53,10 @@ retention that predates the command to the typed result.
 
 A completed placement names a Contract destination by its complete identity,
 not by its private Git reference or another branch. A completed placement reads
-like Git movement, identically for a review and a deliver: the title states the verdict or delivery and the Contract, one row
-states the reference movement, satisfied Verification adds one fact row naming
-the integrated object, and the final lifecycle state is one explicit row. The
+like Git movement, identically for review, delivery, and verify: the title
+states the operation's outcome and Contract, the movement names its reference,
+and the final lifecycle state remains explicit. Evidence retains its snapshot
+and requirement scope rather than becoming a single aggregate green fact. The
 completed lifecycle state reads `accepted`; its recorded fact kind is not
 user-facing vocabulary. Receipt
 Git identities are abbreviated in text by the shared collision-aware display
@@ -138,7 +141,11 @@ facts from their respective public results. Activity summaries retain the
 concrete work observed rather than substituting a broad category; a tool row
 names the actual tool observed with a bounded argument preview, and a partial
 capture truncates visibly. Gate evidence keeps its compact visual state beside
-each gate's identity; stale evidence remains explicitly named. A raw caller
+each gate and requirement's identity; missing, stale, and current unsatisfied
+evidence remain distinct. Current declarations may be labeled by current
+one-based position; removed historical requirements retain stable identity,
+never a fabricated position. Status, board, history, preview, receipts, and JSON
+all preserve this adjudicated requirement scope. A raw caller
 answer remains raw when that operation promises answer bytes. Recording review
 testimony and completing placement remain distinct facts; absence of
 completion does not establish a candidate.
@@ -160,90 +167,55 @@ established Akuma keeps its reason with that identity. Pre-operation refusals
 remain distinct from provider, lifecycle, and action failures after the target
 has been established.
 
-One Akuma action family covers detached and prompt-free calls, forks, tells, and
-kills, including plural kills and partial failures. Every action receipt leads
-with the action verdict and the complete Akuma identity, with an existing alias
-only as a parenthetical supplement; no action receipt hangs facts from an
-identity tree. Contract association, source identity, execution directory, and
-a stage diagnosis are indented supporting facts; a Tell admitted as part of a
-wider call carries its submitted input there too, while a receipt's own Tell
-states that input inline. Distinct fact kinds never collapse into one
-punctuation run, and an absent fact adds no line. Birth and integration are
-admitted facts, so a receipt never prints an unqualified success over a stage
-that failed: the verdict carries the partial failure and each concrete cause
-stays copyable and attached to its subject. A Tell is evidence of admission and
-delivery, not of work finished: its own receipt states the submitted input
-once, folded onto the receipt line after the complete identity and bounded so
-only that preview yields to the terminal's width; added quotation marks never
-replace the source's own, empty input adds no text, and held evidence stays
-distinct from a failed delivery, whose diagnosis and log coordinates remain
-separate supporting facts. Admitted input survives a later failure, so a call
-whose Tell stage failed still names the admitted child, the resolved execution
-directory, that submitted input, and the native cause. Kill keeps killed,
-already-killed, already-stopped, hung, untidy, and unavailable distinct
-outcomes in frozen selection order, one compact block per member, using native
-failure evidence rather than one generic verdict. Opaque configuration and
-observation values retain exact names, scalar types, collection membership,
-empty values, and provenance, with terminal-safe characters escaped reversibly.
-Refusal and recovery text keeps specific causes, capabilities, and coordinates;
-removing internal terminology never removes evidence. Presentation may densify
-and wrap for the terminal but cannot truncate a copyable identity or replace a
-public discriminant with decoration.
+One Akuma action family covers calls, forks, tells, and kills, including plural
+and partial outcomes. Receipts lead with the action verdict and complete Akuma
+identity; aliases supplement identity. Association, source, execution directory,
+submitted input, and diagnostics remain distinct supporting facts. No receipt
+claims unqualified success over a failed stage. A Tell proves admission and
+delivery, never work finished; its input and admitted child survive a later
+failure, alongside the native cause and known recovery coordinates. Empty input
+adds nothing and held input stays distinct from failed delivery. Kill preserves
+each member's native outcome in frozen selection order instead of collapsing
+partial failures into one verdict.
 
-One Akuma observation panel orders its facts the same way wherever they exist,
-for selected status, observing call, ask progress, and history: the
-complete identity with an optional alias parenthetical and any known associated
-Contract on one line, then static context — the execution directory when
-supplied — indented beneath it. A static coordinate appears once, above the
-content boundary, and an unknown coordinate is omitted rather than filled in. One
-width-aware rule opens the content only when timeline or observed conclusion
-content follows, and it never exceeds the terminal. Chronological activity
-retains the owner's selection, event order, payloads, omissions, labels, marks,
-and input attribution. One truthful observed conclusion closes that activity;
-the timeline's own terminal outcome may already be that
-conclusion, and it is then not restated. Reported changes and created Debts
-follow as indented dynamic output, then indented diagnostics such as a failed
-association. An observation diagnostic's subject row names only the observation
-subject and its unavailable state, plus any subject-owned coordinates; its cause
-follows as an indented, bounded payload, never inline after the subject. A delivery
-diagnostic retains its delivery verdict and coordinates in that same separation.
-A diagnostic never becomes an unlabeled static property. History is an immutable
-timeline: it takes the same identity, static context, and content boundary, but
-adds no fabricated current-state conclusion and reads no extra state to fill the
-panel. Status uses
-the same completion judgment as wait, including a sleeping Akuma with an
-outstanding Tell. Only an observed input wait can justify elapsed-duration text,
-and an unknown change size remains unknown rather than implying additions or
-removals. Across observations, including Contract testimony and Akuma snapshot, history,
-compact, and attributed activity, free text uses one bounded payload discipline
-with body-aligned continuations. Activity text carries no wall-clock timestamp,
-though a tool or wait duration remains its own evidence. Two left-flowing
-families share one grammar: top-level input, speech, and outcome rows keep their
-own lead, while indented action rows spend one state margin and one verb cell
-whose continuation aligns with the actual content start, even for a name longer
-than the default cell. Multiline payloads keep their paragraphs and
-indentation; single-line previews fold whitespace, and a row-omission marker
-sits in verb position. Akuma speech sits on its own rail without an action
-label or added quotation marks; a submitted input and a terminal answer are
-recognised by their own leads rather than a verb. Thought narration is its verb
-and natural text, without an added quote boundary; Contract catalogue testimony
-and chapter bodies follow the same unquoted, body-aligned discipline.
-This distinction changes presentation only, never event order or selection.
-Payloads slice by whole grapheme cells and expose truncation at the end; where
-content wraps, a word boundary is preferred over splitting a word. World-board
-answer previews alone anchor to the tail with a leading
-omission mark when the head is cut; the selected Akuma detail keeps head-first
-wrapping. Selected Contract status foregrounds the phase's outcome or current
-work judgment; terminal status does not repeat delivery mechanics, workspace
-observation, its phase, or its age as bare rows beneath the header. When the
-target has moved, a delivered card labels its recorded integration as predating
-that movement. Delivery preview states absent Verification obligations once in human words
-and names observed target lag as counted or unknown when the target is placeable.
-It identifies itself as a dry-run observation, never a successful delivery; candidate
-preparation, standing verdicts, unmet requirements, and target followability stay
-distinct. A checkout already observed as unable to follow names its path and
-observed cause separately from target ref placeability; it does not claim that
-placement is refused.
+Opaque configuration and observation values retain exact names, scalar types,
+collection membership, empty values, and provenance. Terminal-safe escaping is
+reversible. Refusal and recovery text keeps concrete causes, capabilities, and
+coordinates. Presentation may wrap or densify evidence but cannot truncate a
+copyable identity, replace a public discriminant with decoration, or remove
+evidence merely to hide internal terminology.
+
+One shared Akuma observation discipline serves status, observing call, ask, and
+history. Complete identity and known static context precede chronological
+activity, followed by one truthful conclusion, reported changes, and diagnostics.
+Known coordinates appear once; unknown coordinates stay absent. A diagnostic
+keeps its subject, unavailable state, cause, and recovery coordinates together,
+never as an unlabeled static property. Activity retains the owner's event order,
+selection, omissions, payloads, and attribution. A conclusion already supplied
+by the timeline is not repeated.
+
+History is immutable: it neither fabricates current state nor reads extra state
+to fill its panel. Status consumes the same completion judgment as wait,
+including outstanding input on a sleeping Akuma. Only an observed input wait
+justifies elapsed-duration text; unknown change size never implies additions or
+removals. Activity omits wall-clock timestamps while retaining witnessed tool
+and wait durations.
+
+Free text shares one bounded payload discipline across Contract testimony and
+Akuma observations. Multiline payloads preserve paragraphs and indentation;
+single-line previews fold whitespace. Speech, input, thought, and action remain
+distinct without invented quotation marks, and wrapping never changes event
+selection or meaning. Whole-grapheme terminal width governs wrapping and visible
+truncation, preferring word boundaries. World-board answer previews show the
+tail with a leading omission; selected detail keeps the head.
+
+Selected Contract status foregrounds current work or the terminal outcome,
+without repeating settled mechanics. A delivered integration observed before
+target movement is identified as such. Delivery preview identifies itself as a
+dry-run observation, never delivery success. Candidate preparation, standing
+requirement evidence, and target followability stay distinct. Known checkout
+non-followability retains its path and cause without becoming a target-reference
+placement refusal; target lag remains counted or explicitly unknown.
 
 Progress notices, installation reports, diagnostics, and completion receipts
 are ephemeral process observations, useful only when they report an actual
@@ -258,35 +230,26 @@ exactly once, in the receipt: a failure receipt names the facts admitted before
 the failure and then names the failure in outcome vocabulary with its reason,
 and internal phase names never appear in receipt text. A stop on a retryable
 conflict names its retry class in that same outcome vocabulary, never a
-terminal or substantive mark for a stop that concluded nothing. For delivery, review, and delivery preview, witnessed progress lives on the
+terminal or substantive mark for a stop that concluded nothing. For delivery,
+review, verify, and delivery preview, witnessed progress lives on the
 progress channel while one complete final result remains on stdout; on a
 terminal the only liveness evidence is a ticking status line, and a quiet
 interval never claims that a command is hung or alive. Terminal cancellation
 asks the owned operation to stop and waits for its truthful final receipt
-rather than replacing it with an early exit.
+rather than replacing it with an early exit. Verification observations name the
+current declaration position, requirement, and exact snapshot without becoming a
+second result model. Its final receipt preserves partial admissions, retained
+failure scenes, operational stops, and the ordinary completion judgment.
 
-An observing call and an ask share one input-wait
-presentation discipline, defined once: the shared observation head opens on the
-progress channel, eligible timeline rows stream once each in retained order, active
-activity stays in the redrawable frame until it settles, and one truthful
-conclusion follows the shared mark, verb, and duration grammar. Closing
-accounts for every row still in flight: an unresolved tool keeps `?` and
-speech keeps its rail; history and status never assert liveness. For an ask,
-live activity begins at its already-rendered Tell
-admission; earlier work remains available through status and history. A caller
-deadline concludes on the target's observed
-life rather than naming the deadline; the explicit reason stays in JSON. The
-observed answer belongs to its input's
-exact terminal Turn — Akuma-wide idle never stands in for it — and stdout
-carries that answer once, byte-exact, and nothing else on deadline or failure.
-The stream restates the timeline's own rows rather than inventing a private
-vocabulary and never replays a settled row; omissions between evidence spans
-are marked opaquely rather than rewritten. Each settled row is decided once,
-when first observed: it prints or joins an omission count, and no settled row
-is held for a later observation. After each spoken update or Tell, the
-first three settled tools print; later tools until the next such checkpoint
-fold into one untimed omission marker, released before that source's next
-visible row or at closing. A failed tool always prints.
+An observing call and an ask share one input-wait presentation discipline.
+Witnessed timeline activity streams once in owner order on the progress channel;
+active work stays in the redrawable frame until it settles. Closing preserves
+unresolved activity rather than inventing completion. Ask begins at its own
+admitted input, leaving earlier work to history. Its answer belongs to that
+input's exact terminal Turn, never Akuma-wide idle, and stdout carries those
+answer bytes once. Deadline and failure preserve the observed life and explicit
+cause without fabricating an answer. Bounded omissions remain visible, settled
+rows never replay, and failures are never hidden by compaction.
 
 A wait is not a stream. It observes each selected Akuma to its completion
 judgment or the caller deadline and then prints one compact result line per

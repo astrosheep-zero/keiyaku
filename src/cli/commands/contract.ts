@@ -12,6 +12,7 @@ import type {
   Keiyaku as KeiyakuContract,
   KeiyakuLibrary,
   ReviewOutcome,
+  VerifyOutcome,
   Settings,
   WorldRoot,
 } from "../../index.js";
@@ -58,7 +59,7 @@ import type { ParsedContractCommand, StatusCategory } from "./contract-grammar.j
 
 type ContractMutation = Extract<
   ParsedContractCommand,
-  { command: "bind" | "amend" | "deliver" | "review" | "arc" | "abandon" }
+  { command: "bind" | "amend" | "deliver" | "verify" | "review" | "arc" | "abandon" }
 >;
 type ExistingContractCommand = Exclude<ContractMutation, { command: "bind" }>;
 
@@ -99,7 +100,7 @@ async function contractSettings(
 ): Promise<Settings | undefined> {
   const forwarded =
     executionChannel(execution).kind === "body-request" &&
-    (command.command === "deliver" || command.command === "review");
+    (command.command === "deliver" || command.command === "verify" || command.command === "review");
   if (forwarded) return undefined;
   return await settingsAt(world ?? undefined, home);
 }
@@ -300,6 +301,28 @@ async function runDeliver(
   return await finishContractAnswer(answer, command.output, deliverRefusalProjection);
 }
 
+async function runVerify(
+  command: Extract<ContractMutation, { command: "verify" }>,
+  runtime: CliRuntime,
+  seat: ExistingSeat,
+): Promise<CliOutcome> {
+  const driver = command.output === "text" ? await runtime.progress() : undefined;
+  let answer: VerifyOutcome;
+  try {
+    answer = await seat.contract.verify(
+      {
+        ...(command.index === undefined ? {} : { index: command.index }),
+        includeDirty: command.includeDirty,
+        ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
+      },
+      { ...(driver === undefined ? {} : { observe: driver.observe }) },
+    );
+  } finally {
+    if (driver !== undefined) await driver.finish().catch(() => undefined);
+  }
+  return await finishContractAnswer(answer, command.output, deliverRefusalProjection);
+}
+
 async function runReview(
   command: Extract<ContractMutation, { command: "review" }>,
   runtime: CliRuntime,
@@ -362,7 +385,7 @@ async function runAbandon(
 async function runContractMutation(command: ContractMutation, input: ContractMutationInput): Promise<CliOutcome> {
   const { execution, configuration, runtime } = input;
   const actor =
-    executionChannel(execution).kind === "local" && ["deliver", "review"].includes(command.command)
+    executionChannel(execution).kind === "local" && ["deliver", "verify", "review"].includes(command.command)
       ? actorFromEdge(undefined, runtime.environment)
       : undefined;
   const library = composeContractLibrary(execution, createKeiyakuHandle, {
@@ -376,6 +399,8 @@ async function runContractMutation(command: ContractMutation, input: ContractMut
       return await runAmend(command, input, seat);
     case "deliver":
       return await runDeliver(command, input.runtime, seat);
+    case "verify":
+      return await runVerify(command, input.runtime, seat);
     case "review":
       return await runReview(command, input.runtime, seat);
     case "arc":

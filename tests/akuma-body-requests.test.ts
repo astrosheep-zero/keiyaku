@@ -56,6 +56,7 @@ import {
   contractId as makeContractId,
   entryUlid,
   gate,
+  requirementId,
   snapshotId,
   type DependencyKeySet,
 } from "../src/core/facts/types.js";
@@ -114,6 +115,9 @@ const unusedSelectionPort: SelectionRequestPort = {
 };
 
 const unusedContractPort: ContractRequestPort = {
+  verify: async () => {
+    throw new Error("unexpected Contract request");
+  },
   previewDelivery: async () => {
     throw new Error("unexpected Contract request");
   },
@@ -211,7 +215,9 @@ async function requestBodyWait(
   });
 }
 
-async function requestBodyTell(input: Readonly<{ directory: string; id?: string; target: AkuId; body: string; interrupt?: boolean }>) {
+async function requestBodyTell(
+  input: Readonly<{ directory: string; id?: string; target: AkuId; body: string; interrupt?: boolean }>,
+) {
   const command = selectionRequestProtocol("akuma.tell");
   return await requestBodyCommand({
     ...input,
@@ -381,20 +387,18 @@ test("forwarded observation captures semantic identity without granting particip
   }
   assert.equal(waits, 1);
   assert.deepEqual(historyIds, ["turn/7"]);
-  assert.throws(() => selectionRequestProtocol("akuma.ask").decodeResult({ result: {}, historyIds: ["not-a-turn"] }),
-    /invalid live result/u);
+  assert.throws(
+    () => selectionRequestProtocol("akuma.ask").decodeResult({ result: {}, historyIds: ["not-a-turn"] }),
+    /invalid live result/u,
+  );
 });
 
 type FixtureDeliveryResult = Awaited<ReturnType<ContractRequestPort["deliver"]>>;
 type FixtureReviewResult = Awaited<ReturnType<ContractRequestPort["review"]>>;
 
-function acceptedContract(marker: string, action: "deliver", contract: string): FixtureDeliveryResult;
-function acceptedContract(marker: string, action: "review", contract: string): FixtureReviewResult;
-function acceptedContract(
-  marker: string,
-  action: "deliver" | "review",
-  contract: string,
-): FixtureDeliveryResult | FixtureReviewResult {
+function acceptedContract(action: "deliver", contract: string): FixtureDeliveryResult;
+function acceptedContract(action: "review", contract: string): FixtureReviewResult;
+function acceptedContract(action: "deliver" | "review", contract: string): FixtureDeliveryResult | FixtureReviewResult {
   const result = {
     operation: action,
     kind: "accepted" as const,
@@ -415,21 +419,9 @@ function acceptedContract(
             method: "squash" as const,
             policy: { requireBranchesToBeUpToDate: false },
             leading: { kind: "already-admitted" as const, fact: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3") },
-            verification: {
-              kind: "ran" as const,
-              snapshot: snapshotId("snapshot"),
-              verdict: "unsatisfied" as const,
-              summary: marker,
-            },
+            gates: [],
           }
-        : {
-            verification: {
-              kind: "ran" as const,
-              snapshot: snapshotId("snapshot"),
-              verdict: "unsatisfied" as const,
-              summary: marker,
-            },
-          },
+        : { gates: [] },
   };
   return result as FixtureDeliveryResult | FixtureReviewResult;
 }
@@ -1082,7 +1074,7 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
         },
         { contractId, message: "ship it", includeDirty: true, materializeConflict: false },
       );
-      return acceptedContract("delivery-result", "deliver", contractId);
+      return acceptedContract("deliver", contractId);
     },
   });
   try {
@@ -1097,7 +1089,7 @@ test("deliver claims execute once and Heart retains only the Contract fact refer
         includeDirty: true,
         materializeConflict: false,
       }),
-      acceptedContract("delivery-result", "deliver", contractId),
+      acceptedContract("deliver", contractId),
     );
     assert.equal(calls, 1);
     const admitted = await readRequest(parent.paths, id);
@@ -1160,7 +1152,12 @@ function reviewedAttestation(contract: string, entry: string, gateWord: "reviewe
     contract: makeContractId(contract),
     entry: entryUlid(entry),
     at: "2026-08-18T00:00:00.000Z",
-    data: { gate: gate(gateWord), subject: "[]" as DependencyKeySet, verdict: "satisfied" as const },
+    data: {
+      gate: gate(gateWord),
+      requirement: requirementId(`gate:${gateWord}`),
+      subject: "[]" as DependencyKeySet,
+      verdict: "satisfied" as const,
+    },
   };
 }
 
@@ -1173,7 +1170,7 @@ test("review derives its service reference from the invocation's addressed revie
     reviewedAttestation(contractId, "01ARZ3NDEKTSV4RRFFQ69G5FAY", "verified"),
     reviewedAttestation("kei/other-contract", "01ARZ3NDEKTSV4RRFFQ69G5FAZ", "reviewed"),
   ];
-  const native = { ...acceptedContract("review-result", "review", contractId), facts: [...incidental, reviewed] };
+  const native = { ...acceptedContract("review", contractId), facts: [...incidental, reviewed] };
   let calls = 0;
   const pump = await openContractPump(parent, {
     review: async (input) => {
@@ -1209,7 +1206,7 @@ test("review with no addressed reviewed attestation settles unproven rather than
   const parent = await born(root, "parent", "22222222");
   const contractId = "kei/forwarded-review-missing";
   const native = {
-    ...acceptedContract("review-result", "review", contractId),
+    ...acceptedContract("review", contractId),
     facts: [reviewedAttestation("kei/other-contract", "01ARZ3NDEKTSV4RRFFQ69G5FAW", "reviewed")],
   };
   const pump = await openContractPump(parent, { review: async () => native });
@@ -1498,7 +1495,7 @@ test("unpublish failure still fences admission, drains the owner reference and d
     assert.equal(closed(), null, "unpublish failure must still await owner settlement");
     assert.equal((await readRequest(parent.paths, id))?.state, "begun");
     assert.equal(pump.close(), closing, "repeated close shares one closure");
-    release(acceptedContract("drained", "deliver", "kei/drained"));
+    release(acceptedContract("deliver", "kei/drained"));
     await assert.rejects(closing, (error: unknown) => error === failure);
     assert.equal(existsSync(pump.directory), false);
     mock.mock.restore();
@@ -1518,7 +1515,7 @@ test("unpublish failure still fences admission, drains the owner reference and d
       deliveryFactId: "01ARZ3NDEKTSV4RRFFQ69G5FA3",
     });
   } finally {
-    release(acceptedContract("drained", "deliver", "kei/drained"));
+    release(acceptedContract("deliver", "kei/drained"));
     await pump.close().catch(() => undefined);
     context.mock.restoreAll();
     syncBuiltinESMExports();
@@ -1542,7 +1539,7 @@ test("a vanished live receipt does not fail durable request settlement", async (
     deliver: async () => {
       started();
       await executorReleased;
-      return acceptedContract("missing-receipt", "deliver", "kei/missing-receipt");
+      return acceptedContract("deliver", "kei/missing-receipt");
     },
   });
   try {
@@ -1636,7 +1633,13 @@ test("a forwarded self-interrupt Tell and Ask refuse without product effects and
       const id = randomUUID();
       await assert.rejects(
         action === "tell"
-          ? requestBodyTell({ directory: pump.directory, id, target: parent.id, body: "self interrupt", interrupt: true })
+          ? requestBodyTell({
+              directory: pump.directory,
+              id,
+              target: parent.id,
+              body: "self interrupt",
+              interrupt: true,
+            })
           : requestBodyAsk({
               directory: pump.directory,
               id,
@@ -1695,7 +1698,10 @@ test("a forwarded refusal keeps the parent's answer over the child's local birth
     // The target is born only in the child's World, so a locally proved
     // operation would succeed instead of answering as the parent does.
     await assert.rejects(
-      waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory), noBodyLaunch), { path: childWorld, akuma: [local.id] }),
+      waitAkumaOn(selectionSeam(bodyRequestExecutionContext(pump.directory), noBodyLaunch), {
+        path: childWorld,
+        akuma: [local.id],
+      }),
       (error: unknown) => error instanceof AkumaNotBornError && error.id === local.id,
     );
   } finally {
@@ -1811,13 +1817,24 @@ test("bounded forwarded interrupt Ask admits once under the request identity", a
     const id = randomUUID();
     const outcomes = await Promise.all(
       [1, 2].map(
-        async () => await requestBodyAsk({ directory: pump.directory, id, target: target.id, body: "continue", timeoutMs: 0, interrupt: true }),
+        async () =>
+          await requestBodyAsk({
+            directory: pump.directory,
+            id,
+            target: target.id,
+            body: "continue",
+            timeoutMs: 0,
+            interrupt: true,
+          }),
       ),
     );
     const returned = outcomes.find((value) => value.kind === "returned");
     assert.equal(returned?.kind, "returned");
     if (returned?.kind === "returned") {
-      const envelope = selectionRequestProtocol("akuma.ask").decodeResult(returned.result) as { result: unknown; historyIds: readonly string[] };
+      const envelope = selectionRequestProtocol("akuma.ask").decodeResult(returned.result) as {
+        result: unknown;
+        historyIds: readonly string[];
+      };
       const result = selectionResultSchemas.ask.parse(envelope.result);
       assert.deepEqual(envelope.historyIds, []);
       assert.equal(result.tell.admission.tellId, id);
@@ -1876,10 +1893,15 @@ test("a real delayed direct-parent waited Tell observes its exact answer", async
     const outcome = await pending;
     assert.equal(outcome.kind, "returned");
     if (outcome.kind !== "returned") throw new Error("expected a returned waited Tell result");
-    const envelope = selectionRequestProtocol("akuma.ask").decodeResult(outcome.result) as { result: unknown; historyIds: readonly string[] };
+    const envelope = selectionRequestProtocol("akuma.ask").decodeResult(outcome.result) as {
+      result: unknown;
+      historyIds: readonly string[];
+    };
     const result = selectionResultSchemas.ask.parse(envelope.result);
-    assert.throws(() => selectionRequestProtocol("akuma.ask").decodeResult({ ...envelope, historyIds: ["not-a-turn"] }),
-      /invalid live result/u);
+    assert.throws(
+      () => selectionRequestProtocol("akuma.ask").decodeResult({ ...envelope, historyIds: ["not-a-turn"] }),
+      /invalid live result/u,
+    );
     assert.deepEqual(envelope.historyIds, [`turn/${result.tell.row.deliveries.at(-1)!.turnSequence}`]);
     assert.deepEqual(result.observation, { reason: "answered", answer: "delayed direct answer" });
     assert.equal((await readHeart(target.paths)).pending.length, 0);
@@ -1987,7 +2009,8 @@ test("a forwarded Tell writes its transport and the direct parent enters the tel
     },
     tell: async (input) => {
       calls += 1;
-      return await executeTellAkuma({ spawn: noBodyLaunch,
+      return await executeTellAkuma({
+        spawn: noBodyLaunch,
         path: root,
         id: input.target,
         body: input.body,
@@ -2414,21 +2437,32 @@ test("Git-less native preview forwards and preserves live result and typed failu
   let owner: Awaited<ReturnType<ContractRequestPort["previewDelivery"]>> | undefined;
   const pump = await openContractPump(parent, {
     previewDelivery: async (input) => {
-      if (input.includeDirty) throw new KeiyakuError("internal", "preview failed", { cause: new TypeError("owner bug") });
+      if (input.includeDirty)
+        throw new KeiyakuError("internal", "preview failed", { cause: new TypeError("owner bug") });
       owner = await bound.value.keiyaku.previewDelivery({ showDiff: input.showDiff, signal: input.signal });
       return owner;
     },
   });
   try {
-    const forwarded = createKeiyakuHandle(bound.contract, {
-      ...scopeForRepo(repo),
-      get gitPath(): string { throw new Error("child has no Git custody"); },
-    }, bodyRequestExecutionContext(pump.directory), captureLocalContractComposition());
+    const forwarded = createKeiyakuHandle(
+      bound.contract,
+      {
+        ...scopeForRepo(repo),
+        get gitPath(): string {
+          throw new Error("child has no Git custody");
+        },
+      },
+      bodyRequestExecutionContext(pump.directory),
+      captureLocalContractComposition(),
+    );
     const result = accepted(await forwarded.previewDelivery({ showDiff: true }));
     assert.deepEqual(JSON.parse(JSON.stringify(result)), JSON.parse(JSON.stringify(owner)));
     assert.deepEqual(result.facts, []);
     assert.deepEqual(result.effects, []);
-    assert.deepEqual(result.value.verification, { kind: "required" });
+    assert.equal(result.value.verification.kind, "requirements");
+    if (result.value.verification.kind !== "requirements") throw new Error("expected standing requirements");
+    assert.equal(result.value.verification.requirements.length, 1);
+    assert.equal(result.value.verification.requirements[0]?.current.kind, "missing");
     assert.ok(result.value.candidate.kind === "ready");
     assert.match(result.value.candidate.diff ?? "", /candidate.txt/u);
     assert.ok(result.value.target.kind === "placeable");
@@ -2441,7 +2475,10 @@ test("Git-less native preview forwards and preserves live result and typed failu
     const receipt = JSON.parse(await readFile(join(pump.directory, receipts[0]!), "utf8")) as { id: string };
     const stored = await readRequest(parent.paths, receipt.id);
     assert.deepEqual(stored?.state === "served" && "serviceJson" in stored ? JSON.parse(stored.serviceJson) : null, {
-      kind: "delivery-preview-report", repoRoot: repository.path, contractId: bound.contract, report: result.value,
+      kind: "delivery-preview-report",
+      repoRoot: repository.path,
+      contractId: bound.contract,
+      report: result.value,
     });
     await assert.rejects(forwarded.previewDelivery({ includeDirty: true }), (error: unknown) => {
       assert.ok(error instanceof KeiyakuError);

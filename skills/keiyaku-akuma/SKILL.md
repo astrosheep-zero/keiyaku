@@ -53,6 +53,33 @@ An Akuma can `keiyaku report` to you mid-turn without stopping. For long work,
 ask for it in the prompt (e.g. "report each milestone or blocker"); reports
 show up in its `history`.
 
+### Verification brief
+
+When commissioning checks, name the appointed worktree, Contract, all declarations
+or current one-based index, and whether dirty capture is authorized:
+
+```bash
+keiyaku -C <appointed-path> verify <kei/...>
+keiyaku -C <appointed-path> verify <kei/...> --index 2 --include-dirty
+```
+
+Only explicit verify executes declarations. Deliver, review, preview, target
+refresh, and dependent completion consume current evidence only. Each check has
+independent clean scratch, setup, and cleanup: a required build belongs in that
+check's script or setup, never another fence. Evidence names the exact prospective
+integration and stable content-derived requirement; the index is only a current
+selector. Verify admits no delivery and can place only a previously delivered
+candidate whose prerequisites and every gate pass.
+
+Ask for every executed check's verdict, new or reused testimony admission,
+operational stops, retained diagnostic paths, and completion. Reused admission
+never means execution was skipped. Normal failure or timeout affects only that
+requirement and full verify continues; an operational stop admits no verdict for
+the affected check and preserves prior admissions. A selected success establishes
+no verdict for other requirements; the generic gate judgment decides whole-gate
+satisfaction. Local and parent-forwarded verify return the same
+typed result, while the serving Body retains Git and process custody.
+
 ## Tell or ask an existing Akuma
 
 ```bash

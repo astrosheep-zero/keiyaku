@@ -31,13 +31,15 @@ function document(title: string, patterns: readonly string[]): string {
 }
 
 async function bind(repository: ReturnType<typeof repositoryWithMain>, title: string, patterns: readonly string[]) {
-  const result = accepted(await Keiyaku.with().bind({
-    repo: await Repo.at({ path: repository.path }),
-    markdown: document(title, patterns),
-    workspace: "worktree",
-    gates: [],
-  }));
-  return { id: (present(await result.value.keiyaku.state())).id, contract: result.value.keiyaku };
+  const result = accepted(
+    await Keiyaku.with().bind({
+      repo: await Repo.at({ path: repository.path }),
+      markdown: document(title, patterns),
+      workspace: "worktree",
+      gates: [],
+    }),
+  );
+  return { id: present(await result.value.keiyaku.state()).id, contract: result.value.keiyaku };
 }
 
 async function read(repository: ReturnType<typeof repositoryWithMain>, region: Parameters<typeof kanshi>[0]["region"]) {
@@ -205,7 +207,7 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     assert.ok(report.contracts.kind === "present", 'expected report.contracts.kind = "present"');
     const row = report.contracts.value.rows.find((candidate) => candidate.id === id);
     assert.equal(row?.title, null);
-    assert.deepEqual(row?.verification, { kind: "undeclared" });
+    assert.deepEqual(row?.gates, { reports: [], satisfied: true });
     assert.equal(report.region?.kind, "failed");
     const failed = await runCli(["region"], { cwd: repository.path, environment: {} });
     assert.match(failed.stdout, /^× region\n  reason  /u);

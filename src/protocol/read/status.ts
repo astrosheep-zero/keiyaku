@@ -5,7 +5,6 @@ import {
   withContractReadObservationAt,
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
-import { dependencyKeys } from "../../core/subject.js";
 import {
   observeTargetLag,
   observeWorkspace,
@@ -22,9 +21,9 @@ import type {
 } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
-import { gateReports, latestCurrentAttestations, type GateCurrent } from "../../core/facts/gate.js";
+import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
+import { verificationRequirement } from "../../verification/declaration.js";
 import {
-  gate,
   type ContractId,
   type ContractState,
   type ContractTarget,
@@ -39,12 +38,12 @@ export type ContractDisposition = "active" | "terminal";
 
 export type ContractGateCurrent = GateCurrent;
 
-export type ContractGateReport = Readonly<{ gate: string; current: ContractGateCurrent }>;
-
-export type ContractVerificationStatus =
-  | Readonly<{ kind: "undeclared" }>
-  | Readonly<{ kind: "unrecorded" }>
-  | Readonly<{ kind: "recorded"; verdict: "satisfied" | "unsatisfied"; at: string; snapshot?: SnapshotId }>;
+export type ContractGateReport = Readonly<{
+  gate: string;
+  current: GateCurrent;
+  satisfied: boolean;
+  requirements: readonly Readonly<{ requirement: string; current: GateCurrent; index?: number }>[];
+}>;
 
 export type ContractTargetLag =
   | GitContractTargetLag
@@ -83,7 +82,6 @@ export type ContractRow = Readonly<{
   delivery: DeliverData | null;
   abandonNote?: string;
   targetObservation: Readonly<{ head: SnapshotId | null; drift: boolean }> | null;
-  verification?: ContractVerificationStatus;
   gates: Readonly<{
     reports: readonly ContractGateReport[];
     satisfied: boolean;
@@ -127,22 +125,6 @@ function phaseFor(state: ContractState): ContractPhase {
   if (state.terminal?.kind === "claimed") return "claimed";
   if (state.terminal?.kind === "abandoned") return "abandoned";
   return "bound";
-}
-
-function verificationFor(state: ContractState): ContractVerificationStatus | undefined {
-  const verifiedGate = gate("verified");
-  if (!state.terms.gates.includes(verifiedGate)) return { kind: "undeclared" };
-  const current = latestCurrentAttestations(state, new Set([verifiedGate])).get(verifiedGate);
-  if (current !== undefined) {
-    const snapshot = dependencyKeys(current.data.subject).find((key) => key.kind === "snapshot")?.value;
-    return {
-      kind: "recorded",
-      verdict: current.data.verdict,
-      at: current.at,
-      ...(snapshot === undefined ? {} : { snapshot: snapshot as SnapshotId }),
-    };
-  }
-  return state.delivery === null ? undefined : { kind: "unrecorded" };
 }
 
 export function phaseAtFor(state: Pick<ContractState, "terminal" | "delivery">, bindAt: string): string {
@@ -245,7 +227,11 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
   const { repository, state, bindAt, lastJournalAt, targetObservation, workspace, handoff, after, dependents } = input;
   const gates = gateReports(state);
   const document = documentFor(state);
-  const verification = verificationFor(state);
+  const indexes = new Map<string, number>();
+  document?.verification.forEach((declaration, index) => {
+    const requirement = verificationRequirement(declaration);
+    if (!indexes.has(requirement)) indexes.set(requirement, index + 1);
+  });
   const facts = await managedWorkspaceFacts(repository, state, workspace, targetObservation, handoff);
   return {
     id: state.id,
@@ -267,9 +253,14 @@ async function rowFor(input: ContractRowInput): Promise<ContractRow> {
       ? { abandonNote: state.terminal.data.note }
       : {}),
     targetObservation,
-    ...(verification === undefined ? {} : { verification }),
     gates: {
-      reports: gates.reports.map((report) => ({ gate: report.gate, current: report.current })),
+      reports: gates.reports.map((report) => ({
+        ...report,
+        requirements: report.requirements.map((requirement) => {
+          const index = report.gate === "verified" ? indexes.get(requirement.requirement) : undefined;
+          return { ...requirement, ...(index === undefined ? {} : { index }) };
+        }),
+      })),
       satisfied: gates.satisfied,
     },
     after,

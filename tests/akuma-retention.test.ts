@@ -135,6 +135,7 @@ async function claimedContract(raw: ReturnType<typeof makeGitRepository>) {
   raw.run(["-C", worktree, "add", "candidate.txt"]);
   raw.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
   accepted(await keiyaku.deliver());
+  accepted(await keiyaku.verify());
   assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
   return state.id;
 }

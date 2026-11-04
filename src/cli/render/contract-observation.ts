@@ -1,10 +1,12 @@
 import type { ContractAfterEdge, ContractRow, ContractWorkspaceObservation } from "../../index.js";
 
+type GateDisplayCurrent = Readonly<
+  { kind: "missing" } | { kind: "stale" } | { kind: "attested"; verdict: "satisfied" | "unsatisfied" }
+>;
 type GateDisplayReport = Readonly<{
   gate: string;
-  current: Readonly<
-    { kind: "missing" } | { kind: "stale" } | { kind: "attested"; verdict: "satisfied" | "unsatisfied" }
-  >;
+  current: GateDisplayCurrent;
+  requirements: readonly Readonly<{ requirement: string; index?: number; current: GateDisplayCurrent }>[];
 }>;
 
 const GIT_OBJECT_ID = /^[0-9a-f]{40}$/iu;
@@ -45,7 +47,7 @@ export function progressStrip(row: Pick<ContractRow, "delivery" | "gates">): str
   return [delivery, ...gates].join("  ");
 }
 
-export function gateGlyph(report: GateDisplayReport): string {
+export function gateGlyph(report: Readonly<{ current: GateDisplayCurrent }>): string {
   if (report.current.kind === "stale") return "!";
   if (report.current.kind === "missing") return "○";
   return report.current.verdict === "satisfied" ? "✓" : "×";
@@ -55,11 +57,21 @@ export function gateFact(report: GateDisplayReport): string {
   return `${gateGlyph(report)} ${gateDisplayName(report.gate)}${report.current.kind === "stale" ? " · stale" : ""}`;
 }
 
-export function verificationFact(status: ContractRow["verification"]): string | undefined {
-  if (status === undefined) return undefined;
-  if (status.kind === "recorded")
-    return `verification ${status.verdict}${status.snapshot === undefined ? "" : ` · snapshot ${shortGitId(status.snapshot)}`}`;
-  return `verification ${status.kind}`;
+export function requirementDisplayName(
+  gate: string,
+  requirement: Readonly<{ requirement: string; index?: number | undefined }>,
+): string {
+  const name = gateDisplayName(gate);
+  if (gate === "verified") return `${name} ${requirement.index ?? requirement.requirement}`;
+  return requirement.requirement === `gate:${gate}` ? name : `${name} ${requirement.requirement}`;
+}
+
+/** Currentness is supplied by the owner for every requirement; rendering never aggregates testimony. */
+export function gateRequirementFacts(report: GateDisplayReport): readonly string[] {
+  return report.requirements.map(
+    (requirement) =>
+      `${gateGlyph(requirement)} ${requirementDisplayName(report.gate, requirement)}${requirement.current.kind === "stale" ? " · stale" : requirement.current.kind === "missing" ? " · missing" : ""}`,
+  );
 }
 
 export function afterWording(edge: ContractAfterEdge): string {

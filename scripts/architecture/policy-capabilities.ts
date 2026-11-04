@@ -39,6 +39,7 @@ export const capabilityPolicy = {
         { source: "protocol/operations.ts", symbols: ["z"] },
         { source: "protocol/progress.ts", symbols: ["z"] },
         { source: "protocol/review.ts", symbols: ["z"] },
+        { source: "protocol/verify.ts", symbols: ["z"] },
         { source: "protocol/run.ts", symbols: ["z"] },
         { source: "settlement/settle.ts", symbols: ["z"] },
 
@@ -96,6 +97,7 @@ export const capabilityPolicy = {
         { source: "protocol/**" },
         { source: "settlement/**" },
         { source: "debt/**" },
+        { source: "verification/declaration.ts", symbols: ["createHash"] },
         { source: "workspace-place.ts" },
       ],
     },

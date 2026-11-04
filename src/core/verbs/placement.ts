@@ -76,9 +76,7 @@ export function decidePlacement({
   }
   const gates = gateReports(current);
   if (!gates.satisfied) {
-    const unmetGates = gates.reports.filter(
-      (report) => report.current.kind !== "attested" || report.current.verdict !== "satisfied",
-    );
+    const unmetGates = gates.reports.filter((report) => !report.satisfied);
     return {
       kind: "refused",
       refusal: {

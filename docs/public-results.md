@@ -65,33 +65,44 @@ invocation owns.
 
 ## Contract Outcomes
 
-Delivery and review may admit their leading fact while verification, placement,
-or dependent continuation reports a distinct typed stop. Those trailing channels
-are independent: a satisfied review can still find no delivery to place, and a
-verification or placement stop cannot undo an accepted delivery or review.
-Verification runs only for a selected `verified` gate, and its unsatisfied
-verdict or typed stop prevents placement. Without that gate, the Verification
-section is inert text and operation answers carry no Verification evidence.
+Delivery and review admit their leading facts and consume existing requirement
+evidence during placement or dependent continuation. They never execute
+Verification, and missing or stale testimony is pending evidence, not a runtime
+stop or an execution-reuse event. Satisfied review can still find no delivery
+to place; a placement stop cannot undo an admitted delivery or review.
+
+Explicit verify reports every selected check's execution and terminal verdict
+or operational stop, its requirement and current declaration position, the exact
+captured snapshot, and whether testimony was admitted or an identical admission
+was reused. Admission reuse never implies execution was skipped. No gate-level
+aggregate attestation is produced. Normal failures and timeouts affect only
+their requirements; operational stops admit no testimony for the affected check.
+Earlier admissions, later completed checks, and all cleanup residue remain
+visible. Its ordinary completion judgment can place only an already-delivered
+Contract when every prerequisite and gate passes. A selected satisfied check
+establishes only its own requirement's verdict; generic judgment decides whether
+the whole gate is satisfied.
+
 A typed trailing stop after a confirmed admission keeps the witnessed provenance
 alongside that stop. Recovery names an existing
 delivery fact as already admitted, reports only this invocation's facts, and does
 not disguise later workspace bytes as a candidate. Successful placement is
 represented once as completion; callers do not rebuild it from facts or folded
-state. A completed placement also carries the movement it made — the reference it
-advanced and the head it advanced from — so a receipt states the target's
+state. A completed placement also carries the movement it made - the reference it
+advanced and the head it advanced from - so a receipt states the target's
 movement instead of deriving it from journal facts or folded state. A
 Contract-addressed movement names the destination Contract, while typed state
 retains its immutable destination identity; it never presents that movement as
-a branch update. Reused
-Verification evidence is identified as reuse, not a cache or a new evidence
-source.
+a branch update.
 
 Known completion and movement precede optional presentation observation. Failure
 to observe that presentation never reruns completion or erases witnessed movement.
 
-An admitted current candidate with selected `verified` but no terminal fact
-is `unrecorded`, distinct from undeclared or terminal Verification and implying
-no timeout, liveness, or retry state.
+Current requirement reports distinguish missing, stale, satisfied, and
+unsatisfied evidence independently. They retain the generic gate judgment
+without inventing a producer run or liveness state. Current declarations may
+use their one-based display positions; historical requirements removed from the
+document retain stable identity rather than a fabricated current position.
 
 A normal integration conflict is a non-admission refusal. Explicit conflict
 materialization instead returns a handoff result with no admitted fact,
@@ -145,10 +156,11 @@ and an unsatisfied standing verdict is never satisfaction.
 
 Preview never executes declarations or hooks and never publishes testimony,
 admits a candidate, places it, reconciles, settles, or continues dependents.
-Standing evidence is evaluated by generic currentness against the prospective
-integration. Missing or stale evidence means Verification remains required;
-existing unsatisfied evidence remains visible without rerunning it. Target
-followability is observed independently of that evidence and separately from ref
+Standing evidence is evaluated independently for every prospective requirement
+by generic currentness against the prospective integration. Missing or stale
+evidence remains unmet; existing unsatisfied evidence remains visible without
+rerunning it. Target followability is observed independently of that evidence and
+separately from ref
 placeability; known checkout non-followability remains visible without denying
 ref movement. Cancellation interrupts preview with its native exceptional category
 and partial observations, never a successful target-failure observation. Candidate diffs and
@@ -165,7 +177,9 @@ preservation semantics are owned by [world.md](world.md).
 
 Verification scratch cleanup, intentional failed-scene retention, or worktree
 removal failure can report physical residue after admission. The invocation
-reports the retained diagnostic path without adding a journal fact. Such reports
+reports retained diagnostic paths without adding a journal fact. Verification
+scenes keep their Contract and requirement identity, captured snapshot, and
+current declaration position when known. Such reports
 stay on the invocation result, do not change its exit meaning, and never become
 cleanup authority or reconciliation input.
 
@@ -178,7 +192,8 @@ verdict.
 
 Cleanup belongs to the whole invocation, independently of the current candidate.
 All retained resources and failed cleanup attempts keep their known owner and
-candidate coordinates. A newer verification can replace candidate conclusions,
+candidate coordinates, including requirement identity for check-owned scenes.
+A newer verification can replace candidate conclusions,
 but cannot overwrite an earlier resource problem or discard a dependent's
 cleanup report. Cleanup reporting has one public carrier; operation values do
 not repeat it as another source of truth.

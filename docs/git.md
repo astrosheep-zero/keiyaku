@@ -6,10 +6,11 @@ the lifecycle authority; Git is the custody authority for the bytes it names.
 Agents own their working content. Git's private topology is not a public
 identity, an additional state store, or a source of Contract legality.
 
-The Git-custody execution Body performs a forwarded `contract.deliver` for a
-worker that has no `.git` custody; forwarding does not grant that worker Git
-access. Private-index capture reads the appointed worktree bytes, including a
-real unmerged index, while preserving the worker's index and branch.
+The Git-custody execution Body performs forwarded Contract delivery and explicit
+Verification for a worker that has no `.git` custody; forwarding does not grant
+that worker Git access. Private-index capture reads the appointed worktree
+bytes, including a real unmerged index, while preserving the worker's index and
+branch.
 
 ## World, Reads, And Publication
 
@@ -70,7 +71,10 @@ Git diagnostic, without making ordinary checkout lag a placement veto.
 
 Git prepares tenders, target-specific integration results, content identity from
 patch-id (not a commit), recorded delivery diffs, and Verification
-scratch custody.
+scratch custody. Explicit verify uses the same prospective integration preparation
+and clean-worktree or authorized dirty-capture rules as delivery, without
+admitting delivery or reintegration. Preparation conflicts refuse without
+materializing a handoff.
 It returns mechanical data or typed failures; it does not judge Contract
 lifecycle or decode Contract documents. Document bytes used for delivery are
 opaque Git inputs, and Git never judges their currentness.
@@ -81,24 +85,29 @@ integration. The reused commit keeps its original message and dates; a new
 delivery note does not rewrite it. A different tree or predecessor requires a
 fresh integration, and an unavailable recorded commit is skipped rather than
 blocking preparation. This reuse creates no additional identity or evidence
-authority; Verification still judges the exact snapshot and declaration.
+authority; Verification still judges the exact snapshot and requirement.
+Evidence captured before delivery applies when a later delivery names that same
+integration. Target or candidate movement requires a different snapshot and
+never retargets earlier testimony.
 
 Content identity consumes the complete canonical patch without retaining that
 intermediate patch in the caller. A producer failure, consumer failure, or
 cancelled transfer yields no identity, even when partial output resembles one.
 A failed transfer awaits retirement of both owned commands and preserves any
 retirement failure.
-For each Verification attempt Git materializes the exact candidate in an
-independent clean worktree without importing mutable execution state from
-another checkout. Preparation, command execution, and the decision to retain a
-failed scene belong to [verification.md](verification.md); Git owns scratch byte
-custody, Contract association, and physical removal. A retained diagnostic
-scratch stays outside candidate content and Git history. Existing private
-ownership custody proves its association without another journal fact.
-Running attempts neither wait for nor remove one another's execution scenes.
-A failing attempt replaces the Contract's single retained scene during
-retirement under bounded custody, without changing its verdict if retention
-fails. Terminal cleanup retires it when no live attempt owns it.
+For each selected Verification declaration Git materializes the exact captured
+integration in an independent clean worktree without importing mutable execution
+state from another declaration or checkout. Preparation, command execution, and
+the decision to retain a failed scene belong to
+[verification.md](verification.md); Git owns scratch byte custody, Contract and
+requirement association, and physical removal. A retained diagnostic scratch
+stays outside candidate content and Git history. Existing private ownership
+custody proves its association without another journal fact. Running attempts
+neither wait for nor remove one another's execution scenes. A failing check
+replaces only its Contract and requirement's retained scene during retirement
+under bounded custody, without changing its verdict if retention fails. Other
+requirements' scenes remain intact. Terminal cleanup retires all scenes it can
+prove no live attempt owns.
 
 Delivery normally requires a clean managed worktree. Explicit dirty delivery
 captures the complete non-ignored final tree without rewriting the caller's

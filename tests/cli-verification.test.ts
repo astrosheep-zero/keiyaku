@@ -1,460 +1,243 @@
-import { deferred as promiseBarrier, killFixtureProcess, processExists, waitForProcessExit } from "./support/process.js";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { basename, resolve } from "node:path";
-import { Writable } from "node:stream";
-import { setImmediate } from "node:timers/promises";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import test from "node:test";
-import { renderDiffstat } from "../src/cli/render/akuma-tool.js";
+import { Keiyaku, Repo, type DeliveryPreviewOutcome, type DeliverOutcome, type VerifyOutcome } from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
-import { executionCleanupLines } from "../src/cli/render/receipt.js";
-import { executionCleanupSchema } from "../src/protocol/progress.js";
-import { writeExecutionProgress } from "../src/cli/runtime.js";
-import {
-  Keiyaku,
-  Repo,
-  type DeliveryPreviewOutcome,
-  type DeliverOutcome,
-  type ExecutionObservation,
-} from "../src/index.js";
-import { accepted } from "./support/library-verbs.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { appointedWorktreePath, makeGitRepository, observeContract } from "./support/git.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
+import { accepted } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
+import { temporaryDirectory } from "./support/process.js";
 
-function markdown(script: string): string {
+function markdown(scripts: readonly string[]): string {
   return contractMarkdown("CLI verification", {
-    Context: "A CLI result exposes verification owner facts.",
-    Objective: "Keep verification and audit adaptation visible.",
+    Context: "A CLI result exposes independent verification owner facts.",
+    Objective: "Execute explicit checks and retain each requirement's evidence.",
     Design: "Invoke the public Contract operation once.",
-    Region: "~~~\nsrc/**\n~~~",
-    Criteria: `### Check\nThe verification runs.\n\n## Verification\n~~~bash timeout=5m\n${script}\n~~~`,
+    Region: "src/**",
+    Criteria: "### Check\nThe verification runs only when requested.",
+    Verification: scripts.map((script) => `~~~bash timeout=5m\n${script}\n~~~`).join("\n\n"),
   });
 }
 
-async function bindCandidate(script: string, gates: readonly string[] = ["verified"]) {
+async function bindCandidate(scripts: readonly string[], gates: readonly string[] = ["verified"]) {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   mkdirSync(resolve(raw.path, ".keiyaku"), { recursive: true });
   writeFileSync(
     resolve(raw.path, ".keiyaku", "settings.json"),
-    JSON.stringify({ gates: { default: { kind: "bundle", gates } } }),
+    JSON.stringify({
+      gates: { default: { kind: "bundle", gates } },
+    }),
   );
-  const bound = await cliJson<Readonly<{ kind: string; contract?: string }>>(
+  const bound = await cliJson<Readonly<{ kind: string; contract?: ContractId }>>(
     ["-C", raw.path, "bind", "--target", "refs/heads/main", "-"],
-    { environment: {}, readStdin: async () => markdown(script) },
+    { environment: {}, readStdin: async () => markdown(scripts) },
   );
   assert.equal(bound.value.kind, "accepted");
-  const id = bound.value.contract as ContractId;
+  const id = bound.value.contract!;
   const repository = await repositoryAt(raw.path);
   const worktree = await appointedWorktreePath(repository, id);
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
   raw.run(["-C", worktree, "add", "candidate.txt"]);
   raw.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  return { raw, id, worktree };
+  return { raw, id, worktree, repository };
 }
 
-async function bindAndDeliver(script: string, gates: readonly string[] = ["verified"]) {
-  const { raw, id } = await bindCandidate(script, gates);
-  const delivered = await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], {
-    environment: { KEIYAKU_ACTOR_ID: "cli-verification-test" },
-  });
-  return { raw, id, result: delivered.value, stderr: delivered.stderr };
-}
+test("contextual verify accumulates selected checks and completes an already delivered candidate", async () => {
+  const { raw, id, worktree, repository } = await bindCandidate(["printf 'first-live-output\\n'", "true"]);
+  const delivered = accepted(
+    (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value,
+  );
+  assert.deepEqual(
+    delivered.facts.map((fact) => fact.kind),
+    ["deliver"],
+  );
+  assert.equal((await observeContract(repository, id)).state?.terminal, null);
 
-test("deliver adapts a successful Verification result through the CLI", async () => {
-  const { raw, id, result, stderr } = await bindAndDeliver("printf 'delivery-live-output\\n'");
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("deliver was not accepted");
+  const first = await cliJson<VerifyOutcome>(["-C", worktree, "verify", "--index", "1"], { environment: {} });
+  const firstValue = accepted(first.value);
+  assert.equal(first.stderr, "", "JSON emits no text activity");
+  assert.deepEqual(
+    firstValue.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
+  assert.equal(firstValue.value.checks.length, 1);
+  assert.equal(firstValue.value.checks[0]?.index, 1);
+  assert.equal(firstValue.value.snapshot, delivered.value.integration.snapshot);
+  assert.equal(firstValue.value.completion, undefined);
+  const gate = firstValue.value.gates?.find((report) => report.gate === "verified");
+  assert.equal(gate?.satisfied, false);
+  assert.deepEqual(
+    gate?.requirements.map((report) => report.current.kind),
+    ["attested", "missing"],
+  );
+  const text = renderAccepted(firstValue, { columns: 400, color: false });
+  assert.match(text, /check 1\s+executed/u);
+  assert.match(text, /verdict\s+satisfied/u);
+  assert.match(text, /attestation\s+admitted/u);
+  assert.match(text, /awaiting verification/u);
+  const status = await runCli(["-C", raw.path, "status", id], { environment: {} });
+  assert.match(status.stdout, /✓ verification 1/u);
+  assert.match(status.stdout, /○ verification 2 · missing/u);
+  const history = await runCli(["-C", raw.path, "history", id], { environment: {} });
+  assert.ok(history.stdout.includes(firstValue.value.checks[0]!.requirement));
+
+  const second = accepted(
+    (await cliJson<VerifyOutcome>(["-C", worktree, "verify", "--index", "2"], { environment: {} })).value,
+  );
+  assert.equal(second.value.snapshot, firstValue.value.snapshot);
+  assert.deepEqual(
+    second.facts.map((fact) => fact.kind),
+    ["attestation", "claimed"],
+  );
+  assert.equal(second.value.completion?.integration, delivered.value.integration.snapshot);
+  assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
+  assert.equal(existsSync(worktree), false);
+});
+
+test("pre-delivery verify always executes and distinguishes admission reuse from execution", async (t) => {
+  const external = temporaryDirectory(t, "cli-verify-rerun-");
+  const runs = resolve(external, "runs");
+  const { raw, id, repository } = await bindCandidate([`echo run >> '${runs}'`]);
+  const verify = async () =>
+    accepted((await cliJson<VerifyOutcome>(["-C", raw.path, "verify", id], { environment: {} })).value);
+  const first = await verify();
+  assert.deepEqual(
+    first.facts.map((fact) => fact.kind),
+    ["attestation"],
+  );
+  assert.equal(first.value.completion, undefined);
+  assert.equal((await observeContract(repository, id)).state?.delivery, null);
+  const second = await verify();
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\n");
+  assert.deepEqual(second.facts, []);
+  const check = second.value.checks[0]!;
+  assert.ok(check.kind === "terminal");
+  assert.equal(check.admission.kind, "reused");
+  assert.match(
+    renderAccepted(second, { columns: 400, color: false }),
+    /check 1\s+executed[\s\S]*attestation\s+reused/u,
+  );
+  const delivered = accepted(
+    (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value,
+  );
+  assert.equal(delivered.value.completion?.integration, first.value.snapshot);
+  assert.equal(readFileSync(runs, "utf8"), "run\nrun\n", "delivery consumes standing evidence");
+});
+
+test("full verify exposes mixed verdicts, independent scratches, and requirement-scoped retention", async () => {
+  const { raw, id } = await bindCandidate(["echo owned > own-file; exit 1", "test ! -f own-file"]);
+  const result = accepted((await cliJson<VerifyOutcome>(["-C", raw.path, "verify", id], { environment: {} })).value);
+  assert.deepEqual(
+    result.value.checks.map((check) => (check.kind === "terminal" ? check.verdict : check.kind)),
+    ["unsatisfied", "satisfied"],
+  );
   assert.deepEqual(
     result.facts.map((fact) => fact.kind),
-    ["deliver", "attestation", "claimed"],
+    ["attestation", "attestation"],
   );
-  const repository = await repositoryAt(raw.path);
-  assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
-  assert.equal(stderr, "", "JSON carries one native result and no text activity");
+  const failed = result.value.checks[0]!;
+  assert.ok(failed.retainedPath);
+  assert.equal(readFileSync(resolve(failed.retainedPath, "own-file"), "utf8"), "owned\n");
+  const text = renderAccepted(result, { columns: 400, color: false });
+  assert.match(text, /check 1\s+executed[\s\S]*verdict\s+unsatisfied/u);
+  assert.match(text, /check 2\s+executed[\s\S]*verdict\s+satisfied/u);
+  assert.ok(text.includes(failed.requirement));
+  assert.ok(text.includes(failed.retainedPath));
+  accepted(
+    await Keiyaku.with()
+      .select({ repo: await Repo.at({ path: raw.path }), id })
+      .abandon(),
+  );
+  assert.equal(existsSync(failed.retainedPath), false);
 });
 
-test("successful public Verification retires its helper before delivery and scratch removal", async (t) => {
-  if (process.platform === "win32") {
-    t.skip("POSIX process groups only");
-    return;
-  }
-  const external = mkdtempSync(resolve(tmpdir(), "verification-natural-helper-"));
-  const receipt = resolve(external, "helper.json");
-  const launcher = resolve(external, "launcher.cjs");
-  const helper = [
-    'process.on("SIGTERM", () => {});',
-    "setInterval(() => {}, 1_000);",
-    'process.send("ready");',
-  ].join(" ");
-  writeFileSync(launcher, [
-    'const { spawn } = require("node:child_process");',
-    'const { writeFileSync } = require("node:fs");',
-    `const child = spawn(process.execPath, ["-e", ${JSON.stringify(helper)}], { stdio: ["ignore", "ignore", "ignore", "ipc"] });`,
-    'child.once("message", () => {',
-    `writeFileSync(${JSON.stringify(receipt)}, JSON.stringify({ pid: child.pid, scratch: process.cwd() }));`,
-    "process.exit(0); });",
-  ].join("\n"));
-  try {
-    const { raw, id, result } = await bindAndDeliver(`'${process.execPath}' '${launcher}'`);
-    const { pid, scratch } = JSON.parse(readFileSync(receipt, "utf8")) as { pid: number; scratch: string };
-    assert.equal(result.kind, "accepted");
-    assert.ok(result.kind === "accepted" && result.facts.some(
-      (fact) => fact.kind === "attestation" && fact.data.verdict === "satisfied",
-    ));
-    assert.equal((await observeContract(await repositoryAt(raw.path), id)).state?.terminal?.kind, "claimed");
-    assert.equal(existsSync(scratch), false, "successful Verification disposed its execution scratch");
-    assert.equal(processExists(pid), false, "accepted delivery cannot leave the helper alive outside the scratch");
-  } finally {
-    if (existsSync(receipt)) {
-      const { pid } = JSON.parse(readFileSync(receipt, "utf8")) as { pid: number };
-      killFixtureProcess(pid);
-      await waitForProcessExit(pid);
-    }
-    rmSync(external, { recursive: true, force: true });
-  }
-});
-
-test("text deliver streams its Verification activity on stderr and keeps the receipt clean", async () => {
-  const { raw, id } = await bindCandidate("printf 'delivery-live-output\\n'");
-  const delivered = await runCli(["-C", raw.path, "deliver", id], {
-    environment: { KEIYAKU_ACTOR_ID: "cli-verification-test" },
+test("verify refuses out-of-range and unselected checks before execution or admission", async (t) => {
+  const external = temporaryDirectory(t, "cli-verify-refusal-");
+  const marker = resolve(external, "ran");
+  const { raw, id, repository } = await bindCandidate([`touch '${marker}'`]);
+  const before = await observeContract(repository, id);
+  const result = await cliJson<VerifyOutcome>(["-C", raw.path, "verify", id, "--index", "2"], { environment: {} });
+  assert.equal(result.exit, 1);
+  assert.ok(result.value.kind === "refused");
+  assert.deepEqual(result.value.refusal, {
+    kind: "verification-index-out-of-range",
+    contractId: id,
+    index: 2,
+    total: 1,
   });
-  assert.equal(delivered.exit, 0, delivered.stderr);
-  assert.doesNotMatch(delivered.stderr, /●/u, "non-TTY progress never prints a phase start");
-  assert.match(delivered.stderr, /delivery-live-output/u);
-  assert.match(delivered.stderr, /✓ declaration 1\/1/u);
-  assert.equal(delivered.stdout.includes("delivery-live-output"), false, "live activity stays out of the receipt");
+  const text = await runCli(["-C", raw.path, "verify", id, "--index", "2"], { environment: {} });
+  assert.match(text.stdout, /reason\s+Verification declaration index is out of range/u);
+  assert.match(text.stdout, /index\s+2/u);
+  assert.match(text.stdout, /declarations\s+1/u);
+  assert.equal(existsSync(marker), false);
+  assert.deepEqual(await observeContract(repository, id), before);
+
+  const inert = await bindCandidate([`touch '${marker}'`], []);
+  const refused = await runCli(["-C", inert.raw.path, "verify", inert.id], { environment: {} });
+  assert.equal(refused.exit, 1);
+  assert.match(refused.stdout, /does not select the verified gate/u);
+  assert.equal(existsSync(marker), false);
 });
 
-test("a blocked deliver names the verified snapshot and the accepting review lands it", async () => {
-  const { raw, id, worktree } = await bindCandidate("printf 'verified-output\\n'", ["reviewed", "verified"]);
-
-  const blocked = (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value;
-  assert.equal(blocked.kind, "accepted");
-  if (blocked.kind !== "accepted") throw new Error("blocked deliver was not accepted");
-  const blockedText = renderAccepted(blocked, { columns: 200, color: false });
-  const standalone = /^  integration result  ([0-9a-f]+) · verification satisfied$/mu.exec(blockedText);
-  assert.ok(standalone, blockedText);
-  assert.doesNotMatch(blockedText, /verification reused/u, "a fresh run carries no qualifier");
-  assert.equal((blockedText.match(/integration result/gu) ?? []).length, 1, "no second row repeats the subject");
-
-  const reviewed = (await cliJson<import("../src/index.js").ReviewOutcome>(
-    ["-C", raw.path, "review", id, "--satisfied", "--summary", "accepted"],
-    { environment: {} },
-  )).value;
-  assert.equal(reviewed.kind, "accepted");
-  if (reviewed.kind !== "accepted") throw new Error("review was not accepted");
-  const reviewedText = renderAccepted(reviewed, { columns: 200, color: false });
-  const placed = /^  integration result  ([0-9a-f]+) · verification reused satisfied$/mu.exec(reviewedText);
-  assert.ok(placed, reviewedText);
-  assert.equal(placed[1], standalone[1], "the landing names the id the verdict covered");
-  assert.ok(
-    reviewedText.split("\n").includes(`  changes  1 file · ${renderDiffstat({ added: 1, removed: 0 })}`),
-    "the acceptance names the landed diff's shape",
-  );
-  assert.ok(reviewedText.endsWith(`  worktree  ${basename(worktree)} retired`), reviewedText);
+test("verify captures dirty bytes only with explicit authorization and streams per-check progress", async () => {
+  const { raw, id, worktree, repository } = await bindCandidate(["cat candidate.txt; grep -q dirty candidate.txt"]);
+  writeFileSync(resolve(worktree, "candidate.txt"), "dirty\n");
+  const refused = await runCli(["-C", worktree, "verify"], { environment: {} });
+  assert.equal(refused.exit, 1);
+  assert.match(refused.stdout, /--include-dirty/u);
+  const index = raw.run(["-C", worktree, "ls-files", "--stage"]);
+  const result = await runCli(["-C", worktree, "verify", "--include-dirty"], { environment: {} });
+  assert.equal(result.exit, 0, result.stderr);
+  assert.match(result.stdout, /check 1\s+executed/u);
+  assert.match(result.stderr, /dirty/u);
+  assert.match(result.stderr, /declaration 1\/1 · snapshot [0-9a-f]+ · verification:sha256:/u);
+  assert.equal(raw.run(["-C", worktree, "ls-files", "--stage"]), index);
+  assert.equal((await observeContract(repository, id)).state?.delivery, null);
 });
 
-test("a deliver that accepts names the landed diff's shape", async () => {
-  const { result } = await bindAndDeliver("printf 'verified-output\\n'");
-  assert.equal(result.kind, "accepted");
-  if (result.kind !== "accepted") throw new Error("deliver was not accepted");
-  const text = renderAccepted(result, { columns: 200, color: false });
-  assert.ok(text.split("\n").includes(`  changes  1 file · ${renderDiffstat({ added: 1, removed: 0 })}`));
-  assert.equal((text.match(/^  changes /gmu) ?? []).length, 1, "one bounded changes row");
-});
-
-test("review refreshes a moved target before an old failed verification blocks placement", async () => {
-  const { raw, id, worktree } = await bindCandidate("test -f target-ready", ["reviewed", "verified"]);
-  await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} });
-  const repository = await repositoryAt(raw.path);
-  const before = (await observeContract(repository, id)).state!;
-  assert.equal(before.attestations.at(-1)?.data.verdict, "unsatisfied");
-  const unchanged = await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
-  assert.equal(unchanged.exit, 0);
-  assert.equal((await observeContract(repository, id)).state?.terminal, null);
-  writeFileSync(resolve(raw.path, "target-ready"), "ready");
-  raw.run(["add", "target-ready"]);
-  raw.run(["commit", "--quiet", "-m", "target now supplies prerequisite"]);
-  assert.equal(raw.run(["-C", worktree, "ls-files", "target-ready"]), "", "candidate is not manually rebased");
-  const reviewed = await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
-  assert.equal(reviewed.exit, 0);
-  const after = (await observeContract(repository, id)).state!;
-  assert.equal(after.terminal?.kind, "claimed");
-  assert.equal(after.delivery?.entry, before.delivery?.entry, "no replacement delivery required");
-  assert.equal(after.currentIntegration?.changeId, before.currentIntegration?.changeId);
-  assert.notEqual(after.currentIntegration?.snapshot, before.currentIntegration?.snapshot);
-  assert.equal(after.attestations.at(-1)?.data.verdict, "satisfied");
-});
-
-test("redelivery reuses a recorded integration and Verification while preserving each note", async (t) => {
-  const external = mkdtempSync(resolve(tmpdir(), "integration-reuse-"));
-  t.after(() => rmSync(external, { recursive: true, force: true }));
+test("delivery, review and preview consume standing requirement evidence without executing checks", async (t) => {
+  const external = temporaryDirectory(t, "cli-verify-standing-");
   const runs = resolve(external, "runs");
-  const script = `echo run >> '${runs}'`;
-  const { raw, id, worktree } = await bindCandidate(script, ["reviewed", "verified"]);
-  const contract = Keiyaku.with().select({ repo: await Repo.at({ path: raw.path }), id });
-  const first = accepted(await contract.deliver({ message: "first delivery" }));
-  const snapshot = first.value.integration.snapshot;
-  assert.equal(first.value.verification?.kind, "ran");
-  assert.equal(readFileSync(runs, "utf8"), "run\n");
-
-  writeFileSync(resolve(worktree, "candidate.txt"), "changed\n");
-  raw.run(["-C", worktree, "add", "candidate.txt"]);
-  raw.run(["-C", worktree, "commit", "--quiet", "-m", "changed"]);
-  raw.run(["-C", worktree, "revert", "--no-edit", "HEAD"]);
-  const second = accepted(await contract.deliver({ message: "second delivery" }));
-  assert.notEqual(second.value.tenderSnapshot, first.value.tenderSnapshot);
-  assert.equal(second.value.integration.snapshot, snapshot);
-  assert.equal(second.value.leading.reusedIntegration, snapshot);
-  assert.equal(second.value.verification?.kind, "reused");
-  assert.equal(readFileSync(runs, "utf8"), "run\n", "reused satisfaction never executes declarations");
-  assert.equal(second.value.note, "second delivery");
-  assert.equal(JSON.parse(JSON.stringify(second.value)).note, "second delivery");
-  const deliveries = (await observeContract(await repositoryAt(raw.path), id)).entries.filter((entry) => entry.kind === "deliver");
-  assert.deepEqual(deliveries.map((entry) => entry.data.note), ["first delivery", "second delivery"]);
-  assert.equal(raw.run(["show", "-s", "--format=%s", snapshot]).trim(), "first delivery");
-  const text = renderAccepted(second, { columns: 200, color: false });
-  assert.match(text, /second delivery/u);
-  assert.match(text, /integration\s+[0-9a-f]+ reused · commit message kept from first delivery/u);
-
-  writeFileSync(resolve(worktree, "candidate.txt"), "different tree\n");
-  raw.run(["-C", worktree, "add", "candidate.txt"]);
-  raw.run(["-C", worktree, "commit", "--quiet", "-m", "different tree"]);
-  const changed = accepted(await contract.deliver());
-  assert.notEqual(changed.value.integration.snapshot, snapshot);
-  assert.equal(changed.value.verification?.kind, "ran");
-  assert.equal(readFileSync(runs, "utf8"), "run\nrun\n");
-
-  raw.run(["-C", worktree, "revert", "--no-edit", "HEAD"]);
-  const restored = accepted(await contract.deliver());
-  assert.equal(restored.value.integration.snapshot, snapshot, "lookup reaches earlier, non-current integrations");
-  assert.equal(restored.value.verification?.kind, "reused");
-  assert.equal(readFileSync(runs, "utf8"), "run\nrun\n");
-
-  raw.run(["commit", "--allow-empty", "--quiet", "-m", "move target without changing tree"]);
-  const moved = accepted(await contract.deliver());
-  assert.equal(moved.value.verification?.kind, "ran");
-  if (moved.value.verification?.kind !== "ran") throw new Error("moved target was not verified");
-  const movedSnapshot = moved.value.verification.snapshot;
-  assert.notEqual(movedSnapshot, snapshot);
-  assert.equal((await observeContract(await repositoryAt(raw.path), id)).state?.currentIntegration?.snapshot, movedSnapshot);
-  assert.equal(readFileSync(runs, "utf8"), "run\nrun\nrun\n");
-
-  accepted(await contract.amend({ markdown: markdown(`${script}\ntrue`) }));
-  const amended = accepted(await contract.deliver());
-  assert.equal(amended.value.verification?.kind, "ran", "a new declaration cannot reuse old testimony");
-  if (amended.value.verification?.kind !== "ran") throw new Error("amended declaration was not verified");
-  assert.equal(amended.value.verification.snapshot, movedSnapshot);
-  assert.equal(readFileSync(runs, "utf8"), "run\nrun\nrun\nrun\n");
-});
-
-test("unchanged delivery retries failure once and reuses later satisfaction", async (t) => {
-  const external = mkdtempSync(resolve(tmpdir(), "verification-retry-"));
-  t.after(() => rmSync(external, { recursive: true, force: true }));
-  const runs = resolve(external, "runs");
-  const ready = resolve(external, "ready");
-  const { raw, id, worktree } = await bindCandidate(
-    `echo run >> '${runs}'\ntest -f '${ready}'`,
+  const { raw, id, repository } = await bindCandidate(
+    [`echo run >> '${runs}'; exit 1`, "true"],
     ["reviewed", "verified"],
   );
-  const head = raw.run(["-C", worktree, "rev-parse", "HEAD"]);
-  const deliver = async () => {
-    const result = (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value;
-    assert.equal(result.kind, "accepted");
-    return result;
-  };
-  const repository = await repositoryAt(raw.path);
-  await deliver();
-  assert.equal(readFileSync(runs, "utf8"), "run\n");
-  assert.equal((await observeContract(repository, id)).state?.terminal, null);
-  await deliver();
-  assert.equal(readFileSync(runs, "utf8"), "run\nrun\n", "one retry per invocation, never a loop");
-  assert.equal((await observeContract(repository, id)).state?.terminal, null);
-  writeFileSync(ready, "ready");
-  const recovered = await deliver();
-  assert.equal(readFileSync(runs, "utf8"), "run\nrun\nrun\n");
-  assert.ok(recovered.kind === "accepted" && recovered.facts.some(
-    (fact) => fact.kind === "attestation" && fact.data.verdict === "satisfied",
-  ));
-  await deliver();
-  assert.equal(readFileSync(runs, "utf8"), "run\nrun\nrun\n", "satisfaction skips execution");
-  assert.equal(raw.run(["-C", worktree, "rev-parse", "HEAD"]), head, "retry never changes the work");
-  const reviewed = await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
-  assert.equal(reviewed.exit, 0);
-  assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
-});
-
-test("failed retention without residue renders its reason without a kept path", () => {
-  const diagnostic = "failed Verification scratch could not be retained:\nmove denied";
-  const issue = executionCleanupSchema.parse({
-    kind: "worktree-leak",
-    contractId: "kei/retention-no-residue",
-    leak: { diagnostic },
-  });
-  assert.deepEqual(executionCleanupLines([issue], 200), [
-    "  verification scratch not retained",
-    "  reason",
-    "  failed Verification scratch could not be retained:",
-    "  move denied",
-    "",
-  ]);
-});
-
-test("failed verification keeps its scene until replacement or terminal cleanup", async (t) => {
-  const external = mkdtempSync(resolve(tmpdir(), "verification-scene-"));
-  t.after(() => rmSync(external, { recursive: true, force: true }));
-  const ready = resolve(external, "ready");
-  const script = `test ! -e scene.log || exit 8\nprintf 'failure scene\\n' > scene.log\ntest -f '${ready}'`;
-  const { raw, id } = await bindCandidate(script, ["reviewed", "verified"]);
-  const repo = await Repo.at({ path: raw.path });
-  const native = Keiyaku.with().select({ repo, id });
-  const first = accepted(await native.deliver());
-  const retained = first.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
-  assert.ok(retained?.kind === "cleanup" && retained.issue.kind === "worktree-leak");
-  const scratch = retained.issue.leak.path;
-  assert.ok(scratch);
-  assert.equal(readFileSync(resolve(scratch, "scene.log"), "utf8"), "failure scene\n");
-  assert.match(renderAccepted(first, { columns: 400, color: false }), /verification scratch kept at/u);
-  assert.ok(renderAccepted(first, { columns: 400, color: false }).includes(scratch));
-  assert.equal(first.value.verification?.kind, "ran");
-  assert.ok(first.value.verification?.kind === "ran" && first.value.verification.verdict === "unsatisfied");
-  await Keiyaku.with().reconcile({ repo, contract: id });
-  assert.equal(existsSync(scratch), true, "active reconciliation preserves the scene");
-
-  const second = accepted(await native.previewDelivery());
-  assert.ok(second.value.verification.kind === "recorded" && second.value.verification.verdict === "unsatisfied");
-  assert.doesNotMatch(second.value.verification.summary ?? "", /exit 8/u, "preview preserves existing evidence");
-  assert.equal(raw.run(["worktree", "list", "--porcelain"]).split(scratch).length - 1, 1);
-  writeFileSync(ready, "ready");
-  const successful = accepted(await native.deliver());
-  assert.ok(successful.value.verification?.kind === "ran" && successful.value.verification.verdict === "satisfied");
-  assert.equal(existsSync(scratch), true, "satisfaction preserves the retained scene until acceptance");
-  accepted(await native.review({ verdict: "satisfied", summary: "fixture acceptance" }));
-  assert.equal(existsSync(scratch), false);
-
-  rmSync(ready);
-  const abandoning = await bindCandidate(script);
-  const abandonedRepo = await Repo.at({ path: abandoning.raw.path });
-  const abandonedNative = Keiyaku.with().select({ repo: abandonedRepo, id: abandoning.id });
-  const failed = accepted(await abandonedNative.deliver());
-  const scene = failed.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
-  assert.ok(scene?.kind === "cleanup" && scene.issue.kind === "worktree-leak" && scene.issue.leak.path);
-  assert.equal(existsSync(scene.issue.leak.path), true);
-  accepted(await abandonedNative.abandon());
-  assert.equal(existsSync(scene.issue.leak.path), false, "abandonment removes the scene");
-
-  const claiming = await bindCandidate(script);
-  const claimRepo = await Repo.at({ path: claiming.raw.path });
-  const claimNative = Keiyaku.with().select({ repo: claimRepo, id: claiming.id });
-  const pending = accepted(await claimNative.deliver());
-  const claimScene = pending.effects.find((effect) => effect.kind === "cleanup" && effect.issue.kind === "worktree-leak");
-  assert.ok(claimScene?.kind === "cleanup" && claimScene.issue.kind === "worktree-leak" && claimScene.issue.leak.path);
-  accepted(await claimNative.amend({ gates: [] }));
-  accepted(await claimNative.deliver());
-  assert.equal(existsSync(claimScene.issue.leak.path), false, "acceptance removes a retained scene without another run");
-});
-
-test("dry-run observes a recorded failure without rerunning or admitting testimony", async (t) => {
-  const external = mkdtempSync(resolve(tmpdir(), "preview-failure-"));
-  t.after(() => rmSync(external, { recursive: true, force: true }));
-  const runs = resolve(external, "runs");
-  const { raw, id } = await bindAndDeliver(`echo run >> '${runs}'\nfalse`);
-  const repository = await repositoryAt(raw.path);
-  const before = (await observeContract(repository, id)).state!;
-  for (let index = 0; index < 2; index += 1) {
-    const result = accepted((await cliJson<DeliveryPreviewOutcome>(
-      ["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} },
-    )).value);
-    assert.deepEqual(result.facts, []);
-    assert.deepEqual(result.effects, []);
-    assert.deepEqual(result.pending, []);
-    assert.equal(result.head, before.head);
-    assert.ok(result.value.verification.kind === "recorded" && result.value.verification.verdict === "unsatisfied");
-    assert.ok(result.value.candidate.kind === "ready");
-    assert.ok(result.value.candidate.requirements.gates.some(
-      (gate) => gate.gate === "verified" && gate.current.kind === "attested" && gate.current.verdict === "unsatisfied",
-    ));
-  }
-  assert.equal(readFileSync(runs, "utf8"), "run\n", "only real delivery executed Verification");
-  assert.equal((await observeContract(repository, id)).state?.head, before.head);
-});
-
-test("concurrent previews report missing evidence without executing Verification", async (t) => {
-  const external = mkdtempSync(resolve(tmpdir(), "preview-concurrent-"));
-  t.after(() => rmSync(external, { recursive: true, force: true }));
-  const marker = resolve(external, "ran");
-  const { raw, id } = await bindCandidate(`touch '${marker}'`);
-  const native = Keiyaku.with().select({ repo: await Repo.at({ path: raw.path }), id });
-  const [first, second] = await Promise.all([native.previewDelivery(), native.previewDelivery()]);
-  for (const result of [accepted(first), accepted(second)]) {
-    assert.deepEqual(result.facts, []);
-    assert.deepEqual(result.value.verification, { kind: "required" });
-    assert.equal(result.value.target.kind, "placeable");
-  }
-  assert.equal(existsSync(marker), false);
-  assert.deepEqual((await observeContract(await repositoryAt(raw.path), id)).state?.attestations, []);
-});
-
-test("dry-run reports matching satisfaction and stale evidence after candidate change", async (t) => {
-  const external = mkdtempSync(resolve(tmpdir(), "preview-currentness-"));
-  t.after(() => rmSync(external, { recursive: true, force: true }));
-  const runs = resolve(external, "runs");
-  const { raw, id } = await bindAndDeliver(`echo run >> '${runs}'`, ["reviewed", "verified"]);
-  const repository = await repositoryAt(raw.path);
-  const state = (await observeContract(repository, id)).state!;
-  const first = accepted((await cliJson<DeliveryPreviewOutcome>(
-    ["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} },
-  )).value);
-  assert.ok(first.value.verification.kind === "recorded" && first.value.verification.verdict === "satisfied");
-  const worktree = await appointedWorktreePath(repository, id);
-  writeFileSync(resolve(worktree, "candidate.txt"), "changed\n");
-  raw.run(["-C", worktree, "add", "candidate.txt"]);
-  raw.run(["-C", worktree, "commit", "--quiet", "-m", "changed"]);
-  const second = accepted((await cliJson<DeliveryPreviewOutcome>(
-    ["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} },
-  )).value);
-  assert.deepEqual(second.value.verification, { kind: "required" });
-  assert.ok(second.value.candidate.kind === "ready");
-  assert.ok(second.value.candidate.requirements.gates.some(
-    (gate) => gate.gate === "verified" && gate.current.kind === "stale",
-  ));
-  assert.deepEqual(second.facts, []);
-  assert.equal(readFileSync(runs, "utf8"), "run\n");
-  assert.equal((await observeContract(repository, id)).state?.head, state.head);
-});
-
-test("closing or failing CLI progress output does not cancel the operation", async (t) => {
-  for (const failure of [undefined, new Error("output failed")]) {
-    await t.test(failure === undefined ? "closed" : "failed", async () => {
-      const { promise: completion, resolve: complete } = promiseBarrier<string>();
-      const { raw, id } = await bindCandidate("printf 'callback output\n'", ["reviewed", "verified"]);
-      const native = Keiyaku.with().select({ repo: await Repo.at({ path: raw.path }), id });
-      const stream = new Writable({
-        highWaterMark: 1,
-        write(_chunk, _encoding, callback) {
-          callback();
-          void setImmediate().then(() => this.destroy(failure));
-        },
-      });
-      const progress = await writeExecutionProgress(stream);
-      const pending = native.deliver({}, { observe: (event: ExecutionObservation) => {
-        progress.observe(event);
-        return completion.then(() => undefined);
-      } });
-      try {
-        const result = accepted(await pending);
-        assert.ok(result.facts.some((fact) => fact.kind === "deliver"));
-        await assert.rejects(progress.finish(), failure ?? { code: "ERR_STREAM_PREMATURE_CLOSE" });
-      } finally {
-        complete("complete");
-        stream.destroy();
-      }
-    });
-  }
+  const verified = accepted((await cliJson<VerifyOutcome>(["-C", raw.path, "verify", id], { environment: {} })).value);
+  const beforeRuns = readFileSync(runs, "utf8");
+  const delivered = accepted(
+    (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value,
+  );
+  assert.equal(delivered.value.completion, undefined);
+  const preview = accepted(
+    (await cliJson<DeliveryPreviewOutcome>(["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} })).value,
+  );
+  assert.equal(preview.value.verification.kind, "requirements");
+  if (preview.value.verification.kind !== "requirements") throw new Error("missing requirement observation");
+  assert.deepEqual(
+    preview.value.verification.requirements.map((report) => report.index),
+    [1, 2],
+  );
+  assert.deepEqual(
+    preview.value.verification.requirements.map((report) =>
+      report.current.kind === "attested" ? report.current.verdict : report.current.kind,
+    ),
+    ["unsatisfied", "satisfied"],
+  );
+  const previewText = renderAccepted(preview, { columns: 400, color: false });
+  assert.match(previewText, /verification 1\s+recorded unsatisfied/u);
+  assert.match(previewText, /verification 2\s+recorded satisfied/u);
+  assert.deepEqual(preview.facts, []);
+  await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
+  assert.equal(readFileSync(runs, "utf8"), beforeRuns);
+  const after = (await observeContract(repository, id)).state!;
+  assert.equal(after.terminal, null);
+  assert.equal(
+    after.attestations.filter((entry) => entry.data.gate === "verified").length,
+    verified.value.checks.length,
+  );
 });

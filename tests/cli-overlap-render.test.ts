@@ -21,6 +21,7 @@ const bindFact: Extract<Fact, { kind: "bind" }> = {
       document: { bytes: "", key: documentKey("overlap-render") },
       segments: [],
       gates: [],
+      requirements: {},
       after: [],
     },
   },

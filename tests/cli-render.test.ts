@@ -13,6 +13,7 @@ import {
   type DependencyKeySet,
   entryUlid,
   gate,
+  requirementId,
   snapshotId,
   type ContractId,
 } from "../src/core/facts/types.js";
@@ -86,9 +87,21 @@ import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 
 test("canceled outcomes render as canceled in CLI history and snapshots", () => {
-  const row: OutcomeRow = { kind: "outcome", sequence: 2, turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT, outcome: { kind: "canceled", historyId: "turn/1" } };
-  assert.equal(nativeHistoryText({ kind: "exact", id: parseAkuId("aku/claude/1234abcd").id, contract: { kind: "none" }, outcome: row }, { id: "turn/1" }, DEFAULT_CONTEXT), "canceled");
+  const row: OutcomeRow = {
+    kind: "outcome",
+    sequence: 2,
+    turnSequence: 1,
+    at: AKUMA_ACTIVITY_AT,
+    outcome: { kind: "canceled", historyId: "turn/1" },
+  };
+  assert.equal(
+    nativeHistoryText(
+      { kind: "exact", id: parseAkuId("aku/claude/1234abcd").id, contract: { kind: "none" }, outcome: row },
+      { id: "turn/1" },
+      DEFAULT_CONTEXT,
+    ),
+    "canceled",
+  );
   assert.match(snapshotActivityLines(idleAkumaSnapshot([], row), DEFAULT_CONTEXT).join("\n"), /canceled/u);
 });
 
@@ -104,7 +117,13 @@ function bindFact(contract: ContractId): Extract<JournalEntry, { kind: "bind" }>
     kind: "bind",
     data: {
       coordinates: { start: snapshotId("start"), workspace: "worktree" },
-      terms: { document: { bytes: "# Bound\n", key: documentKey("bound") }, segments: [], gates: [], after: [] },
+      terms: {
+        document: { bytes: "# Bound\n", key: documentKey("bound") },
+        segments: [],
+        gates: [],
+        requirements: {},
+        after: [],
+      },
     },
   };
 }
@@ -213,7 +232,12 @@ function reviewAttestationFact(
     contract,
     entry: fixtureEntry,
     kind: "attestation",
-    data: { gate: gate("reviewed"), subject: "[]" as DependencyKeySet, verdict },
+    data: {
+      gate: gate("reviewed"),
+      requirement: requirementId("gate:reviewed"),
+      subject: "[]" as DependencyKeySet,
+      verdict,
+    },
   };
 }
 
@@ -400,7 +424,7 @@ test("the progress strip renders the road to claim from current-candidate chips"
   );
 });
 
-test("skeleton history fuses beats and keeps evidence out of the row grammar", () => {
+test("skeleton history keeps individual requirements and their snapshot identities", () => {
   const watch = contractId("kei/history-test");
   const start = snapshotId("a".repeat(40));
   const candidateA = snapshotId("b".repeat(40));
@@ -425,6 +449,7 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
   });
   const verification = (snapshot: string, verdict: "satisfied" | "unsatisfied"): unknown => ({
     gate: "verified",
+    requirement: "verification:sha256:original-check",
     subject: JSON.stringify([["snapshot", snapshot]]),
     verdict,
     summary: `verification ${verdict}\nsecond line`,
@@ -449,6 +474,7 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
     journal("attestation", "2026-09-28T16:19:00.000Z", verification(integrationB, "satisfied")),
     journal("attestation", "2026-09-28T16:38:00.000Z", {
       gate: "reviewed",
+      requirement: "gate:reviewed",
       subject: JSON.stringify([["snapshot", integrationB]]),
       verdict: "satisfied",
       summary: "review summary",
@@ -469,14 +495,16 @@ test("skeleton history fuses beats and keeps evidence out of the row grammar", (
   assert.doesNotMatch(text, /journal/u);
   assert.equal((text.match(/^\d{4}-\d{2}-\d{2}$/gmu) ?? []).length, 2, "one bare day divider per day");
   assert.match(text, /^15:18 bound to main @ aaaaaaa · gates review · verification · aku\/intern\/33dd4670$/mu);
-  assert.match(text, /^16:00 delivered bbbbbbb · × verification · \d+ lines$/mu, "a denied fused deliver beat");
+  assert.match(text, /^16:00 delivered bbbbbbb · \d+ lines$/mu);
+  assert.match(text, /^16:01 × verification verification:sha256:original-check · snapshot ccccccc · \d+ lines$/mu);
   assert.match(text, /^16:11 amended · gates$/mu, "amend names its facets");
-  assert.match(text, /^16:18 delivered ddddddd · ✓ verification · \d+ lines$/mu, "a satisfied fused deliver beat");
-  assert.match(text, /^16:38 ✓ review · \d+ lines$/mu, "a mark-first review beat");
+  assert.match(text, /^16:18 delivered ddddddd · \d+ lines$/mu);
+  assert.match(text, /^16:19 ✓ verification verification:sha256:original-check · snapshot eeeeeee · \d+ lines$/mu);
+  assert.match(text, /^16:38 ✓ review · snapshot eeeeeee · \d+ lines$/mu, "a mark-first review beat");
   assert.match(
     text,
-    /^16:38 integrated eeeeeee\.\.fffffff · ✓ verification · \d+ lines$/mu,
-    "a fused reintegration beat",
+    /^16:38 integrated eeeeeee\.\.fffffff · \d+ lines$/mu,
+    "reintegration stays separate from each check's evidence",
   );
   assert.match(text, /^09:00 arc Chapter One · 2 lines$/mu, "the chapter title is visible with its body folded");
   assert.match(text, /^09:30 accepted$/mu);
@@ -895,10 +923,41 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
     gates: {
       satisfied: false,
       reports: [
-        { gate: "reviewed", current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" } },
-        { gate: "verified", current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" } },
-        { gate: "security", current: { kind: "stale", priorVerdict: "satisfied" } },
-        { gate: "manual", current: { kind: "missing" } },
+        {
+          gate: "reviewed",
+          satisfied: true,
+          requirements: [
+            {
+              requirement: "gate:reviewed",
+              current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+            },
+          ],
+          current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+        },
+        {
+          gate: "verified",
+          satisfied: false,
+          requirements: [
+            {
+              requirement: "check-one",
+              index: 1,
+              current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" },
+            },
+          ],
+          current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" },
+        },
+        {
+          gate: "security",
+          satisfied: false,
+          requirements: [{ requirement: "gate:security", current: { kind: "stale", priorVerdict: "satisfied" } }],
+          current: { kind: "stale", priorVerdict: "satisfied" },
+        },
+        {
+          gate: "manual",
+          satisfied: false,
+          requirements: [{ requirement: "gate:manual", current: { kind: "missing" } }],
+          current: { kind: "missing" },
+        },
       ],
     },
     after: [
@@ -927,7 +986,6 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       {
         ...row,
         phase: "bound",
-        verification: { kind: "unrecorded" },
         delivery: {
           tenderSnapshot: snap,
           integration: { predecessor: snap, snapshot: snap, changeId: changeId("chg-selected-contract") },
@@ -994,10 +1052,19 @@ test("Contract catalogue testimony keeps source quotes and body-aligned bounded 
       abandonNote: summary,
       gates: {
         satisfied: true,
-        reports: [{
-          gate: "reviewed",
-          current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary },
-        }],
+        reports: [
+          {
+            gate: "reviewed",
+            satisfied: true,
+            requirements: [
+              {
+                requirement: "gate:reviewed",
+                current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary },
+              },
+            ],
+            current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary },
+          },
+        ],
       },
     });
     const text = renderContractCatalogue(contractCatalog([row]));
@@ -1005,8 +1072,7 @@ test("Contract catalogue testimony keeps source quotes and body-aligned bounded 
     const lead = `  ${phase === "claimed" ? "review" : "note"}  `;
     assert.equal(payload.length, 3);
     assert.ok(payload[0]!.startsWith(`${lead}“Source,” she said. x`));
-    for (const continuation of payload.slice(1))
-      assert.ok(continuation.startsWith(`${" ".repeat(lead.length)}x`));
+    for (const continuation of payload.slice(1)) assert.ok(continuation.startsWith(`${" ".repeat(lead.length)}x`));
     assert.ok(payload.at(-1)!.endsWith("…"));
   }
 });
@@ -1021,7 +1087,17 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     disposition: "active" as const,
     worktreePath: "/tmp/wt",
     delivery: null,
-    gates: { satisfied: false, reports: [{ gate: "reviewed", current: { kind: "missing" as const } }] },
+    gates: {
+      satisfied: false,
+      reports: [
+        {
+          gate: "reviewed",
+          satisfied: false,
+          requirements: [{ requirement: "gate:reviewed", current: { kind: "missing" as const } }],
+          current: { kind: "missing" as const },
+        },
+      ],
+    },
   };
   const delivery = {
     tenderSnapshot: tender,
@@ -1049,7 +1125,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     );
   const bound = show(base);
   assert.match(bound, /⧗ bound · 5s/u);
-  assert.doesNotMatch(bound, /○ review/u, "a gate without evidence stays off the card; the requirement strip names it");
+  assert.match(bound, /○ review · missing/u);
   assert.match(bound, /\[ \] delivery  \[ \] review/u);
   assert.doesNotMatch(bound, /awaiting delivery/u);
   assert.match(bound, /worktree  \/tmp\/wt/u);
@@ -1068,6 +1144,18 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
       reports: [
         {
           gate: "reviewed",
+          satisfied: false,
+          requirements: [
+            {
+              requirement: "gate:reviewed",
+              current: {
+                kind: "attested",
+                verdict: "unsatisfied",
+                at: "2026-08-12T00:00:00.000Z",
+                summary: "Fix missing coverage",
+              },
+            },
+          ],
           current: {
             kind: "attested",
             verdict: "unsatisfied",
@@ -1088,7 +1176,14 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
     delivery,
     gates: {
       satisfied: false,
-      reports: [{ gate: "reviewed", current: { kind: "stale", priorVerdict: "satisfied" } }],
+      reports: [
+        {
+          gate: "reviewed",
+          satisfied: false,
+          requirements: [{ requirement: "gate:reviewed", current: { kind: "stale", priorVerdict: "satisfied" } }],
+          current: { kind: "stale", priorVerdict: "satisfied" },
+        },
+      ],
     },
   });
   assert.match(stale, /\[✓\] delivery  \[ \] review/u, "a superseded review does not fill the chip");
@@ -1123,6 +1218,13 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
       reports: [
         {
           gate: "reviewed",
+          satisfied: true,
+          requirements: [
+            {
+              requirement: "gate:reviewed",
+              current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary: long },
+            },
+          ],
           current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", summary: long },
         },
       ],
@@ -1155,24 +1257,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.doesNotMatch(world, /candidate|predecessor|method|content identity|behind/u);
 });
 
-const catalogRow = (verification?: ContractRow["verification"]): ContractRow =>
-  contractRow(verification === undefined ? {} : { verification });
-
-test("recorded verification names the snapshot the verdict covers", () => {
-  const integration = snapshotId("4".repeat(40));
-  const catalog = contractCatalog([
-    catalogRow({ kind: "recorded", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z", snapshot: integration }),
-  ]);
-  assert.match(renderContractCatalogue(catalog), /✓ accepted/u);
-  assert.doesNotMatch(renderContractCatalogue(catalog), /verification|snapshot 4444444/u);
-
-  const bare = renderContractCatalogue({
-    ...catalog,
-    rows: [catalogRow({ kind: "recorded", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" })],
-  });
-  assert.match(bare, /✓ accepted/u);
-  assert.doesNotMatch(bare, /verification|snapshot/u);
-});
+const catalogRow = (): ContractRow => contractRow();
 
 test("every verb receipt states facts without journal rows or entry ids", () => {
   const contract = contractId("kei/receipt-vocabulary");
@@ -1262,25 +1347,34 @@ test("verb receipts expose scratch residue while retained workspace remains type
   }
 });
 
-test("preview verification summary names declarations without changing raw evidence", () => {
-  const summary = "[1 bash exit 1]";
+test("preview keeps each requirement's verdict and summary without parsing output", () => {
+  const summary = "check output [1 bash exit 1]";
   const result = acceptedPreview(
     { contract: contractId("kei/missing") },
     {
       candidate: { kind: "blocked", refusal: { kind: "worktree-missing", contractId: contractId("kei/missing") } },
       verification: {
-        kind: "recorded",
-        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
-        verdict: "unsatisfied",
-        summary,
+        kind: "requirements",
+        requirements: [
+          {
+            requirement: requirementId("historical-check"),
+            index: 2,
+            current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z", summary },
+          },
+        ],
       },
       target: { kind: "not-observed" },
     },
   );
-  assert.match(renderAccepted(result), /declaration 1 · bash exit 1/u);
-  assert.doesNotMatch(renderAccepted(result), /\[1 bash exit 1\]/u);
+  assert.match(renderAccepted(result), /verification 2\s+recorded unsatisfied/u);
+  assert.ok(renderAccepted(result).includes(summary));
   const verification = result.value.verification;
-  assert.equal(verification?.kind === "recorded" ? verification.summary : undefined, summary);
+  assert.equal(
+    verification.kind === "requirements" && verification.requirements[0]?.current.kind === "attested"
+      ? verification.requirements[0].current.summary
+      : undefined,
+    summary,
+  );
 });
 
 test("refusals use reason and option for missing contract and nuke confirmation", () => {
@@ -1379,7 +1473,6 @@ test("preview declares Verification once and names target lag from its typed rep
       delivery: {
         changeId: changeId("0".repeat(40)),
         relation: "identical" as const,
-        verification: { kind: "undeclared" as const },
       },
       verification: { kind: "undeclared" as const },
       target: { kind: "placeable" as const, ref: "refs/heads/main", head, checkouts: [] },
@@ -1556,30 +1649,33 @@ test("world reconcile failure renders its diagnostic", () => {
 
 test("Verification create action names are safe in text receipts", () => {
   const name = "prepare\nINJECT\u001b[31m";
-  const result = acceptedDeliver(
-    { contract: contractId("kei/hostile-create-name") },
-    {
-      ...deliveryIdentity(),
-      verification: {
-        kind: "stopped",
-        stop: {
-          failure: "environment-failure",
-          name,
-          detail: { kind: "exit", code: 17, stdout: "", stderr: "", truncated: false },
+  const result = acceptedReceipt({
+    operation: "verify",
+    contract: contractId("kei/hostile-create-name"),
+    value: {
+      snapshot: snapshotId("snapshot"),
+      checks: [
+        {
+          kind: "stopped",
+          index: 1,
+          requirement: "check-one",
+          snapshot: snapshotId("snapshot"),
+          stop: {
+            failure: "environment-failure",
+            name,
+            detail: { kind: "exit", code: 17, stdout: "", stderr: "", truncated: false },
+          },
         },
-      },
+      ],
     },
-  );
+  });
 
   const text = renderAccepted(result, { columns: 200, color: false });
   assert.equal(text.includes('name "prepare\\nINJECT\\u001b[31m"'), true);
   assert.doesNotMatch(text, /\nINJECT/u);
   assert.doesNotMatch(text, /\u001b/u);
-  const verification = result.value.verification;
-  assert.equal(
-    verification?.kind === "stopped" && "name" in verification.stop ? verification.stop.name : undefined,
-    name,
-  );
+  const check = result.value.checks[0];
+  assert.equal(check?.kind === "stopped" && "name" in check.stop ? check.stop.name : undefined, name);
 });
 
 test("Verification cleanup action names are safe in text receipts", () => {
@@ -1844,26 +1940,47 @@ function attestedUnsatisfied(summary?: string): GateReport["current"] {
 function blockedText(slug: string, unmet: readonly GateReport[]) {
   const contract = contractId(slug);
   return deliverText(contract, {
+    gates: unmet,
     placement: { refusal: { kind: "gates-unsatisfied", contractId: contract, target: "refs/heads/main", unmet } },
   });
 }
 
 test("a gates-refused placement names the target's non-movement and lets recorded verdicts alarm", () => {
   const text = blockedText("kei/blocked-review", [
-    { gate: gate("verified"), current: attestedUnsatisfied("[1 bash exit 1]") },
-    { gate: gate("reviewed"), current: { kind: "stale", priorVerdict: "satisfied" } },
-    { gate: gate("manual"), current: { kind: "missing" } },
+    {
+      gate: gate("verified"),
+      current: attestedUnsatisfied("[1 bash exit 1]"),
+      satisfied: false,
+      requirements: [{ requirement: requirementId("check-one"), current: attestedUnsatisfied("[1 bash exit 1]") }],
+    },
+    {
+      gate: gate("reviewed"),
+      current: { kind: "stale", priorVerdict: "satisfied" },
+      satisfied: false,
+      requirements: [
+        { requirement: requirementId("gate:reviewed"), current: { kind: "stale", priorVerdict: "satisfied" } },
+      ],
+    },
+    {
+      gate: gate("manual"),
+      current: { kind: "missing" },
+      satisfied: false,
+      requirements: [{ requirement: requirementId("gate:manual"), current: { kind: "missing" } }],
+    },
   ]);
   assert.equal(
     text,
     [
       "✓ delivered  kei/blocked-review",
       "  candidate  tender · kept",
-      "  target  refs/heads/main  · unchanged",
-      "! verification  · unsatisfied  · at 2026-08-01T00:00:00.000Z",
+      "  integration result  integration",
+      "× verification check-one  recorded unsatisfied · at 2026-08-01T00:00:00.000Z",
       "  summary",
       "  [1 bash exit 1]",
       "",
+      "! review  stale",
+      "○ manual  missing",
+      "  target  refs/heads/main  · unchanged",
       "⧗ awaiting review, manual",
     ].join("\n"),
   );
@@ -1873,12 +1990,24 @@ test("a gates-refused placement names the target's non-movement and lets recorde
 
 test("a gates-refused placement awaits each not-yet-happened requirement as a plain noun", () => {
   const text = blockedText("kei/two-missing", [
-    { gate: gate("reviewed"), current: { kind: "missing" } },
-    { gate: gate("verified"), current: { kind: "stale", priorVerdict: "satisfied" } },
+    {
+      gate: gate("reviewed"),
+      current: { kind: "missing" },
+      satisfied: false,
+      requirements: [{ requirement: requirementId("gate:reviewed"), current: { kind: "missing" } }],
+    },
+    {
+      gate: gate("verified"),
+      current: { kind: "stale", priorVerdict: "satisfied" },
+      satisfied: false,
+      requirements: [
+        { requirement: requirementId("check-one"), current: { kind: "stale", priorVerdict: "satisfied" } },
+      ],
+    },
   ]);
   assert.equal(
     text.split("\n").at(-1),
-    "⧗ awaiting review, verification",
+    "⧗ awaiting review, verification check-one",
     "a stale requirement folds into the same await",
   );
 });
@@ -1886,20 +2015,33 @@ test("a gates-refused placement awaits each not-yet-happened requirement as a pl
 test("four or more awaited requirements still name every event", () => {
   const text = blockedText(
     "kei/many-missing",
-    ["a", "b", "c", "d"].map((name) => ({ gate: gate(name), current: { kind: "missing" as const } })),
+    ["a", "b", "c", "d"].map((name) => ({
+      gate: gate(name),
+      current: { kind: "missing" as const },
+      satisfied: false,
+      requirements: [{ requirement: requirementId(`gate:${name}`), current: { kind: "missing" as const } }],
+    })),
   );
   assert.equal(text.split("\n").at(-1), "⧗ awaiting a, b, c, d");
 });
 
 test("a gates-refused placement whose unmet requirements all hold verdicts omits the await line", () => {
-  const text = blockedText("kei/recorded-only", [{ gate: gate("verified"), current: attestedUnsatisfied() }]);
+  const text = blockedText("kei/recorded-only", [
+    {
+      gate: gate("verified"),
+      current: attestedUnsatisfied(),
+      satisfied: false,
+      requirements: [{ requirement: requirementId("check-one"), current: attestedUnsatisfied() }],
+    },
+  ]);
   assert.equal(
     text,
     [
       "✓ delivered  kei/recorded-only",
       "  candidate  tender · kept",
+      "  integration result  integration",
+      "× verification check-one  recorded unsatisfied · at 2026-08-01T00:00:00.000Z",
       "  target  refs/heads/main  · unchanged",
-      "! verification  · unsatisfied  · at 2026-08-01T00:00:00.000Z",
     ].join("\n"),
   );
   assert.doesNotMatch(text, /awaiting/u, "nothing is pending when every unmet requirement holds a verdict");
@@ -2051,7 +2193,7 @@ test("detail facts sink behind ordered refusal facts", () => {
   assert.deepEqual(orderRefusalFacts(["detail  only", "reason  kept"]), ["reason  kept", "detail  only"]);
 });
 
-test("deliver projects a ran Verification completion", () => {
+test("deliver reports completion from standing requirement evidence", () => {
   const contract = contractId("kei/completion");
   const integration = snapshotId("4".repeat(40));
   const text = renderAccepted(
@@ -2064,7 +2206,19 @@ test("deliver projects a ran Verification completion", () => {
           predecessor: snapshotId("3".repeat(40)),
           target: "refs/heads/main",
         },
-        verification: { kind: "ran", snapshot: integration, verdict: "satisfied" },
+        gates: [
+          {
+            gate: gate("verified"),
+            current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+            satisfied: true,
+            requirements: [
+              {
+                requirement: requirementId("check-one"),
+                current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+              },
+            ],
+          },
+        ],
       },
     ),
   );
@@ -2073,38 +2227,44 @@ test("deliver projects a ran Verification completion", () => {
     [
       "✓ delivered  kei/completion",
       "  candidate  tender",
+      "  integration result  integration",
+      "✓ verification check-one  recorded satisfied · at 2026-08-12T00:00:00.000Z",
       "  target  3333333..4444444  refs/heads/main",
-      "  integration result  4444444 · verification satisfied",
       "✓ accepted",
     ].join("\n"),
   );
-  assertModeWordingAbsent(text);
 });
 
-test("placement receipts name reused provenance in the audit surface's vocabulary", () => {
+test("placement receipts retain standing requirement verdicts", () => {
   const text = reviewText(contractId("kei/placement-reuse"), {
     completion: movement(),
-    verification: {
-      kind: "reused",
-      snapshot: snapshotId("4".repeat(40)),
-      verdict: "satisfied",
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3"),
-    },
+    gates: [
+      {
+        gate: gate("verified"),
+        current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+        satisfied: true,
+        requirements: [
+          {
+            requirement: requirementId("check-one"),
+            current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+          },
+        ],
+      },
+    ],
   });
   assert.equal(
     text,
     [
       "✓ review satisfied  kei/placement-reuse",
+      "✓ verification check-one  recorded satisfied · at 2026-08-12T00:00:00.000Z",
       "  target  3333333..4444444  refs/heads/main",
-      "  integration result  4444444 · verification reused satisfied",
       "✓ accepted",
     ].join("\n"),
   );
 });
 
-test("a deliver receipt without placement names the verdict's exact snapshot and provenance", () => {
+test("a deliver receipt keeps the integration separate from standing requirement evidence", () => {
   const contract = contractId("kei/standalone-subject");
-  const integration = snapshotId("a".repeat(40));
   assert.equal(
     deliverText(contract, {
       tenderSnapshot: snapshotId("b".repeat(40)),
@@ -2113,40 +2273,66 @@ test("a deliver receipt without placement names the verdict's exact snapshot and
         snapshot: snapshotId("b".repeat(40)),
         changeId: changeId("c".repeat(40)),
       },
-      verification: {
-        snapshot: integration,
-        kind: "reused",
-        verdict: "satisfied",
-        entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3"),
-      },
+      gates: [
+        {
+          gate: gate("verified"),
+          current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+          satisfied: true,
+          requirements: [
+            {
+              requirement: requirementId("check-one"),
+              current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+            },
+          ],
+        },
+      ],
     }),
     [
       "✓ delivered  kei/standalone-subject",
       "  candidate  bbbbbbb · kept",
       "  content identity  ccccccc",
-      "  integration result  aaaaaaa · verification reused satisfied",
+      "  integration result  bbbbbbb",
+      "✓ verification check-one  recorded satisfied · at 2026-08-12T00:00:00.000Z",
     ].join("\n"),
   );
   const fresh = deliverText(contract, {
-    verification: { snapshot: integration, kind: "ran", verdict: "unsatisfied" },
+    gates: [
+      {
+        gate: gate("verified"),
+        current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" },
+        satisfied: false,
+        requirements: [
+          {
+            requirement: requirementId("check-one"),
+            current: { kind: "attested", verdict: "unsatisfied", at: "2026-08-12T00:00:00.000Z" },
+          },
+        ],
+      },
+    ],
   });
-  assert.match(fresh, /^  integration result  aaaaaaa · verification unsatisfied$/mu);
+  assert.match(fresh, /^× verification check-one  recorded unsatisfied · at 2026-08-12T00:00:00.000Z$/mu);
   assert.equal((fresh.match(/integration result/gu) ?? []).length, 1);
 });
 
-test("a placed deliver keeps the verdict on the placement integration row only", () => {
-  const integration = snapshotId("4".repeat(40));
+test("a placed deliver reports standing evidence and one integration row", () => {
   const text = deliverText(contractId("kei/one-row"), {
     completion: movement(),
-    verification: {
-      snapshot: integration,
-      kind: "reused",
-      verdict: "satisfied",
-      entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3"),
-    },
+    gates: [
+      {
+        gate: gate("verified"),
+        current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+        satisfied: true,
+        requirements: [
+          {
+            requirement: requirementId("check-one"),
+            current: { kind: "attested", verdict: "satisfied", at: "2026-08-12T00:00:00.000Z" },
+          },
+        ],
+      },
+    ],
   });
   assert.equal((text.match(/integration result/gu) ?? []).length, 1);
-  assert.match(text, /^  integration result  4444444 · verification reused satisfied$/mu);
+  assert.match(text, /^✓ verification check-one  recorded satisfied · at 2026-08-12T00:00:00.000Z$/mu);
 });
 
 test("terminal receipts name the retired worktree last", () => {
@@ -2155,7 +2341,6 @@ test("terminal receipts name the retired worktree last", () => {
     retiredReview,
     {
       completion: movement(),
-      verification: { kind: "ran", snapshot: snapshotId("4".repeat(40)), verdict: "satisfied" },
     },
     { effects: [retiredWorktreeEffect(retiredReview, "fridge")] },
   );
@@ -2227,14 +2412,12 @@ test("a completed placement names the landed diff's shape through the shared dif
   const contract = contractId("kei/landed-shape");
   const text = reviewText(contract, {
     completion: movement({ scope: { filesChanged: 3, insertions: 4, deletions: 1 } }),
-    verification: { kind: "ran", snapshot: snapshotId("4".repeat(40)), verdict: "satisfied" },
   });
   assert.equal(
     text,
     [
       "✓ review satisfied  kei/landed-shape",
       "  target  3333333..4444444  refs/heads/main",
-      "  integration result  4444444 · verification satisfied",
       `  changes  3 files · ${renderDiffstat({ added: 4, removed: 1 })}`,
       "✓ accepted",
     ].join("\n"),
@@ -2247,9 +2430,7 @@ test("a completed placement names the landed diff's shape through the shared dif
     }),
   });
   assert.ok(single.split("\n").includes(`  changes  1 file · ${renderDiffstat({ added: 2, removed: 0 })}`));
-  const unplaced = deliverText(contract, {
-    verification: { snapshot: snapshotId("a".repeat(40)), kind: "ran", verdict: "satisfied" },
-  });
+  const unplaced = deliverText(contract);
   assert.doesNotMatch(unplaced, /changes/u, "a deliver without placement carries no changes row");
 });
 
@@ -2277,7 +2458,14 @@ test("deliver renders accepted and stopped continuations from the accepted resul
                   refusal: {
                     kind: "gates-unsatisfied",
                     contractId: stopped,
-                    unmet: [{ gate: gate("reviewed"), current: { kind: "missing" } }],
+                    unmet: [
+                      {
+                        gate: gate("reviewed"),
+                        current: { kind: "missing" },
+                        satisfied: false,
+                        requirements: [{ requirement: requirementId("gate:reviewed"), current: { kind: "missing" } }],
+                      },
+                    ],
                   },
                 },
               },
@@ -2296,10 +2484,6 @@ test("deliver renders accepted and stopped continuations from the accepted resul
     ].join("\n"),
   );
 });
-
-function assertModeWordingAbsent(text: string): void {
-  assert.doesNotMatch(text, /verified now|verification reused from delivery/u);
-}
 
 test("movement projects its deviation and reintegration coordinates", () => {
   const contract = contractId("kei/reintegrated");

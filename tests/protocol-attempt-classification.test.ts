@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { entryUlid, contractIdFromSegment, documentKey, snapshotId, type JournalEntry } from "../src/core/facts/types.js";
+import {
+  entryUlid,
+  contractIdFromSegment,
+  documentKey,
+  snapshotId,
+  type JournalEntry,
+} from "../src/core/facts/types.js";
 import { runBoundedAttempts } from "../src/protocol/run.js";
 
 test("bounded admission classification stops on the first accepted or refused result", async () => {
@@ -65,7 +71,6 @@ test("publication failure is terminal and never replays the spent callback", asy
   assert.equal(calls, 1);
 });
 
-
 test("empty budget is exhausted and only the final collision is terminal", async () => {
   let emptyCalls = 0;
   const empty = await runBoundedAttempts<{ kind: "accepted"; value: number }, never>([], async () => {
@@ -84,7 +89,13 @@ test("empty budget is exhausted and only the final collision is terminal", async
     at: "2026-08-06T00:00:00Z",
     data: {
       coordinates: { start: snapshotId("start"), workspace: "worktree" },
-      terms: { document: { bytes: "", key: documentKey("document") }, segments: [], gates: [], after: [] },
+      terms: {
+        document: { bytes: "", key: documentKey("document") },
+        segments: [],
+        gates: [],
+        requirements: {},
+        after: [],
+      },
     },
   });
   const collision = {
@@ -101,10 +112,16 @@ test("empty budget is exhausted and only the final collision is terminal", async
     { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA5")] },
   ];
   const seen: string[] = [];
-  const result = await runBoundedAttempts<{ kind: "accepted"; value: number }, never>(contexts, async (context, index) => {
-    seen.push(context.entryUlids[0]!);
-    return index === 1 ? { kind: "stale" } : collision;
-  });
+  const result = await runBoundedAttempts<{ kind: "accepted"; value: number }, never>(
+    contexts,
+    async (context, index) => {
+      seen.push(context.entryUlids[0]!);
+      return index === 1 ? { kind: "stale" } : collision;
+    },
+  );
   assert.equal(result.kind, "collision");
-  assert.deepEqual(seen, contexts.map((context) => context.entryUlids[0]));
+  assert.deepEqual(
+    seen,
+    contexts.map((context) => context.entryUlids[0]),
+  );
 });

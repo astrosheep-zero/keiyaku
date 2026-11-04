@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import {
-  contractId,
-  documentKey,
-  snapshotId, type JournalEntry
-} from "../src/core/facts/types.js";
+import { contractId, documentKey, snapshotId, type JournalEntry } from "../src/core/facts/types.js";
 import { uniqueEntryUlid } from "./support/journal.js";
 
 const id = contractId("kei/fold-history");
@@ -46,6 +42,7 @@ test("reintegrated codec rejects malformed data and fold rejects out-of-order en
         document: { bytes: "# Initial\n", key: documentKey("initial") },
         segments: [],
         gates: [],
+        requirements: {},
         after: [],
       },
     },

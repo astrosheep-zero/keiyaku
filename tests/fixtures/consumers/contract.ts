@@ -7,6 +7,8 @@ import {
   type BindInput,
   type BindResult,
   type ReviewOutcome,
+  type VerifyInput,
+  type VerifyOutcome,
   type DeliverOutcome,
   type DeliveryPreviewInput,
   type DeliveryPreviewOutcome,
@@ -52,14 +54,29 @@ if (resolution.kind === "refused") {
 }
 // @ts-expect-error resolution has no transport route
 Keiyaku.with().resolve({ repo, selector: id, execution: {} });
+const verifyInput: VerifyInput = { index: 1, includeDirty: true, signal: new AbortController().signal };
+const verified: VerifyOutcome = await selected.verify(verifyInput, { observe: () => {} });
+if (verified.kind === "accepted") {
+  verified.value.checks.forEach((check) => {
+    void [check.index, check.requirement, check.snapshot];
+    if (check.kind === "terminal") void [check.verdict, check.admission.kind];
+  });
+  verified.value.gates?.forEach((gate) => gate.requirements.forEach((requirement) => void requirement.current));
+}
+// @ts-expect-error Verification indexes are numbers at the public boundary
+selected.verify({ index: "1" });
 const cancellable: ReviewInput = { verdict: "satisfied", signal: new AbortController().signal };
-const reviewed: ReviewOutcome = await selected.review(cancellable, { observe: async (event) => { void event.kind; } });
+const reviewed: ReviewOutcome = await selected.review(cancellable, {
+  observe: async (event) => {
+    void event.kind;
+  },
+});
 const effects: readonly InvocationEffect[] = reviewed.effects;
 const pending: readonly PendingSurface[] = reviewed.pending;
 const failure = new KeiyakuError("internal", "failed", { cause: new TypeError("failed") });
 const receipt: PartialOutcomeEnvelope | undefined = failure.outcome;
 if (reviewed.kind === "accepted") {
-  reviewed.value.verification;
+  reviewed.value.gates;
   // @ts-expect-error cleanup belongs to the invocation, not the review value
   reviewed.value.cleanup;
 }
@@ -67,7 +84,10 @@ if (reviewed.kind === "refused") reviewed.refusal.kind;
 // @ts-expect-error only delivery can return handoff
 const reviewHandoff: ReviewOutcome = { ...reviewed, kind: "handoff" };
 declare const delivered: DeliverOutcome;
-if (delivered.kind === "accepted") { delivered.value.leading.fact; delivered.value.diff(); }
+if (delivered.kind === "accepted") {
+  delivered.value.leading.fact;
+  delivered.value.diff();
+}
 if (delivered.kind === "handoff") delivered.value.handoffBase;
 
 const local: LocalContractComposition = { actor: "consumer" };
@@ -122,8 +142,15 @@ selected.abandon("manual");
 selected.startDelivery();
 // @ts-expect-error retired result sidecars are not public
 reviewed.cleanup;
-// @ts-expect-error forwarding-specific retries do not belong to local bind
-const bindRetry: BindResult = { kind: "retry", operation: "bind", reason: { kind: "owner-reason-unavailable", diagnostic: "gone" }, facts: [], effects: [], pending: [] };
+const bindRetry: BindResult = {
+  kind: "retry",
+  operation: "bind",
+  // @ts-expect-error forwarding-specific retries do not belong to local bind
+  reason: { kind: "owner-reason-unavailable", diagnostic: "gone" },
+  facts: [],
+  effects: [],
+  pending: [],
+};
 void bindRetry;
 // @ts-expect-error the retired execution helper is not a public root name
 type RemovedExecutionHelper = import("@astrosheep/keiyaku").bodyRequestExecution;

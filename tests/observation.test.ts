@@ -12,7 +12,7 @@ import {
   entryUlid,
   snapshotId,
   type ContractId,
-  type ContractState
+  type ContractState,
 } from "../src/core/facts/types.js";
 
 const id = contractId("kei/observation-test");
@@ -23,6 +23,7 @@ function terms(after: readonly ReturnType<typeof contractId>[] = []) {
     document: { bytes: "# Observation\n", key: documentKey("observation") },
     segments: [],
     gates: [],
+    requirements: {},
     after,
   };
 }

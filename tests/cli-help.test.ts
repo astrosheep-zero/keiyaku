@@ -47,6 +47,10 @@ test("namespace and leaf help expose executable usage and flags", () => {
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("ask"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
+  const verifyHelp = renderContractHelp("verify");
+  assert.match(verifyHelp, /usage  keiyaku verify/u);
+  assert.match(verifyHelp, /--index <n>/u);
+  assert.match(verifyHelp, /always executes in its own clean scratch/u);
   const showHelp = renderContractHelp("show");
   assert.match(showHelp, /usage  keiyaku show \[<contract>\|@<contract>\]/u);
   assert.match(showHelp, /--json/u);
@@ -113,6 +117,13 @@ test("help is stdout zero and does not enter an absent world", async () => {
   assert.match(stdout, /^usage  keiyaku debt <command>/u);
   assert.equal(stderr, "");
   assert.doesNotMatch(stdout, /^\{/u);
+});
+
+test("verify help needs neither World nor plugins", async () => {
+  const result = await captureOutput(() => main(["-C", "/definitely/absent/keiyaku-world", "verify", "--help"]));
+  assert.equal(result.exit, 0);
+  assert.match(result.stdout, /usage  keiyaku verify/u);
+  assert.equal(result.stderr, "");
 });
 
 test("show help needs neither World nor plugins", async () => {

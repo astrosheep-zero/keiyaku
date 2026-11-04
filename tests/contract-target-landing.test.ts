@@ -100,10 +100,19 @@ test("siblings reintegrate against a moved parent without losing reviewed conten
     raw.run(["-C", path, "add", `${name}.txt`]);
     raw.run(["-C", path, "commit", "--quiet", "-m", name]);
   }
+  accepted(await firstBind.value.keiyaku.verify());
   accepted(await firstBind.value.keiyaku.deliver());
   assert.equal(present(await firstBind.value.keiyaku.state()).terminal, null);
   accepted(await secondBind.value.keiyaku.deliver());
-  accepted(await firstBind.value.keiyaku.review({ verdict: "satisfied" }));
+  const reviewed = accepted(await firstBind.value.keiyaku.review({ verdict: "satisfied" }));
+  assert.equal(reviewed.value.gates?.find(({ gate }) => gate === "verified")?.requirements[0]?.current.kind, "stale");
+  assert.equal(present(await firstBind.value.keiyaku.state()).terminal, null);
+  assert.equal(
+    present(await firstBind.value.keiyaku.state()).attestations.filter((entry) => entry.data.gate === "verified")
+      .length,
+    1,
+  );
+  accepted(await firstBind.value.keiyaku.verify());
   const firstState = present(await firstBind.value.keiyaku.state());
   assert.equal(firstState.terminal?.kind, "claimed");
   assert.equal(firstState.attestations.filter((entry) => entry.data.gate === "verified").length, 2);
@@ -244,7 +253,8 @@ test("parent terminality during Verification prevents the child's placement", as
   writeFileSync(join(childPath, "child.txt"), "child\n");
   raw.run(["-C", childPath, "add", "child.txt"]);
   raw.run(["-C", childPath, "commit", "--quiet", "-m", "child"]);
-  const landing = child.value.keiyaku.deliver();
+  accepted(await child.value.keiyaku.deliver());
+  const landing = child.value.keiyaku.verify();
   void landing.catch(() => undefined);
   try {
     for (let attempt = 0; attempt < 1500 && !existsSync(started); attempt += 1)

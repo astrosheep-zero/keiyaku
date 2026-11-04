@@ -2,7 +2,7 @@ const marker = "pendingTellDisposition = await runPreparedBody({";
 const idleMarker = "const finished = await finishBodyIfIdle(launch.paths, { sequence: bodySequence, at: runtime.now() });";
 const observationMarker = "await this.refresh();";
 const injected = `
-import { existsSync as __keiyakuBarrierExists, watch as __keiyakuBarrierWatch, writeFileSync as __keiyakuBarrierWrite } from "node:fs";
+import { existsSync as __keiyakuBarrierExists, renameSync as __keiyakuBarrierRename, watch as __keiyakuBarrierWatch, writeFileSync as __keiyakuBarrierWrite } from "node:fs";
 import { join as __keiyakuBarrierJoin } from "node:path";
 
 async function __keiyakuAwaitEmptyPublicationBarrier(launch) {
@@ -18,7 +18,9 @@ async function __keiyakuAwaitEmptyPublicationBarrier(launch) {
       }
     });
     watcher.once("error", reject);
-    __keiyakuBarrierWrite(__keiyakuBarrierJoin(barrier, "ready"), JSON.stringify({ id: launch.seed.id, pid: process.pid }) + "\\n");
+    const ready = __keiyakuBarrierJoin(barrier, "ready");
+    __keiyakuBarrierWrite(ready + ".tmp", JSON.stringify({ id: launch.seed.id, pid: process.pid }) + "\\n");
+    __keiyakuBarrierRename(ready + ".tmp", ready);
     if (__keiyakuBarrierExists(release)) {
       watcher.close();
       resolve();

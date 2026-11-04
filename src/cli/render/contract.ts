@@ -11,6 +11,7 @@ import type {
   ReconciliationLag,
   RegionOverlap,
   ReviewOutcome,
+  VerifyOutcome,
   SettlementLag,
 } from "../../index.js";
 import {
@@ -31,6 +32,8 @@ import {
   gatesAwaitLines,
   hookFailureSummary,
   outcomeLines,
+  standingGateLines,
+  placementLines,
   receiptPayload,
   receiptRow,
   stopLines,
@@ -49,6 +52,7 @@ export type ContractOutcome =
   | AmendOutcome
   | DeliverOutcome
   | ReviewOutcome
+  | VerifyOutcome
   | DeliveryPreviewOutcome
   | ArcOutcome
   | AbandonOutcome;
@@ -335,17 +339,9 @@ function landedChangesLines(
   return lines;
 }
 
-/**
- * Shared presentation of a completed placement, so a deliver and a review that placed the same candidate read
- * identically: one git-shaped target movement row, naming the reference it advanced, then the final lifecycle
- * state. Satisfied Verification adds one fact row naming the integrated result; placement made that commit the
- * reference's new head, so the movement and integrated-result rows share one sha. The verdict names reuse in the
- * standing-evidence vocabulary and carries no qualifier when this command executed declarations. A completion
- * without an advanced reference states no movement. Journal ULIDs stay in JSON and `history`, never in ordinary
- * receipt text.
- */
+/** One Git movement grammar for completion, independent of which operation triggered it. */
 function completedPlacementLines(
-  result: Accepted<DeliverOutcome> | Accepted<ReviewOutcome>,
+  result: Accepted<DeliverOutcome> | Accepted<ReviewOutcome> | Accepted<VerifyOutcome>,
   columns: number,
 ): readonly string[] {
   const completion = result.value.completion;
@@ -372,22 +368,6 @@ function completedPlacementLines(
       columns,
     );
   }
-  const verification = result.value.verification;
-  if (verification?.kind !== "stopped" && verification?.verdict === "satisfied") {
-    receiptRow(
-      lines,
-      " ",
-      "integration result",
-      [
-        {
-          text: `${displayGitId(completion.integration, abbreviations)} · verification ${
-            verification.kind === "reused" ? "reused " : ""
-          }satisfied`,
-        },
-      ],
-      columns,
-    );
-  }
   lines.push(...landedChangesLines(completion.scope, columns));
   // Placement admission always admits the claim entry beside the movement, so a completed placement is accepted.
   receiptRow(lines, "✓", lifecycleWord("claimed"), [], columns);
@@ -403,7 +383,7 @@ function movementLines(result: Accepted<DeliverOutcome>, columns: number): reado
 }
 
 function continuationLines(
-  result: Accepted<DeliverOutcome> | Accepted<ReviewOutcome>,
+  result: Accepted<DeliverOutcome> | Accepted<ReviewOutcome> | Accepted<VerifyOutcome>,
   columns: number,
 ): readonly string[] {
   const report = result.value.continuation;
@@ -510,17 +490,13 @@ function deliverIdentityLines(
   return lines;
 }
 
-function deliveryIdentityAbbreviations(
-  value: Accepted<DeliverOutcome>["value"],
-  verificationSnapshot: string | undefined,
-): ReadonlyMap<string, string> {
+function deliveryIdentityAbbreviations(value: Accepted<DeliverOutcome>["value"]): ReadonlyMap<string, string> {
   return abbreviateGitIds([
     value.tenderSnapshot ?? "",
     value.integration?.changeId ?? "",
     value.integration.snapshot,
     value.contentChange?.previousChange ?? "",
     value.contentChange?.currentChange ?? "",
-    verificationSnapshot ?? "",
     value.completion?.predecessor ?? "",
     value.completion?.integration ?? "",
   ]);
@@ -528,32 +504,22 @@ function deliveryIdentityAbbreviations(
 
 function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number): string {
   const complete = result.value.completion !== undefined;
-  const verification = result.value.verification;
-  const subject = verification?.kind === "stopped" ? undefined : verification;
   const lines = titleLines("✓", "delivered", result.contract, columns);
-  const abbreviations = deliveryIdentityAbbreviations(result.value, subject?.snapshot);
+  const abbreviations = deliveryIdentityAbbreviations(result.value);
   lines.push(...deliverIdentityLines(result, abbreviations, columns, !complete));
+  if ((result.value.gates?.length ?? 0) > 0)
+    receiptRow(
+      lines,
+      " ",
+      "integration result",
+      [{ text: displayGitId(result.value.integration.snapshot, abbreviations) }],
+      columns,
+    );
+  lines.push(...standingGateLines(result.value.gates, columns));
   if (complete) lines.push(...completedPlacementLines(result, columns));
-  else {
-    if (subject !== undefined)
-      receiptRow(
-        lines,
-        " ",
-        "integration result",
-        [
-          {
-            text: `${displayGitId(subject.snapshot, abbreviations)} · verification ${
-              subject.kind === "reused" ? "reused " : ""
-            }${subject.verdict}`,
-          },
-        ],
-        columns,
-      );
-    lines.push(...movementLines(result, columns));
-  }
-  if (verification?.kind === "stopped") lines.push(...stopLines(verification.stop, columns, result.contract));
+  else lines.push(...movementLines(result, columns));
   if (!complete && result.value.placement !== undefined)
-    lines.push(...stopLines(result.value.placement, columns, result.contract));
+    lines.push(...placementLines(result.value.placement, columns, result.contract));
   lines.push(
     ...continuationLines(result, columns),
     ...recordBlock(result, columns),
@@ -565,17 +531,61 @@ function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number
 
 function renderAcceptedReview(result: Accepted<ReviewOutcome>, columns: number): string {
   const lines = titleLines("✓", `review ${attestationVerdict(result.facts)}`, result.contract, columns);
+  lines.push(...standingGateLines(result.value.gates, columns));
   lines.push(...completedPlacementLines(result, columns));
-  if (result.value.verification?.kind === "stopped") {
-    lines.push(...stopLines(result.value.verification.stop, columns, result.contract));
-  }
   if (result.value.placement !== undefined) {
-    lines.push(...stopLines(result.value.placement, columns, result.contract));
+    lines.push(...placementLines(result.value.placement, columns, result.contract));
   }
   lines.push(...continuationLines(result, columns));
   lines.push(...recordBlock(result, columns));
   lines.push(...worktreeRetirementLines(result, columns));
   lines.push(...gatesAwaitLines(result.value.placement));
+  return lines.join("\n");
+}
+
+function renderAcceptedVerify(result: Accepted<VerifyOutcome>, columns: number): string {
+  const lines = titleLines("✓", "verify", result.contract, columns);
+  const abbreviations = abbreviateGitIds([
+    result.value.snapshot,
+    ...result.value.checks.map((check) => check.snapshot),
+    result.value.completion?.integration ?? "",
+    result.value.completion?.predecessor ?? "",
+  ]);
+  for (const check of result.value.checks) {
+    receiptRow(
+      lines,
+      " ",
+      `check ${check.index}`,
+      [
+        { text: check.kind === "terminal" ? "executed" : "execution stopped" },
+        { text: check.requirement, opaque: true },
+        { text: `· snapshot ${displayGitId(check.snapshot, abbreviations)}` },
+      ],
+      columns,
+    );
+    if (check.kind === "terminal") {
+      receiptRow(lines, check.verdict === "satisfied" ? "✓" : "×", "verdict", [{ text: check.verdict }], columns);
+      if (check.summary !== undefined) receiptPayload(lines, "summary", check.summary);
+      if (check.admission.kind === "stopped") {
+        receiptRow(lines, "!", "admission", [{ text: "stopped" }], columns);
+        lines.push(...stopLines(check.admission.stop, columns, result.contract));
+      } else receiptRow(lines, " ", "attestation", [{ text: check.admission.kind }], columns);
+    } else {
+      lines.push(...stopLines(check.stop, columns, result.contract));
+    }
+    if (check.retainedPath !== undefined)
+      receiptRow(lines, " ", "scratch retained", [{ text: check.retainedPath, opaque: true }], columns);
+  }
+  lines.push(...standingGateLines(result.value.gates, columns));
+  lines.push(...completedPlacementLines(result, columns));
+  if (result.value.placement !== undefined)
+    lines.push(...placementLines(result.value.placement, columns, result.contract));
+  lines.push(
+    ...continuationLines(result, columns),
+    ...recordBlock(result, columns),
+    ...worktreeRetirementLines(result, columns),
+    ...gatesAwaitLines(result.value.placement),
+  );
   return lines.join("\n");
 }
 
@@ -608,6 +618,8 @@ export function renderAccepted(result: AcceptedContractOutcome, context?: TextRe
       return renderAcceptedBind(result, columns, context?.color === true);
     case "amend":
       return renderAcceptedAmend(result, columns, context?.color === true);
+    case "verify":
+      return renderAcceptedVerify(result, columns);
     case "review":
       return renderAcceptedReview(result, columns);
     case "arc":

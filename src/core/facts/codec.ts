@@ -22,6 +22,7 @@ import {
   documentSegmentKey,
   entryUlid,
   gate,
+  requirementId,
   snapshotId,
 } from "./types.js";
 
@@ -161,23 +162,37 @@ function validateCoordinates(value: unknown, path: string): ContractCoordinates 
 
 function termsValue(value: unknown, path: string): ContractTerms {
   const object = requireRecord(value, path);
-  requireKeys(object, ["document", "segments", "gates", "after"], path);
+  requireKeys(object, ["document", "segments", "gates", "requirements", "after"], path);
+  const gates = brandedArray(object.gates, `${path}.gates`, gate);
+  if (new Set(gates).size !== gates.length) fail(`${path}.gates`, "duplicate gate");
+  const rawRequirements = requireRecord(object.requirements, `${path}.requirements`);
+  requireKeys(rawRequirements, gates, `${path}.requirements`);
+  const requirements = Object.fromEntries(
+    gates.map((declaredGate) => {
+      const values = brandedArray(rawRequirements[declaredGate], `${path}.requirements.${declaredGate}`, requirementId);
+      if (values.length === 0) fail(`${path}.requirements.${declaredGate}`, "expected at least one requirement");
+      if (new Set(values).size !== values.length) fail(`${path}.requirements.${declaredGate}`, "duplicate requirement");
+      return [declaredGate, values];
+    }),
+  );
   return {
     document: documentValue(object.document, `${path}.document`),
     segments: brandedArray(object.segments, `${path}.segments`, documentSegmentKey),
-    gates: brandedArray(object.gates, `${path}.gates`, gate),
+    gates,
+    requirements,
     after: brandedArray(object.after, `${path}.after`, contractId),
   };
 }
 
 function validateAttestation(value: unknown, path: string): AttestationData {
   const object = requireRecord(value, path);
-  requireKeys(object, ["gate", "subject", "verdict"], path, ["summary"]);
+  requireKeys(object, ["gate", "requirement", "subject", "verdict"], path, ["summary"]);
   const declaredGate = brandedValue(object.gate, `${path}.gate`, gate);
   const verdict = stringValue(object.verdict, `${path}.verdict`);
   if (verdict !== "satisfied" && verdict !== "unsatisfied") fail(`${path}.verdict`, "unknown attestation verdict");
   return {
     gate: declaredGate,
+    requirement: brandedValue(object.requirement, `${path}.requirement`, requirementId),
     subject: dependencyKeySetValue(object.subject, `${path}.subject`),
     verdict,
     ...(object.summary === undefined ? {} : { summary: stringValue(object.summary, `${path}.summary`) }),

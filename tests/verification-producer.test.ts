@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import test from "node:test";
 import type { VerificationDeclaration } from "../src/verification/declaration.js";
 import { executeVerification, type ExecuteVerificationInput } from "../src/verification/execution.js";
+import { verificationObservationSchema, type VerificationObservation } from "../src/verification/observation.js";
 import type { MaterializedScratchCandidate } from "../src/git/scratch.js";
 import { settings } from "../src/settings.js";
-import { dependencyKeySet } from "../src/core/subject.js";
-import { contractId, documentSegmentKey, entryUlid, gate, snapshotId } from "../src/core/facts/types.js";
-import { reusableVerificationAttestation } from "../src/protocol/intent.js";
+import { contractId, snapshotId } from "../src/core/facts/types.js";
 
 function declaration(
   script: string,
@@ -25,15 +24,18 @@ function command(program: string): string {
 
 function input(
   root: string,
-  declarations: readonly VerificationDeclaration[],
+  selected: VerificationDeclaration,
   overrides: Partial<ExecuteVerificationInput> = {},
 ): ExecuteVerificationInput {
   const scratch: MaterializedScratchCandidate = { cwd: root, dispose: async () => null };
   return {
     repository: {} as ExecuteVerificationInput["repository"],
-    candidate: "snapshot" as ExecuteVerificationInput["candidate"],
+    candidate: snapshotId("snapshot"),
     contractId: contractId("kei/producer"),
-    declarations,
+    declaration: selected,
+    index: 1,
+    total: 1,
+    requirement: "opaque requirement",
     materializeScratchCandidate: async () => scratch,
     projectSettings: async () => await settings({ root }),
     ...overrides,
@@ -49,171 +51,143 @@ async function inTemporaryDirectory(action: (root: string) => Promise<void>): Pr
   }
 }
 
-test("a declaration timeout is terminally unsatisfied and later declarations still run", async () => {
+test("a selected declaration timeout is terminally unsatisfied with its display index", async () => {
   await inTemporaryDirectory(async (root) => {
-    const secondStarted = join(root, "second-started");
-    const outcome = await executeVerification(
-      input(root, [
-        declaration("sleep 1", "bash", 25),
-        declaration(command(`require("node:fs").writeFileSync(${JSON.stringify(secondStarted)}, "started")`)),
-      ]),
-    );
-
-    assert.deepEqual(outcome, {
+    const result = await executeVerification(input(root, declaration("sleep 1", "bash", 25), { index: 2, total: 3 }));
+    assert.deepEqual(result, {
       outcome: {
         kind: "terminal",
         verdict: "unsatisfied",
-        passed: 1,
-        total: 2,
-        summary: "[1 bash timeout after 25ms]",
+        passed: 0,
+        total: 1,
+        summary: "[2 bash timeout after 25ms]",
       },
     });
-    assert.equal(existsSync(secondStarted), true);
   });
 });
 
-test("caller cancellation is nonterminal and stops later declarations", async () => {
+test("caller cancellation is nonterminal and awaits scene retirement", async () => {
   await inTemporaryDirectory(async (root) => {
     const started = join(root, "started");
-    const later = join(root, "later");
     const controller = new AbortController();
+    let retained: boolean | undefined;
     const outcome = executeVerification(
       input(
         root,
-        [
-          declaration(
-            `${command(`require("node:fs").writeFileSync(${JSON.stringify(started)}, "started")`)}; sleep 30`,
-          ),
-          declaration(command(`require("node:fs").writeFileSync(${JSON.stringify(later)}, "later")`)),
-        ],
-        { signal: controller.signal },
+        declaration(`${command(`require("node:fs").writeFileSync(${JSON.stringify(started)}, "started")`)}; sleep 30`),
+        {
+          signal: controller.signal,
+          materializeScratchCandidate: async () => ({
+            cwd: root,
+            dispose: async (retain) => {
+              retained = retain;
+              return null;
+            },
+          }),
+        },
       ),
     );
-    // Readiness only: a loaded machine can take longer than two seconds to spawn
-    // the declaration. Every cancellation assertion below is unchanged.
     const deadline = performance.now() + 15_000;
     while (!existsSync(started)) {
       if (performance.now() >= deadline) throw new Error("Verification declaration did not start");
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     controller.abort();
-
     assert.deepEqual(await outcome, { outcome: { kind: "cancelled" } });
-    assert.equal(existsSync(later), false);
+    assert.equal(retained, false);
   });
 });
 
 test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error without persistence", async () => {
   await inTemporaryDirectory(async (root) => {
-    const failed = await executeVerification(input(root, [declaration("false")]));
+    const failed = await executeVerification(input(root, declaration("false")));
     assert.deepEqual(failed, {
       outcome: { kind: "terminal", verdict: "unsatisfied", passed: 0, total: 1, summary: "[1 bash exit 1]" },
     });
-
-    const unknownExit = await executeVerification(input(root, [declaration("kill -TERM $$")]));
+    const unknownExit = await executeVerification(input(root, declaration("kill -TERM $$")));
     assert.deepEqual(unknownExit, { outcome: { kind: "unknown-exit" } });
-
     const missingExecutor = "keiyaku-v4-no-such-executable" as VerificationDeclaration["executor"];
-    const spawnError = await executeVerification(input(root, [declaration("true", missingExecutor)]));
-    assert.ok(spawnError.outcome.kind === "spawn-error", 'expected spawnError.outcome.kind = "spawn-error"');
+    const spawnError = await executeVerification(input(root, declaration("true", missingExecutor)));
+    assert.ok(spawnError.outcome.kind === "spawn-error");
     assert.match(spawnError.outcome.diagnostic, new RegExp(`spawn ${missingExecutor} ENOENT`));
   });
 });
 
-test("producer preserves ordered terminal diagnostics within one 32 KiB summary", async () => {
+test("producer bounds a selected failure's diagnostics to 32 KiB", async () => {
   await inTemporaryDirectory(async (root) => {
-    const outcome = await executeVerification(
-      input(root, [
+    const result = await executeVerification(
+      input(
+        root,
         declaration(
-          'printf "first-out"; printf "%*s" 12000 "" | tr " " a; printf "%*s" 12000 "" | tr " " b >&2; false',
+          'printf "first-out"; printf "%*s" 24000 "" | tr " " x; printf "%*s" 24000 "" | tr " " y >&2; false',
         ),
-        declaration('printf "%*s" 12000 "" | tr " " x; printf "%*s" 12000 "" | tr " " y >&2; false'),
-      ]),
+      ),
     );
-
-    assert.ok(outcome.outcome.kind === "terminal", 'expected outcome.outcome.kind = "terminal"');
-    assert.equal(outcome.outcome.verdict, "unsatisfied");
-    assert.notEqual(outcome.outcome.summary, undefined);
-    const summary = outcome.outcome.summary!;
+    assert.ok(result.outcome.kind === "terminal");
+    assert.equal(result.outcome.verdict, "unsatisfied");
+    const summary = result.outcome.summary!;
     assert.ok(Buffer.byteLength(summary) <= 32 * 1024);
     assert.match(summary, /^\[earlier output truncated\]\n/);
-    assert.match(summary, /\[2 bash exit 1\]/);
-    assert.match(summary, /stdout:\n[x]+\nstderr:\n[y]+$/);
+    assert.match(summary, /[x]+\nstderr:\n[y]+$/);
     assert.doesNotMatch(summary, /first-out/);
   });
 });
 
-test("verbose success stays live without evicting an earlier failure", async () => {
+test("all observations keep the selected requirement, index and captured snapshot", async () => {
+  await inTemporaryDirectory(async (root) => {
+    const events: VerificationObservation[] = [];
+    mkdirSync(join(root, ".keiyaku"));
+    writeFileSync(
+      join(root, ".keiyaku/settings.json"),
+      JSON.stringify({
+        worktree: {
+          create: [{ name: "prepare", argv: ["bash", "-c", "printf setup-output"], timeoutMs: 5_000 }],
+          destroy: [{ name: "retire", argv: ["bash", "-c", "printf cleanup-output"], timeoutMs: 5_000 }],
+        },
+      }),
+    );
+    const selected = input(root, declaration('printf "declaration-output"'), {
+      index: 3,
+      total: 4,
+      requirement: "opaque/selected",
+      observe: (event) => events.push(event),
+      materializeScratchCandidate: async (_repository, candidate, contract, requirement) => {
+        assert.equal(candidate, selected.candidate);
+        assert.equal(contract, selected.contractId);
+        assert.equal(requirement, selected.requirement);
+        return { cwd: root, dispose: async () => null };
+      },
+    });
+    const result = await executeVerification(selected);
+    assert.deepEqual(result.outcome, { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 });
+    assert.deepEqual(
+      [...new Set(events.map((event) => event.phase))],
+      ["materialize", "setup", "declaration", "cleanup"],
+    );
+    for (const event of events) {
+      assert.equal(event.requirement, selected.requirement);
+      assert.equal(event.index, 3);
+      assert.equal(event.total, 4);
+      assert.equal(event.snapshot, selected.candidate);
+      assert.equal(verificationObservationSchema.safeParse(event).success, true);
+    }
+    for (const phase of ["setup", "declaration", "cleanup"])
+      assert.ok(events.some((event) => event.kind === "output" && event.phase === phase));
+  });
+});
+
+test("verbose success remains live and observer failure cannot change execution or retirement", async () => {
   await inTemporaryDirectory(async (root) => {
     let successOutput = "";
-    const result = await executeVerification(input(root, [
-      declaration('printf "failure-detail"; false'),
-      declaration('printf "%*s" 40000 "" | tr " " x'),
-    ], {
-      observe: (event) => {
-        if (event.kind === "output" && event.index === 2) successOutput += event.text;
-      },
-    }));
+    const result = await executeVerification(
+      input(root, declaration('printf "%*s" 40000 "" | tr " " x'), {
+        observe: (event) => {
+          if (event.kind === "output") successOutput += event.text;
+          throw new Error("observer unavailable");
+        },
+      }),
+    );
     assert.equal(successOutput, "x".repeat(40000));
-    assert.deepEqual(result.outcome, {
-      kind: "terminal",
-      verdict: "unsatisfied",
-      passed: 1,
-      total: 2,
-      summary: "[1 bash exit 1]\nstdout:\nfailure-detail",
-    });
-  });
-});
-
-test("verification admission reuses an identical current attestation", () => {
-  const current = {
-    v: 1 as const,
-    kind: "attestation" as const,
-    contract: contractId("kei/reuse"),
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAE"),
-    at: "2026-09-26T00:00:00.000Z",
-    data: {
-      gate: gate("verified"),
-      subject: dependencyKeySet([
-        { kind: "snapshot", value: snapshotId("snapshot") },
-        { kind: "segment", value: documentSegmentKey("verification") },
-      ]),
-      verdict: "satisfied" as const,
-      summary: "all good",
-    },
-  };
-  const subject = current.data.subject;
-  assert.deepEqual(reusableVerificationAttestation(current, subject, "satisfied"), {
-    entry: current.entry,
-    verdict: "satisfied",
-    summary: "all good",
-  });
-  assert.equal(reusableVerificationAttestation(current, subject, "unsatisfied"), undefined);
-  assert.equal(
-    reusableVerificationAttestation(
-      current,
-      dependencyKeySet([
-        { kind: "snapshot", value: snapshotId("snapshot") },
-        { kind: "segment", value: documentSegmentKey("amended-verification") },
-      ]),
-      "satisfied",
-    ),
-    undefined,
-  );
-  assert.equal(
-    reusableVerificationAttestation(
-      current,
-      dependencyKeySet([{ kind: "snapshot", value: snapshotId("different") }]),
-      "satisfied",
-    ),
-    undefined,
-  );
-});
-
-test("a deterministic missing executor returns a spawn error", async () => {
-  await inTemporaryDirectory(async (root) => {
-    const missingExecutor = "keiyaku-v4-no-such-executable" as VerificationDeclaration["executor"];
-    const outcome = await executeVerification(input(root, [declaration("true", missingExecutor)]));
-    assert.equal(outcome.outcome.kind, "spawn-error");
+    assert.deepEqual(result.outcome, { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 });
   });
 });

@@ -18,7 +18,11 @@ Derived guidance reserves its own document space from caller extensions. It
 does not make harness identity, worker identity, selected seat, or skill
 procedure into a Contract or Dispatch fact. Skills can give operating procedure
 but cannot amend Contract terms or gain acceptance authority. Guidance is a
-projection, not a delivery preview or an alternate lifecycle surface.
+projection, not a delivery preview or an alternate lifecycle surface. Operating
+procedure must preserve the explicit Verification boundary: only verify runs
+checks, each declaration has independent scratch, and delivery and review consume
+existing requirement evidence. Guidance cannot promise automatic execution or
+turn a selected check's success into whole-gate satisfaction.
 
 ## Managed Place
 

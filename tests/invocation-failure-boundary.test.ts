@@ -463,7 +463,7 @@ test("native preview preserves partial observation on unexpected target-lag fail
     assert.deepEqual(error.outcome.facts, []);
     assert.deepEqual(error.outcome.effects, []);
     assert.equal(error.outcome.value?.candidate?.kind, "ready");
-    assert.equal(error.outcome.value?.verification?.kind, "required");
+    assert.equal(error.outcome.value?.verification?.kind, "requirements");
     assert.equal(error.outcome.value?.target?.kind, "placeable");
     assert.equal(error.outcome.value?.targetLag, undefined);
     return true;

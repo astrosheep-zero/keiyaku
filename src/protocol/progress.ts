@@ -2,7 +2,7 @@ import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { z } from "zod";
 import { worktreeLeakSchema } from "../git/scratch.js";
 import { privateStateSeatCloseLagSchema } from "../git/private-state-seat.js";
-import { verificationCleanupFailureSchema } from "./intent.js";
+import { hookFailureSchema } from "../git/hooks.js";
 import type { ContractHead, ContractId, ContractState, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { GitPlumbingError } from "../git/process.js";
@@ -10,9 +10,9 @@ import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-l
 import type { ReconcileResult } from "../git/reconcile.js";
 import type { WorktreeLeak } from "../git/scratch.js";
 import { GitPrivateStateSeatContentionError, type PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
-import type { VerificationCleanupFailure } from "./intent.js";
 import type { AcceptedProtocolStep } from "./outcome.js";
 import type { ExecutionObservation } from "./execution-observation.js";
+import type { VerificationCheck } from "./verify.js";
 import type { CandidateCompletion, CompletionEvidence } from "./completion.js";
 
 /** A captured interpretation is not an invocation's admission receipt. */
@@ -21,6 +21,15 @@ export type ContractCheckpoint = Readonly<{ state: ContractState; journal: reado
 export function contractCheckpoint(input: ContractCheckpoint): ContractCheckpoint {
   return { state: input.state, journal: input.journal };
 }
+
+export const verificationCleanupFailureSchema = z
+  .object({
+    phase: z.literal("destroy"),
+    name: z.string().refine((value) => value.trim() !== ""),
+    detail: hookFailureSchema,
+  })
+  .strict();
+export type VerificationCleanupFailure = z.infer<typeof verificationCleanupFailureSchema>;
 
 export const executionCleanupSchema = z.union([
   z
@@ -35,6 +44,8 @@ export const executionCleanupSchema = z.union([
       kind: z.literal("verification-cleanup"),
       contractId: contractIdSchema,
       snapshot: snapshotIdSchema.optional(),
+      requirement: z.string().min(1).optional(),
+      index: z.number().int().positive().optional(),
       failure: verificationCleanupFailureSchema,
     })
     .strict(),
@@ -43,6 +54,8 @@ export const executionCleanupSchema = z.union([
       kind: z.literal("worktree-leak"),
       contractId: contractIdSchema,
       snapshot: snapshotIdSchema.optional(),
+      requirement: z.string().min(1).optional(),
+      index: z.number().int().positive().optional(),
       leak: worktreeLeakSchema,
     })
     .strict(),
@@ -147,7 +160,13 @@ export interface ProtocolProgress {
   recordPhysical(contractId: ContractId, report: ReconcileResult): void;
   /** Physical follow owned by this invocation's target movement, distinct from retained topology. */
   recordPlacementPhysical(contractId: ContractId, report: ReconcileResult): void;
-  recordVerification(contractId: ContractId, snapshot: SnapshotId | undefined, result: VerificationResidue): void;
+  recordVerification(
+    contractId: ContractId,
+    snapshot: SnapshotId | undefined,
+    result: VerificationResidue,
+    coordinate?: Readonly<{ requirement: string; index: number }>,
+  ): void;
+  recordVerificationCheck(contractId: ContractId, check: VerificationCheck): void;
   recordStop(stop: ExecutionStop): void;
   recordDeliveryPreview(
     contractId: ContractId,

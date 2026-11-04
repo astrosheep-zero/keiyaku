@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { snapshotId } from "../core/facts/types.js";
 
 const phase = z.enum(["materialize", "setup", "declaration", "cleanup"]);
 const coordinate = {
@@ -6,8 +7,10 @@ const coordinate = {
   cwd: z.string().optional(),
   name: z.string().optional(),
   command: z.string().optional(),
-  index: z.number().int().positive().optional(),
-  total: z.number().int().nonnegative().optional(),
+  requirement: z.string(),
+  snapshot: z.string().transform(snapshotId),
+  index: z.number().int().positive(),
+  total: z.number().int().positive(),
 };
 
 export const verificationObservationSchema = z.discriminatedUnion("kind", [

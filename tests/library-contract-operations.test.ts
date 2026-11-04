@@ -9,10 +9,26 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import { changeId, contractId, entryUlid, snapshotId, type ContractId } from "../src/core/facts/types.js";
 import { contractJournalPath, contractPhysicalName, gitRefLocator } from "../src/git/identity.js";
-import { GIT_REF, HANDOFF_RECEIPT_REF_NAMESPACE, commonGitDirectory, readBlob, readGitPaths, readRef, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
+import {
+  GIT_REF,
+  HANDOFF_RECEIPT_REF_NAMESPACE,
+  commonGitDirectory,
+  readBlob,
+  readGitPaths,
+  readRef,
+  updateGitTree,
+  writeBlob,
+  writeCommit,
+} from "../src/git/repository.js";
 import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { Keiyaku, Repo, type ContractRow } from "../src/index.js";
-import { appointedWorktreePath, cachedRepoAt, cachedRepositoryAt, snapshotGitRepository, withGitShim } from "./support/git.js";
+import {
+  appointedWorktreePath,
+  cachedRepoAt,
+  cachedRepositoryAt,
+  snapshotGitRepository,
+  withGitShim,
+} from "./support/git.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { conflictRecovery } from "../src/git/workspace.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
@@ -128,13 +144,15 @@ async function conflictBoardFixture(count: number) {
   const git = await cachedRepositoryAt(repository.path);
   const contracts = [];
   for (let index = 0; index < count; index += 1) {
-    const contract = accepted(await Keiyaku.with().bind({
-      repo,
-      markdown: document().replace("# Library verbs", `# Board handoff ${index}`),
-      workspace: "worktree",
-      target: "refs/heads/main",
-      gates: ["reviewed"],
-    })).value.keiyaku;
+    const contract = accepted(
+      await Keiyaku.with().bind({
+        repo,
+        markdown: document().replace("# Library verbs", `# Board handoff ${index}`),
+        workspace: "worktree",
+        target: "refs/heads/main",
+        gates: ["reviewed"],
+      }),
+    ).value.keiyaku;
     const id = await publicContractId(contract);
     const appointment = await readManagedWorktreeAppointment(git, id);
     assert.equal(appointment.kind, "appointed");
@@ -142,8 +160,12 @@ async function conflictBoardFixture(count: number) {
     writeFileSync(join(appointment.path, "shared.txt"), "tender\n");
     repository.run(["-C", appointment.path, "add", "shared.txt"]);
     repository.run(["-C", appointment.path, "commit", "--quiet", "-m", "tender"]);
-    contracts.push({ contract, id, worktree: appointment.path,
-      ref: `${HANDOFF_RECEIPT_REF_NAMESPACE}/${contractPhysicalName(id)}/${appointment.place}` });
+    contracts.push({
+      contract,
+      id,
+      worktree: appointment.path,
+      ref: `${HANDOFF_RECEIPT_REF_NAMESPACE}/${contractPhysicalName(id)}/${appointment.place}`,
+    });
   }
   writeFileSync(join(repository.path, "shared.txt"), "target\n");
   repository.run(["add", "shared.txt"]);
@@ -175,11 +197,16 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
           recovery: conflictRecovery,
         });
         assert.deepEqual(observed.row.targetLag, {
-          kind: "counted", behind: 1, subject: { kind: "worktree", path: observed.row.worktreePath },
+          kind: "counted",
+          behind: 1,
+          subject: { kind: "worktree", path: observed.row.worktreePath },
         });
       }
       const reference = await Keiyaku.with().list({ repo });
-      assert.deepEqual(reference.rows.map((row) => expected.find(({ id }) => id === row.id)), reference.rows);
+      assert.deepEqual(
+        reference.rows.map((row) => expected.find(({ id }) => id === row.id)),
+        reference.rows,
+      );
       const calls = join(repository.path, ".git", "board-calls");
       const board = await withGitShim(
         'printf "%s\\n" "$*" >> "$KEIYAKU_BOARD_CALLS"\nexec "$KEIYAKU_REAL_GIT" "$@"',
@@ -193,11 +220,22 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
           const refBatches = commands.filter((command) => command === "cat-file --batch-check=%(objectname)").length;
           const blobChannels = commands.filter((command) => command === "cat-file --batch").length;
           const statusWalks = commands.filter((command) => command.includes(" status --porcelain=v2 ")).length;
-          const individualHandoffRefs = commands.filter((command) => command.includes("rev-parse") && command.includes(HANDOFF_RECEIPT_REF_NAMESPACE)).length;
+          const individualHandoffRefs = commands.filter(
+            (command) => command.includes("rev-parse") && command.includes(HANDOFF_RECEIPT_REF_NAMESPACE),
+          ).length;
           const individualBlobs = commands.filter((command) => command.startsWith("cat-file blob ")).length;
-          context.diagnostic(JSON.stringify({ rows: count, refBatches, blobChannels, statusWalks,
-            individualHandoffRefs, individualBlobs, totalProcesses: commands.length,
-            wallMs: Math.round(performance.now() - start) }));
+          context.diagnostic(
+            JSON.stringify({
+              rows: count,
+              refBatches,
+              blobChannels,
+              statusWalks,
+              individualHandoffRefs,
+              individualBlobs,
+              totalProcesses: commands.length,
+              wallMs: Math.round(performance.now() - start),
+            }),
+          );
           assert.equal(refBatches, 1);
           assert.equal(blobChannels, 1);
           assert.equal(statusWalks, count);
@@ -209,8 +247,11 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       assert.deepEqual(board.rows, reference.rows);
       const catalogue = await Keiyaku.with().list({ repo, limit: 1 });
       assert.equal(catalogue.hasMore, count > 1);
-      const recent = [...expected].sort((left, right) =>
-        right.lastJournalAt.localeCompare(left.lastJournalAt) || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)));
+      const recent = [...expected].sort(
+        (left, right) =>
+          right.lastJournalAt.localeCompare(left.lastJournalAt) ||
+          Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
+      );
       assert.deepEqual(catalogue.rows, recent.slice(0, 1));
     }
   });
@@ -230,13 +271,16 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const orphan = contracts[5]!;
     repository.run(["-C", orphan.worktree, "merge", "--quit"]);
     const after = await Keiyaku.with().list({ repo });
-    assert.deepEqual(after.rows, before.rows.map((row) => {
-      if (row.id === contracts[0]!.id) return row;
-      const workspace = row.workspaceObservation;
-      if (workspace.kind !== "dirty" || workspace.merge === null) throw new Error("missing fixture conflict");
-      const { handoffBase: _base, recovery: _recovery, ...merge } = workspace.merge;
-      return { ...row, workspaceObservation: { ...workspace, merge: row.id === orphan.id ? null : merge } };
-    }));
+    assert.deepEqual(
+      after.rows,
+      before.rows.map((row) => {
+        if (row.id === contracts[0]!.id) return row;
+        const workspace = row.workspaceObservation;
+        if (workspace.kind !== "dirty" || workspace.merge === null) throw new Error("missing fixture conflict");
+        const { handoffBase: _base, recovery: _recovery, ...merge } = workspace.merge;
+        return { ...row, workspaceObservation: { ...workspace, merge: row.id === orphan.id ? null : merge } };
+      }),
+    );
     for (const row of after.rows) {
       const exact = await Keiyaku.with().observe({ repo, id: row.id });
       assert.equal(exact.kind, "present");
@@ -255,7 +299,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
         'if [ "$1 $2" = "cat-file --batch-check=%(objectname)" ]; then',
         '  while IFS= read -r ref; do printf "%s\\n" "$ref" >> "$KEIYAKU_SELECTION_REFS"; done',
         '  exec "$KEIYAKU_REAL_GIT" "$@" < "$KEIYAKU_SELECTION_REFS"',
-        'fi',
+        "fi",
         'exec "$KEIYAKU_REAL_GIT" "$@"',
       ].join("\n"),
       { KEIYAKU_SELECTION_CALLS: calls, KEIYAKU_SELECTION_REFS: refs },
@@ -438,8 +482,11 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
 
     const delivered = await bound.value.keiyaku.deliver();
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    assert.equal(delivered.value.verification, undefined);
-    assert.deepEqual(delivered.facts.map((fact) => fact.kind), ["deliver", "claimed"]);
+    assert.deepEqual(delivered.value.gates, []);
+    assert.deepEqual(
+      delivered.facts.map((fact) => fact.kind),
+      ["deliver", "claimed"],
+    );
     assert.equal(delivered.value.placement, undefined);
     assert.equal(present(await bound.value.keiyaku.state()).terminal?.kind, "claimed");
   });

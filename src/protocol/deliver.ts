@@ -37,7 +37,8 @@ import {
   type WorktreeWitness,
 } from "./run.js";
 import type { AttemptContext } from "../core/decide.js";
-import { contractState, targetContractRefusal } from "../core/facts/observation.js";
+import { contractState, documentIsCurrent, targetContractRefusal } from "../core/facts/observation.js";
+import { dependencyKeys } from "../core/subject.js";
 import { targetName } from "../core/facts/types.js";
 import { resolveContractTarget } from "../git/target.js";
 import { acquireTargetPlacementFence } from "../git/target-placement.js";
@@ -51,7 +52,6 @@ import type {
   SnapshotId,
 } from "../core/facts/types.js";
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
-import { currentVerifiedAttestation, type CurrentVerifiedAttestation } from "./intent.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import type { LeadingOutcome } from "./outcome.js";
 import type { CompletionEvidence } from "./completion.js";
@@ -63,10 +63,23 @@ import type {
   DocumentDerivation,
   MutationOperationInput,
 } from "./operations.js";
-import { recordedIntegrationSnapshots, timestamp } from "./operations.js";
+import { timestamp } from "./operations.js";
 
 type DeliveryIdentity = DeliverData;
-export type VerificationReuse = CurrentVerifiedAttestation;
+
+/** Known prospective and delivered integrations, newest first, without giving Git producer vocabulary. */
+export function deliveryIntegrationSnapshots(journal: readonly JournalEntry[]): readonly SnapshotId[] {
+  return journal
+    .flatMap((entry) => {
+      if (entry.kind === "deliver") return [entry.data.integration.snapshot];
+      if (entry.kind === "reintegrated") return [entry.data.snapshot];
+      if (entry.kind === "attestation" && entry.data.gate === "verified") {
+        return dependencyKeys(entry.data.subject).flatMap((key) => (key.kind === "snapshot" ? [key.value] : []));
+      }
+      return [];
+    })
+    .reverse();
+}
 export const deliverLeadingSchema = z
   .object({
     kind: z.enum(["admitted-now", "already-admitted"]),
@@ -199,10 +212,11 @@ async function prepareDeliveryWithWorktree(
   );
   if (integration.kind === "refused") return integration;
   const changeId = await worktreeChangeId(repository, { contractId, coordinates }, tender.data);
+  // A targetless dirty integration is the captured tender, whose sole parent is the worktree head.
   const reusedIntegration = await reusableIntegrationSnapshot(
     repository,
     integration.data.tree,
-    integration.data.predecessor,
+    coordinates.target === undefined && tender.data.dirty ? tender.data.head : integration.data.predecessor,
     stage.recordedIntegrations ?? [],
   );
   const integrationSnapshot =
@@ -264,7 +278,6 @@ type DeliveryArtifacts =
   | Readonly<{ kind: "defer" }>
   | Readonly<{ kind: "reuse"; worktree: WorktreeWitness }>
   | Readonly<{ kind: "refused"; refusal: DeliveryFailure }>
-  | Readonly<{ kind: "continuation"; worktree: WorktreeWitness }>
   | Readonly<{ kind: "mechanical"; data: DeliveryIdentity; worktree: WorktreeWitness; reusedIntegration?: SnapshotId }>;
 
 type ExternalDeliveryPreparation =
@@ -278,7 +291,6 @@ type AssembledDelivery =
       state: ContractState | null;
       derivation?: DocumentDerivation;
       preparation?: DeliverInput<DeliveryFailure>["preparation"];
-      continuation?: boolean;
       reusedIntegration?: SnapshotId;
       reuse?: boolean;
     }>;
@@ -338,7 +350,7 @@ async function mechanicalDeliveryPreparation(
     {
       contractId: state.id,
       coordinates: state.coordinates,
-      recordedIntegrations: recordedIntegrationSnapshots(journal),
+      recordedIntegrations: deliveryIntegrationSnapshots(journal),
     },
     deliveryPreparationInput(input, derivation),
     captured,
@@ -371,15 +383,6 @@ function worktreeInput(
   );
 }
 
-function hasSupersedingVerification(state: ContractState, journal: readonly JournalEntry[]): boolean {
-  if (state.delivery === null) return false;
-  const current = currentVerifiedAttestation(state);
-  if (current === undefined) return false;
-  const deliveryIndex = journal.findIndex((entry) => entry.entry === state.delivery?.entry);
-  const verificationIndex = journal.findIndex((entry) => entry.entry === current.entry);
-  return deliveryIndex >= 0 && verificationIndex > deliveryIndex;
-}
-
 /**
  * Repeatable physical delivery work outside the publication seat: locate the appointed worktree from
  * one non-authoritative private-state read, capture its bytes, and materialize the prepared artifacts.
@@ -403,19 +406,8 @@ async function prepareDeliveryArtifacts(
   );
   if (captured.kind === "refused") return { kind: "refused", refusal: captured.refusal };
   const worktree = await worktreeInput(input.scope, state, captured.data);
-  if (reusesCurrentCandidate(input, state, derivation, worktree.changeId)) {
+  if (reusesCurrentCandidate(input, state, worktree.changeId)) {
     return { kind: "reuse", worktree };
-  }
-  if (
-    state.terminal === null &&
-    state.delivery !== null &&
-    worktree.changeId === state.delivery.data.integration.changeId &&
-    !hasSupersedingVerification(state, observation.journals.get(state.id)?.entries ?? [])
-  ) {
-    return {
-      kind: "continuation",
-      worktree,
-    };
   }
   const prepared = await mechanicalDeliveryPreparation(
     input,
@@ -475,20 +467,9 @@ async function assembleDeliveryAttempt(
     return { kind: "stale" };
   }
   if (artifacts.kind === "reuse") {
-    return reusesCurrentCandidate(input, state, derivation, artifacts.worktree.changeId)
+    return reusesCurrentCandidate(input, state, artifacts.worktree.changeId)
       ? { kind: "assembled", state, derivation, reuse: true }
       : { kind: "stale" };
-  }
-  if (artifacts.kind === "continuation") {
-    const delivery = state.delivery;
-    if (delivery === null) return { kind: "stale" };
-    return {
-      kind: "assembled",
-      state,
-      derivation,
-      preparation: { kind: "prepared", document: derivation.document, data: delivery.data },
-      continuation: true,
-    };
   }
   return {
     kind: "assembled",
@@ -512,7 +493,7 @@ async function completeDeferredDelivery(
 ): Promise<AssembledDelivery> {
   if (input.materializeConflict !== true || state.terminal !== null) return { kind: "assembled", state, derivation };
   const worktree = await recaptureDeliveryWorktree(input, state);
-  if (worktree !== undefined && reusesCurrentCandidate(input, state, derivation, worktree.changeId)) {
+  if (worktree !== undefined && reusesCurrentCandidate(input, state, worktree.changeId)) {
     return { kind: "assembled", state, derivation, reuse: true };
   }
   const materialization = await materializationMergeStateRefusal(input);
@@ -539,19 +520,11 @@ async function completeDeferredDelivery(
   };
 }
 
-function reusesCurrentCandidate(
-  input: DeliverOperationInput,
-  state: ContractState,
-  derivation: DocumentDerivation,
-  changeId: ChangeId,
-): boolean {
+function reusesCurrentCandidate(input: DeliverOperationInput, state: ContractState, changeId: ChangeId): boolean {
   return (
     input.overwrite !== true &&
     state.terminal === null &&
     state.delivery !== null &&
-    derivation.verification.kind === "prepared" &&
-    derivation.verification.data !== null &&
-    currentVerifiedAttestation(state) === undefined &&
     state.delivery.data.integration.changeId === changeId
   );
 }
@@ -564,6 +537,9 @@ function currentCandidateDeliveryDecision(
 ): AttemptDecision<DeliverValue, DeliverOperationRefusal> | undefined {
   const state = assembled.state;
   if (state === null || assembled.derivation === undefined || assembled.reuse !== true) return undefined;
+  if (!documentIsCurrent(state, assembled.derivation.document)) {
+    return { kind: "refused", refusal: { kind: "document-moved", contractId: state.id } };
+  }
   const record = observation.journals.get(input.contractId);
   const delivery = record?.entries.findLast((entry) => entry.kind === "deliver");
   if (record === undefined || delivery === undefined) throw new Error("current delivery is missing its journal fact");
@@ -575,32 +551,6 @@ function currentCandidateDeliveryDecision(
     journal: record.entries,
     value: {
       ...state.delivery!.data,
-      leading: { kind: "already-admitted", fact: delivery.entry },
-    },
-  };
-}
-
-/** Continue the admitted integration this worktree already carries, without a new offer. */
-function continuationDeliveryDecision(
-  input: DeliverOperationInput,
-  observation: GitDecisionObservation,
-  assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
-): AttemptDecision<DeliverValue, DeliverOperationRefusal> {
-  const record = observation.journals.get(input.contractId);
-  const state = record?.state ?? null;
-  if (record === undefined || state === null || state.delivery === null || assembled.derivation === undefined) {
-    return { kind: "redecide" };
-  }
-  const delivery = record.entries.findLast((entry) => entry.kind === "deliver");
-  if (delivery === undefined) throw new Error("current delivery is missing its journal fact");
-  input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries });
-  return {
-    kind: "accepted",
-    facts: [],
-    state,
-    journal: record.entries,
-    value: {
-      ...state.delivery.data,
       leading: { kind: "already-admitted", fact: delivery.entry },
     },
   };
@@ -618,7 +568,6 @@ async function validateDeliveryTarget(
   const resolved = await resolveContractTarget(input.scope, target.contractId, target);
   if (resolved.kind === "refused") return resolved;
   if (
-    assembled.continuation !== true &&
     assembled.preparation?.kind === "prepared" &&
     resolved.head !== assembled.preparation.data.integration.predecessor
   )
@@ -637,7 +586,6 @@ async function decideAndAdmitDelivery(
   if (targetCheck !== undefined) return targetCheck;
   const current = currentCandidateDeliveryDecision(input, observation, assembled);
   if (current !== undefined) return current;
-  if (assembled.continuation === true) return continuationDeliveryDecision(input, observation, assembled);
   const preparation = assembled.preparation ?? STALE_PRIVATE_STATE_PREPARATION;
   if (preparation.kind === "stale") return preparation;
   const decision = decideDeliver({

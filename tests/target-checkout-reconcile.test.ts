@@ -7,6 +7,7 @@ import test, { describe } from "node:test";
 import { Keiyaku, Repo } from "../src/index.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
+import { singletonRequirement } from "../src/verification/declaration.js";
 import { gate, type ContractId } from "../src/core/facts/types.js";
 import { admitDecidedOffer, mintAttempts } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
@@ -122,7 +123,12 @@ async function admitClaimWithoutFollow(
         at: new Date().toISOString(),
         preparation: {
           kind: "prepared" as const,
-          data: { gate: gate("reviewed"), subject, verdict: "satisfied" as const },
+          data: {
+            gate: gate("reviewed"),
+            requirement: singletonRequirement(gate("reviewed")),
+            subject,
+            verdict: "satisfied" as const,
+          },
         },
       },
       decideAttestation<never>,

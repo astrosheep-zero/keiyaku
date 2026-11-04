@@ -19,6 +19,9 @@ function cloneTerms(terms: ContractTerms): ContractTerms {
     document: { ...terms.document },
     segments: [...terms.segments],
     gates: [...terms.gates],
+    requirements: Object.fromEntries(
+      Object.entries(terms.requirements).map(([gate, requirements]) => [gate, [...requirements]]),
+    ),
     after: [...terms.after],
   };
 }

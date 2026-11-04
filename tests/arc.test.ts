@@ -51,7 +51,7 @@ function bind(suffix = "AA") {
     "bind",
     {
       coordinates: { start: initial, workspace: "worktree" },
-      terms: { document: document.document, segments: document.segments, gates: [], after: [] },
+      terms: { document: document.document, segments: document.segments, gates: [], requirements: {}, after: [] },
     },
     suffix,
   );
@@ -163,7 +163,7 @@ test("Arc CLI admits explicit chapters without changing the status result shape"
     cwd: repository.path,
     environment: { KEIYAKU_HOME: `${repository.path}/empty-home` },
   };
-type CliValue = Readonly<{
+  type CliValue = Readonly<{
     kind?: string;
     operation?: string;
     contract?: ContractId;
@@ -305,7 +305,10 @@ test("freeform and empty chapters render as one bounded history payload", () => 
   const causal = renderContractHistory({
     id,
     state: initial,
-    events: [{ source: "journal", fact: freeform }, { source: "journal", fact: empty }],
+    events: [
+      { source: "journal", fact: freeform },
+      { source: "journal", fact: empty },
+    ],
   });
   assert.match(causal, /^00:00 arc Freeform · 4 lines$/mu);
   assert.match(causal, /^00:00 arc Empty$/mu);
@@ -317,10 +320,6 @@ test("legacy arc blank runs collapse to one blank line in the rendered full view
     { id, state: initial, events: [{ source: "journal", fact: chapter }] },
     { full: true },
   );
-  assert.match(
-    history,
-    /  line one\n\n  line two\n\n  line three/u,
-    "a run of blank payload lines is one blank line",
-  );
+  assert.match(history, /  line one\n\n  line two\n\n  line three/u, "a run of blank payload lines is one blank line");
   assert.doesNotMatch(history, /\n\n\n/u, "no adjacent blank lines survive");
 });

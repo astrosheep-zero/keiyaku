@@ -1,26 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { changeId,contractHead,contractId,entryUlid,snapshotId } from "../src/core/facts/types.js";
+import { changeId, contractHead, contractId, entryUlid, snapshotId } from "../src/core/facts/types.js";
 import { deliveryValueSchema } from "../src/library/delivery.js";
 import {
-KeiyakuError,
-decodeFailureWire,
-encodeFailureWire,
-outcomeSchema,
-reviewSchema,
-withOutcomeReceipt,
+  KeiyakuError,
+  decodeFailureWire,
+  encodeFailureWire,
+  outcomeSchema,
+  reviewSchema,
+  verifySchema,
+  withOutcomeReceipt,
 } from "../src/library/outcome.js";
-import { keiyakuRetryReasonSchema,operationRetrySchemas,type OperationRetries } from "../src/library/refusal.js";
+import { keiyakuRetryReasonSchema, operationRetrySchemas, type OperationRetries } from "../src/library/refusal.js";
 import { materializedConflictSchema } from "../src/protocol/deliver.js";
 import { verificationRuntimeStopSchema } from "../src/protocol/intent.js";
 import { deliverConflictRefusalSchema } from "../src/protocol/operations.js";
 import { settlementLagSchema } from "../src/settlement/settle.js";
-const deliveryResultSchema = outcomeSchema(
-  "deliver",
-  deliveryValueSchema,
-  materializedConflictSchema,
-);
+const deliveryResultSchema = outcomeSchema("deliver", deliveryValueSchema, materializedConflictSchema);
 const reviewResultSchema = outcomeSchema("review", reviewSchema);
+const verifyResultSchema = outcomeSchema("verify", verifySchema);
 const previewResultSchema = outcomeSchema("deliver-preview", deliveryPreviewReportSchema);
 
 const contract = contractId("kei/forwarding-codec");
@@ -70,7 +68,7 @@ function refusesDelivery(value: Record<string, unknown> = {}, extras: Record<str
   assert.equal(deliveryResultSchema.safeParse(acceptedDelivery(value, extras)).success, false);
 }
 
-test("accepted delivery round-trips owner settlement, verification, placement, cleanup, and continuation fields", () => {
+test("accepted delivery round-trips owner settlement, gates, placement, cleanup, and continuation fields", () => {
   const result = acceptedDelivery(
     {
       completion: {
@@ -78,15 +76,14 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
         target: "refs/heads/main",
         predecessor,
       },
-      verification: {
-        kind: "stopped",
-        stop: {
-          failure: "cancelled",
-          stdout: "forwarded delivery tail",
-          stderr: "delivery diagnostic",
-          truncated: true,
+      gates: [
+        {
+          gate: "verified",
+          requirements: [{ requirement: "check-one", current: { kind: "missing" } }],
+          satisfied: false,
+          current: { kind: "missing" },
         },
-      },
+      ],
       continuation: {
         claimed: [contract],
         stopped: [{ contractId: contract, stop: { kind: "already-terminal" } }],
@@ -140,7 +137,6 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
         },
       ],
       pending: [
-        { surface: "verification", required: true },
         { surface: "placement", required: true },
         { surface: "continuation", required: true },
         { surface: "reconciliation", required: true },
@@ -151,6 +147,53 @@ test("accepted delivery round-trips owner settlement, verification, placement, c
   );
   const parsed = deliveryResultSchema.parse(JSON.parse(JSON.stringify(result)));
   assert.deepEqual(parsed, result);
+});
+
+test("forwarded verify preserves each terminal verdict, admission reuse, and stopped check", () => {
+  const result = {
+    operation: "verify",
+    kind: "accepted",
+    contract,
+    head,
+    facts: [],
+    effects: [],
+    pending: [{ surface: "verification", required: true }],
+    value: {
+      snapshot,
+      checks: [
+        {
+          index: 1,
+          requirement: "one",
+          snapshot,
+          kind: "terminal",
+          verdict: "satisfied",
+          admission: { kind: "admitted", entry: fact.entry },
+        },
+        {
+          index: 2,
+          requirement: "two",
+          snapshot,
+          kind: "terminal",
+          verdict: "unsatisfied",
+          admission: { kind: "reused", entry: fact.entry },
+          retainedPath: "/tmp/check-two",
+        },
+        {
+          index: 3,
+          requirement: "three",
+          snapshot,
+          kind: "stopped",
+          stop: { failure: "cancelled", stdout: "captured tail" },
+        },
+      ],
+    },
+  };
+  assert.deepEqual(verifyResultSchema.parse(JSON.parse(JSON.stringify(result))), result);
+  const { admission: _admission, ...withoutAdmission } = result.value.checks[0]!;
+  assert.equal(
+    verifyResultSchema.safeParse({ ...result, value: { snapshot, checks: [withoutAdmission] } }).success,
+    false,
+  );
 });
 
 test("forwarded reconciliation lags preserve their repair scope", () => {
@@ -292,7 +335,14 @@ test("refusal, retry, review, preview, and materialized conflict variants round-
         shortStat: { filesChanged: 1, insertions: 1, deletions: 0 },
         unmergedPaths: [],
       },
-      verification: { kind: "stopped", stop: { failure: "unknown-exit", stdout: "forwarded review tail" } },
+      gates: [
+        {
+          gate: "verified",
+          requirements: [{ requirement: "check-one", current: { kind: "missing" } }],
+          satisfied: false,
+          current: { kind: "missing" },
+        },
+      ],
       continuation: {
         claimed: [contract],
         stopped: [{ contractId: contract, stop: { kind: "already-terminal" } }],
@@ -311,7 +361,10 @@ test("refusal, retry, review, preview, and materialized conflict variants round-
     head,
     value: {
       candidate: { kind: "blocked", refusal: { kind: "target-missing", contractId: contract } },
-      verification: { kind: "required" },
+      verification: {
+        kind: "requirements",
+        requirements: [{ index: 1, requirement: "check-one", current: { kind: "missing" } }],
+      },
       target: { kind: "not-observed" },
     },
     pending: [],
@@ -420,15 +473,9 @@ test("Verification runtime stops preserve only canonical captured output fields"
       stderr: "hook tail",
     },
   );
-  assert.throws(
-    () => verificationRuntimeStopSchema.parse({ failure: "cancelled", stdout: "" }),
-  );
-  assert.throws(
-    () => verificationRuntimeStopSchema.parse({ failure: "cancelled", truncated: false }),
-  );
-  assert.throws(
-    () => verificationRuntimeStopSchema.parse({ failure: "cancelled", diagnostic: "not this variant" }),
-  );
+  assert.throws(() => verificationRuntimeStopSchema.parse({ failure: "cancelled", stdout: "" }));
+  assert.throws(() => verificationRuntimeStopSchema.parse({ failure: "cancelled", truncated: false }));
+  assert.throws(() => verificationRuntimeStopSchema.parse({ failure: "cancelled", diagnostic: "not this variant" }));
 });
 
 test("accepted mutation refuses a missing head", () => {
@@ -628,11 +675,19 @@ test("result codecs reject obsolete cleanup fields, missing operation and cross-
   );
 });
 
-
 test("forwarded contract-file effects retain the owner's nonblank path boundary", () => {
-  const effect = { kind: "reconciliation-effect", contract, effect: { kind: "contract-file", path: "workspace", action: "updated" } };
+  const effect = {
+    kind: "reconciliation-effect",
+    contract,
+    effect: { kind: "contract-file", path: "workspace", action: "updated" },
+  };
   assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({}, { effects: [effect] })).success, true);
-  assert.equal(deliveryResultSchema.safeParse(acceptedDelivery({}, { effects: [{ ...effect, effect: { ...effect.effect, path: "  " } }] })).success, false);
+  assert.equal(
+    deliveryResultSchema.safeParse(
+      acceptedDelivery({}, { effects: [{ ...effect, effect: { ...effect.effect, path: "  " } }] }),
+    ).success,
+    false,
+  );
 });
 
 test("forwarded worktree descriptors preserve strict nonblank grammar in handoff and target lag", () => {
@@ -693,15 +748,33 @@ test("forwarded worktree descriptors preserve strict nonblank grammar in handoff
   }
 });
 
-test("forwarding retry is canonical only for deliver, review and preview, with unchanged operation narrowing", () => {
+test("forwarding retry includes verify and preserves operation narrowing", () => {
   const reason = { kind: "owner-reason-unavailable", diagnostic: "expired live answer" } as const;
   const admitsForwarding: {
     [Operation in keyof OperationRetries]: typeof reason extends OperationRetries[Operation] ? true : false;
-  } = { bind: false, amend: false, deliver: true, review: true, "deliver-preview": true, arc: false, abandon: false };
-  for (const operation of ["deliver", "review", "deliver-preview"] as const) {
+  } = {
+    bind: false,
+    amend: false,
+    deliver: true,
+    verify: true,
+    review: true,
+    "deliver-preview": true,
+    arc: false,
+    abandon: false,
+  };
+  for (const operation of ["deliver", "verify", "review", "deliver-preview"] as const) {
     assert.equal(operationRetrySchemas[operation], keiyakuRetryReasonSchema);
   }
-  for (const operation of ["bind", "amend", "deliver", "review", "deliver-preview", "arc", "abandon"] as const) {
+  for (const operation of [
+    "bind",
+    "amend",
+    "deliver",
+    "verify",
+    "review",
+    "deliver-preview",
+    "arc",
+    "abandon",
+  ] as const) {
     const schema = outcomeSchema(operation, reviewSchema);
     const retry = { kind: "retry", operation, contract, facts: [], effects: [], pending: [], reason };
     assert.equal(schema.safeParse(JSON.parse(JSON.stringify(retry))).success, admitsForwarding[operation]);

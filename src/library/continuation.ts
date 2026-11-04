@@ -14,15 +14,14 @@ import {
 } from "../protocol/progress.js";
 import { observeContractAt } from "../git/observe.js";
 import { gitReconcileLagSchema } from "../git/reconcile.js";
-import type { DocumentDerivation, RepositoryScope } from "../protocol/operations.js";
+import type { RepositoryScope } from "../protocol/operations.js";
 import { executionStopSchema } from "../protocol/progress.js";
-import { contractIdSchema, placementStopSchema, verificationStopSchema } from "../protocol/operations.js";
+import { contractIdSchema, placementStopSchema } from "../protocol/operations.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
 
 const continuationStopSchema = z.union([
   placementStopSchema,
-  verificationStopSchema,
   executionStopSchema,
   z.object({ kind: z.literal("already-terminal") }).strict(),
   z.object({ kind: z.literal("physical-lag"), lags: z.array(gitReconcileLagSchema).readonly() }).strict(),
@@ -68,7 +67,6 @@ type ContinuationInput = Readonly<{
   channel: GitDecodeChannel;
   completed: Extract<CompletionResult, { kind: "completed" }>;
   progress: ProtocolProgress & ContinuationProgress;
-  deriveDocument(state: ContractState): DocumentDerivation;
   actor?: import("../core/facts/types.js").ActorId;
   signal?: AbortSignal;
 }>;
@@ -101,8 +99,6 @@ async function continueCandidate(
     channel: input.channel,
     checkpoint: contractCheckpoint({ state: observed.state, journal: observed.entries }),
     progress: input.progress,
-    start: "verification",
-    deriveDocument: input.deriveDocument,
     ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });

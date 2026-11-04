@@ -8,6 +8,7 @@ declare const changeIdBrand: unique symbol;
 declare const documentKeyBrand: unique symbol;
 declare const documentSegmentKeyBrand: unique symbol;
 declare const gateBrand: unique symbol;
+declare const requirementIdBrand: unique symbol;
 declare const dependencyKeySetBrand: unique symbol;
 declare const actorIdBrand: unique symbol;
 
@@ -19,6 +20,7 @@ export type ChangeId = string & { readonly [changeIdBrand]: "ChangeId" };
 export type DocumentKey = string & { readonly [documentKeyBrand]: "DocumentKey" };
 export type DocumentSegmentKey = string & { readonly [documentSegmentKeyBrand]: "DocumentSegmentKey" };
 export type Gate = string & { readonly [gateBrand]: "Gate" };
+export type RequirementId = string & { readonly [requirementIdBrand]: "RequirementId" };
 export type DependencyKeySet = string & { readonly [dependencyKeySetBrand]: "DependencyKeySet" };
 export type ActorId = string & { readonly [actorIdBrand]: "ActorId" };
 
@@ -85,6 +87,10 @@ export function documentSegmentKey(value: string): DocumentSegmentKey {
   return requireOpaqueId(value, "document segment key") as DocumentSegmentKey;
 }
 
+export function requirementId(value: string): RequirementId {
+  return requireOpaqueId(value, "requirement ID") as RequirementId;
+}
+
 export function gateWord(value: unknown): value is string {
   return typeof value === "string" && /^[a-z][a-z0-9-]{0,63}$/u.test(value);
 }
@@ -121,6 +127,7 @@ export type ContractTerms = Readonly<{
   }>;
   segments: readonly DocumentSegmentKey[];
   gates: readonly Gate[];
+  requirements: Readonly<Record<string, readonly RequirementId[]>>;
   after: readonly ContractId[];
 }>;
 
@@ -154,6 +161,7 @@ export type ReintegratedData = Readonly<{
 
 export type AttestationData = Readonly<{
   gate: Gate;
+  requirement: RequirementId;
   subject: DependencyKeySet;
   verdict: "satisfied" | "unsatisfied";
   summary?: string;

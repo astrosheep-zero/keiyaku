@@ -8,6 +8,10 @@ result and failure evidence, and cannot invoke mutable delivery. Service evidenc
 records observation, not candidate admission or placement. Contract wait is likewise
 an unkeyed, cancellable, parent-served observation of the same native owner;
 its live result is not durable replay evidence and it never falls back to local Git.
+Explicit Contract Verification is a mutable request. The serving parent runs
+the same native verify operation under its Git and process custody, returns the
+same typed check and completion result, and admits each check's terminal testimony
+independently. Preview cannot invoke verify.
 
 ## Transport And Authority
 
@@ -132,7 +136,9 @@ not prove the whole service completed, and an exception after that admission
 cannot prove the request voided. This live detail does not add replay authority:
 when it is gone, recovery still reports the durable request disposition without
 re-executing the service. Parent cancellation reaches the same local execution
-path, including trailing placement and verification.
+path, including verify's independent checks and trailing completion. Cancellation
+preserves already admitted requirement testimony and cleanup residue; transport
+recovery never executes the remaining declarations.
 
 An opted-in Contract service request may also carry bounded ephemeral ordered
 progress after publication and before its final receipt. Sequence gaps are

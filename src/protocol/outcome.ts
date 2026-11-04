@@ -3,7 +3,7 @@ import type { WorktreeLeak } from "../git/scratch.js";
 import type { ReconcileResult } from "../git/reconcile.js";
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { AcceptedAdmission } from "./attempt.js";
-import type { VerificationCleanupFailure } from "./intent.js";
+import type { VerificationCleanupFailure } from "./progress.js";
 import type { ProtocolResult, ProtocolTerminal } from "./run.js";
 
 export type AcceptedProtocolStep = AcceptedAdmission & Readonly<{ physical?: ReconcileResult }>;

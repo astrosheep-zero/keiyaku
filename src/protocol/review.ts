@@ -19,6 +19,7 @@ import { dependencyKeySet } from "../core/subject.js";
 import { contractState, type ActiveContractRefusal } from "../core/facts/observation.js";
 import type { AttestationData, ContractState, DeliverData } from "../core/facts/types.js";
 import { gate } from "../core/facts/types.js";
+import { singletonRequirement } from "../verification/declaration.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import type { LeadingOutcome } from "./outcome.js";
@@ -133,6 +134,7 @@ function preparedReviewCapture(
     kind: "prepared",
     data: {
       gate: REVIEWED,
+      requirement: singletonRequirement(REVIEWED),
       subject: dependencyKeySet([
         { kind: "document", value: state.terms.document.key },
         { kind: "change", value: changeId },

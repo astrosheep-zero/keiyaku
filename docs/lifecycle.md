@@ -30,8 +30,7 @@ Concurrent terminal admission and child landing are ordered by journal admission
 Delivery captures a candidate and frozen placement policy. After that leading
 fact is admitted, a later delivery with the same worktree-content identity
 continues the non-terminal candidate and reuses its delivery data and recorded
-target base without adding another delivery fact. A terminal current
-Verification testimony supersedes that continuation; changed content replaces
+target base without adding another delivery fact. Changed content replaces
 the candidate under the ordinary delivery rules. A conflict normally refuses
 without changing Contract authority; explicit conflict handoff may project it
 into the appointed workspace without treating the projection as delivery. Its
@@ -57,22 +56,30 @@ active Contract, not a debt list, progress measure, or separate acceptance path.
 
 ## Gates And Testimony
 
-Gates are opaque, contract-declared placement obligations. The core supplies no
-built-in vocabulary, producer registry, default gate, or generic attestation
-operation. A producer may record its own testimony whether or not its gate was
-declared; a custom declared gate remains unsatisfied until a lawful producer
-records matching evidence.
+Gates are opaque, contract-declared placement obligations, each with one or
+more opaque requirements. The core supplies no built-in vocabulary, producer
+registry, default gate, or generic attestation operation. A producer may record
+its own testimony whether or not its gate was declared; a custom declared gate
+remains unsatisfied until a lawful producer records matching evidence.
 
-An attestation is durable history about its captured subject. Admission never
-retargets that subject or rejects truthful older testimony merely because the
-Contract has moved. Placement alone applies generic currentness: the latest
-testimony for a declared gate and its current subject must be satisfied. A later
-unsatisfied testimony for the same subject supersedes earlier satisfaction.
-No renderer, protocol adapter, or board recomputes this judgment. Producer
-methodology for `verified` belongs to [verification.md](verification.md);
-selecting `verified` makes the producer's current result a placement obligation.
-Without it, no verb runs Verification; a Verification section is inert document
-text, and older testimony remains truthful history.
+An attestation is durable history about one gate, requirement, and captured
+subject. Admission never retargets that subject or rejects truthful older
+testimony merely because the Contract has moved. Generic currentness selects
+the latest current testimony independently for each declared gate and requirement.
+A later unsatisfied testimony for the same subject supersedes earlier
+satisfaction only for that requirement. A gate is satisfied exactly when every
+currently declared requirement has current satisfied testimony. Missing, stale,
+and current unsatisfied evidence remain distinguishable for each requirement.
+Singleton and multiple-requirement gates use this same judgment; there is no
+aggregate attestation or producer-specific gate arbitration. No renderer,
+protocol adapter, or board recomputes it.
+
+Producer methodology for `verified` belongs to
+[verification.md](verification.md). Selection makes its current requirements
+placement obligations; an unselected Verification section is inert text and
+creates none. Review and custom gates have a singleton requirement derived from
+the gate identity. The document boundary derives and replaces the effective
+requirement set on bind, amend, and fork without teaching core producer vocabulary.
 
 Placement claims only a delivered Contract whose current prerequisites and gates
 pass. Missing delivery, terminal state, unmet prerequisites, and unmet gates are
@@ -82,19 +89,23 @@ the same rules, but that continuation creates no queue, background worker,
 retry ledger, or new lifecycle authority.
 
 Leading testimony and completion have different ownership. Review admits its
-captured testimony; delivery admits its captured candidate. Their shared
-completion node judges one Contract at a time. Satisfied review enters at
-placement, while delivery and delivered-dependent continuation obtain current
-Verification evidence only as the selected `verified` gate's obligation. Without
-that selection, no verb runs the producer. Every Verification refusal or runtime
-stop blocks placement; an unsatisfied verdict leaves the selected gate unmet.
-`reviewed` is independent and neither enables nor replaces
-Verification. Unsatisfied review and delivery preview do not trigger placement. The trigger
-changes the entry point, never the placement rules. Completion observes target
-movement before judging the old integration's gates: an old failed verdict
-cannot prevent refreshing a moved target. A refreshed integration needs its
-own applicable Verification evidence before placement; target movement alone
-never discards review of unchanged candidate content.
+captured testimony; delivery admits its captured candidate; explicit verify
+admits each selected check's terminal testimony without admitting delivery,
+review, reintegration, or another candidate. Their shared completion judgment
+handles one Contract at a time. Satisfied review, delivery, and verify after its
+selected work may request placement. Unsatisfied review and delivery preview do
+not. Pre-delivery verify cannot place because it supplies no delivery.
+
+Completion consumes existing generic requirement evidence only. Delivery,
+review, refreshed-target completion, and delivered-dependent continuation never
+execute Verification, including hooks. Missing or stale evidence is an unmet
+obligation, never a producer run, runtime stop, or execution-reuse event.
+`reviewed` remains independent of Verification. The trigger changes the entry
+point, never the placement rules. Completion observes target movement before
+judging the old integration's gates: an old failed verdict cannot prevent
+refreshing a moved target. A refreshed integration needs its own applicable
+evidence before placement; target movement alone never discards review of
+unchanged candidate content.
 
 The invocation composes those steps synchronously. Dependent discovery is a
 bounded scheduling observation, not permission to mutate a stale worktree or
@@ -130,20 +141,20 @@ same offer. It discards the offer, and any retry uses a fresh observation and
 preparation; uncertain outcomes are resolved only from durable journal facts.
 Bounded retries eventually return a typed non-admission outcome. The journal,
 rather than a queue or cache, is the only recovery and handoff receipt.
-An admitted current candidate still awaiting terminal Verification is reused by
-subsequent delivery only when the observed worktree-content identity is unchanged.
-Changed content replaces the candidate under the ordinary delivery rules and starts
-Verification for that candidate. Testimony from an older running invocation remains
-history for its captured subject, never evidence for the replacement. Explicit
-overwrite retains its remaining replacement behavior. Reuse references its earlier
-admission without claiming that the new invocation admitted it again. Other
-redelivery and terminal refusal behavior is unchanged.
+An admitted current candidate is reused by subsequent delivery only when the
+observed worktree-content identity is unchanged. Changed content replaces the
+candidate under the ordinary delivery rules, without starting Verification.
+Testimony from an older running invocation remains history for its captured
+subject, never evidence for the replacement. Explicit overwrite retains its
+remaining replacement behavior. Reuse references its earlier admission without
+claiming that the new invocation admitted it again. Other redelivery and
+terminal refusal behavior is unchanged.
 
 Delivery preview observes an active Contract without admission. It judges standing
 evidence against the prospective integration through generic currentness, without
 executing a producer or pretending a delivery was persisted. It reports current
 prerequisite and prospective gate judgments without granting placement. Once a leading act is
-admitted, later verification, placement, continuation, cleanup, reconciliation,
+admitted, later placement, continuation, cleanup, reconciliation,
 and settlement are independent obligations: their stops or lags cannot reverse
 the admission or conceal the Contract. Their public representation is owned by
 [public-results.md](public-results.md).

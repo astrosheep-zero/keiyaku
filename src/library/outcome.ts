@@ -9,6 +9,7 @@ import { reconcileEffectSchema } from "../git/reconcile.js";
 import { worktreeWorkspaceSchema } from "../git/workspace.js";
 import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
 import { completionEvidenceSchema } from "../protocol/completion.js";
+import { verifyValueSchema } from "../protocol/verify.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import { materializedConflictSchema } from "../protocol/deliver.js";
 import { contractIdSchema, deliverDataSchema, gateSchema } from "../protocol/operations.js";
@@ -31,7 +32,7 @@ import {
 import { regionOverlapSchema } from "./region.js";
 
 /** Contract operation tags, including preview, sharing the invocation envelope with World reset. */
-export type ContractVerb = "bind" | "amend" | "deliver" | "review" | "deliver-preview" | "arc" | "abandon";
+export type ContractVerb = "bind" | "amend" | "deliver" | "verify" | "review" | "deliver-preview" | "arc" | "abandon";
 type OutcomeOperation = ContractVerb | "nuke";
 
 // ---------------------------------------------------------------------------
@@ -156,13 +157,22 @@ function surface(surface: PendingAction, required: boolean): PendingSurface {
 }
 
 function phasePending(operation: OutcomeOperation, value: unknown): readonly PendingSurface[] {
-  if (operation !== "review" && operation !== "deliver") return [];
+  if (operation !== "review" && operation !== "deliver" && operation !== "verify") return [];
   const concluded = value as
-    | { verification?: { kind?: string }; placement?: unknown; continuation?: ContinuationReport }
+    | {
+        checks?: readonly import("../protocol/verify.js").VerificationCheck[];
+        placement?: unknown;
+        continuation?: ContinuationReport;
+      }
     | undefined;
   if (concluded === undefined) return [];
   const pending: PendingSurface[] = [];
-  if (concluded.verification?.kind === "stopped") pending.push(surface("verification", true));
+  if (
+    concluded.checks?.some(
+      (check) => check.kind === "stopped" || check.admission.kind === "stopped" || check.verdict === "unsatisfied",
+    )
+  )
+    pending.push(surface("verification", true));
   if (concluded.placement !== undefined) pending.push(surface("placement", true));
   if (concluded.continuation !== undefined && concluded.continuation.stopped.length > 0)
     pending.push(surface("continuation", true));
@@ -409,6 +419,8 @@ export function withOutcomeReceipt(error: unknown, outcome: PartialOutcomeEnvelo
 }
 
 // Public value composition: owned nested declarations, no local re-decoding.
+export const verifySchema = verifyValueSchema.extend({ continuation: continuationReportSchema.optional() }).strict();
+export type Verify = z.infer<typeof verifySchema>;
 export const reviewSchema = completionEvidenceSchema
   .extend({
     ...reviewAdmissionValueSchema.shape,
@@ -451,6 +463,7 @@ const partialValueSchemas = {
   bind: bindEvidenceSchema,
   amend: amendEvidenceSchema,
   deliver: partialDeliverySchema,
+  verify: verifySchema.partial(),
   review: reviewSchema,
   "deliver-preview": deliveryPreviewReportSchema.partial(),
   arc: z.object({}).strict(),
@@ -466,7 +479,7 @@ const journalEntrySchema = z.unknown().transform((value, context) => {
 });
 const envelopeFieldsSchema = z
   .object({
-    operation: z.enum(["bind", "amend", "deliver", "review", "deliver-preview", "arc", "abandon"]),
+    operation: z.enum(["bind", "amend", "deliver", "verify", "review", "deliver-preview", "arc", "abandon"]),
     contract: contractIdSchema.optional(),
     facts: z.array(journalEntrySchema).readonly(),
     effects: z.array(contractEffectSchema).readonly(),
@@ -568,6 +581,7 @@ const partialContractEnvelopeSchema = z.union([
   partialContractSchema("bind", partialValueSchemas.bind),
   partialContractSchema("amend", partialValueSchemas.amend),
   partialContractSchema("deliver", partialValueSchemas.deliver),
+  partialContractSchema("verify", partialValueSchemas.verify),
   partialContractSchema("review", partialValueSchemas.review),
   partialContractSchema("deliver-preview", partialValueSchemas["deliver-preview"]),
   partialContractSchema("arc", partialValueSchemas.arc),

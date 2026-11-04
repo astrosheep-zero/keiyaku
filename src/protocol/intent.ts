@@ -1,7 +1,6 @@
-import { entryUlidSchema } from "./attempt.js";
 import { z } from "zod";
 import { hookFailureSchema } from "../git/hooks.js";
-import type { ProtocolProgress } from "./progress.js";
+import { executionStop, type ProtocolProgress, type VerificationCleanupFailure } from "./progress.js";
 import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/process.js";
@@ -14,11 +13,11 @@ import type {
   ActorId,
   AttestationEntry,
   ContractId,
-  ContractState,
   DependencyKeySet,
+  EntryUlid,
+  RequirementId,
   SnapshotId,
 } from "../core/facts/types.js";
-import { latestCurrentAttestations } from "../core/facts/gate.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import {
   executeVerification,
@@ -27,7 +26,7 @@ import {
   type VerificationNonterminalOutcome,
   type VerificationTerminalOutcome,
 } from "../verification/execution.js";
-import { VERIFIED, type VerificationDefinition } from "../verification/declaration.js";
+import { VERIFIED, type VerificationDeclaration } from "../verification/declaration.js";
 import { runProtocol, type CompanionDecorator, type ProtocolPreparation, type ProtocolResult } from "./run.js";
 import { mintAttempts } from "./attempt.js";
 
@@ -111,16 +110,18 @@ export function admitPreparedIntent<
   });
 }
 
-type VerifyDeliveryInput = Readonly<{
+type VerifyRequirementInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
   contractId: ContractId;
   actor?: ActorId;
   at: string;
-  state: ContractState;
-  snapshot?: SnapshotId;
+  snapshot: SnapshotId;
+  requirement: RequirementId;
+  declaration: VerificationDeclaration;
+  index: number;
+  total: number;
   signal?: AbortSignal;
-  verification?: VerificationDefinition;
   progress?: ProtocolProgress;
 }>;
 
@@ -155,22 +156,14 @@ export const verificationRuntimeStopSchema = z.union([
     .strict(),
 ]);
 type VerificationRuntimeStop = z.infer<typeof verificationRuntimeStopSchema>;
-export const verificationCleanupFailureSchema = z
-  .object({
-    phase: z.literal("destroy"),
-    name: z.string().refine((value) => value.trim() !== ""),
-    detail: hookFailureSchema,
-  })
-  .strict();
-export type VerificationCleanupFailure = z.infer<typeof verificationCleanupFailureSchema>;
 type VerificationReuseRefusal = Readonly<{
   kind: "verification-reuse";
-  reuse: CurrentVerifiedAttestation;
+  reuse: VerificationAttestation;
 }>;
 
-export type VerificationReuseStep = Readonly<{
+type VerificationReuseStep = Readonly<{
   kind: "reused";
-  reuse: CurrentVerifiedAttestation;
+  reuse: VerificationAttestation;
 }>;
 export type VerificationStep =
   | ProtocolResult<ActiveContractRefusal | VerificationReuseRefusal>
@@ -178,7 +171,7 @@ export type VerificationStep =
   | VerificationReuseStep;
 export type VerificationResult = Readonly<{
   step: VerificationStep;
-  reuse?: CurrentVerifiedAttestation;
+  reuse?: VerificationAttestation;
   counts?: Readonly<{ passed: number; total: number; verdict: "satisfied" | "unsatisfied"; summary?: string }>;
   cleanup?: VerificationCleanupFailure;
   leak?: WorktreeLeak;
@@ -192,7 +185,7 @@ function runtimeStop(outcome: VerificationNonterminalOutcome): VerificationRunti
 
 function verificationInput(
   outcome: VerificationTerminalOutcome,
-  input: Pick<VerifyDeliveryInput, "contractId" | "actor" | "at">,
+  input: Pick<VerifyRequirementInput, "contractId" | "actor" | "at" | "requirement">,
   subject: DependencyKeySet,
 ): AttestationInput {
   return {
@@ -203,6 +196,7 @@ function verificationInput(
       kind: "prepared",
       data: {
         gate: VERIFIED,
+        requirement: input.requirement,
         subject,
         verdict: outcome.verdict,
         ...(outcome.summary === undefined ? {} : { summary: outcome.summary }),
@@ -211,20 +205,20 @@ function verificationInput(
   };
 }
 
-export const verificationReuseSchema = z
-  .object({
-    entry: entryUlidSchema,
-    verdict: z.enum(["satisfied", "unsatisfied"]),
-    summary: z.string().optional(),
-  })
-  .strict();
-export type CurrentVerifiedAttestation = z.infer<typeof verificationReuseSchema>;
-export function reusableVerificationAttestation(
+type VerificationAttestation = Readonly<{ entry: EntryUlid; verdict: "satisfied" | "unsatisfied"; summary?: string }>;
+function reusableVerificationAttestation(
   current: AttestationEntry | undefined,
   subject: DependencyKeySet,
   verdict: "satisfied" | "unsatisfied",
-): CurrentVerifiedAttestation | undefined {
-  if (current === undefined || current.data.subject !== subject || current.data.verdict !== verdict) return undefined;
+  summary: string | undefined,
+): VerificationAttestation | undefined {
+  if (
+    current === undefined ||
+    current.data.subject !== subject ||
+    current.data.verdict !== verdict ||
+    current.data.summary !== summary
+  )
+    return undefined;
   return {
     entry: current.entry,
     verdict: current.data.verdict,
@@ -232,29 +226,17 @@ export function reusableVerificationAttestation(
   };
 }
 
-/** Read the latest current verified attestation through the generic currentness judge. */
-export function currentVerifiedAttestation(state: ContractState): CurrentVerifiedAttestation | undefined {
-  const current = latestCurrentAttestations(state, new Set([VERIFIED])).get(VERIFIED);
-  return current === undefined
-    ? undefined
-    : {
-        entry: current.entry,
-        verdict: current.data.verdict,
-        ...(current.data.summary === undefined ? {} : { summary: current.data.summary }),
-      };
-}
-
-function retainVerificationReceipt(input: VerifyDeliveryInput, step: VerificationStep): void {
+function retainVerificationReceipt(input: VerifyRequirementInput, step: VerificationStep): void {
   if (!("failure" in step) && step.kind === "accepted") input.progress?.recordResidue(input.contractId, step);
 }
 
 async function verificationStep(
-  input: VerifyDeliveryInput,
+  input: VerifyRequirementInput,
   execution: VerificationExecution,
   subject: DependencyKeySet,
 ): Promise<VerificationStep> {
   if (execution.outcome.kind === "terminal") {
-    const verdict = execution.outcome.verdict;
+    const { verdict, summary } = execution.outcome;
     const admission = await admitIntent<AttestationInput<never>, ActiveContractRefusal | VerificationReuseRefusal>(
       input.channel,
       input.repository,
@@ -265,8 +247,15 @@ async function verificationStep(
         validateAdmission: (observation) => {
           const state = activeContract(observation.decision, input.contractId);
           if ("kind" in state) return undefined;
-          const current = [...state.attestations].reverse().find((attestation) => attestation.data.gate === VERIFIED);
-          const reuse = reusableVerificationAttestation(current, subject, verdict);
+          const current = [...state.attestations]
+            .reverse()
+            .find(
+              (attestation) =>
+                attestation.data.gate === VERIFIED &&
+                attestation.data.requirement === input.requirement &&
+                attestation.data.subject === subject,
+            );
+          const reuse = reusableVerificationAttestation(current, subject, verdict, summary);
           return reuse === undefined ? undefined : { kind: "verification-reuse", reuse };
         },
       },
@@ -302,28 +291,38 @@ function verificationCounts(execution: VerificationExecution): VerificationResul
   };
 }
 
-/** Run Verification against an explicit or admitted integration snapshot. */
-export async function verifyDelivery(input: VerifyDeliveryInput): Promise<VerificationResult | null> {
-  const snapshot = input.snapshot ?? input.state.currentIntegration?.snapshot;
-  if (snapshot === undefined || input.verification === undefined) return null;
-  const subject = dependencyKeySet([
-    { kind: "snapshot", value: snapshot },
-    { kind: "segment", value: input.verification.segment },
-  ]);
+/** Execute and admit one declaration before its caller schedules another check. */
+export async function verifyRequirement(input: VerifyRequirementInput): Promise<VerificationResult> {
+  const snapshot = input.snapshot;
+  const subject = dependencyKeySet([{ kind: "snapshot", value: snapshot }]);
 
   const execution = await executeVerification({
     repository: input.repository,
     candidate: snapshot,
     contractId: input.contractId,
-    declarations: input.verification.declarations,
+    declaration: input.declaration,
+    requirement: input.requirement,
+    index: input.index,
+    total: input.total,
     materializeScratchCandidate,
     projectSettings,
     observe: (observation) =>
       input.progress?.observe({ kind: "verification", contractId: input.contractId, snapshot, observation }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
-  input.progress?.recordVerification(input.contractId, snapshot, execution);
-  const step = await verificationStep(input, execution, subject);
+  input.progress?.recordVerification(input.contractId, snapshot, execution, {
+    requirement: input.requirement,
+    index: input.index,
+  });
+  let step: VerificationStep;
+  try {
+    step = await verificationStep(input, execution, subject);
+  } catch (error) {
+    const stop = executionStop(input.contractId, "verification", error, input.signal);
+    if (stop.reason !== "cancelled") throw error;
+    input.progress?.recordStop(stop);
+    step = { failure: "cancelled" };
+  }
   const counts = verificationCounts(execution);
   retainVerificationReceipt(input, step);
   return {

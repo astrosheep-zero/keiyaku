@@ -58,20 +58,37 @@ export type ExecuteVerificationInput = Readonly<{
   repository: GitRepository;
   candidate: SnapshotId;
   contractId: ContractId;
-  declarations: readonly VerificationDeclaration[];
+  declaration: VerificationDeclaration;
+  index: number;
+  total: number;
+  requirement: string;
   materializeScratchCandidate: (
     repository: GitRepository,
     candidate: SnapshotId,
     contract: ContractId,
+    requirement: string,
   ) => Promise<MaterializedScratchCandidate>;
   projectSettings: (root: string) => Promise<Settings>;
   observe?: (event: VerificationObservation) => void;
   signal?: AbortSignal;
 }>;
 
-function observe(input: Pick<ExecuteVerificationInput, "observe">, event: VerificationObservation): void {
+type AttemptObservation<Event = VerificationObservation> = Event extends VerificationObservation
+  ? Omit<Event, "requirement" | "index" | "total" | "snapshot">
+  : never;
+
+function observe(
+  input: Pick<ExecuteVerificationInput, "observe" | "requirement" | "index" | "total" | "candidate">,
+  event: AttemptObservation,
+): void {
   try {
-    input.observe?.(event);
+    input.observe?.({
+      ...event,
+      requirement: input.requirement,
+      index: input.index,
+      total: input.total,
+      snapshot: input.candidate,
+    });
   } catch {
     /* Observation does not own execution. */
   }
@@ -99,15 +116,15 @@ function processDiagnostic(
     return null;
   }
   return [
-    `[${index + 1} ${declaration.executor} exit ${outcome.code}${outcome.truncated ? " output-truncated" : ""}]`,
+    `[${index} ${declaration.executor} exit ${outcome.code}${outcome.truncated ? " output-truncated" : ""}]`,
     ...(outcome.stdout.length === 0 ? [] : [`stdout:\n${outcome.stdout}`]),
     ...(outcome.stderr.length === 0 ? [] : [`stderr:\n${outcome.stderr}`]),
   ].join("\n");
 }
 
-function appendSummary(current: string | undefined, diagnostic: string | null): string | undefined {
-  if (diagnostic === null) return current;
-  const combined = Buffer.from(current === undefined ? diagnostic : `${current}\n\n${diagnostic}`);
+function boundedSummary(diagnostic: string | null): string | undefined {
+  if (diagnostic === null) return undefined;
+  const combined = Buffer.from(diagnostic);
   if (combined.length <= SUMMARY_BYTES) return combined.toString("utf8");
   const marker = Buffer.from("[earlier output truncated]\n");
   let start = combined.length - (SUMMARY_BYTES - marker.length);
@@ -153,55 +170,46 @@ function nonterminalOutcome(
     : { kind: outcome.kind, ...capturedOutput(outcome) };
 }
 
-async function executeDeclarations(
-  input: Readonly<{
-    declarations: readonly VerificationDeclaration[];
-    cwd: string;
-    environment: NodeJS.ProcessEnv;
-    observe?: (event: VerificationObservation) => void;
-    signal?: AbortSignal;
-  }>,
+async function executeDeclaration(
+  input: ExecuteVerificationInput,
+  cwd: string,
 ): Promise<VerificationTerminalOutcome | VerificationNonterminalOutcome> {
-  let verdict: VerificationVerdict = "satisfied";
-  let passed = 0;
-  const total = input.declarations.length;
-  let summary: string | undefined;
-  for (const [index, declaration] of input.declarations.entries()) {
-    const coordinate = { phase: "declaration" as const, cwd: input.cwd, index: index + 1, total };
-    const started = performance.now();
-    observe(input, { kind: "phase", ...coordinate, state: "started" });
-    const outcome = await runProcess({
-      argv: argvFor(declaration),
-      cwd: input.cwd,
-      env: input.environment,
-      onOutput: (output) => observe(input, { kind: "output", ...coordinate, ...output }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(declaration.timeoutMs === undefined ? {} : { timeoutMs: declaration.timeoutMs }),
-    });
-    observe(input, {
-      kind: "phase",
-      ...coordinate,
-      state: "finished",
-      outcome: outcome.kind === "terminal" ? `exit ${outcome.code}` : outcome.kind,
-      elapsedMs: performance.now() - started,
-    });
-    if (outcome.kind === "timeout") {
-      verdict = "unsatisfied";
-      summary = appendSummary(
-        summary,
-        [`[${index + 1} ${declaration.executor} timeout after ${declaration.timeoutMs}ms]`, outputSummary(outcome)]
+  const { declaration, index } = input;
+  const coordinate = { phase: "declaration" as const, cwd };
+  const started = performance.now();
+  observe(input, { kind: "phase", ...coordinate, state: "started" });
+  const outcome = await runProcess({
+    argv: argvFor(declaration),
+    cwd,
+    env: process.env,
+    onOutput: (output) => observe(input, { kind: "output", ...coordinate, ...output }),
+    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    ...(declaration.timeoutMs === undefined ? {} : { timeoutMs: declaration.timeoutMs }),
+  });
+  observe(input, {
+    kind: "phase",
+    ...coordinate,
+    state: "finished",
+    outcome: outcome.kind === "terminal" ? `exit ${outcome.code}` : outcome.kind,
+    elapsedMs: performance.now() - started,
+  });
+  if (outcome.kind === "spawn-error" || outcome.kind === "unknown-exit" || outcome.kind === "cancelled")
+    return nonterminalOutcome(outcome);
+  const satisfied = outcome.kind === "terminal" && outcome.code === 0;
+  const summary = boundedSummary(
+    outcome.kind === "timeout"
+      ? [`[${index} ${declaration.executor} timeout after ${declaration.timeoutMs}ms]`, outputSummary(outcome)]
           .filter(Boolean)
-          .join("\n"),
-      );
-      continue;
-    }
-    if (outcome.kind === "spawn-error" || outcome.kind === "unknown-exit" || outcome.kind === "cancelled")
-      return nonterminalOutcome(outcome);
-    if (outcome.code === 0) passed += 1;
-    else verdict = "unsatisfied";
-    summary = appendSummary(summary, processDiagnostic(declaration, index, outcome));
-  }
-  return { kind: "terminal", verdict, passed, total, ...(summary === undefined ? {} : { summary }) };
+          .join("\n")
+      : processDiagnostic(declaration, index, outcome),
+  );
+  return {
+    kind: "terminal",
+    verdict: satisfied ? "satisfied" : "unsatisfied",
+    passed: satisfied ? 1 : 0,
+    total: 1,
+    ...(summary === undefined ? {} : { summary }),
+  };
 }
 
 async function materializeScratch(
@@ -210,7 +218,12 @@ async function materializeScratch(
   observe(input, { kind: "phase", phase: "materialize", state: "started" });
   try {
     input.signal?.throwIfAborted();
-    const scratch = await input.materializeScratchCandidate(input.repository, input.candidate, input.contractId);
+    const scratch = await input.materializeScratchCandidate(
+      input.repository,
+      input.candidate,
+      input.contractId,
+      input.requirement,
+    );
     observe(input, { kind: "phase", phase: "materialize", state: "finished", cwd: scratch.cwd, outcome: "ok" });
     return scratch;
   } catch (error) {
@@ -257,13 +270,7 @@ async function runScratch(
         destroy: hooks.destroy,
       };
     return {
-      outcome: await executeDeclarations({
-        declarations: input.declarations,
-        cwd: scratch.cwd,
-        environment: process.env,
-        ...(input.observe === undefined ? {} : { observe: input.observe }),
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      }),
+      outcome: await executeDeclaration(input, scratch.cwd),
       destroy: hooks.destroy,
     };
   } catch (error) {

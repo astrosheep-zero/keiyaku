@@ -12,15 +12,24 @@ import type { ActorId } from "../core/facts/types.js";
 import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
 import { materializedConflictSchema } from "../protocol/deliver.js";
 import { observationSchema, observeExecution, type ExecutionObserver } from "../protocol/execution-observation.js";
-import { contractIdSchema } from "../protocol/operations.js";
+import { contractIdSchema, entryUlidSchema, snapshotIdSchema, verificationStopSchema } from "../protocol/operations.js";
 import { deliveryValueSchema } from "./delivery.js";
 import { InvocationAccumulator } from "./invocation.js";
-import { decodeFailureWire, encodeFailureWire, KeiyakuError, outcomeSchema, project, reviewSchema } from "./outcome.js";
+import {
+  decodeFailureWire,
+  encodeFailureWire,
+  KeiyakuError,
+  outcomeSchema,
+  project,
+  reviewSchema,
+  verifySchema,
+} from "./outcome.js";
 
 type DeliveryResult = import("./contract-outcomes.js").DeliverOutcome;
 type ReviewResult = import("./contract-outcomes.js").ReviewOutcome;
 type DeliveryPreviewResult = import("./contract-outcomes.js").DeliveryPreviewOutcome;
-type ContractResult = DeliveryResult | ReviewResult | DeliveryPreviewResult;
+type VerificationResult = import("./contract-outcomes.js").VerifyOutcome;
+type ContractResult = DeliveryResult | ReviewResult | DeliveryPreviewResult | VerificationResult;
 type ContractRequester = ActorId;
 
 const absolutePathSchema = z.string().refine((value) => isAbsolute(value) && resolve(value) === value);
@@ -40,6 +49,9 @@ const deliverRequestSchema = contractRequestBaseSchema
     message: nonblankStringSchema.optional(),
   })
   .transform((request) => ({ action: "contract.deliver" as const, ...request }));
+const verifyRequestSchema = contractRequestBaseSchema
+  .extend({ index: z.number().int().positive().optional(), includeDirty: z.boolean() })
+  .transform((request) => ({ action: "contract.verify" as const, ...request }));
 const reviewRequestSchema = contractRequestBaseSchema
   .extend({
     verdict: z.enum(["satisfied", "unsatisfied"]),
@@ -51,15 +63,19 @@ const reviewRequestSchema = contractRequestBaseSchema
 export type ContractRequest =
   | z.infer<typeof previewRequestSchema>
   | z.infer<typeof deliverRequestSchema>
+  | z.infer<typeof verifyRequestSchema>
   | z.infer<typeof reviewRequestSchema>;
 type DeliverRequest = Extract<ContractRequest, { action: "contract.deliver" }>;
+type VerifyRequest = Extract<ContractRequest, { action: "contract.verify" }>;
 type ReviewRequest = Extract<ContractRequest, { action: "contract.review" }>;
 type DeliveryPreviewRequest = Extract<ContractRequest, { action: "contract.preview-delivery" }>;
 type ContractResultFor<Action extends ContractRequest["action"]> = Action extends "contract.deliver"
   ? DeliveryResult
-  : Action extends "contract.review"
-    ? ReviewResult
-    : DeliveryPreviewResult;
+  : Action extends "contract.verify"
+    ? VerificationResult
+    : Action extends "contract.review"
+      ? ReviewResult
+      : DeliveryPreviewResult;
 type ContractRequestFor<Action extends ContractRequest["action"]> = Extract<ContractRequest, { action: Action }>;
 const previewServiceSchema = z
   .object({
@@ -93,7 +109,39 @@ const materializedHandoffServiceSchema = materializedConflictSchema
     contractId: contractIdSchema,
   })
   .strict();
+const verificationCoordinateSchema = z.object({
+  index: z.number().int().positive(),
+  requirement: nonblankStringSchema,
+});
+const verificationServiceSchema = z
+  .object({
+    kind: z.literal("verification-completed"),
+    repoRoot: absolutePathSchema,
+    contractId: contractIdSchema,
+    snapshot: snapshotIdSchema,
+    checks: z
+      .array(
+        z.union([
+          verificationCoordinateSchema
+            .extend({
+              kind: z.enum(["admitted", "reused"]),
+              entry: entryUlidSchema,
+            })
+            .strict(),
+          verificationCoordinateSchema
+            .extend({
+              kind: z.literal("stopped"),
+              stage: z.enum(["execution", "admission"]),
+              stop: verificationStopSchema,
+            })
+            .strict(),
+        ]),
+      )
+      .readonly(),
+  })
+  .strict();
 const contractServiceSchema = z.union([
+  verificationServiceSchema,
   previewServiceSchema,
   deliveryReferenceSchema,
   materializedHandoffServiceSchema,
@@ -102,6 +150,9 @@ const contractServiceSchema = z.union([
 type ContractService = z.infer<typeof contractServiceSchema>;
 type ContractReference = ContractService | z.infer<typeof materializedHandoffReferenceSchema>;
 export type ContractRequestPort = Readonly<{
+  verify(
+    input: VerifyRequest & Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
+  ): Promise<VerificationResult>;
   previewDelivery(
     input: DeliveryPreviewRequest &
       Readonly<{ requester: ContractRequester; signal: AbortSignal; observe?: ExecutionObserver }>,
@@ -120,7 +171,9 @@ function decodeContractRequest(action: ContractRequest["action"], value: unknown
       ? previewRequestSchema
       : action === "contract.deliver"
         ? deliverRequestSchema
-        : reviewRequestSchema;
+        : action === "contract.verify"
+          ? verifyRequestSchema
+          : reviewRequestSchema;
   const parsed = schema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
@@ -131,7 +184,9 @@ function decodeContractService(action: ContractRequest["action"], value: unknown
       ? previewServiceSchema
       : action === "contract.deliver"
         ? z.union([deliveryReferenceSchema, materializedHandoffServiceSchema])
-        : reviewReferenceSchema;
+        : action === "contract.verify"
+          ? verificationServiceSchema
+          : reviewReferenceSchema;
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error(`malformed stored Contract service evidence for ${action}`);
   return parsed.data as unknown as ContractService;
@@ -172,6 +227,39 @@ function acceptedReviewEvidence(
   );
   if (review === undefined) throw new Error("accepted review is missing its addressed journal fact");
   return review.entry;
+}
+
+async function executeVerificationRequest(
+  request: VerifyRequest,
+  facts: ExecutionFacts,
+  port: ContractRequestPort,
+): Promise<import("../akuma/request-wire.js").ServiceCompletion<VerificationResult, ContractService>> {
+  const result = await port.verify({
+    ...request,
+    ...executionObservation(facts),
+    requester: facts.requester as ContractRequester,
+    signal: facts.signal,
+  });
+  if (result.kind !== "accepted") return { kind: "voided", outcome: result };
+  return {
+    kind: "served",
+    result,
+    service: {
+      kind: "verification-completed",
+      repoRoot: request.repoRoot,
+      contractId: request.contractId,
+      snapshot: result.value.snapshot,
+      checks: result.value.checks.map((check) => {
+        const coordinate = { index: check.index, requirement: check.requirement };
+        if (check.kind === "stopped")
+          return { ...coordinate, kind: "stopped" as const, stage: "execution" as const, stop: check.stop };
+        const admission = check.admission;
+        return admission.kind === "stopped"
+          ? { ...coordinate, kind: "stopped" as const, stage: "admission" as const, stop: admission.stop }
+          : { ...coordinate, kind: admission.kind, entry: admission.entry };
+      }),
+    },
+  };
 }
 
 async function executeContractRequest(
@@ -235,6 +323,7 @@ async function executeContractRequest(
       },
     };
   }
+  if (request.action === "contract.verify") return await executeVerificationRequest(request, facts, port);
   const result = await port.review({
     ...request,
     ...observation,
@@ -260,7 +349,9 @@ function decodedContractResult(action: ContractRequest["action"], value: unknown
       ? outcomeSchema("deliver-preview", deliveryPreviewReportSchema)
       : action === "contract.deliver"
         ? outcomeSchema("deliver", deliveryValueSchema, materializedHandoffReferenceSchema)
-        : outcomeSchema("review", reviewSchema);
+        : action === "contract.verify"
+          ? outcomeSchema("verify", verifySchema)
+          : outcomeSchema("review", reviewSchema);
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error(`transport integrity: Contract ${action} returned an invalid live result`);
   return parsed.data as unknown as ContractResult;
@@ -301,10 +392,11 @@ export function contractRequestCommand(
 
 export function contractRequestCommands(
   port: ContractRequestPort,
-): Readonly<Record<"contract.preview-delivery" | "contract.deliver" | "contract.review", ErasedRequestCommand>> {
+): Readonly<Record<ContractRequest["action"], ErasedRequestCommand>> {
   return {
     "contract.preview-delivery": eraseRequestCommand(contractRequestCommand("contract.preview-delivery", port)),
     "contract.deliver": eraseRequestCommand(contractRequestCommand("contract.deliver", port)),
+    "contract.verify": eraseRequestCommand(contractRequestCommand("contract.verify", port)),
     "contract.review": eraseRequestCommand(contractRequestCommand("contract.review", port)),
   };
 }
@@ -349,7 +441,9 @@ export function mapForwardedContractFailure(error: unknown, request: ContractReq
         ? "deliver-preview"
         : request.action === "contract.review"
           ? "review"
-          : "deliver";
+          : request.action === "contract.verify"
+            ? "verify"
+            : "deliver";
     const projected = project(operation, new InvocationAccumulator().snapshot(), {
       kind: "retry",
       contract: request.contractId,

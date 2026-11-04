@@ -75,6 +75,29 @@ function renderDirtyRefusal(
   return lines;
 }
 
+function verificationRefusalFacts(
+  refusal: RenderableRefusal,
+  indent: string,
+  identity: string | undefined,
+): readonly string[] | undefined {
+  const contract = identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`];
+  if (refusal.kind === "verification-declaration-invalid")
+    return [
+      ...contract,
+      `${indent}reason  gate 'verified' requires a declared Verification; the Contract declares none`,
+    ];
+  if (refusal.kind === "verification-not-selected")
+    return [`${indent}reason  Contract does not select the verified gate`, ...contract];
+  if (refusal.kind === "verification-index-out-of-range")
+    return [
+      `${indent}reason  Verification declaration index is out of range`,
+      ...contract,
+      `${indent}index  ${refusal.index}`,
+      `${indent}declarations  ${refusal.total}`,
+    ];
+  return undefined;
+}
+
 // eslint-disable-next-line complexity -- one closed projection preserves every refusal fact.
 function refusalFacts(
   refusal: RenderableRefusal,
@@ -94,12 +117,8 @@ function refusalFacts(
       `${indent}option  keiyaku nuke --confirm '${world.replaceAll("'", "'\"'\"'")}'`,
     ];
   }
-  if (refusal.kind === "verification-declaration-invalid") {
-    return [
-      ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
-      `${indent}reason  gate 'verified' requires a declared Verification; the Contract declares none`,
-    ];
-  }
+  const verification = verificationRefusalFacts(refusal, indent, identity);
+  if (verification !== undefined) return verification;
   if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
   if (refusal.kind === "unmerged-paths") {
     return [`${indent}reason  ${refusalWords(refusal.kind)}`, ...collectionLines("paths", refusal.paths, indent)];

@@ -7,6 +7,7 @@ import {
   documentSegmentKey,
   entryUlid,
   gate,
+  requirementId,
   snapshotId,
   type JournalEntry,
 } from "../src/core/facts/types.js";
@@ -24,6 +25,7 @@ test("the journal codec accepts only the opaque current format", () => {
         document: { bytes: "# Current\n", key: documentKey("document-current") },
         segments: [documentSegmentKey("segment-current")],
         gates: [gate("edge-owned")],
+        requirements: { "edge-owned": [requirementId("gate:edge-owned")] },
         after: [],
       },
     },

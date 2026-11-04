@@ -24,7 +24,7 @@ class DeliveryHandle {
   declare readonly leading?: DeliveryValue["leading"];
   declare readonly contentChange?: DeliveryValue["contentChange"];
   declare readonly completion?: DeliveryValue["completion"];
-  declare readonly verification?: DeliveryValue["verification"];
+  declare readonly gates?: DeliveryValue["gates"];
   declare readonly placement?: DeliveryValue["placement"];
   declare readonly continuation?: DeliveryValue["continuation"];
   declare readonly tenderSnapshot: SnapshotId;
@@ -37,7 +37,7 @@ class DeliveryHandle {
     identity: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
     private readonly readDiff: () => Promise<string | null>,
     outcomes: Partial<
-      Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "verification" | "placement" | "continuation">
+      Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "gates" | "placement" | "continuation">
     > = {},
   ) {
     this.tenderSnapshot = identity.tenderSnapshot;
@@ -73,9 +73,7 @@ export function deliveryForContract(
 export function deliveryForContract(
   scope: RepositoryScope,
   delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
-    Partial<
-      Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "verification" | "placement" | "continuation">
-    >,
+    Partial<Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "gates" | "placement" | "continuation">>,
 ): Delivery {
   return new DeliveryHandle(
     delivery,

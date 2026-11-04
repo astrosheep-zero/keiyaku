@@ -70,6 +70,7 @@ export type ContractResolution =
 export type ReviewInput = ActorOptions &
   Readonly<{ verdict: AttestationData["verdict"]; summary?: string; signal?: AbortSignal }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
+export type VerifyInput = Readonly<{ index?: number; includeDirty?: boolean; signal?: AbortSignal }>;
 export type DeliverInput = Readonly<{
   message?: string;
   includeDirty?: boolean;

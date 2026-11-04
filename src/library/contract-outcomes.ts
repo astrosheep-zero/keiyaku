@@ -7,7 +7,7 @@ import type { ContractWorkspaceLocation } from "../workspace-place.js";
 import type { Delivery, DeliveryValue } from "./delivery.js";
 import type { InvocationAccumulator } from "./invocation.js";
 import type { Keiyaku } from "./keiyaku.js";
-import type { ContractVerb, HandoffOutcome, OperationOutcome, OutcomeProjection, Review } from "./outcome.js";
+import type { ContractVerb, HandoffOutcome, OperationOutcome, OutcomeProjection, Review, Verify } from "./outcome.js";
 import type { OperationRefusals } from "./refusal.js";
 import type { AmendRegionObservation, RegionObservation } from "./region.js";
 
@@ -29,6 +29,7 @@ export type AmendOutcome = OperationOutcome<"amend", AmendValue, OperationRefusa
 export type DeliverOutcome =
   | OperationOutcome<"deliver", Delivery & DeliveryValue, OperationRefusals["deliver"]>
   | HandoffOutcome;
+export type VerifyOutcome = OperationOutcome<"verify", Verify, OperationRefusals["verify"]>;
 export type ReviewOutcome = OperationOutcome<"review", Review, OperationRefusals["review"]>;
 export type DeliveryPreviewOutcome = OperationOutcome<
   "deliver-preview",
