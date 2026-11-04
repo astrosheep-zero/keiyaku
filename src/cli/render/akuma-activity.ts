@@ -1054,7 +1054,9 @@ export function callRawAnswer(result: CallResult, streamed: boolean): string | u
 }
 
 export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {
-  if (historyId === undefined || result.kind !== "exact") return undefined;
+  if (historyId === undefined) return undefined;
+  if (result.kind === "exact-report") return result.report.text;
+  if (result.kind !== "exact") return undefined;
   const outcome = result.outcome.outcome;
   return outcome.kind === "answered" ? outcome.answer : outcome.kind === "canceled" ? "canceled" : outcome.diagnostic;
 }
@@ -1143,13 +1145,10 @@ export function historyText(
   context: TextRenderContext,
 ): string {
   if (presentation.id !== undefined) {
-    if (result.kind !== "exact")
-      return `${result.kind === "unknown-history" ? result.historyId : "unknown"} has no matching retained outcome`;
-    return result.outcome.outcome.kind === "answered"
-      ? result.outcome.outcome.answer
-      : result.outcome.outcome.kind === "canceled"
-        ? "canceled"
-        : result.outcome.outcome.diagnostic;
+    return (
+      historyRawAnswer(result, presentation.id) ??
+      `${result.kind === "unknown-history" ? result.historyId : "unknown"} has no matching retained history`
+    );
   }
   if (presentation.last === true) return result.kind === "last" ? result.answer : "no answer retained";
   if (result.kind !== "history") throw new Error("history result lacks page");

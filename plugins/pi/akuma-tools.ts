@@ -261,10 +261,10 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
   );
   register<ToolAddress<AkumaHistoryInput>>(
     "akuma_history",
-    "Read retained execution history, the last answer, or one exact turn/n outcome. id cannot combine with paging or last. before/since are durable sequence cursors, not timestamps.",
+    "Read retained execution history, the last answer, one exact turn/n outcome, or one exact report/n. id cannot combine with paging or last. before/since are durable sequence cursors, not timestamps.",
     {
       akuma: selector,
-      id: { type: "string", pattern: "^turn/[1-9][0-9]*$" },
+      id: { type: "string", pattern: "^(turn|report)/[1-9][0-9]*$" },
       before: { type: "integer", minimum: 1 },
       since: { type: "integer", minimum: 1 },
       limit,

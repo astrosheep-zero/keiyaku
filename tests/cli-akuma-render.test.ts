@@ -178,6 +178,16 @@ test("bounded paragraph previews never spend their last line on a blank", () => 
   assert.match(lines[2]!, /…$/u, "the bounded preview names its truncation");
 });
 
+test("history renders the full exact report without confusing it with an outcome", () => {
+  const text = " report\n  complete\n";
+  assert.equal(historyText({
+    kind: "exact-report",
+    id: parseAkuId("aku/elite/b9977141").id,
+    contract: { kind: "none" },
+    report: { kind: "report", sequence: 5, bodySequence: 1, turnSequence: 2, at: AKUMA_ACTIVITY_AT, text },
+  }, { id: "report/5" }, { columns: 64, color: false }), text);
+});
+
 test("history keeps long call and Tell inputs to one bounded input line", () => {
   const text = "Final minimal correction ".repeat(12);
   const rows: ActivityRow[] = [

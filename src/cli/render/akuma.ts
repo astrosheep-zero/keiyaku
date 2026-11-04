@@ -235,5 +235,5 @@ export function forkOutcome(receipt: ForkResult): CliOutcome {
 
 export function historyOutcome(result: AkumaHistoryResult, id: string | undefined): CliOutcome {
   if (id === undefined) return "accepted";
-  return result.kind === "exact" ? "accepted" : "refused";
+  return result.kind === "exact" || result.kind === "exact-report" ? "accepted" : "refused";
 }

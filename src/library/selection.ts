@@ -13,8 +13,8 @@ import {
 } from "../akuma/akuma-selection-execution.js";
 import { executeWaitAkuma, type NativeWaitResult } from "../akuma/akuma-wait.js";
 import { type AkumaStatus } from "../akuma/akuma.js";
-import { parsePublicHistoryId } from "../akuma/identity.js";
-import { type ActivityHistory, type OutcomeRow } from "../akuma/projection.js";
+import { parseExactHistorySelector } from "../akuma/identity.js";
+import { type ActivityHistory, type OutcomeRow, type ReportRow } from "../akuma/projection.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type {
   AkumaAskResult,
@@ -73,6 +73,7 @@ export type AkumaHistoryInput = AkumaAddressInput &
 export type AkumaHistoryResult =
   | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory; contract: DispatchAssociation }>
   | Readonly<{ kind: "exact"; id: AkumaStatus["id"]; outcome: OutcomeRow; contract: DispatchAssociation }>
+  | Readonly<{ kind: "exact-report"; id: AkumaStatus["id"]; report: ReportRow; contract: DispatchAssociation }>
   | Readonly<{
       kind: "unknown-history";
       id: AkumaStatus["id"];
@@ -437,8 +438,8 @@ function validateHistoryInput(values: Record<string, unknown>): void {
   if (values.last !== undefined && typeof values.last !== "boolean") throw new TypeError("last must be a boolean");
   if (values.id !== undefined && (typeof values.id !== "string" || values.id.trim() === ""))
     throw new TypeError("id must be a nonblank string");
-  if (values.id !== undefined && parsePublicHistoryId(values.id as string) === null)
-    throw new TypeError("id must match turn/<positive safe integer>");
+  if (values.id !== undefined && parseExactHistorySelector(values.id as string) === null)
+    throw new TypeError("id must match turn/<positive safe integer> or report/<positive safe integer>");
   if (
     values.id !== undefined &&
     (values.last === true || values.before !== undefined || values.since !== undefined || values.limit !== undefined)
@@ -475,6 +476,8 @@ export async function historyAkuma(
     if (values.id !== undefined) {
       if ("kind" in history && history.kind === "exact")
         return { kind: "exact", id: addressed.id, outcome: history.outcome, contract };
+      if ("kind" in history && history.kind === "exact-report")
+        return { kind: "exact-report", id: addressed.id, report: history.report, contract };
       return { kind: "unknown-history", id: addressed.id, historyId: values.id as string, contract };
     }
     return { kind: "history", id: addressed.id, history: history as ActivityHistory, contract };

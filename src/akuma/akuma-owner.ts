@@ -45,7 +45,7 @@ import {
   type TurnOutcome,
   type PauseFact,
 } from "./heart/index.js";
-import { parsePublicHistoryId, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
+import { parseExactHistorySelector, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
 import type { ReportAdmission } from "./heart/facts.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
 import { projectTurns, selectExactHistory, selectHistory } from "./projection.js";
@@ -203,9 +203,10 @@ export class AkumaOwner {
       throw new TypeError("Akuma history id must be a nonblank string");
     if (input.before !== undefined || input.since !== undefined || input.limit !== undefined)
       throw new TypeError("Akuma history id cannot be combined with before, since, or limit");
-    if (parsePublicHistoryId(input.id) === null)
-      throw new TypeError("Akuma history id must match turn/<positive safe integer>");
-    return selectExactHistory((await this.projectHistoryTurns()).rows, input.id);
+    const selector = parseExactHistorySelector(input.id);
+    if (selector === null)
+      throw new TypeError("Akuma history id must match turn/<positive safe integer> or report/<positive safe integer>");
+    return selectExactHistory((await this.projectHistoryTurns()).rows, selector);
   }
 
   async report(

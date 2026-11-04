@@ -17,6 +17,15 @@ export function parsePublicHistoryId(value: string): number | null {
   return Number.isSafeInteger(sequence) ? sequence : null;
 }
 
+export function parseExactHistorySelector(
+  value: string,
+): Readonly<{ kind: "turn" | "report"; sequence: number }> | null {
+  const match = /^(turn|report)\/([1-9][0-9]*)$/u.exec(value);
+  if (match === null) return null;
+  const sequence = Number(match[2]);
+  return Number.isSafeInteger(sequence) ? { kind: match[1] as "turn" | "report", sequence } : null;
+}
+
 const pathText = z.string().refine((value) => value.trim() !== "");
 export const akumaPathsSchema = z
   .object({

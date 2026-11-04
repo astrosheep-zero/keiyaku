@@ -16,6 +16,9 @@ ambient state or substitutes newer execution for a stale caller. Its result mean
 cannot undo the fact. Reports appear as distinct rows in the same public history
 and stream, under their existing sequence and retention meaning. They are not
 answers, and neither completion observation nor final-answer selection changes.
+An exact retained report is independently readable by its own timeline identity,
+even while its Turn is open. That read observes no Turn outcome; a pruned or
+wrong-kind coordinate remains unknown rather than selecting other evidence.
 
 ## One Public Timeline
 

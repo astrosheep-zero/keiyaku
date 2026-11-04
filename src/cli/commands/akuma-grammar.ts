@@ -2,7 +2,7 @@ import { CliUsageError, commandGuide, usageLine, type CliUsageGuide } from "../u
 import { scanArgs, type ScanFlagKind, type ScanSpec } from "../scan.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
-import { parsePublicHistoryId } from "../../akuma/identity.js";
+import { parseExactHistorySelector } from "../../akuma/identity.js";
 
 type Output = Readonly<{ output: "text" | "json" }>;
 type Addressed = Readonly<{ akuma: string }>;
@@ -160,7 +160,7 @@ const AKUMA_COMMAND_SPECS = {
       "history <aku/...|@alias> [--before <index> | --since <index>] [--limit <count>]\nhistory <aku/...|@alias> --id <historyId>\nhistory <aku/...|@alias> --last\nhistory <kei/...> [--full] [--repo <path>]",
     purpose: "Read an Akuma's answers and activity, or a Contract's history of changes and assigned work.",
     details: [
-      "--id reads an exact retained terminal turn (turn/<number>): its answer or failure diagnostic.",
+      "--id reads an exact retained terminal turn (turn/<number>) or report (report/<number>).",
       "--before <index> pages older rows before that sequence; --since <index> pages newer rows after it.",
       "--limit bounds page size (default 12); without --since, the latest rows are shown.",
       "With --since, paging starts at the earliest newer rows.",
@@ -326,7 +326,8 @@ function parseAkumaHistory(
   if (limit !== undefined && limit > 5_000) fail("--limit must be no greater than 5000");
   const id =
     flags.id === undefined ? undefined : stringFlag(flags.id, "history --id requires a nonblank historyId", fail);
-  if (id !== undefined && parsePublicHistoryId(id) === null) fail("history --id requires turn/<positive safe integer>");
+  if (id !== undefined && parseExactHistorySelector(id) === null)
+    fail("history --id requires turn/<positive safe integer> or report/<positive safe integer>");
   return {
     command: "history",
     akuma: selector,

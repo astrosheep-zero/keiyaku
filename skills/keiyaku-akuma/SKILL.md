@@ -124,6 +124,7 @@ keiyaku ls "aku/*/*"
 keiyaku ls --mine
 keiyaku history @reviewer --last
 keiyaku history @reviewer --id turn/3
+keiyaku history @reviewer --id report/5
 ```
 
 - `whoami`: who you are; for an Akuma, also who started its current turn.
@@ -131,6 +132,7 @@ keiyaku history @reviewer --id turn/3
 - `ls aku/`: callable names. `ls "aku/*/*"`: recent instances.
   `ls --mine`: Akumas you called, plus their descendants in this World.
   `--caller` selects another caller; see `ls --help`.
+- `history <aku> --id report/N`: the exact retained report text, including during an open Turn.
 - `history <aku> --last`: latest answer. `--id turn/N`: one exact turn's
   answer or failure diagnostic (ids are in `history <aku> --json`).
   Keep the complete AkuId if an alias may move.

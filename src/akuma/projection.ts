@@ -276,11 +276,20 @@ export type ActivityHistory = Readonly<{
 
 export type ExactHistory =
   | Readonly<{ kind: "exact"; outcome: OutcomeRow }>
+  | Readonly<{ kind: "exact-report"; report: ReportRow }>
   | Readonly<{ kind: "unknown-history"; id: string }>;
 
 export type HistoryPage = ActivityHistory;
 
-export function selectExactHistory(rows: readonly ActivityRow[], id: string): ExactHistory {
+export function selectExactHistory(
+  rows: readonly ActivityRow[],
+  selector: Readonly<{ kind: "turn" | "report"; sequence: number }>,
+): ExactHistory {
+  const id = `${selector.kind}/${selector.sequence}`;
+  if (selector.kind === "report") {
+    const report = rows.find((row): row is ReportRow => row.kind === "report" && row.sequence === selector.sequence);
+    return report === undefined ? { kind: "unknown-history", id } : { kind: "exact-report", report };
+  }
   const outcome = rows.find((row): row is OutcomeRow => row.kind === "outcome" && row.outcome.historyId === id);
   return outcome === undefined ? { kind: "unknown-history", id } : { kind: "exact", outcome };
 }
