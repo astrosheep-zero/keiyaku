@@ -965,12 +965,47 @@ type SnapshotCoreOptions = Readonly<{
   facts?: readonly string[];
 }>;
 
+function selectedStatusActivity(snapshot: RenderedSnapshot, context: TextRenderContext): readonly string[] {
+  const entries = coalesceAdjacentGaps(
+    snapshot.kind === "open" ? visibleOpenSnapshotEntries(snapshot) : orderedSnapshotEntries(snapshot),
+  );
+  const rendered = entries.map((entry) => {
+    if (entry.kind === "gap")
+      return { exempt: true, lines: [omissionMarker(`${entry.count} omitted`, context.columns)] };
+    const row = entry.row;
+    const exempt =
+      row.kind === "outcome" ||
+      (row.kind === "tell" && row.state === "pending") ||
+      (row.kind === "tool" && (row.state === "active" || row.state === "unsettled" || row.state.status === "error"));
+    return { exempt, lines: renderRow(row, context) };
+  });
+  const kept = rendered.map(({ lines }) => lines);
+  // Allocate the budget backwards without changing the order of the resulting lines.
+  let remaining = 3;
+  for (let i = rendered.length - 1; i >= 0; i -= 1) {
+    const item = rendered[i]!;
+    if (item.exempt) continue;
+    const take = Math.min(remaining, item.lines.length);
+    remaining -= take;
+    kept[i] = take === 0 ? [] : item.lines.slice(-take);
+  }
+  let marked = false;
+  return rendered.flatMap((item, index) => {
+    const lines = kept[index]!;
+    if (!item.exempt && lines.length < item.lines.length && !marked) {
+      marked = true;
+      return [omissionMarker("earlier activity omitted", context.columns), ...lines];
+    }
+    return lines;
+  });
+}
+
 function snapshotCore(
   view: SnapshotView,
   context: TextRenderContext,
   options: SnapshotCoreOptions,
 ): Readonly<{ activity: readonly string[]; head: readonly string[]; facts: readonly string[] }> {
-  const activity = snapshotActivityLines(view.status.timeline, context);
+  const activity = selectedStatusActivity(view.status.timeline, context);
   // Static coordinates belong above the content boundary; a dynamic diagnostic stays below it.
   const contextFacts = [...(view.status.cwd === undefined ? [] : [safeText(view.status.cwd)])];
   const facts = [

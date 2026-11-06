@@ -3165,17 +3165,11 @@ test("status renders selected activity evidence while preserving history and com
     DEFAULT_CONTEXT,
   );
   assert.doesNotMatch(statusText, /internal thought/u);
-  for (const command of ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"])
-    assert.equal(
-      (statusText.match(new RegExp(`\\$ ${command}`, "gu")) ?? []).length,
-      1,
-      `selected ${command} renders once`,
-    );
+  assert.doesNotMatch(statusText, /\$ c[1-6]\b/u);
+  for (const command of ["c7", "c8", "c9"]) assert.match(statusText, new RegExp(`\\$ ${command}\\b`, "u"));
   assert.match(statusText, /\?  run +\$ c9/u, "the active final tool remains visible as unsettled");
   assert.doesNotMatch(statusText, /●  run/u, "status never asserts live activity");
-  assert.doesNotMatch(statusText, /omitted/u, "status does not re-fold the selected tool evidence");
-  assert.ok(statusText.indexOf("$ c4") < statusText.indexOf("between"));
-  assert.ok(statusText.indexOf("between") < statusText.indexOf("$ c5"));
+  assert.match(statusText, /earlier activity omitted/u);
   assert.ok(statusText.indexOf("$ c7") < statusText.indexOf("after"));
   assert.ok(statusText.indexOf("after") < statusText.indexOf("$ c8"));
 
@@ -3211,7 +3205,7 @@ test("status renders selected activity evidence while preserving history and com
   );
   assert.match(outcomeText, /final outcome/u, "an answered status retains its complete outcome");
   assert.doesNotMatch(outcomeText, /✓ say\s+“”/u, "a retained answer never becomes an empty say");
-  assert.match(outcomeText, /\$ c5/u, "settled status retains selected activity around its outcome");
+  assert.match(outcomeText, /\$ c9/u, "settled status retains latest activity around its outcome");
 
   const failedOutcome: OutcomeRow = {
     kind: "outcome",
@@ -3234,7 +3228,7 @@ test("status renders selected activity evidence while preserving history and com
     DEFAULT_CONTEXT,
   );
   assert.match(failedText, /retained provider diagnostic/u, "a failed status retains its diagnostic");
-  assert.match(failedText, /\$ c5/u, "failed status retains selected activity around its diagnostic");
+  assert.match(failedText, /\$ c9/u, "failed status retains latest activity around its diagnostic");
 
   const historyInvocation = parseArgv(["history", id]);
   assert.ok("command" in historyInvocation);

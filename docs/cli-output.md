@@ -188,7 +188,12 @@ evidence merely to hide internal terminology.
 One shared Akuma observation discipline serves status, observing call, ask, and
 history. Complete identity and known static context precede chronological
 activity, followed by one truthful conclusion, reported changes, and diagnostics.
-Known coordinates appear once; unknown coordinates stay absent. A diagnostic
+Known coordinates appear once; unknown coordinates stay absent. Selected Akuma
+status text bounds ordinary activity to its latest rendered lines and visibly
+acknowledges earlier omitted content; identity, conclusion, reported changes,
+and actionable failure or pending evidence remain outside that bound. This
+presentation does not narrow the public snapshot, history, or observing streams.
+A diagnostic
 keeps its subject, unavailable state, cause, and recovery coordinates together,
 never as an unlabeled static property. Activity retains the owner's event order,
 selection, omissions, payloads, and attribution. A conclusion already supplied

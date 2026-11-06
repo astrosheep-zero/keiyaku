@@ -92,6 +92,22 @@ test("status panel puts static coordinates above the timeline and dynamic facts 
   assert.equal(lines.filter((line) => line.startsWith("!")).length, 0, "a diagnostic never becomes a bare static fact");
 });
 
+test("selected status keeps the last three rendered activity lines, not three events", () => {
+  const id = "aku/worker/abcd1234";
+  const say = (sequence: number, text: string): OpenSnapshotRow => ({
+    kind: "said", sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text,
+  });
+  const render = (rows: readonly OpenSnapshotRow[]) =>
+    snapshotText({ status: running(id, rows), contract: { kind: "none" } }, { columns: 40, color: false });
+  assert.doesNotMatch(render([]), /omitted/u);
+  assert.doesNotMatch(render([say(1, "only")]), /omitted/u);
+  const text = render([say(1, "old one\nold two"), say(2, "new 👩‍💻\nnew two")]);
+  assert.match(text, /earlier activity omitted/u);
+  assert.doesNotMatch(text, /old one/u);
+  assert.match(text, /old two\n▎ new 👩‍💻\n▎ new two/u);
+  assert.match(text, /● running/u);
+});
+
 test("speech uses the rail without a label or quotes and wraps at a grapheme boundary", () => {
   const row: ActivityRow = {
     kind: "said",
