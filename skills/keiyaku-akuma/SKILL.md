@@ -122,20 +122,27 @@ keiyaku status @reviewer
 keiyaku ls aku/
 keiyaku ls "aku/*/*"
 keiyaku ls --mine
+keiyaku history @reviewer
 keiyaku history @reviewer --last
 keiyaku history @reviewer --id turn/3
 keiyaku history @reviewer --id report/5
 ```
 
 - `whoami`: who you are; for an Akuma, also who started its current turn.
-- `status [<aku>]`: the roster, or one Akuma's state and workdir.
+- `status [<aku>]`: the roster, or a selected Akuma's current-work snapshot,
+  state, workdir, and reported file-change statistics. Those statistics summarize
+  retained successful file-change activity, not a fresh Git diff.
 - `ls aku/`: callable names. `ls "aku/*/*"`: recent instances.
   `ls --mine`: Akumas you called, plus their descendants in this World.
   `--caller` selects another caller; see `ls --help`.
-- `history <aku> --id report/N`: the exact retained report text, including during an open Turn.
-- `history <aku> --last`: latest answer. `--id turn/N`: one exact turn's
-  answer or failure diagnostic (ids are in `history <aku> --json`).
-  Keep the complete AkuId if an alias may move.
+- `history <aku>`: by default, the latest 12 retained timeline events, which
+  can include actions during an open Turn. It is a one-shot immutable observation,
+  not a live following stream or proof of completion. See `history --help` for
+  paging.
+- `history <aku> --last`: the latest answer, not a history page. `--id turn/N`
+  retrieves one exact turn's answer or failure diagnostic; `--id report/N`
+  retrieves one exact retained report, even during an open Turn. IDs are in
+  `history <aku> --json`. Keep the complete AkuId if an alias may move.
 
 ## Retention
 
