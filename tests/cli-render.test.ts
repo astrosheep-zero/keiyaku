@@ -1077,6 +1077,29 @@ test("Contract catalogue testimony keeps source quotes and body-aligned bounded 
   }
 });
 
+test("selected Contract roster preserves terminal associations and unavailable observations", () => {
+  const attached = { id: "aku/worker/11110001", aliases: ["@lead" as never] };
+  const missing = { id: "aku/worker/22220002", aliases: [], aliasesUnavailable: true as const };
+  const akuma = activityAkumaRow(attached.id, "asleep", idleAkumaSnapshot([]));
+  const report = {
+    ...akumaWorldReport([akuma]),
+    contracts: {
+      kind: "present" as const,
+      value: {
+        root: "/repo",
+        state: null,
+        observedAt: "2026-01-01T10:00:00.000Z",
+        rows: [{ ...catalogRow(), phase: "claimed" as const, holder: { kind: "none" as const }, roster: [attached, missing], rosterUnavailable: true as const }],
+      },
+    },
+  };
+  const text = renderKanshiText(report, { columns: 80, color: false }, "contract");
+  assert.match(text, /akuma association unavailable/u);
+  assert.match(text, /aku\/worker\/11110001 \(@lead\) · asleep/u);
+  assert.match(text, /aku\/worker\/22220002 \(aliases unavailable\) · unavailable/u);
+  assert.doesNotMatch(text, /activity|worktree|candidate/u);
+});
+
 test("Contract status cards collapse terminal mechanics and bound testimony like Akuma answers", () => {
   const integration = snapshotId("a".repeat(40));
   const tender = snapshotId("b".repeat(40));

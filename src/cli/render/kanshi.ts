@@ -33,8 +33,8 @@ import {
   type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
-import { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard } from "./kanshi-akuma.js";
-import { contractMark, debtDispositionMark } from "./marks.js";
+import { akumaLabel, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard } from "./kanshi-akuma.js";
+import { akumaMark, contractMark, debtDispositionMark } from "./marks.js";
 import { dispositionText } from "./debt.js";
 const REVIEW_ATTENTION_MS = 15 * 60 * 1_000;
 const PENDING_ATTENTION_MS = 60 * 60 * 1_000;
@@ -127,6 +127,22 @@ function linkedAkumaSummary(row: ContractKanshiRow, akuma: Section<AkumaKanshiWo
   return facts.join(" · ");
 }
 
+function linkedAkumaRows(row: ContractKanshiRow, akuma: Section<AkumaKanshiWorld> | undefined): readonly string[] {
+  const rows = akuma?.kind === "present" ? akuma.value.rows : [];
+  const byId = new Map<string, AkumaAttachmentRow>(rows.map((item) => [item.id, item]));
+  return [
+    ...(row.rosterUnavailable === true ? ["  akuma association unavailable"] : []),
+    ...row.roster.map((attached) => {
+      const observed = byId.get(attached.id);
+      const aliases = akumaLabel(attached, attached.aliasesUnavailable === true);
+      const identity = [attached.id, aliases].filter(Boolean).join(" ");
+      return observed === undefined
+        ? `  ! ${safeText(identity)} · unavailable`
+        : `  ${akumaMark(observed.life)} ${safeText(identity)} · ${observed.life}`;
+    }),
+  ];
+}
+
 function semanticBlock(_name: string, facts: readonly string[], _context: TextRenderContext): readonly string[] {
   if (facts.length === 0) return [];
   return facts.map((fact) => `  ${safeText(fact)}`);
@@ -195,6 +211,7 @@ function renderSelectedContractRow(
   if (row.phase === "claimed" || row.phase === "abandoned") {
     const outcome = terminalFacts(row, context, abbreviations);
     lines.push(...outcome.map((fact) => (fact.startsWith("  ") ? fact : `  ${safeText(fact)}`)));
+    lines.push(...linkedAkumaRows(row, facts.akuma));
     return lines;
   }
   const deniedReview = row.gates.reports.find(
@@ -234,8 +251,7 @@ function renderSelectedContractRow(
   }
   if (deniedReview?.current.kind === "attested" && deniedReview.current.summary !== undefined)
     lines.push(...payload("review  ×", deniedReview.current.summary, context));
-  const akuma = linkedAkumaSummary(row, facts.akuma);
-  if (akuma !== undefined) lines.push(...semanticBlock("akuma", [akuma], context));
+  lines.push(...linkedAkumaRows(row, facts.akuma));
   if (row.worktreePath !== null) lines.push(...semanticBlock("worktree", [`worktree  ${row.worktreePath}`], context));
   lines.push(...semanticBlock("alarms", liveAlarms(row, facts.debts), context));
   return lines;

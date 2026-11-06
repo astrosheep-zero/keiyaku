@@ -217,7 +217,9 @@ truncation, preferring word boundaries. World-board answer previews show the
 tail with a leading omission; selected detail keeps the head.
 
 Selected Contract status foregrounds current work or the terminal outcome,
-without repeating settled mechanics. A delivered integration observed before
+without repeating settled mechanics. Associated Akumas retain their complete
+identities, available aliases, and observed life, including unavailable
+association or observation evidence. A delivered integration observed before
 target movement is identified as such. Delivery preview identifies itself as a
 dry-run observation, never delivery success. Candidate preparation, standing
 requirement evidence, and target followability stay distinct. Known checkout

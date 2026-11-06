@@ -246,6 +246,24 @@ test("unattempted associations without a Repo are not marked unavailable", async
   }
 });
 
+test("selected Contract shows associated Akuma identity, alias, and life", async (t) => {
+  const { repository, contract, akumaId } = await populatedWorld(t);
+  const report = await kanshi({
+    world: await World.at(repository.path),
+    repo: await Repo.at({ path: repository.path }),
+    contract: contract.id,
+  });
+  const selected = selectKanshi({ report, contract: contract.id });
+  const text = renderKanshiText(selected, { columns: 80, color: false }, "contract");
+  assert.ok(text.includes(akumaId));
+  assert.equal(selected.akuma.kind, "present");
+  if (selected.akuma.kind !== "present") return;
+  const life = selected.akuma.value.rows.find((row) => row.id === akumaId)?.life;
+  assert.ok(life !== undefined);
+  assert.ok(text.includes(`(@watch) · ${life}`));
+  assert.doesNotMatch(text, /akuma  \d/u);
+});
+
 test("selected Contract shares one Debt observation across its bounded and owned views", async (t) => {
   const { repository, contract, debtId } = await populatedWorld(t);
   const world = await World.at(repository.path);

@@ -47,7 +47,7 @@ function latestActivityLines(
   );
 }
 
-function akumaLabel(row: AkumaKanshiRow, aliasesUnavailable: boolean): string {
+function akumaLabel(row: Pick<AkumaKanshiRow, "aliases">, aliasesUnavailable: boolean): string {
   const aliases = row.aliases ?? [];
   if (aliases.length > 0) return `(${aliases.join(" ")})`;
   return aliasesUnavailable ? "(aliases unavailable)" : "";
@@ -139,4 +139,4 @@ function formatAge(source: string | null | undefined, observedAt: string): strin
   return ageText(source, observedAt);
 }
 
-export { endpointFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard };
+export { akumaLabel, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard };
