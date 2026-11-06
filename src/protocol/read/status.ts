@@ -1,7 +1,7 @@
 import {
   observeActiveContractWorld,
   observeContractsForAdmissionInObservationAt,
-  observeDeliveryTargetAt,
+  deliveryTargetObserver,
   withContractReadObservationAt,
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
@@ -295,6 +295,7 @@ async function hydrateRows(
     observation.readBlobs,
     selected.flatMap(({ workspace }) => (workspace === undefined ? [] : [workspace])),
   );
+  const observeTarget = deliveryTargetObserver(observation);
   return await Promise.all(
     selected.map(
       async ({ state, bindAt, lastJournalAt, workspace }) =>
@@ -303,7 +304,7 @@ async function hydrateRows(
           state,
           bindAt,
           lastJournalAt,
-          targetObservation: await observeDeliveryTargetAt(observation, state),
+          targetObservation: await observeTarget(state),
           workspace,
           handoff: handoffs.get(state.id),
           after: afterEdges(state, endpoints),
@@ -313,8 +314,12 @@ async function hydrateRows(
   );
 }
 
-/** Build the Contract board from one immutable git observation. */
-export async function readContractBoard(observation: GitReadObservation, include?: ContractId): Promise<ContractBoard> {
+/** Build the complete board by default; a selected detail read retains complete dependency evidence. */
+export async function readContractBoard(
+  observation: GitReadObservation,
+  include?: ContractId,
+  detail: "board" | "selected" = "board",
+): Promise<ContractBoard> {
   const observedAt = new Date().toISOString();
   const observed = await observeActiveContractWorld(observation);
   const contracts = new Map(observed.contracts);
@@ -329,8 +334,9 @@ export async function readContractBoard(observation: GitReadObservation, include
       endpoints = new Map(await afterEndpointMap(observation, endpoints, record.state.terms.after));
     }
   }
-  const selected = selectedContractStates(contracts);
-  const rows = await hydrateRows(observation, selected, endpoints, selected);
+  const states = selectedContractStates(contracts);
+  const selected = detail === "selected" ? states.filter(({ state }) => state.id === include) : states;
+  const rows = await hydrateRows(observation, selected, endpoints, states);
   return {
     root: observation.repository.primaryWorktree,
     state: observed.snapshot,

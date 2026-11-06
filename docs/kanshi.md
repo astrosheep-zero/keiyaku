@@ -43,6 +43,13 @@ The bare World Contract section is likewise a recent bounded catalogue. A
 selected Contract retains its exact owner observation, so the convenience of a
 World aperture never weakens the detail that selection asks the Contract owner
 to explain.
+Its aperture bounds physical detail observation as well as returned rows. A
+Contract's workspace is not inspected merely to discard its detail, while a
+selected row's target still supplies the evidence required to explain it.
+Shared target evidence is reused only within the same observation,
+without weakening incarnation checks or turning unavailable evidence into a
+clean judgment. Exact selection preserves complete relationship evidence while
+observing physical detail only for the requested Contract and its target.
 Its judgment is phase-driven: active Contracts foreground the outstanding hand
 and acceptance evidence, while terminal Contracts foreground the settled outcome.
 The World Contract section offers the same concise judgment at catalogue scale.

@@ -8,7 +8,7 @@ import {
   type JournalEntry,
   type SnapshotId,
 } from "../core/facts/types.js";
-import { targetRef, targetRepository, resolveContractTarget } from "./target.js";
+import { resolveContractTarget } from "./target.js";
 import type { ContractsObservation } from "../core/facts/observation.js";
 import {
   contractJournalPath,
@@ -17,7 +17,7 @@ import {
   mintSnapshotId,
   type ContractJournalClass,
 } from "./identity.js";
-import { currentBranch, isKeiyakuOwnedRef, readRef, type GitSnapshot, type GitOid } from "./repository.js";
+import { currentBranch, isKeiyakuOwnedRef, type GitSnapshot, type GitOid } from "./repository.js";
 import { GitPlumbingError, executeGit, type GitRepository } from "./process.js";
 import {
   readBlobResults,
@@ -30,25 +30,35 @@ import {
 
 type TargetObservation = Readonly<{ head: SnapshotId | null; drift: boolean }>;
 
-export async function observeDeliveryTargetAt(
+/** Reuse exact target evidence only within this read, while judging each Contract's own drift. */
+export function deliveryTargetObserver(
   observation: GitReadObservation,
-  state: ContractState,
-): Promise<TargetObservation | null> {
-  const target = state.coordinates.target;
-  if (target === undefined) return null;
-  if (typeof target !== "string") {
-    const resolved = await resolveContractTarget(observation.repository, target.contractId, target);
-    if (resolved.kind === "refused") return { head: null, drift: true };
-  }
-  const value =
-    typeof target === "string"
-      ? await observation.resolveRef(target)
-      : await readRef(targetRepository(observation.repository, target), targetRef(target));
-  const head = value === null ? null : mintSnapshotId(value);
-  const integration = state.currentIntegration;
-  if (integration === null) return { head, drift: false };
-  const expected = state.terminal?.kind === "claimed" ? integration.snapshot : integration.predecessor;
-  return { head, drift: head !== expected };
+): (state: ContractState) => Promise<TargetObservation | null> {
+  const targets = new Map<string, Promise<Readonly<{ head: SnapshotId | null; unavailable: boolean }>>>();
+  return async (state) => {
+    const target = state.coordinates.target;
+    if (target === undefined) return null;
+    const key =
+      typeof target === "string" ? target : `${target.contractId}\0${target.worktree.id}\0${target.worktree.identity}`;
+    let pending = targets.get(key);
+    if (pending === undefined) {
+      pending = (async () => {
+        if (typeof target !== "string") {
+          const resolved = await resolveContractTarget(observation.repository, target.contractId, target);
+          return resolved.kind === "refused"
+            ? { head: null, unavailable: true }
+            : { head: resolved.head, unavailable: false };
+        }
+        const value = await observation.resolveRef(target);
+        return { head: value === null ? null : mintSnapshotId(value), unavailable: false };
+      })();
+      targets.set(key, pending);
+    }
+    const { head, unavailable } = await pending;
+    const integration = state.currentIntegration;
+    const expected = state.terminal?.kind === "claimed" ? integration?.snapshot : integration?.predecessor;
+    return { head, drift: unavailable || (integration !== null && head !== expected) };
+  };
 }
 
 type GitJournalRecord = Readonly<{

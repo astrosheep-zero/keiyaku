@@ -169,7 +169,7 @@ async function readContracts(
       value:
         include === undefined
           ? await readContractCatalogue(observation, limit)
-          : await readContractBoard(observation, include),
+          : await readContractBoard(observation, include, "selected"),
     };
   } catch (error) {
     return { kind: "failed", failure: { message: diagnostic(error) } };

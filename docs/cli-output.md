@@ -145,8 +145,10 @@ each gate and requirement's identity; missing, stale, and current unsatisfied
 evidence remain distinct. Current declarations may be labeled by current
 one-based position; removed historical requirements retain stable identity,
 never a fabricated position. Status, board, history, preview, receipts, and JSON
-all preserve this adjudicated requirement scope. A raw caller
-answer remains raw when that operation promises answer bytes. Recording review
+all preserve this adjudicated requirement scope. The World Akuma board stays a
+catalogue rather than expanding each member's timeline: a running member may
+carry one bounded latest-activity preview through the shared activity renderer.
+A raw caller answer remains raw when that operation promises answer bytes. Recording review
 testimony and completing placement remain distinct facts; absence of
 completion does not establish a candidate.
 

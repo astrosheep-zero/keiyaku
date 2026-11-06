@@ -1,13 +1,15 @@
 import { accepted, present } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { appendActivity, beginTurn, breakBody, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import { contractId } from "../src/core/facts/types.js";
+import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
+import { snapshotActivityLines } from "../src/cli/render/akuma-activity.js";
+import { contractId, type ContractId } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import {
   GIT_FORMAT_PATH,
@@ -27,6 +29,14 @@ import type { WorldRoot } from "../src/world.js";
 import { World } from "../src/world.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
+import {
+  activityAkumaRow,
+  akumaWorldReport,
+  completedTool,
+  openAkumaSnapshot,
+  snapshotRow,
+  AKUMA_ACTIVITY_AT,
+} from "./support/kanshi-activity.js";
 
 function document(title = "Kanshi contract"): string {
   return contractMarkdown(title, {
@@ -458,4 +468,119 @@ test("Debt board failure names the malformed document once without suppressing C
     (worldText.match(/debt\/bad · failed debt document must begin with YAML front matter/gu) ?? []).length,
     1,
   );
+});
+
+async function traceGit<T>(path: string, action: () => Promise<T>) {
+  writeFileSync(path, "");
+  const previous = process.env.GIT_TRACE2_EVENT;
+  process.env.GIT_TRACE2_EVENT = path;
+  const start = performance.now();
+  try {
+    const value = await action();
+    const events = readFileSync(path, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const commands: string[][] = events.filter((event) => event.event === "start").map((event) => event.argv.slice(1));
+    return { value, commands, wallMs: Math.round(performance.now() - start) };
+  } finally {
+    if (previous === undefined) delete process.env.GIT_TRACE2_EVENT;
+    else process.env.GIT_TRACE2_EVENT = previous;
+  }
+}
+
+test("World status bounds worktree detail before observation and shares repeated target reads", async (t) => {
+  const raw = fixtureRepository(t);
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repo = await Repo.at({ path: raw.path });
+  const world = await World.at(raw.path);
+  const contracts = Keiyaku.with();
+  const rows: { id: ContractId; path: string }[] = [];
+  for (let index = 0; index < 20; index += 1) {
+    const bound = accepted(await contracts.bind({
+      repo,
+      markdown: document(`Status ${index}`),
+      target: index < 16 ? "main" : rows[0]!.id,
+      gates: ["reviewed"],
+    }));
+    rows.push({ id: present(await bound.value.keiyaku.state()).id, path: bound.value.workspace!.path });
+  }
+  const tracePath = join(raw.path, ".git", "status-trace.jsonl");
+  const expected = [...(await contracts.list({ repo })).rows].sort((left, right) =>
+    right.lastJournalAt.localeCompare(left.lastJournalAt) || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
+  );
+  const observed = await traceGit(tracePath, () => kanshi({ world, repo }));
+  if (observed.value.contracts.kind !== "present") assert.fail(JSON.stringify(observed.value.contracts));
+  const board = observed.value.contracts.value;
+  assert.equal(board.hasMore, true);
+  assert.deepEqual(board.rows, expected.slice(0, 10).map((row) => ({ ...row, holder: { kind: "none" }, roster: [] })));
+  const status = observed.commands.filter((args) => args.includes("--porcelain=v2"));
+  const lag = observed.commands.filter((args) => args.includes("rev-list"));
+  const parentReads = observed.commands.filter((args) => args[0] === "-C" && args[1] === rows[0]!.path);
+  const selectedPaths = new Set(board.rows.map((row) => row.worktreePath));
+  assert.deepEqual(new Set(status.map((args) => args[1])), selectedPaths);
+  assert.equal(status.length, 10);
+  assert.equal(lag.length, 10);
+  const detailedPaths = new Set(observed.commands.filter((args) => args[0] === "-C").map((args) => args[1]));
+  assert.ok([...detailedPaths].every((path) => selectedPaths.has(path!) || path === rows[0]!.path));
+  assert.equal(parentReads.length, new Set(parentReads.map((args) => JSON.stringify(args))).size);
+  assert.equal(observed.commands.filter((args) => args[0] === "worktree").length, 1);
+  t.diagnostic(JSON.stringify({
+    stage: "bare", worktrees: rows.length, processes: observed.commands.length,
+    status: status.length, lag: lag.length, parentReads: parentReads.length, wallMs: observed.wallMs,
+  }));
+
+  const exact = await traceGit(tracePath, () => kanshi({ world, repo, contract: rows.at(-1)!.id }));
+  if (exact.value.contracts.kind !== "present") assert.fail(JSON.stringify(exact.value.contracts));
+  const { holder: _holder, roster: _roster, namespaceDebts: _debts, ...exactRow } = exact.value.contracts.value.rows[0]!;
+  assert.deepEqual(exactRow, expected.find((row) => row.id === rows.at(-1)!.id)!);
+  assert.equal(exact.commands.filter((args) => args.includes("--porcelain=v2")).length, 1);
+  assert.ok(exact.commands.filter((args) => args[0] === "-C").every(
+    (args) => args[1] === rows[0]!.path || args[1] === rows.at(-1)!.path,
+  ));
+  t.diagnostic(JSON.stringify({
+    stage: "selected", processes: exact.commands.length,
+    status: exact.commands.filter((args) => args.includes("--porcelain=v2")).length, wallMs: exact.wallMs,
+  }));
+
+  const selected = rows.at(-1)!;
+  renameSync(selected.path, `${selected.path}-missing`);
+  const unavailable = await kanshi({ world, repo, contract: selected.id });
+  if (unavailable.contracts.kind !== "present") assert.fail(JSON.stringify(unavailable.contracts));
+  assert.equal(unavailable.contracts.value.rows[0]!.workspaceObservation.kind, "unavailable");
+  assert.equal(unavailable.contracts.value.rows[0]!.targetLag.kind, "unknown");
+  renameSync(`${selected.path}-missing`, selected.path);
+
+  const parent = rows[0]!;
+  renameSync(parent.path, `${parent.path}-missing`);
+  const missingTarget = await kanshi({ world, repo });
+  if (missingTarget.contracts.kind !== "present") assert.fail(JSON.stringify(missingTarget.contracts));
+  for (const row of missingTarget.contracts.value.rows.filter((row) => typeof row.target === "object")) {
+    assert.deepEqual(row.targetObservation, { head: null, drift: true });
+    assert.equal(row.targetLag.kind, "unknown");
+  }
+  renameSync(`${parent.path}-missing`, parent.path);
+  const recovered = await kanshi({ world, repo });
+  if (recovered.contracts.kind !== "present") assert.fail(JSON.stringify(recovered.contracts));
+  assert.deepEqual(recovered.contracts.value.rows, board.rows);
+});
+
+test("World running rows keep only one bounded latest activity line through the shared renderer", () => {
+  const snapshot = openAkumaSnapshot([
+    snapshotRow(completedTool(1, "bash", { kind: "run", command: "older command" })),
+    snapshotRow({
+      kind: "report", sequence: 2, bodySequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT,
+      text: "first paragraph\n\nsecond paragraph\n".repeat(30),
+    }),
+  ]);
+  const row = activityAkumaRow("aku/worker/1234abcd", "running", snapshot);
+  for (const columns of [48, 100]) {
+    const latest = snapshotActivityLines(
+      snapshot, { columns: columns - 2, color: false }, { latest: true, tailAnswer: true },
+    );
+    assert.equal(latest.length, 1);
+    const board = renderAkuma(akumaWorldReport([row]), { columns, color: false });
+    const { snapshot: _snapshot, ...withoutSnapshot } = row;
+    const withoutActivity = renderAkuma(akumaWorldReport([withoutSnapshot]), { columns, color: false });
+    assert.deepEqual(board, [...withoutActivity, `  ${latest[0]}`]);
+    assert.match(board.at(-1)!, /report +first paragraph/u);
+    assert.doesNotMatch(board.join("\n"), /older command/u);
+  }
 });
