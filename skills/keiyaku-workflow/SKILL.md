@@ -38,6 +38,8 @@ hands help the work, not to make review count.
 
 ## 3. Lifecycle
 
+This section teaches operation semantics across interfaces; get exact invocation grammar from CLI leaf help or the corresponding exposed tool description.
+
 Each act changes a different part of the world:
 
 - **Bind:** Journal gains the Contract and its terms. Workspace appointment
