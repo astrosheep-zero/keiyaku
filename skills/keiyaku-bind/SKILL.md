@@ -144,35 +144,9 @@ checks and deadlines. Each check gets its own clean scratch, setup, and cleanup;
 put any prerequisite build in that check's script or setup, never in a preceding
 fence. Use an explicit timeout for bounded commands; `5m` is the normal baseline.
 
-Only explicit `verify` executes declarations, and only with the `verified` gate
-selected. It captures the exact prospective integration using delivery's clean
-worktree rule and explicit dirty-capture authorization, without admitting a
-delivery. `deliver`, `review`, `deliver --dry-run`, and dependent completion only
-consume existing evidence. Without `verified`, the section is inert and creates
-no requirements. `reviewed` independently requires review evidence.
-
-```bash
-keiyaku -C <appointed-path> verify <kei/...>
-keiyaku -C <appointed-path> verify <kei/...> --index 1 --include-dirty
-```
-
-Omit `--index` to execute all declarations; a positive one-based index selects
-one current declaration. Every invocation executes its selection, even when
-satisfied testimony already exists. Each terminal check admits testimony before
-later checks begin; an identical admission may be reused without skipping
-execution. Normal failures and timeouts affect only their requirement and full
-verify continues; operational stops admit no verdict for the affected check and
-preserve earlier results.
-
-Every selected gate needs current satisfied testimony for every requirement.
-Review and custom gates have a singleton requirement. Verification requirements
-follow canonical executor, script, and declared deadline, never declaration
-position: reordering preserves evidence, changing one check affects only that
-requirement, and exact duplicates share one requirement. Removing a declaration
-removes its obligation but preserves historical testimony. Evidence captured
-before delivery can satisfy a later delivery of the exact same integration;
-changed candidate or target snapshots need applicable evidence. Verify can place
-only an already-delivered Contract when all gates and prerequisites pass.
+Select `verified` at binding to make declarations requirements; otherwise the
+section is inert. `reviewed` independently requires review evidence. For
+execution, evidence, and placement, see [Keiyaku Workflow](../keiyaku-workflow/SKILL.md).
 
 For an existing Debt that this delivery settles:
 
@@ -194,9 +168,9 @@ keiyaku -C <repo> bind --gates "" - < CONTRACT.md
 keiyaku -C <repo> bind --gates reviewed - < CONTRACT.md
 ```
 
-Omitting `--gates` uses `gates.default`, or `reviewed` when no default group
-exists. `--gates ""` selects no gates. Gates are named acceptance obligations,
-not work assignments. Named gate groups and worktree hooks live in Settings;
+Omitting `--gates` uses `gates.default` if configured, otherwise `reviewed`.
+`--gates ""` selects no gates. Gates are named acceptance obligations, not work
+assignments. Named gate groups and worktree hooks live in Settings;
 see the README Configuration section or `keiyaku settings --help`.
 
 ## 3. After Binding
@@ -219,11 +193,9 @@ The holder now owns the lifecycle:
 1. Start the work directly or delegate Debts, Arc chapters, Akumas, or Contract roles.
 2. Run independent work in parallel and let it converge on the one acceptance
    boundary.
-3. Prepare the candidate and explicitly verify selected declarations when
-   `verified` is required; deliver those same bytes before or after verification.
-4. Coordinate requirement evidence, review, gates, and prerequisites; inspect
-   per-check verdicts, admission reuse, stops, and retained diagnostic paths.
-5. Continue until the `kei` is accepted, amend terms while keeping the same
+3. Follow [Keiyaku Workflow](../keiyaku-workflow/SKILL.md) for candidate,
+   verification, review, and placement.
+4. Continue until the `kei` is accepted, amend terms while keeping the same
    objective and acceptance boundary, or abandon it when either has changed.
 
 Continue with `keiyaku-workflow` for this lifecycle. For Akuma invocation,

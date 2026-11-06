@@ -55,17 +55,23 @@ Each act changes a different part of the world:
   Verification evidence, and target followability without submitting work or
   running Verification or hooks. With the `verified` gate, missing or stale
   evidence remains unmet; preview never promises acceptance.
-- **Verify:** `verify [<contract>] [--index <n>] [--include-dirty]` explicitly
-  executes all current declarations or one by positive one-based position. It
-  captures the appointed worktree under delivery's clean-worktree and dirty
-  authorization rules and prepares the exact prospective integration without
-  delivering it. Conflicts refuse without a handoff. Each check gets independent
-  scratch, setup, cleanup, and requirement testimony. Normal failure or timeout
-  does not stop other selected checks; operational stops admit no verdict for
-  the affected check and preserve earlier results. Verify always executes its
-  selection, even if identical testimony can reuse admission. It then requests
-  ordinary placement of an already-delivered Contract when every prerequisite
-  and gate passes; pre-delivery verify records evidence without placement.
+- **Verify:** Only explicit `verify` executes declarations, and it requires the
+  `verified` gate; an unselected Verification section is inert. `verify` executes
+  all current declarations, or one selected by `--index <n>` using its positive
+  one-based position. `--include-dirty` authorizes dirty capture. It captures the appointed worktree under
+  delivery's clean-worktree and dirty authorization rules and prepares the exact
+  prospective integration without delivering it. Conflicts refuse without a
+  handoff. Each check has independent scratch, setup, cleanup, and requirement
+  testimony. Verify runs with the invoking process's native Git and process
+  custody. Each terminal check admits its testimony before later checks begin.
+  Normal failure or timeout records unsatisfied testimony for that requirement
+  and does not stop other selected checks. Operational stops may stop
+  later checks and admit no testimony for the affected check, while preserving
+  earlier admissions; a verdict reached before an admission stop remains a verdict,
+  not recorded testimony. Verify always executes its selection, even if identical
+  testimony can reuse admission. It then requests ordinary placement of an
+  already-delivered Contract when every prerequisite and gate passes;
+  pre-delivery verify records evidence without placement.
 - **Deliver:** Captures a tender and integration against the observed target;
   journal gains a delivered candidate. It never executes Verification. Ready
   prerequisites and existing gate evidence trigger placement and claim in this
