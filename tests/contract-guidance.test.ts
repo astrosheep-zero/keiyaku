@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   CONTRACT_DELIVERER_SKILL,
@@ -92,6 +92,75 @@ test("guidance inserts the current Arc before Fulfillment", () => {
   assert.match(guidance, /^## Arc\n\n### Sequence\n\n2$/m);
   assert.match(guidance, /### Body\n\nContinue\.\n\nDo the next coherent work\./);
   assert.ok(guidance.indexOf("## Arc") < guidance.indexOf("## Fulfillment"));
+});
+
+test("guidance repair replaces read-only bytes, preserves protection, and retries unchanged", async () => {
+  const repository = repositoryWithMain();
+  const git = await repositoryAt(repository.path);
+  const current = state(undefined);
+  const register = await appointManagedWorktrees(git, [current.id]);
+  const worktree = worktreePath(git, register.byContract.get(current.id)!.place);
+  repository.run(["worktree", "add", "--detach", worktree, "HEAD"]);
+  const path = join(worktree, ".keiyaku", "KEIYAKU.md");
+  assert.deepEqual((await projectContractWorktree(git, current, register)).lag, []);
+  const changed = { ...current, terms: { ...current.terms, document: { ...current.terms.document, bytes: "# Changed\n" } } };
+  for (const next of [changed, current]) {
+    const result = await projectContractWorktree(git, next, register);
+    assert.deepEqual(result.lag, []);
+    assert.equal(result.effects.find((effect) => effect.path === path)?.action, "updated");
+    assert.equal(readFileSync(path, "utf8"), renderContractGuidance(next));
+    assert.equal(statSync(path).mode & 0o222, 0);
+    const before = statSync(path);
+    const retry = await projectContractWorktree(git, next, register);
+    assert.equal(retry.effects.find((effect) => effect.path === path)?.action, "unchanged");
+    assert.equal(statSync(path).ino, before.ino);
+  }
+});
+
+test("failed replacement reports lag and restores read-only protection", {
+  skip: process.platform === "win32" || (typeof process.getuid === "function" && process.getuid() === 0),
+}, async () => {
+  const repository = repositoryWithMain();
+  const git = await repositoryAt(repository.path);
+  const current = state(undefined);
+  const register = await appointManagedWorktrees(git, [current.id]);
+  const worktree = worktreePath(git, register.byContract.get(current.id)!.place);
+  repository.run(["worktree", "add", "--detach", worktree, "HEAD"]);
+  const directory = join(worktree, ".keiyaku");
+  const path = join(directory, "KEIYAKU.md");
+  assert.deepEqual((await projectContractWorktree(git, current, register)).lag, []);
+  const changed = { ...current, terms: { ...current.terms, document: { ...current.terms.document, bytes: "# Changed\n" } } };
+  chmodSync(directory, 0o555);
+  try {
+    const result = await projectContractWorktree(git, changed, register);
+    assert.equal(result.lag[0]?.kind, "contract-file-failed");
+    assert.equal(result.lag[0]?.path, path);
+    assert.equal(readFileSync(path, "utf8"), renderContractGuidance(current));
+    assert.equal(statSync(path).mode & 0o222, 0);
+  } finally {
+    chmodSync(directory, 0o755);
+  }
+  assert.deepEqual((await projectContractWorktree(git, changed, register)).lag, []);
+});
+
+test("guidance repair leaves symlink targets alone and reports lag", { skip: process.platform === "win32" }, async () => {
+  const repository = repositoryWithMain();
+  const git = await repositoryAt(repository.path);
+  const current = state(undefined);
+  const register = await appointManagedWorktrees(git, [current.id]);
+  const worktree = worktreePath(git, register.byContract.get(current.id)!.place);
+  repository.run(["worktree", "add", "--detach", worktree, "HEAD"]);
+  const path = join(worktree, ".keiyaku", "KEIYAKU.md");
+  await projectContractWorktree(git, current, register);
+  const target = join(worktree, "user-file");
+  writeFileSync(target, "user data");
+  chmodSync(target, 0o640);
+  unlinkSync(path);
+  symlinkSync(target, path);
+  const result = await projectContractWorktree(git, current, register);
+  assert.equal(result.lag[0]?.kind, "contract-file-failed");
+  assert.equal(readFileSync(target, "utf8"), "user data");
+  assert.equal(statSync(target).mode & 0o777, 0o640);
 });
 
 test("projection batches each index as generated files grow and preserves bytes and effect order", async () => {

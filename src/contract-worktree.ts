@@ -83,15 +83,27 @@ async function repair(
 ): Promise<ContractFileEffect> {
   const path = join(worktree, relativePath);
   if (tracked.has(relativePath)) throw new Error(`generated path is tracked by Git: ${path}`);
-  const action = await repairDerivedFile(path, bytes);
-  if (relativePath === ".keiyaku/KEIYAKU.md") {
+  if (relativePath !== ".keiyaku/KEIYAKU.md") {
+    return { kind: "contract-file", path, action: await repairDerivedFile(path, bytes) };
+  }
+  try {
+    const stat = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return undefined;
+      throw error;
+    });
+    if (stat?.isFile() && !stat.isSymbolicLink() && !(await readFile(path)).equals(Buffer.from(bytes))) {
+      await chmod(path, stat.mode | 0o200);
+    }
+    const action = await repairDerivedFile(path, bytes);
+    return { kind: "contract-file", path, action };
+  } finally {
     try {
-      await chmod(path, 0o444);
+      const stat = await lstat(path);
+      if (stat.isFile() && !stat.isSymbolicLink()) await chmod(path, 0o444);
     } catch {
       /* advisory protection only */
     }
   }
-  return { kind: "contract-file", path, action };
 }
 
 async function isKeiyakuSeatLeaf(worktree: string, seat: string): Promise<boolean> {
