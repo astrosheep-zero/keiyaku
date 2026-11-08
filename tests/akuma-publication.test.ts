@@ -6,7 +6,7 @@ import test from "node:test";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunchEnd, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { HeldAkumaLeash, readSeal, readSoul } from "../src/akuma/heart/index.js";
-import { allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
+import { allocateAkumaDirectory, type AkumaId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { World } from "../src/world.js";
 import { allocatedHeart, noBodyLaunch } from "./support/akuma-fixtures.js";
@@ -18,7 +18,7 @@ function publishWorker(
   signal: AbortSignal | undefined,
   launch: (allocated: Awaited<ReturnType<typeof allocatedHeart>>) => Promise<LiveBodyLaunch | void>,
 ) {
-  return publishAkuma({ worldPath: root, archetype: "worker", ...(signal === undefined ? {} : { signal }), launch });
+  return publishAkuma({ worldPath: root, akumaName: "worker", ...(signal === undefined ? {} : { signal }), launch });
 }
 
 test("cancelled publication returns born when Soul appears during termination behind a successor leash", async () => {
@@ -40,7 +40,7 @@ test("cancelled publication returns born when Soul appears during termination be
             terminateCount += 1;
             await leash.birth(allocated.paths, {
               id: allocated.id,
-              archetype: "worker",
+              akumaName: "worker",
               provider: { name: "codex-app-server", kind: "codex-app-server" },
               options: {},
               cwd: root,
@@ -85,7 +85,7 @@ test("cancelled publication waits for an already-born child to exit before relea
       const leash = (await HeldAkumaLeash.try(allocated.paths))!;
       await leash.birth(allocated.paths, {
         id: allocated.id,
-        archetype: "worker",
+        akumaName: "worker",
         provider: { name: "codex-app-server", kind: "codex-app-server" },
         options: {},
         cwd: root,
@@ -149,8 +149,8 @@ test("cancelled publication terminates its child, observes Seal, and then reject
   try {
     assert.equal(
       await leash.birth(childPaths!, {
-        id: "aku/worker/00000000" as AkuId,
-        archetype: "worker",
+        id: "aku/worker/00000000" as AkumaId,
+        akumaName: "worker",
         provider: { name: "codex-app-server", kind: "codex-app-server" },
         options: {},
         cwd: root,
@@ -278,7 +278,7 @@ test("publication observes an exited child before Soul and releases without term
   };
   const started = performance.now();
   await assert.rejects(
-    publishAkuma({ worldPath: root, archetype: "worker", launch: async () => child }),
+    publishAkuma({ worldPath: root, akumaName: "worker", launch: async () => child }),
     /neutral launch ended before Soul/u,
   );
   assert.ok(performance.now() - started < 1_000);

@@ -55,7 +55,7 @@ export function createAcpProvider(execution: ProviderExecution, dependencies: Ac
   const drive = async (input: AcpStartInput, custody: AttemptCustody) => {
     if (input.runtimeInstructions !== undefined) {
       throw new Error(
-        "ACP has no verified native runtime-instruction channel; call with bare to omit the Keiyaku section",
+        "ACP has no verified native runtime-instruction channel; spawn with bare to omit the Keiyaku section",
       );
     }
     const launch = {

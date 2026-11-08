@@ -10,7 +10,7 @@ export async function akumaCallerFromEnvironment(environment: NodeJS.ProcessEnv)
   }
   if (id !== undefined && world !== undefined) {
     const resolved = await World.resolve({ cwd: world, repositoryRoot: world });
-    return decodeAkumaCaller({ kind: "akuma", akuId: id, world: resolved.candidate });
+    return decodeAkumaCaller({ kind: "akuma", akumaId: id, world: resolved.candidate });
   }
   const hosts = [
     { integration: "codex", id: environment.CODEX_THREAD_ID },

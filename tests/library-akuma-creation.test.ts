@@ -20,11 +20,11 @@ import {
   readTurn,
   recordTell,
 } from "../src/akuma/heart/index.js";
-import { parseAkuId, pathsForAkuId } from "../src/akuma/identity.js";
+import { parseAkumaId, pathsForAkumaId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { cliJson } from "./support/cli-fixtures.js";
-import type { CallResult } from "../src/library/akumas.js";
+import type { SpawnResult } from "../src/library/akumas.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import { Akumas, Keiyaku, Repo, World, settings } from "../src/index.js";
 import {
@@ -113,7 +113,7 @@ function okSchema() {
   );
 }
 
-test("prompt-free bare Akumas.call reports born without admitting a Tell", async (t) => {
+test("prompt-free bare Akumas.spawn reports born without admitting a Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const bodyPidReceipt = join(raw.path, "body-pids");
   // Existing Body receipt instrumentation is installed before the call and stays
@@ -121,8 +121,8 @@ test("prompt-free bare Akumas.call reports born without admitting a Tell", async
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   let operationFailed = true;
   try {
-    const result = await Akumas.of(world).call({
-      archetype: "worker",
+    const result = await Akumas.of(world).spawn({
+      akumaName: "worker",
       cwd: world,
       bare: true,
       writableDirectories: [world, world],
@@ -131,7 +131,7 @@ test("prompt-free bare Akumas.call reports born without admitting a Tell", async
     assert.deepEqual(result.observation, { kind: "born" });
     const handle = PublicAkuma.select(world, result.akuma);
     assert.deepEqual((await handle.status()).birth, { origin: { kind: "direct" }, caller: { kind: "unknown" } });
-    const soul = await readSoul(pathsForAkuId(world, result.akuma));
+    const soul = await readSoul(pathsForAkumaId(world, result.akuma));
     assert.equal(soul?.caller, undefined);
     assert.equal(soul?.bare, true);
     assert.deepEqual(soul?.provider.config?.sandbox_workspace_write, {
@@ -175,7 +175,7 @@ test("prompt-free bare Akumas.call reports born without admitting a Tell", async
 test("malformed explicit callers refuse before allocation on public call and fork", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-caller-refusal-"));
   const caller = { kind: "unknown" } as never;
-  await assert.rejects(Akumas.of(world).call({ archetype: "worker", caller }), /Invalid Akuma caller/u);
+  await assert.rejects(Akumas.of(world).spawn({ akumaName: "worker", caller }), /Invalid Akuma caller/u);
   await assert.rejects(
     Akumas.of(world).fork({ akuma: "aku/worker/1234abcd", at: "turn/1", caller }),
     /Invalid Akuma caller/u,
@@ -197,8 +197,8 @@ test("explicit writable directories refuse invalid public grants before allocati
     "not-an-array",
   ]) {
     await assert.rejects(
-      Akumas.of(world).call({
-        archetype: "worker",
+      Akumas.of(world).spawn({
+        akumaName: "worker",
         ...configured.placement,
         writableDirectories: value as never,
       }),
@@ -216,19 +216,19 @@ test("explicit writable directories refuse invalid public grants before allocati
   assert.deepEqual((await Akumas.of(world).list()).rows, []);
 });
 
-test("prompt-free Akumas.call refuses schema and wait options", async () => {
+test("prompt-free Akumas.spawn refuses schema and wait options", async () => {
   const { world, configured } = await directCallFixture();
   await assert.rejects(
-    () => Akumas.of(world).call({ archetype: "worker", ...configured.placement, schema: okSchema() }),
+    () => Akumas.of(world).spawn({ akumaName: "worker", ...configured.placement, schema: okSchema() }),
     /schema requires body/u,
   );
   await assert.rejects(
-    () => Akumas.of(world).call({ archetype: "worker", ...configured.placement, mode: "wait" }),
+    () => Akumas.of(world).spawn({ akumaName: "worker", ...configured.placement, mode: "wait" }),
     /wait and timeoutMs require body/u,
   );
 });
 
-test("local schema Akumas.call waits for its held empty Body before admitting its Tell", async (t) => {
+test("local schema Akumas.spawn waits for its held empty Body before admitting its Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
@@ -240,8 +240,8 @@ test("local schema Akumas.call waits for its held empty Body before admitting it
   let akumaId: string | undefined;
   let operationFailed = true;
   try {
-    const pending = Akumas.of(world).call({
-      archetype: "worker",
+    const pending = Akumas.of(world).spawn({
+      akumaName: "worker",
       body: "schema-call",
       cwd: world,
       ...configured.placement,
@@ -256,7 +256,7 @@ test("local schema Akumas.call waits for its held empty Body before admitting it
         terminalState: settlementProbe(pending, () => "call settled before empty Body publication"),
       });
       const held = JSON.parse(readFileSync(readyPath, "utf8")) as { id: string };
-      const whileHeld = await readHeart(pathsForAkuId(world, parseAkuId(held.id).id));
+      const whileHeld = await readHeart(pathsForAkumaId(world, parseAkumaId(held.id).id));
       assert.equal(whileHeld.latestBody?.end, undefined);
       assert.deepEqual(whileHeld.pending, []);
 
@@ -302,7 +302,7 @@ test("local schema Akumas.call waits for its held empty Body before admitting it
   }
 });
 
-test("local schema Akumas.call starts its zero observation budget after birth", async (t) => {
+test("local schema Akumas.spawn starts its zero observation budget after birth", async (t) => {
   // An already-answered Tell legitimately wins at the deadline edge. Hold the
   // provider answer until the zero-budget observation has returned instead of
   // racing a real child process against the first observation.
@@ -316,7 +316,7 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
   let wake: Promise<unknown> | undefined;
-  let pending: Promise<CallResult> | undefined;
+  let pending: Promise<SpawnResult> | undefined;
   const admitInitialTell = AkumaOwner.prototype.admitInitialTell;
   t.mock.method(
     AkumaOwner.prototype,
@@ -329,8 +329,8 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
   );
   let operationFailed = true;
   try {
-    pending = Akumas.of(world).call({
-      archetype: "worker",
+    pending = Akumas.of(world).spawn({
+      akumaName: "worker",
       body: "zero-budget-after-birth",
       cwd: world,
       ...configured.placement,
@@ -348,8 +348,8 @@ test("local schema Akumas.call starts its zero observation budget after birth", 
       },
     );
     const held = JSON.parse(readFileSync(readyPath, "utf8")) as { id: string };
-    const child = parseAkuId(held.id).id;
-    assert.equal((await readHeart(pathsForAkuId(world, child))).latestBody?.end, undefined);
+    const child = parseAkumaId(held.id).id;
+    assert.equal((await readHeart(pathsForAkumaId(world, child))).latestBody?.end, undefined);
     writeFileSync(join(emptyPublicationBarrier, "release"), "release\n");
     const result = await pending;
     akumaId = result.akuma;
@@ -435,8 +435,8 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
         diagnostics.push(message);
         throw new Error("host rejects diagnostic");
       },
-    }).call({
-      archetype: "worker",
+    }).spawn({
+      akumaName: "worker",
       body: "bounded observation",
       cwd: world,
       caller: { kind: "external", integration: "tests", id: "submit:bounded" },
@@ -450,7 +450,7 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
     assert.equal(result.observation.kind, "observed");
     assert.ok(result.observation.kind === "observed");
     assert.deepEqual(result.observation.observation, { reason: "answered", answer: '{"ok":true}' });
-    const tell = await readTell(pathsForAkuId(world, result.akuma), result.observation.tell.admission.tellId);
+    const tell = await readTell(pathsForAkumaId(world, result.akuma), result.observation.tell.admission.tellId);
     assert.ok(tell?.binding);
     assert.deepEqual(
       readFileSync(output, "utf8")
@@ -478,7 +478,7 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
       origin: { kind: "direct" },
       caller: { kind: "external", integration: "tests", id: "submit:bounded" },
     });
-    const log = pathsForAkuId(world, result.akuma).log;
+    const log = pathsForAkumaId(world, result.akuma).log;
     await waitForCondition("submitting call observation diagnostic log", () =>
       readFileSync(log, "utf8").includes("plugin outcome observation failed:"),
     );
@@ -526,14 +526,14 @@ test("call without a host preserves log-only diagnostics", async (t) => {
   });
   let operationFailed = true;
   try {
-    const result = await Akumas.of(world).call({
-      archetype: "worker",
+    const result = await Akumas.of(world).spawn({
+      akumaName: "worker",
       cwd: world,
       home: configured.home,
       settings: await settings({ root: world, home: configured.home }),
     });
     assert.deepEqual(result.observation, { kind: "born" });
-    const log = pathsForAkuId(world, result.akuma).log;
+    const log = pathsForAkumaId(world, result.akuma).log;
     await waitForCondition(
       "log-only birth diagnostic",
       () => existsSync(log) && readFileSync(log, "utf8").includes("birth-only failure"),
@@ -573,7 +573,7 @@ test("a Tell admitted while an empty Body is deciding to put down is still drive
     await waitForCondition("Body periodic observation barrier", () => existsSync(join(barrier, "observation-ready")), {
       budgetMs: 5_000,
     });
-    const paths = pathsForAkuId(world, child.id);
+    const paths = pathsForAkumaId(world, child.id);
     const admitted = await recordTell(paths, {
       kind: "tell",
       id: "late-tell",
@@ -602,7 +602,7 @@ test("a Tell admitted while an empty Body is deciding to put down is still drive
   } finally {
     try {
       if (operationFailed && child !== undefined && tellRecorded) {
-        const tell = await readTell(pathsForAkuId(world, child.id), "late-tell");
+        const tell = await readTell(pathsForAkumaId(world, child.id), "late-tell");
         if (tell?.state === "pending" && tell.binding === undefined && tell.deliveries.length === 0) {
           for (const pid of readPidReceipt(bodyPidReceipt)) {
             try {
@@ -682,7 +682,7 @@ test("native birth retains its captured host callback for the resulting handle",
   }
 });
 
-test("schema Akumas.call preserves its child when initial Tell admission fails", async (t) => {
+test("schema Akumas.spawn preserves its child when initial Tell admission fails", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
@@ -699,8 +699,8 @@ test("schema Akumas.call preserves its child when initial Tell admission fails",
     };
   });
   try {
-    const result = await Akumas.of(world).call({
-      archetype: "worker",
+    const result = await Akumas.of(world).spawn({
+      akumaName: "worker",
       body: "terminal-birth-schema-call",
       cwd: world,
       ...configured.placement,
@@ -734,7 +734,7 @@ test("schema Akumas.call preserves its child when initial Tell admission fails",
   }
 });
 
-test("ordinary Akumas.call stays bound to its first Turn when a later Turn settles before observation", async (t) => {
+test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn settles before observation", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
@@ -742,8 +742,8 @@ test("ordinary Akumas.call stays bound to its first Turn when a later Turn settl
   let observedTellId: string | undefined;
   let operationFailed = true;
   try {
-    const result = await Akumas.of(world).call({
-      archetype: "worker",
+    const result = await Akumas.of(world).spawn({
+      akumaName: "worker",
       body: "ordinary-first-input",
       cwd: world,
       ...configured.placement,
@@ -752,7 +752,7 @@ test("ordinary Akumas.call stays bound to its first Turn when a later Turn settl
       observe: {
         admitted: async (tell, id) => {
           observedTellId = tell.admission.tellId;
-          const paths = pathsForAkuId(world, id);
+          const paths = pathsForAkumaId(world, id);
           await waitForCondition("the call's admitted Turn to settle", async () => {
             const persisted = await readTell(paths, tell.admission.tellId);
             if (persisted?.binding === undefined) return false;
@@ -887,22 +887,22 @@ test("Contract association never selects the Akuma execution workdir", async (t)
     if (appointment.kind !== "appointed") return;
 
     const invocationCwd = realpathSync(raw.path);
-    const implicit = await cliJson<CallResult>(["-C", ".", "call", "worker", "--contract", managedId, "-"], {
+    const implicit = await cliJson<SpawnResult>(["-C", ".", "spawn", "worker", "--contract", managedId, "-"], {
       cwd: raw.path,
       environment: { ...environment, KEIYAKU_HOME: configured.home },
       readStdin: async () => "implicit placement",
     });
-    assert.equal(implicit.value.kind, "called");
+    assert.equal(implicit.value.kind, "spawned");
     assert.deepEqual(implicit.value.execution, { cwd: invocationCwd, source: "input" });
     assert.notEqual(implicit.value.execution.cwd, appointment.path);
     assert.equal(implicit.value.dispatch.kind, "dispatched");
     if (implicit.value.dispatch.kind === "dispatched")
       assert.equal(implicit.value.dispatch.dispatch.contractId, managedId);
-    assert.equal((await readSoul(pathsForAkuId(world, implicit.value.akuma)))?.cwd, invocationCwd);
+    assert.equal((await readSoul(pathsForAkumaId(world, implicit.value.akuma)))?.cwd, invocationCwd);
     assert.equal(implicit.value.observation.kind, "detached");
     if (implicit.value.observation.kind === "detached") {
       assert.equal(
-        (await readTell(pathsForAkuId(world, implicit.value.akuma), implicit.value.observation.tell.admission.tellId))
+        (await readTell(pathsForAkumaId(world, implicit.value.akuma), implicit.value.observation.tell.admission.tellId))
           ?.initiator,
         submittingOwner,
       );
@@ -910,8 +910,8 @@ test("Contract association never selects the Akuma execution workdir", async (t)
 
     const explicitDir = join(raw.path, "explicit-workdir");
     mkdirSync(explicitDir);
-    const explicit = await cliJson<CallResult>(
-      ["-C", ".", "call", "worker", "--contract", managedId, "--workdir", "explicit-workdir"],
+    const explicit = await cliJson<SpawnResult>(
+      ["-C", ".", "spawn", "worker", "--contract", managedId, "--workdir", "explicit-workdir"],
       {
         cwd: raw.path,
         environment: {
@@ -924,7 +924,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
         },
       },
     );
-    assert.equal(explicit.value.kind, "called");
+    assert.equal(explicit.value.kind, "spawned");
     assert.deepEqual(explicit.value.execution, { cwd: realpathSync(explicitDir), source: "input" });
     assert.equal(explicit.value.dispatch.kind, "dispatched");
     assert.equal(explicit.value.observation.kind, "born");
@@ -944,7 +944,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
         akumaId: explicit.value.akuma,
         bodySequence: 1,
         origin: { kind: "direct" },
-        caller: { kind: "akuma", world, akuId: "aku/delegator/abcd1234" },
+        caller: { kind: "akuma", world, akumaId: "aku/delegator/abcd1234" },
         initiator: "Submitter",
         contractId: managedId,
       },
@@ -973,8 +973,8 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
   const root = await World.at(temporaryDirectory(context, "keiyaku-library-world-proof-"));
   const forged = `${root}/.`;
   await assert.rejects(
-    Akumas.of(forged as never).call({
-      archetype: "worker",
+    Akumas.of(forged as never).spawn({
+      akumaName: "worker",
       body: "must not start",
     }),
     /canonical physical directory/u,
@@ -1050,8 +1050,8 @@ test("retired caller fields refuse before allocation", async (context) => {
   const world = await World.at(root);
   const runtime = Akumas.of(world);
   await assert.rejects(
-    runtime.call({ archetype: "worker", allowed: [] } as never),
-    /Akumas.call input has unknown field: allowed/u,
+    runtime.spawn({ akumaName: "worker", allowed: [] } as never),
+    /Akumas.spawn input has unknown field: allowed/u,
   );
   await assert.rejects(
     PublicAkuma.birth("worker", { root: world, allowed: [] } as never),
@@ -1074,10 +1074,10 @@ test("a local call reports unsupported Archetype options as an Archetype failure
   const archetypePath = join(home, "akumas", "greedy.md");
   writeFileSync(archetypePath, "---\nprovider: claude\nnetwork: enabled\n---\nWork.\n");
   await assert.rejects(
-    Akumas.of(await World.at(root)).call({ archetype: "greedy", body: "hello", home, settings: value }),
+    Akumas.of(await World.at(root)).spawn({ akumaName: "greedy", body: "hello", home, settings: value }),
     (error: unknown) =>
       error instanceof AkumaArchetypeError &&
-      error.archetype === "greedy" &&
+      error.akumaName === "greedy" &&
       error.searched.join("\n") === archetypePath &&
       error.reason === "is unsupported: Claude provider does not support the network option",
   );

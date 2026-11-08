@@ -20,7 +20,7 @@ export const BIRTH_TIMEOUT_MS = 30_000;
 
 class LaunchCompletedError extends Error {}
 
-export type BirthInput = Readonly<{ worldPath: string; archetype: string; signal?: AbortSignal }>;
+export type BirthInput = Readonly<{ worldPath: string; akumaName: string; signal?: AbortSignal }>;
 export type LaunchInput = Readonly<{
   allocated: AllocatedAkuma;
   awaitAsleep?: boolean;
@@ -259,7 +259,7 @@ async function initializeAllocatedAkuma(allocated: AllocatedAkuma, signal?: Abor
 
 async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
   input.signal?.throwIfAborted();
-  const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, archetype: input.archetype });
+  const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, akumaName: input.akumaName });
   return await initializeAllocatedAkuma(allocated, input.signal);
 }
 
@@ -327,7 +327,7 @@ type PreparedCallResult = Readonly<{
 }>;
 
 type PreparedCallInput = Readonly<{
-  archetype: string;
+  akumaName: string;
   cwd: string;
   writableDirectories?: readonly string[];
   caller?: AkumaCaller;
@@ -385,7 +385,7 @@ export async function prepareCall(input: PreparedCallInput): Promise<PreparedCal
   const caller = decodeAkumaCaller(input.caller);
   const recipe = await admittedRecipe(input.recipe, input);
   input.signal?.throwIfAborted();
-  const allocated = await allocateAkumaDirectory({ worldRoot: input.world, archetype: input.archetype });
+  const allocated = await allocateAkumaDirectory({ worldRoot: input.world, akumaName: input.akumaName });
   return { allocated, input, recipe, caller };
 }
 
@@ -409,7 +409,7 @@ export async function publishPreparedCall(prepared: PreparedCall): Promise<Prepa
           paths: ready.paths,
           seed: {
             id: ready.id,
-            archetype: ready.archetype,
+            akumaName: ready.akumaName,
             ...(recipe.description === undefined ? {} : { description: recipe.description }),
             provider: recipe.provider,
             options: recipe.options,

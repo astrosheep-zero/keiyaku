@@ -66,9 +66,9 @@ async function bornStreamFixture(root: string, suffix: string) {
 /** One real second process commits a Tell into the same Heart the parent is observing. */
 async function recordTellFromAnotherProcess(world: string, id: string): Promise<string> {
   const source = [
-    "const { pathsForAkuId } = await import(process.env.KEIYAKU_IDENTITY_MODULE);",
+    "const { pathsForAkumaId } = await import(process.env.KEIYAKU_IDENTITY_MODULE);",
     "const { recordTell } = await import(process.env.KEIYAKU_HEART_MODULE);",
-    "const admitted = await recordTell(pathsForAkuId(process.env.KEIYAKU_WORLD, process.env.KEIYAKU_ID), {",
+    "const admitted = await recordTell(pathsForAkumaId(process.env.KEIYAKU_WORLD, process.env.KEIYAKU_ID), {",
     "  kind: 'tell', id: 'tell-from-another-process', body: 'written elsewhere', recordedAt: process.env.KEIYAKU_AT,",
     "});",
     "if (admitted.kind !== 'recorded') { process.stderr.write('the Akuma is not born\\n'); process.exit(3); }",

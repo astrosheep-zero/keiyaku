@@ -37,7 +37,7 @@ import {
   snapshotRow,
 } from "./support/kanshi-activity.js";
 
-test("call preserves a definition failure instead of reporting a missing Akuma", async (t) => {
+test("spawn preserves a definition failure instead of reporting a missing Akuma", async (t) => {
   const root = temporaryDirectory(t, "keiyaku-cli-definition-");
   const home = join(root, "home");
   const definitions = join(home, "akumas");
@@ -45,20 +45,20 @@ test("call preserves a definition failure instead of reporting a missing Akuma",
   const invalidPath = join(definitions, "broken.md");
   writeFileSync(invalidPath, "---\nprovider: false\n---\n");
   const runtime = { cwd: root, environment: { KEIYAKU_HOME: home } };
-  const missing = await runCli(["call", "missing", "go"], runtime);
+  const missing = await runCli(["spawn", "missing", "go"], runtime);
   assert.equal(missing.exit, 1);
   assert.match(missing.stdout, /reason  Akuma not found · missing/u);
   assert.match(missing.stdout, /available  keiyaku ls aku\//u);
-  const invalid = await runCli(["call", "broken", "go"], runtime);
+  const invalid = await runCli(["spawn", "broken", "go"], runtime);
   assert.equal(invalid.exit, 1);
   assert.match(invalid.stdout, /reason  is invalid: Akuma provider must be a nonblank string · broken/u);
   assert.ok(invalid.stdout.includes(`searched  ${invalidPath}`));
-  const json = await runCli(["call", "broken", "go", "--json"], runtime);
+  const json = await runCli(["spawn", "broken", "go", "--json"], runtime);
   assert.equal(json.exit, 1);
   assert.deepEqual(JSON.parse(json.stdout), {
     kind: "refused",
     diagnostic: "is invalid: Akuma provider must be a nonblank string",
-    archetype: "broken",
+    akumaName: "broken",
     searched: [invalidPath],
   });
 });

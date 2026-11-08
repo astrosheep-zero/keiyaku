@@ -1,9 +1,9 @@
-import type { AkuId } from "./identity.js";
+import type { AkumaId } from "./identity.js";
 export { AkumaBusyError } from "./heart/facts.js";
 
 export class AkumaNotBornError extends Error {
   readonly kind = "akuma-not-born";
-  constructor(readonly id: AkuId) {
+  constructor(readonly id: AkumaId) {
     super(`Akuma ${id} is not born`);
     this.name = "AkumaNotBornError";
   }
@@ -12,7 +12,7 @@ export class AkumaNotBornError extends Error {
 export class AkumaObservationError extends Error {
   readonly kind = "akuma-observation";
   constructor(
-    readonly id: AkuId,
+    readonly id: AkumaId,
     readonly diagnostic: string,
   ) {
     super(`Akuma ${id} observation failed: ${diagnostic}`);

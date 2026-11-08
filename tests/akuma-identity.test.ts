@@ -5,26 +5,26 @@ import { join } from "node:path";
 import test from "node:test";
 import {
   allocateAkumaDirectory,
-  akuId,
-  akuIdFromDirectoryName,
+  akumaId,
+  akumaIdFromDirectoryName,
   ensureAkumaRunRoot,
-  parseAkuId,
+  parseAkumaId,
 } from "../src/akuma/identity.js";
 import { validateAkumaName } from "../src/identity/normalize.js";
 import { matchesAkumaGlob, parseAkumaAlias, parseAkumaGlob } from "../src/identity/selector.js";
 
 test("Aku identity has one exact durable spelling", async () => {
-  assert.equal(akuId({ archetype: "claude", suffix: "12ab34cd" }), "aku/claude/12ab34cd");
-  assert.deepEqual(parseAkuId("aku/claude/12ab34cd"), {
+  assert.equal(akumaId({ akumaName: "claude", suffix: "12ab34cd" }), "aku/claude/12ab34cd");
+  assert.deepEqual(parseAkumaId("aku/claude/12ab34cd"), {
     id: "aku/claude/12ab34cd",
-    archetype: "claude",
+    akumaName: "claude",
     suffix: "12ab34cd",
   });
-  assert.throws(() => parseAkuId("a/claude/12ab34cd"), /aku\//);
-  assert.throws(() => akuId({ archetype: "Claude", suffix: "12ab34cd" }), /normalized/);
-  assert.deepEqual(akuIdFromDirectoryName("claude-fast-12ab34cd"), {
+  assert.throws(() => parseAkumaId("a/claude/12ab34cd"), /aku\//);
+  assert.throws(() => akumaId({ akumaName: "Claude", suffix: "12ab34cd" }), /normalized/);
+  assert.deepEqual(akumaIdFromDirectoryName("claude-fast-12ab34cd"), {
     id: "aku/claude-fast/12ab34cd",
-    archetype: "claude-fast",
+    akumaName: "claude-fast",
     suffix: "12ab34cd",
   });
 });
@@ -40,8 +40,8 @@ test("Akuma archetypes and aliases share bounded canonical name admission", () =
   }
   assert.throws(() => parseAkumaAlias("reviewer"), /start with @/u);
   const historic = `aku/${"a".repeat(65)}/1234abcd`;
-  assert.equal(parseAkuId(historic).id, historic);
-  assert.throws(() => akuId({ archetype: "a".repeat(65), suffix: "1234abcd" }), /64 UTF-8 bytes/u);
+  assert.equal(parseAkumaId(historic).id, historic);
+  assert.throws(() => akumaId({ akumaName: "a".repeat(65), suffix: "1234abcd" }), /64 UTF-8 bytes/u);
 });
 
 test("Akuma globs treat dots as literal name characters", () => {
@@ -58,7 +58,7 @@ test("directory creation is the identity allocation adjudicator", async (context
   const draws = ["00000000", "11111111"];
   const allocated = await allocateAkumaDirectory({
     worldRoot: root,
-    archetype: "claude",
+    akumaName: "claude",
     draw: () => draws.shift()!,
   });
   assert.equal(allocated.id, "aku/claude/11111111");

@@ -14,7 +14,7 @@ import { PreparedCallAdmissionError, prepareCall, publishPreparedCall, type Prep
 import type { Schema } from "./schema.js";
 
 export type AkumaCallInput = Readonly<{
-  archetype: string;
+  akumaName: string;
   body?: string;
   cwd?: string;
   writableDirectories?: readonly string[];
@@ -69,17 +69,17 @@ export async function prepareAkumaCall(
   spawn: BodyLauncher,
 ): Promise<PreparedAkumaCall> {
   decodeAkumaCaller(input.caller);
-  const name = validateAkumaName(input.archetype);
+  const name = validateAkumaName(input.akumaName);
   const home = configuration.home === undefined ? {} : { home: configuration.home };
   const settings = configuration.settings ?? (await readSettings({ root: path, ...home }));
-  const archetype = await loadPreparedArchetype({ name, project: path, ...home, settings });
+  const akumaName = await loadPreparedArchetype({ name, project: path, ...home, settings });
   const writableDirectories = await writableDirectoriesOption(input.writableDirectories);
-  if (writableDirectories.length > 0 && archetype.provider.kind !== "codex-app-server")
-    throw new TypeError(`writableDirectories is unsupported by provider ${archetype.provider.kind}`);
+  if (writableDirectories.length > 0 && akumaName.provider.kind !== "codex-app-server")
+    throw new TypeError(`writableDirectories is unsupported by provider ${akumaName.provider.kind}`);
   const recipe = Object.freeze({
-    ...(archetype.description === undefined ? {} : { description: archetype.description }),
-    provider: archetype.provider,
-    options: archetype.options,
+    ...(akumaName.description === undefined ? {} : { description: akumaName.description }),
+    provider: akumaName.provider,
+    options: akumaName.options,
     bare: bareOption(input.bare) ?? false,
   });
   const execution = await callExecution(path, input, context);
@@ -91,7 +91,7 @@ export async function prepareAkumaCall(
     });
   try {
     const publication = await prepareCall({
-      archetype: archetype.name,
+      akumaName: akumaName.name,
       cwd,
       ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
       ...(input.caller === undefined ? {} : { caller: input.caller }),
@@ -115,8 +115,8 @@ export async function prepareAkumaCall(
     // Provider admission retains the initiating caller's Archetype-classified refusal.
     if (error instanceof PreparedCallAdmissionError) {
       throw new AkumaArchetypeError(
-        archetype.name,
-        [archetype.path],
+        akumaName.name,
+        [akumaName.path],
         error.stage === "options" ? `is unsupported: ${error.diagnostic}` : `uses ${error.diagnostic}`,
       );
     }

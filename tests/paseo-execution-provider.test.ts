@@ -863,7 +863,7 @@ test(
         paths: allocated.paths,
         seed: {
           id: allocated.id,
-          archetype: "paseo",
+          akumaName: "paseo",
           provider: { name: "paseo", kind: "paseo" },
           options: {},
           cwd: root,

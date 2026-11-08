@@ -435,10 +435,10 @@ function attachAkumaAssociations(
   const aliasById = new Map<string, AliasBinding[]>();
   if (aliases.kind === "present") {
     for (const binding of aliases.value)
-      aliasById.set(binding.akuId, [...(aliasById.get(binding.akuId) ?? []), binding]);
+      aliasById.set(binding.akumaId, [...(aliasById.get(binding.akumaId) ?? []), binding]);
   }
   const dispatchById = new Map(
-    dispatches.kind === "present" ? dispatches.value.map((dispatch) => [dispatch.akuId, dispatch] as const) : [],
+    dispatches.kind === "present" ? dispatches.value.map((dispatch) => [dispatch.akumaId, dispatch] as const) : [],
   );
   return {
     kind: "present",

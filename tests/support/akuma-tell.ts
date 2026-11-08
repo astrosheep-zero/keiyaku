@@ -99,13 +99,13 @@ export async function bornWorld(root: string, suffix: string, spawn: BodyLaunche
     join(root, ".keiyaku", "settings.json"),
     JSON.stringify({ plugins: { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } } }),
   );
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
   const holder = (await HeldAkumaLeash.try(allocated.paths))!;
   try {
     await holder.birth(allocated.paths, {
       id: allocated.id,
-      archetype: "claude",
+      akumaName: "claude",
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       cwd: world,

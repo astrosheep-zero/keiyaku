@@ -12,7 +12,7 @@ import { answering } from "./support/akuma-tell.js";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
 import { HeldAkumaLeash, projectTell, readSeal, readSoul, readTell, type TellFact } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, pathsForAkuId, type AkuId } from "../src/akuma/identity.js";
+import { akumaRunRoot, pathsForAkumaId, type AkumaId } from "../src/akuma/identity.js";
 import type {
   CallInitialTellAdmission,
   InitialTellAdmissionInput,
@@ -192,8 +192,8 @@ test(
       assert.deepEqual(trace().slice(-1)[0]?.slice(0, 1), ["observe"], "ACK attempt precedes decode and close");
       return value;
     });
-    const result = await api.call({
-      archetype: "worker",
+    const result = await api.spawn({
+      akumaName: "worker",
       body: "work",
       mode: "wait",
       settings: selected,
@@ -217,7 +217,7 @@ test(
     const input = trace()[0]?.[1] as { akumaIds: string[] };
     assert.deepEqual(input.akumaIds, [result.akuma]);
     assert.ok(result.observation.kind === "observed");
-    const tell = await readTell(pathsForAkuId(world, result.akuma), result.observation.tell.admission.tellId);
+    const tell = await readTell(pathsForAkumaId(world, result.akuma), result.observation.tell.admission.tellId);
     assert.ok(tell?.binding);
     assert.deepEqual(trace(), [
       ["acquire", input],
@@ -228,8 +228,8 @@ test(
     assert.deepEqual(await cards(), [], "exact observation survives release of its temporary prefix");
     bounded = false;
     writeFileSync(output, "");
-    await api.call({ archetype: "worker", settings: selected, signal: t.signal });
-    await api.call({ archetype: "worker", body: "detached", settings: selected, signal: t.signal });
+    await api.spawn({ akumaName: "worker", settings: selected, signal: t.signal });
+    await api.spawn({ akumaName: "worker", body: "detached", settings: selected, signal: t.signal });
     assert.equal(
       trace().some((row) => row[0] === "acquire" || row[0] === "close" || row[0] === "observe"),
       false,
@@ -246,7 +246,7 @@ test("the prepared executor admits local provider options itself and refuses uns
   const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-refuse-"));
   await assert.rejects(
     prepareCall({
-      archetype: "worker",
+      akumaName: "worker",
       cwd: root,
       world: root,
       recipe: rawRecipe({ options: { network: "enabled" } }),
@@ -262,7 +262,7 @@ test("local custody carries a raw recipe the executor admits once and births wit
   const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-local-"));
   const recipe = rawRecipe({ description: "Worker", options: { model: "claude-sonnet-4-5" } });
   const prepared = await prepareCall({
-    archetype: "worker",
+    akumaName: "worker",
     cwd: root,
     world: root,
     recipe,
@@ -283,7 +283,7 @@ test("a durably born child survives a later launch failure and returns the nativ
   const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-born-"));
   const failure = new Error("post-birth launch failure");
   const prepared = await prepareCall({
-    archetype: "worker",
+    akumaName: "worker",
     cwd: root,
     world: root,
     recipe: rawRecipe(),
@@ -304,7 +304,7 @@ test("an abort after confirmed birth keeps the child and its native reason", asy
   const controller = new AbortController();
   const reason = new Error("stop after birth");
   const prepared = await prepareCall({
-    archetype: "worker",
+    akumaName: "worker",
     cwd: root,
     signal: controller.signal,
     world: root,
@@ -325,7 +325,7 @@ test("the exact admitted initial Tell is preserved and a missing admission never
   const tellId = "2f1c4b6a-0000-4000-8000-000000000001";
   const seen: string[] = [];
   const prepared = await prepareCall({
-    archetype: "worker",
+    akumaName: "worker",
     cwd: root,
     initialTell: { tellId, body: "begin" },
     world: root,
@@ -342,7 +342,7 @@ test("the exact admitted initial Tell is preserved and a missing admission never
 
   const missingRoot = await World.at(temporaryDirectory(context, "keiyaku-prepared-notborn-"));
   const missingPrepared = await prepareCall({
-    archetype: "worker",
+    akumaName: "worker",
     cwd: missingRoot,
     initialTell: { tellId, body: "begin" },
     world: missingRoot,
@@ -359,7 +359,7 @@ test("a failed initial Tell wake keeps the born child and the native failure", a
   const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-wake-"));
   const failure = new Error("tell wake failed");
   const prepared = await prepareCall({
-    archetype: "worker",
+    akumaName: "worker",
     cwd: root,
     initialTell: { tellId: "2f1c4b6a-0000-4000-8000-000000000002", body: "begin" },
     world: root,
@@ -403,14 +403,14 @@ for (const corruptInitialization of [false, true]) {
     const controller = new AbortController();
     const reason = new Error("original prebirth cancellation");
     const suppress = DeliveryLedger.prototype.suppress;
-    let child: AkuId | undefined;
+    let child: AkumaId | undefined;
     t.mock.method(
       DeliveryLedger.prototype,
       "suppress",
       async function (this: DeliveryLedger, input: Parameters<DeliveryLedger["suppress"]>[0]) {
         const result = await suppress.call(this, input);
-        child = input.key.slice("keiyaku/".length, -"/turn/".length) as AkuId;
-        if (corruptInitialization) mkdirSync(pathsForAkuId(world, child).heart);
+        child = input.key.slice("keiyaku/".length, -"/turn/".length) as AkumaId;
+        if (corruptInitialization) mkdirSync(pathsForAkumaId(world, child).heart);
         controller.abort(reason);
         return result;
       },
@@ -418,14 +418,14 @@ for (const corruptInitialization of [false, true]) {
     const selected = await settings({ root: world, home: join(world, "empty-home") });
     const api = akumasWithLauncher(world, async () => assert.fail("canceled observation cannot launch a Body"));
     await assert.rejects(
-      api.call({ archetype: "worker", body: "begin", mode: "wait", settings: selected, signal: controller.signal }),
+      api.spawn({ akumaName: "worker", body: "begin", mode: "wait", settings: selected, signal: controller.signal }),
       (error) => error === reason,
     );
     assert.ok(child);
     assert.equal((await childRuns(world)).length, 1, "the allocated coordinate remains owned and is never reused");
     if (!corruptInitialization) {
-      assert.equal(await readSoul(pathsForAkuId(world, child)), null);
-      assert.equal((await readSeal(pathsForAkuId(world, child)))?.evidence, reason.message);
+      assert.equal(await readSoul(pathsForAkumaId(world, child)), null);
+      assert.equal((await readSeal(pathsForAkumaId(world, child)))?.evidence, reason.message);
     }
   });
 }

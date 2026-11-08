@@ -132,8 +132,8 @@ test("other journals, Dispatch, worker completion, worktree edits and target mov
     barrier.reset();
     const pending = Keiyaku.with().select({ repo: observingRepo, id: first.id }).wait({ timeoutMs: 3000 });
     await barrier.reads();
-    const worker = await bornLineageAkuma({ root: world, archetype: "worker", draw: "1234abcd", createdAt: "2026-08-18T00:00:00.000Z" });
-    await publishDispatch({ repository: await repositoryAt(repository.path), akuId: worker.id, contractId: first.id });
+    const worker = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "1234abcd", createdAt: "2026-08-18T00:00:00.000Z" });
+    await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: worker.id, contractId: first.id });
     const completed = await Akumas.of(world).wait({ akuma: [worker.id], timeoutMs: 0 });
     assert.equal(completed.reason, "completed");
     const killed = await Akumas.of(world).kill({ akuma: [first.id], repo });

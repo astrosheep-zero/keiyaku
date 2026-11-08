@@ -15,8 +15,8 @@ export function keiyakuExecutionInstructions(soul: Soul, association?: Execution
   return [
     "<keiyaku>",
     "This context supersedes any earlier Keiyaku execution context.",
-    `Akuma: ${soul.id}`,
-    `Archetype: ${soul.archetype}`,
+    `Akuma ID: ${soul.id}`,
+    `Akuma name: ${soul.akumaName}`,
     ...(association === undefined ? [] : [`Contract context (not a Dispatch receipt): ${association.contractId}`]),
     'Use `keiyaku report "..."` to share updates without stopping your work.',
     "</keiyaku>",

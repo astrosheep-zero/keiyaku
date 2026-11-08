@@ -7,7 +7,7 @@ import type { AkumaConfiguration } from "../../src/akuma/akuma-call.js";
 import type { AkumaCompleteList, AkumaList, AkumaListInput } from "../../src/akuma/akuma.js";
 import { listArchetypes } from "../../src/akuma/archetype.js";
 import { admitCallInitialTell } from "../../src/akuma/call-initial-tell.js";
-import { parseAkuId } from "../../src/akuma/identity.js";
+import { parseAkumaId } from "../../src/akuma/identity.js";
 import { projectTell } from "../../src/akuma/heart/index.js";
 import { readAliases, type AliasBinding } from "../../src/alias/index.js";
 import type { AkumaAlias } from "../../src/identity/selector.js";
@@ -39,9 +39,9 @@ export function isolateSquareFixtureLedger(root: string): () => void {
 function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[]): AkumaList {
   const byId = new Map<string, AkumaAlias[]>();
   for (const binding of bindings) {
-    const aliases = byId.get(binding.akuId) ?? [];
+    const aliases = byId.get(binding.akumaId) ?? [];
     aliases.push(binding.alias);
-    byId.set(binding.akuId, aliases);
+    byId.set(binding.akumaId, aliases);
   }
   return { ...roster, rows: roster.rows.map((row) => ({ ...row, aliases: byId.get(row.id) ?? [] })) };
 }
@@ -58,11 +58,11 @@ export class AkumaComposition {
   }
 
   of(input: Readonly<{ id: string }>): AkumaOwner {
-    return new AkumaOwner(parseAkuId(input.id).id, this.root);
+    return new AkumaOwner(parseAkumaId(input.id).id, this.root);
   }
 
   async call(input: AkumaCallInput): Promise<AkumaOwner> {
-    const result = await Akumas.of(this.root).call({
+    const result = await Akumas.of(this.root).spawn({
       ...input,
       cwd: input.cwd ?? process.cwd(),
       ...(this.configuration.home === undefined ? {} : { home: this.configuration.home }),
@@ -82,7 +82,7 @@ export class AkumaComposition {
 
   async listComplete(input: AkumaListInput = {}): Promise<AkumaCompleteList> {
     return await readAkumaCompleteRoster(this.root, {
-      ...(input.archetype === undefined ? {} : { archetype: input.archetype }),
+      ...(input.akumaName === undefined ? {} : { akumaName: input.akumaName }),
       ...(input.caller === undefined ? {} : { caller: input.caller }),
     });
   }

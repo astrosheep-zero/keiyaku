@@ -1,6 +1,6 @@
 # Akuma
 
-An Akuma is a summoned agent the flagship can call, observe, steer, and collect.
+An Akuma is a summoned agent the flagship can spawn, observe, steer, and collect.
 This chapter owns its identity, birth, life, Archetype admission, placement, and
 execution/provider boundary. Processes come and go; the Heart remains its
 durable authority.
@@ -103,17 +103,17 @@ retains the candidate. Dispatch and Contract observation uses the World's Git
 repository; a World without one has no Dispatch authority.
 
 Retention is a best-effort maintenance pass triggered only after a successful
-call or fork has made its new Akuma durable. It runs outside the birth
+spawn or fork has made its new Akuma durable. It runs outside the birth
 transaction and never changes, rolls back, or replaces that birth result. List,
 status, history, wait, tell, ask, and every other observation path never retire
 bytes. One sweep removes only recognized per-entry custody, never signals or
 kills an Akuma, and a failure in one candidate never affects another candidate
-or the operation that triggered the pass. If no later successful call or fork
+or the operation that triggered the pass. If no later successful spawn or fork
 occurs, eligible entries simply remain.
 
 ## Archetype And Placement
 
-An Archetype is call-time personality and provider configuration. Publicly these are Akuma names; the word Archetype never appears on the CLI face. Its exact
+An Archetype is spawn-time personality and provider configuration. Publicly these are Akuma names; the word Archetype never appears on the CLI face. Its exact
 Markdown grammar is edge detail; admission rejects malformed, unknown, or
 unsupported provider input before allocation. Later Archetype or Settings edits
 change only future births. A definition file joins the catalogue exactly when
@@ -125,7 +125,7 @@ Archetype definitions are configuration kept apart from World runtime custody.
 Project definitions are eligible for version control. Definitions may come from
 both the current project and Home. A project definition shadows a Home definition
 with the same canonical name; Home remains the fallback when the project has no
-definition. This precedence applies only to call-time definition configuration
+definition. This precedence applies only to spawn-time definition configuration
 and never changes World runtime custody, Heart evidence, or leash ownership.
 
 An Archetype may name one `base` Archetype at load time. The base is resolved
@@ -134,7 +134,7 @@ complete snapshot before catalog presentation or birth. Provider, model,
 effort, network, and description are replaced only when present on the child;
 otherwise the base value remains. A nonempty child body replaces the base body,
 while an empty body inherits it. The resolved base relation is not part of
-AkuId, Soul, Heart, Dispatch, or any public call input, and later file edits
+AkuId, Soul, Heart, Dispatch, or any public spawn input, and later file edits
 affect only future loads.
 
 An explicit base is never silently ignored. Missing or malformed bases,

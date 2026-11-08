@@ -50,7 +50,7 @@ must not be the Deliverer of the candidate under review):
 
 ## 3. Commissioning And Next Moves
 
-Assign a role `@alias` when calling an Akuma (`keiyaku-akuma`), pass the
+Assign a role `@alias` when spawning an Akuma (`keiyaku-akuma`), pass the
 appointed worktree as its working directory, and state the Contract ID,
 worktree path, and current Arc in the prompt:
 

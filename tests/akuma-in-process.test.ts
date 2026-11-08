@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { Akuma, AkumaHost, Akumas, Keiyaku, Repo, World, type AkumaHostOptions, type WorldRoot } from "../src/index.js";
-import { allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { allocateAkumaDirectory, pathsForAkumaId } from "../src/akuma/identity.js";
 import { initializeHeart, probeLeash, readHeart, readSeal, readLatestTurnForBody } from "../src/akuma/heart/index.js";
 import { launchInProcessBody } from "../src/akuma/in-process-body.js";
 import { publishAkuma } from "../src/akuma/publication.js";
@@ -129,8 +129,8 @@ test(
     assert.ok(first instanceof Akuma);
     const before = { ...process.env };
     const firstAsk = first.ask(prompt(holdingCommand(world, "first")), { signal: t.signal });
-    const second = await api.call({
-      archetype: "worker",
+    const second = await api.spawn({
+      akumaName: "worker",
       cwd: world,
       body: prompt(holdingCommand(world, "second")),
       mode: "wait",
@@ -152,9 +152,9 @@ test(
       const secondHandle = Akuma.select(world, second.akuma, { hosting: "in-process" });
       assert.ok(secondHandle instanceof Akuma);
       assert.equal((await secondHandle.idle({ timeoutMs: 20_000, signal: t.signal })).reason, "completed");
-      const heart = await readHeart(pathsForAkuId(world, second.akuma));
+      const heart = await readHeart(pathsForAkumaId(world, second.akuma));
       assert.equal(heart.pending.length, 0);
-      const outcome = (await readLatestTurnForBody(pathsForAkuId(world, second.akuma), heart.latestBody!.sequence))?.end
+      const outcome = (await readLatestTurnForBody(pathsForAkumaId(world, second.akuma), heart.latestBody!.sequence))?.end
         ?.outcome;
       assert.equal(outcome?.kind, "answered");
       if (outcome?.kind !== "answered") throw new Error("second Body lost its answer");
@@ -212,8 +212,8 @@ console.log(JSON.stringify({
 }));`;
       return prompt([process.execPath, "-e", script].map(quote).join(" "));
     };
-    const called = await api.call({
-      archetype: "worker", cwd: world, contract, body: reporting("first report"),
+    const called = await api.spawn({
+      akumaName: "worker", cwd: world, contract, body: reporting("first report"),
       mode: "wait", timeoutMs: 20_000, signal: t.signal,
     });
     assert.equal(called.observation.kind, "observed");
@@ -245,7 +245,7 @@ console.log(JSON.stringify({
     const bareAnswer = await bare.ask(reporting("bare report"), { timeoutMs: 20_000, signal: t.signal });
     if (bareAnswer.observation.reason !== "answered") assert.fail(JSON.stringify(bareAnswer));
     assert.equal(JSON.parse(bareAnswer.observation.answer).current.kind, "recorded");
-    assert.equal((await readHeart(pathsForAkuId(world, bare.id))).soul?.bare, true);
+    assert.equal((await readHeart(pathsForAkumaId(world, bare.id))).soul?.bare, true);
     assert.equal(runtime().at(-1)!.prompt.includes("<keiyaku>"), false);
     assert.ok(runtime().at(-1)!.prompt.includes("Fixture."), "bare preserves personality");
     assert.ok(nativeEvents(world).every(event => hosting === "in-process" ? event.pid === process.pid : event.pid !== process.pid));
@@ -282,7 +282,7 @@ const run = (...args) => JSON.parse(execFileSync(process.execPath, ["--import", 
 const who = run("whoami");
 const debt = run("debt", "add", "Local Body operation");
 const review = run("review", ${JSON.stringify(id)}, "--unsatisfied", "--summary", "fixture");
-const child = run("call", "worker", ${JSON.stringify(prompt("printf child-answer"))});
+const child = run("spawn", "worker", ${JSON.stringify(prompt("printf child-answer"))});
 const waited = run("wait", child.akuma, "--timeout", "20s");
 console.log(JSON.stringify({ who, debt, review, child, waited }));
 `,
@@ -298,9 +298,9 @@ console.log(JSON.stringify({ who, debt, review, child, waited }));
     assert.equal(result.review.kind, "accepted");
     assert.equal(result.child.observation.kind, "detached");
     assert.equal(result.waited.reason, "completed");
-    const child = await readHeart(pathsForAkuId(world, result.child.akuma));
+    const child = await readHeart(pathsForAkumaId(world, result.child.akuma));
     assert.equal(child.soul?.origin.kind, "direct");
-    assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akuId: parent.id });
+    assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akumaId: parent.id });
     assert.equal(present(await contract.state()).attestations.at(-1)?.actor, parent.id);
     const events = nativeEvents(world).filter((event) => event.event === "session_start");
     assert.ok(events.some((event) => event.pid === process.pid));
@@ -326,7 +326,7 @@ test(
           nativeEvents(world).some((event) => event.event === "stall-started"),
       );
       assert.equal(await akuma.kill({ signal: t.signal }), "hung");
-      const paths = pathsForAkuId(world, akuma.id);
+      const paths = pathsForAkumaId(world, akuma.id);
       assert.ok((await readHeart(paths)).latestBody?.hung);
       await waitForCondition("hung Body to release its leash", async () => (await probeLeash(paths)) === "free");
       assert.equal(
@@ -353,7 +353,7 @@ test("launch cancellation before preparation cannot create a late Body, and publ
   let allocated: Parameters<Parameters<typeof publishAkuma>[0]["launch"]>[0] | undefined;
   const birth = publishAkuma({
     worldPath: world,
-    archetype: "worker",
+    akumaName: "worker",
     signal: controller.signal,
     launch: async (child) => {
       allocated = child;
@@ -362,7 +362,7 @@ test("launch cancellation before preparation cannot create a late Body, and publ
           paths: child.paths,
           seed: {
             id: child.id,
-            archetype: "worker",
+            akumaName: "worker",
             cwd: world,
             origin: { kind: "direct" },
             provider: { name: "pi", kind: "pi" },
@@ -390,8 +390,8 @@ test("launch cancellation before preparation cannot create a late Body, and publ
 
 test("owned in-process cancellation retires only its own prepared Body", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-in-process-cancel-"));
-  const first = await allocateAkumaDirectory({ worldRoot: world, archetype: "worker" });
-  const second = await allocateAkumaDirectory({ worldRoot: world, archetype: "worker" });
+  const first = await allocateAkumaDirectory({ worldRoot: world, akumaName: "worker" });
+  const second = await allocateAkumaDirectory({ worldRoot: world, akumaName: "worker" });
   await Promise.all([initializeHeart(first.paths), initializeHeart(second.paths)]);
   const started = [deferred<void>(), deferred<void>()];
   const finished = [deferred<void>(), deferred<void>()];
@@ -426,7 +426,7 @@ test("owned in-process cancellation retires only its own prepared Body", async (
         paths: child.paths,
         seed: {
           id: child.id,
-          archetype: "worker",
+          akumaName: "worker",
           cwd: world,
           origin: { kind: "direct" },
           provider: { name: "pi", kind: "pi" },
@@ -460,8 +460,8 @@ test(
     const observation = new AbortController();
     const calls = ["left", "right"].map((name) =>
       api
-        .call({
-          archetype: "worker",
+        .spawn({
+          akumaName: "worker",
           cwd: world,
           body: prompt(holdingCommand(world, name)),
           mode: "wait",
@@ -497,8 +497,8 @@ test(
     installHostAcpFixture(world, true);
     const scope = AkumaHost.inProcess();
     const api = Akumas.of(world, scope);
-    const called = await api.call({ archetype: "acp-worker", cwd: world, body: "first", bare: true, signal: t.signal });
-    const paths = pathsForAkuId(world, called.akuma);
+    const called = await api.spawn({ akumaName: "acp-worker", cwd: world, body: "first", bare: true, signal: t.signal });
+    const paths = pathsForAkumaId(world, called.akuma);
     const proof = () =>
       readFileSync(join(world, "host-proof.jsonl"), "utf8")
         .trim()
@@ -565,8 +565,8 @@ export default pi => {
   );
   const scope = AkumaHost.inProcess();
   const api = Akumas.of(world, scope);
-  const called = await api.call({
-    archetype: "worker",
+  const called = await api.spawn({
+    akumaName: "worker",
     cwd: world,
     body: prompt("printf should-not-run"),
     signal: t.signal,
@@ -585,12 +585,12 @@ export default pi => {
     await close;
     assert.ok(existsSync(join(world, "binding.finished")));
     assert.equal(existsSync(join(world, "late-prompt")), false);
-    assert.equal(await probeLeash(pathsForAkuId(world, called.akuma)), "free");
+    assert.equal(await probeLeash(pathsForAkumaId(world, called.akuma)), "free");
     const retained = await api.tell({ akuma: called.akuma, body: "retained, but no host launch" });
     assert.equal(retained.tell.wake.kind, "failed");
     if (retained.tell.wake.kind === "failed") assert.match(retained.tell.wake.diagnostic, /scope is closed/u);
     assert.ok(
-      (await readHeart(pathsForAkuId(world, called.akuma))).pending.length > 0,
+      (await readHeart(pathsForAkumaId(world, called.akuma))).pending.length > 0,
       "scope closure is not Tell rollback",
     );
   } finally {
@@ -608,8 +608,8 @@ test(
       const scope = AkumaHost.inProcess();
       const api = Akumas.of(world, scope);
       const before = existsSync(join(world, "native.jsonl")) ? nativeEvents(world).length : 0;
-      const called = await api.call({ archetype: "worker", cwd: world, body: prompt("stall"), signal: t.signal });
-      const paths = pathsForAkuId(world, called.akuma);
+      const called = await api.spawn({ akumaName: "worker", cwd: world, body: prompt("stall"), signal: t.signal });
+      const paths = pathsForAkumaId(world, called.akuma);
       try {
         await waitForCondition(
           "noncooperative tool in scoped launch",

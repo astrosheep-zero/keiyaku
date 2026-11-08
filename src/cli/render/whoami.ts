@@ -5,7 +5,7 @@ import { safeText } from "./terminal.js";
 
 function callerText(caller: AkumaCaller | Readonly<{ kind: "unknown" }>): string {
   if (caller.kind === "unknown") return "unknown";
-  return caller.kind === "akuma" ? `${caller.akuId} · world ${caller.world}` : `${caller.integration}:${caller.id}`;
+  return caller.kind === "akuma" ? `${caller.akumaId} · world ${caller.world}` : `${caller.integration}:${caller.id}`;
 }
 
 function originText(origin: Exclude<AkumaOrigin, { kind: "direct" }>): string {
@@ -16,7 +16,7 @@ function selfHead(facts: WhoamiFacts, dispatch: ContractId | undefined, workdir:
   const self = facts.self;
   if (self.kind === "akuma") {
     const aliases = facts.profile?.kind === "available" ? facts.profile.aliases : [];
-    const identity = `${self.akuId}${aliases.length ? ` (${aliases.join(" · ")})` : ""}`;
+    const identity = `${self.akumaId}${aliases.length ? ` (${aliases.join(" · ")})` : ""}`;
     return panelHead(
       identity,
       undefined,

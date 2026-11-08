@@ -2,7 +2,7 @@
 name: keiyaku
 description: >-
   Keiyaku records unresolved work, writes handoff terms for deliveries, and
-  calls delegates. Use this skill when deciding which Keiyaku concept or skill
+  spawns delegates. Use this skill when deciding which Keiyaku concept or skill
   to reach for.
 ---
 
@@ -29,7 +29,7 @@ Keiyaku has three pillars that work alone or together:
 - Recording or querying unresolved work and prerequisites: `keiyaku-debt`
 - Splitting acceptance boundaries and authoring a Contract: `keiyaku-bind`
 - Running a Contract's fulfillment loop (deliver, verify, review): `keiyaku-workflow`
-- Calling, aliasing, steering, and waiting on Akumas: `keiyaku-akuma`
+- Spawning, aliasing, steering, and waiting on Akumas: `keiyaku-akuma`
 - Supervising multiple active Contracts and Akumas in parallel: `keiyaku-babysit`
 
 Get exact command or tool syntax from CLI `--help` or the exposed tool

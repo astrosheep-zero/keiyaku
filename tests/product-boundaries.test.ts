@@ -15,7 +15,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
 
   const contracts = Keiyaku.with({ actor: "contract-actor" });
   assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "reconcile", "resolve", "select", "wait"]);
-  assert.equal("call" in contracts, false);
+  assert.equal("spawn" in contracts, false);
   assert.equal("nuke" in contracts, false);
   assert.equal("debts" in contracts, false);
 

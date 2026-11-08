@@ -18,7 +18,7 @@ stopping conditions) rather than in the flagship's conversation context:
 | Rare failure diagnosis | Generate competing hypotheses from logs/code; have agents propose distinguishing experiments; eliminate hypotheses from actual results. |
 | Untrusted issue triage | Separate readers of untrusted text (returning bounded structured evidence) from actors with mutation authority. |
 
-Create separate Akumas (`@judge-1`, etc., or distinct `Akumas.call`
+Create separate Akumas (`@judge-1`, etc., or distinct `Akumas.spawn`
 instances) for blind comparisons and adversarial checks so a judge never grades
 its own earlier work.
 
@@ -35,7 +35,7 @@ answer arrives).
 import { Akuma, Akumas, World, z } from "@astrosheep/keiyaku";
 
 const root = await World.at(process.cwd());
-const archetype = process.env.AKUMA_ARCHETYPE ?? "worker";
+const akumaName = process.env.AKUMA_NAME ?? "worker";
 
 const Verdict = z.object({
   verdict: z.enum(["supported", "contradicted", "unknown"]),
@@ -43,21 +43,21 @@ const Verdict = z.object({
   reason: z.string(),
 });
 
-// 1. One-shot structured call (birth + first Tell + wait):
-const called = await Akumas.of(root).call({
-  archetype,
+// 1. One-shot structured spawn (birth + first Tell + wait):
+const spawned = await Akumas.of(root).spawn({
+  akumaName,
   cwd: process.cwd(),
   body: "Read-only check: verify whether src/index.ts exports World.",
   schema: Verdict,
   mode: "wait",
 });
-if (called.observation.kind !== "observed" || called.observation.observation.reason !== "answered") {
-  throw new Error("Did not answer: " + JSON.stringify(called.observation));
+if (spawned.observation.kind !== "observed" || spawned.observation.observation.reason !== "answered") {
+  throw new Error("Did not answer: " + JSON.stringify(spawned.observation));
 }
-console.log(called.akuma, called.observation.observation.answer);
+console.log(spawned.akuma, spawned.observation.observation.answer);
 
 // 2. Reconnect to the same AkuId for a follow-up turn after Body settlement:
-const worker = Akuma.select(root, called.akuma);
+const worker = Akuma.select(root, spawned.akuma);
 await worker.idle();
 const followUp = await worker.ask("Now check whether Repo is also exported.", {
   schema: Verdict,
@@ -83,5 +83,5 @@ if (followUp.observation.reason === "answered") {
   must survive restarts:** `Akuma.select(root, savedId)` reconnects
   synchronously (`status()` and `history()` inspect prior state), rather than
   blindly rerunning completed turns.
-- **Worktree isolation:** `Akumas.call` does not create an isolated Contract
+- **Worktree isolation:** `Akumas.spawn` does not create an isolated Contract
   worktree; give parallel writers non-overlapping paths or dedicated worktrees.

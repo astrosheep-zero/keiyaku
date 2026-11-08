@@ -1,6 +1,6 @@
 import { decodeAkumaCaller } from "../caller.js";
 import type { DatabaseSync } from "node:sqlite";
-import { parseAkuId, type AkuId } from "../identity.js";
+import { parseAkumaId, type AkumaId } from "../identity.js";
 import { decodeProviderOptions, decodeProviderRecipe } from "../provider-recipe.js";
 import { akumaOriginSchema, type Soul, type SoulRow } from "./facts.js";
 
@@ -17,9 +17,9 @@ function nonblank(value: unknown, what: string): string {
   return value;
 }
 
-function soulAkuIdentity(value: unknown, what: string): ReturnType<typeof parseAkuId> {
+function soulAkuIdentity(value: unknown, what: string): ReturnType<typeof parseAkumaId> {
   try {
-    return parseAkuId(nonblank(value, what));
+    return parseAkumaId(nonblank(value, what));
   } catch (error) {
     throw new Error(`Akuma soul ${what} is not an Akuma identity coordinate`, { cause: error });
   }
@@ -29,9 +29,9 @@ export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
   const soul = record(value);
   if (soul === null) throw new Error("Akuma soul must be an object");
   const identity = soulAkuIdentity(soul.id, "id");
-  const id: AkuId = identity.id;
-  const archetype = nonblank(soul.archetype, "name");
-  if (identity.archetype !== archetype) throw new Error("Akuma soul id and name must agree");
+  const id: AkumaId = identity.id;
+  const akumaName = nonblank(soul.akumaName, "name");
+  if (identity.akumaName !== akumaName) throw new Error("Akuma soul id and name must agree");
   const description = soul.description === undefined ? undefined : nonblank(soul.description, "description");
   const provider = decodeProviderRecipe(soul.provider);
   const options = decodeProviderOptions(soul.options);
@@ -41,7 +41,7 @@ export function decodeSoulSeed(value: unknown): Omit<Soul, "createdAt"> {
   }
   return {
     id,
-    archetype,
+    akumaName,
     ...(description === undefined ? {} : { description }),
     provider,
     options,

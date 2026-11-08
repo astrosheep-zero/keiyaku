@@ -10,7 +10,7 @@ import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from 
 import type { AkumaStatus } from "../akuma/akuma.js";
 import type { TellResult } from "../akuma/body.js";
 import { bareOption, canonicalBirthCwd } from "../akuma/call-input.js";
-import { pathsForAkuId, type AkuId, type AkumaPaths } from "../akuma/identity.js";
+import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "../akuma/identity.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import { moveAlias, type AliasBinding } from "../alias/index.js";
@@ -39,22 +39,22 @@ export type DispatchStage =
 
 type AliasStage =
   | Readonly<{ kind: "none" }>
-  | Readonly<{ kind: "aliased"; alias: AliasBinding; previous: AkuId | null }>
+  | Readonly<{ kind: "aliased"; alias: AliasBinding; previous: AkumaId | null }>
   | Readonly<{ kind: "skipped"; reason: "dispatch-failed" }>
   | Readonly<{ kind: "failed"; failure: IntegrationFailure }>;
 
-export type CallWaitHead = Readonly<{
+export type SpawnWaitHead = Readonly<{
   dispatch: DispatchStage;
   alias: AliasStage;
 }>;
 
-type CallWaitObserver = Readonly<{
-  admitted?: (tell: TellResult, id: AkumaStatus["id"], head: CallWaitHead) => void | Promise<void>;
+type SpawnWaitObserver = Readonly<{
+  admitted?: (tell: TellResult, id: AkumaStatus["id"], head: SpawnWaitHead) => void | Promise<void>;
   observe?: AskObserver["observe"];
 }>;
 
-export type CallInput = Readonly<{
-  archetype: string;
+export type SpawnInput = Readonly<{
+  akumaName: string;
   body?: string;
   cwd?: string;
   mode?: "wait" | "detach";
@@ -69,10 +69,10 @@ export type CallInput = Readonly<{
   initiator?: string;
   caller?: AkumaCaller;
   signal?: AbortSignal;
-  observe?: CallWaitObserver;
+  observe?: SpawnWaitObserver;
 }>;
 
-export type CallObservation =
+export type SpawnObservation =
   | Readonly<{ kind: "born" }>
   | Readonly<{ kind: "detached"; tell: TellResult }>
   | Readonly<{
@@ -83,9 +83,9 @@ export type CallObservation =
     }>
   | Readonly<{ kind: "failed"; tellId: string; tell?: TellResult; failure: IntegrationFailure }>;
 
-export type CallResult = Readonly<{
-  kind: "called";
-  akuma: AkuId;
+export type SpawnResult = Readonly<{
+  kind: "spawned";
+  akuma: AkumaId;
   execution: Readonly<{
     cwd: string;
     source: "input" | "process" | "world";
@@ -93,10 +93,10 @@ export type CallResult = Readonly<{
   dispatch: DispatchStage;
   alias: AliasStage;
   structured?: true;
-  observation: CallObservation;
+  observation: SpawnObservation;
 }>;
 
-type CallExecution = CallResult["execution"];
+type CallExecution = SpawnResult["execution"];
 
 export type ForkInput = Readonly<{
   akuma: string;
@@ -108,8 +108,8 @@ export type ForkInput = Readonly<{
 }>;
 
 export type ForkResult =
-  | Readonly<{ kind: "forked"; parent: AkuId; child: AkuId; dispatch: DispatchStage }>
-  | (Exclude<ForkReceipt, Readonly<{ kind: "forked"; child: AkuId }>> & Readonly<{ parent: AkuId }>);
+  | Readonly<{ kind: "forked"; parent: AkumaId; child: AkumaId; dispatch: DispatchStage }>
+  | (Exclude<ForkReceipt, Readonly<{ kind: "forked"; child: AkumaId }>> & Readonly<{ parent: AkumaId }>);
 
 function nonblank(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -226,7 +226,7 @@ function callDiagnosticSink(
 async function dispatchStage(
   input: Readonly<{
     repository: Parameters<typeof publishDispatch>[0]["repository"];
-    akuId: AkuId;
+    akumaId: AkumaId;
     contractId: Parameters<typeof publishDispatch>[0]["contractId"];
   }>,
 ): Promise<DispatchStage> {
@@ -249,15 +249,15 @@ async function dispatchStage(
 async function forkDispatchStage(
   input: Readonly<{
     repository: Parameters<typeof readDispatch>[0];
-    parent: AkuId;
-    child: AkuId;
+    parent: AkumaId;
+    child: AkumaId;
   }>,
 ): Promise<DispatchStage> {
   try {
     const parent = await readDispatch(input.repository, input.parent);
     return parent === null
       ? { kind: "none" }
-      : await dispatchStage({ repository: input.repository, akuId: input.child, contractId: parent.contractId });
+      : await dispatchStage({ repository: input.repository, akumaId: input.child, contractId: parent.contractId });
   } catch (error) {
     return { kind: "failed", failure: integrationFailure(error) };
   }
@@ -275,12 +275,12 @@ async function resolveAliasStage(
   path: WorldRoot,
   alias: AkumaAlias | undefined,
   dispatch: DispatchStage,
-  akuma: AkuId,
+  akuma: AkumaId,
 ): Promise<AliasStage> {
   if (alias === undefined) return { kind: "none" };
   if (dispatch.kind === "failed") return { kind: "skipped", reason: "dispatch-failed" };
   try {
-    const moved = await moveAlias({ world: path, alias, akuId: akuma });
+    const moved = await moveAlias({ world: path, alias, akumaId: akuma });
     return { kind: "aliased", alias: moved.alias, previous: moved.previous };
   } catch (error) {
     return { kind: "failed", failure: integrationFailure(error) };
@@ -289,7 +289,7 @@ async function resolveAliasStage(
 
 const CALL_INPUT_KEYS = [
   "path",
-  "archetype",
+  "akumaName",
   "body",
   "cwd",
   "mode",
@@ -309,7 +309,7 @@ const CALL_INPUT_KEYS = [
 
 type ParsedCallInput = Readonly<{
   path: WorldRoot;
-  archetype: string;
+  akumaName: string;
   cwd?: string;
   mode: "wait" | "detach";
   timeoutMs: number;
@@ -323,14 +323,14 @@ type ParsedCallInput = Readonly<{
   caller?: AkumaCaller;
   initiator?: string;
   initialTell?: InitialCallTell & Readonly<{ schema?: Schema<unknown> }>;
-  observe?: CallWaitObserver;
+  observe?: SpawnWaitObserver;
 }>;
 
-async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>): Promise<ParsedCallInput> {
-  const values = requireInput(input, "Akumas.call input");
-  onlyKeys(values, CALL_INPUT_KEYS, "Akumas.call input");
+async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>): Promise<ParsedCallInput> {
+  const values = requireInput(input, "Akumas.spawn input");
+  onlyKeys(values, CALL_INPUT_KEYS, "Akumas.spawn input");
   const path = await World.prove(nonblank(values.path, "path"));
-  const archetype = nonblank(values.archetype, "archetype");
+  const akumaName = nonblank(values.akumaName, "akumaName");
   const body = callBody(values.body);
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
   const caller = decodeAkumaCaller(values.caller);
@@ -359,7 +359,7 @@ async function parseCallInput(input: CallInput & Readonly<{ path: WorldRoot }>):
         };
   return {
     path,
-    archetype,
+    akumaName,
     ...(cwd === undefined ? {} : { cwd }),
     mode,
     timeoutMs,
@@ -388,7 +388,7 @@ function callConfiguration(input: ParsedCallInput) {
 
 function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | undefined) {
   return {
-    archetype: input.archetype,
+    akumaName: input.akumaName,
     ...(input.caller === undefined ? {} : { caller: input.caller }),
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     ...(input.initialTell === undefined
@@ -409,14 +409,14 @@ function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | u
 }
 
 function callResultOf(
-  akuma: AkuId,
+  akuma: AkumaId,
   execution: CallExecution,
   dispatch: DispatchStage,
   alias: AliasStage,
   initialTell: ParsedCallInput["initialTell"],
-): Omit<CallResult, "observation"> {
+): Omit<SpawnResult, "observation"> {
   return {
-    kind: "called",
+    kind: "spawned",
     akuma,
     execution,
     dispatch,
@@ -426,11 +426,11 @@ function callResultOf(
 }
 
 function failedCall(
-  result: Omit<CallResult, "observation">,
+  result: Omit<SpawnResult, "observation">,
   tellId: string,
   error: unknown,
   tell?: TellResult,
-): CallResult {
+): SpawnResult {
   return {
     ...result,
     observation: {
@@ -445,17 +445,17 @@ function failedCall(
 async function observeCall(
   input: Readonly<{
     path: WorldRoot;
-    akuma: AkuId;
-    result: Omit<CallResult, "observation">;
+    akuma: AkumaId;
+    result: Omit<SpawnResult, "observation">;
     initialTell: NonNullable<ParsedCallInput["initialTell"]>;
     receipt: TellResult;
     timeoutMs: number;
     settings?: Settings;
     signal?: AbortSignal;
-    observe?: CallWaitObserver;
+    observe?: SpawnWaitObserver;
   }>,
   reportDiagnostic?: (message: string) => void,
-): Promise<CallResult> {
+): Promise<SpawnResult> {
   const onObserve: AskObserver = {
     admitted: async (receipt, id) => {
       await input.observe?.admitted?.(receipt, id, {
@@ -476,7 +476,7 @@ async function observeCall(
         world: input.path,
         ...(input.settings === undefined ? {} : { settings: input.settings }),
         reportDiagnostic: callDiagnosticSink(
-          pathsForAkuId(input.path, input.akuma),
+          pathsForAkumaId(input.path, input.akuma),
           "outcome observation",
           reportDiagnostic,
         ),
@@ -503,9 +503,9 @@ async function observeCall(
 }
 
 /** One failure that still names the child the invocation durably admitted. */
-function knownChildFailure(reason: unknown, akuma: AkuId): Error {
-  const cause = reason instanceof Error ? reason : new Error(reason === undefined ? "call aborted" : String(reason));
-  // One AbortSignal may cancel several parallel calls. Never overwrite another
+function knownChildFailure(reason: unknown, akuma: AkumaId): Error {
+  const cause = reason instanceof Error ? reason : new Error(reason === undefined ? "spawn aborted" : String(reason));
+  // One AbortSignal may cancel several parallel spawns. Never overwrite another
   // invocation's leading birth on its shared reason object.
   const error =
     Object.isExtensible(cause) && !Object.hasOwn(cause, "akuma") ? cause : new Error(cause.message, { cause });
@@ -515,14 +515,14 @@ function knownChildFailure(reason: unknown, akuma: AkuId): Error {
 
 /** Preserve a native failure identity; only an unknown shape becomes a fresh Error. */
 function asError(failure: unknown): Error {
-  return failure instanceof Error ? failure : new Error(failure === undefined ? "call failed" : String(failure));
+  return failure instanceof Error ? failure : new Error(failure === undefined ? "spawn failed" : String(failure));
 }
 
 export async function callAkumas(
-  input: CallInput & Readonly<{ path: WorldRoot }>,
+  input: SpawnInput & Readonly<{ path: WorldRoot }>,
   spawn: BodyLauncher,
   reportDiagnostic?: (message: string) => void,
-): Promise<CallResult> {
+): Promise<SpawnResult> {
   const parsed = await parseCallInput(input);
   const selectedExecution = await resolveCallExecution(parsed.cwd === undefined ? {} : { cwd: parsed.cwd });
   const seat = parsed.seat;
@@ -537,13 +537,13 @@ export async function callAkumas(
     spawn,
   );
   let publishing = false;
-  const run = async (): Promise<CallResult> => {
+  const run = async (): Promise<SpawnResult> => {
     publishing = true;
     const admitted = await publishAkumaCall(prepared);
     const dispatch: DispatchStage =
       seat === undefined
         ? { kind: "none" }
-        : await dispatchStage({ repository: seat.scope, akuId: admitted.id, contractId: seat.id });
+        : await dispatchStage({ repository: seat.scope, akumaId: admitted.id, contractId: seat.id });
     const aliasStage = await resolveAliasStage(parsed.path, parsed.alias, dispatch, admitted.id);
     const result = callResultOf(admitted.id, admitted.execution, dispatch, aliasStage, parsed.initialTell);
     if (parsed.initialTell === undefined) {

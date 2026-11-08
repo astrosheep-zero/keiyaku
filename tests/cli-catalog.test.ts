@@ -13,7 +13,7 @@ function row(
 ): AkumaList["rows"][number] {
   return {
     id: id as never,
-    archetype: "worker",
+    akumaName: "worker",
     life: "asleep",
     lifeAt,
     lastActivityAt: lifeAt,
@@ -24,7 +24,7 @@ function row(
 }
 
 const external: AkumaCaller = { kind: "external", integration: "test", id: "root" };
-const parent: AkumaCaller = { kind: "akuma", world: "/world" as never, akuId: "aku/lead/aaaa0001" as never };
+const parent: AkumaCaller = { kind: "akuma", world: "/world" as never, akumaId: "aku/lead/aaaa0001" as never };
 
 function catalogue(rows: AkumaList["rows"]): AkumaList {
   return { observedAt: AT, rows, searched: ["/world/.keiyaku/akuma/run"], hasMore: false };

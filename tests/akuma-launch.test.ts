@@ -36,14 +36,14 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: `session-${text}` } };
           if (text === "parent") {
-            const child = await akumasWithLauncher(world, spawn).call({
-              archetype: "worker",
+            const child = await akumasWithLauncher(world, spawn).spawn({
+              akumaName: "worker",
               body: "child",
               schema: Schema.json({ type: "object" }, (value) => value),
               caller: {
                 kind: "akuma",
                 world,
-                akuId: input.execution!.akumaId as NonNullable<BodyLaunch["seed"]>["id"],
+                akumaId: input.execution!.akumaId as NonNullable<BodyLaunch["seed"]>["id"],
               },
               signal: context.signal,
             });
@@ -79,8 +79,8 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
     };
   };
   try {
-    const result = await akumasWithLauncher(world, spawn).call({
-      archetype: "worker",
+    const result = await akumasWithLauncher(world, spawn).spawn({
+      akumaName: "worker",
       body: "parent",
       mode: "wait",
       signal: context.signal,
@@ -100,7 +100,7 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
     assert.notEqual(launches[0]!.paths.directory, launches[2]!.paths.directory);
     assert.equal(launches[2]!.seed?.id, nestedId);
     const child = await readHeart(launches[2]!.paths);
-    assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akuId: launches[0]!.seed!.id });
+    assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akumaId: launches[0]!.seed!.id });
     assert.equal(child.latestBody?.end, "exited");
     assert.equal(child.pending.length, 0);
   } finally {
@@ -156,7 +156,7 @@ test("the composed launcher also owns ordinary wake and authorized succession", 
   };
   try {
     const api = akumasWithLauncher(world, spawn);
-    const result = await api.call({ archetype: "worker", body: "first", signal: context.signal });
+    const result = await api.spawn({ akumaName: "worker", body: "first", signal: context.signal });
     await started.promise;
     const next = await api.ask({ akuma: result.akuma, body: "second", signal: context.signal });
     assert.deepEqual(next.observation, { reason: "answered", answer: "second" });
@@ -266,9 +266,9 @@ test(
     mkdirSync(barrier);
     installAkumaBodyEmptyPublicationBarrier(barrier);
     let launch;
-    const child = await publishAkuma({ worldPath: world, archetype: "worker", launch: async (allocated) => {
+    const child = await publishAkuma({ worldPath: world, akumaName: "worker", launch: async (allocated) => {
       launch = await spawnAkumaBody({ paths: allocated.paths, seed: {
-        id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
+        id: allocated.id, akumaName: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {}, cwd: world, origin: { kind: "direct" },
       } });
       await waitForFixtureFile(join(barrier, "ready"));

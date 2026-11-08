@@ -12,7 +12,7 @@ import type { CreatedDebtObservation } from "../debt/created-observation.js";
 import { World, type WorldRoot } from "../world.js";
 import { sweepInactiveAkumas } from "./akuma-retention.js";
 import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
-import type { CallInput, CallResult, CallWaitHead, DispatchStage, ForkInput, ForkResult } from "./akuma-creation.js";
+import type { DispatchStage, ForkInput, ForkResult, SpawnInput, SpawnResult, SpawnWaitHead } from "./akuma-creation.js";
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
 import { requireInput } from "./input.js";
 import {
@@ -39,7 +39,7 @@ import {
 export { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
 
 export type { AkumaAddressInput } from "./address.js";
-export type { CallInput, ForkInput } from "./akuma-creation.js";
+export type { ForkInput, SpawnInput } from "./akuma-creation.js";
 export type { AkumaAskInput, AkumaHistoryInput, AkumaKillInput, AkumaTellInput, AkumaWaitInput } from "./selection.js";
 export type {
   AkumaAskResult,
@@ -52,12 +52,12 @@ export type {
   AkumaTellResult,
   AkumaWaitResult,
   AkumaWorldScopeRefusal,
-  CallResult,
-  CallWaitHead,
   CreatedDebtObservation,
   DispatchAssociation,
   DispatchStage,
   ForkResult,
+  SpawnResult,
+  SpawnWaitHead,
   TellResult,
   TellWake,
 };
@@ -85,8 +85,8 @@ class AkumasHandle {
     return withRosterAliases(roster, await readAliases(path));
   }
 
-  call(input: CallInput): Promise<CallResult> {
-    const pending = callAkumas(this.withWorld(input, "Akumas.call input"), this.#spawn, this.#reportDiagnostic);
+  spawn(input: SpawnInput): Promise<SpawnResult> {
+    const pending = callAkumas(this.withWorld(input, "Akumas.spawn input"), this.#spawn, this.#reportDiagnostic);
     return pending.then(async (result) => {
       await this.maintain(this.#world);
       return result;
@@ -170,9 +170,9 @@ class AkumasHandle {
 function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[]): AkumaList {
   const byId = new Map<string, AkumaAlias[]>();
   for (const binding of bindings) {
-    const aliases = byId.get(binding.akuId) ?? [];
+    const aliases = byId.get(binding.akumaId) ?? [];
     aliases.push(binding.alias);
-    byId.set(binding.akuId, aliases);
+    byId.set(binding.akumaId, aliases);
   }
   return { ...roster, rows: roster.rows.map((row) => ({ ...row, aliases: byId.get(row.id) ?? [] })) };
 }

@@ -33,7 +33,7 @@ test("born callers and three refresh signals reuse one lazy client", async (t) =
   });
   const { signals } = await plugin.activate(ctx);
   assert.equal(connects, 0);
-  const callers = [born.caller, { kind: "akuma", world: "/parent/world", akuId: "aku/parent/1" }, { kind: "unknown" }] as const;
+  const callers = [born.caller, { kind: "akuma", world: "/parent/world", akumaId: "aku/parent/1" }, { kind: "unknown" }] as const;
   for (const caller of callers) await signals?.["akuma.born"]?.({ ...born, caller });
   await signals?.["akuma.turn-started"]?.(started);
   await signals?.["akuma.turn-outcome"]?.({ ...started, kind: "akuma.turn-outcome", bodySequence: 1,
@@ -42,7 +42,7 @@ test("born callers and three refresh signals reuse one lazy client", async (t) =
   assert.equal(connects, 1); assert.equal(closes, 1, "Body end releases the persistent client");
   const world = await realpath(ctx.world);
   assert.deepEqual(calls, [
-    ...callers.map((caller) => ["keiyaku-paseo", "attach", { world, akuId: started.akumaId, caller }]),
+    ...callers.map((caller) => ["keiyaku-paseo", "attach", { world, akuId: started.akumaId, caller: caller.kind === "akuma" ? { kind: "akuma", world: caller.world, akuId: caller.akumaId } : caller }]),
     ...Array.from({ length: 3 }, () => ["keiyaku-paseo", "refresh", { world, akuId: started.akumaId }]),
   ]);
 });

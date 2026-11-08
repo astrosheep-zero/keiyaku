@@ -240,7 +240,7 @@ export const CONTRACT_COMMAND_SPECS = {
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
       "ls kei lists active Contracts; accepted and abandoned ones leave the list, and their record stays in history and Git.",
-      "ls aku/ lists the callable Akuma-name catalog; ls aku/<name> lists recent retained Akuma instances under one name.",
+      "ls aku/ lists the spawnable Akuma-name catalog; ls aku/<name> lists recent retained Akuma instances under one name.",
       'ls "aku/<name>/*" is the same roster in glob form; ls "aku/*/*" lists recent retained Akuma instances across names.',
       "--mine selects the caller identity of this process and lists that caller's direct and transitive descendants in this World.",
       "--caller selects an explicit caller instead; both selectors are World-local and refuse for Contract, Debt, or Akuma-name catalogues.",

@@ -19,7 +19,7 @@ test("CLI caller canonicalizes the actor World, prioritizes the complete pair an
   assert.deepEqual(await akumaCallerFromEnvironment({
     KEIYAKU_ACTOR_ID: "aku/parent/1234abcd", KEIYAKU_ACTOR_WORLD: join(root, "alias"),
     KEIYAKU_EXTERNAL_CALLER: "malformed",
-  }), { kind: "akuma", world: realpathSync(target), akuId: "aku/parent/1234abcd" });
+  }), { kind: "akuma", world: realpathSync(target), akumaId: "aku/parent/1234abcd" });
   assert.equal(existsSync(join(target, ".keiyaku")), false, "attribution must not establish the caller's World");
   assert.deepEqual(await akumaCallerFromEnvironment({ KEIYAKU_EXTERNAL_CALLER: "slack:channel:thread" }), {
     kind: "external", integration: "slack", id: "channel:thread",
@@ -37,28 +37,28 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   const external: AkumaCaller = { kind: "external", integration: "test", id: "root" };
   const direct = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "dddd0001",
     createdAt: "2026-08-08T00:00:01.000Z",
     caller: external,
   });
   const sibling = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "dddd0002",
     createdAt: "2026-08-08T00:00:02.000Z",
     caller: external,
   });
   const grandchild = await bornLineageAkuma({
     root,
-    archetype: "intern",
+    akumaName: "intern",
     draw: "dddd0003",
     createdAt: "2026-08-08T00:00:03.000Z",
-    caller: { kind: "akuma", world: root, akuId: direct.id },
+    caller: { kind: "akuma", world: root, akumaId: direct.id },
   });
   const unrelated = await bornLineageAkuma({
     root,
-    archetype: "intern",
+    akumaName: "intern",
     draw: "dddd0004",
     createdAt: "2026-08-08T00:00:04.000Z",
     caller: { kind: "external", integration: "other", id: "elsewhere" },
@@ -75,7 +75,7 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   );
   assert.deepEqual(
     shorthand.value.rows.map((row) => ("caller" in row ? row.caller : undefined)),
-    [{ kind: "akuma", world: root, akuId: direct.id }, external, external],
+    [{ kind: "akuma", world: root, akumaId: direct.id }, external, external],
   );
   assert.equal(shorthand.value.rows.some((row) => row.id === unrelated.id), false);
 

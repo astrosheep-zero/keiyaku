@@ -10,7 +10,7 @@ const callerWorldSchema = z.custom<WorldRoot>(
   "caller world must be an absolute normalized path",
 );
 export const akumaCallerSchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("akuma"), world: callerWorldSchema, akuId: akumaIdSchema }).strict(),
+  z.object({ kind: z.literal("akuma"), world: callerWorldSchema, akumaId: akumaIdSchema }).strict(),
   z
     .object({
       kind: z.literal("external"),
@@ -47,6 +47,6 @@ export function decodeAkumaCaller(value: unknown): AkumaCaller | undefined {
 /** One stable comparison coordinate for stored and queried caller attribution. */
 export function akumaCallerKey(caller: AkumaCaller): string {
   return caller.kind === "akuma"
-    ? `akuma\u0000${caller.world}\u0000${caller.akuId}`
+    ? `akuma\u0000${caller.world}\u0000${caller.akumaId}`
     : `external\u0000${caller.integration}\u0000${caller.id}`;
 }

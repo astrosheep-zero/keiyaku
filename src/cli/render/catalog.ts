@@ -20,13 +20,13 @@ function relativeAge(source: string | null, observedAt: string): string | null {
   return ageText(source, observedAt);
 }
 
-export function renderAkumaCatalogue(list: AkumaList, archetype: string | null, caller?: AkumaCaller): string {
+export function renderAkumaCatalogue(list: AkumaList, akumaName: string | null, caller?: AkumaCaller): string {
   const rows = list.rows;
   if (rows.length === 0) {
     return emptyCatalogue("akuma");
   }
   const root = caller === undefined ? undefined : akumaCallerKey(caller);
-  const lines = [archetype === null ? "AKUMA // recent" : `AKUMA // ${safeText(archetype)}`, ""];
+  const lines = [akumaName === null ? "AKUMA // recent" : `AKUMA // ${safeText(akumaName)}`, ""];
   for (const row of rows) {
     const lifeAt = "lifeAt" in row ? row.lifeAt : null;
     const activityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
@@ -40,7 +40,7 @@ export function renderAkumaCatalogue(list: AkumaList, archetype: string | null, 
     const rowCaller = "caller" in row ? row.caller : undefined;
     const by =
       root !== undefined && rowCaller?.kind === "akuma" && akumaCallerKey(rowCaller) !== root
-        ? ` · by ${safeText(rowCaller.akuId)}`
+        ? ` · by ${safeText(rowCaller.akumaId)}`
         : "";
     lines.push(
       `${akumaMark(row.life)} ${safeText(row.id)}${aliases} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}${by}`,

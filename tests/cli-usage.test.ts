@@ -9,7 +9,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
 import { CliUsageError, parseArgv, renderHelp } from "../src/cli/parse.js";
-import { parseAkuId } from "../src/akuma/identity.js";
+import { parseAkumaId } from "../src/akuma/identity.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { akumaFailureProjection } from "../src/cli/runtime.js";
@@ -254,7 +254,7 @@ test("a local status on an absent complete id reports one caller-facing fact", (
 });
 
 test("Akuma address refusals keep Alias absence, a malformed selector, and a foreign World distinct", async () => {
-  const id = parseAkuId("aku/intern/33dd4670").id;
+  const id = parseAkumaId("aku/intern/33dd4670").id;
   const parsed = parseArgv(["wait", id]);
   if (!("command" in parsed)) throw new Error("wait did not parse as an executable command");
   const refusals: readonly (readonly [unknown, readonly string[]])[] = [

@@ -189,7 +189,7 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
     writeStderr(akumaFailure.body);
     return akumaFailure.outcome;
   }
-  if (error instanceof AkumaArchetypeError && command.command === "call") {
+  if (error instanceof AkumaArchetypeError && command.command === "spawn") {
     const missing = error.reason === "was not found";
     const diagnostic = missing ? "Akuma not found" : error.reason;
     return emit(
@@ -197,14 +197,14 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
       {
         kind: "refused",
         diagnostic,
-        archetype: error.archetype,
+        akumaName: error.akumaName,
         searched: error.searched,
         ...(missing ? { available: "keiyaku ls aku/" } : {}),
       },
       () =>
         renderStructuredRefusal(
-          "call",
-          `${diagnostic} · ${error.archetype}`,
+          "spawn",
+          `${diagnostic} · ${error.akumaName}`,
           [...error.searched.map((path) => `searched  ${path}`), ...(missing ? ["available  keiyaku ls aku/"] : [])],
           usageGuideForCommand(command),
         ),

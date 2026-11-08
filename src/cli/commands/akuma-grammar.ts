@@ -12,8 +12,8 @@ type Prompted = Readonly<{ prompt: AkumaPromptSource }>;
 export type ParsedAkumaCommand = Output &
   (
     | (Readonly<{
-        command: "call";
-        archetype: string;
+        command: "spawn";
+        akumaName: string;
         contract?: string;
         alias?: AkumaAlias;
         mode: "wait" | "detach";
@@ -74,7 +74,7 @@ const AKUMA_COMMAND_SPECS = {
     details:
       "Give <text> as one argument, or - to read stdin. Works only from inside a running Akuma. It does not end your turn or replace your final answer.",
   },
-  call: {
+  spawn: {
     arity: 1,
     stdin: true,
     flags: {
@@ -87,15 +87,15 @@ const AKUMA_COMMAND_SPECS = {
       schema: "value",
     },
     usage:
-      "call <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--add-dir <path>]... [--bare] [--schema <file>] [--wait <duration>] [<prompt> | -]",
-    purpose: "Call an Akuma into the world.",
+      "spawn <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--add-dir <path>]... [--bare] [--schema <file>] [--wait <duration>] [<prompt> | -]",
+    purpose: "Spawn a new Akuma into the world.",
     details: [
-      "Use keiyaku ls aku/ to find visible Akuma names; hidden definitions can still be called by name.",
+      "Use keiyaku ls aku/ to list available Akuma names.",
       "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
       "--schema and --wait require a prompt.",
       "--bare omits Keiyaku's runtime instruction section for this birth and its later execution; personality, tools, permissions, and report remain unchanged.",
       "Generic ACP needs --bare: it has no verified native runtime-instruction channel. Existing sessions without the section are not retrofitted; ordinary resume retains existing native instructions.",
-      "By default, call returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
+      "By default, spawn returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
       "--contract records an association, not the work or execution directory; include the Contract and worktree context in the prompt as needed. --repo requires --contract.",
       "--workdir selects where the Akuma works; relative paths resolve from the invocation directory selected by -C/--cwd, or the process cwd when omitted. Without --workdir, the invocation directory is used.",
       "--add-dir explicitly grants another existing writable directory to Codex native workspace-write tools; repeat for multiple roots. Relative paths resolve from the invocation directory. Other sandbox modes, permission profiles, and providers refuse nonempty grants instead of broadening policy. Existing network policy and writable roots are preserved; the repo and Home are never granted automatically.",
@@ -341,7 +341,7 @@ function parseAkumaHistory(
 }
 
 function parseAddressed(
-  action: Exclude<AkumaAction, "call" | "tell" | "ask" | "report">,
+  action: Exclude<AkumaAction, "spawn" | "tell" | "ask" | "report">,
   rawSelectors: readonly string[],
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
@@ -361,18 +361,18 @@ function parseAddressed(
 }
 
 function parsePrompted(
-  action: "call" | "tell" | "ask",
+  action: "spawn" | "tell" | "ask",
   positionals: readonly string[],
   stdin: boolean,
   fail: (message: string) => never,
 ): Readonly<{ subject: string; prompt?: AkumaPromptSource }> {
   if (positionals.length === 0)
-    fail(action === "call" ? "call requires an Akuma name" : `${action} requires an Akuma selector`);
+    fail(action === "spawn" ? "spawn requires an Akuma name" : `${action} requires an Akuma selector`);
   if (positionals.length > 2)
-    fail(`${action} accepts at most ${action === "call" ? "a name" : "a selector"} and one prompt`);
+    fail(`${action} accepts at most ${action === "spawn" ? "a name" : "a selector"} and one prompt`);
   const argument = positionals[1];
   if (stdin && argument !== undefined) fail(`${action} accepts either a prompt argument or stdin, not both`);
-  if (action !== "call" && !stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
+  if (action !== "spawn" && !stdin && argument === undefined) fail(`${action} requires a prompt argument or stdin`);
   return {
     subject: positionals[0]!,
     ...(stdin
@@ -418,13 +418,13 @@ function parseAsk(
   };
 }
 
-function parseCall(
+function parseSpawn(
   flags: Readonly<Record<string, FlagValue>>,
-  archetype: string,
+  akumaName: string,
   prompt: AkumaPromptSource | undefined,
   output: "text" | "json",
   fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "call" }> {
+): Extract<ParsedAkumaCommand, { command: "spawn" }> {
   let alias: AkumaAlias | undefined;
   if (flags.alias !== undefined) {
     try {
@@ -437,12 +437,12 @@ function parseCall(
   const mode = flags.wait === undefined ? ("detach" as const) : ("wait" as const);
   const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
   const schema =
-    flags.schema === undefined ? undefined : stringFlag(flags.schema, "call --schema requires a file", fail);
-  if (prompt === undefined && schema !== undefined) fail("call --schema requires a prompt");
-  if (prompt === undefined && flags.wait !== undefined) fail("call --wait requires a prompt");
+    flags.schema === undefined ? undefined : stringFlag(flags.schema, "spawn --schema requires a file", fail);
+  if (prompt === undefined && schema !== undefined) fail("spawn --schema requires a prompt");
+  if (prompt === undefined && flags.wait !== undefined) fail("spawn --wait requires a prompt");
   return {
-    command: "call",
-    archetype,
+    command: "spawn",
+    akumaName,
     ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
     ...(alias === undefined ? {} : { alias }),
     mode,
@@ -479,10 +479,10 @@ export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
   const { flags, positionals, stdin } = scanArgs(argv, scanSpec(action, spec), fail);
   const output = flags.json === true ? ("json" as const) : ("text" as const);
   if (action === "report") return parseReport(positionals, stdin !== undefined, output, fail);
-  if (action === "call" || action === "tell" || action === "ask") {
+  if (action === "spawn" || action === "tell" || action === "ask") {
     const parsed = parsePrompted(action, positionals, stdin !== undefined, fail);
-    return action === "call"
-      ? parseCall(flags, parsed.subject, parsed.prompt, output, fail)
+    return action === "spawn"
+      ? parseSpawn(flags, parsed.subject, parsed.prompt, output, fail)
       : action === "tell"
         ? parseTell(flags, parsed.subject, parsed.prompt!, output)
         : parseAsk(flags, parsed.subject, parsed.prompt!, output, fail);

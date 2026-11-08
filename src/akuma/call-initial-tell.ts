@@ -1,7 +1,7 @@
 import type { WorldRoot } from "../world.js";
 import { bornStatus, defaultWaitComplete, readWaitComplete, waitForObservation } from "./akuma-observe.js";
 import { recordTell, type TellFact } from "./heart/index.js";
-import { pathsForAkuId, type AkuId } from "./identity.js";
+import { pathsForAkumaId, type AkumaId } from "./identity.js";
 import type { TellRow } from "./heart/facts.js";
 import { BIRTH_TIMEOUT_MS } from "./publication.js";
 
@@ -13,7 +13,7 @@ export type CallInitialTell = Readonly<{
 }>;
 
 export type InitialTellAdmissionInput = Readonly<{
-  id: AkuId;
+  id: AkumaId;
   initialTell: CallInitialTell;
   contractId?: string;
   signal?: AbortSignal;
@@ -51,14 +51,14 @@ export type CallInitialTellAdmission =
 export async function admitCallInitialTell(
   input: Readonly<{
     world: WorldRoot;
-    id: AkuId;
+    id: AkumaId;
     initialTell: CallInitialTell;
     signal?: AbortSignal;
     now?: () => string;
     wake(tell: TellFact): Promise<TellResult>;
   }>,
 ): Promise<CallInitialTellAdmission> {
-  const paths = pathsForAkuId(input.world, input.id);
+  const paths = pathsForAkumaId(input.world, input.id);
   const birth = await waitForObservation({
     timeoutMs: BIRTH_TIMEOUT_MS,
     ...(input.signal === undefined ? {} : { signal: input.signal }),

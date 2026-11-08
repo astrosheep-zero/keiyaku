@@ -35,9 +35,9 @@ data. No native tool shells out to the CLI.
 
 | Tool | Parameters |
 | --- | --- |
-| `akuma_call` | `akuma` definition name, `body`; optional `workdir`, `writableDirectories`, `detach`, `bare`, `wait`, `timeoutMs`, `schema` |
+| `akuma_spawn` | `akuma` definition name, `body`; optional `workdir`, `writableDirectories`, `detach`, `bare`, `wait`, `timeoutMs`, `schema` |
 | `akuma_status` | `akuma`; optional `repo` |
-| `akuma_list` | optional `archetype`, `limit` |
+| `akuma_list` | optional `akumaName`, `limit` |
 | `akuma_definitions` | optional `limit` |
 | `akuma_tell` | `akuma`, `body`; optional `interrupt`, `detach`, `repo` |
 | `akuma_ask` | `akuma`, `body`; optional `interrupt`, `detach`, `schema`, `timeoutMs`, `repo` |
@@ -46,12 +46,12 @@ data. No native tool shells out to the CLI.
 | `akuma_fork` | `akuma`, `at`; optional `detach`, `bare`, `repo` |
 | `akuma_kill` | `akuma` array; optional `repo` |
 
-`akuma_call` supports every configured provider, not only Pi. Default
+`akuma_spawn` supports every configured provider, not only Pi. Default
 `detach: false` launches in the calling Pi session's in-process host scope.
 Default `wait: false` returns after birth and first-input admission; these are
 **independent choices**. `wait: true` observes the first answer for up to five
-minutes by default. `timeoutMs` on call requires `wait: true`.
-Call and Fork pass `bare` through to the SDK: it omits only Keiyaku runtime
+minutes by default. `timeoutMs` on spawn requires `wait: true`.
+Spawn and Fork pass `bare` through to the SDK: it omits only Keiyaku runtime
 instructions and remains frozen through wake and inherited by forks. Providers
 without a verified runtime-instruction channel retain their explicit refusal
 unless the caller opts out.

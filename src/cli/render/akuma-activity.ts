@@ -9,7 +9,7 @@ import type {
   AkumaWaitResult,
 } from "../../akuma/selection-observation.js";
 import type { AkumaObservation, CreatedDebtObservation, DispatchAssociation } from "../../index.js";
-import type { CallObservation, CallResult } from "../../library/akuma-creation.js";
+import type { SpawnObservation, SpawnResult } from "../../library/akuma-creation.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import { dispositionText } from "./debt.js";
@@ -788,10 +788,10 @@ export type InputWaitStream = Readonly<{
 
 /**
  * The call-observation projection of one input wait: the same admitted/observe/frame/flush/opened
- * lifetime with the closing judgment translated from the native CallObservation.
+ * lifetime with the closing judgment translated from the native SpawnObservation.
  */
 export type CallObservationStream = Readonly<
-  Omit<InputWaitStream, "conclude"> & { conclude: (observation: CallObservation) => string }
+  Omit<InputWaitStream, "conclude"> & { conclude: (observation: SpawnObservation) => string }
 >;
 
 function failedOutcomeDiagnostic(status: AkumaStatus): string | undefined {
@@ -1081,7 +1081,7 @@ export function askRawAnswer(result: AkumaAskResult, structured: boolean | undef
   return answerBytes(result.observation.answer, structured === true);
 }
 
-export function callRawAnswer(result: CallResult, streamed: boolean): string | undefined {
+export function callRawAnswer(result: SpawnResult, streamed: boolean): string | undefined {
   const observation = result.observation;
   if (observation.kind !== "observed" || observation.observation.reason !== "answered")
     return streamed ? "" : undefined;

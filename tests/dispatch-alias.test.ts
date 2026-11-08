@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import test from "node:test";
 import { moveAlias, readAliases } from "../src/alias/index.js";
-import { parseAkuId, type AkuId } from "../src/akuma/identity.js";
+import { parseAkumaId, type AkumaId } from "../src/akuma/identity.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
@@ -48,11 +48,11 @@ function deferred<T>(): {
 test("Dispatch publishes one immutable association and preserves its first timestamp", async () => {
   const raw = makeGitRepository();
   const repository = await repositoryAt(raw.path);
-  const akuma = parseAkuId("aku/worker/1234abcd").id;
+  const akuma = parseAkumaId("aku/worker/1234abcd").id;
   const owner = contractId("kei/dispatch-owner");
 
   assert.equal(await readDispatch(repository, akuma), null);
-  const first = await publishDispatch({ repository, akuId: akuma, contractId: owner });
+  const first = await publishDispatch({ repository, akumaId: akuma, contractId: owner });
   assert.ok(first.kind === "dispatched", 'expected first.kind = "dispatched"');
   assert.equal(
     raw.run(["log", "-1", "--format=%s", "refs/heads/keiyaku-state"]).trim(),
@@ -65,11 +65,11 @@ test("Dispatch publishes one immutable association and preserves its first times
   assert.deepEqual(await readDispatch(repository, akuma), first.dispatch);
   assert.deepEqual(await readDispatches(repository), [first.dispatch]);
 
-  const repeated = await publishDispatch({ repository, akuId: akuma, contractId: owner });
+  const repeated = await publishDispatch({ repository, akumaId: akuma, contractId: owner });
   assert.deepEqual(repeated, first);
   const conflict = await publishDispatch({
     repository,
-    akuId: akuma,
+    akumaId: akuma,
     contractId: contractId("kei/other-owner"),
   });
   assert.deepEqual(conflict, {
@@ -86,9 +86,9 @@ test("confirmed private-state seat close failure remains lag on a dispatched ass
       throw new Error("seat close failed after publication");
     },
   };
-  const akuma = parseAkuId("aku/worker/1234abcd").id;
+  const akuma = parseAkumaId("aku/worker/1234abcd").id;
   const owner = contractId("kei/dispatch-owner");
-  const published = await publishDispatch({ repository, akuId: akuma, contractId: owner });
+  const published = await publishDispatch({ repository, akumaId: akuma, contractId: owner });
   assert.ok(published.kind === "dispatched", 'expected published.kind = "dispatched"');
   assert.deepEqual(await readDispatch(repository, akuma), published.dispatch);
   assert.deepEqual(published.seatClose, [
@@ -104,19 +104,19 @@ test("concurrent distinct Dispatch publications wait for one repository seat", a
   const repository = await repositoryAt(raw.path);
   const owner = contractId("kei/dispatch-owner");
   const ids = [
-    parseAkuId("aku/worker/11111111").id,
-    parseAkuId("aku/worker/22222222").id,
-    parseAkuId("aku/reviewer/33333333").id,
+    parseAkumaId("aku/worker/11111111").id,
+    parseAkumaId("aku/worker/22222222").id,
+    parseAkumaId("aku/reviewer/33333333").id,
   ];
   const held = await acquireSqliteTransactionLock({
     path: privateStatePublicationSeatPath(repository),
     mode: "immediate",
   });
   const arrivals = ids.map(() => deferred<void>());
-  const pending = ids.map((akuId, index) =>
+  const pending = ids.map((akumaId, index) =>
     publishDispatch({
       repository: { ...repository, onPrivateStateSeatContention: arrivals[index]!.resolve },
-      akuId,
+      akumaId,
       contractId: owner,
     }),
   );
@@ -138,13 +138,13 @@ test("concurrent distinct Dispatch publications wait for one repository seat", a
 test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
   const raw = makeGitRepository();
   const repository = await repositoryAt(raw.path);
-  const seed = parseAkuId("aku/worker/77777777").id;
+  const seed = parseAkumaId("aku/worker/77777777").id;
   const owner = contractId("kei/dispatch-cas");
   assert.equal(
     (
       await publishDispatch({
         repository,
-        akuId: seed,
+        akumaId: seed,
         contractId: owner,
       })
     ).kind,
@@ -164,7 +164,7 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
     async (gitPath) =>
       publishDispatch({
         repository: await repositoryAt(raw.path, gitPath),
-        akuId: parseAkuId("aku/worker/88888888").id,
+        akumaId: parseAkumaId("aku/worker/88888888").id,
         contractId: owner,
       }),
   );
@@ -186,41 +186,41 @@ test("Dispatch keeps non-Dispatch CAS failure classifications", async () => {
     async (gitPath) =>
       publishDispatch({
         repository: await repositoryAt(raw.path, gitPath),
-        akuId: parseAkuId("aku/worker/99999999").id,
+        akumaId: parseAkumaId("aku/worker/99999999").id,
         contractId: owner,
       }),
   );
   assert.ok(raced.kind === "failed", 'expected raced.kind = "failed"');
   assert.equal(raced.failure.kind, "publication-failed");
-  assert.equal(await readDispatch(repository, parseAkuId("aku/worker/99999999").id), null);
+  assert.equal(await readDispatch(repository, parseAkumaId("aku/worker/99999999").id), null);
 });
 
 test("Alias moves are serialized, canonical, and expose the previous target", async (context) => {
   const world = temporaryDirectory(context, "keiyaku-alias-") as WorldRoot;
   const alpha = parseAkumaAlias("@alpha");
   const beta = parseAkumaAlias("@beta");
-  const first = parseAkuId("aku/worker/11111111").id;
-  const second = parseAkuId("aku/reviewer/22222222").id;
+  const first = parseAkumaId("aku/worker/11111111").id;
+  const second = parseAkumaId("aku/reviewer/22222222").id;
   await Promise.all([
-    moveAlias({ world, alias: beta, akuId: second }),
-    moveAlias({ world, alias: alpha, akuId: first }),
+    moveAlias({ world, alias: beta, akumaId: second }),
+    moveAlias({ world, alias: alpha, akumaId: first }),
   ]);
   assert.deepEqual(await readAliases(world), [
-    { alias: alpha, akuId: first },
-    { alias: beta, akuId: second },
+    { alias: alpha, akumaId: first },
+    { alias: beta, akumaId: second },
   ]);
   assert.equal(
     readFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "utf8"),
     '{"version":1,"aliases":{"@alpha":"aku/worker/11111111","@beta":"aku/reviewer/22222222"}}\n',
   );
 
-  assert.deepEqual(await moveAlias({ world, alias: alpha, akuId: second }), {
-    alias: { alias: alpha, akuId: second },
+  assert.deepEqual(await moveAlias({ world, alias: alpha, akumaId: second }), {
+    alias: { alias: alpha, akumaId: second },
     previous: first,
   });
   assert.deepEqual(await readAliases(world), [
-    { alias: alpha, akuId: second },
-    { alias: beta, akuId: second },
+    { alias: alpha, akumaId: second },
+    { alias: beta, akumaId: second },
   ]);
 });
 
@@ -229,12 +229,12 @@ test("existing noncanonical alias spelling stays readable but cannot be newly as
   const directory = join(world, ".keiyaku", "akuma");
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, "alias.json"), '{"version":1,"aliases":{"@old--":"aku/worker/11111111"}}\n');
-  assert.deepEqual(await readAliases(world), [{ alias: "@old--", akuId: parseAkuId("aku/worker/11111111").id }]);
+  assert.deepEqual(await readAliases(world), [{ alias: "@old--", akumaId: parseAkumaId("aku/worker/11111111").id }]);
   await assert.rejects(
     moveAlias({
       world,
       alias: "@old--" as ReturnType<typeof parseAkumaAlias>,
-      akuId: parseAkuId("aku/worker/22222222").id,
+      akumaId: parseAkumaId("aku/worker/22222222").id,
     }),
     /normalized Akuma name/u,
   );
@@ -252,20 +252,20 @@ test("Alias world coordinates never fall back to process cwd", async () => {
   await assert.rejects(readAliases("" as WorldRoot), /Alias world must be a nonblank path/u);
 });
 
-function dispatchPathFor(akuId: AkuId): string {
-  return `dispatch/${createHash("sha256").update(akuId).digest("hex")}.json`;
+function dispatchPathFor(akumaId: AkumaId): string {
+  return `dispatch/${createHash("sha256").update(akumaId).digest("hex")}.json`;
 }
 
 /** Overwrite one durable Dispatch fact with the given bytes, keeping the rest of the state tree. */
-async function overwriteDispatchFact(repository: GitRepository, akuId: AkuId, bytes: string): Promise<void> {
+async function overwriteDispatchFact(repository: GitRepository, akumaId: AkumaId, bytes: string): Promise<void> {
   const snapshot = await readGitPaths(repository, []);
   const blob = await writeBlob(repository, Buffer.from(bytes));
-  const tree = await updateGitTree(repository, snapshot.tree, new Map([[dispatchPathFor(akuId), { oid: blob }]]));
+  const tree = await updateGitTree(repository, snapshot.tree, new Map([[dispatchPathFor(akumaId), { oid: blob }]]));
   const commit = await writeStateCommit({
     repository,
     tree,
     parent: snapshot.commit,
-    message: `overwrite ${akuId}`,
+    message: `overwrite ${akumaId}`,
     at: new Date().toISOString(),
   });
   assert.deepEqual(
@@ -275,16 +275,16 @@ async function overwriteDispatchFact(repository: GitRepository, akuId: AkuId, by
 }
 
 const ASSOCIATION_IDS = [
-  parseAkuId("aku/worker/00000001").id,
-  parseAkuId("aku/reviewer/00000002").id,
-  parseAkuId("aku/worker/00000003").id,
+  parseAkumaId("aku/worker/00000001").id,
+  parseAkumaId("aku/reviewer/00000002").id,
+  parseAkumaId("aku/worker/00000003").id,
 ] as const;
 
 test("a selected association read answers every requested identity from one targeted observation", async () => {
   const repository = await repositoryAt(makeGitRepository().path);
   const [first, second, third] = ASSOCIATION_IDS;
   const owner = contractId("kei/batch-owner");
-  assert.equal((await publishDispatch({ repository, akuId: second, contractId: owner })).kind, "dispatched");
+  assert.equal((await publishDispatch({ repository, akumaId: second, contractId: owner })).kind, "dispatched");
 
   const associations = await observeDispatchAssociations(repository, [third, first, second, third]);
   assert.deepEqual(
@@ -308,10 +308,10 @@ test("one malformed requested Dispatch fact fails only its own association", asy
   const repository = await repositoryAt(makeGitRepository().path);
   const [first, second, third] = ASSOCIATION_IDS;
   const owner = contractId("kei/batch-malformed");
-  for (const akuId of [first, second, third]) {
-    assert.equal((await publishDispatch({ repository, akuId, contractId: owner })).kind, "dispatched");
+  for (const akumaId of [first, second, third]) {
+    assert.equal((await publishDispatch({ repository, akumaId, contractId: owner })).kind, "dispatched");
   }
-  await overwriteDispatchFact(repository, second, '{"akuId":"aku/worker/00000002","contractId":"kei/x"}\n');
+  await overwriteDispatchFact(repository, second, '{"akumaId":"aku/worker/00000002","contractId":"kei/x"}\n');
 
   await assert.rejects(readDispatches(repository), AuthorityCorruptionError);
   const associations = await observeDispatchAssociations(repository, [first, second, third]);
@@ -326,8 +326,8 @@ test("an unrelated corrupt Dispatch fact stays out of a selected association rea
   const repository = await repositoryAt(makeGitRepository().path);
   const [requested, unrelated, other] = ASSOCIATION_IDS;
   const owner = contractId("kei/batch-unrelated");
-  for (const akuId of [requested, other]) {
-    assert.equal((await publishDispatch({ repository, akuId, contractId: owner })).kind, "dispatched");
+  for (const akumaId of [requested, other]) {
+    assert.equal((await publishDispatch({ repository, akumaId, contractId: owner })).kind, "dispatched");
   }
   await overwriteDispatchFact(repository, unrelated, "not JSON at all\n");
 
@@ -346,7 +346,7 @@ test("selected association failures await Git channel retirement", async (t) => 
   const raw = makeGitRepository();
   const repository = await repositoryAt(raw.path);
   const [first, second] = ASSOCIATION_IDS;
-  await publishDispatch({ repository, akuId: first, contractId: contractId("kei/batch-retirement") });
+  await publishDispatch({ repository, akumaId: first, contractId: contractId("kei/batch-retirement") });
   const log = join(temporaryDirectory(t, "keiyaku-dispatch-retirement-"), "closed");
   await withGitShim(
     [
@@ -405,10 +405,10 @@ test("a selected association read spends a constant number of Git processes", as
   const owner = contractId("kei/batch-scale");
   const ten = Array.from(
     { length: 10 },
-    (_, index) => parseAkuId(`aku/worker/${(index + 1).toString(16).padStart(8, "0")}`).id,
+    (_, index) => parseAkumaId(`aku/worker/${(index + 1).toString(16).padStart(8, "0")}`).id,
   );
-  for (const akuId of ten) {
-    assert.equal((await publishDispatch({ repository, akuId, contractId: owner })).kind, "dispatched");
+  for (const akumaId of ten) {
+    assert.equal((await publishDispatch({ repository, akumaId, contractId: owner })).kind, "dispatched");
   }
 
   await withGitShim(SPAWN_LOGGING_SHIM, { KEIYAKU_SPAWN_LOG: log }, async (gitPath) => {
@@ -416,11 +416,11 @@ test("a selected association read spends a constant number of Git processes", as
     const single = await countingSpawns(log, () => observeDispatchAssociations(shimmed, [ten[0]!]));
     const plural = await countingSpawns(log, () => observeDispatchAssociations(shimmed, ten));
     const none = await countingSpawns(log, () =>
-      observeDispatchAssociations(shimmed, [parseAkuId("aku/worker/deadbeef").id]),
+      observeDispatchAssociations(shimmed, [parseAkumaId("aku/worker/deadbeef").id]),
     );
     const absentRepo = await countingSpawns(log, () => observeDispatchAssociations(undefined, ten));
     const empty = await countingSpawns(log, () => observeDispatchAssociations(shimmed, []));
-    const before = async (ids: readonly AkuId[]) =>
+    const before = async (ids: readonly AkumaId[]) =>
       new Map(
         await Promise.all(
           ids.map(async (id) => {

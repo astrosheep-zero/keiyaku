@@ -146,7 +146,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
   t.after(() => leash.release());
   await leash.birth(allocated.paths, {
-    id: allocated.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
+    id: allocated.id, akumaName: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
     options: { model: "fixture-model" }, cwd: row.worktreePath, origin: { kind: "direct" },
     caller: { kind: "external", integration: "fixture", id: "parent" }, createdAt: AT,
   });
@@ -160,9 +160,9 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   const previous = await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: AT, initiator: "Previous" });
   await endTurn(allocated.paths, { turnSequence: previous.sequence, completedAt: AT,
     outcome: { kind: "answered", answer: "done", session: { sessionId: "fixture" } } });
-  await moveAlias({ world, alias: parseAkumaAlias("@worker"), akuId: allocated.id });
-  await moveAlias({ world, alias: parseAkumaAlias("@backup"), akuId: allocated.id });
-  assert.equal((await publishDispatch({ repository: scopeForRepo(repo), akuId: allocated.id, contractId: bound.contract })).kind, "dispatched");
+  await moveAlias({ world, alias: parseAkumaAlias("@worker"), akumaId: allocated.id });
+  await moveAlias({ world, alias: parseAkumaAlias("@backup"), akumaId: allocated.id });
+  assert.equal((await publishDispatch({ repository: scopeForRepo(repo), akumaId: allocated.id, contractId: bound.contract })).kind, "dispatched");
 
   // Prove this fixture really would emit on the ordinary public status read.
   await Akuma.select(world, allocated.id).status();
@@ -174,12 +174,12 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   const result = await cliJson<WhoamiFacts>(["-C", row.worktreePath, "whoami"], { environment });
   assert.equal(result.exit, 0, result.stderr);
   assert.equal(result.value.world, world);
-  assert.deepEqual(result.value.self, { kind: "akuma", akuId: allocated.id, world });
+  assert.deepEqual(result.value.self, { kind: "akuma", akumaId: allocated.id, world });
   assert.equal(result.value.initiator, "CurrentSeat");
   assert.equal("caller" in result.value, false);
   assert.deepEqual(result.value.contract, { kind: "resolved", id: bound.contract });
   assert.deepEqual(result.value.profile, {
-    kind: "available", archetype: "worker", aliases: ["@backup", "@worker"], provider: "claude", model: "fixture-model",
+    kind: "available", akumaName: "worker", aliases: ["@backup", "@worker"], provider: "claude", model: "fixture-model",
     workdir: row.worktreePath, birth: { origin: { kind: "direct" }, caller: { kind: "external", integration: "fixture", id: "parent" } },
     bornAt: AT, contracts: [bound.contract],
   });
@@ -253,7 +253,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   const freeLeash = (await HeldAkumaLeash.try(free.paths))!;
   t.after(() => freeLeash.release());
   await freeLeash.birth(free.paths, {
-    id: free.id, archetype: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
+    id: free.id, akumaName: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {}, cwd: row.worktreePath, origin: { kind: "fork", parent: allocated.id, at: "turn/1" }, createdAt: AT,
   });
   const freeEnvironment = { ...environment, KEIYAKU_ACTOR_ID: free.id };

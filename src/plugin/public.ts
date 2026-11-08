@@ -16,7 +16,7 @@ export type PluginBodyEnd = "exited" | "broke-off" | "put-down" | "hung";
 export type PluginAkumaOrigin = Readonly<{ kind: "direct" }> | Readonly<{ kind: "fork"; parent: string; at: string }>;
 
 export type PluginAkumaCaller =
-  | Readonly<{ kind: "akuma"; world: string; akuId: string }>
+  | Readonly<{ kind: "akuma"; world: string; akumaId: string }>
   | Readonly<{ kind: "external"; integration: string; id: string }>
   | Readonly<{ kind: "unknown" }>;
 

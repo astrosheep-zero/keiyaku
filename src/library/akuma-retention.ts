@@ -2,7 +2,7 @@
 import { tryAcquireAliasCustody, readAliases } from "../alias/index.js";
 import { knownAkuma, type KnownAkuma } from "../akuma/akuma.js";
 import type { DispatchAssociation } from "../akuma/dispatch-association.js";
-import type { AkuId } from "../akuma/identity.js";
+import type { AkumaId } from "../akuma/identity.js";
 import { boundedMap } from "../akuma/read-pool.js";
 import {
   readRetentionCandidate,
@@ -73,7 +73,7 @@ async function retireCandidate(
         const aliases = await tryAcquireAliasCustody(world);
         if (aliases === null) return "retained";
         try {
-          if (aliases.bindings.some((binding) => binding.akuId === entry.id)) return "retained";
+          if (aliases.bindings.some((binding) => binding.akumaId === entry.id)) return "retained";
           if (repository === undefined) return await retireOrRetain();
           try {
             // Dispatch publication takes this same private-state seat. Holding
@@ -116,7 +116,7 @@ async function retireCandidate(
 export async function sweepInactiveAkumas(
   world: WorldRoot,
   options: Readonly<{ now?: number }> = {},
-): Promise<readonly AkuId[]> {
+): Promise<readonly AkumaId[]> {
   const now = options.now ?? retentionNow();
   const known = await knownAkuma(world);
   if (known.rows.length === 0) return [];
@@ -132,13 +132,13 @@ export async function sweepInactiveAkumas(
   ).filter((entry): entry is KnownAkuma => entry !== null);
   if (candidates.length === 0) return [];
 
-  const aliases = new Set((await readAliases(world)).map((binding) => binding.akuId));
+  const aliases = new Set((await readAliases(world)).map((binding) => binding.akumaId));
   const repository = await retentionRepository(world);
   const associations = await observeDispatchAssociations(
     repository,
     candidates.map((entry) => entry.id),
   );
-  const retired: AkuId[] = [];
+  const retired: AkumaId[] = [];
   for (const entry of candidates) {
     if (aliases.has(entry.id)) continue;
     if (!(await dispatchAssociationIsRetirable(repository, associations.get(entry.id)!))) continue;

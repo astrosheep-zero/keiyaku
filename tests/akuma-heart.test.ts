@@ -467,7 +467,7 @@ test("wake names the missing frozen execution directory instead of a bare spawn 
     assert.ok(diagnostic.includes(vanishedCwd), diagnostic);
     assert.match(diagnostic, /frozen execution directory/);
     assert.match(diagnostic, /no longer exists/);
-    assert.match(diagnostic, /kill this Akuma and call a fresh one/);
+    assert.match(diagnostic, /kill this Akuma and spawn a fresh one/);
     assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
     const heart = await readHeart(value.allocated.paths);
     assert.deepEqual(
@@ -500,7 +500,7 @@ test("wake names the missing waking executable instead of a bare spawn absence",
     assert.ok(diagnostic.includes(vanishedExecutable), diagnostic);
     assert.match(diagnostic, /waking process executable/);
     assert.match(diagnostic, /no longer exists/);
-    assert.match(diagnostic, /kill this Akuma and call a fresh one/);
+    assert.match(diagnostic, /kill this Akuma and spawn a fresh one/);
     assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
     const heart = await readHeart(value.allocated.paths);
     assert.deepEqual(
@@ -536,7 +536,7 @@ test("wake names both missing pieces when the executable and frozen directory ar
     assert.ok(diagnostic.includes(vanishedExecutable), diagnostic);
     assert.match(diagnostic, /frozen execution directory/);
     assert.match(diagnostic, /waking process executable/);
-    assert.match(diagnostic, /kill this Akuma and call a fresh one/);
+    assert.match(diagnostic, /kill this Akuma and spawn a fresh one/);
     assert.doesNotMatch(diagnostic, /spawn .* ENOENT/);
     const heart = await readHeart(value.allocated.paths);
     assert.deepEqual(
@@ -918,7 +918,7 @@ test("kill evaluates stranded pending Tell recovery exactly once", async () => {
 
 test("heart schema version 31 and leash schema version 4 hard-refuse unknown authority", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-schema-cut-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "30000000" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "30000000" });
   seedLegacySchema(allocated.paths.heart, "akuma_schema", 14);
   seedLegacySchema(allocated.paths.leash, "leash_schema", 2);
   await assert.rejects(readHeart(allocated.paths), /heart schema version must be 31/u);
@@ -1491,7 +1491,7 @@ test("a model update preserves unrelated raw Soul members instead of re-encoding
     // would discard them; the narrow update must preserve them unchanged.
     const raw = {
       id: value.soul.id,
-      archetype: "claude",
+      akumaName: "claude",
       description: "Claude fixture",
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise.", legacyKnob: true },
@@ -1718,7 +1718,7 @@ test("Body hung custody evidence round trips through Heart", async () => {
 function codecSoul(): Soul {
   return {
     id: "aku/claude/1234abcd" as Soul["id"],
-    archetype: "claude",
+    akumaName: "claude",
     description: "Codec fixture",
     provider: {
       name: "codex",
@@ -1757,8 +1757,8 @@ test("soul codec hard-fails invalid known members", () => {
     { name: "id has a single segment", change: (soul) => ({ ...soul, id: "aku/claude" }) },
     { name: "id suffix is not lower hex8", change: (soul) => ({ ...soul, id: "aku/claude/nothex" }) },
     { name: "id has an extra segment", change: (soul) => ({ ...soul, id: "aku/claude/1234abcd/extra" }) },
-    { name: "id archetype is not normalized", change: (soul) => ({ ...soul, id: "aku/Claude/1234abcd" }) },
-    { name: "id and archetype disagree", change: (soul) => ({ ...soul, archetype: "worker" }) },
+    { name: "id akumaName is not normalized", change: (soul) => ({ ...soul, id: "aku/Claude/1234abcd" }) },
+    { name: "id and akumaName disagree", change: (soul) => ({ ...soul, akumaName: "worker" }) },
     { name: "blank cwd", change: (soul) => ({ ...soul, cwd: "" }) },
     { name: "blank description", change: (soul) => ({ ...soul, description: " " }) },
   ];
@@ -1784,7 +1784,7 @@ test("Soul caller attribution shares admission validation and preserves legal ab
   const absentWorld = join(temporaryDirectory(context, "keiyaku-akuma-caller-"), "nonexistent-world");
   assert.equal(existsSync(absentWorld), false);
   for (const caller of [
-    { kind: "akuma", world: absentWorld, akuId: "aku/delegator/1234abcd" },
+    { kind: "akuma", world: absentWorld, akumaId: "aku/delegator/1234abcd" },
     { kind: "external", integration: "slack", id: "channel:thread" },
   ]) {
     const admitted = decodeAkumaCaller(caller);
@@ -1793,9 +1793,9 @@ test("Soul caller attribution shares admission validation and preserves legal ab
   }
   for (const caller of [
     null, { kind: "unknown" },
-    { kind: "akuma", world: "relative", akuId: "aku/parent/1234abcd" },
-    { kind: "akuma", world: "/world/../elsewhere", akuId: "aku/parent/1234abcd" },
-    { kind: "akuma", world: absentWorld, akuId: "aku/Parent/1234abcd" },
+    { kind: "akuma", world: "relative", akumaId: "aku/parent/1234abcd" },
+    { kind: "akuma", world: "/world/../elsewhere", akumaId: "aku/parent/1234abcd" },
+    { kind: "akuma", world: absentWorld, akumaId: "aku/Parent/1234abcd" },
     { kind: "external", integration: "Upper", id: "id" },
     { kind: "external", integration: "slack", id: " " },
     { kind: "external", integration: "slack", id: "a\u0000b" },

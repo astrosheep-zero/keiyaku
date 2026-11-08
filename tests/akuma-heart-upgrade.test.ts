@@ -15,7 +15,7 @@ const at = "2026-10-29T00:00:00.000Z";
 // current Heart relabeled as old or a migration generated from current source.
 async function legacyFixture(version: 29 | 30 = 29) {
   const owner = await soulFixture("keiyaku-heart-upgrade-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: owner.root, archetype: "claude", draw: () => "29abcdef" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: owner.root, akumaName: "claude", draw: () => "29abcdef" });
   const database = new DatabaseSync(allocated.paths.heart);
   try {
     let schema = readFileSync("tests/fixtures/heart-v29.sql", "utf8");

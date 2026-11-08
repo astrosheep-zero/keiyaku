@@ -27,7 +27,7 @@ test("complete Akuma parent wins; incomplete custody and ambiguous native hosts 
   const hosts = { CODEX_THREAD_ID: "codex", PI_SESSION_ID: "pi", CLAUDE_CODE_SESSION_ID: "claude" };
   assert.deepEqual(await akumaCallerFromEnvironment({ ...hosts,
     KEIYAKU_ACTOR_ID: "aku/parent/1234abcd", KEIYAKU_ACTOR_WORLD: world }),
-    { kind: "akuma", akuId: "aku/parent/1234abcd", world: realpathSync(world) });
+    { kind: "akuma", akumaId: "aku/parent/1234abcd", world: realpathSync(world) });
   await assert.rejects(akumaCallerFromEnvironment({ ...hosts, KEIYAKU_ACTOR_ID: "aku/parent/1234abcd" }),
     /requires both/u);
   await assert.rejects(akumaCallerFromEnvironment(hosts), /Ambiguous native host caller: codex, pi, claude/u);

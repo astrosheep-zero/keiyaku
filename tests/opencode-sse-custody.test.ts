@@ -230,7 +230,7 @@ test("OpenCode v2 Body remains supervised while whole closure is unproven", asyn
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        archetype: "claude",
+        akumaName: "claude",
         provider: { name: "opencode-sdk", kind: "opencode-sdk" },
         options: {},
         origin: { kind: "direct" },

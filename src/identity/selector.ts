@@ -30,13 +30,13 @@ export function parseAkumaAlias(value: string): AkumaAlias {
 
 export function parseAkumaGlob(value: string): AkumaGlob {
   const segments = value.split("/");
-  const archetype = segments[1] ?? "";
-  const archetypeProbe = archetype.replaceAll("*", "x");
+  const akumaName = segments[1] ?? "";
+  const archetypeProbe = akumaName.replaceAll("*", "x");
   if (
     segments.length !== 3 ||
     segments[0] !== "aku" ||
     !value.includes("*") ||
-    archetype.length === 0 ||
+    akumaName.length === 0 ||
     normalizeIdentityStem({ source: archetypeProbe }) !== archetypeProbe ||
     !AKUMA_GLOB_SUFFIX.test(segments[2] ?? "")
   ) {

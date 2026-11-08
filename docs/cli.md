@@ -25,17 +25,17 @@ or splice facts from two Worlds into one report. The edge supplies environment
 or current-directory facts only as explicit process inputs. Libraries do not
 rediscover them.
 
-Akuma call execution is a separate coordinate from invocation scope. An
-explicit call execution directory is the only selection; otherwise the call
+Akuma spawn execution is a separate coordinate from invocation scope. An
+explicit spawn execution directory is the only selection; otherwise the spawn
 uses the effective invocation directory. Contract association never supplies
 or displaces an execution directory, and selecting the invocation directory
-explicitly is equivalent to omitting that selection. Call and fork may omit only
+explicitly is equivalent to omitting that selection. Spawn and fork may omit only
 Keiyaku's runtime instruction section; this choice persists through later
-execution and fork inheritance without narrowing any capability. A successful call or fork
+execution and fork inheritance without narrowing any capability. A successful spawn or fork
 may perform best-effort inactive-Akuma maintenance after its new child is
 durable; list, status, history, wait, tell, and ask never retire bytes.
 
-The call edge resolves explicit additional writable directories relative to the
+The spawn edge resolves explicit additional writable directories relative to the
 effective invocation directory and canonicalizes existing directories before
 handing them to creation. Native provider policy governs this filesystem
 exposure; it never automatically includes the World, repository, or Home.
@@ -73,7 +73,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
 | debt | Delegate to the separate Debt command surface. | Debt owns Debt judgment and result semantics. |
 | wait | Route Contract journal change waits and Akuma completion waits to their respective owners; refuse mixed families before observation. | Return the selected owner's native observation. |
-| call, fork, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, answers, and recovery. |
+| spawn, fork, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, answers, and recovery. |
 
 Bind target selection, including the omitted-target default and fork
 inheritance, is owned by [public-api.md](public-api.md); the edge only adapts
@@ -139,12 +139,12 @@ identity, a conflicting or invalid selector, and any Contract, Debt, or
 Akuma-name catalogue query refuse at the usage boundary rather than returning a
 misleading empty list.
 
-The call and ask edges may acquire a JSON Schema from a caller-selected file;
+The spawn and ask edges may acquire a JSON Schema from a caller-selected file;
 the file is decoded once at the edge and passed to the public Akuma surface.
-Schema acquisition failures are usage or input failures, while ordinary call,
+Schema acquisition failures are usage or input failures, while ordinary spawn,
 ask, tell, wait, history, and kill behavior remains unchanged.
 
-Call, fork, tell, and ask select the submitting process's opaque host Owner at
+Spawn, fork, tell, and ask select the submitting process's opaque host Owner at
 the invocation edge and pass it unchanged as optional initiator attribution.
 A nonblank explicit integration Owner wins; otherwise one unambiguous native
 host coordinate supplies attribution, with the external host fallback used only
@@ -154,7 +154,7 @@ reads no notification artifact or membership. The Body uses frozen input and
 Turn recipients, never its environment to reconstruct the submitting Owner.
 Caller lineage remains independent from notification attribution.
 
-Direct call and fork derive optional declared caller attribution at this edge:
+Direct spawn and fork derive optional declared caller attribution at this edge:
 a complete Akuma-and-World environment pair wins over external integration
 attribution, and an incomplete pair refuses rather than inventing a World.
 The supplied World is canonicalized here. Without Akuma custody, the enclosing

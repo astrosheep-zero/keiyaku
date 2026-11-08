@@ -648,7 +648,7 @@ async function liveWaitFixture(context: TestContext, count = 1) {
   for (let index = 0; index < count; index += 1) {
     const born = await bornDirectAkuma({
       root,
-      archetype: "worker",
+      akumaName: "worker",
       draw: index.toString(16).padStart(8, "0"),
       createdAt: LIVE_WAIT_AT,
     });

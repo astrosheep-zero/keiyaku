@@ -46,7 +46,7 @@ completion without doing the implementation work yourself.
     worktree, resolve conflicts, and re-`deliver`.
 - **Silent or wedged worker:** if a worker settles with an empty answer and
   clean worktree (or stalls without progress), check `history <aku>`, send one
-  steering `tell`, or `kill` it and call a replacement assigned to the same
+  steering `tell`, or `kill` it and spawn a replacement assigned to the same
   `@alias`.
 - **Unrecorded review verdict:** if `@reviewer` wrote its analysis in `history`
   without recording `review` testimony, read `history` and record the `review`

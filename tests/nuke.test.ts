@@ -76,7 +76,7 @@ async function gitNukeFixture() {
 }
 
 async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "3456cdef" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "3456cdef" });
   await initializeHeart(allocated.paths);
   let aborted = false;
   const { promise: completion, resolve: settle } = promiseBarrier<{ kind: "failed"; diagnostic: string }>();
@@ -117,7 +117,7 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
     paths: allocated.paths,
     seed: {
       id: allocated.id,
-      archetype: "claude",
+      akumaName: "claude",
       provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },
@@ -144,7 +144,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
     mkdirSync(join(world, ".keiyaku", "namespace"), { recursive: true });
     writeFileSync(namespace, "retained\n");
     const running = await runningAkuma(world);
-    await moveAlias({ world, alias: parseAkumaAlias("@running"), akuId: running.allocated.id });
+    await moveAlias({ world, alias: parseAkumaAlias("@running"), akumaId: running.allocated.id });
     const settings = join(world, ".keiyaku", "settings.json");
     const unknown = join(world, ".keiyaku", "unknown.bin");
     const unknownRun = join(world, ".keiyaku", "akuma", "run", "foreign-12345678");
@@ -210,7 +210,7 @@ test("confirmed nuke stops live writers and removes owned state while preserving
 test("confirmed nuke removes known stopped-entry artifacts and empty run roots", async () => {
   const world = await testWorld();
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "abcd1234" });
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "abcd1234" });
     await initializeHeart(allocated.paths);
     writeFileSync(allocated.paths.log, "stdio\n");
     writeFileSync(`${allocated.paths.heart}-wal`, "wal\n");
@@ -254,7 +254,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     const { raw, world, managedPath, foreign } = fixture;
     const debts = Debts.of(world);
     assert.equal((await debts.add({ title: "Remove me" })).kind, "accepted");
-    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "14000000" });
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "14000000" });
     const heart = new DatabaseSync(allocated.paths.heart);
     heart.exec(
       "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)",
@@ -323,7 +323,7 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
 test("confirmed nuke preserves unknown former request artifacts", async () => {
   const world = await testWorld();
   try {
-    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "feedface" });
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "feedface" });
     await initializeHeart(allocated.paths);
     const entry = join(allocated.paths.directory, "request-entry.json");
     const sequence = join(allocated.paths.directory, "requests", "1");
@@ -354,11 +354,11 @@ test("confirmed nuke preserves recognized entries when stop cannot take custody"
   try {
     const debt = await Debts.of(world).add({ title: "Keep debt while writer lives" });
     assert.ok(debt.kind === "accepted");
-    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
     const soul: Soul = {
       id: allocated.id,
-      archetype: "claude",
+      akumaName: "claude",
       provider: CLAUDE_EXECUTION,
       options: {},
       cwd: world,

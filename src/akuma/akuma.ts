@@ -9,13 +9,13 @@ import { AkumaOwner } from "./akuma-owner.js";
 import type { AkumaLife } from "./heart/index.js";
 import { readSoul } from "./heart/index.js";
 import {
-  akuIdFromDirectoryName,
+  akumaIdFromDirectoryName,
   akumaIdSchema,
   akumaPaths,
   akumaRunRoot,
-  parseAkuId,
-  pathsForAkuId,
-  type AkuId,
+  parseAkumaId,
+  pathsForAkumaId,
+  type AkumaId,
   type AkumaPaths,
 } from "./identity.js";
 import { validateAkumaName } from "../identity/normalize.js";
@@ -30,8 +30,8 @@ import { activitySnapshotSchema } from "./projection.js";
 import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
 
 export type AkumaListRow = Readonly<{
-  id: AkuId;
-  archetype: string;
+  id: AkumaId;
+  akumaName: string;
   description?: string;
   life: AkumaLife;
   lifeAt: string | null;
@@ -42,7 +42,7 @@ export type AkumaListRow = Readonly<{
 }>;
 
 export type UnbornAkumaListRow = Readonly<{
-  id: AkuId;
+  id: AkumaId;
   life: "unborn" | "stillborn";
   aliases: readonly AkumaAlias[];
   seal?: Readonly<{ evidence: string; at: string }>;
@@ -57,7 +57,7 @@ export type AkumaList = BoundedList<AkumaListRow | UnbornAkumaListRow> &
 export type AkumaCompleteList = Omit<AkumaList, "hasMore">;
 
 export type AkumaListInput = Readonly<{
-  archetype?: string;
+  akumaName?: string;
   caller?: AkumaCaller;
   limit?: number;
 }>;
@@ -79,7 +79,7 @@ export type AkumaStatus = z.infer<typeof akumaStatusSchema>;
 type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
 
 /** One recognized Akuma directory under this World's run root. */
-export type KnownAkuma = Readonly<{ id: AkuId; paths: AkumaPaths }>;
+export type KnownAkuma = Readonly<{ id: AkumaId; paths: AkumaPaths }>;
 
 type ActivityCandidate = KnownAkuma & Readonly<{ bound: number }>;
 
@@ -132,17 +132,17 @@ export async function knownAkuma(
   }
   const rows: KnownAkuma[] = [];
   for (const name of names) {
-    let physical: ReturnType<typeof akuIdFromDirectoryName>;
+    let physical: ReturnType<typeof akumaIdFromDirectoryName>;
     try {
-      physical = akuIdFromDirectoryName(name);
+      physical = akumaIdFromDirectoryName(name);
     } catch {
       // The run root can contain bytes not produced by Keiyaku. Preserve them.
       continue;
     }
-    if (selected !== undefined && physical.archetype !== selected) continue;
+    if (selected !== undefined && physical.akumaName !== selected) continue;
     rows.push({
       id: physical.id,
-      paths: akumaPaths({ runRoot, archetype: physical.archetype, suffix: physical.suffix }),
+      paths: akumaPaths({ runRoot, akumaName: physical.akumaName, suffix: physical.suffix }),
     });
   }
   return { runRoot, rows };
@@ -181,17 +181,17 @@ export async function countRunningAkuma(path: WorldRoot): Promise<number> {
 }
 
 function rosterInput(
-  input: AkumaListInput | Readonly<{ archetype?: string }>,
+  input: AkumaListInput | Readonly<{ akumaName?: string }>,
   allowLimit: boolean,
-): Readonly<{ archetype?: string; caller?: AkumaCaller }> {
+): Readonly<{ akumaName?: string; caller?: AkumaCaller }> {
   if (typeof input !== "object" || input === null || Array.isArray(input))
     throw new TypeError("Akuma list input must be an object");
-  const allowed = allowLimit ? ["archetype", "caller", "limit"] : ["archetype", "caller"];
+  const allowed = allowLimit ? ["akumaName", "caller", "limit"] : ["akumaName", "caller"];
   const unknown = Object.keys(input).find((key) => !allowed.includes(key));
   if (unknown !== undefined) throw new TypeError(`Akuma list input has unknown field: ${unknown}`);
   const caller = decodeAkumaCaller((input as AkumaListInput).caller);
   return {
-    ...(input.archetype === undefined ? {} : { archetype: validateAkumaName(input.archetype) }),
+    ...(input.akumaName === undefined ? {} : { akumaName: validateAkumaName(input.akumaName) }),
     ...(caller === undefined ? {} : { caller }),
   };
 }
@@ -201,17 +201,17 @@ function rosterInput(
  * then Akuma coordinates inside this selected World. Fork origin is not an edge.
  * Known identities deduplicate repeated and cyclic edges.
  */
-function callerClosure(lineage: AkumaLineage, root: AkumaCaller, world: WorldRoot): ReadonlySet<AkuId> {
+function callerClosure(lineage: AkumaLineage, root: AkumaCaller, world: WorldRoot): ReadonlySet<AkumaId> {
   if (root.kind === "akuma" && root.world !== world) return new Set();
-  const children = new Map<string, AkuId[]>();
-  for (const [akuId, caller] of lineage) {
+  const children = new Map<string, AkumaId[]>();
+  for (const [akumaId, caller] of lineage) {
     if (caller === null) continue;
     const key = akumaCallerKey(caller);
     const siblings = children.get(key);
-    if (siblings === undefined) children.set(key, [akuId]);
-    else siblings.push(akuId);
+    if (siblings === undefined) children.set(key, [akumaId]);
+    else siblings.push(akumaId);
   }
-  const included = new Set<AkuId>();
+  const included = new Set<AkumaId>();
   const visited = new Set<string>();
   const queue: AkumaCaller[] = [root];
   while (queue.length > 0) {
@@ -219,10 +219,10 @@ function callerClosure(lineage: AkumaLineage, root: AkumaCaller, world: WorldRoo
     const key = akumaCallerKey(caller);
     if (visited.has(key)) continue;
     visited.add(key);
-    for (const akuId of children.get(key) ?? []) {
-      if (included.has(akuId)) continue;
-      included.add(akuId);
-      queue.push({ kind: "akuma", world, akuId });
+    for (const akumaId of children.get(key) ?? []) {
+      if (included.has(akumaId)) continue;
+      included.add(akumaId);
+      queue.push({ kind: "akuma", world, akumaId });
     }
   }
   return included;
@@ -240,9 +240,9 @@ function sameCallerEvidence(left: AkumaCaller | null, right: AkumaCaller | null)
   return akumaCallerKey(left) === akumaCallerKey(right);
 }
 
-async function readCallerSoul(world: WorldRoot, akuId: AkuId): Promise<SoulEdge> {
+async function readCallerSoul(world: WorldRoot, akumaId: AkumaId): Promise<SoulEdge> {
   try {
-    const soul = await readSoul(pathsForAkuId(world, akuId));
+    const soul = await readSoul(pathsForAkumaId(world, akumaId));
     return soul === null ? { kind: "absent" } : { kind: "born", caller: soul.caller ?? null };
   } catch {
     return { kind: "unreadable" };
@@ -253,14 +253,14 @@ type CallerVerification = Readonly<{
   world: WorldRoot;
   root: AkumaCaller;
   lineage: AkumaLineage;
-  souls: Map<AkuId, Promise<SoulEdge>>;
+  souls: Map<AkumaId, Promise<SoulEdge>>;
 }>;
 
-async function soulEdgeFor(verification: CallerVerification, akuId: AkuId): Promise<SoulEdge> {
-  const observed = verification.souls.get(akuId);
+async function soulEdgeFor(verification: CallerVerification, akumaId: AkumaId): Promise<SoulEdge> {
+  const observed = verification.souls.get(akumaId);
   if (observed !== undefined) return await observed;
-  const pending = readCallerSoul(verification.world, akuId);
-  verification.souls.set(akuId, pending);
+  const pending = readCallerSoul(verification.world, akumaId);
+  verification.souls.set(akumaId, pending);
   return await pending;
 }
 
@@ -272,7 +272,7 @@ async function soulEdgeFor(verification: CallerVerification, akuId: AkuId): Prom
  */
 async function verifyCallerMember(
   verification: CallerVerification,
-  id: AkuId,
+  id: AkumaId,
   observedCaller: AkumaCaller | undefined,
 ): Promise<MemberVerdict> {
   const { lineage, root } = verification;
@@ -291,7 +291,7 @@ async function verifyCallerMember(
     seen.add(key);
     if (current.kind === "external") return "excluded";
     if (current.world !== verification.world) return "excluded";
-    const parentId = current.akuId;
+    const parentId = current.akumaId;
     const parentCached = lineage.get(parentId);
     const edge = await soulEdgeFor(verification, parentId);
     if (edge.kind === "unreadable") return "unknown";
@@ -361,7 +361,7 @@ async function callerCandidates(
 ): Promise<readonly ActivityCandidate[]> {
   const closure = callerClosure(lineage, root, world);
   return await freshnessOrdered(
-    rows.filter((row) => closure.has(row.id) && (selected === undefined || parseAkuId(row.id).archetype === selected)),
+    rows.filter((row) => closure.has(row.id) && (selected === undefined || parseAkumaId(row.id).akumaName === selected)),
   );
 }
 
@@ -398,7 +398,7 @@ async function readCallerPage(
 export async function readAkumaRoster(path: WorldRoot, input: AkumaListInput = {}): Promise<AkumaList> {
   const selection = rosterInput(input, true);
   const limit = boundedListLimit(input.limit);
-  return observeAkumaRoster(path, limit, selection.archetype, selection.caller);
+  return observeAkumaRoster(path, limit, selection.akumaName, selection.caller);
 }
 
 /**
@@ -432,15 +432,15 @@ export async function observeAkumaRoster(
 /** The complete native roster for callers whose semantics require a frozen set. */
 export async function readAkumaCompleteRoster(
   path: WorldRoot,
-  input: Readonly<{ archetype?: string; caller?: AkumaCaller }> = {},
+  input: Readonly<{ akumaName?: string; caller?: AkumaCaller }> = {},
 ): Promise<AkumaCompleteList> {
   const selection = rosterInput(input, false);
   const observedAt = new Date().toISOString();
   if (selection.caller !== undefined) {
-    const page = await readCallerPage(path, Number.POSITIVE_INFINITY, selection.archetype, selection.caller);
+    const page = await readCallerPage(path, Number.POSITIVE_INFINITY, selection.akumaName, selection.caller);
     return { observedAt, rows: page.rows, searched: [akumaRunRoot(path)] };
   }
-  const known = await knownAkuma(path, selection.archetype);
+  const known = await knownAkuma(path, selection.akumaName);
   return {
     observedAt,
     rows: [...(await readableRows(known.rows)).rows].sort(compareRows),
@@ -449,6 +449,6 @@ export async function readAkumaCompleteRoster(
 }
 
 /** Internal timeline observation for composition owners. */
-export async function readAkumaTimeline(path: WorldRoot, id: AkuId): Promise<AkumaStatus["timeline"]> {
+export async function readAkumaTimeline(path: WorldRoot, id: AkumaId): Promise<AkumaStatus["timeline"]> {
   return (await new AkumaOwner(id, path).status()).timeline;
 }

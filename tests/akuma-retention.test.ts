@@ -39,14 +39,14 @@ function ageAkuma(allocated: AllocatedAkuma, at: string): void {
 }
 
 async function oldAkuma(world: WorldRoot, suffix: string, at = OLD): Promise<AllocatedAkuma> {
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
   await driveAkumaBody(
     {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        archetype: "claude",
+        akumaName: "claude",
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
@@ -65,12 +65,12 @@ async function runningAkuma(
   world: WorldRoot,
   suffix: string,
 ): Promise<Readonly<{ allocated: AllocatedAkuma; leash: HeldAkumaLeash }>> {
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
   await leash.birth(allocated.paths, {
     id: allocated.id,
-    archetype: "claude",
+    akumaName: "claude",
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
     origin: { kind: "direct" },
@@ -154,15 +154,15 @@ test("a successful call runs the maintenance pass while read-only observations n
   await Akumas.of(world).wait({ akuma: [old.id] });
   assert.equal(existsSync(old.paths.heart), true, "read-only observations must not retire");
 
-  const called = await Akumas.of(world).call({
-    archetype: "worker",
+  const called = await Akumas.of(world).spawn({
+    akumaName: "worker",
     body: "ping",
     mode: "wait",
     timeoutMs: 15_000,
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(called.kind, "called");
+  assert.equal(called.kind, "spawned");
   assert.equal(existsSync(old.paths.directory), false);
   assert.equal(existsSync(recent.paths.heart), true);
   assert.deepEqual(await sweepInactiveAkumas(world), [], "removal is idempotent and the recent entry survives");
@@ -178,28 +178,28 @@ test("a same-handle later call reruns maintenance after a sweep failure", async 
   const aliasAuthority = join(world, ".keiyaku", "akuma", "alias.json");
   writeFileSync(aliasAuthority, "not json\n");
 
-  const one = await akumas.call({
-    archetype: "worker",
+  const one = await akumas.spawn({
+    akumaName: "worker",
     body: "ping",
     mode: "wait",
     timeoutMs: 15_000,
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(one.kind, "called");
+  assert.equal(one.kind, "spawned");
   assert.equal(existsSync(first.paths.heart), true, "a failed sweep is retried by a later call");
 
   unlinkSync(aliasAuthority);
   const second = await oldAkuma(world, "a0000004");
-  const two = await akumas.call({
-    archetype: "worker",
+  const two = await akumas.spawn({
+    akumaName: "worker",
     body: "ping",
     mode: "wait",
     timeoutMs: 15_000,
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(two.kind, "called");
+  assert.equal(two.kind, "spawned");
   assert.equal(existsSync(first.paths.heart), false);
   assert.equal(existsSync(second.paths.heart), false);
 });
@@ -223,7 +223,7 @@ test("a running old Akuma, an aliased Akuma, and pending input survive", async (
   const running = await runningAkuma(world, "c0000001");
   const aliased = await oldAkuma(world, "c0000002");
   const pending = await oldAkuma(world, "c0000003");
-  await moveAlias({ world, alias: parseAkumaAlias("@kept"), akuId: aliased.id });
+  await moveAlias({ world, alias: parseAkumaAlias("@kept"), akumaId: aliased.id });
   // A pending Tell is durable input that a later wake must still recover.
   assert.equal(
     (await recordTell(pending.paths, { kind: "tell", id: "pending-tell", body: "still recoverable", recordedAt: OLD }))
@@ -260,14 +260,14 @@ test("Dispatch associations keep active, missing, and unproven Contracts while t
   accepted(await abandonedContract.abandon());
 
   const claimedId = await claimedContract(raw);
-  assert.equal((await publishDispatch({ repository, akuId: active.id, contractId: activeId })).kind, "dispatched");
+  assert.equal((await publishDispatch({ repository, akumaId: active.id, contractId: activeId })).kind, "dispatched");
   assert.equal(
-    (await publishDispatch({ repository, akuId: abandoned.id, contractId: abandonedId })).kind,
+    (await publishDispatch({ repository, akumaId: abandoned.id, contractId: abandonedId })).kind,
     "dispatched",
   );
-  assert.equal((await publishDispatch({ repository, akuId: claimed.id, contractId: claimedId })).kind, "dispatched");
+  assert.equal((await publishDispatch({ repository, akumaId: claimed.id, contractId: claimedId })).kind, "dispatched");
   assert.equal(
-    (await publishDispatch({ repository, akuId: missing.id, contractId: contractId("kei/never-bound") })).kind,
+    (await publishDispatch({ repository, akumaId: missing.id, contractId: contractId("kei/never-bound") })).kind,
     "dispatched",
   );
 
@@ -284,7 +284,7 @@ test("a failed Dispatch observation keeps the candidate", async () => {
   const repository = await repositoryAt(raw.path);
   const allocated = await oldAkuma(world, "d0000005");
   assert.equal(
-    (await publishDispatch({ repository, akuId: allocated.id, contractId: contractId("kei/unavailable-owner") })).kind,
+    (await publishDispatch({ repository, akumaId: allocated.id, contractId: contractId("kei/unavailable-owner") })).kind,
     "dispatched",
   );
   const path = `dispatch/${createHash("sha256").update(allocated.id).digest("hex")}.json`;
@@ -313,7 +313,7 @@ test("removal holds Alias custody across the effect so a concurrent move cannot 
       const custody = await tryAcquireAliasCustody(world);
       assert.ok(custody !== null);
       try {
-        moving = moveAlias({ world, alias: parseAkumaAlias("@raced"), akuId: allocated.id });
+        moving = moveAlias({ world, alias: parseAkumaAlias("@raced"), akumaId: allocated.id });
         await new Promise((resolve) => setTimeout(resolve, 25));
         assert.deepEqual(await readAliases(world), [], "a concurrent Alias move cannot commit before removal");
         assert.equal(await retire(), true);
@@ -427,11 +427,11 @@ test("unborn, stillborn, foreign bytes, and noncanonical directories are preserv
   const world = await worldAt(context, "keiyaku-retention-preserve-");
   const now = Date.parse("2030-01-01T00:00:00.000Z");
 
-  const unborn = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "f0000001" });
+  const unborn = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "f0000001" });
   await initializeHeart(unborn.paths);
   ageAkuma(unborn, OLD);
 
-  const stillborn = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "f0000002" });
+  const stillborn = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "f0000002" });
   await initializeHeart(stillborn.paths);
   const leash = (await HeldAkumaLeash.try(stillborn.paths))!;
   await leash.sealIfUnborn(stillborn.paths, { evidence: "fixture stillborn", at: OLD });
@@ -452,7 +452,7 @@ test("unborn, stillborn, foreign bytes, and noncanonical directories are preserv
 
 test("one corrupt candidate is retained without failing the sweep or the ordinary list", async (context) => {
   const world = await worldAt(context, "keiyaku-retention-corrupt-");
-  const corrupt = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "0bad0001" });
+  const corrupt = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "0bad0001" });
   await initializeHeart(corrupt.paths);
   writeFileSync(corrupt.paths.heart, "not a sqlite database\n");
   ageAkuma(corrupt, OLD);

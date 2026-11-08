@@ -1,6 +1,6 @@
 import { validateAkumaName } from "../../identity/normalize.js";
 import { decodeAkumaCaller, type AkumaCaller } from "../../akuma/caller.js";
-import { parseAkuId, type AkuId } from "../../akuma/identity.js";
+import { parseAkumaId, type AkumaId } from "../../akuma/identity.js";
 import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
@@ -8,25 +8,25 @@ import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js
 type AkumaCallerSelector =
   | Readonly<{ kind: "mine" }>
   | Readonly<{ kind: "external"; caller: AkumaCaller }>
-  | Readonly<{ kind: "akuma"; akuId: AkuId }>;
+  | Readonly<{ kind: "akuma"; akumaId: AkumaId }>;
 type CatalogQuery =
   | Readonly<{ kind: "debts"; namespace?: readonly string[]; limit?: number }>
   | Readonly<{ kind: "contracts"; limit?: number }>
   | Readonly<{ kind: "archetypes"; limit?: number }>
-  | Readonly<{ kind: "akuma"; archetype?: string; caller?: AkumaCallerSelector; limit?: number }>;
+  | Readonly<{ kind: "akuma"; akumaName?: string; caller?: AkumaCallerSelector; limit?: number }>;
 type Output = Readonly<{ output: "text" | "json" }>;
 type Actor = Readonly<{ actor?: string }>;
 
 function parseAkumaCatalogPath(
   value: string,
-): Readonly<{ kind: "archetypes" } | { kind: "akuma"; archetype?: string }> | null {
+): Readonly<{ kind: "archetypes" } | { kind: "akuma"; akumaName?: string }> | null {
   if (value === "aku" || value === "aku/") return { kind: "archetypes" };
   if (value === "aku/*/*") return { kind: "akuma" };
   const scopedGlob = /^aku\/([^/]+)\/\*$/u.exec(value);
-  if (scopedGlob !== null) return { kind: "akuma", archetype: validateAkumaName(scopedGlob[1]!) };
+  if (scopedGlob !== null) return { kind: "akuma", akumaName: validateAkumaName(scopedGlob[1]!) };
   const match = /^aku\/([^/]+)\/?$/u.exec(value);
   if (match === null) return null;
-  return { kind: "akuma", archetype: validateAkumaName(match[1]!) };
+  return { kind: "akuma", akumaName: validateAkumaName(match[1]!) };
 }
 
 export type ParsedBind = Output &
@@ -393,7 +393,7 @@ function parseCallerSelector(parts: ParsedContractParts): AkumaCallerSelector | 
   const text = value.trim();
   if (text.startsWith("aku/")) {
     try {
-      return { kind: "akuma", akuId: parseAkuId(text).id };
+      return { kind: "akuma", akumaId: parseAkumaId(text).id };
     } catch (error) {
       refuse("ls", `--caller has an invalid Akuma identity: ${error instanceof Error ? error.message : text}`);
     }

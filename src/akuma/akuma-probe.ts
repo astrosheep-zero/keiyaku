@@ -1,6 +1,6 @@
 import { AkumaNotBornError, AkumaObservationError } from "./akuma-errors.js";
 import { readSoul } from "./heart/index.js";
-import { pathsForAkuId, type AkuId } from "./identity.js";
+import { pathsForAkumaId, type AkumaId } from "./identity.js";
 import type { WorldRoot } from "../world.js";
 
 /**
@@ -13,9 +13,9 @@ export type AkumaAddressability =
   | Readonly<{ kind: "absent" }>
   | Readonly<{ kind: "unreadable"; reason: string }>;
 
-export async function akumaAddressability(worldPath: WorldRoot, id: AkuId): Promise<AkumaAddressability> {
+export async function akumaAddressability(worldPath: WorldRoot, id: AkumaId): Promise<AkumaAddressability> {
   try {
-    return (await readSoul(pathsForAkuId(worldPath, id))) === null ? { kind: "absent" } : { kind: "born" };
+    return (await readSoul(pathsForAkumaId(worldPath, id))) === null ? { kind: "absent" } : { kind: "born" };
   } catch (error) {
     return { kind: "unreadable", reason: error instanceof Error ? error.message : String(error) };
   }
@@ -26,7 +26,7 @@ export async function akumaAddressability(worldPath: WorldRoot, id: AkuId): Prom
  * Heart is absent was never born, and one whose Heart cannot be read is an
  * observation failure that keeps its reason with the identity.
  */
-export async function requireBornAkuma(worldPath: WorldRoot, id: AkuId): Promise<void> {
+export async function requireBornAkuma(worldPath: WorldRoot, id: AkumaId): Promise<void> {
   const addressability = await akumaAddressability(worldPath, id);
   if (addressability.kind === "absent") throw new AkumaNotBornError(id);
   if (addressability.kind === "unreadable") throw new AkumaObservationError(id, addressability.reason);

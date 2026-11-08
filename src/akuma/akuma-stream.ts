@@ -3,7 +3,7 @@ import { abortableDelay } from "./abort.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 import { OBSERVATION_POLL_MS, type OutcomeObserver } from "./akuma-observe.js";
 import { createTimelineReader } from "./heart/index.js";
-import type { AkuId, AkumaPaths } from "./identity.js";
+import type { AkumaId, AkumaPaths } from "./identity.js";
 import { projectTurns, selectHistory, type ActivityHistory, type ActivityRow } from "./projection.js";
 
 /** The complete bounded latest timeline window one stream emission carries; never a delta. */
@@ -25,7 +25,7 @@ const STREAM_RETURN = Symbol("akuma-stream-return");
  * a bounded set rather than every outcome it ever saw.
  */
 async function announceOutcomes(
-  id: AkuId,
+  id: AkumaId,
   rows: readonly ActivityRow[],
   observed: ReadonlySet<string>,
   observe?: OutcomeObserver,
@@ -45,7 +45,7 @@ async function announceOutcomes(
  */
 async function* observeTimeline(
   paths: AkumaPaths,
-  id: AkuId,
+  id: AkumaId,
   signal: AbortSignal,
   observe?: OutcomeObserver,
 ): AsyncGenerator<AkumaStreamSnapshot> {
@@ -98,7 +98,7 @@ async function* observeTimeline(
  */
 export function createAkumaStream(
   paths: AkumaPaths,
-  id: AkuId,
+  id: AkumaId,
   options: Readonly<{ signal?: AbortSignal }> = {},
   observe?: OutcomeObserver,
 ): AsyncIterableIterator<AkumaStreamSnapshot> {

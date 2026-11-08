@@ -1,6 +1,6 @@
 import type { AkumaCaller } from "../caller.js";
 import { z } from "zod";
-import { akumaIdSchema, type AkuId } from "../identity.js";
+import { akumaIdSchema, type AkumaId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
 import type { ProviderExecution, ProviderOptions } from "../provider-recipe.js";
 export type { ResumeCoordinate } from "../coordinate.js";
@@ -21,8 +21,8 @@ export const akumaOriginSchema = z.discriminatedUnion("kind", [
 export type AkumaOrigin = z.infer<typeof akumaOriginSchema>;
 
 export type Soul = Readonly<{
-  id: AkuId;
-  archetype: string;
+  id: AkumaId;
+  akumaName: string;
   description?: string;
   provider: ProviderExecution;
   options: ProviderOptions;

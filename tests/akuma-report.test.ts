@@ -158,7 +158,7 @@ test("report admission refuses absent and stale Body/Turn without writes, includ
   const root = temporaryDirectory(context, "keiyaku-report-fence-");
   const value = await reportFixture(root, "feed0002");
   const input = { ...value.execution, text: "stale", at: AT };
-  const absent = await allocateAkumaDirectory({ worldRoot: value.world, archetype: "claude", draw: () => "feedffff" });
+  const absent = await allocateAkumaDirectory({ worldRoot: value.world, akumaName: "claude", draw: () => "feedffff" });
   assert.deepEqual(await recordReport(absent.paths, input), { kind: "refused", reason: "not-born" });
   try {
     const before = await activitySlice(value.allocated.paths);

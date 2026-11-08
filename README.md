@@ -85,7 +85,7 @@ npm test
 
 ```bash
 keiyaku bind --gates reviewed,verified - < contract.md # terms written; an isolated worktree appears
-keiyaku call worker -                                  # commission names Contract and appointed worktree
+keiyaku spawn worker -                                 # commission names Contract and appointed worktree
 keiyaku verify <contract>                              # each declared check executes and attests independently
 keiyaku deliver <contract>                             # delivered; existing evidence judges placement
 keiyaku review <contract> --satisfied --summary -       # review attested; ready delivery can land
@@ -190,7 +190,7 @@ description: Repository implementation agent
 Make scoped changes and run relevant tests.
 ```
 
-One Markdown file, one worker. `keiyaku call worker` summons it.
+One Markdown file, one worker. `keiyaku spawn worker` summons it.
 
 ## Configuration
 
@@ -274,10 +274,10 @@ effort: high
 ```
 
 Model and effort must be offered by that native provider; effort is its native
-thinking option id. Call with
-`PASEO_PASSWORD=<password> keiyaku call paseo-worker "<prompt>"`.
+thinking option id. Spawn with
+`PASEO_PASSWORD=<password> keiyaku spawn paseo-worker "<prompt>"`.
 
-- After a Paseo native reload or restart, call a fresh Akuma instead of resuming.
+- After a Paseo native reload or restart, spawn a fresh Akuma instead of resuming.
 - `kill` and `--interrupt` control current execution session-wide and may affect
   concurrent human work. Normal completion only disconnects the client; it does
   not cancel later work or close the native runtime.

@@ -152,7 +152,7 @@ established Akuma keeps its reason with that identity. Pre-operation refusals
 remain distinct from provider, lifecycle, and action failures after the target
 has been established.
 
-One Akuma action family covers calls, forks, tells, and kills, including plural
+One Akuma action family covers spawns, forks, tells, and kills, including plural
 and partial outcomes. Receipts lead with the action verdict and complete Akuma
 identity; aliases supplement identity. Association, source, execution directory,
 submitted input, and diagnostics remain distinct supporting facts. No receipt
@@ -170,7 +170,7 @@ coordinates. Presentation may wrap or densify evidence but cannot truncate a
 copyable identity, replace a public discriminant with decoration, or remove
 evidence merely to hide internal terminology.
 
-One shared Akuma observation discipline serves status, observing call, ask, and
+One shared Akuma observation discipline serves status, observing spawn, ask, and
 history. Complete identity and known static context precede chronological
 activity, followed by one truthful conclusion, reported changes, and diagnostics.
 Known coordinates appear once; unknown coordinates stay absent. Selected Akuma
@@ -229,7 +229,7 @@ current declaration position, requirement, and exact snapshot without becoming a
 second result model. Its final receipt preserves partial admissions, retained
 failure scenes, operational stops, and the ordinary completion judgment.
 
-An observing call and an ask share one input-wait presentation discipline.
+An observing spawn and an ask share one input-wait presentation discipline.
 Witnessed timeline activity streams once in owner order on the progress channel;
 active work stays in the redrawable frame until it settles. Closing preserves
 unresolved activity rather than inventing completion. Ask begins at its own

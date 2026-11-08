@@ -1,6 +1,6 @@
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { parseAkuId, type AkuId } from "../akuma/identity.js";
+import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import { replaceFileDurably } from "../coordination/durable-file.js";
 import {
   acquireSqliteTransactionLock,
@@ -12,8 +12,8 @@ import type { WorldRoot } from "../world.js";
 
 const VERSION = 1;
 
-export type AliasBinding = Readonly<{ alias: AkumaAlias; akuId: AkuId }>;
-export type AliasMove = Readonly<{ alias: AliasBinding; previous: AkuId | null }>;
+export type AliasBinding = Readonly<{ alias: AkumaAlias; akumaId: AkumaId }>;
+export type AliasMove = Readonly<{ alias: AliasBinding; previous: AkumaId | null }>;
 
 type AliasFile = Readonly<{
   version: typeof VERSION;
@@ -35,7 +35,7 @@ function canonical(bindings: readonly AliasBinding[]): string {
     bindings
       .slice()
       .sort((left, right) => Buffer.compare(Buffer.from(left.alias), Buffer.from(right.alias)))
-      .map((binding) => [binding.alias, binding.akuId]),
+      .map((binding) => [binding.alias, binding.akumaId]),
   );
   const file: AliasFile = { version: VERSION, aliases };
   return `${JSON.stringify(file)}\n`;
@@ -69,9 +69,9 @@ function decode(path: string, bytes: string): readonly AliasBinding[] {
   }
   const bindings: AliasBinding[] = [];
   for (const [rawAlias, rawAkuId] of Object.entries(record.aliases as Record<string, unknown>)) {
-    if (typeof rawAkuId !== "string") corruption(`Alias target must be an AkuId: ${path}`);
+    if (typeof rawAkuId !== "string") corruption(`Alias target must be an AkumaId: ${path}`);
     try {
-      bindings.push({ alias: parseReadableAkumaAlias(rawAlias), akuId: parseAkuId(rawAkuId).id });
+      bindings.push({ alias: parseReadableAkumaAlias(rawAlias), akumaId: parseAkumaId(rawAkuId).id });
     } catch (error) {
       return corruption(`Alias binding is invalid: ${path}`, error);
     }
@@ -152,20 +152,20 @@ export async function moveAlias(
   input: Readonly<{
     world: WorldRoot;
     alias: AkumaAlias;
-    akuId: AkuId;
+    akumaId: AkumaId;
   }>,
 ): Promise<AliasMove> {
   const alias = parseAkumaAlias(input.alias);
-  const akuId = parseAkuId(input.akuId).id;
+  const akumaId = parseAkumaId(input.akumaId).id;
   const location = paths(input.world);
   const held = await acquireSqliteTransactionLock({ path: location.lock, mode: "immediate" });
   try {
     const current = await read(location.authority);
-    const previous = current.find((binding) => binding.alias === alias)?.akuId ?? null;
-    const next = [...current.filter((binding) => binding.alias !== alias), { alias, akuId }];
+    const previous = current.find((binding) => binding.alias === alias)?.akumaId ?? null;
+    const next = [...current.filter((binding) => binding.alias !== alias), { alias, akumaId }];
     await mkdir(dirname(location.authority), { recursive: true });
     await replaceFileDurably(location.authority, canonical(next));
-    return { alias: { alias, akuId }, previous };
+    return { alias: { alias, akumaId }, previous };
   } finally {
     held.close();
   }

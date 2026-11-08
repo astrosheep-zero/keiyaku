@@ -29,17 +29,17 @@ function fixture() {
 
 type SettingsFixture = ReturnType<typeof fixture>;
 
-/** Load one archetype through the same preparation and provider-admission composition publication uses. */
+/** Load one akumaName through the same preparation and provider-admission composition publication uses. */
 async function loadNamed(value: SettingsFixture, name: string) {
-  const archetype = await loadPreparedArchetype({
+  const akumaName = await loadPreparedArchetype({
     name,
     home: value.home,
     settings: await settings({ root: value.project, home: value.home }),
   });
-  const { adapter } = await resolveProviderExecution(archetype.provider);
-  const admission = adapter.admitOptions(archetype.options);
+  const { adapter } = await resolveProviderExecution(akumaName.provider);
+  const admission = adapter.admitOptions(akumaName.options);
   if (admission.kind === "refused") throw new TypeError(admission.diagnostic);
-  return { ...archetype, options: admission.options };
+  return { ...akumaName, options: admission.options };
 }
 
 function contractGates(context: TestContext) {

@@ -26,7 +26,7 @@ import {
   renderContractCatalogue,
   renderDebtCatalogue,
 } from "../src/cli/render/catalog.js";
-import type { CallObservation } from "../src/library/akuma-creation.js";
+import type { SpawnObservation } from "../src/library/akuma-creation.js";
 import {
   DEFAULT_CONTEXT,
   activityStream,
@@ -75,7 +75,7 @@ import { askProgressStream } from "../src/cli/render/akuma.js";
 import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { activityFact } from "./support/akuma-fixtures.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
-import { parseAkuId } from "../src/akuma/identity.js";
+import { parseAkumaId } from "../src/akuma/identity.js";
 import { renderDebtList, renderDebtMutation, renderDebtShow, renderDebtUpdate } from "../src/cli/render/debt.js";
 import type { DebtId, DebtPage, DebtRow } from "../src/debt/index.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
@@ -96,7 +96,7 @@ test("canceled outcomes render as canceled in CLI history and snapshots", () => 
   };
   assert.equal(
     nativeHistoryText(
-      { kind: "exact", id: parseAkuId("aku/claude/1234abcd").id, contract: { kind: "none" }, outcome: row },
+      { kind: "exact", id: parseAkumaId("aku/claude/1234abcd").id, contract: { kind: "none" }, outcome: row },
       { id: "turn/1" },
       DEFAULT_CONTEXT,
     ),
@@ -346,9 +346,9 @@ const genericLines = (rows: readonly GenericFixture[], columns: number) =>
     { columns, color: false },
   );
 function callObservation(
-  observation: Extract<CallObservation, { kind: "observed" }>["observation"],
+  observation: Extract<SpawnObservation, { kind: "observed" }>["observation"],
   completedAt: string | null = AKUMA_ACTIVITY_AT,
-): CallObservation {
+): SpawnObservation {
   return {
     kind: "observed",
     tell: {
@@ -462,7 +462,7 @@ test("skeleton history keeps individual requirements and their snapshot identiti
     {
       source: "dispatch",
       dispatch: {
-        akuId: parseAkuId("aku/intern/33dd4670").id,
+        akumaId: parseAkumaId("aku/intern/33dd4670").id,
         contractId: watch,
         dispatchedAt: "2026-09-28T15:20:00.000Z",
       },
@@ -626,7 +626,7 @@ test("catalog text renders only the selected identity layer", () => {
         rows: [
           {
             id: "aku/worker/deadbeef" as never,
-            archetype: "worker",
+            akumaName: "worker",
             life: "asleep",
             lifeAt: "2026-08-11T23:00:00.000Z",
             lastActivityAt: "2026-08-11T23:30:00.000Z",
@@ -651,13 +651,13 @@ test("ls help lists the Akuma catalogue usage forms", () => {
   assert.ok(help.includes('ls "aku/*/*"'));
 });
 
-test("rendered Akuma catalog header names Akuma names, never archetype", () => {
+test("rendered Akuma catalog header names Akuma names, never akumaName", () => {
   const text = renderArchetypeCatalogue({
     rows: [{ name: "reviewer" }],
     hasMore: false,
   });
   assert.ok(text.startsWith("AKUMA NAMES // available"));
-  assert.doesNotMatch(text, /archetype/iu);
+  assert.doesNotMatch(text, /akumaName/iu);
 });
 
 test("root Debt catalogue marks every disposition with its own state", () => {
@@ -886,7 +886,7 @@ test("scoped Akuma catalog text preserves bounded membership and marks further r
 test("Akuma catalog renders future ages as now", () => {
   const futureRow = {
     id: "aku/worker/future" as never,
-    archetype: "worker",
+    akumaName: "worker",
     life: "unborn" as const,
     lifeAt: "2026-08-12T00:00:01.000Z",
     lastActivityAt: null,
@@ -3429,7 +3429,7 @@ test("current attempt boundaries consume the projection opening identity", () =>
 });
 
 test("call and ask stream projected overlapping tool completions once in completion order", () => {
-  const id = parseAkuId("aku/worker/abcd0104").id;
+  const id = parseAkumaId("aku/worker/abcd0104").id;
   const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
   const tool = (sequence: number, phase: "started" | "completed", name: string): TimelineFact =>
     phase === "completed"
@@ -3706,7 +3706,7 @@ test("multiple says each print their first three tools as they settle", () => {
 test("a plural wait text renders one compact line per observation and unreadable peer", () => {
   const first = "aku/worker/abcd0006";
   const second = "aku/worker/abcd0007";
-  const missing = parseAkuId("aku/worker/abcd0008").id;
+  const missing = parseAkumaId("aku/worker/abcd0008").id;
   const running = (id: string) =>
     akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: openAkumaSnapshot([]) });
   const answered = (id: string) =>

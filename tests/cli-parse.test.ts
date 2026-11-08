@@ -70,21 +70,21 @@ test("global coordinates are independent of command position", () => {
     repo: "../delivery",
     command: { command: "status", output: "text" },
   });
-  assert.deepEqual(parseArgv(["call", "worker", "--workdir", "work", "body"]), {
+  assert.deepEqual(parseArgv(["spawn", "worker", "--workdir", "work", "body"]), {
     workdir: "work",
     command: {
-      command: "call",
-      archetype: "worker",
+      command: "spawn",
+      akumaName: "worker",
       mode: "detach",
       prompt: { kind: "argument", value: "body" },
       output: "text",
     },
   });
-  assert.deepEqual(parseArgv(["call", "worker", "--contract", "kei/example", "--workdir", "work", "body"]), {
+  assert.deepEqual(parseArgv(["spawn", "worker", "--contract", "kei/example", "--workdir", "work", "body"]), {
     workdir: "work",
     command: {
-      command: "call",
-      archetype: "worker",
+      command: "spawn",
+      akumaName: "worker",
       contract: "kei/example",
       mode: "detach",
       prompt: { kind: "argument", value: "body" },
@@ -94,18 +94,18 @@ test("global coordinates are independent of command position", () => {
   assert.throws(() => parseArgv(["status", "--repo"]), /--repo requires a path/u);
   assert.throws(() => parseArgv(["--repo", "/one", "status", "--repo", "/two"]), /--repo may appear only once/u);
   assert.throws(
-    () => parseArgv(["call", "worker", "--workdir", "one", "--workdir", "two", "body"]),
+    () => parseArgv(["spawn", "worker", "--workdir", "one", "--workdir", "two", "body"]),
     /--workdir may appear only once/u,
   );
-  assert.deepEqual(command(["call", "worker"]), {
-    command: "call",
-    archetype: "worker",
+  assert.deepEqual(command(["spawn", "worker"]), {
+    command: "spawn",
+    akumaName: "worker",
     mode: "detach",
     output: "text",
   });
-  assert.deepEqual(command(["call", "worker", "--bare"]), {
-    command: "call",
-    archetype: "worker",
+  assert.deepEqual(command(["spawn", "worker", "--bare"]), {
+    command: "spawn",
+    akumaName: "worker",
     mode: "detach",
     bare: true,
     output: "text",
@@ -117,12 +117,12 @@ test("global coordinates are independent of command position", () => {
     bare: true,
     output: "text",
   });
-  assert.throws(() => parseArgv(["call", "worker", "--schema", "answer.json"]), /call --schema requires a prompt/u);
-  assert.throws(() => parseArgv(["call", "worker", "--wait", "1s"]), /call --wait requires a prompt/u);
+  assert.throws(() => parseArgv(["spawn", "worker", "--schema", "answer.json"]), /spawn --schema requires a prompt/u);
+  assert.throws(() => parseArgv(["spawn", "worker", "--wait", "1s"]), /spawn --wait requires a prompt/u);
 
-  assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
-  assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
-  assert.throws(() => parseArgv(["call", "worker", "--workdir", " ", "body"]), /--workdir requires a path/u);
+  assert.throws(() => parseArgv(["spawn", "worker", "-d", "prompt"]), /option -d is not valid for spawn/u);
+  assert.throws(() => parseArgv(["spawn", "worker", "--detach", "prompt"]), /option --detach is not valid for spawn/u);
+  assert.throws(() => parseArgv(["spawn", "worker", "--workdir", " ", "body"]), /--workdir requires a path/u);
   assert.throws(
     () => parseArgv(["tell", "@worker", "--workdir", "work", "body"]),
     /option --workdir is not valid for tell/u,
@@ -133,13 +133,13 @@ test("global coordinates are independent of command position", () => {
   );
 });
 
-test("call repeats native writable-directory grants and refuses retired options", () => {
-  assert.deepEqual(command(["call", "worker", "--add-dir", "../runtime", "--add-dir", "/square"]), {
-    command: "call", archetype: "worker", mode: "detach", output: "text",
+test("spawn repeats native writable-directory grants and refuses retired options", () => {
+  assert.deepEqual(command(["spawn", "worker", "--add-dir", "../runtime", "--add-dir", "/square"]), {
+    command: "spawn", akumaName: "worker", mode: "detach", output: "text",
     writableDirectories: ["../runtime", "/square"],
   });
-  assert.throws(() => command(["call", "worker", "--allowed", "contract.review"]), /option --allowed is not valid for call/u);
-  assert.throws(() => command(["call", "worker", "--add-dir"]), /--add-dir requires/u);
+  assert.throws(() => command(["spawn", "worker", "--allowed", "contract.review"]), /option --allowed is not valid for spawn/u);
+  assert.throws(() => command(["spawn", "worker", "--add-dir"]), /--add-dir requires/u);
   assert.throws(() => command(["fork", "@worker", "--at", "turn/1", "--add-dir", "/square"]), /--add-dir/u);
 });
 
@@ -152,9 +152,9 @@ test("root version is recognized only after coordinates and help", () => {
     (error: unknown) => error instanceof CliUsageError && error.guide?.given === "--version",
   );
   assert.throws(
-    () => parseArgv(["call", "worker", "--version"]),
+    () => parseArgv(["spawn", "worker", "--version"]),
     (error: unknown) =>
-      error instanceof CliUsageError && error.message.includes("option --version is not valid for call"),
+      error instanceof CliUsageError && error.message.includes("option --version is not valid for spawn"),
   );
   assert.throws(
     () => parseArgv(["tell", "@worker", "--version"]),
@@ -284,14 +284,14 @@ test("ls parses only canonical identity directories", () => {
   }
   for (const path of ["aku/worker", "aku/worker/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { command: "ls", query: { kind: "akuma", archetype: "worker" }, output: "text" },
+      command: { command: "ls", query: { kind: "akuma", akumaName: "worker" }, output: "text" },
     });
   }
   assert.deepEqual(parseArgv(["ls", "aku/*/*"]), {
     command: { command: "ls", query: { kind: "akuma" }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/elite/*", "--limit", "40"]), {
-    command: { command: "ls", query: { kind: "akuma", archetype: "elite", limit: 40 }, output: "text" },
+    command: { command: "ls", query: { kind: "akuma", akumaName: "elite", limit: 40 }, output: "text" },
   });
   assert.match(renderContractHelp("ls"), /ls "aku\/<name>\/\*"/u);
   for (const path of [
@@ -316,7 +316,7 @@ test("ls parses caller-scoped Akuma selection", () => {
     command: { command: "ls", query: { kind: "akuma", caller: { kind: "mine" } }, output: "json" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/intern", "--mine"]), {
-    command: { command: "ls", query: { kind: "akuma", archetype: "intern", caller: { kind: "mine" } }, output: "text" },
+    command: { command: "ls", query: { kind: "akuma", akumaName: "intern", caller: { kind: "mine" } }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/*/*", "--caller", "slack:channel:thread"]), {
     command: {
@@ -333,8 +333,8 @@ test("ls parses caller-scoped Akuma selection", () => {
       command: "ls",
       query: {
         kind: "akuma",
-        archetype: "worker",
-        caller: { kind: "akuma", akuId: "aku/lead/1234abcd" },
+        akumaName: "worker",
+        caller: { kind: "akuma", akumaId: "aku/lead/1234abcd" },
         limit: 5,
       },
       output: "text",
@@ -441,17 +441,17 @@ test("abandon accepts a note but no caller-selected reason", () => {
   assert.throws(() => parseArgv(["abandon", "kei/example", "--reason", "manual"]), CliUsageError);
 });
 
-test("call accepts a bare alias name and keeps prefixed input compatible", () => {
+test("spawn accepts a bare alias name and keeps prefixed input compatible", () => {
   for (const input of ["pi-reset-api-review", "@pi-reset-api-review"]) {
-    const parsed = command(["call", "intern", "--alias", input, "audit"]);
-    assert.equal(parsed.command, "call");
-    if (parsed.command === "call") assert.equal(parsed.alias, "@pi-reset-api-review");
+    const parsed = command(["spawn", "intern", "--alias", input, "audit"]);
+    assert.equal(parsed.command, "spawn");
+    if (parsed.command === "spawn") assert.equal(parsed.alias, "@pi-reset-api-review");
   }
-  const unicode = command(["call", "审查-二号", "--alias", "审查-二号", "audit"]);
-  assert.equal(unicode.command, "call");
-  if (unicode.command === "call") assert.equal(unicode.alias, "@审查-二号");
-  assert.throws(() => parseArgv(["call", "intern", "--alias", "Reviewer", "audit"]), /normalized Akuma name/u);
-  assert.throws(() => parseArgv(["call", "intern", "--alias", "a".repeat(65), "audit"]), /64 UTF-8 bytes/u);
+  const unicode = command(["spawn", "审查-二号", "--alias", "审查-二号", "audit"]);
+  assert.equal(unicode.command, "spawn");
+  if (unicode.command === "spawn") assert.equal(unicode.alias, "@审查-二号");
+  assert.throws(() => parseArgv(["spawn", "intern", "--alias", "Reviewer", "audit"]), /normalized Akuma name/u);
+  assert.throws(() => parseArgv(["spawn", "intern", "--alias", "a".repeat(65), "audit"]), /64 UTF-8 bytes/u);
 });
 
 test("wait accepts a plural selection without an explicit completion mode", () => {
@@ -560,10 +560,10 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["deliver", "--message", "  "], /--message requires a nonblank value/],
     [["abandon", "--note", "\n"], /--note requires a nonblank value/],
     [["bind", "--actor", " ", "-"], /--actor requires a nonblank value/],
-    [["call", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
-    [["call", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
-    [["call", "worker", ""], /call requires a nonblank value/],
-    [["call", " ", "-"], /call requires a nonblank value/],
+    [["spawn", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
+    [["spawn", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
+    [["spawn", "worker", ""], /spawn requires a nonblank value/],
+    [["spawn", " ", "-"], /spawn requires a nonblank value/],
     [["tell", "aku/claude/1234abcd", " \u00a0"], /tell requires a nonblank value/],
     [["fork", "aku/claude/1234abcd", "--at", "  "], /--at requires a nonblank value/],
     [["debt", "add"], /debt add requires either TITLE or '-' input/],
@@ -576,7 +576,7 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["debt", "done", "debt/a", "--note", ""], /--note requires a nonblank value/],
     [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],
     [["bind", "--after", "kei/one", "--after", " ", "-"], /--after requires a nonblank value/],
-    [["call", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],
+    [["spawn", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],
     [["debt", "show", " "], /debt show requires a nonblank value/],
     [["debt", "add", "Title", "--needs", "debt/a", "--needs", "\t"], /--needs requires a nonblank value/],
     [["wait", "aku/claude/1234abcd", " "], /wait requires a nonblank value/],
@@ -598,9 +598,9 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     summary: "  keep  ",
     output: "text",
   });
-  const called = command(["call", "worker", "  keep  "]);
-  assert.equal(called.command, "call");
-  if (called.command === "call") assert.deepEqual(called.prompt, { kind: "argument", value: "  keep  " });
+  const called = command(["spawn", "worker", "  keep  "]);
+  assert.equal(called.command, "spawn");
+  if (called.command === "spawn") assert.deepEqual(called.prompt, { kind: "argument", value: "  keep  " });
   assert.deepEqual(command(["debt", "add", "--", "--urgent debt"]), {
     command: "debt",
     action: "add",
@@ -608,17 +608,17 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     positionals: ["--urgent debt"],
     flags: {},
   });
-  assert.deepEqual(command(["call", "worker", "--", "--workdir"]), {
-    command: "call",
-    archetype: "worker",
+  assert.deepEqual(command(["spawn", "worker", "--", "--workdir"]), {
+    command: "spawn",
+    akumaName: "worker",
     mode: "detach",
     prompt: { kind: "argument", value: "--workdir" },
     output: "text",
   });
-  assert.deepEqual(parseArgv(["call", "worker", "--", "--workdir"]), {
+  assert.deepEqual(parseArgv(["spawn", "worker", "--", "--workdir"]), {
     command: {
-      command: "call",
-      archetype: "worker",
+      command: "spawn",
+      akumaName: "worker",
       mode: "detach",
       prompt: { kind: "argument", value: "--workdir" },
       output: "text",
@@ -676,19 +676,19 @@ test("stdin marker is position independent for Contract commands and global coor
       output: "text",
     },
   });
-  assert.deepEqual(parseArgv(["call", "worker", "--", "--cwd"]), {
+  assert.deepEqual(parseArgv(["spawn", "worker", "--", "--cwd"]), {
     command: {
-      command: "call",
-      archetype: "worker",
+      command: "spawn",
+      akumaName: "worker",
       mode: "detach",
       prompt: { kind: "argument", value: "--cwd" },
       output: "text",
     },
   });
-  assert.deepEqual(parseArgv(["call", "worker", "--", "--help"]), {
+  assert.deepEqual(parseArgv(["spawn", "worker", "--", "--help"]), {
     command: {
-      command: "call",
-      archetype: "worker",
+      command: "spawn",
+      akumaName: "worker",
       mode: "detach",
       prompt: { kind: "argument", value: "--help" },
       output: "text",

@@ -1,5 +1,5 @@
 import type { ActiveToolRow, ActivitySnapshot, ActivitySnapshotEntry, CompletedToolRow, IdleSnapshotRow, OpenSnapshotRow, OutcomeRow, ReportedFileChange, SnapshotRow } from "../../src/akuma/projection.js";
-import { parseAkuId } from "../../src/akuma/identity.js";
+import { parseAkumaId } from "../../src/akuma/identity.js";
 import type { AkumaKanshiRow, KanshiReport } from "../../src/kanshi/index.js";
 
 export const AKUMA_ACTIVITY_AT = "2026-01-01T10:00:00.000Z";
@@ -81,8 +81,8 @@ export function activityAkumaRow(
   snapshot: ActivitySnapshot,
 ): AkumaKanshiRow {
   return {
-    id: parseAkuId(id).id,
-    archetype: "worker",
+    id: parseAkumaId(id).id,
+    akumaName: "worker",
     life,
     lifeAt: AKUMA_ACTIVITY_AT,
     lastActivityAt: AKUMA_ACTIVITY_AT,

@@ -7,7 +7,7 @@ import {
   Schema,
   World,
   listArchetypeDefinitions,
-  type CallResult,
+  type SpawnResult,
   type AkumaHostScope,
   type AkumaCaller,
   type AkumaAddressInput,
@@ -149,7 +149,7 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
   }
 
   register<{
-    akuma: string;
+    akumaName: string;
     body: string;
     workdir?: string;
     writableDirectories?: readonly string[];
@@ -158,14 +158,14 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
     timeoutMs?: number;
     schema?: JsonSchemaDocument;
   }>(
-    "akuma_call",
-    "Call any configured Akuma provider. By default launch in this Pi session and return birth plus first-Tell receipt immediately. detach selects detached hosting; wait separately observes the first answer (default five-minute bound). Deadlines/abort stop observation, not admitted execution. Session shutdown retires only this session's in-process launches.",
+    "akuma_spawn",
+    "Spawn any configured Akuma provider. By default launch in this Pi session and return birth plus first-Tell receipt immediately. detach selects detached hosting; wait separately observes the first answer (default five-minute bound). Deadlines/abort stop observation, not admitted execution. Session shutdown retires only this session's in-process launches.",
     {
-      akuma: {
+      akumaName: {
         type: "string",
         minLength: 1,
         pattern: "\\S",
-        description: "Callable definition name (see akuma_definitions)",
+        description: "Spawnable Akuma name (see akuma_definitions)",
       },
       body,
       workdir: { type: "string", minLength: 1, description: "Execution directory relative to Pi cwd (default Pi cwd)" },
@@ -181,11 +181,11 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
       timeoutMs,
       schema: { type: "object", additionalProperties: true },
     },
-    ["akuma", "body"],
+    ["akumaName", "body"],
     async (input, akumas, ctx, signal) => {
       if (input.timeoutMs !== undefined && input.wait !== true) throw new TypeError("timeoutMs requires wait: true");
-      const result: CallResult = await akumas.call({
-        archetype: input.akuma,
+      const result: SpawnResult = await akumas.spawn({
+        akumaName: input.akumaName,
         body: input.body,
         cwd: resolve(ctx.cwd, input.workdir ?? "."),
         ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
@@ -209,14 +209,14 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
   );
   register<AkumaListInput>(
     "akuma_list",
-    "List a bounded recent-activity roster of Akuma instances, with aliases. Use akuma_definitions for callable names.",
-    { archetype: { type: "string", minLength: 1 }, limit },
+    "List a bounded recent-activity roster of Akuma instances, with aliases. Use akuma_definitions for spawnable names.",
+    { akumaName: { type: "string", minLength: 1 }, limit },
     [],
     async (input, akumas) => akumas.list(input),
   );
   register<{ limit?: number }>(
     "akuma_definitions",
-    "List visible callable Akuma definitions for all configured providers (not running instances).",
+    "List visible spawnable Akuma definitions for all configured providers (not running instances).",
     { limit },
     [],
     async (input, _akumas, _ctx, _signal, world) => listArchetypeDefinitions({ project: world, ...input }),

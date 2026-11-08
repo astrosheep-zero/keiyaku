@@ -215,13 +215,13 @@ test("Body launch and provider setup isolate parent harness identity without mut
   const previous = Object.fromEntries(PARENT_HARNESS_KEYS.map((key) => [key, process.env[key]]));
   try {
     Object.assign(process.env, PARENT_HARNESS_ENVIRONMENT);
-    const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "e11d0001" });
+    const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "e11d0001" });
     const input = await bodyProcessInput(
       {
         paths: allocated.paths,
         seed: {
           id: allocated.id,
-          archetype: "claude",
+          akumaName: "claude",
           provider: { name: "claude", kind: "claude-agent-sdk" },
           options: {},
           origin: { kind: "direct" },
@@ -405,7 +405,7 @@ function acpLaunch(allocated: Awaited<ReturnType<typeof allocateAkumaDirectory>>
     paths: allocated.paths,
     seed: {
       id: allocated.id,
-      archetype: "acp",
+      akumaName: "acp",
       provider: { name: "acp", kind: "acp" },
       options: {},
       origin: { kind: "direct" },
@@ -507,11 +507,11 @@ test("birth observes durable Soul and Body once, without Turn ownership or repla
   writeFileSync(join(root, "plugins", "birth.mjs"), `
     import { appendFileSync } from "node:fs";
     import { readHeart, readLatestTurnForBody } from ${JSON.stringify(new URL("../src/akuma/heart/index.js", import.meta.url).href)};
-    import { pathsForAkuId } from ${JSON.stringify(new URL("../src/akuma/identity.js", import.meta.url).href)};
+    import { pathsForAkumaId } from ${JSON.stringify(new URL("../src/akuma/identity.js", import.meta.url).href)};
     export default { manifest: { id: "birth", apiVersion: 1 }, activate(context) {
       return { signals: { "akuma.born": async (signal) => {
-        const heart = await readHeart(pathsForAkuId(context.world, signal.akumaId));
-        const turn = await readLatestTurnForBody(pathsForAkuId(context.world, signal.akumaId), signal.bodySequence);
+        const heart = await readHeart(pathsForAkumaId(context.world, signal.akumaId));
+        const turn = await readLatestTurnForBody(pathsForAkumaId(context.world, signal.akumaId), signal.bodySequence);
         appendFileSync(context.config.output, JSON.stringify({ signal, soul: heart.soul, body: heart.latestBody, turn }) + "\\n");
         throw new Error("birth observer failure");
       } } };
@@ -1003,7 +1003,7 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
         paths: allocated.paths,
         seed: {
           id: allocated.id,
-          archetype: "codex",
+          akumaName: "codex",
           provider: { name: "codex", kind: "codex-app-server" },
           options: {},
           origin: { kind: "direct" },
@@ -1088,7 +1088,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
     } as unknown as PiSdk;
     const body = runAkumaBody({
       paths: allocated.paths,
-      seed: { id: allocated.id, archetype: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
+      seed: { id: allocated.id, akumaName: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
       initialBody: "work",
     }, createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
     await waitUntilLatestBody(allocated.paths, body);
@@ -1170,7 +1170,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
     } as unknown as PiSdk;
     const body = runAkumaBody({
       paths: allocated.paths,
-      seed: { id: allocated.id, archetype: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
+      seed: { id: allocated.id, akumaName: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
       initialBody: "work",
     }, createPiProvider({ name: "pi", kind: "pi" }, async () => sdk), { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
     await waitUntilLatestBody(allocated.paths, body);
@@ -1357,7 +1357,7 @@ test("concurrent handoff before ending-body leash release does not consume the s
   const allocated = await allocatedHeart(root, "acp", "1a2b3c53");
   const seed = {
     id: allocated.id,
-    archetype: "acp",
+    akumaName: "acp",
     provider: { name: "acp", kind: "acp" as const },
     options: {},
     origin: { kind: "direct" as const },
@@ -1405,7 +1405,7 @@ test("open disposition referencing a missing Tell is Heart corruption, not prove
   const allocated = await allocatedHeart(root, "acp", "1a2b3c54");
   const seed = {
     id: allocated.id,
-    archetype: "acp",
+    akumaName: "acp",
     provider: { name: "acp", kind: "acp" as const },
     options: {},
     origin: { kind: "direct" as const },
@@ -1534,7 +1534,7 @@ test("a successor admits through the leash without reconstructing custody of an 
     const allocated = await allocatedHeart(root, "claude", "a1b2c3d4");
     const soul = {
       id: allocated.id,
-      archetype: "claude",
+      akumaName: "claude",
       provider: { name: "claude", kind: "claude-agent-sdk" as const },
       options: {},
       origin: { kind: "direct" as const },
@@ -2224,7 +2224,7 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns cancel w
     const born = (await HeldAkumaLeash.try(allocated.paths))!;
     await born.birth(allocated.paths, {
       id: allocated.id,
-      archetype: "claude",
+      akumaName: "claude",
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },
@@ -2301,7 +2301,7 @@ test("spawn ENOENT diagnosis preserves the original failure as cause", async () 
         paths: allocated.paths,
         seed: {
           id: allocated.id,
-          archetype: "claude",
+          akumaName: "claude",
           provider: { name: "claude", kind: "claude-agent-sdk" },
           options: {},
           origin: { kind: "direct" },

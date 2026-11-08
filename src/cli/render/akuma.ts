@@ -1,10 +1,10 @@
 import type { CliOutcome } from "../streams.js";
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/body.js";
-import type { AkuId } from "../../akuma/identity.js";
+import type { AkumaId } from "../../akuma/identity.js";
 import type { AkumaAskResult, AkumaKillResult, AkumaTellResult } from "../../akuma/selection-observation.js";
-import type { CallWaitHead, DispatchStage, ForkResult } from "../../index.js";
-import type { CallResult } from "../../library/akuma-creation.js";
+import type { DispatchStage, ForkResult, SpawnWaitHead } from "../../index.js";
+import type { SpawnResult } from "../../library/akuma-creation.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import {
   actionReceipt,
@@ -19,7 +19,7 @@ import {
 import { safeText, type TextRenderContext } from "./terminal.js";
 
 type AskProgress = Readonly<{
-  admitted: (tell: TellResult, id: AkuId) => readonly string[];
+  admitted: (tell: TellResult, id: AkumaId) => readonly string[];
   observe: (observation: LiveStatusObservation) => readonly string[];
   frame: () => readonly string[];
   flush: () => readonly string[];
@@ -27,7 +27,7 @@ type AskProgress = Readonly<{
 }>;
 
 export function askProgressStream(
-  akuma: AkuId | undefined,
+  akuma: AkumaId | undefined,
   alias: string | undefined,
   context: TextRenderContext,
 ): AskProgress {
@@ -81,7 +81,9 @@ function dispatchLines(stage: DispatchStage): readonly string[] {
 }
 
 /** The shared identity frame for one admitted call input. */
-export function callObservationHead(input: Readonly<{ akuma: string; cwd?: string }> & CallWaitHead): ObservedCallHead {
+export function callObservationHead(
+  input: Readonly<{ akuma: string; cwd?: string }> & SpawnWaitHead,
+): ObservedCallHead {
   const alias = input.alias.kind === "aliased" ? input.alias.alias.alias : undefined;
   const contractId = input.dispatch.kind === "dispatched" ? input.dispatch.dispatch.contractId : undefined;
   const facts = [
@@ -100,7 +102,7 @@ export function callObservationHead(input: Readonly<{ akuma: string; cwd?: strin
 }
 
 /** The admitted context a call action receipt can state without reading anything new. */
-function callEvidence(result: CallResult, head: ObservedCallHead): readonly string[] {
+function callEvidence(result: SpawnResult, head: ObservedCallHead): readonly string[] {
   return [
     ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
     safeText(result.execution.cwd),
@@ -108,7 +110,7 @@ function callEvidence(result: CallResult, head: ObservedCallHead): readonly stri
   ];
 }
 
-export function renderCallText(result: CallResult, streamed: boolean, context: TextRenderContext): string {
+export function renderCallText(result: SpawnResult, streamed: boolean, context: TextRenderContext): string {
   if (streamed) return "";
   const head = callObservationHead({
     akuma: result.akuma,
@@ -119,7 +121,7 @@ export function renderCallText(result: CallResult, streamed: boolean, context: T
   const receipt = (mark: "✓" | "!", extra: readonly string[] = []): string =>
     actionReceipt({
       mark,
-      verb: "called",
+      verb: "spawned",
       id: result.akuma,
       ...(head.alias === undefined ? {} : { alias: head.alias }),
       evidence: [...callEvidence(result, head), ...extra],
@@ -136,7 +138,7 @@ export function renderCallText(result: CallResult, streamed: boolean, context: T
     return [
       ...actionReceipt({
         mark: "!",
-        verb: "called",
+        verb: "spawned",
         id: result.akuma,
         ...(head.alias === undefined ? {} : { alias: head.alias }),
         evidence: callEvidence(result, head),
@@ -159,7 +161,7 @@ export function renderCallText(result: CallResult, streamed: boolean, context: T
  * The failure panel for an observing call whose stream never opened. It opens the same shared head
  * over the failure's own evidence, including a Tell the invocation had already admitted.
  */
-export function renderFailedCallObservation(result: CallResult, context: TextRenderContext): string {
+export function renderFailedCallObservation(result: SpawnResult, context: TextRenderContext): string {
   const failure = callObservationStream(
     context,
     callObservationHead({
@@ -200,7 +202,7 @@ export function renderKillText(result: AkumaKillResult, alias: string | undefine
   return result.results.map((member) => killResultText(member.id, member.evidence, alias)).join("\n");
 }
 
-export function callOutcome(result: CallResult): CliOutcome {
+export function callOutcome(result: SpawnResult): CliOutcome {
   if (result.dispatch.kind === "failed" || result.alias.kind === "failed" || result.observation.kind === "failed")
     return "failed";
   if (result.observation.kind !== "observed") return "accepted";

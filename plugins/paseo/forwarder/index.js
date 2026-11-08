@@ -29,9 +29,9 @@ export async function syncMirrorTitles(client, path, akuId, signal) {
         throw new Error(`Keiyaku aliases unavailable: ${aliases.kind === "failed" ? aliases.failure.message : "absent"}`);
     const names = new Map();
     for (const binding of aliases.value) {
-        const current = names.get(binding.akuId) ?? [];
+        const current = names.get(binding.akumaId) ?? [];
         current.push(binding.alias.replace(/^@/u, ""));
-        names.set(binding.akuId, current);
+        names.set(binding.akumaId, current);
     }
     const updates = [];
     let cursor;
@@ -154,7 +154,8 @@ export function createForwarder(openClient = connect) {
             };
             return { signals: { "akuma.turn-started": refresh, "akuma.turn-outcome": refresh,
                     async "akuma.born"(event, cancellation) {
-                        const result = await hint(attachRpc, { world, akuId: event.akumaId, caller: event.caller }, cancellation);
+                        const caller = event.caller.kind === "akuma" ? { kind: "akuma", world: event.caller.world, akuId: event.caller.akumaId } : event.caller;
+                        const result = await hint(attachRpc, { world, akuId: event.akumaId, caller }, cancellation);
                         if (!("attached" in result) || !result.attached)
                             return;
                         const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
@@ -174,8 +175,7 @@ export function createForwarder(openClient = connect) {
                             client = undefined;
                             await previous?.then((connected) => connected.close()).catch(() => { });
                         }
-                    },
-                } };
+                    }, } };
         },
     };
 }

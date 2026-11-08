@@ -123,7 +123,7 @@ type TurnFixture = Readonly<{
 async function turnFixture(context: TestContext, prefix: string): Promise<TurnFixture> {
   const root = temporaryDirectory(context, prefix);
   const world = await World.at(root);
-  const born = await bornDirectAkuma({ root, archetype: "claude", draw: "f8930001", createdAt: AT });
+  const born = await bornDirectAkuma({ root, akumaName: "claude", draw: "f8930001", createdAt: AT });
   const body = await born.leash.recordBody(born.paths, { leashTakenAt: AT });
   return {
     paths: born.paths,

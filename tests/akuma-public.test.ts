@@ -51,7 +51,7 @@ import {
   recordTell,
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, allocateAkumaDirectory, pathsForAkuId } from "../src/akuma/identity.js";
+import { akumaRunRoot, allocateAkumaDirectory, pathsForAkumaId } from "../src/akuma/identity.js";
 import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
@@ -494,7 +494,7 @@ test("turn owner folds a rejected completion while the event stream remains open
   let driving: ReturnType<typeof driveAkumaBody> | undefined;
   try {
     const world = await World.at(root);
-    const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => "deadbeef" });
+    const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "deadbeef" });
     await initializeHeart(allocated.paths);
     driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
       spawn: noBodyLaunch,
@@ -517,14 +517,14 @@ test("turn owner folds a rejected completion while the event stream remains open
 
 async function answeredSource(root: string, suffix: string, bare?: boolean) {
   const world = await World.at(root);
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, archetype: "claude", draw: () => suffix });
+  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
   await driveAkumaBody(
     {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        archetype: "claude",
+        akumaName: "claude",
         description: "Fork source",
         ...(bare === undefined ? {} : { bare }),
         provider: CLAUDE_EXECUTION,
@@ -1301,7 +1301,7 @@ test("wait timeout returns the same running status carrier", async (context) => 
 
 test("an answered Turn without a fork point remains visible and keeps its answer", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-no-fork-point-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "f0a10006" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "f0a10006" });
   await initializeHeart(allocated.paths);
   const noPointProvider: ProviderAdapter = fixtureAdapter(async () => {
     const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
@@ -1325,7 +1325,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        archetype: "claude",
+        akumaName: "claude",
         description: "No fork point",
         provider: CLAUDE_EXECUTION,
         options: { model: "fixture-model" },
@@ -1383,7 +1383,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
     const caller = {
       kind: "akuma" as const,
       world,
-      akuId: (await akumaAt(root)).of({ id: "aku/delegator/1234abcd" }).id,
+      akumaId: (await akumaAt(root)).of({ id: "aku/delegator/1234abcd" }).id,
     };
     const receipt = await Akumas.of(world).fork({
       akuma: source.id,
@@ -1394,7 +1394,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
     });
     assert.equal(receipt.kind, "forked");
     if (receipt.kind !== "forked") return;
-    const child = pathsForAkuId(world, receipt.child);
+    const child = pathsForAkumaId(world, receipt.child);
     assert.equal((await readHeart(child)).soul?.bare, true);
     assert.equal((await readHeart(source.paths)).soul?.bare, undefined, "fork does not change its source");
     const status = await (await akumaAt(root)).of({ id: receipt.child }).status();
@@ -1416,7 +1416,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
     assert.equal(inherited.kind, "forked");
     if (inherited.kind === "forked") {
       assert.equal(
-        (await readHeart(pathsForAkuId(world, inherited.child))).soul?.bare,
+        (await readHeart(pathsForAkumaId(world, inherited.child))).soul?.bare,
         true,
         "false cannot undo a source's frozen opt-out",
       );
@@ -1490,7 +1490,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     try {
       const unborn = await allocateAkumaDirectory({
         worldRoot: unbornRoot,
-        archetype: "claude",
+        akumaName: "claude",
         draw: () => "f0a10003",
       });
       await assert.rejects(
@@ -1510,21 +1510,21 @@ test("public Akuma handles separate compact list rows from full status and wait"
   const root = temporaryDirectory(context, "keiyaku-akuma-public-");
   const world = await akumaAt(root);
   assert.deepEqual((await world.list()).rows, []);
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "1234abcd" });
   await initializeHeart(allocated.paths);
-  await moveAlias({ world: root as WorldRoot, alias: parseAkumaAlias("@early"), akuId: allocated.id });
+  await moveAlias({ world: root as WorldRoot, alias: parseAkumaAlias("@early"), akumaId: allocated.id });
   assert.equal((await world.list()).rows[0]?.life, "unborn");
   assert.deepEqual((await world.list()).rows[0]?.aliases, ["@early"]);
-  assert.equal((await world.list({ archetype: "claude" })).rows[0]?.id, allocated.id);
-  assert.deepEqual((await world.list({ archetype: "reviewer" })).rows, []);
-  await assert.rejects(world.list({ archetype: "not/a-name" }), /Akuma name/);
+  assert.equal((await world.list({ akumaName: "claude" })).rows[0]?.id, allocated.id);
+  assert.deepEqual((await world.list({ akumaName: "reviewer" })).rows, []);
+  await assert.rejects(world.list({ akumaName: "not/a-name" }), /Akuma name/);
   await assert.rejects(world.list({ unknown: true } as never), /unknown field: unknown/);
 
   const launch: BodyLaunch = {
     paths: allocated.paths,
     seed: {
       id: allocated.id,
-      archetype: "claude",
+      akumaName: "claude",
       description: "Fixture akuma",
       provider: CLAUDE_EXECUTION,
       options: {},
@@ -1541,13 +1541,13 @@ test("public Akuma handles separate compact list rows from full status and wait"
   assert.equal("lifeAt" in listed && listed.lifeAt, "2026-08-08T00:00:00.000Z");
   assert.equal("history" in listed, false);
   assert.equal("answer" in listed, false);
-  assert.equal(listed.archetype, "claude");
+  assert.equal(listed.akumaName, "claude");
   assert.equal(listed.description, "Fixture akuma");
   assert.deepEqual(listed.pending, []);
   const status = await handle.status();
   assert.equal(status.life, "asleep");
   assert.equal(status.cwd, root, "status reports the Akuma's frozen execution workdir");
-  assert.equal("archetype" in status, false);
+  assert.equal("akumaName" in status, false);
   assert.equal("description" in status, false);
   assert.equal("pending" in status, false);
   assert.equal(status.timeline.kind, "idle");
@@ -1588,46 +1588,46 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   const proved = await World.at(root);
   const world = Akuma.of(proved);
   const rootCaller = { kind: "external", integration: "test", id: "root" } as const;
-  const akumaCaller = (akuId: string): AkumaCaller =>
-    ({ kind: "akuma", world: proved, akuId: akuId as never }) as AkumaCaller;
+  const akumaCaller = (akumaId: string): AkumaCaller =>
+    ({ kind: "akuma", world: proved, akumaId: akumaId as never }) as AkumaCaller;
   const direct = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "ca110001",
     createdAt: "2026-08-08T00:00:01.000Z",
     caller: rootCaller,
   });
   const sibling = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "ca110002",
     createdAt: "2026-08-08T00:00:02.000Z",
     caller: rootCaller,
   });
   const grandchild = await bornLineageAkuma({
     root,
-    archetype: "intern",
+    akumaName: "intern",
     draw: "ca110003",
     createdAt: "2026-08-08T00:00:03.000Z",
     caller: akumaCaller(direct.id),
   });
   const greatGrandchild = await bornLineageAkuma({
     root,
-    archetype: "intern",
+    akumaName: "intern",
     draw: "ca110004",
     createdAt: "2026-08-08T00:00:04.000Z",
     caller: akumaCaller(grandchild.id),
   });
   const delegation = await bornLineageAkuma({
     root,
-    archetype: "delegator",
+    akumaName: "delegator",
     draw: "ca110005",
     createdAt: "2026-08-08T00:00:05.000Z",
     caller: akumaCaller(sibling.id),
   });
   const unrelated = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "ca110006",
     createdAt: "2026-08-08T00:00:06.000Z",
     caller: { kind: "external", integration: "other", id: "elsewhere" },
@@ -1635,7 +1635,7 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   });
   const forked = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "ca110007",
     createdAt: "2026-08-08T00:00:07.000Z",
     origin: { kind: "fork", parent: direct.id, at: "turn/1" },
@@ -1645,7 +1645,7 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   assert.deepEqual(
     listed.rows.map((row) => row.id),
     [delegation.id, greatGrandchild.id, grandchild.id, sibling.id, direct.id],
-    "activity order applies after caller and archetype selection",
+    "activity order applies after caller and akumaName selection",
   );
   assert.deepEqual(
     listed.rows.map((row) => ("caller" in row ? row.caller : undefined)),
@@ -1664,7 +1664,7 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   );
 
   assert.deepEqual(
-    (await world.list({ caller: rootCaller, archetype: "intern" })).rows.map((row) => row.id),
+    (await world.list({ caller: rootCaller, akumaName: "intern" })).rows.map((row) => row.id),
     [greatGrandchild.id, grandchild.id],
     "the closure is complete across archetypes before the name filter",
   );
@@ -1700,14 +1700,14 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
   const root = temporaryDirectory(context, "keiyaku-akuma-lineage-cache-");
   const world = await akumaAt(root);
   const caller = { kind: "external", integration: "test", id: "birth" } as const;
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "ca110010" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "ca110010" });
   await initializeHeart(allocated.paths);
   await driveAkumaBody(
     {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        archetype: "claude",
+        akumaName: "claude",
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
@@ -1739,37 +1739,37 @@ test("a wrong lineage cache edge cannot fabricate members or their ancestor chai
   const proved = await World.at(root);
   const world = Akuma.of(proved);
   const rootCaller = { kind: "external", integration: "test", id: "root" } as const;
-  const akumaCaller = (akuId: string): AkumaCaller =>
-    ({ kind: "akuma", world: proved, akuId: akuId as never }) as AkumaCaller;
+  const akumaCaller = (akumaId: string): AkumaCaller =>
+    ({ kind: "akuma", world: proved, akumaId: akumaId as never }) as AkumaCaller;
   const direct = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "ca110011",
     createdAt: "2026-08-08T00:00:01.000Z",
     caller: rootCaller,
   });
   const descendant = await bornLineageAkuma({
     root,
-    archetype: "intern",
+    akumaName: "intern",
     draw: "ca110012",
     createdAt: "2026-08-08T00:00:02.000Z",
     caller: akumaCaller(direct.id),
   });
   const stranger = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "ca110013",
     createdAt: "2026-08-08T00:00:03.000Z",
     caller: { kind: "external", integration: "other", id: "elsewhere" },
   });
   const strangerChild = await bornLineageAkuma({
     root,
-    archetype: "intern",
+    akumaName: "intern",
     draw: "ca110014",
     createdAt: "2026-08-08T00:00:04.000Z",
     caller: akumaCaller(stranger.id),
   });
-  const unborn = await allocateAkumaDirectory({ worldRoot: proved, archetype: "intern", draw: () => "ca110015" });
+  const unborn = await allocateAkumaDirectory({ worldRoot: proved, akumaName: "intern", draw: () => "ca110015" });
   await initializeHeart(unborn.paths);
 
   // Forged edges: an unrelated worker looks like a direct child, its real child
@@ -1796,7 +1796,7 @@ test("a wrong lineage cache edge cannot fabricate members or their ancestor chai
     "the real child remains a child of its real caller",
   );
   assert.deepEqual(
-    (await world.list({ caller: rootCaller, archetype: "intern" })).rows.map((row) => row.id),
+    (await world.list({ caller: rootCaller, akumaName: "intern" })).rows.map((row) => row.id),
     [descendant.id],
   );
 });
@@ -1808,7 +1808,7 @@ test("a lineage cache row for a vanished directory never resurrects an identity"
   const rootCaller = { kind: "external", integration: "test", id: "root" } as const;
   const direct = await bornLineageAkuma({
     root,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "ca110016",
     createdAt: "2026-08-08T00:00:01.000Z",
     caller: rootCaller,
@@ -1896,14 +1896,14 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-idle-");
   const seat = join(root, "seat");
   mkdirSync(seat);
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1d1e0001" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "1d1e0001" });
   await initializeHeart(allocated.paths);
   await driveAkumaBody(
     {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        archetype: "claude",
+        akumaName: "claude",
         provider: CLAUDE_EXECUTION,
         options: {},
         origin: { kind: "direct" },
@@ -2209,7 +2209,7 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
   }
 });
 
-test("dotted archetype file stems join the catalogue as canonical names", async () => {
+test("dotted akumaName file stems join the catalogue as canonical names", async () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-dotted-root-"));
   const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-dotted-home-"));
   try {
@@ -2264,7 +2264,7 @@ test("list omits unreadable Hearts instead of reporting unborn, while direct sta
   const root = temporaryDirectory(context, "keiyaku-akuma-list-schema-cut-");
   const heartCut = await allocateAkumaDirectory({
     worldRoot: root,
-    archetype: "claude",
+    akumaName: "claude",
     draw: () => "c1000001",
   });
   seedLegacySchema(heartCut.paths.heart, "akuma_schema", 13);
@@ -2272,7 +2272,7 @@ test("list omits unreadable Hearts instead of reporting unborn, while direct sta
   mkdirSync(noise);
   const visible = await allocateAkumaDirectory({
     worldRoot: root,
-    archetype: "claude",
+    akumaName: "claude",
     draw: () => "c1000003",
   });
 
@@ -2287,7 +2287,7 @@ test("list omits unreadable Hearts instead of reporting unborn, while direct sta
   rmSync(heartCut.paths.directory, { recursive: true, force: true });
   const leashCut = await allocateAkumaDirectory({
     worldRoot: root,
-    archetype: "claude",
+    akumaName: "claude",
     draw: () => "c1000002",
   });
   await initializeHeart(leashCut.paths);
@@ -2297,7 +2297,7 @@ test("list omits unreadable Hearts instead of reporting unborn, while direct sta
 
 test("kill gives the Body a grace window to abort its owned provider session", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-kill-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "fedcba98" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "fedcba98" });
   await initializeHeart(allocated.paths);
   let aborted = false;
   const { promise: completion, resolve: settle } = promiseBarrier<{ kind: "failed"; diagnostic: string }>();
@@ -2325,7 +2325,7 @@ test("kill gives the Body a grace window to abort its owned provider session", a
     paths: allocated.paths,
     seed: {
       id: allocated.id,
-      archetype: "claude",
+      akumaName: "claude",
       provider: CLAUDE_EXECUTION,
       options: {},
       origin: { kind: "direct" },

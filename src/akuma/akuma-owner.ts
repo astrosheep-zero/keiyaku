@@ -45,7 +45,7 @@ import {
   type TurnOutcome,
   type PauseFact,
 } from "./heart/index.js";
-import { parseExactHistorySelector, pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
+import { parseExactHistorySelector, pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
 import type { ReportAdmission } from "./heart/facts.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
 import { projectTurns, selectExactHistory, selectHistory } from "./projection.js";
@@ -55,7 +55,7 @@ import { publishAkuma } from "./publication.js";
 export type InterruptReceipt = TellResult | Extract<InterruptTellAdmission, { kind: "unavailable" }>;
 
 export type ForkReceipt =
-  | Readonly<{ kind: "forked"; child: AkuId }>
+  | Readonly<{ kind: "forked"; child: AkumaId }>
   | Readonly<{ kind: "provider-cannot-fork"; provider: string }>
   | Readonly<{ kind: "unknown-history"; at: string }>
   | Readonly<{ kind: "fork-failed"; diagnostic: string }>
@@ -182,13 +182,13 @@ export async function killAkumaWithRecovery(
  */
 export class AkumaOwner {
   constructor(
-    readonly id: AkuId,
+    readonly id: AkumaId,
     private readonly worldPath: WorldRoot,
     private readonly outcomeObserved?: OutcomeObserver,
   ) {}
 
   private get paths(): AkumaPaths {
-    return pathsForAkuId(this.worldPath, this.id);
+    return pathsForAkumaId(this.worldPath, this.id);
   }
 
   private async projectHistoryTurns() {
@@ -519,14 +519,14 @@ export class AkumaOwner {
     try {
       const child = await publishAkuma({
         worldPath: this.worldPath,
-        archetype: source.archetype,
+        akumaName: source.akumaName,
         awaitAsleep: true,
         launch: async (allocated) =>
           await spawn({
             paths: allocated.paths,
             seed: {
               id: allocated.id,
-              archetype: source.archetype,
+              akumaName: source.akumaName,
               ...(source.description === undefined ? {} : { description: source.description }),
               provider: source.provider,
               options: source.options,

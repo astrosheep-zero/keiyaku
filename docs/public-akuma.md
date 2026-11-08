@@ -37,10 +37,10 @@ as its own integration stage and never rolls back the Akuma. A Dispatch failure
 prevents the requested Alias move; an Alias failure preserves Dispatch. A
 contract-free birth is complete and writes no Dispatch. Fork may carry an
 existing Dispatch relation to its child but never inherits an Alias or invents a
-provider fork capability. The submitting process writes its call wiring after
-call admission -- including any exact first Tell -- and before it observes the
-call outcome. Dispatch and Alias remain independent cross-product authority,
-not child identity, and each keeps its own integration result. Bounded-call
+provider fork capability. The submitting process writes its spawn wiring after
+spawn admission -- including any exact first Tell -- and before it observes the
+spawn outcome. Dispatch and Alias remain independent cross-product authority,
+not child identity, and each keeps its own integration result. Bounded-spawn
 observation starts only after native validation and child allocation, with that
 exact coordinate's notification suppression established before publication and
 first input. The same allocated child is published by the ordinary birth owner;
@@ -54,7 +54,7 @@ only an explicit selection or the effective invocation directory determines
 it. Exact public inputs, result fields,
 and timeout defaults belong to declarations and help.
 
-Birth and call also accept explicit additional writable directories. The SDK
+Birth and spawn also accept explicit additional writable directories. The SDK
 requires nonblank existing canonical absolute directories and rejects invalid
 or unsupported grants before allocating an Akuma. Omission leaves existing
 behavior unchanged. The Akuma/provider owner admits these additive native
@@ -84,17 +84,17 @@ participate in identified-outcome observation, while association reads and
 roster expansion do not. Wait and ask deliver identified outcome observation
 in the observing process from the concrete result they return. Wait uses its
 returned status outcomes; ask uses private live observation evidence that never
-changes the public result. Delivery precedes answer decoding. Bounded call
+changes the public result. Delivery precedes answer decoding. Bounded spawn
 answer observation stays with the submitting observer. Composition never
 rereads later state to infer the identity of an earlier observed answer.
 
-A call composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a call without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a call awaits the answer to that first Tell without withdrawing it at the deadline.
+A spawn composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a spawn without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a spawn awaits the answer to that first Tell without withdrawing it at the deadline.
 Akuma execution owns that admission and wake. Library composes surrounding
 Dispatch and Alias facts. A schema belongs to that same input and
-its answer contract; it creates no alternate call path and does not
+its answer contract; it creates no alternate spawn path and does not
 alter the existing busy refusal for schema Tells to a running Akuma.
 
-After a successful call or fork has made its new Akuma durable, and outside that
+After a successful spawn or fork has made its new Akuma durable, and outside that
 birth transaction, one best-effort inactive-retention sweep may follow. It can
 only retire entries that satisfy the Akuma owner's fifteen-day, stopped,
 unaliased, terminal-Dispatch judgment under the Alias authority lock and the
@@ -166,10 +166,10 @@ roster supplies that native membership, order, and extent, and World
 composition attaches the current Alias bindings afterward without replacing the
 semantic order or counting the board. Archetype definitions are listed by the archetype
 owner. The owner's bounded definitions catalogue and the native Archetype
-error that call admission already throws are reachable from the package root,
-so a root-only caller lists the same callable definitions the CLI shows and
+error that spawn admission already throws are reachable from the package root,
+so a root-only caller lists the same spawnable definitions the CLI shows and
 identifies that error without a private module. An archetype definition may declare `hidden: true`: a hidden definition
-never appears in the archetype catalogue, but it resolves and answers calls by
+never appears in the archetype catalogue, but it resolves and answers spawns by
 name exactly as a visible one, and hiddenness is the definition's own
 catalogue visibility, never inherited through `base`. There is no
 cross-product SDK catalogue or `ls` operation, and no public definition loader. The CLI's

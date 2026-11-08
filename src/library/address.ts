@@ -2,7 +2,7 @@
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readAkumaCompleteRoster } from "../akuma/akuma.js";
 import { akumaAddressability, requireBornAkuma } from "../akuma/akuma-probe.js";
-import { parseAkuId, type AkuId } from "../akuma/identity.js";
+import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import { contractId } from "../core/facts/types.js";
 import { readDispatches } from "../dispatch/index.js";
 import {
@@ -37,7 +37,7 @@ type UncheckedAkumaAddressInput = Readonly<{
 
 export type AkumaWorldScopeRefusal = Readonly<{
   kind: "akuma-not-in-world";
-  ids: readonly AkuId[];
+  ids: readonly AkumaId[];
   world: WorldRoot;
 }>;
 
@@ -80,19 +80,19 @@ function parseAddressAlias(selector: string): AkumaAlias {
   }
 }
 
-function parseAddressId(selector: string): ReturnType<typeof parseAkuId> {
+function parseAddressId(selector: string): ReturnType<typeof parseAkumaId> {
   try {
-    return parseAkuId(selector);
+    return parseAkumaId(selector);
   } catch (error) {
     if (!(error instanceof TypeError)) throw error;
     throw new AkumaAddressError({ kind: "invalid-akuma", selector });
   }
 }
 
-async function directId(path: WorldRoot, selector: string): Promise<AkuId> {
+async function directId(path: WorldRoot, selector: string): Promise<AkumaId> {
   if (selector.startsWith("@")) {
     const alias = parseAddressAlias(selector);
-    const resolved = (await readAliases(path)).find((binding) => binding.alias === alias)?.akuId ?? null;
+    const resolved = (await readAliases(path)).find((binding) => binding.alias === alias)?.akumaId ?? null;
     if (resolved === null) throw new AkumaAddressError({ kind: "akuma-alias-not-found", alias });
     return resolved;
   }
@@ -101,7 +101,7 @@ async function directId(path: WorldRoot, selector: string): Promise<AkuId> {
 
 export type NamedAddress =
   | Readonly<{ kind: "contract"; id: ReturnType<typeof contractId> }>
-  | Readonly<{ kind: "akuma"; id: AkuId }>;
+  | Readonly<{ kind: "akuma"; id: AkumaId }>;
 
 /** The frozen authority a named selector is adjudicated against. */
 export type NamedAddressAuthority = Readonly<{
@@ -145,7 +145,7 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
   });
   const aliasId =
     input.aliases.kind === "present"
-      ? (input.aliases.value.find((binding) => binding.alias === alias)?.akuId ?? null)
+      ? (input.aliases.value.find((binding) => binding.alias === alias)?.akumaId ?? null)
       : null;
   if (contractMatches.length > 0 && aliasId !== null)
     throw new TypeError(`ambiguous selector matches Contract and Akuma: ${selector}`);
@@ -163,7 +163,7 @@ export function resolveNamedAddress(input: NamedAddressInput): NamedAddress {
 
 type AddressedAkuma = Readonly<{
   path: WorldRoot;
-  id: AkuId;
+  id: AkumaId;
 }>;
 
 /** Resolve one selector and prove its birth through the native addressability owner. */
@@ -185,7 +185,7 @@ type ParsedSetSelector =
   | Readonly<{ kind: "contract"; value: ReturnType<typeof contractId> }>
   | Readonly<{ kind: "glob"; value: AkumaGlob }>
   | Readonly<{ kind: "alias"; value: AkumaAlias }>
-  | Readonly<{ kind: "direct"; value: AkuId }>;
+  | Readonly<{ kind: "direct"; value: AkumaId }>;
 type DispatchFact = Awaited<ReturnType<typeof readDispatches>>[number];
 
 function parseSetSelector(raw: string): ParsedSetSelector {
@@ -203,19 +203,19 @@ function hasSelectorKind(selectors: readonly ParsedSetSelector[], kind: ParsedSe
 function addSelectorIds(
   selector: ParsedSetSelector,
   sources: Readonly<{
-    rosterIds: readonly AkuId[];
-    aliases: ReadonlyMap<AkumaAlias, AkuId>;
+    rosterIds: readonly AkumaId[];
+    aliases: ReadonlyMap<AkumaAlias, AkumaId>;
     dispatches: readonly DispatchFact[];
   }>,
-  selected: Set<AkuId>,
-  contractMembers: Set<AkuId>,
-  explicit: Set<AkuId>,
+  selected: Set<AkumaId>,
+  contractMembers: Set<AkumaId>,
+  explicit: Set<AkumaId>,
 ): void {
   if (selector.kind === "contract") {
     for (const dispatch of sources.dispatches) {
       if (dispatch.contractId !== selector.value) continue;
-      selected.add(dispatch.akuId);
-      contractMembers.add(dispatch.akuId);
+      selected.add(dispatch.akumaId);
+      contractMembers.add(dispatch.akumaId);
     }
     return;
   }
@@ -234,7 +234,7 @@ function addSelectorIds(
   explicit.add(selector.value);
 }
 
-async function contractMemberInWorld(path: WorldRoot, id: AkuId): Promise<boolean> {
+async function contractMemberInWorld(path: WorldRoot, id: AkumaId): Promise<boolean> {
   // A dispatched physical member stays selected when its Heart cannot be read:
   // the World, not this reader, remains the authority on its membership.
   return (await akumaAddressability(path, id)).kind !== "absent";
@@ -242,10 +242,10 @@ async function contractMemberInWorld(path: WorldRoot, id: AkuId): Promise<boolea
 
 async function refuseForeignContractMembers(
   path: WorldRoot,
-  ids: readonly AkuId[],
-  contractMembers: ReadonlySet<AkuId>,
+  ids: readonly AkumaId[],
+  contractMembers: ReadonlySet<AkumaId>,
 ): Promise<void> {
-  const foreign: AkuId[] = [];
+  const foreign: AkumaId[] = [];
   for (const id of ids) {
     if (contractMembers.has(id) && !(await contractMemberInWorld(path, id))) foreign.push(id);
   }
@@ -255,14 +255,14 @@ async function refuseForeignContractMembers(
 type ResolvedAkumaSet = Readonly<{
   path: WorldRoot;
   /** The same set in the caller's selector order, for surfaces that name the selection as chosen. */
-  orderedIds: readonly AkuId[];
+  orderedIds: readonly AkumaId[];
   /** The canonical order of the selected set. */
-  ids: readonly AkuId[];
-  contractMembers: ReadonlySet<AkuId>;
-  explicit: ReadonlySet<AkuId>;
+  ids: readonly AkumaId[];
+  contractMembers: ReadonlySet<AkumaId>;
+  explicit: ReadonlySet<AkumaId>;
 }>;
 
-function canonicalAkumaOrder(selected: ReadonlySet<AkuId>): readonly AkuId[] {
+function canonicalAkumaOrder(selected: ReadonlySet<AkumaId>): readonly AkumaId[] {
   const ids = [...selected].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
   if (ids.length === 0) throw new TypeError("Akuma selector snapshot is empty");
   return ids;
@@ -286,14 +286,14 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<Resolved
     ? (await readAkumaCompleteRoster(path)).rows.map((row) => row.id)
     : [];
   const aliases = hasSelectorKind(selectors, "alias")
-    ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akuId]))
-    : new Map<AkumaAlias, AkuId>();
+    ? new Map((await readAliases(path)).map((binding) => [binding.alias, binding.akumaId]))
+    : new Map<AkumaAlias, AkumaId>();
   const dispatches = hasSelectorKind(selectors, "contract")
     ? await readDispatches(scopeForRepo(values.repo as Repo))
     : [];
-  const selected = new Set<AkuId>();
-  const contractMembers = new Set<AkuId>();
-  const explicit = new Set<AkuId>();
+  const selected = new Set<AkumaId>();
+  const contractMembers = new Set<AkumaId>();
+  const explicit = new Set<AkumaId>();
   const sources = { rosterIds, aliases, dispatches };
   for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers, explicit);
   return { path, orderedIds: [...selected], ids: canonicalAkumaOrder(selected), contractMembers, explicit };
@@ -301,7 +301,7 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<Resolved
 
 export async function addressAkumaSet(
   input: UncheckedAkumaAddressInput,
-): Promise<Readonly<{ path: WorldRoot; ids: readonly AkuId[]; orderedIds: readonly AkuId[] }>> {
+): Promise<Readonly<{ path: WorldRoot; ids: readonly AkumaId[]; orderedIds: readonly AkumaId[] }>> {
   const resolved = await readAkumaSet(input);
   for (const id of resolved.explicit) await requireBornAkuma(resolved.path, id);
   await refuseForeignContractMembers(resolved.path, resolved.ids, resolved.contractMembers);

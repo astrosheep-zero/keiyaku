@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
-import { parseAkuId, type AkuId } from "../akuma/identity.js";
+import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import {
   appendPrivateStateSeatClose,
   confirmPrivateStatePublication,
@@ -37,7 +37,7 @@ const DISPATCH_PREFIX = `${DISPATCH_ROOT}/`;
 const DISPATCH_SUFFIX = ".json";
 
 export type Dispatch = Readonly<{
-  akuId: AkuId;
+  akumaId: AkumaId;
   contractId: ContractId;
   dispatchedAt: string;
 }>;
@@ -50,8 +50,8 @@ type DispatchPublication =
   | Readonly<{ kind: "dispatched"; dispatch: Dispatch; seatClose?: readonly PrivateStateSeatCloseLag[] }>
   | Readonly<{ kind: "failed"; failure: DispatchFailure }>;
 
-function pathFor(akuId: AkuId): string {
-  return `${DISPATCH_PREFIX}${createHash("sha256").update(akuId).digest("hex")}${DISPATCH_SUFFIX}`;
+function pathFor(akumaId: AkumaId): string {
+  return `${DISPATCH_PREFIX}${createHash("sha256").update(akumaId).digest("hex")}${DISPATCH_SUFFIX}`;
 }
 
 function bytesFor(dispatch: Dispatch): Uint8Array {
@@ -79,20 +79,20 @@ function decode(path: string, bytes: Uint8Array): Dispatch {
   }
   const record = value as Record<string, unknown>;
   const keys = Object.keys(record);
-  if (keys.length !== 3 || keys.some((key) => !["akuId", "contractId", "dispatchedAt"].includes(key))) {
+  if (keys.length !== 3 || keys.some((key) => !["akumaId", "contractId", "dispatchedAt"].includes(key))) {
     corruption(`Dispatch has invalid fields: ${path}`);
   }
   if (
-    typeof record.akuId !== "string" ||
+    typeof record.akumaId !== "string" ||
     typeof record.contractId !== "string" ||
     typeof record.dispatchedAt !== "string"
   ) {
     corruption(`Dispatch has invalid values: ${path}`);
   }
-  let akuId: AkuId;
+  let akumaId: AkumaId;
   let owner: ContractId;
   try {
-    akuId = parseAkuId(record.akuId).id;
+    akumaId = parseAkumaId(record.akumaId).id;
     owner = contractId(record.contractId);
   } catch (error) {
     return corruption(`Dispatch identity is invalid: ${path}`, error);
@@ -101,8 +101,8 @@ function decode(path: string, bytes: Uint8Array): Dispatch {
   if (!Number.isFinite(timestamp.getTime()) || timestamp.toISOString() !== record.dispatchedAt) {
     corruption(`Dispatch timestamp is invalid: ${path}`);
   }
-  const dispatch: Dispatch = { akuId, contractId: owner, dispatchedAt: record.dispatchedAt };
-  if (pathFor(akuId) !== path) corruption(`Dispatch path does not match akuId: ${path}`);
+  const dispatch: Dispatch = { akumaId, contractId: owner, dispatchedAt: record.dispatchedAt };
+  if (pathFor(akumaId) !== path) corruption(`Dispatch path does not match akumaId: ${path}`);
   if (!Buffer.from(bytesFor(dispatch)).equals(Buffer.from(bytes))) {
     corruption(`Dispatch bytes are not canonical: ${path}`);
   }
@@ -112,19 +112,19 @@ function decode(path: string, bytes: Uint8Array): Dispatch {
 async function dispatchFromSnapshot(
   repository: GitRepository,
   snapshot: GitSnapshot,
-  akuId: AkuId,
+  akumaId: AkumaId,
 ): Promise<Dispatch | null> {
-  const path = pathFor(akuId);
+  const path = pathFor(akumaId);
   const entry = snapshot.paths.get(path);
   if (entry === undefined) return null;
   if (entry.type !== "blob") corruption(`Dispatch path is not a blob: ${path}`);
   return decode(path, await readBlob(repository, entry.oid));
 }
 
-export async function readDispatch(repository: GitRepository, value: AkuId): Promise<Dispatch | null> {
-  const akuId = parseAkuId(value).id;
-  const path = pathFor(akuId);
-  return await dispatchFromSnapshot(repository, await readGitPaths(repository, [path]), akuId);
+export async function readDispatch(repository: GitRepository, value: AkumaId): Promise<Dispatch | null> {
+  const akumaId = parseAkumaId(value).id;
+  const path = pathFor(akumaId);
+  return await dispatchFromSnapshot(repository, await readGitPaths(repository, [path]), akumaId);
 }
 
 export async function readDispatchesAt(observation: GitReadObservation): Promise<readonly Dispatch[]> {
@@ -133,7 +133,7 @@ export async function readDispatchesAt(observation: GitReadObservation): Promise
   );
   const blobs = await observation.readBlobs(entries.map(([, entry]) => entry.oid));
   const dispatches: Dispatch[] = [];
-  const seen = new Set<AkuId>();
+  const seen = new Set<AkumaId>();
   for (const [path, entry] of observation.snapshot.paths) {
     if (path === DISPATCH_ROOT) corruption(`Dispatch authority root is not a tree: ${path}`);
     if (!path.startsWith(DISPATCH_PREFIX)) continue;
@@ -142,11 +142,11 @@ export async function readDispatchesAt(observation: GitReadObservation): Promise
     const result = blobs.get(entry.oid);
     if (result?.kind !== "present") corruption(`missing Dispatch Git object: ${path}`);
     const dispatch = decode(path, result.bytes);
-    if (seen.has(dispatch.akuId)) corruption(`duplicate Dispatch identity: ${dispatch.akuId}`);
-    seen.add(dispatch.akuId);
+    if (seen.has(dispatch.akumaId)) corruption(`duplicate Dispatch identity: ${dispatch.akumaId}`);
+    seen.add(dispatch.akumaId);
     dispatches.push(dispatch);
   }
-  return dispatches.sort((left, right) => Buffer.compare(Buffer.from(left.akuId), Buffer.from(right.akuId)));
+  return dispatches.sort((left, right) => Buffer.compare(Buffer.from(left.akumaId), Buffer.from(right.akumaId)));
 }
 
 export async function readDispatches(repository: GitRepository): Promise<readonly Dispatch[]> {
@@ -157,10 +157,10 @@ export async function readDispatches(repository: GitRepository): Promise<readonl
 
 async function observedPublication(
   repository: GitRepository,
-  akuId: AkuId,
+  akumaId: AkumaId,
   owner: ContractId,
 ): Promise<DispatchPublication | null> {
-  const current = await readDispatch(repository, akuId);
+  const current = await readDispatch(repository, akumaId);
   if (current === null) return null;
   return current.contractId === owner
     ? { kind: "dispatched", dispatch: current }
@@ -181,18 +181,18 @@ function dispatchPublicationWithSeatClose(outcome: PrivateStateSeatOutcome<Dispa
 export async function publishDispatch(
   input: Readonly<{
     repository: GitRepository;
-    akuId: AkuId;
+    akumaId: AkumaId;
     contractId: ContractId;
   }>,
 ): Promise<DispatchPublication> {
-  const akuId = parseAkuId(input.akuId).id;
+  const akumaId = parseAkumaId(input.akumaId).id;
   const owner = contractId(input.contractId);
-  const intended: Dispatch = { akuId, contractId: owner, dispatchedAt: new Date().toISOString() };
-  const path = pathFor(akuId);
+  const intended: Dispatch = { akumaId, contractId: owner, dispatchedAt: new Date().toISOString() };
+  const path = pathFor(akumaId);
   return dispatchPublicationWithSeatClose(
     await withPrivateStatePublicationSeat(input.repository, async (seat) => {
       const snapshot = await readGitPaths(input.repository, [path]);
-      const current = await dispatchFromSnapshot(input.repository, snapshot, akuId);
+      const current = await dispatchFromSnapshot(input.repository, snapshot, akumaId);
       if (current !== null) {
         if (current.contractId === owner) confirmPrivateStatePublication(seat);
         return current.contractId === owner
@@ -210,7 +210,7 @@ export async function publishDispatch(
         repository: input.repository,
         tree,
         parent: snapshot.commit,
-        message: `dispatch ${akuId}`,
+        message: `dispatch ${akumaId}`,
         at: intended.dispatchedAt,
       });
       const publication = await updateRefsAtomically(input.repository, [
@@ -225,7 +225,7 @@ export async function publishDispatch(
         return { kind: "dispatched", dispatch: intended };
       }
 
-      const observed = await observedPublication(input.repository, akuId, owner);
+      const observed = await observedPublication(input.repository, akumaId, owner);
       if (observed !== null) {
         if (observed.kind === "dispatched") confirmPrivateStatePublication(seat);
         return observed;
@@ -250,37 +250,37 @@ export async function publishDispatch(
 /** Read selected associations in one targeted observation, isolating per-identity decoding failures. */
 export async function observeDispatchAssociations(
   repository: GitRepository | undefined,
-  akuIds: readonly AkuId[],
-): Promise<ReadonlyMap<AkuId, DispatchAssociation>> {
-  const requested = [...new Set(akuIds.map((akuId) => parseAkuId(akuId).id))];
-  const associations = new Map<AkuId, DispatchAssociation>(requested.map((akuId) => [akuId, NO_DISPATCH_ASSOCIATION]));
+  akuIds: readonly AkumaId[],
+): Promise<ReadonlyMap<AkumaId, DispatchAssociation>> {
+  const requested = [...new Set(akuIds.map((akumaId) => parseAkumaId(akumaId).id))];
+  const associations = new Map<AkumaId, DispatchAssociation>(requested.map((akumaId) => [akumaId, NO_DISPATCH_ASSOCIATION]));
   if (repository === undefined || requested.length === 0) return associations;
   try {
     await withGitDecodeChannel(repository, (channel) =>
       withGitTargetedReadObservation(repository, channel, { paths: requested.map(pathFor) }, async (observation) => {
-        const entries = requested.map((akuId) => {
-          const path = pathFor(akuId);
-          return [akuId, path, observation.snapshot.paths.get(path)] as const;
+        const entries = requested.map((akumaId) => {
+          const path = pathFor(akumaId);
+          return [akumaId, path, observation.snapshot.paths.get(path)] as const;
         });
         const blobs = await observation.readBlobs(
           entries.flatMap(([, , entry]) => (entry?.type === "blob" ? [entry.oid] : [])),
         );
-        for (const [akuId, path, entry] of entries) {
+        for (const [akumaId, path, entry] of entries) {
           if (entry === undefined) continue;
           try {
             if (entry.type !== "blob") corruption(`Dispatch path is not a blob: ${path}`);
             const result = blobs.get(entry.oid);
             if (result?.kind !== "present") corruption(`missing Dispatch Git object: ${path}`);
-            associations.set(akuId, { kind: "associated", contractId: decode(path, result.bytes).contractId });
+            associations.set(akumaId, { kind: "associated", contractId: decode(path, result.bytes).contractId });
           } catch (error) {
-            associations.set(akuId, { kind: "failed", diagnostic: diagnostic(error) });
+            associations.set(akumaId, { kind: "failed", diagnostic: diagnostic(error) });
           }
         }
       }),
     );
   } catch (error) {
     const message = diagnostic(error);
-    for (const akuId of requested) associations.set(akuId, { kind: "failed", diagnostic: message });
+    for (const akumaId of requested) associations.set(akumaId, { kind: "failed", diagnostic: message });
   }
   return associations;
 }

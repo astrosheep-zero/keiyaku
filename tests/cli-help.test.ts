@@ -46,7 +46,7 @@ test("namespace and leaf help expose executable usage and flags", () => {
   assert.match(renderDebtHelp("add"), /usage  keiyaku debt add/u);
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
   assert.match(renderAkumaHelp("ask"), /--wait <duration>/u);
-  assert.match(renderAkumaHelp("call"), /\[--workdir <path>\]/u);
+  assert.match(renderAkumaHelp("spawn"), /\[--workdir <path>\]/u);
   const verifyHelp = renderContractHelp("verify");
   assert.match(verifyHelp, /usage  keiyaku verify/u);
   assert.match(verifyHelp, /--index <n>/u);

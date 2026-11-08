@@ -102,7 +102,7 @@ function fullEventLines(
   event: ContractHistoryEvent,
   workspace?: Readonly<{ kind: "worktree"; path: string }>,
 ): readonly string[] {
-  if (event.source === "dispatch") return [`${event.dispatch.dispatchedAt} dispatch · ${event.dispatch.akuId}`];
+  if (event.source === "dispatch") return [`${event.dispatch.dispatchedAt} dispatch · ${event.dispatch.akumaId}`];
   return [journalHead(event.fact), ...journalBody(event.fact, workspace)];
 }
 
@@ -139,7 +139,7 @@ function bindLine(bind: Extract<Fact, { kind: "bind" }>, dispatch: ContractHisto
   const target = destination === undefined ? "targetless" : targetName(destination).replace(/^refs\/heads\//u, "");
   const gates = bind.data.terms.gates.map(gateDisplayName);
   const gateFact = gates.length === 0 ? "" : ` · ${gates.length === 1 ? "gate" : "gates"} ${gates.join(" · ")}`;
-  const caller = dispatch?.source === "dispatch" ? ` · ${dispatch.dispatch.akuId}` : "";
+  const caller = dispatch?.source === "dispatch" ? ` · ${dispatch.dispatch.akumaId}` : "";
   return `bound to ${target} @ ${shortGitId(bind.data.coordinates.start)}${gateFact}${caller}`;
 }
 
@@ -163,7 +163,7 @@ function skeletonBeatLines(beat: Beat, history: ContractHistory): readonly strin
   };
   const payloadSuffix = (rendered: readonly string[]): string =>
     rendered.length > 0 ? ` · ${lineCount(rendered.length)}` : "";
-  if (first.source === "dispatch") return [`${clock(first)} dispatch · ${first.dispatch.akuId}`];
+  if (first.source === "dispatch") return [`${clock(first)} dispatch · ${first.dispatch.akumaId}`];
   const fact = first.fact;
   switch (fact.kind) {
     case "bind": {

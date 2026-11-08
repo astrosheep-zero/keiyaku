@@ -213,7 +213,7 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     process.env.KEIYAKU_TEST_OPENAI_COMPLETION_RECEIPT = receipt;
 
     const world = Akuma.of(worldRoot, { home });
-    const handle = await world.call({ archetype: "fixture", body: "Return the fixture answer." });
+    const handle = await world.call({ akumaName: "fixture", body: "Return the fixture answer." });
     const status = await handle.wait(undefined, { timeoutMs: 15_000 });
     assert.deepEqual(
       readFileSync(receipt, "utf8")

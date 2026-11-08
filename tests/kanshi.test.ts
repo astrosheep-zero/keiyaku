@@ -49,12 +49,12 @@ function document(title = "Kanshi contract"): string {
 }
 
 async function bornAkuma(root: string, suffix: string, createdAt = "2026-08-09T00:00:00.000Z", settle = false) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "watcher", draw: () => suffix });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "watcher", draw: () => suffix });
   await initializeHeart(allocated.paths);
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
   await leash.birth(allocated.paths, {
     id: allocated.id,
-    archetype: "watcher",
+    akumaName: "watcher",
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
     cwd: root,
@@ -101,13 +101,13 @@ async function replacePrivateState(
 }
 
 async function akumaWithReportedChange(root: string, suffix: string) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "watcher", draw: () => suffix });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "watcher", draw: () => suffix });
   await initializeHeart(allocated.paths);
   const at = "2026-08-09T00:00:00.000Z";
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
   await leash.birth(allocated.paths, {
     id: allocated.id,
-    archetype: "watcher",
+    akumaName: "watcher",
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
     cwd: root,
@@ -156,13 +156,13 @@ async function populatedWorld(t: TestContext) {
     (
       await publishDispatch({
         repository: await repositoryAt(repository.path),
-        akuId: akumaId,
+        akumaId: akumaId,
         contractId: contract.id,
       })
     ).kind,
     "dispatched",
   );
-  await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akuId: akumaId });
+  await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akumaId: akumaId });
   return { repository, contract, keiyaku: bound.value.keiyaku, debtId: added.value.id, akumaId };
 }
 
@@ -173,7 +173,7 @@ test("Contract Git format failure preserves independently readable Debt, Akuma, 
     (
       await publishDispatch({
         repository: await repositoryAt(repository.path),
-        akuId: changedAkuma,
+        akumaId: changedAkuma,
         contractId: contract.id,
       })
     ).kind,
@@ -382,7 +382,7 @@ test("missing placement proof retains the Akuma's reported changes", async (t) =
     (
       await publishDispatch({
         repository: await repositoryAt(repository.path),
-        akuId: akumaId,
+        akumaId: akumaId,
         contractId: missingContract,
       })
     ).kind,
@@ -406,7 +406,7 @@ test("missing placement proof retains the Akuma's reported changes", async (t) =
 test("Alias failure leaves Akuma rows readable and marks the section's aliases unavailable", async (t) => {
   const repository = fixtureRepository(t);
   const akumaId = await bornAkuma(repository.path, "a0000004");
-  await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akuId: akumaId });
+  await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akumaId: akumaId });
   writeFileSync(join(repository.path, ".keiyaku", "akuma", "alias.json"), "not Alias authority\n");
 
   const observation = await observeKanshi({ world: await World.at(repository.path) });

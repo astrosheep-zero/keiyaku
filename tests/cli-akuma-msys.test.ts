@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { AkuId } from "../src/akuma/identity.js";
+import type { AkumaId } from "../src/akuma/identity.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
-import type { CallObservation, CallResult } from "../src/library/akuma-creation.js";
+import type { SpawnObservation, SpawnResult } from "../src/library/akuma-creation.js";
 import type { WorldRoot } from "../src/world.js";
 import { parseArgv } from "../src/cli/parse.js";
 import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
@@ -12,7 +12,7 @@ import { contractId } from "../src/core/facts/types.js";
 import { AKUMA_ACTIVITY_AT } from "./support/kanshi-activity.js";
 
 const world = "D:\\dev\\repo with $tag\\it's" as WorldRoot;
-const akuma = "aku/worker/1234abcd" as AkuId;
+const akuma = "aku/worker/1234abcd" as AkumaId;
 const context = { columns: 100, color: false } as const;
 function parseExecution(argv: readonly string[]): ParsedCommandInvocation {
   const parsed = parseArgv(argv);
@@ -20,7 +20,7 @@ function parseExecution(argv: readonly string[]): ParsedCommandInvocation {
   return parsed;
 }
 
-const command = parseExecution(["call", "worker", "prompt"]).command;
+const command = parseExecution(["spawn", "worker", "prompt"]).command;
 
 function tellResult() {
   return {
@@ -38,9 +38,9 @@ function tellResult() {
   };
 }
 
-function detachedCall(result: Pick<CallResult, "dispatch" | "alias">): CallResult {
+function detachedCall(result: Pick<SpawnResult, "dispatch" | "alias">): SpawnResult {
   return {
-    kind: "called",
+    kind: "spawned",
     akuma,
     execution: { cwd: world, source: "process" },
     observation: { kind: "detached", tell: tellResult() },
@@ -48,40 +48,40 @@ function detachedCall(result: Pick<CallResult, "dispatch" | "alias">): CallResul
   };
 }
 
-test("call defaults to detached birth and rejects removed detach flags", () => {
+test("spawn defaults to detached birth and rejects removed detach flags", () => {
   assert.deepEqual(command, {
-    command: "call",
-    archetype: "worker",
+    command: "spawn",
+    akumaName: "worker",
     mode: "detach",
     prompt: { kind: "argument", value: "prompt" },
     output: "text",
   });
-  assert.throws(() => parseArgv(["call", "worker", "-d", "prompt"]), /option -d is not valid for call/u);
-  assert.throws(() => parseArgv(["call", "worker", "--detach", "prompt"]), /option --detach is not valid for call/u);
+  assert.throws(() => parseArgv(["spawn", "worker", "-d", "prompt"]), /option -d is not valid for spawn/u);
+  assert.throws(() => parseArgv(["spawn", "worker", "--detach", "prompt"]), /option --detach is not valid for spawn/u);
   const text = renderCallText(detachedCall({ dispatch: { kind: "none" }, alias: { kind: "none" } }), false, context);
-  assert.equal(text, [`✓ called ${akuma}`, `  ${world}`].join("\n"), "verdict and subject, directory subordinate");
-  assert.doesNotMatch(text, /^─+$|running|completed/mu, "detached call has no timeline or observation conclusion");
+  assert.equal(text, [`✓ spawned ${akuma}`, `  ${world}`].join("\n"), "verdict and subject, directory subordinate");
+  assert.doesNotMatch(text, /^─+$|running|completed/mu, "detached spawn has no timeline or observation conclusion");
   assert.doesNotMatch(text, /cwd|->|keiyaku wait|to wait|📁|└─|├─/u);
 });
 
-test("a contract-bound call receipt indents contract and directory alike", () => {
+test("a contract-bound spawn receipt indents contract and directory alike", () => {
   const text = renderCallText(
     detachedCall({
       dispatch: { kind: "dispatched", dispatch: { contractId: "kei/tree-receipt" } as never },
-      alias: { kind: "aliased", alias: { alias: "@sapling" as AkumaAlias, akuId: akuma }, previous: null },
+      alias: { kind: "aliased", alias: { alias: "@sapling" as AkumaAlias, akumaId: akuma }, previous: null },
     }),
     false,
     context,
   );
   assert.equal(
     text,
-    [`✓ called ${akuma} (@sapling)`, `  kei/tree-receipt`, `  ${world}`].join("\n"),
+    [`✓ spawned ${akuma} (@sapling)`, `  kei/tree-receipt`, `  ${world}`].join("\n"),
     "the alias stays on the subject line and no fact kind collapses into a tree",
   );
 });
 
 test("a dispatched fork receipt names its source and contract as indented evidence", () => {
-  const child = "aku/worker/5678abcd" as AkuId;
+  const child = "aku/worker/5678abcd" as AkumaId;
   const text = renderForkText({
     kind: "forked",
     parent: akuma,
@@ -92,11 +92,11 @@ test("a dispatched fork receipt names its source and contract as indented eviden
 });
 
 function observingCall(
-  observation: CallObservation,
-  result: Pick<CallResult, "dispatch" | "alias"> = { dispatch: { kind: "none" }, alias: { kind: "none" } },
-): CallResult {
+  observation: SpawnObservation,
+  result: Pick<SpawnResult, "dispatch" | "alias"> = { dispatch: { kind: "none" }, alias: { kind: "none" } },
+): SpawnResult {
   return {
-    kind: "called",
+    kind: "spawned",
     akuma,
     execution: { cwd: world, source: "process" },
     observation,
@@ -104,10 +104,10 @@ function observingCall(
   };
 }
 
-test("prompt-free call renders its born identity without a Tell receipt", () => {
+test("prompt-free spawn renders its born identity without a Tell receipt", () => {
   const result = observingCall({ kind: "born" });
   const text = renderCallText(result, false, context);
-  assert.equal(text, [`✓ called ${akuma}`, `  ${world}`].join("\n"));
+  assert.equal(text, [`✓ spawned ${akuma}`, `  ${world}`].join("\n"));
   assert.doesNotMatch(text, /tell|answer|cwd|->/u);
 });
 test("an observing call writes its answer once without repeating cwd or the outcome row", () => {
@@ -133,9 +133,9 @@ test("a detached call keeps its born child, execution directory, and failed stag
       {
         dispatch: {
           kind: "dispatched",
-          dispatch: { akuId: akuma, contractId: contractId("kei/msys-receipt"), dispatchedAt: AKUMA_ACTIVITY_AT },
+          dispatch: { akumaId: akuma, contractId: contractId("kei/msys-receipt"), dispatchedAt: AKUMA_ACTIVITY_AT },
         },
-        alias: { kind: "aliased", alias: { alias: "@ship" as AkumaAlias, akuId: akuma }, previous: null },
+        alias: { kind: "aliased", alias: { alias: "@ship" as AkumaAlias, akumaId: akuma }, previous: null },
       },
     ),
     false,
@@ -143,7 +143,7 @@ test("a detached call keeps its born child, execution directory, and failed stag
   );
   assert.equal(
     text,
-    [`! called ${akuma} (@ship)`, "  kei/msys-receipt", `  ${world}`, '  "prompt"', "  ! window lost"].join("\n"),
+    [`! spawned ${akuma} (@ship)`, "  kei/msys-receipt", `  ${world}`, '  "prompt"', "  ! window lost"].join("\n"),
     "a failed Tell stage stays an action receipt over the admitted child, its directory, and its Tell input",
   );
   assert.equal((text.match(/"prompt"/gu) ?? []).length, 1, "the submitted Tell payload is not replayed");
@@ -152,7 +152,7 @@ test("a detached call keeps its born child, execution directory, and failed stag
 test("detached wait command keeps alias, timeout, failed silence, and JSON", () => {
   const aliased = detachedCall({
     dispatch: { kind: "none" },
-    alias: { kind: "aliased", alias: { alias: "@ship" as AkumaAlias, akuId: akuma }, previous: null },
+    alias: { kind: "aliased", alias: { alias: "@ship" as AkumaAlias, akumaId: akuma }, previous: null },
   });
   assert.match(renderCallText(aliased, false, context), /aku\/worker\/1234abcd \(@ship\)/u);
 
@@ -177,7 +177,7 @@ test("detached wait command keeps alias, timeout, failed silence, and JSON", () 
     assert.ok(text.split("\n").includes(`  ${diagnostic}`), diagnostic);
     assert.match(
       text.split("\n")[0]!,
-      /^! called aku\/worker\/1234abcd/u,
+      /^! spawned aku\/worker\/1234abcd/u,
       "a partial failure is marked on the verdict",
     );
     assert.doesNotMatch(text, /keiyaku wait|to wait|-----/u);

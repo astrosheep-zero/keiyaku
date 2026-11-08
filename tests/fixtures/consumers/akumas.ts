@@ -6,7 +6,7 @@ import {
   Keiyaku,
   listArchetypeDefinitions,
   nuke,
-  type AkuId,
+  type AkumaId,
   type AkumaHostOptions,
   type AkumaHostScope,
   type ArchetypeCatalog,
@@ -18,7 +18,7 @@ import {
 } from "@astrosheep/keiyaku";
 
 declare const world: WorldRoot;
-declare const aku: AkuId;
+declare const aku: AkumaId;
 declare const repo: Repo;
 declare const nativeError: unknown;
 
@@ -81,7 +81,7 @@ Akumas.of(world, contractPolicy);
 // @ts-expect-error the removed execution carrier is not a public input
 Akumas.of(world, { execution: {} });
 // @ts-expect-error Keiyaku.with exposes no Akuma creation operation
-Keiyaku.with().call({ archetype: "worker", body: "not a Contract" });
+Keiyaku.with().spawn({ akumaName: "worker", body: "not a Contract" });
 // @ts-expect-error selection uses the Contract owner's `select` verb
 Keiyaku.with().of({ repo, id: "kei/example" as never });
 // @ts-expect-error old execution constructors are removed

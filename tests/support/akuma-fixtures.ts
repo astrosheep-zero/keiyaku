@@ -24,8 +24,8 @@ type ActivityFact = Extract<TimelineFact, { kind: "activity" }>;
 type TurnEndFact = Extract<TimelineFact, { kind: "turn-end" }>;
 
 /** Allocate one Akuma directory under a World root and initialize its Heart. */
-export async function allocatedHeart(root: string, archetype: string, draw: string) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => draw });
+export async function allocatedHeart(root: string, akumaName: string, draw: string) {
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName, draw: () => draw });
   await initializeHeart(allocated.paths);
   return allocated;
 }
@@ -34,16 +34,16 @@ export async function allocatedHeart(root: string, archetype: string, draw: stri
 export async function bornDirectAkuma(
   input: Readonly<{
     root: string;
-    archetype: string;
+    akumaName: string;
     draw: string;
     createdAt: string;
     provider?: Soul["provider"];
   }>,
 ) {
-  const allocated = await allocatedHeart(input.root, input.archetype, input.draw);
+  const allocated = await allocatedHeart(input.root, input.akumaName, input.draw);
   const soul: Soul = {
     id: allocated.id,
-    archetype: input.archetype,
+    akumaName: input.akumaName,
     provider: input.provider ?? { name: "codex-app-server", kind: "codex-app-server" },
     options: {},
     cwd: input.root,
@@ -59,19 +59,19 @@ export async function bornDirectAkuma(
 export async function bornLineageAkuma(
   input: Readonly<{
     root: string;
-    archetype: string;
+    akumaName: string;
     draw: string;
     createdAt: string;
     caller?: AkumaCaller;
     origin?: Soul["origin"];
   }>,
 ) {
-  const allocated = await allocatedHeart(input.root, input.archetype, input.draw);
+  const allocated = await allocatedHeart(input.root, input.akumaName, input.draw);
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
   try {
     const soul: Soul = {
       id: allocated.id,
-      archetype: input.archetype,
+      akumaName: input.akumaName,
       provider: { name: "codex-app-server", kind: "codex-app-server" },
       options: {},
       cwd: input.root,
@@ -111,7 +111,7 @@ export function turnEndFact(
 /** A fresh Heart-initialized World root with an allocated claude Akuma; the caller closes it. */
 export async function heartFixture(prefix: string) {
   const root = await World.at(mkdtempSync(join(tmpdir(), prefix)));
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => "1234abcd" });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "1234abcd" });
   await initializeHeart(allocated.paths);
   return { root, allocated, close: () => rmSync(root, { recursive: true, force: true }) };
 }
@@ -121,7 +121,7 @@ export async function soulFixture(prefix: string) {
   const value = await heartFixture(prefix);
   const soul: Soul = {
     id: value.allocated.id,
-    archetype: "claude",
+    akumaName: "claude",
     description: "Claude fixture",
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: { model: "claude-sonnet-4-5", systemPrompt: "Be precise." },
@@ -135,12 +135,12 @@ export async function soulFixture(prefix: string) {
 /** One born claude Body under a fresh Heart: the invariant direct-origin,
  * default-options life; createdAt is the scenario's exact time. */
 export async function bornBody(root: string, suffix: string, createdAt: string) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "claude", draw: () => suffix });
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => suffix });
   await initializeHeart(allocated.paths);
   const holder = (await HeldAkumaLeash.try(allocated.paths))!;
   await holder.birth(allocated.paths, {
     id: allocated.id,
-    archetype: "claude",
+    akumaName: "claude",
     provider: { name: "claude", kind: "claude-agent-sdk" },
     options: {},
     origin: { kind: "direct" },
@@ -190,7 +190,7 @@ export function claudeBodyLaunch(
     paths: allocated.paths,
     seed: {
       id: allocated.id,
-      archetype: "claude",
+      akumaName: "claude",
       provider: { name: "claude", kind: "claude-agent-sdk" },
       options: {},
       origin: { kind: "direct" },

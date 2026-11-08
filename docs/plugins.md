@@ -115,7 +115,7 @@ A library host may capture diagnostics through an immutable Akuma composition
 capability. It observes only diagnostics produced in that host process, never
 remote Body logs, and cannot change public results.
 Independent handles may select independent destinations. Local public
-observations default to line-oriented stderr; call observations keep their
+observations default to line-oriented stderr; spawn observations keep their
 existing Akuma log and additionally notify an explicitly selected host.
 CLI output remains owned by its process edge, and Body observations retain
 their own log custody.
@@ -136,12 +136,12 @@ and reports lost custody diagnostically, never recreating an expired scope.
 Completion, timeout, cancellation, decode failure, and partial or late acquisition
 all release only that invocation's suppressions after stopping renewal.
 
-A bounded call validates its complete native recipe before allocating one child
+A bounded spawn validates its complete native recipe before allocating one child
 coordinate. Observation acquires suppression for that coordinate before the same
 allocation is initialized, published, and given its first ordinary Tell. No
 input-correlation substitute or public allocation hook exists. Detached and
-prompt-free calls acquire no answer resource. Wait and idle establish only final
-snapshot outcomes; ask and bounded call establish only the exact admitted input's
+prompt-free spawns acquire no answer resource. Wait and idle establish only final
+snapshot outcomes; ask and bounded spawn establish only the exact admitted input's
 outcome, before answer decoding.
 
 Established exact Turn observation records permanent exact suppression for its
@@ -173,7 +173,7 @@ Normal Akuma birth attempts `akuma.born` after Soul is durable and its first
 Body has been recorded, before supervisor or Turn work. It carries frozen
 origin and caller attribution, the recorded Body identity, and any submitting
 initiator and Contract association already known to that launch. Absent caller
-projects unknown. Calls and forks share this Body-owned producer; wake and succession never replay it. Sealed unborn coordinates emit
+projects unknown. Spawns and forks share this Body-owned producer; wake and succession never replay it. Sealed unborn coordinates emit
 nothing. Loss or failed preparation after Soul durability but before this point
 may leave zero notification. Delivery is best effort, not exactly once or proof
 of provider startup, and cannot roll back birth. This deliberately replaces
@@ -206,7 +206,7 @@ cross-process continuations.
 Public Akuma observation emits `akuma.outcome-observed` when it establishes an
 exact retained answered, failed, or canceled outcome. Knowing it exists neither
 consumes its body nor judges idle. Status, wait and idle, history, stream, ask,
-and bounded call participate; roster, board, incidental reads, and lifecycle
+and bounded spawn participate; roster, board, incidental reads, and lifecycle
 production do not. Running execution may have an observed past outcome. Missing
 or pruned evidence and deadlines invent no identity; decoding failure never
 undoes an established observation.
@@ -224,7 +224,7 @@ Wait and ask observe once in the process returning the concrete result that
 establishes identity: wait uses its returned status frontier and ask carries
 exact identity beside its private live result. Later reads never reconstruct or
 replay observation. Decoding follows observation, including invalid answers;
-bounded call observes in the submitting process after admission. These
+bounded spawn observes in the submitting process after admission. These
 ephemeral observations are neither Keiyaku acknowledgment facts nor
 cross-operation receipts. The observing integration uses its own local
 ownership; attribution grants no permission and changes no public result.

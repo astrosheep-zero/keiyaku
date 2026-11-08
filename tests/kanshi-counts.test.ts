@@ -35,11 +35,11 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   }), gates: [] }));
   await terminal.value.keiyaku.abandon();
   for (let i = 1; i <= 12; i++) {
-    const running = await bornDirectAkuma({ root: world, archetype: "worker", draw: i.toString(16).padStart(8, "0"), createdAt: "2026-08-09T00:00:00.000Z" });
+    const running = await bornDirectAkuma({ root: world, akumaName: "worker", draw: i.toString(16).padStart(8, "0"), createdAt: "2026-08-09T00:00:00.000Z" });
     context.after(() => running.leash.release());
     await running.leash.recordBody(running.paths, { leashTakenAt: running.soul.createdAt });
   }
-  const stopped = await bornDirectAkuma({ root: world, archetype: "worker", draw: "000000ff", createdAt: "2026-08-09T00:00:00.000Z" });
+  const stopped = await bornDirectAkuma({ root: world, akumaName: "worker", draw: "000000ff", createdAt: "2026-08-09T00:00:00.000Z" });
   const body = await stopped.leash.recordBody(stopped.paths, { leashTakenAt: stopped.soul.createdAt });
   await breakBody(stopped.paths, { sequence: body.sequence, end: "put-down", at: stopped.soul.createdAt });
   stopped.leash.release();

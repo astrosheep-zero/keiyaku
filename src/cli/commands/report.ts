@@ -25,7 +25,7 @@ export async function runReport(
   const turnSequence = executionSequence(environment, "KEIYAKU_TURN_SEQUENCE");
   const caller = await akumaCallerFromEnvironment(environment);
   if (caller?.kind !== "akuma") throw new CliUsageError("report requires explicit Akuma identity");
-  const result = await Akuma.select(caller.world, caller.akuId, { reportDiagnostic: writeStderr }).report(text, {
+  const result = await Akuma.select(caller.world, caller.akumaId, { reportDiagnostic: writeStderr }).report(text, {
     bodySequence,
     turnSequence,
     signal: runtime.signal,
@@ -35,7 +35,7 @@ export async function runReport(
     result,
     () =>
       result.kind === "recorded"
-        ? `recorded ${caller.akuId} report/${result.report.sequence} · body/${bodySequence} · turn/${turnSequence}`
+        ? `recorded ${caller.akumaId} report/${result.report.sequence} · body/${bodySequence} · turn/${turnSequence}`
         : `refused report · ${result.reason}`,
     result.kind === "recorded" ? "accepted" : "refused",
   );

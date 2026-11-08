@@ -85,8 +85,8 @@ test("the public catalogue rejects malformed caller input before observing any d
     await assert.rejects(listArchetypeDefinitions(malformed as never), /Akuma catalogue input must be an object/u);
   }
   await assert.rejects(
-    listArchetypeDefinitions({ project: root, home, archetype: "worker" } as never),
-    /Akuma catalogue input has unknown field: archetype/u,
+    listArchetypeDefinitions({ project: root, home, akumaName: "worker" } as never),
+    /Akuma catalogue input has unknown field: akumaName/u,
   );
   await assert.rejects(
     listArchetypeDefinitions({ project: 7 } as never),
@@ -127,7 +127,7 @@ test("the native Archetype error keeps its class, kind, reason and searched path
     assert.ok(error instanceof Error);
     assert.equal(error.name, "AkumaArchetypeError");
     assert.equal(error.kind, "akuma-archetype");
-    assert.equal(error.archetype, "broken");
+    assert.equal(error.akumaName, "broken");
     assert.deepEqual(error.searched, [join(root, ".keiyaku", "akumas", "broken.md")]);
     assert.equal(error.reason, "is invalid: Akuma hidden must be a boolean");
     assert.match(error.message, /`broken` is invalid/u);

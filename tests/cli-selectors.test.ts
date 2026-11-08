@@ -134,7 +134,7 @@ test("Akuma categories preserve bounded recent owner rows without Repo or Debt r
   for (let index = 0; index < 11; index += 1) {
     const born = await bornDirectAkuma({
       root: world,
-      archetype: "worker",
+      akumaName: "worker",
       draw: index.toString(16).padStart(8, "0"),
       createdAt: `2026-08-09T00:00:${String(index).padStart(2, "0")}.000Z`,
     });
@@ -144,7 +144,7 @@ test("Akuma categories preserve bounded recent owner rows without Repo or Debt r
   }
   const owner = await Akumas.of(world).list({ limit: 11 });
   assert.equal(owner.rows[0]!.id, "aku/worker/0000000a");
-  await moveAlias({ world, alias: parseAkumaAlias("@recent"), akuId: owner.rows[0]!.id });
+  await moveAlias({ world, alias: parseAkumaAlias("@recent"), akumaId: owner.rows[0]!.id });
   mkdirSync(join(world, ".keiyaku", "debts"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
   for (const selector of ["aku", "aku/", "aku/*"]) {
@@ -214,15 +214,15 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
   assert.equal(named.value.contracts.value.rows[0]!.id, oldest.id, "the oldest short name selects its Contract");
   const exactById = await cliJson<KanshiReport>(["-C", world, "status", oldest.id], { environment: {} });
   assert.equal(exactById.value.contracts.kind === "present" && exactById.value.contracts.value.rows[0]!.id, oldest.id);
-  const born = await bornDirectAkuma({ root: world, archetype: "worker", draw: "a0000001", createdAt: "2026-08-09T00:00:00.000Z" });
+  const born = await bornDirectAkuma({ root: world, akumaName: "worker", draw: "a0000001", createdAt: "2026-08-09T00:00:00.000Z" });
   born.leash.release();
-  await moveAlias({ world, alias: parseAkumaAlias(short), akuId: born.id });
+  await moveAlias({ world, alias: parseAkumaAlias(short), akumaId: born.id });
   const ambiguous = runCliJson(repository.path, ["status", short]);
   assert.equal(ambiguous.status, 3, ambiguous.stderr);
   const refusal = JSON.parse(ambiguous.stdout) as Readonly<{ kind: string; diagnostic: string }>;
   assert.equal(refusal.kind, "failed");
   assert.match(refusal.diagnostic, /ambiguous selector matches Contract and Akuma/u);
-  const dispatch = await publishDispatch({ repository: await repositoryAt(repository.path), akuId: born.id, contractId: owner.rows[0]!.id });
+  const dispatch = await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: born.id, contractId: owner.rows[0]!.id });
   assert.equal(dispatch.kind, "dispatched");
   mkdirSync(join(world, ".keiyaku", "debts"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");

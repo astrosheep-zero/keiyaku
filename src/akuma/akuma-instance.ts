@@ -19,7 +19,7 @@ import type { ReportFact } from "./heart/facts.js";
 import { captureAkumaHost, type AkumaHostOptions } from "../body-host.js";
 export type { AkumaHostOptions } from "../body-host.js";
 import type { BodyLauncher } from "./body-launch.js";
-import { parseAkuId, type AkuId } from "./identity.js";
+import { parseAkumaId, type AkumaId } from "./identity.js";
 import type { ActivityHistory } from "./projection.js";
 import { schemaFromStandard, schemaJsonText, type Schema, type StandardSchemaV1 } from "./schema.js";
 import { type AkumaAskResult, type AkumaTellResult } from "./selection-observation.js";
@@ -65,7 +65,7 @@ function signalOption(value: unknown): AbortSignal | undefined {
 
 class AkumaHandle {
   constructor(
-    readonly id: AkuId,
+    readonly id: AkumaId,
     private readonly root: WorldRoot,
     private readonly reportDiagnostic: (message: string) => void,
     private readonly spawn: BodyLauncher,
@@ -252,11 +252,11 @@ class AkumaHandle {
 }
 
 export class Akuma extends AkumaHandle {
-  private constructor(id: AkuId, root: WorldRoot, reportDiagnostic: (message: string) => void, spawn: BodyLauncher) {
+  private constructor(id: AkumaId, root: WorldRoot, reportDiagnostic: (message: string) => void, spawn: BodyLauncher) {
     super(id, root, reportDiagnostic, spawn);
   }
 
-  static async birth(archetype: string, input: AkumaBirthInput): Promise<Akuma> {
+  static async birth(akumaName: string, input: AkumaBirthInput): Promise<Akuma> {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
       throw new TypeError("Akuma birth input must be an object");
     }
@@ -276,7 +276,7 @@ export class Akuma extends AkumaHandle {
         ...(input.settings === undefined ? {} : { settings: input.settings }),
       },
       {
-        archetype,
+        akumaName,
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
         ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
         ...(input.bare === undefined ? {} : { bare: input.bare }),
@@ -293,7 +293,7 @@ export class Akuma extends AkumaHandle {
   static select(root: WorldRoot, selector: string, host?: AkumaHostOptions): Akuma {
     if (typeof root !== "string") throw new TypeError("Akuma.select root must be a WorldRoot");
     const { spawn, reportDiagnostic = stderrPluginDiagnostic } = captureAkumaHost(host);
-    return new Akuma(parseAkuId(selector).id, root, reportDiagnostic, spawn);
+    return new Akuma(parseAkumaId(selector).id, root, reportDiagnostic, spawn);
   }
 }
 
@@ -306,5 +306,5 @@ export function akumaWithLauncher(
 ): Akuma {
   if (typeof root !== "string") throw new TypeError("Akuma.select root must be a WorldRoot");
   const reportDiagnostic = captureAkumaHostDiagnostic(host) ?? stderrPluginDiagnostic;
-  return new AkumaHandle(parseAkuId(selector).id, root, reportDiagnostic, spawn);
+  return new AkumaHandle(parseAkumaId(selector).id, root, reportDiagnostic, spawn);
 }

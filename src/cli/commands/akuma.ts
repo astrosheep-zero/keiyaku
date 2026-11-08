@@ -10,9 +10,9 @@ import { settings, type Settings } from "../../settings.js";
 import {
   Akumas,
   AkumaWorldScopeError,
-  type CallInput,
   type Keiyaku as KeiyakuContract,
   type Repo,
+  type SpawnInput,
 } from "../../index.js";
 import { Keiyaku } from "../../index.js";
 import type { CliCoordinates } from "../coordinates.js";
@@ -79,7 +79,7 @@ type InvokeInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-type CallRequest = Omit<CallInput, "mode" | "timeoutMs">;
+type SpawnRequest = Omit<SpawnInput, "mode" | "timeoutMs">;
 
 function akumas(input: InvokeInput) {
   return Akumas.of(input.path, { reportDiagnostic: writeStderr });
@@ -99,7 +99,7 @@ function inputAlias(selector: string): string | undefined {
 }
 
 async function promptBody(
-  action: "call" | "tell" | "ask",
+  action: "spawn" | "tell" | "ask",
   command: Readonly<{ prompt: AkumaPromptSource }>,
   input: InvokeInput,
 ): Promise<string> {
@@ -119,20 +119,20 @@ function emitAnswer(body: string, exact: boolean): void {
   else writeStdout(body);
 }
 
-// eslint-disable-next-line complexity -- one call owns prompt/schema/placement plus live observation.
-async function runCall(
-  command: Extract<InvokedAkumaCommand, { command: "call" }>,
+// eslint-disable-next-line complexity -- one spawn owns prompt/schema/placement plus live observation.
+async function runSpawn(
+  command: Extract<InvokedAkumaCommand, { command: "spawn" }>,
   input: InvokeInput,
 ): Promise<CliOutcome> {
-  const body = command.prompt === undefined ? undefined : await promptBody("call", { prompt: command.prompt }, input);
+  const body = command.prompt === undefined ? undefined : await promptBody("spawn", { prompt: command.prompt }, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
   const declaredCaller = await akumaCallerFromEnvironment(input.environment);
   await World.at(input.path);
   const caller = akumas(input);
-  const request: CallRequest = {
+  const request: SpawnRequest = {
     ...(await inputInitiator(input)),
     ...(declaredCaller === undefined ? {} : { caller: declaredCaller }),
-    archetype: command.archetype,
+    akumaName: command.akumaName,
     ...(body === undefined ? {} : { body }),
     ...(input.home === undefined ? {} : { home: input.home }),
     ...(input.settings === undefined ? {} : { settings: input.settings }),
@@ -147,7 +147,7 @@ async function runCall(
   let stream: ReturnType<typeof callObservationStream> | undefined;
   const driver = new ActivityDriver(process.stderr);
   const observing = command.mode === "wait" && command.output === "text";
-  const observe: CallRequest["observe"] = observing
+  const observe: SpawnRequest["observe"] = observing
     ? {
         admitted: (tell, id, head) => {
           stream = callObservationStream(
@@ -167,7 +167,7 @@ async function runCall(
       }
     : undefined;
   try {
-    const result = await caller.call({
+    const result = await caller.spawn({
       ...request,
       mode: command.mode,
       ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
@@ -329,19 +329,19 @@ async function runKill(
 
 async function akumaWorld(command: InvokedAkumaCommand, coordinates: CliCoordinates): Promise<WorldRoot> {
   const world =
-    command.command === "call"
+    command.command === "spawn"
       ? (coordinates.candidateWorld ?? (await coordinates.establishWorld()))
       : coordinates.world;
   if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
   return world;
 }
 
-async function callExecutionCwd(
+async function spawnExecutionCwd(
   command: InvokedAkumaCommand,
   cwd: string,
   workdir: string | undefined,
 ): Promise<string | undefined> {
-  if (command.command !== "call") return undefined;
+  if (command.command !== "spawn") return undefined;
   if (workdir !== undefined)
     return await canonicalBirthCwd(resolve(cwd, workdir), `workdir is not an existing directory: ${workdir}`);
   return cwd;
@@ -354,9 +354,9 @@ async function akumaInput(
   runtime: CliRuntime,
 ): Promise<InvokeInput> {
   const path = await akumaWorld(command, coordinates);
-  const executionCwd = await callExecutionCwd(command, coordinates.cwd, workdir);
+  const executionCwd = await spawnExecutionCwd(command, coordinates.cwd, workdir);
   const writableDirectories =
-    command.command !== "call" || command.writableDirectories === undefined
+    command.command !== "spawn" || command.writableDirectories === undefined
       ? undefined
       : await Promise.all(
           command.writableDirectories.map((path) => {
@@ -364,12 +364,12 @@ async function akumaInput(
             return canonicalBirthCwd(resolve(coordinates.cwd, path));
           }),
         );
-  const home = command.command === "call" ? runtime.home : undefined;
-  const configuration = command.command === "call" ? await settingsAt(path, home) : undefined;
-  if (command.command === "call" && command.contract !== undefined && coordinates.repo === undefined)
-    throw new Error("call with Contract requires a resolved Repo");
+  const home = command.command === "spawn" ? runtime.home : undefined;
+  const configuration = command.command === "spawn" ? await settingsAt(path, home) : undefined;
+  if (command.command === "spawn" && command.contract !== undefined && coordinates.repo === undefined)
+    throw new Error("spawn with Contract requires a resolved Repo");
   const contract =
-    command.command === "call" && command.contract !== undefined
+    command.command === "spawn" && command.contract !== undefined
       ? contractFromInput(coordinates.repo!, command.contract).contract
       : undefined;
   return {
@@ -411,8 +411,8 @@ export async function runAkumaCommand(
     }
     const input = await akumaInput(command, coordinates, workdir, runtime);
     switch (command.command) {
-      case "call":
-        return await runCall(command, input);
+      case "spawn":
+        return await runSpawn(command, input);
       case "wait":
         return await runWait(command, input);
       case "tell":

@@ -46,7 +46,7 @@ export type ArchetypeCatalogInput = Readonly<{
   limit?: number;
 }>;
 
-/** One loaded archetype whose provider owner has decoded its execution but not yet admitted its options. */
+/** One loaded akumaName whose provider owner has decoded its execution but not yet admitted its options. */
 type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
   Readonly<{
     provider: ProviderExecution;
@@ -55,12 +55,12 @@ type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
 export class AkumaArchetypeError extends Error {
   readonly kind = "akuma-archetype";
   constructor(
-    readonly archetype: string,
+    readonly akumaName: string,
     readonly searched: readonly string[],
     readonly reason: string,
     guidance?: string,
   ) {
-    super([`\`${archetype}\` ${reason}`, ...(guidance === undefined ? [] : [guidance])].join("\n"));
+    super([`\`${akumaName}\` ${reason}`, ...(guidance === undefined ? [] : [guidance])].join("\n"));
     this.name = "AkumaArchetypeError";
   }
 }
@@ -472,7 +472,7 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   throw new TypeError(`unknown provider ${name}`);
 }
 
-/** Resolve one archetype and decode its provider execution, leaving option admission to the caller. */
+/** Resolve one akumaName and decode its provider execution, leaving option admission to the caller. */
 export async function loadPreparedArchetype(
   input: Readonly<{ name: string; project?: string; home?: string; settings: Settings }>,
 ): Promise<PreparedArchetype> {

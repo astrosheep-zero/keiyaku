@@ -14,7 +14,7 @@ import { createHeartReader, HeartAbsentError } from "../src/akuma/heart/storage.
 const AT = "2026-10-01T00:00:00.000Z";
 
 async function born(root: string) {
-  return await bornDirectAkuma({ root, archetype: "worker", draw: "1234abcd", createdAt: AT });
+  return await bornDirectAkuma({ root, akumaName: "worker", draw: "1234abcd", createdAt: AT });
 }
 
 test("observer reuses its connection without retaining a transaction and detects replacement and absence", async () => {

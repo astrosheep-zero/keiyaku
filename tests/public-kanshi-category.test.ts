@@ -31,7 +31,7 @@ async function worldWithAkuma(context: TestContext, count: number): Promise<Worl
   for (let index = 0; index < count; index += 1) {
     const born = await bornDirectAkuma({
       root: world,
-      archetype: "worker",
+      akumaName: "worker",
       draw: index.toString(16).padStart(8, "0"),
       createdAt: `2026-08-09T00:00:0${index}.000Z`,
     });
@@ -54,7 +54,7 @@ test("the package root exposes the bounded category observation with its crossin
 test("category observation reuses owner rows and is the operation the CLI runs", async (context) => {
   const world = await worldWithAkuma(context, 3);
   const owner = await Akumas.of(world).list({ limit: 3 });
-  await moveAlias({ world, alias: parseAkumaAlias("@watch"), akuId: owner.rows[0]!.id });
+  await moveAlias({ world, alias: parseAkumaAlias("@watch"), akumaId: owner.rows[0]!.id });
 
   const report = await kanshiCategory({ world, category: "akuma", limit: 2 });
   assert.equal(report.category, "akuma");
@@ -119,20 +119,20 @@ test("failed Dispatch leaves the bounded Akuma category and Alias rows readable"
   const world = await World.at(repository.path);
   const born = await bornDirectAkuma({
     root: world,
-    archetype: "worker",
+    akumaName: "worker",
     draw: "a0000001",
     createdAt: "2026-08-09T00:00:00.000Z",
   });
   const body = await born.leash.recordBody(born.paths, { leashTakenAt: born.soul.createdAt });
   await breakBody(born.paths, { sequence: body.sequence, end: "put-down", at: born.soul.createdAt });
   born.leash.release();
-  await moveAlias({ world, alias: parseAkumaAlias("@watch"), akuId: born.id });
+  await moveAlias({ world, alias: parseAkumaAlias("@watch"), akumaId: born.id });
   const git = await repositoryAt(repository.path);
   assert.equal(
     (
       await publishDispatch({
         repository: git,
-        akuId: born.id,
+        akumaId: born.id,
         contractId: contractId("kei/category-dispatch"),
       })
     ).kind,

@@ -10,7 +10,7 @@ import { backfillMirrorTitles, createForwarder, syncMirrorTitles } from "../plug
 import { attach } from "../plugins/paseo/plugin/server/attach.js";
 import { World } from "../src/world.js";
 import { moveAlias } from "../src/alias/index.js";
-import { parseAkuId } from "../src/akuma/identity.js";
+import { parseAkumaId } from "../src/akuma/identity.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import type { PluginContext } from "../src/plugin/public.js";
 
@@ -19,7 +19,7 @@ async function fixture(t: TestContext) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const world = await World.at(root);
   const alias = join(root, "alias"); await symlink(world, alias);
-  const bind = (name: string, id: string) => moveAlias({ world, alias: parseAkumaAlias(`@${name}`), akuId: parseAkuId(id).id });
+  const bind = (name: string, id: string) => moveAlias({ world, alias: parseAkumaAlias(`@${name}`), akumaId: parseAkumaId(id).id });
   return { world, alias, bind };
 }
 function snapshot(id: string, world: string, akuId: string, title: string | null) {

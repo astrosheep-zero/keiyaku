@@ -6,7 +6,7 @@ import { identityCoordinate, identitySegments } from "../identity/coordinates.js
 import { isCanonicalAkumaName, validateAkumaName } from "../identity/normalize.js";
 declare const AKU_ID: unique symbol;
 
-export type AkuId = string & { readonly [AKU_ID]: true };
+export type AkumaId = string & { readonly [AKU_ID]: true };
 
 const HEX8 = /^[0-9a-f]{8}$/u;
 
@@ -38,8 +38,8 @@ export const akumaPathsSchema = z
 export type AkumaPaths = z.infer<typeof akumaPathsSchema>;
 
 export type AllocatedAkuma = Readonly<{
-  id: AkuId;
-  archetype: string;
+  id: AkumaId;
+  akumaName: string;
   suffix: string;
   paths: AkumaPaths;
 }>;
@@ -49,30 +49,30 @@ function suffixSegment(value: string): string {
   return value;
 }
 
-export function akuId(input: Readonly<{ archetype: string; suffix: string }>): AkuId {
+export function akumaId(input: Readonly<{ akumaName: string; suffix: string }>): AkumaId {
   return identityCoordinate({
     family: "aku",
-    segments: [validateAkumaName(input.archetype), suffixSegment(input.suffix)],
-  }) as AkuId;
+    segments: [validateAkumaName(input.akumaName), suffixSegment(input.suffix)],
+  }) as AkumaId;
 }
 
-export function parseAkuId(value: string): Readonly<{ id: AkuId; archetype: string; suffix: string }> {
+export function parseAkumaId(value: string): Readonly<{ id: AkumaId; akumaName: string; suffix: string }> {
   const segments = identitySegments({ family: "aku", value });
   if (segments.length !== 2) throw new TypeError("Akuma identity must be aku/<akuma>/<hex8>");
-  const archetype = segments[0]!;
+  const akumaName = segments[0]!;
   // Existing identities remain addressable after new births gain a name limit.
-  if (!isCanonicalAkumaName(archetype)) throw new TypeError("Akuma name must be one normalized human identity segment");
+  if (!isCanonicalAkumaName(akumaName)) throw new TypeError("Akuma name must be one normalized human identity segment");
   const suffix = suffixSegment(segments[1]!);
-  return { id: value as AkuId, archetype, suffix };
+  return { id: value as AkumaId, akumaName, suffix };
 }
 
 export const akumaIdSchema = z.string().transform((value, context) => {
   try {
-    const id = parseAkuId(value).id;
+    const id = parseAkumaId(value).id;
     if (id !== value) throw new Error("not canonical");
     return id;
   } catch {
-    context.addIssue({ code: "custom", message: "expected canonical AkuId" });
+    context.addIssue({ code: "custom", message: "expected canonical AkumaId" });
     return z.NEVER;
   }
 });
@@ -83,13 +83,13 @@ export function akumaRunRoot(worldRoot: string): string {
 export function akumaPaths(
   input: Readonly<{
     runRoot: string;
-    archetype: string;
+    akumaName: string;
     suffix: string;
   }>,
 ): AkumaPaths {
-  if (!isCanonicalAkumaName(input.archetype))
+  if (!isCanonicalAkumaName(input.akumaName))
     throw new TypeError("Akuma name must be one normalized human identity segment");
-  const directory = join(input.runRoot, `${input.archetype}-${suffixSegment(input.suffix)}`);
+  const directory = join(input.runRoot, `${input.akumaName}-${suffixSegment(input.suffix)}`);
   return {
     directory,
     heart: join(directory, "heart.db"),
@@ -98,11 +98,11 @@ export function akumaPaths(
   };
 }
 
-export function akuIdFromDirectoryName(name: string): Readonly<{ id: AkuId; archetype: string; suffix: string }> {
+export function akumaIdFromDirectoryName(name: string): Readonly<{ id: AkumaId; akumaName: string; suffix: string }> {
   if (name.length < 10 || name.at(-9) !== "-") throw new Error(`invalid Akuma run directory ${name}`);
-  const archetype = name.slice(0, -9);
+  const akumaName = name.slice(0, -9);
   const suffix = name.slice(-8);
-  return parseAkuId(`aku/${archetype}/${suffix}`);
+  return parseAkumaId(`aku/${akumaName}/${suffix}`);
 }
 
 export async function ensureAkumaRunRoot(worldRoot: string): Promise<string> {
@@ -119,27 +119,27 @@ export async function ensureAkumaRunRoot(worldRoot: string): Promise<string> {
 export async function allocateAkumaDirectory(
   input: Readonly<{
     worldRoot: string;
-    archetype: string;
+    akumaName: string;
     draw?: () => string;
   }>,
 ): Promise<AllocatedAkuma> {
-  const archetype = validateAkumaName(input.archetype);
+  const akumaName = validateAkumaName(input.akumaName);
   const runRoot = await ensureAkumaRunRoot(input.worldRoot);
   for (;;) {
     const suffix = suffixSegment(input.draw?.() ?? randomBytes(4).toString("hex"));
-    const paths = akumaPaths({ runRoot, archetype, suffix });
+    const paths = akumaPaths({ runRoot, akumaName, suffix });
     try {
       await mkdir(paths.directory);
-      return { id: akuId({ archetype, suffix }), archetype, suffix, paths };
+      return { id: akumaId({ akumaName, suffix }), akumaName, suffix, paths };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
 }
 
-export function pathsForAkuId(worldRoot: string, id: AkuId): AkumaPaths {
-  const parsed = parseAkuId(id);
-  return akumaPaths({ runRoot: akumaRunRoot(worldRoot), archetype: parsed.archetype, suffix: parsed.suffix });
+export function pathsForAkumaId(worldRoot: string, id: AkumaId): AkumaPaths {
+  const parsed = parseAkumaId(id);
+  return akumaPaths({ runRoot: akumaRunRoot(worldRoot), akumaName: parsed.akumaName, suffix: parsed.suffix });
 }
 
 export function worldRootForAkumaPaths(paths: AkumaPaths): string {

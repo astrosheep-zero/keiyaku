@@ -8,7 +8,7 @@ import {
   type LiveStatusObservation,
   type WaitReason,
 } from "./akuma-observe.js";
-import { pathsForAkuId } from "./identity.js";
+import { pathsForAkumaId } from "./identity.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { AkumaUnobserved } from "./selection-observation.js";
 
@@ -85,7 +85,7 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Nativ
   const readerFor = (id: AkumaStatus["id"]) => {
     let reader = readers.get(id);
     if (reader === undefined) {
-      reader = createLiveStatusReader(pathsForAkuId(input.path, id), id);
+      reader = createLiveStatusReader(pathsForAkumaId(input.path, id), id);
       readers.set(id, reader);
     }
     return reader;

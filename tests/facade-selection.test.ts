@@ -33,7 +33,7 @@ import {
   readTell,
   recordTell,
 } from "../src/akuma/heart/index.js";
-import { akuId, allocateAkumaDirectory, type AkuId } from "../src/akuma/identity.js";
+import { akumaId, allocateAkumaDirectory, type AkumaId } from "../src/akuma/identity.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { moveAlias, readAliases } from "../src/alias/index.js";
 import { contractId, contractSegment } from "../src/core/facts/types.js";
@@ -134,15 +134,15 @@ function debtCatalogDocument(id: DebtId, updatedAt: string): DebtDocument {
   };
 }
 
-async function answered(root: string, archetype: string, suffix: string) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype, draw: () => suffix });
+async function answered(root: string, akumaName: string, suffix: string) {
+  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName, draw: () => suffix });
   await initializeHeart(allocated.paths);
   await driveAkumaBody(
     {
       paths: allocated.paths,
       seed: {
         id: allocated.id,
-        archetype,
+        akumaName,
         provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {},
         origin: { kind: "direct" },
@@ -162,7 +162,7 @@ test(
   async (t) => {
     const root = fixtureRoot(t, "keiyaku-facade-ask-");
     const source = await bornWorld(root, "00000009");
-    await moveAlias({ world: root, alias: parseAkumaAlias("@worker"), akuId: source.allocated.id });
+    await moveAlias({ world: root, alias: parseAkumaAlias("@worker"), akumaId: source.allocated.id });
     const schema = Schema.json(
       { type: "object", properties: { ok: { type: "boolean" } } },
       (value) => value as { ok: boolean },
@@ -368,7 +368,7 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
   const root = fixtureRoot(t, "keiyaku-facade-selection-");
   const worker = await answered(root, "worker", "00000002");
   const reviewer = await answered(root, "reviewer", "00000001");
-  await moveAlias({ world: root, alias: parseAkumaAlias("@review"), akuId: reviewer.id });
+  await moveAlias({ world: root, alias: parseAkumaAlias("@review"), akumaId: reviewer.id });
 
   assert.equal((await Akumas.of(root).status({ akuma: "@review" })).status.id, reviewer.id);
   const waited = await Akumas.of(root).wait({
@@ -396,7 +396,7 @@ const WAIT_AT = "2026-08-11T00:00:00.000Z";
 
 // Keep the leash held so retained history belongs to real running work.
 async function retainedRunningWorker(root: string, suffix: string, at: string, historySize = 1) {
-  const born = await bornDirectAkuma({ root, archetype: "worker", draw: suffix, createdAt: at });
+  const born = await bornDirectAkuma({ root, akumaName: "worker", draw: suffix, createdAt: at });
   const body = await born.leash.recordBody(born.paths, { leashTakenAt: at });
   const turn = await beginTurn(born.paths, { bodySequence: body.sequence, startedAt: at, call: "retained work" });
   for (let index = 0; index < historySize; index += 1) {
@@ -738,7 +738,7 @@ test("a Tell admitted after a completion probe is judged by the full round", asy
 test("a missing Soul remains a hard failure behind a running plural peer", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-wait-not-born-");
   const running = await retainedRunningWorker(root, "00000071", WAIT_AT);
-  const missing = akuId({ archetype: "worker", suffix: "00000072" });
+  const missing = akumaId({ akumaName: "worker", suffix: "00000072" });
   try {
     for (const completion of ["any", "all"] as const) {
       await assert.rejects(executeWaitAkuma({ path: root, ids: [running.id, missing], completion, timeoutMs: 5_000 }), {
@@ -756,7 +756,7 @@ test("wait reselects an unchanged later Heart when an earlier member releases th
   for (let index = 0; index < 6; index += 1) {
     const born = await bornDirectAkuma({
       root,
-      archetype: "worker",
+      akumaName: "worker",
       draw: index.toString(16).padStart(8, "0"),
       createdAt: at,
     });
@@ -823,13 +823,13 @@ test("one and ten selected identities use one Dispatch batch at final wait attac
   const repository = fixtureRepository(t);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
-  const ids: AkuId[] = [];
+  const ids: AkumaId[] = [];
   for (let index = 0; index < 10; index += 1) {
     ids.push((await answered(world, "worker", index.toString(16).padStart(8, "0"))).id);
   }
   await publishDispatch({
     repository: await repositoryAt(world),
-    akuId: akuId({ archetype: "worker", suffix: "ffffffff" }),
+    akumaId: akumaId({ akumaName: "worker", suffix: "ffffffff" }),
     contractId: contractId("kei/unrelated"),
   });
   const log = join(repository.path, "wait-git-spawns.log");
@@ -868,7 +868,7 @@ test("wait observes a Dispatch published during polling at final attachment", { 
   // Seed private authority so selection opens a decode channel even though both selected associations are absent.
   await publishDispatch({
     repository: git,
-    akuId: akuId({ archetype: "worker", suffix: "dddddd03" }),
+    akumaId: akumaId({ akumaName: "worker", suffix: "dddddd03" }),
     contractId: owner,
   });
   const started = promiseBarrier<void>();
@@ -926,7 +926,7 @@ test("wait observes a Dispatch published during polling at final attachment", { 
           if (waiting && !hooked && paths.heart === allocated.paths.heart) {
             hooked = true;
             logWhilePolling = readFileSync(log, "utf8");
-            publication = publishDispatch({ repository: git, akuId: allocated.id, contractId: owner });
+            publication = publishDispatch({ repository: git, akumaId: allocated.id, contractId: owner });
             void publication.finally(() => finish.resolve());
           }
           return await originalTry(paths);
@@ -1000,12 +1000,12 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
       hasMore: false,
     });
-    const workers = await Akumas.of(await World.at(root)).list({ archetype: "worker" });
+    const workers = await Akumas.of(await World.at(root)).list({ akumaName: "worker" });
     assert.deepEqual(
       workers.rows.map((row) => row.id),
       [source.id],
     );
-    assert.deepEqual((await Akumas.of(await World.at(root)).list({ archetype: "reviewer" })).rows, []);
+    assert.deepEqual((await Akumas.of(await World.at(root)).list({ akumaName: "reviewer" })).rows, []);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -1036,7 +1036,7 @@ test("Akumas roster returns bounded Heart activity in semantic order", async (t)
     at: "2026-08-11T00:00:03.000Z",
   });
 
-  const page = await Akumas.of(await World.at(root)).list({ archetype: "worker", limit: 2 });
+  const page = await Akumas.of(await World.at(root)).list({ akumaName: "worker", limit: 2 });
   assert.deepEqual(
     page.rows.map((row) => row.id),
     [tiedFirst.id, tiedSecond.id],
@@ -1078,7 +1078,7 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
     const oldIds = [];
     for (let index = 0; index < oldCount; index += 1) {
       const suffix = index.toString(16).padStart(8, "0");
-      const allocated = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
+      const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "worker", draw: () => suffix });
       await initializeUnbornFixture(allocated.paths, template);
       template ??= allocated.paths;
       oldIds.push(allocated.id);
@@ -1159,7 +1159,7 @@ test("all-null Akuma fallback retains exact membership through the fixed Heart r
     const allocated = [];
     for (let index = 0; index < PAGE_POOL_SIZE * 2 + 1; index += 1) {
       const suffix = index.toString(16).padStart(8, "0");
-      const value = await allocateAkumaDirectory({ worldRoot: root, archetype: "worker", draw: () => suffix });
+      const value = await allocateAkumaDirectory({ worldRoot: root, akumaName: "worker", draw: () => suffix });
       await initializeUnbornFixture(value.paths, template);
       template ??= value.paths;
       allocated.push(value);
@@ -1255,7 +1255,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   const alias = parseAkumaAlias(`@${contractSegment(boundId)}`);
   const source = await answered(repository.path, "worker", "00000001");
   const path = await World.at(repository.path);
-  await moveAlias({ world: path, alias, akuId: source.id });
+  await moveAlias({ world: path, alias, akumaId: source.id });
   const authority = await observeNamedAddress({ world: path, repo });
   assert.throws(
     () => resolveNamedAddress({ selector: alias, contracts: authority.contracts, aliases: authority.aliases }),
@@ -1268,7 +1268,7 @@ test("named Address refuses failed Kanshi Contract and Alias observations", asyn
   const failure = { kind: "failed" as const, failure: { message: "unavailable" } };
   const source = await answered(root, "worker", "00000002");
   const alias = parseAkumaAlias("@readable");
-  await moveAlias({ world: root, alias, akuId: source.id });
+  await moveAlias({ world: root, alias, akumaId: source.id });
   const detached = await observeNamedAddress({ world: root, repo: null });
   assert.deepEqual(
     resolveNamedAddress({
@@ -1296,8 +1296,8 @@ test("named Address refuses failed Kanshi Contract and Alias observations", asyn
 
 test("named Address resolves a retained Alias outside Kanshi roster rows", async (t) => {
   const root = fixtureRoot(t, "keiyaku-named-kanshi-alias-");
-  const id = akuId({ archetype: "worker", suffix: "deadbeef" });
-  await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akuId: id });
+  const id = akumaId({ akumaName: "worker", suffix: "deadbeef" });
+  await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akumaId: id });
   const observation = await observeKanshi({ world: root });
   const authority = await observeNamedAddress({ world: root, repo: null });
   assert.equal(observation.report.akuma.kind, "present");
@@ -1328,7 +1328,7 @@ test("Contract wait refuses selectors while cross-World Contract kill refuses be
     (
       await publishDispatch({
         repository: await repositoryAt(worldB),
-        akuId: born.id,
+        akumaId: born.id,
         contractId: owner,
       })
     ).kind,
@@ -1357,7 +1357,7 @@ test("selection status projects Dispatch association without changing Akuma core
   const source = await answered(repository.path, "worker", "deadbeef");
   const owner = contractId("kei/provider-core");
   assert.equal(
-    (await publishDispatch({ repository: await repositoryAt(repository.path), akuId: source.id, contractId: owner }))
+    (await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: source.id, contractId: owner }))
       .kind,
     "dispatched",
   );

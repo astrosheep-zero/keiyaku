@@ -87,7 +87,7 @@ export function renderRootHelp(columns?: number): string {
       "Global options:",
       "  -C, --cwd <path>    Set the invocation working directory.",
       "  --repo <path>       Select the Git repository coordinate.",
-      "  --workdir <path>    Set the execution directory for call only.",
+      "  --workdir <path>    Set the execution directory for spawn only.",
       "",
       "Outcomes:  exit 0 accepted · 1 refused · 2 retryable · 3 failed · 64 usage",
     ].join("\n"),
@@ -131,7 +131,7 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
       case "install":
         return renderInstallHelp();
       case "whoami":
-        return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only. For an Akuma, who started its current turn is shown apart from who called it. Missing or unreadable facts stay explicit.`;
+        return `${WHOAMI_PURPOSE}\n\n${usageLine(WHOAMI_USAGE)}\n\nRead-only. For an Akuma, who started its current turn is shown apart from who spawned it. Missing or unreadable facts stay explicit.`;
       case "akuma":
         return renderAkumaHelp(coordinate.action);
     }
@@ -194,7 +194,7 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
       const contractSelector = command.akuma.some((selector) => selector.startsWith("kei/"));
       return { use: contractSelector ? "required" : "optional", acceptsExplicit: contractSelector };
     }
-    case "call":
+    case "spawn":
       return {
         use: command.contract === undefined ? "none" : "required",
         acceptsExplicit: command.contract !== undefined,
@@ -209,7 +209,7 @@ export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
 }
 
 function refuseUnusedRepo(command: ParsedCommand): never {
-  if (command.command === "call") throw new CliUsageError("--repo has no consumer without --contract");
+  if (command.command === "spawn") throw new CliUsageError("--repo has no consumer without --contract");
   throw new CliUsageError(`--repo has no consumer for ${command.command}`);
 }
 
@@ -362,7 +362,7 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
     invocation.commandArgv[0] === "install" ? parseInstallCommand(invocation.commandArgv.slice(1)) : undefined;
   const akuma = isAkumaAction(invocation.commandArgv[0]) ? parseAkumaCommand(invocation.commandArgv) : undefined;
   const command = whoami ?? debt ?? akuma ?? install ?? parseContractCommand(scanArgv(invocation.commandArgv));
-  if (invocation.workdir !== undefined && command.command !== "call") {
+  if (invocation.workdir !== undefined && command.command !== "spawn") {
     throw new CliUsageError(`option --workdir is not valid for ${command.command}`, usageGuideForCommand(command));
   }
   return {

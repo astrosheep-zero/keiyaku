@@ -61,7 +61,7 @@ A live observing command may receive, beside that bounded status and only for
 its still-open callback, the complete retained semantic frontier from the same
 fact read and Turn projection. That transient companion preserves final forms
 that a later bounded status no longer selects, including rows of a newly idle
-Turn. It neither widens a status nor enters a public wait or call result.
+Turn. It neither widens a status nor enters a public wait or spawn result.
 
 Active tools and in-flight speech belong only to a live stream's redrawable
 frame. Append-only output admits activity only after settlement; closing
@@ -134,10 +134,10 @@ owns diagnostic destinations and producer custody.
 
 Selection over an already resolved World and identity is synchronous; every
 operation that reads Heart, leash, or filesystem state is asynchronous. The
-surface contains no owner, born, Turn, call, fork, receipt, ledger,
+surface contains no owner, born, Turn, spawn, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
-A Tell is the admitted message, and `tell` returns its admission receipt without awaiting an answer. `ask` admits a Tell and observes the answer to that exact admission; both faces use these same verbs and the shared AskResult. Its observation distinguishes answered, failed, invalid-output, unanswered, and deadline. The decoded answer flows through the answered arm; provider failure and schema decode failure remain distinct observations, not thrown answer failures. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A call composes prompt-free birth with optional first ordinary Tell admission; bounded call observation awaits that first ask without changing admission. Schema belongs to ask, not tell. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy and recovery semantics.
+A Tell is the admitted message, and `tell` returns its admission receipt without awaiting an answer. `ask` admits a Tell and observes the answer to that exact admission; both faces use these same verbs and the shared AskResult. Its observation distinguishes answered, failed, invalid-output, unanswered, and deadline. The decoded answer flows through the answered arm; provider failure and schema decode failure remain distinct observations, not thrown answer failures. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A spawn composes prompt-free birth with optional first ordinary Tell admission; bounded spawn observation awaits that first ask without changing admission. Schema belongs to ask, not tell. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy and recovery semantics.
 Wait observes status until its Akuma-owned completion judgment or a caller
 deadline. Running execution keeps observation open. Normally sleeping execution
 completes only without pending Tell, preserving ordinary successor handoff.
@@ -214,7 +214,7 @@ and never becomes a catalogue command.
 
 The roster also answers one caller-scoped question inside the same World.
 Given one frozen caller coordinate — an external integration or an Akuma in this
-World — it returns the directly called Akumas and their transitively descended
+World — it returns the directly spawned Akumas and their transitively descended
 Akumas. Only frozen Soul caller edges are followed; fork origin is not a caller
 edge, and absent attribution is never inferred. The complete caller closure is
 computed across every Archetype before a requested Archetype narrows it, then

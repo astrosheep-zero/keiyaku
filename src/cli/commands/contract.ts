@@ -455,11 +455,11 @@ async function runLs(
   }
   const caller = await lsCaller(query.caller, coordinates, runtime);
   const listed = await Akumas.of(coordinates.world).list({
-    ...(query.archetype === undefined ? {} : { archetype: query.archetype }),
+    ...(query.akumaName === undefined ? {} : { akumaName: query.akumaName }),
     ...(query.limit === undefined ? {} : { limit: query.limit }),
     ...(caller === undefined ? {} : { caller }),
   });
-  return emit(command.output, listed, () => renderAkumaCatalogue(listed, query.archetype ?? null, caller), "accepted");
+  return emit(command.output, listed, () => renderAkumaCatalogue(listed, query.akumaName ?? null, caller), "accepted");
 }
 
 /** `--mine` is the process caller identity; `--caller` names the same coordinate explicitly. */
@@ -474,7 +474,7 @@ async function lsCaller(
   if (selection.kind === "external") return selection.caller;
   if (selection.kind === "akuma") {
     if (coordinates.world === null) throw usage("no Keiyaku world contains the invocation cwd");
-    return { kind: "akuma", world: coordinates.world, akuId: selection.akuId };
+    return { kind: "akuma", world: coordinates.world, akumaId: selection.akumaId };
   }
   let caller: AkumaCaller | undefined;
   try {

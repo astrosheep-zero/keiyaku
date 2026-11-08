@@ -33,9 +33,9 @@ export async function syncMirrorTitles(client: Pick<Client, "fetchAgents" | "upd
   if (aliases.kind !== "present") throw new Error(`Keiyaku aliases unavailable: ${aliases.kind === "failed" ? aliases.failure.message : "absent"}`);
   const names = new Map<string, string[]>();
   for (const binding of aliases.value) {
-    const current = names.get(binding.akuId) ?? [];
+    const current = names.get(binding.akumaId) ?? [];
     current.push(binding.alias.replace(/^@/u, ""));
-    names.set(binding.akuId, current);
+    names.set(binding.akumaId, current);
   }
   const updates: { id: string; name: string }[] = [];
   let cursor: string | undefined;
@@ -140,7 +140,8 @@ export function createForwarder(openClient: (signal: AbortSignal) => Promise<Cli
       };
       return { signals: { "akuma.turn-started": refresh, "akuma.turn-outcome": refresh,
         async "akuma.born"(event, cancellation) {
-          const result = await hint(attachRpc, { world, akuId: event.akumaId, caller: event.caller }, cancellation);
+          const caller = event.caller.kind === "akuma" ? { kind: "akuma" as const, world: event.caller.world, akuId: event.caller.akumaId } : event.caller;
+          const result = await hint(attachRpc, { world, akuId: event.akumaId, caller }, cancellation);
           if (!("attached" in result) || !result.attached) return;
           const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
           try { await backfillMirrorTitles(world, event.akumaId, signal, openClient); }

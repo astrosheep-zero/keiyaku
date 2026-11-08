@@ -244,5 +244,5 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
 }
 
 /* ---------------------------------------------------------------------------
- * Native roster, archetype listing and the one prepared call recipe
+ * Native roster, akumaName listing and the one prepared call recipe
  * ------------------------------------------------------------------------ */

@@ -26,10 +26,10 @@ import {
 } from "../src/cli/render/akuma.js";
 import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/marks.js";
-import { parseAkuId } from "../src/akuma/identity.js";
+import { parseAkumaId } from "../src/akuma/identity.js";
 import type { AkumaTellResult } from "../src/akuma/selection-observation.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
-import type { CallObservation, CallResult } from "../src/library/akuma-creation.js";
+import type { SpawnObservation, SpawnResult } from "../src/library/akuma-creation.js";
 import type { DispatchStage, ForkResult } from "../src/index.js";
 import { contractId } from "../src/core/facts/types.js";
 import type { DebtRow } from "../src/debt/board.js";
@@ -198,7 +198,7 @@ test("history renders the full exact report without confusing it with an outcome
   const text = " report\n  complete\n";
   assert.equal(historyText({
     kind: "exact-report",
-    id: parseAkuId("aku/elite/b9977141").id,
+    id: parseAkumaId("aku/elite/b9977141").id,
     contract: { kind: "none" },
     report: { kind: "report", sequence: 5, bodySequence: 1, turnSequence: 2, at: AKUMA_ACTIVITY_AT, text },
   }, { id: "report/5" }, { columns: 64, color: false }), text);
@@ -221,7 +221,7 @@ test("history keeps long call and Tell inputs to one bounded input line", () => 
   const lines = historyText(
     {
       kind: "history",
-      id: parseAkuId("aku/elite/b9977141").id,
+      id: parseAkumaId("aku/elite/b9977141").id,
       contract: { kind: "none" },
       history: {
         rows,
@@ -262,8 +262,8 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
 });
 
 test("Akuma observation failures name the target and reason without carrier words", () => {
-  const first = parseAkuId("aku/worker/abcd0102").id;
-  const second = parseAkuId("aku/intern/33dd4670").id;
+  const first = parseAkumaId("aku/worker/abcd0102").id;
+  const second = parseAkumaId("aku/intern/33dd4670").id;
   assert.equal(
     waitText(
       {
@@ -405,7 +405,7 @@ test("wait keeps a single-target alias and none in plural output", () => {
 });
 
 test("waited Tell reserves stdout for its exact answer and keeps one JSON envelope", () => {
-  const id = parseAkuId("aku/worker/deadbeef").id;
+  const id = parseAkumaId("aku/worker/deadbeef").id;
   const result = {
     kind: "akuma" as const,
     action: "ask" as const,
@@ -500,7 +500,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
 });
 
 test("call and bounded Tell share one input frame and pinned conclusion", () => {
-  const id = parseAkuId("aku/worker/deadbeef").id;
+  const id = parseAkumaId("aku/worker/deadbeef").id;
   const context = { columns: 100, color: false };
   const startedAt = Date.parse(AKUMA_ACTIVITY_AT) - 5_000;
   const tell = {
@@ -552,7 +552,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
 });
 
 test("ask activity starts at admission and includes a later settlement of an older tool", () => {
-  const id = parseAkuId("aku/worker/deadbeef").id;
+  const id = parseAkumaId("aku/worker/deadbeef").id;
   const at = (minute: number) => `2026-01-01T10:${String(minute).padStart(2, "0")}:00.000Z`;
   const opening: OpenSnapshotRow = { kind: "call", sequence: 1, turnSequence: 1, at: at(0), text: "original input" };
   const oldNote: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at: at(1), text: "before ask" };
@@ -606,7 +606,7 @@ test("ask activity starts at admission and includes a later settlement of an old
 });
 
 test("ask seed marks eligible omissions before a newer Turn opening in timeline order", () => {
-  const id = parseAkuId("aku/worker/deadbeef").id;
+  const id = parseAkumaId("aku/worker/deadbeef").id;
   const at = AKUMA_ACTIVITY_AT;
   const tell = {
     admission: { fact: "recorded" as const, tellId: "tell-ask" },
@@ -796,7 +796,7 @@ test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
  * with its verdict and subject, an observation panel separates identity, static context, activity,
  * conclusion, dynamic outputs, and diagnostics.
  */
-const SPECIMEN_ID = parseAkuId("aku/worker/1234abcd").id;
+const SPECIMEN_ID = parseAkumaId("aku/worker/1234abcd").id;
 
 function tellReceipt(
   text: string,
@@ -811,12 +811,12 @@ function tellReceipt(
 }
 
 function called(
-  observation: CallObservation,
-  dispatch: CallResult["dispatch"] = { kind: "none" },
-  alias: CallResult["alias"] = { kind: "none" },
-): CallResult {
+  observation: SpawnObservation,
+  dispatch: SpawnResult["dispatch"] = { kind: "none" },
+  alias: SpawnResult["alias"] = { kind: "none" },
+): SpawnResult {
   return {
-    kind: "called",
+    kind: "spawned",
     akuma: SPECIMEN_ID,
     execution: { cwd: "/work/repo", source: "process" },
     dispatch,
@@ -828,12 +828,12 @@ function called(
 function dispatchOf(contract: string): DispatchStage {
   return {
     kind: "dispatched",
-    dispatch: { akuId: SPECIMEN_ID, contractId: contractId(contract), dispatchedAt: AKUMA_ACTIVITY_AT },
+    dispatch: { akumaId: SPECIMEN_ID, contractId: contractId(contract), dispatchedAt: AKUMA_ACTIVITY_AT },
   };
 }
 
 function forkReceipt(parent: string, child: string, dispatch: DispatchStage): ForkResult {
-  return { kind: "forked", parent: parseAkuId(parent).id, child: parseAkuId(child).id, dispatch };
+  return { kind: "forked", parent: parseAkumaId(parent).id, child: parseAkumaId(child).id, dispatch };
 }
 
 function createdDebtRow(): DebtRow {
@@ -863,20 +863,20 @@ test("every action receipt leads with a verdict and subject, then indented evide
   const context = { columns: 100, color: false };
   assert.deepEqual(
     renderCallText(called({ kind: "born" }), false, context).split("\n"),
-    ["✓ called aku/worker/1234abcd", "  /work/repo"],
+    ["✓ spawned aku/worker/1234abcd", "  /work/repo"],
     "a prompt-free birth is an action receipt with its directory subordinate",
   );
   assert.deepEqual(
     renderCallText(
       called({ kind: "detached", tell: tellReceipt("go", "told", { kind: "told" }) }, dispatchOf("kei/example-1234"), {
         kind: "aliased",
-        alias: { alias: "@reviewer" as AkumaAlias, akuId: SPECIMEN_ID },
+        alias: { alias: "@reviewer" as AkumaAlias, akumaId: SPECIMEN_ID },
         previous: null,
       }),
       false,
       context,
     ).split("\n"),
-    ["✓ called aku/worker/1234abcd (@reviewer)", "  kei/example-1234", "  /work/repo"],
+    ["✓ spawned aku/worker/1234abcd (@reviewer)", "  kei/example-1234", "  /work/repo"],
     "the alias supplements the subject and distinct fact kinds stay on their own lines",
   );
   assert.deepEqual(
@@ -889,7 +889,7 @@ test("every action receipt leads with a verdict and subject, then indented evide
       false,
       context,
     ).split("\n"),
-    ["! called aku/worker/1234abcd", "  /work/repo", "  ! dispatch failed infrastructure busy"],
+    ["! spawned aku/worker/1234abcd", "  /work/repo", "  ! dispatch failed infrastructure busy"],
     "a failed stage marks the receipt instead of standing under an unqualified success",
   );
   assert.deepEqual(
@@ -902,7 +902,7 @@ test("every action receipt leads with a verdict and subject, then indented evide
       false,
       context,
     ).split("\n"),
-    ["! called aku/worker/1234abcd", "  /work/repo", "  ! window lost"],
+    ["! spawned aku/worker/1234abcd", "  /work/repo", "  ! window lost"],
     "a detached failure with no admitted Tell stays an action receipt over the born child",
   );
   assert.deepEqual(
@@ -916,8 +916,8 @@ test("every action receipt leads with a verdict and subject, then indented evide
       false,
       context,
     ).split("\n"),
-    ["! called aku/worker/1234abcd", "  /work/repo", '  "exact prompt"', "  ! window lost"],
-    "an admitted Tell input stays visible beneath the failed call verdict",
+    ["! spawned aku/worker/1234abcd", "  /work/repo", '  "exact prompt"', "  ! window lost"],
+    "an admitted Tell input stays visible beneath the failed spawn verdict",
   );
   assert.deepEqual(
     renderCallText(
@@ -925,7 +925,7 @@ test("every action receipt leads with a verdict and subject, then indented evide
         { kind: "detached", tell: tellReceipt("go", "told", { kind: "told" }) },
         {
           kind: "dispatched",
-          dispatch: { akuId: SPECIMEN_ID, contractId: contractId("kei/example-1234"), dispatchedAt: AKUMA_ACTIVITY_AT },
+          dispatch: { akumaId: SPECIMEN_ID, contractId: contractId("kei/example-1234"), dispatchedAt: AKUMA_ACTIVITY_AT },
           seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "seat closed late" }],
         },
       ),
@@ -933,7 +933,7 @@ test("every action receipt leads with a verdict and subject, then indented evide
       context,
     ).split("\n"),
     [
-      "✓ called aku/worker/1234abcd",
+      "✓ spawned aku/worker/1234abcd",
       "  kei/example-1234",
       "  /work/repo",
       "  dispatch lag private-state-seat-close-failed seat closed late",
@@ -1023,9 +1023,9 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
     renderKillText(
       {
         results: [
-          { id: parseAkuId("aku/worker/1234abcd").id, evidence: "killed" },
-          { id: parseAkuId("aku/worker/5678abcd").id, evidence: "already-stopped" },
-          { id: parseAkuId("aku/worker/9999beef").id, evidence: "hung" },
+          { id: parseAkumaId("aku/worker/1234abcd").id, evidence: "killed" },
+          { id: parseAkumaId("aku/worker/5678abcd").id, evidence: "already-stopped" },
+          { id: parseAkumaId("aku/worker/9999beef").id, evidence: "hung" },
         ],
       },
       undefined,
@@ -1171,7 +1171,7 @@ test("a failed observing call keeps a known directory and its admitted Tell inpu
     contract: { kind: "associated" as const, contractId: contractId("kei/demo") },
     facts: [] as readonly string[],
   };
-  const failedObservation = (tell: AkumaTellResult["tell"]): CallObservation => ({
+  const failedObservation = (tell: AkumaTellResult["tell"]): SpawnObservation => ({
     kind: "failed",
     tellId: tell.admission.fact === "recorded" ? tell.admission.tellId : "tell/specimen",
     tell,

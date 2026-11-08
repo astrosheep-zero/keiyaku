@@ -18,7 +18,7 @@ const acpSdk = new URL("../node_modules/@agentclientprotocol/sdk/dist/acp.js", i
  * process home, which Node resolves from HOME on POSIX and USERPROFILE on Windows, so a plugin the
  * developer selected in their own user settings would activate in every child here and its import
  * diagnostic would land in asserted stderr. Both variables are moved before any World or child
- * environment is captured; KEIYAKU_HOME stays the fixtures' own archetype coordinate.
+ * environment is captured; KEIYAKU_HOME stays the fixtures' own akumaName coordinate.
  */
 const processHome = mkdtempSync(join(tmpdir(), "keiyaku-packaged-home-"));
 const ambientHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
@@ -113,7 +113,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
   mkdirSync(join(home, "akumas"), { recursive: true });
   const agent = join(root, "fake-acp.mjs");
   writeFileSync(agent, fakeAgentSource());
-  for (const [archetype, provider] of [
+  for (const [akumaName, provider] of [
     ["worker", "fake-notes"],
     ["holder", "fake-holding"],
     ["slowcoach", "fake-slow"],
@@ -121,7 +121,7 @@ function observingWorld(): Readonly<{ root: string; world: string; env: NodeJS.P
     ["finisher", "fake-answer"],
     ["silent", "fake-empty"],
   ] as const) {
-    writeFileSync(join(home, "akumas", `${archetype}.md`), `---\nprovider: ${provider}\n---\nWork.\n`);
+    writeFileSync(join(home, "akumas", `${akumaName}.md`), `---\nprovider: ${provider}\n---\nWork.\n`);
   }
   writeFileSync(
     join(world, ".keiyaku", "settings.json"),
@@ -197,13 +197,13 @@ async function unsettledKillEvidence(akumas: Akumas, selector: string, killed: A
   return sections.join("\n");
 }
 
-test("packaged prompt-free call births without admitting a Tell", { timeout: 120_000 }, async () => {
+test("packaged prompt-free spawn births without admitting a Tell", { timeout: 120_000 }, async () => {
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
   try {
-    const born = await runPackagedCli(["-C", world, "call", "worker", "--bare"], { cwd: world, env });
+    const born = await runPackagedCli(["-C", world, "spawn", "worker", "--bare"], { cwd: world, env });
     assert.equal(born.code, 0, born.stderr);
-    assert.match(born.stdout, /^✓ called aku\/worker\/[0-9a-f]{8}$/mu, "the receipt leads with verdict and identity");
+    assert.match(born.stdout, /^✓ spawned aku\/worker\/[0-9a-f]{8}$/mu, "the receipt leads with verdict and identity");
     assert.ok(
       born.stdout.split("\n").includes(`  ${await realpath(world)}`),
       `the indented execution directory is the canonical cwd:\n${born.stdout}`,
@@ -224,7 +224,7 @@ test(
     const { root, world, env } = observingWorld();
     try {
       const unfinished = await runPackagedCli(
-        ["-C", world, "call", "worker", "--bare", "--wait", "10s", "--alias", "@notes", "prompt"],
+        ["-C", world, "spawn", "worker", "--bare", "--wait", "10s", "--alias", "@notes", "prompt"],
         { cwd: world, env },
       );
       assert.equal(unfinished.code, 0, unfinished.stderr);
@@ -259,7 +259,7 @@ test(
 
       let detachedStarted = false;
       try {
-        const detached = await runPackagedCli(["-C", world, "call", "worker", "--bare", "--alias", "@detached", "prompt"], {
+        const detached = await runPackagedCli(["-C", world, "spawn", "worker", "--bare", "--alias", "@detached", "prompt"], {
           cwd: world,
           env,
         });
@@ -277,7 +277,7 @@ test(
         if (detachedStarted) await killAndAwaitPluralTarget(await World.at(world), "@detached");
       }
 
-      const answered = await runPackagedCli(["-C", world, "call", "finisher", "--bare", "--wait", "20s", "prompt"], {
+      const answered = await runPackagedCli(["-C", world, "spawn", "finisher", "--bare", "--wait", "20s", "prompt"], {
         cwd: world,
         env,
       });
@@ -304,7 +304,7 @@ test(
       assert.equal(tell.stderr.match(/\n\n/gu)?.length, 1, "only the answer separator is blank");
       assert.match(tell.stderr, /✓ answered — \d+s\n\n$/u, "the progress channel separates the raw answer");
 
-      const silent = await runPackagedCli(["-C", world, "call", "silent", "--bare", "--wait", "20s", "prompt"], {
+      const silent = await runPackagedCli(["-C", world, "spawn", "silent", "--bare", "--wait", "20s", "prompt"], {
         cwd: world,
         env,
       });
@@ -321,7 +321,7 @@ test("packaged observing call bounds nine eligible tools across polling callback
   assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
   const { root, world, env } = observingWorld();
   try {
-    const result = await runPackagedCli(["-C", world, "call", "toolbox", "--bare", "--wait", "20s", "prompt"], {
+    const result = await runPackagedCli(["-C", world, "spawn", "toolbox", "--bare", "--wait", "20s", "prompt"], {
       cwd: world,
       env,
     });
@@ -346,18 +346,18 @@ test("packaged plural waits return each target's status snapshot", { timeout: 12
   const cleanupAliases: string[] = [];
   try {
     const running = await runPackagedCli(
-      ["-C", world, "call", "worker", "--bare", "--wait", "1s", "--alias", "@notes", "prompt"],
+      ["-C", world, "spawn", "worker", "--bare", "--wait", "1s", "--alias", "@notes", "prompt"],
       { cwd: world, env },
     );
     cleanupAliases.push("@notes");
     assert.equal(running.code, 0, running.stderr);
     const settled = await runPackagedCli(
-      ["-C", world, "call", "finisher", "--bare", "--wait", "20s", "--alias", "@done", "prompt"],
+      ["-C", world, "spawn", "finisher", "--bare", "--wait", "20s", "--alias", "@done", "prompt"],
       { cwd: world, env },
     );
     assert.equal(settled.code, 0, settled.stderr);
     const slow = await runPackagedCli(
-      ["-C", world, "call", "slowcoach", "--bare", "--wait", "1s", "--alias", "@slow", "prompt"],
+      ["-C", world, "spawn", "slowcoach", "--bare", "--wait", "1s", "--alias", "@slow", "prompt"],
       { cwd: world, env },
     );
     cleanupAliases.push("@slow");

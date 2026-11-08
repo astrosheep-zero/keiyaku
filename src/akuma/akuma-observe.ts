@@ -14,7 +14,7 @@ import {
   readSoul,
   type HeartSnapshot,
 } from "./heart/index.js";
-import { pathsForAkuId, type AkuId, type AkumaPaths } from "./identity.js";
+import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
 import {
   ordinarySnapshotBudget,
   projectTurns,
@@ -34,7 +34,7 @@ import { AkumaNotBornError } from "./akuma-errors.js";
 
 export async function rosterListRow(
   paths: AkumaPaths,
-  expected: AkuId,
+  expected: AkumaId,
   aliases: readonly AkumaAlias[] = [],
 ): Promise<AkumaListRow | UnbornAkumaListRow> {
   const snapshot = await readHeart(paths);
@@ -42,7 +42,7 @@ export async function rosterListRow(
     const observed = await bornObservation(paths, expected, () => readHeart(paths), snapshot);
     return {
       id: observed.soul.id,
-      archetype: observed.soul.archetype,
+      akumaName: observed.soul.akumaName,
       ...(observed.soul.description === undefined ? {} : { description: observed.soul.description }),
       life: observed.currentLife,
       lifeAt: lifeAt(
@@ -71,7 +71,7 @@ export async function rosterListRow(
 
 async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBody" | "latestKill">>(
   paths: AkumaPaths,
-  expected: AkuId,
+  expected: AkumaId,
   read: () => Promise<T>,
   snapshot?: T,
 ) {
@@ -97,10 +97,10 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
 }
 
 /** Optional semantic seam; the observer composition owns delivery and deduplication. */
-export type OutcomeObserver = (akumaId: AkuId, historyIds: readonly string[]) => Promise<void>;
+export type OutcomeObserver = (akumaId: AkumaId, historyIds: readonly string[]) => Promise<void>;
 
 export async function observeOutcomeRows(
-  id: AkuId,
+  id: AkumaId,
   rows: readonly ActivityRow[],
   observer?: OutcomeObserver,
 ): Promise<void> {
@@ -139,7 +139,7 @@ function snapshotSelection(input: StatusObservationInput) {
 }
 
 /** Private to a live wait: retain only this member's current frontier and last selection. */
-export function createLiveStatusReader(paths: AkumaPaths, expected: AkuId) {
+export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
   const reader = createStatusFactReader(paths);
   let memo:
     | Readonly<{
@@ -220,7 +220,7 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkuId) {
 /** One-shot observations use the same reader and always release it. */
 export async function bornLiveStatus(
   paths: AkumaPaths,
-  expected: AkuId,
+  expected: AkumaId,
   input: StatusObservationInput,
   signal?: AbortSignal,
 ): Promise<LiveStatusObservation> {
@@ -234,7 +234,7 @@ export async function bornLiveStatus(
 
 export async function bornStatus(
   paths: AkumaPaths,
-  expected: AkuId,
+  expected: AkumaId,
   input: StatusObservationInput,
 ): Promise<BudgetedStatusObservation> {
   const { rows: _rows, ...status } = await bornLiveStatus(paths, expected, input);
@@ -243,11 +243,11 @@ export async function bornStatus(
 
 export async function readLiveStatus(
   worldPath: WorldRoot,
-  id: AkuId,
+  id: AkumaId,
   input: StatusObservationInput,
   signal?: AbortSignal,
 ): Promise<LiveStatusObservation> {
-  return await bornLiveStatus(pathsForAkuId(worldPath, id), id, input, signal);
+  return await bornLiveStatus(pathsForAkumaId(worldPath, id), id, input, signal);
 }
 
 export type ExecutionProgress = "settled" | "advancing" | "stopped";
@@ -280,16 +280,16 @@ export function defaultWaitComplete(status: AkumaStatus): boolean {
 /** Probe completion only; returned statuses still come from a full observation. */
 export async function readWaitComplete(
   worldPath: WorldRoot,
-  ids: readonly AkuId[],
+  ids: readonly AkumaId[],
   completion: "any" | "all",
   signal?: AbortSignal,
-  probe?: (id: AkuId) => Promise<boolean>,
+  probe?: (id: AkumaId) => Promise<boolean>,
 ): Promise<boolean> {
   let completed = 0;
   for (const id of ids) {
     signal?.throwIfAborted();
     try {
-      const paths = pathsForAkuId(worldPath, id);
+      const paths = pathsForAkumaId(worldPath, id);
       const ready =
         probe === undefined
           ? await bornObservation(paths, id, () => readLifeSnapshot(paths, signal)).then((observed) =>
@@ -348,8 +348,8 @@ export async function waitForObservation<T>(
   }
 }
 
-export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkuId): Promise<string> {
-  const soul = await readSoul(pathsForAkuId(worldPath, id));
+export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkumaId): Promise<string> {
+  const soul = await readSoul(pathsForAkumaId(worldPath, id));
   if (soul === null) throw new AkumaNotBornError(id);
   return soul.cwd;
 }

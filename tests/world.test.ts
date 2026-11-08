@@ -31,7 +31,7 @@ test("CLI coordinates retain explicit versus ambient cwd statedness", async () =
   const root = temporary();
   const explicit = join(root, "explicit");
   mkdirSync(explicit);
-  const command = parseArgv(["call", "worker", "body"]).command;
+  const command = parseArgv(["spawn", "worker", "body"]).command;
 
   const ambient = await cliCoordinateDiscovery.resolve({ processCwd: root, command });
   assert.equal(ambient.cwdSource, "process");

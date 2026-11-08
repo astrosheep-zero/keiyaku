@@ -1,7 +1,7 @@
 import type { CliOutcome } from "../streams.js";
 import { AkumaOwner } from "../../akuma/akuma-owner.js";
 import { readHeart, readLatestTurnForBody } from "../../akuma/heart/index.js";
-import { parseAkuId, pathsForAkuId } from "../../akuma/identity.js";
+import { parseAkumaId, pathsForAkumaId } from "../../akuma/identity.js";
 import { Keiyaku, NoGitWorldError, Repo, type AkumaCaller, type AkumaStatus, type ContractId } from "../../index.js";
 import { observeNamedAddress } from "../../library/address.js";
 import { dispatchAssociations } from "../../library/selection.js";
@@ -20,7 +20,7 @@ type Contract =
 type Profile =
   | Readonly<{
       kind: "available";
-      archetype: string;
+      akumaName: string;
       aliases: readonly string[];
       provider: string | null;
       model: string | null;
@@ -86,7 +86,7 @@ type CurrentTurn = Readonly<{ initiator: string | null; bornAt: string | null; u
 async function currentTurn(self: Extract<AkumaCaller, { kind: "akuma" }>): Promise<CurrentTurn> {
   let bornAt: string | null = null;
   try {
-    const paths = pathsForAkuId(self.world, self.akuId);
+    const paths = pathsForAkumaId(self.world, self.akumaId);
     const heart = await readHeart(paths);
     bornAt = heart.soul?.createdAt ?? null;
     const body = heart.latestBody;
@@ -113,7 +113,7 @@ async function callerProfile(
 ): Promise<Profile> {
   try {
     if (!(await World.established(caller.world))) throw new Error("caller World is not established");
-    const id = parseAkuId(caller.akuId);
+    const id = parseAkumaId(caller.akumaId);
     // This is the same status owner as the public read, without its plugin outcome observer.
     const [status, aliases, repo] = await Promise.all([
       new AkumaOwner(id.id, caller.world).status(),
@@ -127,8 +127,8 @@ async function callerProfile(
     if (dispatch.kind === "failed") throw new Error(dispatch.diagnostic);
     return {
       kind: "available",
-      archetype: id.archetype,
-      aliases: aliases.aliases.value.filter((binding) => binding.akuId === id.id).map((binding) => binding.alias),
+      akumaName: id.akumaName,
+      aliases: aliases.aliases.value.filter((binding) => binding.akumaId === id.id).map((binding) => binding.alias),
       provider: status.provider ?? null,
       model: status.model ?? null,
       workdir: status.cwd ?? null,
