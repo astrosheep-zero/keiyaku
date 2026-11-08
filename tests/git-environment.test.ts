@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { consumeGitStdout, executeGit, runGitPipe } from "../src/git/process.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import { GIT_REF } from "../src/git/repository.js";
@@ -41,14 +41,13 @@ test("a resolved Repo reads and binds only its own repository after ambient Git 
   const repo = await Repo.at({ path: a.path });
   await withEnvironment(redirectTo(b.path), async () => {
     assert.equal(await repo.currentBranch(), "refs/heads/pinned-a");
-    const contract = await Keiyaku.with().bind({
-      repo,
+    const contract = await Keis.of(repo).bind({
       markdown: document(),
       workspace: "worktree",
       target: null,
       gates: [],
     });
-    const handle = accepted(contract).value.keiyaku;
+    const handle = accepted(contract).value.kei;
     assert.notEqual(await handle.state(), null, "the journal must also decode under ambient redirection");
   });
 

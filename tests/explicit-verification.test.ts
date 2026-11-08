@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, KeiyakuError, Repo } from "../src/index.js";
+import { Keis, KeiyakuError, Repo } from "../src/index.js";
 import { gateReports } from "../src/core/facts/gate.js";
 import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
@@ -19,13 +19,12 @@ function declarations(scripts: readonly string[]): string {
 async function fixture(scripts: readonly string[], gates = ["reviewed", "verified"]) {
   const repository = repositoryWithMain();
   const contract = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: declarations(scripts),
       gates,
       target: "refs/heads/main",
     }),
-  ).value.keiyaku;
+  ).value.kei;
   const worktree = await appointedWorktreePath(
     await cachedRepositoryAt(repository.path),
     present(await contract.state()).id,

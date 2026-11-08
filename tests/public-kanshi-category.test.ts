@@ -16,7 +16,7 @@ import {
   repositoryAt,
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
-import { Akumas, kanshiCategory, Keiyaku, Repo, World } from "../src/index.js";
+import { Akumas, kanshiCategory, Keis, Repo, World } from "../src/index.js";
 import type { KanshiCategoryInput, KanshiCategoryReport } from "../src/index.js";
 import type { WorldRoot } from "../src/world.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -86,8 +86,7 @@ test("category observation reuses owner rows and is the operation the CLI runs",
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo,
+    await Keis.of(repo).bind({
       target: "main",
       markdown: contractMarkdown("Public category contract", {
         Context: "public category",
@@ -99,7 +98,7 @@ test("category observation reuses owner rows and is the operation the CLI runs",
       gates: ["reviewed"],
     }),
   );
-  const contract = present(await bound.value.keiyaku.state());
+  const contract = present(await bound.value.kei.state());
   const contracts = await kanshiCategory({ world, repo, category: "contract", limit: 1 });
   assert.equal(contracts.category, "contract");
   if (contracts.category !== "contract" || contracts.contracts.kind !== "present")

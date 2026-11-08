@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { setTimeout } from "node:timers/promises";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { materializeScratchCandidate, removeCollectableScratchWorktrees } from "../src/git/scratch.js";
 import { contractId, snapshotId } from "../src/core/facts/types.js";
@@ -70,8 +70,7 @@ test("explicit verification prepares clean candidate scratch without importing w
         'printf "declaration-output\\n"',
       ].join(" && ");
       const bound = accepted(
-        await Keiyaku.with().bind({
-          repo: await Repo.at({ path: raw.path }),
+        await Keis.of(await Repo.at({ path: raw.path })).bind({
           markdown: document(declaration),
           workspace: "worktree",
           gates: ["verified", "reviewed"],
@@ -79,7 +78,7 @@ test("explicit verification prepares clean candidate scratch without importing w
       );
       const source = await appointedWorktreePath(
         await repositoryAt(raw.path),
-        present(await bound.value.keiyaku.state()).id,
+        present(await bound.value.kei.state()).id,
       );
       const cleanupLog = join(raw.path, "cleanup.log");
       const setup = [
@@ -131,7 +130,7 @@ test("explicit verification prepares clean candidate scratch without importing w
       const result = await executeVerification({
         repository: await repositoryAt(raw.path),
         candidate: snapshotId(raw.run(["-C", source, "rev-parse", "HEAD"]).trim()),
-        contractId: present(await bound.value.keiyaku.state()).id,
+        contractId: present(await bound.value.kei.state()).id,
         ...SELECTED,
         declaration: { executor: "bash", script: declaration },
         materializeScratchCandidate,
@@ -673,8 +672,7 @@ test("explicit verification retires a partially materialized scratch after post-
         { DENY_REMOVAL: removalFails ? "yes" : "no" },
         async (gitPath) => {
           const bound = accepted(
-            await Keiyaku.with().bind({
-              repo: await Repo.at({ path: raw.path, gitPath }),
+            await Keis.of(await Repo.at({ path: raw.path, gitPath })).bind({
               markdown: document("touch declaration-ran"),
               workspace: "worktree",
               gates: ["verified", "reviewed"],
@@ -682,7 +680,7 @@ test("explicit verification retires a partially materialized scratch after post-
           );
           const source = await appointedWorktreePath(
             await repositoryAt(raw.path),
-            present(await bound.value.keiyaku.state()).id,
+            present(await bound.value.kei.state()).id,
           );
           writeFileSync(
             hook,
@@ -702,7 +700,7 @@ test("explicit verification retires a partially materialized scratch after post-
           const pending = executeVerification({
             repository: { ...(await repositoryAt(raw.path, gitPath)), signal: controller.signal },
             candidate: snapshotId(raw.run(["-C", source, "rev-parse", "HEAD"]).trim()),
-            contractId: present(await bound.value.keiyaku.state()).id,
+            contractId: present(await bound.value.kei.state()).id,
             ...SELECTED,
             declaration: { executor: "bash", script: "touch declaration-ran" },
             materializeScratchCandidate,
@@ -736,7 +734,7 @@ test("explicit verification retires a partially materialized scratch after post-
             assert.equal(raw.run(["worktree", "list", "--porcelain"]).includes(scratch), removalFails);
             assert.equal(existsSync(join(source, ".git")), true);
             assert.equal(existsSync(join(scratch, "declaration-ran")), false);
-            assert.equal(present(await bound.value.keiyaku.state()).attestations.length, 0);
+            assert.equal(present(await bound.value.kei.state()).attestations.length, 0);
           } finally {
             controller.abort();
             await pending.catch(() => undefined);

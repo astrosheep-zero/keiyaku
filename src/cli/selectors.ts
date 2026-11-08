@@ -1,21 +1,21 @@
 import { identitySegments } from "../identity/coordinates.js";
-import { Keiyaku, type ContractId, type Repo } from "../index.js";
+import type { Keis, ContractId, Kei } from "../index.js";
 import { CliUsageError } from "./parse.js";
 
-type SelectedContract = Readonly<{ id: ContractId; contract: Keiyaku }>;
+type SelectedContract = Readonly<{ id: ContractId; contract: Kei }>;
 
-export function contractFromInput(repo: Repo, value: string): SelectedContract {
+export function contractFromInput(library: Keis, value: string): SelectedContract {
   try {
     const id = value as ContractId;
-    return { id, contract: Keiyaku.with().select({ repo, id }) };
+    return { id, contract: library.kei({ id }) };
   } catch (error) {
     throw new CliUsageError(error instanceof Error ? error.message : String(error));
   }
 }
 
 /** Adapt public Contract resolution evidence to the existing CLI usage diagnostics. */
-export async function resolveContractId(repo: Repo, selector: string | undefined, cwd: string): Promise<ContractId> {
-  const result = await Keiyaku.with().resolve({ repo, ...(selector === undefined ? {} : { selector }), cwd });
+export async function resolveContractId(library: Keis, selector: string | undefined, cwd: string): Promise<ContractId> {
+  const result = await library.resolve({ ...(selector === undefined ? {} : { selector }), cwd });
   if (result.kind === "resolved") return result.id;
   const refusal = result.refusal;
   switch (refusal.kind) {

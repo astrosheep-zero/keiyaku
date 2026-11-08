@@ -5,10 +5,9 @@ import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import { optionalSignal, requireInput } from "./input.js";
 import { readContractValue } from "./outcome.js";
-import { scopeForRepo, type Repo } from "./repo.js";
 
 export type ContractWaitOptions = Readonly<{ completion?: "any" | "all"; timeoutMs?: number; signal?: AbortSignal }>;
-export type ContractWaitInput = ContractWaitOptions & Readonly<{ repo: Repo; contracts: readonly string[] }>;
+export type ContractWaitInput = ContractWaitOptions & Readonly<{ contracts: readonly string[] }>;
 
 // An unknown presence means the deadline interrupted the initial observation.
 export type ContractWaitMember = Readonly<{
@@ -33,9 +32,9 @@ export type ValidatedWait = Readonly<{
   signal?: AbortSignal;
 }>;
 
-export function validateContractWait(input: unknown): ValidatedWait {
-  const values = requireInput(input, "Contract wait input", ["repo", "contracts", "completion", "timeoutMs", "signal"]);
-  return validateContractWaitValues(values, scopeForRepo(values.repo));
+export function validateContractWait(scope: RepositoryScope, input: unknown): ValidatedWait {
+  const values = requireInput(input, "Contract wait input", ["contracts", "completion", "timeoutMs", "signal"]);
+  return validateContractWaitValues(values, scope);
 }
 
 export function validateContractWaitHandle(

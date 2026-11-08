@@ -10,7 +10,7 @@ import { cliJson } from "./support/cli-fixtures.js";
 import { cliCoordinateDiscovery } from "../src/cli/coordinates.js";
 import { parseArgv as parseInvocation } from "../src/cli/parse.js";
 import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { World } from "../src/world.js";
 import { registeredWorktrees, repositoryAt } from "../src/git/repository.js";
 
@@ -106,7 +106,7 @@ test("CLI accepts native repository coordinate spellings through managed worktre
     assert.equal(result.exit, 0);
     assert.equal(result.value.kind, "accepted");
     if (result.value.kind !== "accepted") continue;
-    const row = (await Keiyaku.with().list({ repo: await Repo.at({ path }) })).rows.find(
+    const row = (await Keis.of(await Repo.at({ path })).list({  })).rows.find(
       (candidate) => candidate.id === result.value.contract,
     );
     assert.notEqual(row?.worktreePath, null);

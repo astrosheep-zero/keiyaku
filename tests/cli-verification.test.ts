@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { Keiyaku, Repo, type DeliveryPreviewOutcome, type DeliverOutcome, type VerifyOutcome } from "../src/index.js";
+import { Keis, Repo, type DeliveryPreviewOutcome, type DeliverOutcome, type VerifyOutcome } from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
 import type { ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -149,8 +149,8 @@ test("full verify exposes mixed verdicts, independent scratches, and requirement
   assert.ok(text.includes(failed.requirement));
   assert.ok(text.includes(failed.retainedPath));
   accepted(
-    await Keiyaku.with()
-      .select({ repo: await Repo.at({ path: raw.path }), id })
+    await Keis.of(await Repo.at({ path: raw.path }))
+      .kei({ id })
       .abandon(),
   );
   assert.equal(existsSync(failed.retainedPath), false);

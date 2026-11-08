@@ -6,13 +6,13 @@ import type { IntentOutcome, IntentRetry } from "../protocol/operations.js";
 import type { ContractWorkspaceLocation } from "../workspace-place.js";
 import type { Delivery, DeliveryValue } from "./delivery.js";
 import type { InvocationAccumulator } from "./invocation.js";
-import type { Keiyaku } from "./keiyaku.js";
+import type { Kei } from "./kei.js";
 import type { ContractVerb, HandoffOutcome, OperationOutcome, OutcomeProjection, Review, Verify } from "./outcome.js";
 import type { OperationRefusals } from "./refusal.js";
 import type { AmendRegionObservation, RegionObservation } from "./region.js";
 
 export type BindValue = Readonly<{
-  keiyaku: Keiyaku;
+  kei: Kei;
   workspace?: ContractWorkspaceLocation;
   warnings?: readonly string[];
 }> &

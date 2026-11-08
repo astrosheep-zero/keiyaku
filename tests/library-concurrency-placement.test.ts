@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test, { describe } from "node:test";
-import { Keiyaku } from "../src/index.js";
+import { Keis } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
@@ -26,7 +26,7 @@ function crossProcessAmend(
   }>,
 ) {
   const source = [
-    "const { Keiyaku, Repo } = await import(process.env.KEIYAKU_MODULE);",
+    "const { Keis, Repo } = await import(process.env.KEIYAKU_MODULE);",
     "const { repositoryAt } = await import(process.env.KEIYAKU_REPOSITORY_MODULE);",
     "const { privateStatePublicationSeatPath } = await import(process.env.KEIYAKU_SEAT_MODULE);",
     "const { tryAcquireSqliteTransactionLock } = await import(process.env.KEIYAKU_LOCK_MODULE);",
@@ -50,7 +50,7 @@ function crossProcessAmend(
     "if (process.env.KEIYAKU_WAIT_FOR_RELEASE === '1') await new Promise((resolve) => process.stdin.once('data', resolve));",
     "try {",
     "  if (intent === undefined) {",
-    "    const contract = await Keiyaku.with().select({ repo: await Repo.at({ path: process.env.KEIYAKU_REPOSITORY }), id: contractId });",
+    "    const contract = await Keis.of(await Repo.at({ path: process.env.KEIYAKU_REPOSITORY })).kei({ id: contractId });",
     "    await contract.amend({ markdown: process.env.KEIYAKU_MARKDOWN });",
     "    process.stdout.write('accepted\\n');",
     "  } else {",
@@ -187,18 +187,17 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
   test("reintegration observes and publishes only after the shared private-state seat", async () => {
     const repository = repositoryWithMain();
     repository.run(["branch", "release"]);
-    const bound = accepted(await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
+    const bound = accepted(await Keis.of(await cachedRepoAt(repository.path)).bind({
       markdown: document(),
       target: "refs/heads/release",
       workspace: "worktree",
       gates: ["reviewed"],
     }));
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.value.keiyaku.state())).id);
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.value.kei.state())).id);
     writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
     repository.run(["-C", worktree, "add", "candidate.txt"]);
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-    await bound.value.keiyaku.deliver();
+    await bound.value.kei.deliver();
     writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
     repository.run(["add", "target.txt"]);
     repository.run(["commit", "--quiet", "-m", "move target"]);
@@ -223,7 +222,7 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
       reintegrateOperation({
         channel,
         repository: capability,
-        contractId: (present(await bound.value.keiyaku.state())).id,
+        contractId: (present(await bound.value.kei.state())).id,
         target: "refs/heads/release",
       }),
     );

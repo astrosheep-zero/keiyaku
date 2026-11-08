@@ -2,7 +2,7 @@
 import { gate, gateWord, type ActorId, type Gate } from "../core/facts/types.js";
 import { EMPTY_WORKTREE_HOOKS, worktreeHooksFrom, type WorktreeHooks } from "../git/hooks.js";
 import { SettingsError, type Settings } from "../settings.js";
-import type { LocalContractComposition } from "./contract-types.js";
+import type { KeisOptions } from "./contract-types.js";
 import { actorOption, requireInput } from "./input.js";
 import { KeiyakuError } from "./outcome.js";
 
@@ -143,12 +143,12 @@ export function derivedGates(
   }
 }
 
-export function captureLocalContractComposition(input?: LocalContractComposition): LocalContractCompositionCapture {
-  const values = requireInput(input === undefined ? {} : input, "Keiyaku.with input", ["settings", "actor"]);
+export function captureLocalContractComposition(input?: KeisOptions): LocalContractCompositionCapture {
+  const values = requireInput(input === undefined ? {} : input, "Keis.of input", ["settings", "actor"]);
   const actor = actorOption(values.actor).actor;
   const settings = values.settings;
   if (settings !== undefined && (settings === null || typeof settings !== "object")) {
-    throw new TypeError("Keiyaku.with settings must be a Settings value");
+    throw new TypeError("Keis.of settings must be a Settings value");
   }
   return Object.freeze({
     ...(actor === undefined ? {} : { actor }),

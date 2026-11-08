@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
-import { Keiyaku, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
+import { Keis, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
 import { snapshotId } from "../src/core/facts/types.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
 import {
@@ -41,14 +41,13 @@ let deliveredReviewGatedTargetTemplate: Promise<DeliveredReviewGatedTargetTempla
 
 async function buildDeliveredReviewGatedTargetTemplate(): Promise<DeliveredReviewGatedTargetTemplate> {
   const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
-  const bound = accepted(await Keiyaku.with().bind({
-    repo: await Repo.at({ path: repository.path }),
+  const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
     markdown: document(),
     workspace: "worktree",
     target: "refs/heads/main",
     gates: ["reviewed"],
   }));
-  const contract = bound.value.keiyaku;
+  const contract = bound.value.kei;
   const contractId = (present(await contract.state())).id;
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
@@ -75,7 +74,7 @@ async function deliveredReviewGatedTargetFixture() {
   repository.run(["worktree", "add", "--detach", worktree, template.workspaceHead]);
   restoreWorktreeFiles(worktree, template.generatedFiles);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.with().select({ repo, id: template.id });
+  const contract = Keis.of(repo).kei({ id: template.id });
   return { contract, repository, repo, worktree };
 }
 
@@ -92,8 +91,8 @@ async function restoreOwnedRefs(
 async function projectionFixture() {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), workspace: "worktree" }));
-  const id = present(await bound.value.keiyaku.state()).id;
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), workspace: "worktree" }));
+  const id = present(await bound.value.kei.state()).id;
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
   return { repository, repo, id, worktree };
 }
@@ -128,7 +127,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       const override = join(worktree, ".keiyaku", "namespace", "current");
       writeFileSync(override, "custom\n");
 
-      const report = await Keiyaku.with().reconcile({ repo, contract: id });
+      const report = await Keis.of(repo).reconcile({ contract: id });
 
       const lag = report.lag.find((entry) => entry.kind === "contract-file-failed");
       assert.ok(lag);
@@ -153,7 +152,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       );
 
       repository.run(["-C", root, "reset", "--quiet", "HEAD", "--", relativePath]);
-      const retried = await Keiyaku.with().reconcile({ repo, contract: id });
+      const retried = await Keis.of(repo).reconcile({ contract: id });
       assert.deepEqual(retried.lag, []);
       assert.notEqual(readFileSync(path, "utf8"), "authored generated location\n");
       assert.equal(readFileSync(override, "utf8"), "custom\n");
@@ -178,7 +177,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
         ].join("\n"),
         { KEIYAKU_FAILED_INDEX: root },
         async (gitPath) =>
-          Keiyaku.with().reconcile({ repo: await Repo.at({ path: repository.path, gitPath }), contract: id }),
+          Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({ contract: id }),
       );
 
       const lag = report.lag.find((entry) => entry.kind === "contract-file-failed");
@@ -194,18 +193,17 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       );
       if (index === "managed") assert.equal(readFileSync(context, "utf8"), `${id}\n`);
       else assert.equal(statSync(context, { throwIfNoEntry: false }), undefined);
-      assert.deepEqual((await Keiyaku.with().reconcile({ repo, contract: id })).lag, []);
+      assert.deepEqual((await Keis.of(repo).reconcile({ contract: id })).lag, []);
     });
   }
   test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
     const repository = repositoryWithMain();
     const repo = await Repo.at({ path: repository.path });
-    const bound = accepted(await Keiyaku.with().bind({
-      repo,
+    const bound = accepted(await Keis.of(repo).bind({
       markdown: document(),
       workspace: "worktree",
     }));
-    const contract = bound.value.keiyaku;
+    const contract = bound.value.kei;
     const contractId = (present(await contract.state())).id;
     const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
     const deliverLeaf = join(worktree, ".agents", "skills", "keiyaku-deliver");
@@ -217,7 +215,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "user seat skill"]);
     writeFileSync(reviewSkill, "stale generated skill\n");
 
-    const report = await Keiyaku.with().reconcile({ repo, contract: contractId });
+    const report = await Keis.of(repo).reconcile({ contract: contractId });
 
     assert.deepEqual(report.lag, []);
     assert.equal(readFileSync(deliverSkill, "utf8"), "# User deliverer skill\n");
@@ -245,7 +243,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     const rewritten = repository.run(["commit-tree", tree, "-m", "rewritten target"]).trim();
     repository.run(["update-ref", "refs/heads/main", rewritten]);
 
-    const report = await Keiyaku.with().reconcile({ repo, contract: state.id });
+    const report = await Keis.of(repo).reconcile({ contract: state.id });
     const git = await repositoryAt(repository.path);
 
     assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
@@ -284,8 +282,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       ].join("\n"),
       { KEIYAKU_MOVED_TARGET: marker, KEIYAKU_REPO: repository.path },
       async (gitPath) =>
-        Keiyaku.with().reconcile({
-          repo: await Repo.at({ path: repository.path, gitPath }),
+        Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({
           contract: state.id,
         }),
     );
@@ -299,7 +296,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
     assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
 
-    const retried = await Keiyaku.with().reconcile({ repo, contract: state.id });
+    const retried = await Keis.of(repo).reconcile({ contract: state.id });
     assert.equal(await readRef(git, deliveryRefFor(state.id)), null);
     assert.equal(await readRef(git, candidatePinRefFor(state.id)), null);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), moved);

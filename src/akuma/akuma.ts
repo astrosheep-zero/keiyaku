@@ -361,7 +361,9 @@ async function callerCandidates(
 ): Promise<readonly ActivityCandidate[]> {
   const closure = callerClosure(lineage, root, world);
   return await freshnessOrdered(
-    rows.filter((row) => closure.has(row.id) && (selected === undefined || parseAkumaId(row.id).akumaName === selected)),
+    rows.filter(
+      (row) => closure.has(row.id) && (selected === undefined || parseAkumaId(row.id).akumaName === selected),
+    ),
   );
 }
 

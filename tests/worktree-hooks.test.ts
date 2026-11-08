@@ -14,7 +14,7 @@ import { appointedWorktreePath } from "./support/git.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { projectSettings } from "../src/settings.js";
 import { abandonOperation } from "../src/protocol/abandon.js";
 import { scopeOperation } from "../src/protocol/operations.js";
@@ -79,17 +79,16 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   const settings = await projectSettings(repository.path);
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keiyaku.with({ settings }).bind({
-      repo,
+    await Keis.of(repo, { settings }).bind({
       markdown: contractBody("Concurrent hooks"),
     }),
   );
-  const id = present(await bound.value.keiyaku.state()).id;
+  const id = present(await bound.value.kei.state()).id;
   const worktree = await appointedWorktreePath(git, id);
   const administration = await worktreeGitDirectory(git, worktree);
   const reports = await Promise.all([
-    Keiyaku.with({ settings }).reconcile({ repo, contract: id }),
-    Keiyaku.with({ settings }).reconcile({ repo, contract: id }),
+    Keis.of(repo, { settings }).reconcile({ contract: id }),
+    Keis.of(repo, { settings }).reconcile({ contract: id }),
   ]);
 
   assert.deepEqual(
@@ -100,7 +99,7 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   assert.equal(repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]), "");
   assert.equal(existsSync(join(administration, "keiyaku", "hooks.json")), false);
 
-  const abandoned = await bound.value.keiyaku.abandon({});
+  const abandoned = await bound.value.kei.abandon({});
   assert.deepEqual(
     abandoned.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag),
     [],
@@ -135,19 +134,18 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
   });
   const settings = await projectSettings(repository.path);
   const bound = accepted(
-    await Keiyaku.with({ settings }).bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path }), { settings }).bind({
       markdown: contractBody("Recovery around destroy hooks"),
     }),
   );
   const worktree = await appointedWorktreePath(
     await repositoryAt(repository.path),
-    present(await bound.value.keiyaku.state()).id,
+    present(await bound.value.kei.state()).id,
   );
   const originalHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   writeFileSync(join(worktree, "before-destroy-hook.txt"), "initial bytes\n");
 
-  const abandoned = await bound.value.keiyaku.abandon({});
+  const abandoned = await bound.value.kei.abandon({});
   const recoveries = abandoned.effects.filter(
     (effect) => effect.kind === "reconciliation-effect" && effect.effect.kind === "recovery-snapshot",
   );
@@ -189,12 +187,11 @@ test("CLI abandon carries the configured destroy hook to the native operation", 
   const marker = join(markers, "destroy.txt");
   settingsHooks(repository.path, { destroy: [markerCommand(marker, "destroy")] });
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: contractBody("CLI abandon hooks"),
     }),
   );
-  const id = present(await bound.value.keiyaku.state()).id;
+  const id = present(await bound.value.kei.state()).id;
 
   const abandoned = await runCli(["-C", repository.path, "abandon", id], { environment: {} });
   assert.equal(abandoned.exit, 0, abandoned.stderr);
@@ -208,12 +205,11 @@ test("CLI arc carries the configured create hook into its reconciliation", async
   const marker = join(markers, "create.txt");
   settingsHooks(repository.path, { create: [markerCommand(marker, "create")] });
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: contractBody("CLI arc hooks"),
     }),
   );
-  const id = present(await bound.value.keiyaku.state()).id;
+  const id = present(await bound.value.kei.state()).id;
   rmSync(await appointedWorktreePath(await repositoryAt(repository.path), id), { recursive: true, force: true });
 
   const arced = await runCli(["-C", repository.path, "arc", id, "-"], {
@@ -229,15 +225,14 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
   const git = await repositoryAt(repository.path);
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo,
+    await Keis.of(repo).bind({
       markdown: contractBody("Terminal wins"),
     }),
   );
-  const id = present(await bound.value.keiyaku.state()).id;
+  const id = present(await bound.value.kei.state()).id;
   const worktree = await appointedWorktreePath(git, id);
   const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
-  const pending = Keiyaku.with().reconcile({ repo, contract: id });
+  const pending = Keis.of(repo).reconcile({ contract: id });
 
   const scope = await scopeOperation({ coordinate: repository.path });
   const terminal = await withGitDecodeChannel(scope, (channel) =>
@@ -258,7 +253,7 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
     false,
   );
   assert.equal(existsSync(worktree), false);
-  assert.equal(present(await bound.value.keiyaku.state()).terminal?.kind, "abandoned");
+  assert.equal(present(await bound.value.kei.state()).terminal?.kind, "abandoned");
 });
 
 test("a Hook runner outlives its killed reconcile caller and fences immediate replay", async () => {
@@ -340,12 +335,11 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   repository.run(["commit", "--quiet", "-m", "scratch settings"]);
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo,
+    await Keis.of(repo).bind({
       markdown: contractBody("Scratch cleanup"),
     }),
   );
-  const id = present(await bound.value.keiyaku.state()).id;
+  const id = present(await bound.value.kei.state()).id;
   const requirement = "scratch-custody";
   const snapshot = repository.run(["rev-parse", "HEAD"]).trim();
   const pathFile = join(mkdtempSync(join(tmpdir(), "keiyaku-orphan-path-")), "path");
@@ -379,7 +373,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
 
   const active = await materializeScratchCandidate(git, mintSnapshotId(snapshot), id, requirement);
   try {
-    const report = await Keiyaku.with().reconcile({ repo, contract: id });
+    const report = await Keis.of(repo).reconcile({ contract: id });
     assert.equal(
       report.effects.some(
         (effect) => effect.kind === "worktree" && effect.path === orphan && effect.action === "removed",

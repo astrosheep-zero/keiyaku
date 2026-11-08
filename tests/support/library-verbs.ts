@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { Keiyaku, Repo, type Keiyaku as KeiyakuHandle, type KeiyakuRefusal } from "../../src/index.js";
+import { Keis, Repo, type Kei as KeiyakuHandle, type KeiyakuRefusal } from "../../src/index.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -97,14 +97,13 @@ export function document(verification?: string): string {
 
 export async function bind(repository: TestGitRepository, verification?: string) {
   // These lifecycle fixtures exercise targetless Contracts on an attached HEAD.
-  const result = await Keiyaku.with().bind({
-    repo: await Repo.at({ path: repository.path }),
+  const result = await Keis.of(await Repo.at({ path: repository.path })).bind({
     markdown: document(verification),
     workspace: "worktree",
     target: null,
     gates: verification === undefined ? ["reviewed"] : ["verified"],
   });
-  return accepted(result).value.keiyaku;
+  return accepted(result).value.kei;
 }
 
 export function commitCandidate(repository: TestGitRepository, worktreePath = repository.path): void {
@@ -134,14 +133,13 @@ export function targetPlacementDocument(title = "Target checkout placement"): st
 }
 
 export async function managedCandidate(repository: TestGitRepository, gates: readonly string[] = []) {
-  const bound = await Keiyaku.with().bind({
-    repo: await cachedRepoAt(repository.path),
+  const bound = await Keis.of(await cachedRepoAt(repository.path)).bind({
     markdown: targetPlacementDocument(),
     workspace: "worktree",
     target: "refs/heads/main",
     gates,
   });
-  const contract = accepted(bound).value.keiyaku;
+  const contract = accepted(bound).value.kei;
   const state = present(await contract.state());
   const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   writeFileSync(resolve(path, "delivered.txt"), "candidate\n");

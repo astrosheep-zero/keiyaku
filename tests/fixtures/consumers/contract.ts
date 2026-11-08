@@ -1,5 +1,7 @@
 import {
-  Keiyaku,
+  Kei,
+  Keis,
+  actorId,
   Delivery,
   Repo,
   KeiyakuError,
@@ -17,7 +19,7 @@ import {
   type PendingSurface,
   type ReviewInput,
   type PartialOutcomeEnvelope,
-  type LocalContractComposition,
+  type KeisOptions,
   type ContractObservation,
   type ContractResolveInput,
   type ContractResolution,
@@ -28,12 +30,12 @@ declare const repo: Repo;
 declare const id: ContractId;
 declare const markdown: string;
 
-const input: BindInput = { repo, markdown, after: [id], gates: ["reviewed"] };
-const targetlessInput: BindInput = { repo, markdown, target: null };
+const input: BindInput = { markdown, after: [id], gates: ["reviewed"] };
+const targetlessInput: BindInput = { markdown, target: null };
 // @ts-expect-error a target is a branch name or an explicit absence, never another value
-const invalidTarget: BindInput = { repo, markdown, target: 7 };
-const bound: Promise<BindResult> = Keiyaku.with().bind(input);
-const selected = Keiyaku.with().select({ repo, id });
+const invalidTarget: BindInput = { markdown, target: 7 };
+const bound: Promise<BindResult> = Keis.of(repo).bind(input);
+const selected = Keis.of(repo).kei({ id });
 const previewInput: DeliveryPreviewInput = { includeDirty: true, showDiff: true, signal: new AbortController().signal };
 const preview: DeliveryPreviewOutcome = await selected.previewDelivery(previewInput, { observe: () => {} });
 if (preview.kind === "accepted") {
@@ -45,15 +47,15 @@ if (preview.kind === "accepted") {
 selected.audit();
 // @ts-expect-error preview cannot accept mutation-only options
 selected.previewDelivery({ overwrite: true });
-const resolveInput: ContractResolveInput = { repo, selector: "@short", cwd: "/explicit/worktree" };
-const resolution: ContractResolution = await Keiyaku.with().resolve(resolveInput);
-if (resolution.kind === "resolved") Keiyaku.with().select({ repo, id: resolution.id });
+const resolveInput: ContractResolveInput = { selector: "@short", cwd: "/explicit/worktree" };
+const resolution: ContractResolution = await Keis.of(repo).resolve(resolveInput);
+if (resolution.kind === "resolved") Keis.of(repo).kei({ id: resolution.id });
 if (resolution.kind === "refused") {
   const refusal: ContractSelectorRefusal = resolution.refusal;
   void refusal.kind;
 }
 // @ts-expect-error resolution has no transport route
-Keiyaku.with().resolve({ repo, selector: id, execution: {} });
+Keis.of(repo).resolve({ selector: id, execution: {} });
 const verifyInput: VerifyInput = { index: 1, includeDirty: true, signal: new AbortController().signal };
 const verified: VerifyOutcome = await selected.verify(verifyInput, { observe: () => {} });
 if (verified.kind === "accepted") {
@@ -90,22 +92,22 @@ if (delivered.kind === "accepted") {
 }
 if (delivered.kind === "handoff") delivered.value.handoffBase;
 
-const local: LocalContractComposition = { actor: "consumer" };
-Keiyaku.with(local).select({ repo, id }).review(cancellable);
+const local: KeisOptions = { actor: actorId("consumer") };
+Keis.of(repo, local).kei({ id }).review(cancellable);
 // @ts-expect-error the execution carrier is no longer a public construction input
-Keiyaku.with({ execution: {} });
+Keis.of(repo, { execution: {} });
 
-const observed: ContractObservation = await Keiyaku.with().observe({ repo, id });
+const observed: ContractObservation = await Keis.of(repo).observe({ id });
 if (observed.kind === "present") observed.row.gates.reports;
-const reconciled = await Keiyaku.with().reconcile({ repo, contract: id });
+const reconciled = await Keis.of(repo).reconcile({ contract: id });
 reconciled.effects;
 reconciled.settlement;
-const worldReconciled = await Keiyaku.with().reconcile({ repo, retryHooks: true });
+const worldReconciled = await Keis.of(repo).reconcile({ retryHooks: true });
 worldReconciled.kind;
 
 // Handles cannot be independently constructed outside their repository authority.
 // @ts-expect-error constructor is private
-new Keiyaku();
+new Kei();
 // @ts-expect-error constructor is private
 new Delivery();
 // @ts-expect-error Repo requires an explicit coordinate object
@@ -115,7 +117,7 @@ Repo.at();
 // @ts-expect-error a selected handle cannot switch repositories during an operation
 selected.review({ ...cancellable, repo });
 // @ts-expect-error binding must contain Markdown or a fork source
-Keiyaku.with().bind({ repo });
+Keis.of(repo).bind({  });
 
 void bound;
 void targetlessInput;
@@ -126,9 +128,9 @@ void receipt;
 void reviewHandoff;
 
 // @ts-expect-error selectors require branded Contract identities
-Keiyaku.with().select({ repo, id: "kei/unbranded" });
+Keis.of(repo).kei({ id: "kei/unbranded" });
 // @ts-expect-error prerequisite identities cannot be unbranded strings
-Keiyaku.with().bind({ repo, markdown, after: ["kei/unbranded"] });
+Keis.of(repo).bind({ markdown, after: ["kei/unbranded"] });
 // @ts-expect-error obsolete singular cleanup is not a public result
 reviewed.leak;
 // @ts-expect-error a Repo cannot act as an alternative construction facade

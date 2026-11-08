@@ -26,7 +26,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import type { SpawnResult } from "../src/library/akumas.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { Akumas, Keiyaku, Repo, World, settings } from "../src/index.js";
+import { Akumas, Keis, Repo, World, settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
@@ -853,7 +853,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let operationFailed = true;
-  let bound: Awaited<ReturnType<ReturnType<typeof Keiyaku.with>["bind"]>> | undefined;
+  let bound: Awaited<ReturnType<ReturnType<typeof Keis.of>["bind"]>> | undefined;
   const environment = { ...process.env };
   for (const key of [
     "KEIYAKU_ACTOR_ID",
@@ -870,8 +870,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
   environment.PI_SESSION_ID = "isolated-call-submitter";
   const submittingOwner = harnessOwner({ channel: "pi", session: "isolated-call-submitter" });
   try {
-    bound = await Keiyaku.with().bind({
-      repo,
+    bound = await Keis.of(repo).bind({
       markdown: contractMarkdown("Akuma execution placement", {
         Context: "A Contract association and a call execution directory are separate inputs.",
         Objective: "Contract association never selects the Akuma execution workdir.",
@@ -881,7 +880,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       }),
       workspace: "worktree",
     });
-    const managedId = present(await accepted(bound).value.keiyaku.state()).id;
+    const managedId = present(await accepted(bound).value.kei.state()).id;
     const appointment = await readManagedWorktreeAppointment(git, managedId);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = 'appointed'");
     if (appointment.kind !== "appointed") return;
@@ -954,7 +953,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
     try {
       if (bound !== undefined)
         await accepted(bound)
-          .value.keiyaku.abandon({})
+          .value.kei.abandon({})
           .catch(() => undefined);
       await cleanupSpawnCapableFixtureForTest(t, {
         fixturePath: raw.path,

@@ -7,7 +7,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku } from "../src/index.js";
+import { Keis } from "../src/index.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
@@ -93,8 +93,7 @@ test("placement keeps post-bind Debt edits and changes only state to done", asyn
     repo = await cachedRepoAt(world.path);
   const debtId = await debt(world.path, "Edited completion");
   commitDebts(world);
-  const bound = accepted(await Keiyaku.with().bind({
-    repo,
+  const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
     markdown: document("Edited completion"),
     workspace: "worktree",
@@ -105,7 +104,7 @@ test("placement keeps post-bind Debt edits and changes only state to done", asyn
   writeFileSync(authority, `${before}Manual edit after bind.\n`);
   writeFileSync(`${world.path}/edited.txt`, "edited\n");
 
-  const delivered = acceptedDelivery(await bound.value.keiyaku.deliver({ includeDirty: true }));
+  const delivered = acceptedDelivery(await bound.value.kei.deliver({ includeDirty: true }));
 
   const after = readFileSync(authority, "utf8");
   assert.match(after, /Manual edit after bind\./u);
@@ -119,33 +118,32 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
   const world = repository(),
     repo = await cachedRepoAt(world.path);
   const debtId = await debt(world.path, "Replay completion", "drop");
-  const bound = accepted(await Keiyaku.with().bind({
-    repo,
+  const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
     markdown: document("Replay completion"),
     workspace: "worktree",
     gates: [],
   }));
   writeFileSync(`${world.path}/replay.txt`, "replay\n");
-  const delivered = acceptedDelivery(await bound.value.keiyaku.deliver({ includeDirty: true }));
+  const delivered = acceptedDelivery(await bound.value.kei.deliver({ includeDirty: true }));
 
   assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "debt");
-  assert.equal((present(await bound.value.keiyaku.state())).terminal?.kind, "claimed");
+  assert.equal((present(await bound.value.kei.state())).terminal?.kind, "claimed");
   assert.equal(await debtState(world.path, debtId), "drop");
   assert.deepEqual(await holders(world), [
-    { version: 1, debtId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "held" },
+    { version: 1, debtId, contractId: (present(await bound.value.kei.state())).id, disposition: "held" },
   ]);
   replaceDebtState(world.path, debtId, "drop", "open");
 
-  const first = await Keiyaku.with().reconcile({ repo, contract: (present(await bound.value.keiyaku.state())).id });
+  const first = await Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id });
   assert.deepEqual(first.settlement.actions, [{ kind: "debt", debtId, action: "done" }]);
   assert.deepEqual(first.settlement.lags, []);
   assert.equal(await debtState(world.path, debtId), "done");
   assert.deepEqual(await holders(world), [
-    { version: 1, debtId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "released" },
+    { version: 1, debtId, contractId: (present(await bound.value.kei.state())).id, disposition: "released" },
   ]);
 
-  const second = await Keiyaku.with().reconcile({ repo, contract: (present(await bound.value.keiyaku.state())).id });
+  const second = await Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id });
   assert.deepEqual(second.settlement.actions, []);
   assert.deepEqual(second.settlement.lags, []);
   assert.equal(await debtState(world.path, debtId), "done");
@@ -158,18 +156,17 @@ test(
     const world = repository(),
       repo = await cachedRepoAt(world.path);
     const debtId = await debt(world.path, "Settlement cleanup", "drop");
-    const bound = accepted(await Keiyaku.with().bind({
-      repo,
+    const bound = accepted(await Keis.of(repo).bind({
       debt: debtId,
       markdown: document("Settlement cleanup"),
       workspace: "worktree",
       gates: [],
     }));
     writeFileSync(join(world.path, "cleanup.txt"), "cleanup\n");
-    const delivered = acceptedDelivery(await bound.value.keiyaku.deliver({ includeDirty: true }));
+    const delivered = acceptedDelivery(await bound.value.kei.deliver({ includeDirty: true }));
     assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "debt");
     assert.deepEqual(await holders(world), [
-      { version: 1, debtId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "held" },
+      { version: 1, debtId, contractId: (present(await bound.value.kei.state())).id, disposition: "held" },
     ]);
     replaceDebtState(world.path, debtId, "drop", "open");
     assert.equal(await debtState(world.path, debtId), "open");
@@ -192,8 +189,8 @@ test(
       }
     };
     try {
-      const replayed = await Keiyaku.with().reconcile({ repo, contract: (present(await bound.value.keiyaku.state())).id });
-      const state = present(await bound.value.keiyaku.state());
+      const replayed = await Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id });
+      const state = present(await bound.value.kei.state());
       assert.deepEqual(replayed.settlement.actions, [{ kind: "debt", debtId, action: "done" }]);
       assert.deepEqual(replayed.settlement.lags, [
         {
@@ -216,22 +213,21 @@ test("Settlement exact-read-backs an unknown DebtHolder release after external s
   const world = repository(),
     repo = await cachedRepoAt(world.path);
   const debtId = await debt(world.path, "Unknown holder release", "drop");
-  const bound = accepted(await Keiyaku.with().bind({
-    repo,
+  const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
     markdown: document("Unknown holder release"),
     workspace: "worktree",
     gates: [],
   }));
   writeFileSync(`${world.path}/unknown-holder.txt`, "candidate\n");
-  const delivered = acceptedDelivery(await bound.value.keiyaku.deliver({ includeDirty: true }));
+  const delivered = acceptedDelivery(await bound.value.kei.deliver({ includeDirty: true }));
   assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "debt");
   assert.deepEqual(await holders(world), [
-    { version: 1, debtId, contractId: (present(await bound.value.keiyaku.state())).id, disposition: "held" },
+    { version: 1, debtId, contractId: (present(await bound.value.kei.state())).id, disposition: "held" },
   ]);
   replaceDebtState(world.path, debtId, "drop", "open");
   assert.equal(await debtState(world.path, debtId), "open");
-  const state = present(await bound.value.keiyaku.state());
+  const state = present(await bound.value.kei.state());
 
   const git = await cachedRepositoryAt(world.path);
   const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(git), mode: "immediate" });

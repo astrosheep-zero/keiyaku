@@ -40,7 +40,7 @@ import { contractId, contractSegment } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { AkumaWorldScopeError, Akumas, Keiyaku, Repo, type WorldRoot } from "../src/index.js";
+import { AkumaWorldScopeError, Akumas, Keis, Repo, type WorldRoot } from "../src/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
 import { createLiveStatusReader, defaultWaitComplete } from "../src/akuma/akuma-observe.js";
@@ -1224,8 +1224,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo,
+    await Keis.of(repo).bind({
       markdown: [
         "# Review",
         "",
@@ -1250,7 +1249,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
       ].join("\n"),
     }),
   );
-  const boundId = present(await bound.value.keiyaku.state()).id;
+  const boundId = present(await bound.value.kei.state()).id;
   assert.match(boundId, /^kei\/review-[0-9a-f]{4}$/u);
   const alias = parseAkumaAlias(`@${contractSegment(boundId)}`);
   const source = await answered(repository.path, "worker", "00000001");

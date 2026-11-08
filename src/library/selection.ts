@@ -296,7 +296,7 @@ export async function waitAkuma(
     Array.isArray(values.akuma) &&
     values.akuma.some((selector: unknown) => typeof selector === "string" && selector.startsWith("kei/"))
   ) {
-    throw new TypeError("Akumas.wait does not accept Contract selectors; use Keiyaku.with().wait");
+    throw new TypeError("Akumas.wait does not accept Contract selectors; use Keis.wait");
   }
   const selected = completionMode(values.completion);
   const timeoutMs = timeout(values.timeoutMs);

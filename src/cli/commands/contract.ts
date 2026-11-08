@@ -1,4 +1,4 @@
-import { Akumas, Keiyaku, KeiyakuError, kanshiCategory, listArchetypeDefinitions, nuke } from "../../index.js";
+import { Akumas, Keis, KeiyakuError, kanshiCategory, listArchetypeDefinitions, nuke } from "../../index.js";
 import type {
   ActorId,
   AkumaCaller,
@@ -8,8 +8,7 @@ import type {
   ContractId,
   DeliverOutcome,
   KanshiCategoryReport,
-  Keiyaku as KeiyakuContract,
-  KeiyakuLibrary,
+  Kei as KeiyakuContract,
   ReviewOutcome,
   VerifyOutcome,
   Settings,
@@ -18,7 +17,6 @@ import type {
 import type { KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
 import { kanshi, selectRegion } from "../../kanshi/index.js";
 import { observeNamedAddress, resolveNamedAddress, type NamedAddressAuthority } from "../../library/address.js";
-import { observeKeiyaku } from "../../library/contract-composition.js";
 import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../../library/reconcile.js";
 import type { Repo } from "../../library/repo.js";
@@ -162,26 +160,25 @@ async function finishContractAnswer(
 }
 
 async function selectedContract(
-  repo: Repo,
+  library: Keis,
   selector: string | undefined,
   scope: string,
 ): Promise<Readonly<{ id: ContractId; contract: KeiyakuContract }>> {
-  const id = await resolveContractId(repo, selector, scope);
-  return { id, contract: contractFromInput(repo, id).contract };
+  const id = await resolveContractId(library, selector, scope);
+  return { id, contract: contractFromInput(library, id).contract };
 }
 
 async function existingSeat(
   command: ExistingContractCommand,
   coordinates: CliCoordinates,
   runtime: CliRuntime,
-  library: KeiyakuLibrary,
+  library: Keis,
 ): Promise<ExistingSeat> {
-  const repo = requiredRepo(coordinates);
-  const id = await resolveContractId(repo, command.contract, coordinates.cwd);
+  const id = await resolveContractId(library, command.contract, coordinates.cwd);
   const actor = "actor" in command ? actorFromEdge(command.actor, runtime.environment) : undefined;
   return {
     id,
-    contract: library.select({ repo, id }),
+    contract: library.kei({ id }),
     ...(actor === undefined ? {} : { actor }),
   };
 }
@@ -189,15 +186,13 @@ async function existingSeat(
 async function runBind(
   command: Extract<ContractMutation, { command: "bind" }>,
   input: ContractMutationInput,
-  library: KeiyakuLibrary,
+  library: Keis,
 ): Promise<CliOutcome> {
   const { coordinates, runtime } = input;
-  const repo = requiredRepo(coordinates);
   const actor = actorFromEdge(command.actor, runtime.environment);
   if (command.forkOf !== undefined) {
     const answer = await library.bind({
-      repo,
-      forkOf: contractFromInput(repo, command.forkOf).id,
+      forkOf: contractFromInput(library, command.forkOf).id,
       ...(command.target === undefined ? {} : { target: command.target }),
       ...(actor === undefined ? {} : { actor }),
     });
@@ -205,9 +200,8 @@ async function runBind(
   }
   const markdown = await runtime.readStdin();
   try {
-    const after = command.after?.map((id) => contractFromInput(repo, id).id);
+    const after = command.after?.map((id) => contractFromInput(library, id).id);
     const answer = await library.bind({
-      repo,
       markdown,
       ...(command.debt === undefined ? {} : { debt: command.debt as `debt/${string}` }),
       ...(command.target === undefined ? {} : { target: command.target }),
@@ -234,13 +228,13 @@ async function runAmend(
   command: Extract<ContractMutation, { command: "amend" }>,
   input: ContractMutationInput,
   seat: ExistingSeat,
+  library: Keis,
 ): Promise<CliOutcome> {
-  const { coordinates, runtime } = input;
+  const { runtime } = input;
   const markdown = command.stdin === true ? await runtime.readStdin() : undefined;
   if (markdown !== undefined && isBlankInput(markdown))
     throw new CliUsageError("amend requires a nonblank stdin document");
-  const repo = requiredRepo(coordinates);
-  const after = command.clearAfter === true ? [] : command.after?.map((id) => contractFromInput(repo, id).id);
+  const after = command.clearAfter === true ? [] : command.after?.map((id) => contractFromInput(library, id).id);
   const answer = await seat.contract.amend({
     ...(markdown === undefined ? {} : { markdown }),
     ...(seat.actor === undefined ? {} : { actor: seat.actor }),
@@ -367,7 +361,7 @@ async function runContractMutation(command: ContractMutation, input: ContractMut
   const actor = ["deliver", "verify", "review"].includes(command.command)
     ? actorFromEdge(undefined, runtime.environment)
     : undefined;
-  const library = Keiyaku.with({
+  const library = Keis.of(requiredRepo(input.coordinates), {
     ...(configuration === undefined ? {} : { settings: configuration }),
     ...(actor === undefined ? {} : { actor }),
   });
@@ -375,7 +369,7 @@ async function runContractMutation(command: ContractMutation, input: ContractMut
   const seat = await existingSeat(command, input.coordinates, input.runtime, library);
   switch (command.command) {
     case "amend":
-      return await runAmend(command, input, seat);
+      return await runAmend(command, input, seat, library);
     case "deliver":
       return await runDeliver(command, input.runtime, seat);
     case "verify":
@@ -429,8 +423,7 @@ async function runLs(
 ): Promise<CliOutcome> {
   const query = command.query;
   if (query.kind === "contracts") {
-    const list = await Keiyaku.with().list({
-      repo: requiredRepo(coordinates),
+    const list = await Keis.of(requiredRepo(coordinates)).list({
       ...(query.limit === undefined ? {} : { limit: query.limit }),
     });
     return emit(command.output, list, () => renderContractCatalogue(list), "accepted");
@@ -532,7 +525,7 @@ async function runShow(
 ): Promise<CliOutcome> {
   const repo = coordinates.repo;
   if (repo === undefined) throw new CliUsageError("cannot select a contract while the Contract world is absent");
-  const selected = await selectedContract(repo, command.contract, coordinates.cwd);
+  const selected = await selectedContract(Keis.of(repo), command.contract, coordinates.cwd);
   const guidance = await selected.contract.guidance();
   if (guidance === null) {
     const refusal = statusRefusal(command.command, selected.id);
@@ -646,10 +639,12 @@ async function runRegion(
     return emitSection(report.region ?? { kind: "absent" });
   }
   const contract =
-    command.contract === undefined ? undefined : await resolveContractId(repo, command.contract, coordinates.cwd);
+    command.contract === undefined
+      ? undefined
+      : await resolveContractId(Keis.of(repo), command.contract, coordinates.cwd);
   const report = await kanshi({ world: coordinates.world, repo, region: { kind: "declarations" } });
   if (contract === undefined) return emitSection(report.region ?? { kind: "absent" });
-  const observed = await observeKeiyaku({ repo, id: contract });
+  const observed = await Keis.of(repo).observe({ id: contract });
   if (observed.kind === "missing" || observed.row.phase === "claimed" || observed.row.phase === "abandoned") {
     const refusal: RenderableRefusal = {
       kind: observed.kind === "missing" ? "contract-missing" : "terminal",
@@ -682,7 +677,7 @@ export async function runContractHistoryCommand(
   coordinates: CliCoordinates,
 ): Promise<CliOutcome> {
   const repo = requiredRepo(coordinates);
-  const selected = contractFromInput(repo, command.contract);
+  const selected = contractFromInput(Keis.of(repo), command.contract);
   const history: ContractHistory | null = await selected.contract.history();
   if (history === null) {
     const refusal: RenderableRefusal = { kind: "contract-missing", contractId: selected.id };
@@ -701,19 +696,19 @@ async function runReconcile(
 ): Promise<CliOutcome> {
   const repo = requiredRepo(coordinates);
   const configuration = await settingsAt(coordinates.world ?? undefined, home);
-  const library = Keiyaku.with({ settings: configuration });
+  const library = Keis.of(repo, { settings: configuration });
   let report: ReconcileCompletion | RepoReconcileReport;
   if (command.contract === undefined) {
-    report = await library.reconcile({ repo, retryHooks: command.retryHooks });
+    report = await library.reconcile({ retryHooks: command.retryHooks });
   } else {
-    const selected = await selectedContract(repo, command.contract, coordinates.cwd);
-    const observed = await observeKeiyaku({ repo, id: selected.id });
+    const selected = await selectedContract(library, command.contract, coordinates.cwd);
+    const observed = await library.observe({ id: selected.id });
     if (observed.kind === "missing") {
       if (command.output === "json") writeJson(statusRefusal("reconcile", selected.id).refusal);
       else writeStdout(renderRefusal(statusRefusal("reconcile", selected.id), undefined, displayContext()));
       return "refused";
     }
-    report = await library.reconcile({ repo, contract: selected.id, retryHooks: command.retryHooks });
+    report = await library.reconcile({ contract: selected.id, retryHooks: command.retryHooks });
   }
   if (command.output === "json") writeJson(report);
   else writeStdout(renderReconcile(report, displayContext()));

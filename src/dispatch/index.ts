@@ -253,7 +253,9 @@ export async function observeDispatchAssociations(
   akuIds: readonly AkumaId[],
 ): Promise<ReadonlyMap<AkumaId, DispatchAssociation>> {
   const requested = [...new Set(akuIds.map((akumaId) => parseAkumaId(akumaId).id))];
-  const associations = new Map<AkumaId, DispatchAssociation>(requested.map((akumaId) => [akumaId, NO_DISPATCH_ASSOCIATION]));
+  const associations = new Map<AkumaId, DispatchAssociation>(
+    requested.map((akumaId) => [akumaId, NO_DISPATCH_ASSOCIATION]),
+  );
   if (repository === undefined || requested.length === 0) return associations;
   try {
     await withGitDecodeChannel(repository, (channel) =>

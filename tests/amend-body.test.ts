@@ -6,7 +6,7 @@ import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
 import type { ContractBody as ContractBodyValue } from "../src/body/types.js";
-import { Keiyaku, KeiyakuError, Repo } from "../src/index.js";
+import { Keis, KeiyakuError, Repo } from "../src/index.js";
 import { makeGitRepository } from "./support/git.js";
 
 const body: ContractBodyValue = {
@@ -268,7 +268,7 @@ test("duplicate amendments retain their native input cause before Git observatio
     const repo = await Repo.at({ path: repository.path });
     const before = readFileSync(log, "utf8");
     assert.match(before, /worktree list/u, "repository discovery proves Git observation tracing is active");
-    const contract = Keiyaku.with().select({ repo, id: "kei/missing" as never });
+    const contract = Keis.of(repo).kei({ id: "kei/missing" as never });
     await assert.rejects(
       () => contract.amend({ markdown: "## Append: Context\nfirst\n## Append: Context\nsecond\n" }),
       (error: unknown) => {

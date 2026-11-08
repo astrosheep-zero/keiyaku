@@ -3,8 +3,8 @@ import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { candidatePinRefFor, deliveryRefFor, withGitShim } from "./support/git.js";
-import { KeiyakuError, AuthorityCorruptionError, Repo, Keiyaku } from "../src/index.js";
-import { createKeiyakuHandle } from "../src/library/keiyaku.js";
+import { KeiyakuError, AuthorityCorruptionError, Repo, Kei, Keis } from "../src/index.js";
+import { createKeiHandle } from "../src/library/kei.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 import { scopeForRepo } from "../src/library/repo.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
@@ -21,14 +21,13 @@ test("native delivery propagates lower programming and corruption failures after
     const repository = repositoryWithMain();
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(
-      await Keiyaku.with().bind({
-        repo,
+      await Keis.of(repo).bind({
         markdown: (await import("./support/library-verbs.js")).document(),
         target: "main",
         gates: [],
       }),
     );
-    const id = present(await bound.value.keiyaku.state()).id;
+    const id = present(await bound.value.kei.state()).id;
     commitCandidate(repository);
     let armed = false;
     const base = scopeForRepo(repo);
@@ -42,7 +41,7 @@ test("native delivery propagates lower programming and corruption failures after
         armed = true;
       },
     };
-    const native = createKeiyakuHandle(id, scope, captureLocalContractComposition());
+    const native = createKeiHandle(id, scope, captureLocalContractComposition());
     await assert.rejects(native.deliver(), (error: unknown) => {
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, original instanceof AuthorityCorruptionError ? "authority-corruption" : "internal");
@@ -82,7 +81,7 @@ test("native delivery never treats an aborted signal as proof that an independen
       return actorId("test");
     },
   };
-  const native = createKeiyakuHandle(present(await bound.state()).id, scope, composition);
+  const native = createKeiHandle(present(await bound.state()).id, scope, composition);
   await assert.rejects(native.deliver({ signal: controller.signal }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "internal");
@@ -139,8 +138,8 @@ test("decode-channel teardown never replaces the original failure, including a t
 test("native delivery keeps claim and movement when the optional scope observation throws, without reading twice", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), target: "main", gates: [] }));
-  const id = present(await bound.value.keiyaku.state()).id;
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
+  const id = present(await bound.value.kei.state()).id;
   commitCandidate(repository);
   const original = new TypeError("broken optional diffstat observation");
   const base = scopeForRepo(repo);
@@ -157,7 +156,7 @@ test("native delivery keeps claim and movement when the optional scope observati
       return base.gitPath;
     },
   };
-  const native = createKeiyakuHandle(id, scope, captureLocalContractComposition());
+  const native = createKeiHandle(id, scope, captureLocalContractComposition());
   await assert.rejects(
     native.deliver(
       {},
@@ -190,15 +189,14 @@ test("native review retains an earlier claimed sibling when a later continuation
   const primaryId = present(await primary.state()).id;
   const child = async (title: string) =>
     accepted(
-      await Keiyaku.with().bind({
-        repo,
+      await Keis.of(repo).bind({
         markdown: document().replace("# Library verbs", "# " + title),
         gates: [],
         // The continuation fixtures stay targetless, like their prerequisite.
         target: null,
         after: [primaryId],
       }),
-    ).value.keiyaku;
+    ).value.kei;
   const left = await child("Earlier sibling");
   const right = await child("Later sibling");
   const childIds = [present(await left.state()).id, present(await right.state()).id].sort();
@@ -216,7 +214,7 @@ test("native review retains an earlier claimed sibling when a later continuation
       return base.gitPath;
     },
   };
-  const native = createKeiyakuHandle(primaryId, scope, captureLocalContractComposition());
+  const native = createKeiHandle(primaryId, scope, captureLocalContractComposition());
   await assert.rejects(
     native.review(
       { verdict: "satisfied" },
@@ -290,16 +288,16 @@ test("read observation preserves exact exceptional identity and thrown undefined
 test("native bind and delivery JSON retain result data without process custody", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
   const bindJson = JSON.parse(JSON.stringify(bound));
-  assert.deepEqual(bindJson.value.keiyaku, { contract: bound.contract });
+  assert.deepEqual(bindJson.value.kei, { contract: bound.contract });
   assert.deepEqual(bindJson.facts, bound.facts);
   assert.deepEqual(bindJson.effects, bound.effects);
   assert.deepEqual(bindJson.value.workspace, bound.value.workspace);
   assert.deepEqual(Object.keys(bindJson.value).sort(), Object.keys(bound.value).sort());
   assert.ok(bound.value.workspace?.kind === "worktree");
   commitCandidate(repository, bound.value.workspace.path);
-  const delivered = accepted(await bound.value.keiyaku.deliver());
+  const delivered = accepted(await bound.value.kei.deliver());
   const json = JSON.parse(JSON.stringify(delivered));
   assert.deepEqual(json.facts, delivered.facts);
   assert.deepEqual(json.effects, delivered.effects);
@@ -309,7 +307,7 @@ test("native bind and delivery JSON retain result data without process custody",
   assert.ok((await delivered.value.diff())?.includes("candidate.txt"));
   for (const mechanics of ["readDiff", "scope", "execution", "composition", "checkpoints"]) {
     assert.equal(Object.hasOwn(json.value, mechanics), false);
-    assert.equal(Object.hasOwn(bindJson.value.keiyaku, mechanics), false);
+    assert.equal(Object.hasOwn(bindJson.value.kei, mechanics), false);
   }
 });
 
@@ -324,7 +322,7 @@ test("native delivery retains completed Debt settlement before terminal cleanup 
   repository.run(["add", ".keiyaku/debts"]);
   repository.run(["commit", "--quiet", "-m", "Debt authority"]);
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), debt: debt.value.id, gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), debt: debt.value.id, gates: [] }));
   const original = new TypeError("terminal cleanup program failure");
   const base = scopeForRepo(repo);
   let armed = false;
@@ -339,7 +337,7 @@ test("native delivery retains completed Debt settlement before terminal cleanup 
         armed = true;
     },
   };
-  const native = createKeiyakuHandle(bound.contract, scope, captureLocalContractComposition());
+  const native = createKeiHandle(bound.contract, scope, captureLocalContractComposition());
   await assert.rejects(native.deliver(), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.cause, original);
@@ -389,7 +387,7 @@ test("native Contract reads use null for lawful absence while corrupt fork terms
   );
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const missing = Keiyaku.with().select({ repo, id: contractId("kei/missing") });
+  const missing = Keis.of(repo).kei({ id: contractId("kei/missing") });
   assert.equal(await missing.state(), null);
   assert.equal(await missing.history(), null);
   assert.equal(await missing.guidance(), null);
@@ -422,7 +420,7 @@ test("native Contract reads use null for lawful absence while corrupt fork terms
     (await updateRefsAtomically(scope, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
     "published",
   );
-  await assert.rejects(Keiyaku.with().bind({ repo, forkOf: id }), (error: unknown) => {
+  await assert.rejects(Keis.of(repo).bind({ forkOf: id }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "authority-corruption");
     assert.ok(error.cause instanceof TypeError);
@@ -435,7 +433,7 @@ test("native preview preserves partial observation on unexpected target-lag fail
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keiyaku.with().bind({ repo, markdown: document("true"), target: "main", gates: ["reviewed", "verified"] }),
+    await Keis.of(repo).bind({ markdown: document("true"), target: "main", gates: ["reviewed", "verified"] }),
   );
   const base = scopeForRepo(repo);
   const original = new TypeError("unexpected native target lag observation failure");
@@ -450,8 +448,8 @@ test("native preview preserves partial observation on unexpected target-lag fail
       return base.gitPath;
     },
   };
-  const native = createKeiyakuHandle(bound.contract, scope, captureLocalContractComposition());
-  const witnessedHead = present(await bound.value.keiyaku.state()).head;
+  const native = createKeiHandle(bound.contract, scope, captureLocalContractComposition());
+  const witnessedHead = present(await bound.value.kei.state()).head;
   await assert.rejects(native.previewDelivery(), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "internal");
@@ -468,7 +466,7 @@ test("native preview preserves partial observation on unexpected target-lag fail
     return true;
   });
   assert.equal(injected, 1);
-  assert.equal(present(await bound.value.keiyaku.state()).head, witnessedHead);
+  assert.equal(present(await bound.value.kei.state()).head, witnessedHead);
 });
 
 test("native bind retains its complete accepted value when its owned decode channel has an operational close failure", async () => {
@@ -485,8 +483,8 @@ test("native bind retains its complete accepted value when its owned decode chan
     {},
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      const result = accepted(await Keiyaku.with().bind({ repo, markdown: document(), gates: [] }));
-      assert.ok(result.value.keiyaku instanceof Keiyaku);
+      const result = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
+      assert.ok(result.value.kei instanceof Kei);
       assert.ok(result.value.workspace?.kind === "worktree");
       assert.ok(result.facts.some((fact) => fact.kind === "bind" && fact.contract === result.contract));
       assert.ok(
@@ -504,7 +502,7 @@ test("native delivery retains an earlier completed checkout follow when a later 
   repository.run(["worktree", "add", "--quiet", "--force", sibling, "main"]);
   try {
     const repo = await Repo.at({ path: repository.path });
-    const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), target: "main", gates: [] }));
+    const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
     assert.ok(bound.value.workspace?.kind === "worktree");
     commitCandidate(repository, bound.value.workspace.path);
     const base = scopeForRepo(repo);
@@ -517,7 +515,7 @@ test("native delivery retains an earlier completed checkout follow when a later 
         return base.gitPath;
       },
     };
-    const native = createKeiyakuHandle(
+    const native = createKeiHandle(
       bound.contract,
       scope,
       captureLocalContractComposition(),
@@ -571,11 +569,11 @@ test("native terminal removal survives a subsequent malformed ref read, includin
     { KEIYAKU_REMOVAL_MARKER: marker },
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), target: "main", gates: [] }));
+      const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
       assert.ok(bound.value.workspace?.kind === "worktree");
       const path = bound.value.workspace.path;
       commitCandidate(repository, path);
-      await assert.rejects(bound.value.keiyaku.deliver(), (error: unknown) => {
+      await assert.rejects(bound.value.kei.deliver(), (error: unknown) => {
         assert.ok(error instanceof KeiyakuError);
         assert.equal(error.category, "internal");
         assert.ok(error.cause instanceof Error);
@@ -611,8 +609,7 @@ test("native terminal removal survives a subsequent malformed ref read, includin
 test("native delivery independently bounds stalled EOF retirement and proves the owned process exited", async () => {
   const repository = repositoryWithMain();
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: document(),
       gates: ["reviewed"],
     }),
@@ -631,7 +628,7 @@ test("native delivery independently bounds stalled EOF retirement and proves the
     { KEIYAKU_EOF_MARKER: marker },
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      const native = Keiyaku.with().select({ repo, id: bound.contract });
+      const native = Keis.of(repo).kei({ id: bound.contract });
       const controller = new AbortController();
       let watchdogFired = false;
       let finishedAt: number | undefined;

@@ -1,23 +1,35 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Akumas, Keiyaku, World } from "../src/index.js";
+import { actorId, Akumas, Keis, Repo, World } from "../src/index.js";
 
 test("Contract and Akumas capture only their own composition inputs", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-product-boundaries-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const world = await World.at(root);
-  assert.throws(() => Keiyaku.with(null as never), TypeError);
+  execFileSync("git", ["init", "--quiet", root]);
+  const repo = await Repo.at({ path: root });
+  assert.throws(() => Keis.of(null as never), TypeError);
   assert.throws(() => Akumas.of(null as never), TypeError);
   assert.deepEqual(Object.keys(Akumas.of(world)), []);
 
-  const contracts = Keiyaku.with({ actor: "contract-actor" });
-  assert.deepEqual(Object.keys(contracts).sort(), ["bind", "list", "observe", "reconcile", "resolve", "select", "wait"]);
+  const contracts = Keis.of(repo, { actor: actorId("contract-actor") });
+  assert.deepEqual(Object.keys(contracts).sort(), ["bind", "kei", "list", "observe", "reconcile", "resolve", "wait"]);
   assert.equal("spawn" in contracts, false);
   assert.equal("nuke" in contracts, false);
   assert.equal("debts" in contracts, false);
+  assert.throws(() => contracts.kei({ repo, id: "kei/example" } as never), TypeError);
+  for (const run of [
+    () => contracts.bind({ repo, markdown: "" } as never),
+    () => contracts.resolve({ repo } as never),
+    () => contracts.list({ repo } as never),
+    () => contracts.observe({ repo, id: "kei/example" } as never),
+    () => contracts.wait({ repo, contracts: ["kei/example"] } as never),
+    () => contracts.reconcile({ repo } as never),
+  ]) await assert.rejects(run, TypeError);
 
   const akumas = Akumas.of(world);
   assert.equal("actor" in akumas, false);

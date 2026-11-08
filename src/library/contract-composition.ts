@@ -5,10 +5,11 @@ import {
   contractCatalogueOperation,
   contractObservationOperation,
   contractsOperation,
+  type RepositoryScope,
 } from "../protocol/operations.js";
 import type { ContractObservation } from "../protocol/read/status.js";
 import { resolveContract } from "./contract-address.js";
-import { bindKeiyaku } from "./contract-creation.js";
+import { bindKei } from "./contract-creation.js";
 import type { BindOutcome } from "./contract-outcomes.js";
 import {
   captureLocalContractComposition,
@@ -22,8 +23,7 @@ import type {
   ContractObservationInput,
   ContractResolveInput,
   ContractResolution,
-  KeiyakuSelectInput,
-  LocalContractComposition,
+  KeisOptions,
 } from "./contract-types.js";
 import { requireInput } from "./input.js";
 import {
@@ -32,7 +32,7 @@ import {
   type ContractWaitInput,
   type ContractWaitResult,
 } from "./contract-wait.js";
-import type { Keiyaku, createKeiyakuHandle } from "./keiyaku.js";
+import { createKeiHandle, type Kei } from "./kei.js";
 import { readContractValue } from "./outcome.js";
 import {
   completeReconcile,
@@ -42,50 +42,43 @@ import {
 } from "./reconcile.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
-export type ReconcileInput = Readonly<{ repo: Repo; contract?: string; retryHooks?: boolean }>;
-interface KeiyakuLibraryReconcile {
+export type ReconcileInput = Readonly<{ contract?: string; retryHooks?: boolean }>;
+interface KeisReconcile {
   (input: ReconcileInput & Readonly<{ contract: string }>): Promise<ReconcileCompletion>;
   (input: ReconcileInput & Readonly<{ contract?: undefined }>): Promise<RepoReconcileReport>;
   (input: ReconcileInput): Promise<ReconcileCompletion | RepoReconcileReport>;
 }
 
-export type KeiyakuLibrary = Readonly<{
+export type Keis = Readonly<{
   bind(input: BindInput): Promise<BindOutcome>;
-  select(input: KeiyakuSelectInput): Keiyaku;
+  kei(input: Readonly<{ id: ContractId }>): Kei;
   resolve(input: ContractResolveInput): Promise<ContractResolution>;
-  list(input: ContractListInput): Promise<ContractList>;
+  list(input?: ContractListInput): Promise<ContractList>;
   observe(input: ContractObservationInput): Promise<ContractObservation>;
   wait(input: ContractWaitInput): Promise<ContractWaitResult>;
-  reconcile: KeiyakuLibraryReconcile;
+  reconcile: KeisReconcile;
 }>;
 
-/** Captures immutable Contract settings for native owner operations. */
-export function composeContractLibrary(
-  createHandle: typeof createKeiyakuHandle,
-  input?: LocalContractComposition,
-): KeiyakuLibrary {
-  const composition = captureLocalContractComposition(input);
-  return Object.freeze({
-    bind: (operation: BindInput) => bindKeiyaku(operation, createHandle, composition),
-    select: (operation: KeiyakuSelectInput) => selectKeiyaku(operation, createHandle, composition),
-    resolve: resolveContract,
-    list: (operation: ContractListInput) => listKeiyaku(operation),
-    observe: (operation: ContractObservationInput) => observeKeiyaku(operation),
-    wait: async (operation: ContractWaitInput) => await waitContractLocal(validateContractWait(operation)),
-    reconcile: reconcileOperation(composition),
-  });
-}
-
-function selectKeiyaku(
-  input: KeiyakuSelectInput,
-  createHandle: typeof createKeiyakuHandle,
-  composition: LocalContractCompositionCapture = captureLocalContractComposition(),
-): Keiyaku {
-  const values = requireInput(input, "Keiyaku.with().select input");
-  const scope = scopeForRepo(values.repo);
-  if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-  return createHandle(contractId(values.id), scope, composition);
-}
+/** Captures one Repo and immutable Contract settings. */
+export const Keis = Object.freeze({
+  of(repo: Repo, input?: KeisOptions): Keis {
+    const scope = scopeForRepo(repo);
+    const composition = captureLocalContractComposition(input);
+    return Object.freeze({
+      bind: (operation: BindInput) => bindKei(scope, operation, createKeiHandle, composition),
+      kei: (input: Readonly<{ id: ContractId }>) => {
+        const values = requireInput(input, "Keis.kei input", ["id"]);
+        if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
+        return createKeiHandle(contractId(values.id), scope, composition);
+      },
+      resolve: (operation: ContractResolveInput) => resolveContract(scope, operation),
+      list: (operation: ContractListInput = {}) => listKeis(scope, operation),
+      observe: (operation: ContractObservationInput) => observeKei(scope, operation),
+      wait: async (operation: ContractWaitInput) => await waitContractLocal(validateContractWait(scope, operation)),
+      reconcile: reconcileOperation(scope, composition),
+    });
+  },
+});
 
 /**
  * The one public repair entry: an explicit Repo proves the Git world, the captured composition
@@ -93,22 +86,22 @@ function selectKeiyaku(
  * available. Omitted contract reconciles the complete world; a supplied one reconciles that
  * addressed Contract.
  */
-function reconcileOperation(composition: LocalContractCompositionCapture): KeiyakuLibraryReconcile {
+function reconcileOperation(scope: RepositoryScope, composition: LocalContractCompositionCapture): KeisReconcile {
   function run(input: ReconcileInput & Readonly<{ contract: string }>): Promise<ReconcileCompletion>;
   function run(input: ReconcileInput & Readonly<{ contract?: undefined }>): Promise<RepoReconcileReport>;
   function run(input: ReconcileInput): Promise<ReconcileCompletion | RepoReconcileReport>;
   function run(input: ReconcileInput): Promise<ReconcileCompletion | RepoReconcileReport> {
-    return reconcileKeiyaku(input, composition);
+    return reconcileKeiyaku(scope, input, composition);
   }
   return run;
 }
 
 async function reconcileKeiyaku(
+  scope: RepositoryScope,
   input: ReconcileInput,
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
 ): Promise<ReconcileCompletion | RepoReconcileReport> {
-  const values = requireInput(input, "Keiyaku.with().reconcile input", ["repo", "contract", "retryHooks"]);
-  const scope = scopeForRepo(values.repo);
+  const values = requireInput(input, "Keis.reconcile input", ["contract", "retryHooks"]);
   const contract = values.contract;
   if (contract !== undefined && typeof contract !== "string") throw new TypeError("contract must be a string");
   if (values.retryHooks !== undefined && typeof values.retryHooks !== "boolean")
@@ -123,12 +116,11 @@ async function reconcileKeiyaku(
   );
 }
 
-export async function listKeiyaku(input: ContractListInput): Promise<ContractList> {
-  const values = requireInput(input, "Keiyaku.with().list input");
+export async function listKeis(scope: RepositoryScope, input: ContractListInput): Promise<ContractList> {
+  const values = requireInput(input, "Keis.list input");
   for (const key of Object.keys(values)) {
-    if (key !== "repo" && key !== "limit") throw new TypeError(`Keiyaku.with().list input has unknown field: ${key}`);
+    if (key !== "limit") throw new TypeError(`Keis.list input has unknown field: ${key}`);
   }
-  const scope = scopeForRepo(values.repo);
   if (values.limit === undefined) {
     const board = await readContractValue(() =>
       withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel })),
@@ -143,11 +135,13 @@ export async function listKeiyaku(input: ContractListInput): Promise<ContractLis
   );
 }
 
-export async function observeKeiyaku(input: ContractObservationInput): Promise<ContractObservation> {
-  const values = requireInput(input, "Keiyaku.observe input");
+export async function observeKei(
+  scope: RepositoryScope,
+  input: ContractObservationInput,
+): Promise<ContractObservation> {
+  const values = requireInput(input, "Keis.observe input");
   for (const key of Object.keys(values))
-    if (key !== "repo" && key !== "id") throw new TypeError(`Keiyaku.observe input has unknown field: ${key}`);
-  const scope = scopeForRepo(values.repo);
+    if (key !== "id") throw new TypeError(`Keis.observe input has unknown field: ${key}`);
   if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
   let id: ContractId;
   try {

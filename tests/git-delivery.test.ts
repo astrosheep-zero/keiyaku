@@ -13,7 +13,7 @@ import { readRef } from "../src/git/repository.js";
 import { readDeliveryDiff, worktreeChangeId } from "../src/git/integration.js";
 import { followDependentManagedWorktree, unmergedWorkspacePaths } from "../src/git/workspace.js";
 import { appointmentFor, readManagedWorktreeAppointment, readPlaceRegister } from "../src/workspace-place.js";
-import { AuthorityCorruptionError, Keiyaku, Repo, type ContractId } from "../src/index.js";
+import { AuthorityCorruptionError, Keis, Repo, type ContractId } from "../src/index.js";
 import { captureTender, dirtyTenderDelta } from "../src/git/tender.js";
 import { deliveryDiffOperation, scopeOperation } from "../src/protocol/operations.js";
 import {
@@ -95,8 +95,7 @@ async function buildPostBindTemplate(
     repository.run(["config", "user.email", "test@example.com"]);
   }
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: contractBody(),
       workspace: "worktree",
       ...(target === "targeted"
@@ -105,7 +104,7 @@ async function buildPostBindTemplate(
           { target: null }),
     }),
   );
-  const state = present(await bound.value.keiyaku.state());
+  const state = present(await bound.value.kei.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   const generatedFiles = captureWorktreeFiles(worktree);
   repository.run(["worktree", "remove", "--force", worktree]);
@@ -137,7 +136,7 @@ async function postBindFixture(target: "targetless" | "targeted", gates: readonl
   repository.run(["worktree", "add", "--detach", worktree, template.start]);
   restoreWorktreeFiles(worktree, template.generatedFiles);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.with().select({ repo, id: template.id });
+  const contract = Keis.of(repo).kei({ id: template.id });
   return { contract, repository, id: template.id, preparation: template.preparation, worktree };
 }
 
@@ -174,20 +173,19 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
     message: "tracked directory",
   });
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: contractBody(),
       workspace: "worktree",
       target: "refs/heads/main",
     }),
   );
-  const state = present(await bound.value.keiyaku.state());
+  const state = present(await bound.value.kei.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   repository.run(["-C", worktree, "rm", "-r", "artifact"]);
   writeFileSync(join(worktree, "artifact"), "candidate file\n");
   repository.run(["-C", worktree, "add", "artifact"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "replace directory"]);
-  return { contract: bound.value.keiyaku, repository, worktree };
+  return { contract: bound.value.kei, repository, worktree };
 }
 
 async function preparedAuditTarget() {
@@ -597,13 +595,12 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     const repository = makeGitRepository();
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
     const bound = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: contractBody(),
         workspace: "worktree",
       }),
     );
-    const state = present(await bound.value.keiyaku.state());
+    const state = present(await bound.value.kei.state());
     const git = await cachedRepositoryAt(repository.path);
     const path = await appointedWorktreePath(git, state.id);
     repository.run(["worktree", "remove", path]);
@@ -645,18 +642,17 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(
-      await Keiyaku.with().bind({
-        repo,
+      await Keis.of(repo).bind({
         markdown: contractBody(),
         workspace: "worktree",
       }),
     );
-    const contractId = present(await bound.value.keiyaku.state()).id;
-    await Keiyaku.with().reconcile({ repo, contract: contractId });
+    const contractId = present(await bound.value.kei.state()).id;
+    await Keis.of(repo).reconcile({ contract: contractId });
     const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contractId);
     renameSync(path, `${path}-moved`);
 
-    const repaired = await Keiyaku.with().reconcile({ repo, contract: contractId });
+    const repaired = await Keis.of(repo).reconcile({ contract: contractId });
 
     assert.equal(existsSync(path), true);
     assert.equal(
@@ -736,8 +732,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       ].join("\n"),
       {},
       async (gitPath) =>
-        Keiyaku.with().bind({
-          repo: await Repo.at({ path: repository.path, gitPath }),
+        Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
           markdown: contractBody(),
           workspace: "worktree",
         }),
@@ -760,11 +755,11 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       result.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag),
       [],
     );
-    const state = present(await accepted(result).value.keiyaku.state());
+    const state = present(await accepted(result).value.kei.state());
     assert.equal(state.id, result.facts[0]?.contract);
     assert.equal(state.head, accepted(result).head);
     assert.equal(state.terminal, null);
-    const observation = await Keiyaku.with().observe({ repo: await Repo.at({ path: repository.path }), id: state.id });
+    const observation = await Keis.of(await Repo.at({ path: repository.path })).observe({ id: state.id });
     assert.equal(observation.kind, "present");
   });
 
@@ -866,11 +861,11 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     repository.run(["commit", "--quiet", "-m", "target advance"]);
     const targetBefore = repository.run(["rev-parse", "refs/heads/main"]).trim();
     const fresh = await Repo.at({ path: repository.path });
-    const report = await Keiyaku.with().reconcile({ repo: fresh });
+    const report = await Keis.of(fresh).reconcile({  });
 
     assert.ok(report.kind === "completed", 'expected report.kind = "completed"');
     assert.equal(report.contracts.find((item) => item.contractId === id)?.report.lag.length, 0);
-    assert.equal(present(await Keiyaku.with().select({ repo: fresh, id }).state()).terminal?.kind, "claimed");
+    assert.equal(present(await Keis.of(fresh).kei({ id }).state()).terminal?.kind, "claimed");
     assert.equal(await readRef(git, deliveryRefFor(id)), null);
     assert.equal(await readRef(git, candidatePinRefFor(id)), null);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), targetBefore);
@@ -886,14 +881,13 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(
-      await Keiyaku.with().bind({
-        repo,
+      await Keis.of(repo).bind({
         markdown: contractBody(),
         workspace: "worktree",
       }),
     );
-    const contractId = present(await bound.value.keiyaku.state()).id;
-    await Keiyaku.with().reconcile({ repo, contract: contractId });
+    const contractId = present(await bound.value.kei.state()).id;
+    await Keis.of(repo).reconcile({ contract: contractId });
     const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), contractId);
     repository.run([
       "-C",
@@ -909,7 +903,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     repository.run(["-C", path, "commit", "--quiet", "-am", "submodule"]);
     writeFileSync(join(path, "module", "child.txt"), "dirty child\n");
 
-    const abandoned = await bound.value.keiyaku.abandon();
+    const abandoned = await bound.value.kei.abandon();
 
     assert.equal(
       abandoned.effects.some(

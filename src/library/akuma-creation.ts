@@ -23,8 +23,8 @@ import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import { addressAkuma } from "./address.js";
 import { requireInput } from "./input.js";
-import type { Keiyaku } from "./keiyaku.js";
-import { seatForKeiyaku } from "./keiyaku.js";
+import type { Kei } from "./kei.js";
+import { seatForKei } from "./kei.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
 type IntegrationFailure = Readonly<{
@@ -61,7 +61,7 @@ export type SpawnInput = Readonly<{
   timeoutMs?: number;
   home?: string;
   settings?: Settings;
-  contract?: Keiyaku;
+  contract?: Kei;
   alias?: AkumaAlias;
   writableDirectories?: readonly string[];
   bare?: boolean;
@@ -193,8 +193,8 @@ function callSignal(value: unknown): AbortSignal | undefined {
 
 function callSeat(contract: unknown) {
   if (contract === undefined) return undefined;
-  const seat = seatForKeiyaku(contract);
-  if (seat === null) throw new TypeError("contract must be a Keiyaku");
+  const seat = seatForKei(contract);
+  if (seat === null) throw new TypeError("contract must be a Kei");
   return seat;
 }
 

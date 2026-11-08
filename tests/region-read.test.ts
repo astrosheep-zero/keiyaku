@@ -3,7 +3,7 @@ import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { runCli } from "./support/cli-fixtures.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { kanshi } from "../src/kanshi/index.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import { World } from "../src/world.js";
@@ -32,14 +32,13 @@ function document(title: string, patterns: readonly string[]): string {
 
 async function bind(repository: ReturnType<typeof repositoryWithMain>, title: string, patterns: readonly string[]) {
   const result = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: document(title, patterns),
       workspace: "worktree",
       gates: [],
     }),
   );
-  return { id: present(await result.value.keiyaku.state()).id, contract: result.value.keiyaku };
+  return { id: present(await result.value.kei.state()).id, contract: result.value.kei };
 }
 
 async function read(repository: ReturnType<typeof repositoryWithMain>, region: Parameters<typeof kanshi>[0]["region"]) {

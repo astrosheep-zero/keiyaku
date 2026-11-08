@@ -190,7 +190,7 @@ test(
     const api = Akumas.of(world);
     installHostAcpFixture(world);
     const nonPi = await native("akuma_spawn", {
-      akuma: "acp-worker",
+      akumaName: "acp-worker",
       body: "ordinary provider",
       bare: true,
       writableDirectories: [],
@@ -199,7 +199,7 @@ test(
     });
     assert.equal(nonPi.observation.observation.answer, "acp-answer", JSON.stringify(nonPi));
     const unsupported = await host.invoke("akuma_spawn", {
-      akuma: "worker", body: "must not start", writableDirectories: [world],
+      akumaName: "worker", body: "must not start", writableDirectories: [world],
     }, true);
     assert.match(JSON.stringify(unsupported), /writableDirectories.*pi|pi.*writableDirectories/u);
     const ambient = {
@@ -217,7 +217,7 @@ test(
       }
     });
 
-    const called = await native("akuma_spawn", { akuma: "worker", body: command(holding(world, "first")) });
+    const called = await native("akuma_spawn", { akumaName: "worker", body: command(holding(world, "first")) });
     assert.equal(called.kind, "spawned");
     assert.equal(called.observation.kind, "detached", "return without answer observation is independent of hosting");
     const id = called.akuma;
@@ -308,7 +308,7 @@ test(
       akuma: id,
       body: JSON.stringify({
         tool: "nested-fixture",
-        args: { name: "akuma_spawn", args: { akuma: "worker", body: "nested child", wait: true, timeoutMs: 20_000 } },
+        args: { name: "akuma_spawn", args: { akumaName: "worker", body: "nested child", wait: true, timeoutMs: 20_000 } },
       }),
       timeoutMs: 20_000,
     });
@@ -349,11 +349,11 @@ test(
     assert.equal((await api.list()).rows.length, 5);
 
     // Tool schema validation is real Pi validation, before any owner mutation.
-    await host.invoke("akuma_spawn", { akuma: "worker", body: "x", detach: "yes" }, true);
-    const invalid = await host.invoke("akuma_spawn", { akuma: "worker", body: "x", timeoutMs: 0 }, true);
+    await host.invoke("akuma_spawn", { akumaName: "worker", body: "x", detach: "yes" }, true);
+    const invalid = await host.invoke("akuma_spawn", { akumaName: "worker", body: "x", timeoutMs: 0 }, true);
     assert.match(JSON.stringify(invalid), /requires wait/u);
     const deadlineCall = await native("akuma_spawn", {
-      akuma: "worker",
+      akumaName: "worker",
       body: command(holding(world, "deadline")),
       wait: true,
       timeoutMs: 0,
@@ -365,7 +365,7 @@ test(
 
     const aborting = host.invoke(
       "akuma_spawn",
-      { akuma: "worker", body: command(holding(world, "aborted")), wait: true },
+      { akumaName: "worker", body: command(holding(world, "aborted")), wait: true },
       true,
     );
     await waitForCondition("call observation ready for abort", () => existsSync(join(world, "aborted.ready")));
@@ -380,11 +380,11 @@ test(
     await native("akuma_kill", { akuma: [aborted.structuredContent.akuma] });
 
     const detached = await native("akuma_spawn", {
-      akuma: "worker",
+      akumaName: "worker",
       body: command(holding(world, "detached")),
       detach: true,
     });
-    const scoped = await native("akuma_spawn", { akuma: "worker", body: command(holding(world, "scoped")) });
+    const scoped = await native("akuma_spawn", { akumaName: "worker", body: command(holding(world, "scoped")) });
     // Wake the earlier identity through a different scope. The old Pi session
     // must not kill it just because it originally called this AkumaId.
     const foreignScope = AkumaHost.inProcess();

@@ -1,7 +1,7 @@
 import { accepted } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Keiyaku, KeiyakuError, Repo } from "../src/index.js";
+import { Kei, Keis, KeiyakuError, Repo } from "../src/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function invalidInput(error: unknown, message?: string): boolean {
@@ -18,25 +18,25 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
-  const before = (await Keiyaku.with().list({ repo })).rows;
+  const before = (await Keis.of(repo).list({  })).rows;
 
   await assert.rejects(() => withGitShim("exit 99", {}, () => Reflect.apply(Repo.at, Repo, [null])), TypeError);
   assert.throws(
-    () => withGitShim("exit 99", {}, () => Keiyaku.with().select({ repo, id: null } as never)),
+    () => withGitShim("exit 99", {}, () => Keis.of(repo).kei({ id: null } as never)),
     TypeError,
   );
-  await assert.rejects(() => withGitShim("exit 99", {}, () => Keiyaku.with().list(null as never)), TypeError);
+  await assert.rejects(() => withGitShim("exit 99", {}, () => Keis.of(repo).list(null as never)), TypeError);
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => Keiyaku.with().observe({ repo, id: "bad" as never })),
+    () => withGitShim("exit 99", {}, () => Keis.of(repo).observe({ id: "bad" as never })),
     (error: unknown) => error instanceof TypeError && error.message === "contract ID must be kei/<contract-segment>",
   );
   await assert.rejects(
     () =>
-      withGitShim("exit 99", {}, () => Keiyaku.with().bind({ repo, markdown: null, workspace: "worktree" } as never)),
+      withGitShim("exit 99", {}, () => Keis.of(repo).bind({ markdown: null, workspace: "worktree" } as never)),
     invalidInput,
   );
 
-  assert.deepEqual((await Keiyaku.with().list({ repo })).rows, before);
+  assert.deepEqual((await Keis.of(repo).list({  })).rows, before);
 });
 
 test("amend validates programmer input before observing a missing contract", async () => {
@@ -45,8 +45,8 @@ test("amend validates programmer input before observing a missing contract", asy
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.with().select({ repo, id: "kei/missing" as never });
-  const before = (await Keiyaku.with().list({ repo })).rows;
+  const contract = Keis.of(repo).kei({ id: "kei/missing" as never });
+  const before = (await Keis.of(repo).list({  })).rows;
 
   await assert.rejects(
     () =>
@@ -55,7 +55,7 @@ test("amend validates programmer input before observing a missing contract", asy
       ),
     (error: unknown) => invalidInput(error, "gates[0] must match ^[a-z][a-z0-9-]{0,63}$"),
   );
-  assert.deepEqual((await Keiyaku.with().list({ repo })).rows, before);
+  assert.deepEqual((await Keis.of(repo).list({  })).rows, before);
 });
 
 test("boundary validation precedes Git and unrepresentable targets stay typed", async () => {
@@ -64,8 +64,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   repository.run(["config", "user.email", "boundary@example.test"]);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
-  const refused = await Keiyaku.with().bind({
-      repo,
+  const refused = await Keis.of(repo).bind({
       markdown: [
         "# T",
         "",
@@ -94,8 +93,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   assert.ok(refused.kind === "refused");
   assert.deepEqual(refused.refusal, { kind: "invalid-target" });
 
-  const bound = accepted(await Keiyaku.with().bind({
-    repo,
+  const bound = accepted(await Keis.of(repo).bind({
     markdown: [
       "# T",
       "",
@@ -121,17 +119,17 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     workspace: "worktree",
     gates: ["reviewed"],
   }));
-  assert.ok(bound.value.keiyaku instanceof Keiyaku);
+  assert.ok(bound.value.kei instanceof Kei);
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => bound.value.keiyaku.deliver({ actor: " " } as never)),
+    () => withGitShim("exit 99", {}, () => bound.value.kei.deliver({ actor: " " } as never)),
     (error: unknown) => invalidInput(error, "deliver input has unknown field: actor"),
   );
   await assert.rejects(
-    () => bound.value.keiyaku.review({ verdict: "satisfied", hooks: { create: [], destroy: [] } } as never),
+    () => bound.value.kei.review({ verdict: "satisfied", hooks: { create: [], destroy: [] } } as never),
     (error: unknown) => invalidInput(error, "review input has unknown field: hooks"),
   );
   await assert.rejects(
-    () => bound.value.keiyaku.previewDelivery({ requireBranchesToBeUpToDate: true } as never),
+    () => bound.value.kei.previewDelivery({ requireBranchesToBeUpToDate: true } as never),
     (error: unknown) => invalidInput(error, "delivery preview input has unknown field: requireBranchesToBeUpToDate"),
   );
 });

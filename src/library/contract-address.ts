@@ -38,9 +38,11 @@ export async function readCompleteContractCandidates(repo: Repo): Promise<readon
   return (await completeBoard(scopeForRepo(repo))).rows;
 }
 
-export async function resolveContract(input: ContractResolveInput): Promise<ContractResolution> {
-  const values = requireInput(input, "Keiyaku.with().resolve input", ["repo", "selector", "cwd"]);
-  const scope = scopeForRepo(values.repo);
+export async function resolveContract(
+  scope: RepositoryScope,
+  input: ContractResolveInput,
+): Promise<ContractResolution> {
+  const values = requireInput(input, "Keis.resolve input", ["selector", "cwd"]);
   const selector = values.selector;
   if (selector !== undefined && typeof selector !== "string") throw new TypeError("selector must be a string");
   const suppliedCwd = values.cwd;

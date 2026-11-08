@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Kei, Keis, Repo } from "../src/index.js";
 import { main } from "../src/cli/main.js";
 import { captureOutput, cliJson, runCli } from "./support/cli-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
@@ -14,10 +14,9 @@ test("show reads native bytes once for explicit and contextual Contract selectio
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
-  const library = Keiyaku.with();
+  const library = Keis.of(repo);
   const bound = accepted(
     await library.bind({
-      repo,
       target: "main",
       gates: ["reviewed"],
       markdown: contractMarkdown("Guidance read", {
@@ -29,11 +28,11 @@ test("show reads native bytes once for explicit and contextual Contract selectio
       }),
     }),
   );
-  const row = (await library.list({ repo })).rows.find((entry) => entry.id === bound.contract)!;
+  const row = (await library.list({  })).rows.find((entry) => entry.id === bound.contract)!;
   assert.ok(row.worktreePath);
-  const expected = await library.select({ repo, id: row.id }).guidance();
+  const expected = await library.kei({ id: row.id }).guidance();
   assert.equal(typeof expected, "string");
-  const read = t.mock.method(Keiyaku.prototype, "guidance");
+  const read = t.mock.method(Kei.prototype, "guidance");
   for (const [cwd, selector] of [
     [repository.path, row.id],
     [repository.path, `@${row.id.slice("kei/".length)}`],
@@ -73,7 +72,7 @@ test("show reads native bytes once for explicit and contextual Contract selectio
 test("show preserves native absence and selection refusals with command-specific diagnostics", async (t) => {
   const repository = makeGitRepository();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
-  const read = t.mock.method(Keiyaku.prototype, "guidance");
+  const read = t.mock.method(Kei.prototype, "guidance");
   const text = await runCli(["-C", repository.path, "show", "kei/missing"], { environment: {} });
   assert.equal(text.exit, 1);
   assert.equal(text.stdout, "× show refused\n  contract  kei/missing\n  reason  contract missing\n");
@@ -101,7 +100,7 @@ test("show preserves native absence and selection refusals with command-specific
 });
 
 test("retired status guidance is a usage refusal before World or guidance acquisition", async (t) => {
-  const read = t.mock.method(Keiyaku.prototype, "guidance", async () => {
+  const read = t.mock.method(Kei.prototype, "guidance", async () => {
     assert.fail("status must not acquire guidance");
   });
   for (const selectors of [[], ["kei/missing"], ["aku"], ["kei/a", "kei/b"]]) {
@@ -119,7 +118,7 @@ test("retired status guidance is a usage refusal before World or guidance acquis
 test("guidance acquisition failure stays a failure, not missing guidance", async (t) => {
   const repository = makeGitRepository();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
-  t.mock.method(Keiyaku.prototype, "guidance", async () => {
+  t.mock.method(Kei.prototype, "guidance", async () => {
     throw new Error("guidance unavailable");
   });
   const result = await captureOutput(() => main(["-C", repository.path, "show", "kei/missing"]));

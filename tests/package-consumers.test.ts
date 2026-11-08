@@ -56,16 +56,16 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Debt, K
     `
 import type { Gate, Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractRow, ContractGateCurrent,
   ContractDependent, ReconcileCompletion, SettlementAction, NukeResult,
-  NukeConfirmationRefusal, NukeConfirmationRequiredRefusal, Repo, Keiyaku,
+  NukeConfirmationRefusal, NukeConfirmationRequiredRefusal, Repo, Kei,
   ContractWaitInput, ContractWaitResult, KanshiCountsInput, KanshiCountsReport } from "@astrosheep/keiyaku";
 const countsInput: KanshiCountsInput = { world: null };
 const countsResult: Promise<KanshiCountsReport> = (await import("@astrosheep/keiyaku")).kanshiCounts(countsInput);
 void countsResult;
 declare const repo: Repo;
-declare const handle: Keiyaku;
-const waitInput: ContractWaitInput = { repo, contracts: ["kei/consumer"], timeoutMs: 0 };
+declare const handle: Kei;
+const waitInput: ContractWaitInput = { contracts: ["kei/consumer"], timeoutMs: 0 };
 const waitResult: Promise<ContractWaitResult> = handle.wait({ timeoutMs: 0 });
-const collectionWait: Promise<ContractWaitResult> = (await import("@astrosheep/keiyaku")).Keiyaku.with().wait(waitInput);
+const collectionWait: Promise<ContractWaitResult> = (await import("@astrosheep/keiyaku")).Keis.of(repo).wait(waitInput);
 void [waitResult, collectionWait];
 declare const fact: Fact;
 declare const error: KeiyakuError;
@@ -119,30 +119,30 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'import assert from "node:assert/strict";',
         'import { createRequire } from "node:module";',
         'import * as root from "@astrosheep/keiyaku";',
-        'import { Akuma, Akumas, Delivery, Keiyaku, Repo, Debts, kanshi, kanshiCounts, nuke, settings } from "@astrosheep/keiyaku";',
+        'import { Akuma, Akumas, Delivery, Kei, Keis, Repo, Debts, kanshi, kanshiCounts, nuke, settings } from "@astrosheep/keiyaku";',
         'assert.equal((await kanshiCounts({ world: null })).akuma.kind, "absent");',
         'const repo = await Repo.at({ path: process.cwd() });',
-        'assert.equal((await Keiyaku.with().wait({ repo, contracts: ["kei/missing"], timeoutMs: 0 })).kind, "missing");',
+        'assert.equal((await Keis.of(repo).wait({ contracts: ["kei/missing"], timeoutMs: 0 })).kind, "missing");',
         'import plugin from "@astrosheep/keiyaku-plugin-square";',
-        "assert.throws(() => Reflect.construct(Keiyaku, []), TypeError);",
-        'assert.equal(typeof Keiyaku.prototype.previewDelivery, "function");',
-        'assert.equal("audit" in Keiyaku.prototype, false);',
-        'assert.equal(typeof Keiyaku.with, "function");',
-        "assert.equal(Keiyaku.call, Function.prototype.call);",
-        "assert.equal(Keiyaku.bind, Function.prototype.bind);",
-        'assert.equal("fork" in Keiyaku, false);',
-        'assert.equal("history" in Keiyaku, false);',
-        'assert.equal("interrupt" in Keiyaku, false);',
-        'assert.equal("kill" in Keiyaku, false);',
-        'assert.equal("nuke" in Keiyaku, false);',
-        'assert.equal("ls" in Keiyaku, false);',
-        'assert.equal("list" in Keiyaku, false);',
-        'assert.equal("observe" in Keiyaku, false);',
-        'assert.equal("of" in Keiyaku, false);',
-        'assert.equal("status" in Keiyaku, false);',
-        'assert.equal("tell" in Keiyaku, false);',
-        'assert.equal("wait" in Keiyaku, false);',
-        "assert.equal(Object.hasOwn(Keiyaku, Symbol.hasInstance), false);",
+        "assert.throws(() => Reflect.construct(Kei, []), TypeError);",
+        'assert.equal(typeof Kei.prototype.previewDelivery, "function");',
+        'assert.equal("audit" in Kei.prototype, false);',
+        'assert.equal(typeof Keis.of, "function");',
+        "assert.equal(Kei.call, Function.prototype.call);",
+        "assert.equal(Kei.bind, Function.prototype.bind);",
+        'assert.equal("fork" in Kei, false);',
+        'assert.equal("history" in Kei, false);',
+        'assert.equal("interrupt" in Kei, false);',
+        'assert.equal("kill" in Kei, false);',
+        'assert.equal("nuke" in Kei, false);',
+        'assert.equal("ls" in Kei, false);',
+        'assert.equal("list" in Kei, false);',
+        'assert.equal("observe" in Kei, false);',
+        'assert.equal("of" in Kei, false);',
+        'assert.equal("status" in Kei, false);',
+        'assert.equal("tell" in Kei, false);',
+        'assert.equal("wait" in Kei, false);',
+        "assert.equal(Object.hasOwn(Kei, Symbol.hasInstance), false);",
         'assert.equal(typeof Akuma.birth, "function");',
         'assert.equal(typeof Akuma.select, "function");',
         'assert.equal(Akuma.name, "Akuma");',
@@ -164,7 +164,7 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         "  assert.throws(() => require.resolve(specifier), /ERR_PACKAGE_PATH_NOT_EXPORTED/u, specifier);",
         "}",
         // Private composition, execution, and configuration helpers stay off the root entry.
-        'for (const name of ["gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiyakuHandle"]) {',
+        'for (const name of ["gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiHandle"]) {',
         "  assert.equal(name in root, false, name);",
         "}",
         'assert.ok(require.resolve("@astrosheep/keiyaku-plugin-square").endsWith("index.js"));',

@@ -7,14 +7,8 @@ import { deliveryOwner } from "../delivery-identity.js";
 import { canonicalBirthCwd } from "../../akuma/call-input.js";
 import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
 import { settings, type Settings } from "../../settings.js";
-import {
-  Akumas,
-  AkumaWorldScopeError,
-  type Keiyaku as KeiyakuContract,
-  type Repo,
-  type SpawnInput,
-} from "../../index.js";
-import { Keiyaku } from "../../index.js";
+import { Akumas, AkumaWorldScopeError, type Kei as KeiyakuContract, type Repo, type SpawnInput } from "../../index.js";
+import { Keis } from "../../index.js";
 import type { CliCoordinates } from "../coordinates.js";
 import { World, type WorldRoot } from "../../world.js";
 import { contractFromInput } from "../selectors.js";
@@ -370,7 +364,7 @@ async function akumaInput(
     throw new Error("spawn with Contract requires a resolved Repo");
   const contract =
     command.command === "spawn" && command.contract !== undefined
-      ? contractFromInput(coordinates.repo!, command.contract).contract
+      ? contractFromInput(Keis.of(coordinates.repo!), command.contract).contract
       : undefined;
   return {
     path,
@@ -397,8 +391,7 @@ export async function runAkumaCommand(
       const contracts = command.akuma.filter((selector) => selector.startsWith("kei/"));
       if (contracts.length > 0) {
         if (coordinates.repo === undefined) throw new CliUsageError("Contract wait requires a repository");
-        const result = await Keiyaku.with().wait({
-          repo: coordinates.repo,
+        const result = await Keis.of(coordinates.repo).wait({
           contracts,
           ...(command.completion === undefined ? {} : { completion: command.completion }),
           ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),

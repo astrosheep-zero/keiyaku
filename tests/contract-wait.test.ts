@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Akumas, Keiyaku, Repo, World } from "../src/index.js";
+import { Akumas, Kei, Keis, Repo, World } from "../src/index.js";
 import { contractJournalPaths } from "../src/git/identity.js";
 import { readGitPaths, repositoryAt, updateGitTree, writeCommit } from "../src/git/repository.js";
 import { publishDispatch } from "../src/dispatch/index.js";
@@ -18,14 +18,14 @@ async function fixture() {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const make = async (name: string) => {
-    const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document().replace("# Library verbs", `# ${name}`), target: null, gates: ["reviewed"], workspace: "worktree" }));
-    const handle = bound.value.keiyaku;
+    const bound = accepted(await Keis.of(repo).bind({ markdown: document().replace("# Library verbs", `# ${name}`), target: null, gates: ["reviewed"], workspace: "worktree" }));
+    const handle = bound.value.kei;
     return { handle, id: present(await handle.state()).id };
   };
   return { repository, repo, first: await make("First wait subject"), second: await make("Second wait subject") };
 }
 
-async function amend(handle: Keiyaku, objective: string) {
+async function amend(handle: Kei, objective: string) {
   accepted(await handle.amend({ markdown: `## Replace: Objective\n\n${objective}\n` }));
 }
 
@@ -34,7 +34,7 @@ test("Contract waits witness their own journal changes and preserve plural progr
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
     barrier.reset();
-    const pending = Keiyaku.with().wait({ repo: observingRepo, contracts: [first.id, second.id, first.id], completion: "all", timeoutMs: 10_000 });
+    const pending = Keis.of(observingRepo).wait({ contracts: [first.id, second.id, first.id], completion: "all", timeoutMs: 10_000 });
     await barrier.reads();
     await amend(first.handle, "First observed change.");
     barrier.reset();
@@ -47,7 +47,7 @@ test("Contract waits witness their own journal changes and preserve plural progr
     assert.ok(result.contracts.every((item) => item.changed && item.head !== item.baseline && item.present === true && item.terminal === null));
 
     barrier.reset();
-    const any = Keiyaku.with().wait({ repo: observingRepo, contracts: [first.id, second.id], timeoutMs: 10_000 });
+    const any = Keis.of(observingRepo).wait({ contracts: [first.id, second.id], timeoutMs: 10_000 });
     await barrier.reads();
     await amend(second.handle, "Any mode wakes for this subject.");
     const anyResult = await any;
@@ -56,7 +56,7 @@ test("Contract waits witness their own journal changes and preserve plural progr
     assert.deepEqual(anyResult.contracts.map((item) => item.changed), [false, true]);
 
     barrier.reset();
-    const progress = Keiyaku.with().wait({ repo: observingRepo, contracts: [first.id, second.id], completion: "all", timeoutMs: 1800 });
+    const progress = Keis.of(observingRepo).wait({ contracts: [first.id, second.id], completion: "all", timeoutMs: 1800 });
     await barrier.reads();
     await amend(first.handle, "Another observed change.");
     const deadline = await progress;
@@ -64,7 +64,7 @@ test("Contract waits witness their own journal changes and preserve plural progr
     assert.deepEqual(deadline.contracts.map((item) => item.changed), [true, false]);
   });
   assert.equal((await first.handle.wait({ timeoutMs: 0 })).kind, "deadline");
-  const missing = await Keiyaku.with().wait({ repo, contracts: [first.id, "kei/not-present"], timeoutMs: 0 });
+  const missing = await Keis.of(repo).wait({ contracts: [first.id, "kei/not-present"], timeoutMs: 0 });
   assert.equal(missing.kind, "missing");
   assert.equal(missing.contracts[1]?.present, false);
   accepted(await second.handle.abandon());
@@ -87,23 +87,23 @@ test("terminal baselines satisfy any and all without inventing changes", async (
     assert.equal(result.contracts[0]?.changed, false);
     assert.equal(result.contracts[0]?.baseline, result.contracts[0]?.head);
   }
-  const all = await Keiyaku.with().wait({ repo, contracts: [claimed.id, second.id], completion: "all", timeoutMs: 0 });
+  const all = await Keis.of(repo).wait({ contracts: [claimed.id, second.id], completion: "all", timeoutMs: 0 });
   assert.equal(all.kind, "terminal");
   assert.deepEqual(all.contracts.map((item) => item.terminal), ["claimed", "abandoned"]);
-  const any = await Keiyaku.with().wait({ repo, contracts: [first.id, second.id], timeoutMs: 0 });
+  const any = await Keis.of(repo).wait({ contracts: [first.id, second.id], timeoutMs: 0 });
   assert.equal(any.kind, "terminal");
   assert.deepEqual(any.contracts.map((item) => item.changed), [false, false]);
-  const missing = await Keiyaku.with().wait({ repo, contracts: [second.id, "kei/not-present"], timeoutMs: 0 });
+  const missing = await Keis.of(repo).wait({ contracts: [second.id, "kei/not-present"], timeoutMs: 0 });
   assert.equal(missing.kind, "missing");
-  const partial = await Keiyaku.with().wait({ repo, contracts: [second.id, first.id], completion: "all", timeoutMs: 0 });
+  const partial = await Keis.of(repo).wait({ contracts: [second.id, first.id], completion: "all", timeoutMs: 0 });
   assert.equal(partial.kind, "deadline");
   assert.equal(partial.contracts[0]?.terminal, "abandoned");
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
-    const immediate = await Keiyaku.with().select({ repo: observingRepo, id: claimed.id }).wait();
+    const immediate = await Keis.of(observingRepo).kei({ id: claimed.id }).wait();
     assert.equal(immediate.kind, "terminal");
     barrier.reset();
-    const pending = Keiyaku.with().wait({ repo: observingRepo, contracts: [second.id, first.id], completion: "all", timeoutMs: 10_000 });
+    const pending = Keis.of(observingRepo).wait({ contracts: [second.id, first.id], completion: "all", timeoutMs: 10_000 });
     await barrier.reads();
     await amend(first.handle, "Active member changes after baseline.");
     const changed = await pending;
@@ -130,7 +130,7 @@ test("other journals, Dispatch, worker completion, worktree edits and target mov
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
     barrier.reset();
-    const pending = Keiyaku.with().select({ repo: observingRepo, id: first.id }).wait({ timeoutMs: 3000 });
+    const pending = Keis.of(observingRepo).kei({ id: first.id }).wait({ timeoutMs: 3000 });
     await barrier.reads();
     const worker = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "1234abcd", createdAt: "2026-08-18T00:00:00.000Z" });
     await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: worker.id, contractId: first.id });
@@ -153,7 +153,7 @@ test("disappearance after baseline is missing, never change success", async () =
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
     barrier.reset();
-    const pending = Keiyaku.with().select({ repo: observingRepo, id: first.id }).wait({ timeoutMs: 10_000 });
+    const pending = Keis.of(observingRepo).kei({ id: first.id }).wait({ timeoutMs: 10_000 });
     await barrier.reads();
     const git = await repositoryAt(repository.path);
     const paths = contractJournalPaths(first.id);
@@ -175,7 +175,7 @@ test("initial reads honor deadlines and cancellation; inputs and Akuma selectors
   await withGitShim('if [ "$1 $2" = "cat-file --batch" ]; then exec sleep 30; fi\nexec "$KEIYAKU_REAL_GIT" "$@"', {}, async (gitPath) => {
     const slow = await Repo.at({ path: repository.path, gitPath });
     const started = performance.now();
-    const result = await Keiyaku.with().wait({ repo: slow, contracts: [first.id], timeoutMs: 150 });
+    const result = await Keis.of(slow).wait({ contracts: [first.id], timeoutMs: 150 });
     assert.equal(result.kind, "deadline");
     assert.equal(result.contracts[0]?.present, null);
     assert.ok(performance.now() - started < 5000);
@@ -189,15 +189,15 @@ test("initial reads honor deadlines and cancellation; inputs and Akuma selectors
     const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
     const controller = new AbortController();
     barrier.reset();
-    const pending = Keiyaku.with().select({ repo: observingRepo, id: first.id }).wait({ signal: controller.signal });
+    const pending = Keis.of(observingRepo).kei({ id: first.id }).wait({ signal: controller.signal });
     await barrier.reads();
     controller.abort();
     await assert.rejects(pending);
   });
-  await assert.rejects(Keiyaku.with().wait({ repo, contracts: [] }), /nonempty/u);
-  await assert.rejects(Keiyaku.with().wait({ repo, contracts: ["not-a-contract"] }), /contract ID/u);
-  await assert.rejects(Keiyaku.with().wait({ repo, contracts: [first.id], timeoutMs: -1 }), /timeoutMs/u);
-  await assert.rejects(Keiyaku.with().wait({ repo, contracts: [first.id], completion: null as never }), /completion/u);
+  await assert.rejects(Keis.of(repo).wait({ contracts: [] }), /nonempty/u);
+  await assert.rejects(Keis.of(repo).wait({ contracts: ["not-a-contract"] }), /contract ID/u);
+  await assert.rejects(Keis.of(repo).wait({ contracts: [first.id], timeoutMs: -1 }), /timeoutMs/u);
+  await assert.rejects(Keis.of(repo).wait({ contracts: [first.id], completion: null as never }), /completion/u);
   const world = await World.at(repository.path);
   await assert.rejects(Akumas.of(world).wait({ akuma: [first.id], repo, timeoutMs: 0 }), /does not accept Contract/u);
 });

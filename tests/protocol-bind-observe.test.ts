@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
-import { AuthorityCorruptionError, KeiyakuError, Keiyaku, Repo } from "../src/index.js";
+import { AuthorityCorruptionError, KeiyakuError, Keis, Repo } from "../src/index.js";
 import { prepareDelivery } from "../src/protocol/deliver.js";
 import { admit } from "../src/git/admission.js";
 import {
@@ -145,13 +145,12 @@ function terms(after: readonly ContractId[]) {
 
 async function boundObservedContract(repository: TestGitRepository) {
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
+    await Keis.of(await cachedRepoAt(repository.path)).bind({
       markdown: contractBody(),
       workspace: "worktree",
     }),
   );
-  const id = present(await bound.value.keiyaku.state()).id;
+  const id = present(await bound.value.kei.state()).id;
   const git = await repositoryAt(repository.path);
   return { bound, id, git };
 }
@@ -577,7 +576,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         error instanceof AuthorityCorruptionError && /journal entry is not canonical/.test(error.message),
     );
     await assert.rejects(
-      () => Keiyaku.with().reconcile({ repo, contract: id }),
+      () => Keis.of(repo).reconcile({ contract: id }),
       (error: unknown) =>
         error instanceof KeiyakuError &&
         error.category === "authority-corruption" &&

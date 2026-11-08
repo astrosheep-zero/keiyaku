@@ -123,7 +123,7 @@ exact and plural identity selection. A category reads its selected owner section
 Contract categories require Repo, while Akuma categories remain available in a
 World without Repo.
 
-`ls` routes Contract rows through `Keiyaku.with().list`, Akuma instances
+`ls` routes Contract rows through the Repo-bound Contract collection, Akuma instances
 through `Akumas.of(world).list`, archetypes through their definition owner, and
 Debts through `Debts.of(world).list`. Contract-only selection, including region lookup, delegates to the public
 Contract resolver owned by [public-api.md](public-api.md). The edge renders its

@@ -9,7 +9,7 @@ import {
   present,
   repositoryWithMain,
 } from "./support/library-verbs.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { deferred } from "./support/process.js";
 import type { ExecutionObservation } from "../src/index.js";
 
@@ -34,8 +34,7 @@ test("synchronous and asynchronous observer failures cannot change delivery admi
 async function verificationCandidate() {
   const repository = repositoryWithMain();
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown:
         document() +
         "\n## Verification\n\n~~~bash timeout=1m\nprintf first\n~~~\n\n~~~bash timeout=1m\nprintf second\n~~~\n",
@@ -45,7 +44,7 @@ async function verificationCandidate() {
   );
   assert.ok(bound.value.workspace);
   commitCandidate(repository, bound.value.workspace.path);
-  return bound.value.keiyaku;
+  return bound.value.kei;
 }
 
 test("verify observers retain selected coordinates and cannot interrupt repeated execution or admission reuse", async () => {

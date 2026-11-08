@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { breakBody } from "../src/akuma/heart/index.js";
-import { Debts, kanshiCounts, Keiyaku, Repo, World } from "../src/index.js";
+import { Debts, kanshiCounts, Keis, Repo, World } from "../src/index.js";
 import type { KanshiCountsInput } from "../src/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
@@ -26,14 +26,14 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   accepted(await debts.debt({ id: done }).done());
   accepted(await debts.debt({ id: drop }).drop());
   for (let i = 0; i < 12; i++) {
-    accepted(await Keiyaku.with().bind({ repo, target: "main", markdown: contractMarkdown(`Count ${i}`, {
+    accepted(await Keis.of(repo).bind({ target: "main", markdown: contractMarkdown(`Count ${i}`, {
       Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
     }), gates: [] }));
   }
-  const terminal = accepted(await Keiyaku.with().bind({ repo, target: "main", markdown: contractMarkdown("Terminal", {
+  const terminal = accepted(await Keis.of(repo).bind({ target: "main", markdown: contractMarkdown("Terminal", {
     Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
   }), gates: [] }));
-  await terminal.value.keiyaku.abandon();
+  await terminal.value.kei.abandon();
   for (let i = 1; i <= 12; i++) {
     const running = await bornDirectAkuma({ root: world, akumaName: "worker", draw: i.toString(16).padStart(8, "0"), createdAt: "2026-08-09T00:00:00.000Z" });
     context.after(() => running.leash.release());

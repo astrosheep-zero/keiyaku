@@ -21,7 +21,7 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { kanshi, observeKanshi, selectKanshi } from "../src/kanshi/index.js";
 import { Debts } from "../src/debt/index.js";
 import { contractNamespace, debtAuthorityPath, parseDebtId } from "../src/debt/identity.js";
@@ -140,15 +140,14 @@ async function populatedWorld(t: TestContext) {
   const added = await debts.add({ title: "Render status", priority: 0 });
   assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       debt: added.value.id,
       markdown: document(),
       workspace: "worktree",
       target: "main",
     }),
   );
-  const contract = present(await bound.value.keiyaku.state());
+  const contract = present(await bound.value.kei.state());
   const renamed = await debts.debt({ id: added.value.id }).update({ title: "Investigate status rendering" });
   assert.equal(renamed.kind, "accepted");
   const akumaId = await bornAkuma(repository.path, "a0000001");
@@ -163,7 +162,7 @@ async function populatedWorld(t: TestContext) {
     "dispatched",
   );
   await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akumaId: akumaId });
-  return { repository, contract, keiyaku: bound.value.keiyaku, debtId: added.value.id, akumaId };
+  return { repository, contract, keiyaku: bound.value.kei, debtId: added.value.id, akumaId };
 }
 
 test("Contract Git format failure preserves independently readable Debt, Akuma, and Alias observations", async (t) => {
@@ -509,19 +508,18 @@ test("World status bounds worktree detail before observation and shares repeated
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: raw.path });
   const world = await World.at(raw.path);
-  const contracts = Keiyaku.with();
+  const contracts = Keis.of(repo);
   const rows: { id: ContractId; path: string }[] = [];
   for (let index = 0; index < 20; index += 1) {
     const bound = accepted(await contracts.bind({
-      repo,
       markdown: document(`Status ${index}`),
       target: index < 16 ? "main" : rows[0]!.id,
       gates: ["reviewed"],
     }));
-    rows.push({ id: present(await bound.value.keiyaku.state()).id, path: bound.value.workspace!.path });
+    rows.push({ id: present(await bound.value.kei.state()).id, path: bound.value.workspace!.path });
   }
   const tracePath = join(raw.path, ".git", "status-trace.jsonl");
-  const expected = [...(await contracts.list({ repo })).rows].sort((left, right) =>
+  const expected = [...(await contracts.list({  })).rows].sort((left, right) =>
     right.lastJournalAt.localeCompare(left.lastJournalAt) || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
   );
   const observed = await traceGit(tracePath, () => kanshi({ world, repo }));

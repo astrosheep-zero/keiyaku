@@ -3,7 +3,8 @@ import {
   AkumaArchetypeError,
   AkumaHost,
   Akumas,
-  Keiyaku,
+  Keis,
+  actorId,
   listArchetypeDefinitions,
   nuke,
   type AkumaId,
@@ -12,7 +13,7 @@ import {
   type ArchetypeCatalog,
   type ArchetypeCatalogInput,
   type ArchetypeCatalogRow,
-  type LocalContractComposition,
+  type KeisOptions,
   type Repo,
   type WorldRoot,
 } from "@astrosheep/keiyaku";
@@ -32,8 +33,8 @@ if (nativeError instanceof AkumaArchetypeError) {
 }
 void [catalogue, catalogueRows];
 
-const contractPolicy: LocalContractComposition = { actor: "contract-owner" };
-Keiyaku.with(contractPolicy);
+const contractPolicy: KeisOptions = { actor: actorId("contract-owner") };
+Keis.of(repo, contractPolicy);
 
 const scope: AkumaHostScope = AkumaHost.inProcess({ reportDiagnostic: console.error });
 const scoped = Akumas.of(world, scope);
@@ -80,18 +81,18 @@ Akumas.of(repo);
 Akumas.of(world, contractPolicy);
 // @ts-expect-error the removed execution carrier is not a public input
 Akumas.of(world, { execution: {} });
-// @ts-expect-error Keiyaku.with exposes no Akuma creation operation
-Keiyaku.with().spawn({ akumaName: "worker", body: "not a Contract" });
-// @ts-expect-error selection uses the Contract owner's `select` verb
-Keiyaku.with().of({ repo, id: "kei/example" as never });
+// @ts-expect-error Keis exposes no Akuma creation operation
+Keis.of(repo).spawn({ akumaName: "worker", body: "not a Contract" });
+// @ts-expect-error selection uses the Contract owner's `kei` verb
+Keis.of(repo).of({ id: "kei/example" as never });
 // @ts-expect-error old execution constructors are removed
-Keiyaku.withExecution({ execution: {} });
+Keis.withExecution({ execution: {} });
 // @ts-expect-error the old mixed package-root catalog spelling is removed
-Keiyaku.with().ls({ query: { kind: "akuma" } });
+Keis.of(repo).ls({ query: { kind: "akuma" } });
 // @ts-expect-error Debt operations do not enter the World-bound Akumas surface
 plural.debt({ id: "debt/not-an-akuma" });
-// @ts-expect-error Contract selection retains an explicit Repo coordinate
-Keiyaku.with().select({ id: "kei/example" });
+// @ts-expect-error Contract collection requires a Repo coordinate
+Keis.of(world);
 // @ts-expect-error nuke is a root operation, not a Keiyaku method
 Akuma.nuke({ world, confirm: world });
 // @ts-expect-error the retired ./akumas subpath promise is gone

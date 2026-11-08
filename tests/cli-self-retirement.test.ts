@@ -192,7 +192,7 @@ const source = (path) => pathToFileURL(join(worktree, "build/src", path)).href;
 // Every ability this child needs is acquired before mutable product work can retire the tree.
 const { parseArgv } = await import(source("cli/parse.js"));
 const { runCliCommand } = await import(source("cli/runtime.js"));
-const { Keiyaku, Repo } = await import(source("index.js"));
+const { Keis, Repo } = await import(source("index.js"));
 const { withOutcomeReceipt } = await import(source("library/outcome.js"));
 
 const executable = (argv) => {
@@ -201,8 +201,8 @@ const executable = (argv) => {
   return parsed;
 };
 
-const delivered = await Keiyaku.with()
-  .select({ repo: await Repo.at({ path: world }), id: contract })
+const delivered = await Keis.of(await Repo.at({ path: world }))
+  .kei({ id: contract })
   .deliver();
 if (delivered.kind !== "accepted") throw new Error("deliver did not admit: " + delivered.kind);
 

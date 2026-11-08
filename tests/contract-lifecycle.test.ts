@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import test, { describe } from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import type { ReviewOutcome, VerifyOutcome } from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
@@ -29,8 +29,7 @@ async function bindAndCommit(options: {
 }) {
   const repository = repositoryWithMain();
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: document(options.verification),
       workspace: "worktree",
       gates: options.gates,
@@ -38,7 +37,7 @@ async function bindAndCommit(options: {
       target: options.target ?? null,
     }),
   );
-  const state = present(await bound.value.keiyaku.state());
+  const state = present(await bound.value.kei.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   const paths = ["candidate.txt"];
@@ -49,7 +48,7 @@ async function bindAndCommit(options: {
   }
   repository.run(["-C", worktree, "add", ...paths]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  return { repository, keiyaku: bound.value.keiyaku, state };
+  return { repository, keiyaku: bound.value.kei, state };
 }
 
 function assertNoVerification(value: { completion?: object | undefined; verification?: unknown }): void {
@@ -261,8 +260,8 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     await withGitShim(shim, { KEIYAKU_REMOVE_MARKER: marker }, async (gitPath) => {
       const delivered = accepted(await keiyaku.deliver());
       assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-      const abandoned = await Keiyaku.with()
-        .select({ repo: await Repo.at({ path: repository.path, gitPath }), id: state.id })
+      const abandoned = await Keis.of(await Repo.at({ path: repository.path, gitPath }))
+        .kei({ id: state.id })
         .abandon();
       assert.ok(abandoned.kind === "accepted", JSON.stringify(abandoned));
       assert.equal(
@@ -287,8 +286,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const delivered = accepted(await keiyaku.deliver());
     assertNoVerification(delivered.value);
     assert.deepEqual(present(await keiyaku.state()).attestations, before);
-    const observed = await Keiyaku.with().observe({
-      repo: await Repo.at({ path: repository.path }),
+    const observed = await Keis.of(await Repo.at({ path: repository.path })).observe({
       id: keiyaku.toJSON().contract,
     });
     assert.ok(observed.kind === "present");
@@ -418,20 +416,19 @@ function cliJsonAt<Value>(cwd: string, argv: readonly string[]) {
 async function targetedCheckoutBinding(files: Readonly<Record<string, string>>, changedPath: string) {
   const repository = repositoryWithMain({ files });
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: repository.path }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: document(),
       workspace: "worktree",
       gates: ["reviewed"],
       target: "refs/heads/main",
     }),
   );
-  const state = present(await bound.value.keiyaku.state());
+  const state = present(await bound.value.kei.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   writeFileSync(join(worktree, changedPath), "candidate\n");
   repository.run(["-C", worktree, "add", changedPath]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-  await bound.value.keiyaku.deliver();
+  await bound.value.kei.deliver();
   return { repository, state, worktree };
 }
 

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keiyaku, KeiyakuError, Repo, type ContractResolution } from "../src/index.js";
+import { Kei, Keis, KeiyakuError, Repo, type ContractResolution } from "../src/index.js";
 import { matchContractCandidates } from "../src/library/contract-address.js";
 import { makeGitRepository } from "./support/git.js";
 import { accepted } from "./support/library-verbs.js";
@@ -20,21 +20,21 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
-  const library = Keiyaku.with();
-  const bound = accepted(await library.bind({ repo, markdown, gates: ["reviewed"] }));
-  const [row] = (await library.list({ repo })).rows;
+  const library = Keis.of(repo);
+  const bound = accepted(await library.bind({ markdown, gates: ["reviewed"] }));
+  const [row] = (await library.list({  })).rows;
   assert.ok(row?.worktreePath);
   const expected: ContractResolution = { kind: "resolved", id: bound.contract };
   const selector = `@${row.id.slice("kei/".length)}`;
-  assert.deepEqual(await library.resolve({ repo, selector }), expected);
-  assert.deepEqual(await library.resolve({ repo: await Repo.at({ path: row.worktreePath }) }), expected);
+  assert.deepEqual(await library.resolve({ selector }), expected);
+  assert.deepEqual(await Keis.of(await Repo.at({ path: row.worktreePath })).resolve({  }), expected);
   const link = join(repository.path, "context-link");
   symlinkSync(row.worktreePath, link, "dir");
-  assert.deepEqual(await library.resolve({ repo, cwd: link }), expected);
+  assert.deepEqual(await library.resolve({ cwd: link }), expected);
   const nested = join(row.worktreePath, "nested");
   mkdirSync(nested);
   assert.deepEqual(
-    await library.resolve({ repo, cwd: nested }),
+    await library.resolve({ cwd: nested }),
     {
       kind: "refused",
       refusal: { kind: "no-contextual-match", cwd: nested },
@@ -42,14 +42,14 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
     "context is exact, not an ancestor lookup",
   );
   assert.deepEqual(
-    await library.resolve({ repo }),
+    await library.resolve({  }),
     {
       kind: "refused",
       refusal: { kind: "no-contextual-match", cwd: repo.cwd },
     },
     "omission uses the supplied Repo, not the test process directory",
   );
-  assert.deepEqual(await library.resolve({ repo, selector: `${selector}-extra` }), {
+  assert.deepEqual(await library.resolve({ selector: `${selector}-extra` }), {
     kind: "refused",
     refusal: { kind: "unknown-short-selector", selector: `${selector}-extra` },
   });
@@ -64,9 +64,9 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
     "candidate membership uses owner disposition, not a second phase judgment",
   );
   rmSync(link);
-  accepted(await bound.value.keiyaku.abandon());
+  accepted(await bound.value.kei.abandon());
   assert.deepEqual(
-    await library.resolve({ repo, selector }),
+    await library.resolve({ selector }),
     {
       kind: "refused",
       refusal: { kind: "unknown-short-selector", selector },
@@ -78,19 +78,19 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
 test("selector refusals are ordinary data while malformed input and cwd are caller errors", async () => {
   const repository = makeGitRepository();
   const repo = await Repo.at({ path: repository.path });
-  const library = Keiyaku.with();
-  assert.deepEqual(await library.resolve({ repo, selector: "@kei/redundant" }), {
+  const library = Keis.of(repo);
+  assert.deepEqual(await library.resolve({ selector: "@kei/redundant" }), {
     kind: "refused",
     refusal: { kind: "redundant-short-selector", selector: "@kei/redundant" },
   });
-  const invalid = await library.resolve({ repo, selector: "not-a-contract" });
+  const invalid = await library.resolve({ selector: "not-a-contract" });
   assert.equal(invalid.kind, "refused");
   if (invalid.kind === "refused") assert.equal(invalid.refusal.kind, "invalid-selector");
-  await assert.rejects(library.resolve({ repo, selector: 7 } as never), TypeError);
-  await assert.rejects(library.resolve({ repo, cwd: "relative" }), TypeError);
+  await assert.rejects(library.resolve({ selector: 7 } as never), TypeError);
+  await assert.rejects(library.resolve({ cwd: "relative" }), TypeError);
   const file = join(repo.cwd, "not-directory");
   writeFileSync(file, "file");
-  await assert.rejects(library.resolve({ repo, cwd: file }), TypeError);
+  await assert.rejects(library.resolve({ cwd: file }), TypeError);
 });
 
 test("complete identities resolve without authority reads; corrupt short-selector authority retains its cause", async () => {
@@ -98,14 +98,14 @@ test("complete identities resolve without authority reads; corrupt short-selecto
   const repo = await Repo.at({ path: repository.path });
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "invalid authority"]);
   repository.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
-  const library = Keiyaku.with();
-  const resolved = await library.resolve({ repo, selector: "kei/nonexistent" });
+  const library = Keis.of(repo);
+  const resolved = await library.resolve({ selector: "kei/nonexistent" });
   assert.equal(resolved.kind, "resolved");
   if (resolved.kind === "resolved") {
     assert.equal(resolved.id, "kei/nonexistent");
-    assert.ok(library.select({ repo, id: resolved.id }) instanceof Keiyaku);
+    assert.ok(library.kei({ id: resolved.id }) instanceof Kei);
   }
-  await assert.rejects(library.resolve({ repo, selector: "@nonexistent" }), (error: unknown) => {
+  await assert.rejects(library.resolve({ selector: "@nonexistent" }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "authority-corruption");
     assert.ok(error.cause instanceof Error);

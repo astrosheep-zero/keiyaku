@@ -12,7 +12,6 @@ import {
   type RepositoryScope,
 } from "../protocol/operations.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
-import { composeContractLibrary, type KeiyakuLibrary } from "./contract-composition.js";
 import { readContractValue } from "./outcome.js";
 import { ContractExecution } from "./contract-execution.js";
 import type {
@@ -34,7 +33,6 @@ import type {
   ContractHistory,
   ContractHistoryEvent,
   DeliverInput,
-  LocalContractComposition,
   ReviewInput,
   VerifyInput,
 } from "./contract-types.js";
@@ -46,16 +44,12 @@ import {
   type ContractWaitResult,
 } from "./contract-wait.js";
 
-const KEIYAKU_HANDLE = Symbol("Keiyaku handle");
+const KEIYAKU_HANDLE = Symbol("Kei handle");
 
 type HandleSeat = Readonly<{ id: ContractId; scope: RepositoryScope }>;
 const KEIYAKU_SEATS = new WeakMap<object, HandleSeat>();
 
-export class Keiyaku {
-  static with(input?: LocalContractComposition): KeiyakuLibrary {
-    return composeContractLibrary(createKeiyakuHandle, input);
-  }
-
+export class Kei {
   private readonly id: ContractId;
   private readonly scope: RepositoryScope;
   private readonly operations: ContractExecution;
@@ -66,7 +60,7 @@ export class Keiyaku {
     scope: RepositoryScope,
     composition: LocalContractCompositionCapture,
   ) {
-    if (token !== KEIYAKU_HANDLE) throw new TypeError("Keiyaku handles are created by Keiyaku.with");
+    if (token !== KEIYAKU_HANDLE) throw new TypeError("Kei handles are created by Keis.of");
     this.id = id;
     this.scope = scope;
     this.operations = new ContractExecution({ id, scope, composition });
@@ -188,17 +182,17 @@ export class Keiyaku {
   }
 }
 
-/** Internal constructor capability; callers select a Contract through Keiyaku.with. */
-export function createKeiyakuHandle(
+/** Internal constructor capability; callers select a Contract through Keis.of. */
+export function createKeiHandle(
   id: ContractId,
   scope: RepositoryScope,
   composition: LocalContractCompositionCapture,
-): Keiyaku {
-  return new Keiyaku(KEIYAKU_HANDLE, id, scope, composition);
+): Kei {
+  return new Kei(KEIYAKU_HANDLE, id, scope, composition);
 }
 
 /** Internal package composition capability; not exported from the package root. */
-export function seatForKeiyaku(value: unknown): HandleSeat | null {
+export function seatForKei(value: unknown): HandleSeat | null {
   return value !== null && (typeof value === "object" || typeof value === "function")
     ? (KEIYAKU_SEATS.get(value) ?? null)
     : null;

@@ -132,7 +132,9 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["protocol/run.ts", ["git/target-placement.ts", "prepareTargetPlacement"], false],
   ["akuma/akuma.ts", ["library/contract.ts", "contract"], false],
   ["akuma/akuma.ts", ["library/contract.ts", "Contract", true], false],
-  ["library/keiyaku.ts", ["protocol/completion.ts", "completeCandidate"], false],
+  ["library/kei.ts", ["protocol/completion.ts", "completeCandidate"], false],
+  ["index.ts", ["library/kei.ts", "Kei"], true],
+  ["index.ts", ["library/contract-composition.ts", "Keis"], true],
   ["library/contract-execution.ts", ["protocol/completion.ts", "completeCandidate"], true],
   ["library/contract-creation.ts", ["library/bind.ts", "prepareMarkdownBind"], true],
   ["library/invocation.ts", ["protocol/completion.ts", "completeCandidate"], false],
@@ -199,7 +201,7 @@ const debts: Edge = ["debt/index.ts", "debts"];
 const catalog: Edge = ["debt/catalog.ts", "catalog"];
 const compositionCases: readonly (readonly [string, readonly Edge[], string, boolean])[] = [
   [
-    "library/keiyaku.ts",
+    "library/kei.ts",
     [
       ["library/contract-composition.ts", "composeContractLibrary"],
       ["library/contract.ts", "contract"],

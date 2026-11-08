@@ -21,7 +21,7 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { Keiyaku, Repo, type ContractRow } from "../src/index.js";
+import { Kei, Keis, Repo, type ContractRow } from "../src/index.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -34,20 +34,20 @@ import { conflictRecovery } from "../src/git/workspace.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 
-type ContractHandle = Pick<Keiyaku, "state">;
+type ContractHandle = Pick<Kei, "state">;
 
 test("bind persists the canonical rendering, so amending one section leaves other bytes untouched", async () => {
   const repository = repositoryWithMain();
   const repo = await cachedRepoAt(repository.path);
   const raw = document().replace(/\n## Objective/u, "\n\n\n## Objective");
-  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: raw, workspace: "worktree" }));
-  const before = present(await bound.value.keiyaku.state()).terms.document.bytes;
+  const bound = accepted(await Keis.of(repo).bind({ markdown: raw, workspace: "worktree" }));
+  const before = present(await bound.value.kei.state()).terms.document.bytes;
   assert.equal(before, renderContractBody(decodeContractDocument(document())));
   const amended = accepted(
-    await bound.value.keiyaku.amend({ markdown: "## Replace: Objective\n\nA sharpened objective.\n" }),
+    await bound.value.kei.amend({ markdown: "## Replace: Objective\n\nA sharpened objective.\n" }),
   );
   assert.match(amended.value.documentDiff, /sharpened objective/u);
-  const after = present(await bound.value.keiyaku.state()).terms.document.bytes;
+  const after = present(await bound.value.kei.state()).terms.document.bytes;
   const start = before.indexOf("## Objective");
   const end = before.indexOf("## Design");
   assert.equal(after.slice(0, start), before.slice(0, start));
@@ -81,15 +81,14 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
   repository.run(["add", "a.txt", "z.txt"]);
   repository.run(["commit", "--quiet", "-m", "base"]);
   const bound = accepted(
-    await Keiyaku.with().bind({
-      repo: await cachedRepoAt(repository.path),
+    await Keis.of(await cachedRepoAt(repository.path)).bind({
       markdown: document(),
       workspace: "worktree",
       target: "refs/heads/main",
       gates: ["reviewed"],
     }),
   );
-  const boundId = await publicContractId(bound.value.keiyaku);
+  const boundId = await publicContractId(bound.value.kei);
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   writeFileSync(join(repository.path, "a.txt"), "target\n");
   writeFileSync(join(repository.path, "z.txt"), "target\n");
@@ -120,7 +119,7 @@ async function reviewGatedConflictCandidateFixture() {
   repository.run(["worktree", "add", "--detach", worktree, template.candidateHead]);
   restoreWorktreeFiles(worktree, template.generatedFiles);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.with().select({ repo, id: template.id });
+  const contract = Keis.of(repo).kei({ id: template.id });
   return { repository, repo, contract, targetHead: template.targetHead, worktree };
 }
 
@@ -145,14 +144,13 @@ async function conflictBoardFixture(count: number) {
   const contracts = [];
   for (let index = 0; index < count; index += 1) {
     const contract = accepted(
-      await Keiyaku.with().bind({
-        repo,
+      await Keis.of(repo).bind({
         markdown: document().replace("# Library verbs", `# Board handoff ${index}`),
         workspace: "worktree",
         target: "refs/heads/main",
         gates: ["reviewed"],
       }),
-    ).value.keiyaku;
+    ).value.kei;
     const id = await publicContractId(contract);
     const appointment = await readManagedWorktreeAppointment(git, id);
     assert.equal(appointment.kind, "appointed");
@@ -184,7 +182,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       const { repository, repo, contracts } = await conflictBoardFixture(count);
       const expected: ContractRow[] = [];
       for (const { id } of contracts) {
-        const observed = await Keiyaku.with().observe({ repo, id });
+        const observed = await Keis.of(repo).observe({ id });
         assert.equal(observed.kind, "present");
         if (observed.kind !== "present") throw new Error("missing fixture row");
         expected.push(observed.row);
@@ -202,7 +200,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
           subject: { kind: "worktree", path: observed.row.worktreePath },
         });
       }
-      const reference = await Keiyaku.with().list({ repo });
+      const reference = await Keis.of(repo).list({  });
       assert.deepEqual(
         reference.rows.map((row) => expected.find(({ id }) => id === row.id)),
         reference.rows,
@@ -215,7 +213,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
           const traced = await Repo.at({ path: repository.path, gitPath });
           writeFileSync(calls, ""); // Exclude repository construction from the product read.
           const start = performance.now();
-          const board = await Keiyaku.with().list({ repo: traced });
+          const board = await Keis.of(traced).list({  });
           const commands = readFileSync(calls, "utf8").trim().split("\n");
           const refBatches = commands.filter((command) => command === "cat-file --batch-check=%(objectname)").length;
           const blobChannels = commands.filter((command) => command === "cat-file --batch").length;
@@ -245,7 +243,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
         },
       );
       assert.deepEqual(board.rows, reference.rows);
-      const catalogue = await Keiyaku.with().list({ repo, limit: 1 });
+      const catalogue = await Keis.of(repo).list({ limit: 1 });
       assert.equal(catalogue.hasMore, count > 1);
       const recent = [...expected].sort(
         (left, right) =>
@@ -258,7 +256,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
 
   test("handoff selection preserves absent, mismatched, malformed and consumed workspace judgments", async () => {
     const { repository, repo, git, contracts } = await conflictBoardFixture(6);
-    const before = await Keiyaku.with().list({ repo });
+    const before = await Keis.of(repo).list({  });
     const absent = contracts[1]!;
     repository.run(["update-ref", "-d", absent.ref]);
     for (const [index, field] of ["contractId", "place", "workspace"].entries()) {
@@ -270,7 +268,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     }
     const orphan = contracts[5]!;
     repository.run(["-C", orphan.worktree, "merge", "--quit"]);
-    const after = await Keiyaku.with().list({ repo });
+    const after = await Keis.of(repo).list({  });
     assert.deepEqual(
       after.rows,
       before.rows.map((row) => {
@@ -282,12 +280,12 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       }),
     );
     for (const row of after.rows) {
-      const exact = await Keiyaku.with().observe({ repo, id: row.id });
+      const exact = await Keis.of(repo).observe({ id: row.id });
       assert.equal(exact.kind, "present");
       if (exact.kind === "present") assert.deepEqual(exact.row, row);
     }
 
-    const selected = (await Keiyaku.with().list({ repo, limit: 1 })).rows[0]!;
+    const selected = (await Keis.of(repo).list({ limit: 1 })).rows[0]!;
     const unrelated = contracts.find(({ id }) => id !== selected.id && id !== contracts[0]!.id)!;
     const corrupt = await writeBlob(git, '{"version":1}');
     repository.run(["update-ref", unrelated.ref, corrupt]);
@@ -307,22 +305,22 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
         const traced = await Repo.at({ path: repository.path, gitPath });
         writeFileSync(calls, "");
         writeFileSync(refs, "");
-        const bounded = await Keiyaku.with().list({ repo: traced, limit: 1 });
+        const bounded = await Keis.of(traced).list({ limit: 1 });
         assert.deepEqual(bounded.rows, [selected]);
         assert.equal(bounded.hasMore, true);
         assert.equal(readFileSync(refs, "utf8"), `${contracts.find(({ id }) => id === selected.id)!.ref}\n`);
         assert.equal(readFileSync(calls, "utf8").includes(unrelated.worktree), false);
         writeFileSync(calls, "");
         writeFileSync(refs, "");
-        const exact = await Keiyaku.with().observe({ repo: traced, id: selected.id });
+        const exact = await Keis.of(traced).observe({ id: selected.id });
         assert.equal(exact.kind, "present");
         if (exact.kind === "present") assert.deepEqual(exact.row, selected);
         assert.equal(readFileSync(refs, "utf8"), `${contracts.find(({ id }) => id === selected.id)!.ref}\n`);
         assert.equal(readFileSync(calls, "utf8").includes(unrelated.worktree), false);
       },
     );
-    await assert.rejects(Keiyaku.with().list({ repo }), /handoff receipt is malformed/u);
-    await assert.rejects(Keiyaku.with().observe({ repo, id: unrelated.id }), /handoff receipt is malformed/u);
+    await assert.rejects(Keis.of(repo).list({  }), /handoff receipt is malformed/u);
+    await assert.rejects(Keis.of(repo).observe({ id: unrelated.id }), /handoff receipt is malformed/u);
     repository.run(["update-ref", "-d", unrelated.ref]);
 
     const matching = contracts[0]!;
@@ -330,7 +328,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     writeFileSync(join(matching.worktree, "shared.txt"), "resolved\n");
     accepted(await matching.contract.deliver({ includeDirty: true }));
     assert.equal(await readRef(git, matching.ref), null);
-    const resolved = await Keiyaku.with().observe({ repo, id: matching.id });
+    const resolved = await Keis.of(repo).observe({ id: matching.id });
     assert.equal(resolved.kind, "present");
     if (resolved.kind !== "present") throw new Error("missing resolved row");
     assert.equal(resolved.row.workspaceObservation.kind, "dirty");
@@ -375,8 +373,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       ].join("\n"),
       { KEIYAKU_FENCE_ARMED: armed, KEIYAKU_FENCE_PARKED: parked, KEIYAKU_FENCE_RELEASED: released },
       async (gitPath) => {
-        const traced = Keiyaku.with().select({
-          repo: await Repo.at({ path: repository.path, gitPath }),
+        const traced = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({
           id: await publicContractId(contract),
         });
         const pending = traced.review(
@@ -467,20 +464,19 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
   test("ungated Verification is absent from a library delivery claim", async () => {
     const repository = repositoryWithMain();
     const bound = accepted(
-      await Keiyaku.with().bind({
-        repo: await cachedRepoAt(repository.path),
+      await Keis.of(await cachedRepoAt(repository.path)).bind({
         markdown: document("exit 1"),
         workspace: "worktree",
         gates: [],
       }),
     );
-    const state = present(await bound.value.keiyaku.state());
+    const state = present(await bound.value.kei.state());
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
     writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
     repository.run(["-C", worktree, "add", "candidate.txt"]);
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
 
-    const delivered = await bound.value.keiyaku.deliver();
+    const delivered = await bound.value.kei.deliver();
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
     assert.deepEqual(delivered.value.gates, []);
     assert.deepEqual(
@@ -488,6 +484,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       ["deliver", "claimed"],
     );
     assert.equal(delivered.value.placement, undefined);
-    assert.equal(present(await bound.value.keiyaku.state()).terminal?.kind, "claimed");
+    assert.equal(present(await bound.value.kei.state()).terminal?.kind, "claimed");
   });
 });

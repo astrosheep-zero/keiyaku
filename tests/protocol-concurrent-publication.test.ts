@@ -2,7 +2,7 @@ import { present, accepted } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import test from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { entryUlid, type ContractTerms } from "../src/core/facts/types.js";
@@ -21,8 +21,7 @@ test("two concurrent private-state binds both publish distinct accepted contract
   const results = await Promise.all(
     Array.from({ length: writers }, () =>
       (async () =>
-        Keiyaku.with().bind({
-          repo: await Repo.at({ path: repository.path }),
+        Keis.of(await Repo.at({ path: repository.path })).bind({
           markdown: document(),
           workspace: "worktree",
           gates: ["reviewed"],
@@ -31,7 +30,7 @@ test("two concurrent private-state binds both publish distinct accepted contract
   );
   assert.equal(results.length, writers);
   assert.ok(results.every((result) => result.kind === "accepted"));
-  const states = await Promise.all(results.map((result) => result.value.keiyaku.state()));
+  const states = await Promise.all(results.map((result) => result.value.kei.state()));
   assert.equal(new Set(states.map((state) => present(state).id)).size, writers);
   assert.ok(states.every((state) => present(state).head !== null));
 });
@@ -110,8 +109,7 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
     ].join("\n"),
     { KEIYAKU_STALLING: stalling, KEIYAKU_RELEASE: release },
     async (gitPath) =>
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path, gitPath }),
+      await Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
         markdown: document(),
         workspace: "worktree",
         gates: ["reviewed"],
@@ -126,8 +124,7 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
   }
   assert.ok(existsSync(stalling), "the bind must stall in its seat-external preparation");
   // Another independent bind must publish while the first still waits outside the seat.
-  const concurrent = accepted(await Keiyaku.with().bind({
-    repo: await Repo.at({ path: repository.path }),
+  const concurrent = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
     markdown: document(),
     workspace: "worktree",
     gates: ["reviewed"],
@@ -156,8 +153,7 @@ test("an injected Git publication error still returns publication-failed", async
       { KEIYAKU_ATTEMPTS: attempts },
       async (gitPath) =>
         (
-          await Keiyaku.with().select({
-            repo: await Repo.at({ path: repository.path, gitPath }),
+          await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({
             id: (present(await contract.state())).id,
           })
         ).amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),

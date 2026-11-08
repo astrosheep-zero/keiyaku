@@ -1,8 +1,8 @@
 # Public API
 
 The ESM package exposes exactly two entries: the package root and the plugin
-entry. The root exposes Keiyaku as the Contract product and native Contract
-handle, Akuma as the standalone single-Akuma product, Akumas as the World-bound
+entry. The root exposes Kei as the native Contract handle and Keis as the
+Repo-bound Contract collection, Akuma as the standalone single-Akuma product, Akumas as the World-bound
 plural Akuma composition, Debt as its independent product, Kanshi as composite
 observation including its bounded category aperture, Settings, Plugin types,
 Repo, World, and the named `nuke` operation. No other subpath, compatibility
@@ -40,23 +40,22 @@ error shapes belong to generated declarations, leaf help, and executable specifi
 `Repo` establishes the one Git world shared by its worktrees from the one
 explicit worktree coordinate the caller supplies. A missing or unresolved
 coordinate is caller-invalid input, never quietly replaced by an ambient
-current directory. `Keiyaku` is the native branded Contract handle created by
-binding or by selecting a complete Contract identity within that repository; instance operations never accept a
+current directory. `Kei` is the native branded Contract handle created by
+binding or selecting a complete identity within that repository; instance operations never accept a
 second repository coordinate. A handle offers state and guidance reads, history,
 amendment, explicit Verification, delivery and its read-only preview, review,
-abandonment, and arc. `Keiyaku.with()`
-synchronously captures one already-loaded immutable Settings value and the
-Contract-local actor, then exposes the Contract collection operations bind,
-select, resolve, list, observe, and wait, and the one public repair entry that reconciles
-either a world or one addressed Contract from an explicit Git-world
-coordinate. Construction performs no I/O and validates no product namespace.
+abandonment, and arc. `Keis.of(repo)` synchronously captures the Repo, an optional
+already-loaded immutable Settings value, and the Contract-local actor. Its collection
+operations never take another repository coordinate. They bind, select a handle,
+resolve, list, observe, wait, and reconcile either the captured world or one addressed
+Contract. Construction performs no I/O and validates no product namespace.
 Public construction is synchronous. The CLI and Akuma execution invoke the same
 native owner operations with ordinary caller inputs. Neither the Git-world coordinate
 nor a Contract handle exposes a second repair door. The composition's actor,
 worktree hooks, and branch-freshness policy stay within Contract operations and
 never configure Akumas; hooks and freshness are read from the captured Settings
-by the operation that actually consumes them. There is no Contract `of` alias or package-root Akuma
-operation on Keiyaku.
+by the operation that actually consumes them. There is no package-root Akuma
+operation on the Contract collection.
 
 Binding accepts either caller Markdown or a fork of existing terms. It may
 associate a Debt through the post-admission association owned by

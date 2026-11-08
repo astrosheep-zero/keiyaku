@@ -1,9 +1,8 @@
-import type { AttestationData, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, AttestationData, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import type { Dispatch } from "../dispatch/index.js";
 import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
 import type { Settings } from "../settings.js";
 import type { DebtId } from "../debt/identity.js";
-import type { Repo } from "./repo.js";
 
 /** Public gate words remain ordinary strings; private policy interprets them. */
 export type Gate = string;
@@ -19,7 +18,6 @@ export type ContractHistory = Readonly<{
 }>;
 
 type MarkdownBindInput = Readonly<{
-  repo: Repo;
   markdown: string;
   debt?: DebtId;
   /** A literal target branch; `null` is deliberately targetless; omitted is the Repo worktree's current branch. */
@@ -30,7 +28,6 @@ type MarkdownBindInput = Readonly<{
   gates?: readonly string[];
 }>;
 type ForkBindInput = Readonly<{
-  repo: Repo;
   forkOf: ContractId;
   /** A literal target branch; `null` clears the source target; omitted inherits it. */
   target?: string | null;
@@ -40,9 +37,9 @@ type ForkBindInput = Readonly<{
 export type BindInput = MarkdownBindInput | ForkBindInput;
 type ActorOptions = Readonly<{ actor?: string }>;
 /** Contract-local composition: one captured Settings selection and the operation actor. */
-export type LocalContractComposition = Readonly<{
+export type KeisOptions = Readonly<{
   settings?: Settings;
-  actor?: string;
+  actor?: ActorId;
 }>;
 
 export type AmendInput = ActorOptions &
@@ -52,11 +49,10 @@ export type AmendInput = ActorOptions &
     gates?: readonly string[];
   }>;
 export type ArcInput = ActorOptions & Readonly<{ markdown: string }>;
-export type ContractListInput = Readonly<{ repo: Repo; limit?: number }>;
+export type ContractListInput = Readonly<{ limit?: number }>;
 export type ContractList = Omit<ContractBoard, "rows"> & Readonly<{ rows: readonly ContractRow[]; hasMore: boolean }>;
-export type ContractObservationInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type KeiyakuSelectInput = Readonly<{ repo: Repo; id: ContractId }>;
-export type ContractResolveInput = Readonly<{ repo: Repo; selector?: string; cwd?: string }>;
+export type ContractObservationInput = Readonly<{ id: ContractId }>;
+export type ContractResolveInput = Readonly<{ selector?: string; cwd?: string }>;
 export type ContractSelectorRefusal =
   | Readonly<{ kind: "invalid-selector"; selector: string; diagnostic: string }>
   | Readonly<{ kind: "redundant-short-selector"; selector: string }>

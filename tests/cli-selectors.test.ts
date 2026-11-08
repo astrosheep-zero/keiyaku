@@ -13,7 +13,7 @@ import { parseArgv } from "../src/cli/parse.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { breakBody } from "../src/akuma/heart/index.js";
-import { Akumas, Keiyaku, Repo, World } from "../src/index.js";
+import { Akumas, Keis, Repo, World } from "../src/index.js";
 import type { KanshiCategoryReport } from "../src/kanshi/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
@@ -50,17 +50,17 @@ test("CLI adapts public Contract selector refusals without owning matching", asy
   const repository = makeGitRepository();
   const repo = await Repo.at({ path: repository.path });
   const selector = "@missing";
-  assert.deepEqual(await Keiyaku.with().resolve({ repo, selector }), {
+  assert.deepEqual(await Keis.of(repo).resolve({ selector }), {
     kind: "refused",
     refusal: { kind: "unknown-short-selector", selector },
   });
-  await assert.rejects(resolveContractId(repo, selector, repo.cwd), (error: unknown) => {
+  await assert.rejects(resolveContractId(Keis.of(repo), selector, repo.cwd), (error: unknown) => {
     assert.ok(error instanceof CliUsageError);
     assert.match(error.message, /unknown contract selector: @missing/u);
     return true;
   });
-  await assert.rejects(resolveContractId(repo, "@kei/missing", repo.cwd), /redundant short contract selector/u);
-  await assert.rejects(resolveContractId(repo, undefined, repo.cwd), /required outside a managed worktree/u);
+  await assert.rejects(resolveContractId(Keis.of(repo), "@kei/missing", repo.cwd), /redundant short contract selector/u);
+  await assert.rejects(resolveContractId(Keis.of(repo), undefined, repo.cwd), /required outside a managed worktree/u);
 });
 
 test("missing Contract selectors refuse uniformly across read and reconcile verbs", () => {
@@ -181,10 +181,9 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
   const world = await World.at(repository.path);
-  const library = Keiyaku.with();
+  const library = Keis.of(repo);
   for (let index = 0; index < 11; index += 1) {
     accepted(await library.bind({
-      repo,
       target: "main",
       markdown: contractMarkdown(`Category ${index}`, {
         Context: "category status", Objective: "observe", Design: "owner rows",
@@ -193,11 +192,11 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
       gates: ["reviewed"],
     }));
   }
-  const owner = await library.list({ repo, limit: 11 });
+  const owner = await library.list({ limit: 11 });
   const oldest = owner.rows[10]!;
   const short = `@${oldest.id.slice("kei/".length)}`;
-  assert.equal(await resolveContractId(repo, short, repo.cwd), oldest.id);
-  assert.equal(await resolveContractId(repo, undefined, oldest.worktreePath!), oldest.id);
+  assert.equal(await resolveContractId(Keis.of(repo), short, repo.cwd), oldest.id);
+  assert.equal(await resolveContractId(Keis.of(repo), undefined, oldest.worktreePath!), oldest.id);
   const region = await cliJson<{ kind: string; value: { declaration: { contract: string } } }>(
     ["-C", repository.path, "region", short],
     { environment: {} },
@@ -253,9 +252,9 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
   const akuma = await cliJson<KanshiCategoryReport>(["-C", world, "status", "aku"], { environment: {} });
   if (akuma.value.category !== "akuma" || akuma.value.akuma.kind !== "present") assert.fail(akuma.stdout);
   assert.equal(akuma.value.akuma.value.rows[0]!.contract?.id, owner.rows[0]!.id);
-  const terminal = library.select({ repo, id: owner.rows[10]!.id });
+  const terminal = library.kei({ id: owner.rows[10]!.id });
   accepted(await terminal.abandon());
-  const activeOwner = await library.list({ repo, limit: 11 });
+  const activeOwner = await library.list({ limit: 11 });
   const full = await cliJson<KanshiCategoryReport>(["-C", world, "status", "kei", "--limit", "501"], { environment: {} });
   if (full.value.category !== "contract" || full.value.contracts.kind !== "present") assert.fail(full.stdout);
   assert.equal(full.value.contracts.value.rows.length, 10);

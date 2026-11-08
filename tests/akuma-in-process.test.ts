@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
-import { Akuma, AkumaHost, Akumas, Keiyaku, Repo, World, type AkumaHostOptions, type WorldRoot } from "../src/index.js";
+import { Akuma, AkumaHost, Akumas, Keis, Repo, World, type AkumaHostOptions, type WorldRoot } from "../src/index.js";
 import { allocateAkumaDirectory, pathsForAkumaId } from "../src/akuma/identity.js";
 import { initializeHeart, probeLeash, readHeart, readSeal, readLatestTurnForBody } from "../src/akuma/heart/index.js";
 import { launchInProcessBody } from "../src/akuma/in-process-body.js";
@@ -194,9 +194,9 @@ test("both public hosts preserve Contract runtime context and exact native repor
   for (const hosting of ["in-process", "detached"] as const) {
     const repository = repositoryWithMain();
     const world = await nativeWorld(t, repository.path);
-    const contract = accepted(await Keiyaku.with().bind({
-      repo: await Repo.at({ path: world }), markdown: document(), target: null, gates: ["reviewed"],
-    })).value.keiyaku;
+    const contract = accepted(await Keis.of(await Repo.at({ path: world })).bind({
+      markdown: document(), target: null, gates: ["reviewed"],
+    })).value.kei;
     const contractId = present(await contract.state()).id;
     const host = { hosting };
     const api = Akumas.of(world, host);
@@ -259,14 +259,13 @@ test(
     const repository = repositoryWithMain();
     const world = await nativeWorld(t, repository.path);
     const bound = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: world }),
+      await Keis.of(await Repo.at({ path: world })).bind({
         markdown: document(),
         target: null,
         gates: ["reviewed"],
       }),
     );
-    const contract = bound.value.keiyaku;
+    const contract = bound.value.kei;
     const id = present(await contract.state()).id;
     const parent = await Akuma.birth("worker", {
       root: world,

@@ -121,7 +121,7 @@ const outcomeOwner = {
     any("library/reconcile.ts"),
     any("library/refusal.ts"),
     types("library/contract-outcomes.ts"),
-    types("library/keiyaku.ts"),
+    types("library/kei.ts"),
     types("library/invocation.ts"),
     types("library/delivery.ts"),
     types("library/region.ts"),
@@ -352,7 +352,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
-      source: "library/keiyaku.ts",
+      source: "library/kei.ts",
       allow: [
         any("contract-guidance.ts"),
         any("core/facts/types.ts"),
@@ -663,7 +663,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/facts/errors.ts", ["AuthorityCorruptionError"]),
         runtime("core/facts/types.ts", ["actorId"]),
         types("core/facts/types.ts"),
-        any("library/keiyaku.ts", ["Keiyaku"]),
+        any("library/kei.ts", ["Kei"]),
+        runtime("library/contract-composition.ts", ["Keis"]),
         any("library/delivery.ts", ["Delivery"]),
         any("library/outcome.ts", ["KeiyakuError"]),
         types("library/outcome.ts"),

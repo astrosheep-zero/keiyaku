@@ -21,12 +21,11 @@ import {
 import type { BindInput } from "./contract-types.js";
 import { actorOption, normalizedList, requireInput, requireMarkdown, debtOption } from "./input.js";
 import { InvocationAccumulator } from "./invocation.js";
-import type { Keiyaku, createKeiyakuHandle } from "./keiyaku.js";
+import type { Kei, createKeiHandle } from "./kei.js";
 import { project, validated, type OutcomeProjection } from "./outcome.js";
 import { reconcileAffectedContracts } from "./reconcile.js";
 import type { OperationRefusals } from "./refusal.js";
 import { observeRegion, type RegionObservation } from "./region.js";
-import { scopeForRepo } from "./repo.js";
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
 
@@ -36,15 +35,16 @@ function bindTargetSelection(target: string | null | undefined): BindTargetSelec
   return target === null ? { kind: "targetless" } : { kind: "explicit", target };
 }
 
-function bindInput(input: BindInput, composition: LocalContractCompositionCapture) {
+function bindInput(scope: RepositoryScope, input: BindInput, composition: LocalContractCompositionCapture) {
+  const fields = validated(() => requireInput(input, "Keis.bind input"));
+  const allowed =
+    fields.forkOf === undefined
+      ? ["markdown", "debt", "target", "workspace", "actor", "after", "gates"]
+      : ["forkOf", "target", "workspace", "actor"];
+  requireInput(input, "Keis.bind input", allowed);
   return validated(() => {
-    const values = requireInput(input, "Keiyaku.bind input");
+    const values = fields;
     const forkOf = values.forkOf;
-    const allowed =
-      forkOf === undefined
-        ? ["repo", "markdown", "debt", "target", "workspace", "actor", "after", "gates"]
-        : ["repo", "forkOf", "target", "workspace", "actor"];
-    requireInput(input, "Keiyaku.bind input", allowed);
     if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
     if (values.target !== undefined && values.target !== null && typeof values.target !== "string")
       throw new TypeError("target must be a string or null");
@@ -56,7 +56,7 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
     const derived = forkOf === undefined ? derivedGates(composition, gateNames(values.gates)) : undefined;
     return {
       forkOf: forkOf === undefined ? undefined : contractId(forkOf as string),
-      scope: scopeForRepo(values.repo),
+      scope,
       document,
       actor,
       target: values.target as string | null | undefined,
@@ -71,14 +71,15 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
  * One Contract bind. An omitted Markdown target names the current branch of the caller's explicit
  * Repo worktree coordinate, `null` is deliberately targetless, and a string is that literal target.
  */
-export async function bindKeiyaku(
+export async function bindKei(
+  scope: RepositoryScope,
   input: BindInput,
-  createHandle: typeof createKeiyakuHandle,
+  createHandle: typeof createKeiHandle,
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
 ): Promise<BindOutcome> {
-  const prepared = bindInput(input, composition);
+  const prepared = bindInput(scope, input, composition);
   const hooks = derivedHooks(composition);
-  const { forkOf, scope, document, target, actor } = prepared;
+  const { forkOf, document, target, actor } = prepared;
   const handle = (id: ContractId) => createHandle(id, scope, composition);
   const accumulator = new InvocationAccumulator();
   const projection = await (async (): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> => {
@@ -102,7 +103,7 @@ export async function bindKeiyaku(
               const admission = fork.admission;
               if (admission.kind !== "accepted") return expected(undefined, admission);
               const id = admission.value.contractId;
-              accumulator.extendConclusions(id, { keiyaku: handle(id) });
+              accumulator.extendConclusions(id, { kei: handle(id) });
               const value = await bindComplete(accumulator, id, scope, channel, admission, hooks, () =>
                 observeRegion(scope, channel, id, fork.document.region).then((region) =>
                   bindValue(handle(id), region, []),
@@ -138,9 +139,9 @@ export async function bindKeiyaku(
   return projected.outcome as BindOutcome;
 }
 
-function bindValue(keiyaku: Keiyaku, region: RegionObservation, warnings: readonly string[]): BindValue {
+function bindValue(kei: Kei, region: RegionObservation, warnings: readonly string[]): BindValue {
   return {
-    keiyaku,
+    kei,
     ...(warnings.length === 0 ? {} : { warnings }),
     ...region,
   };
@@ -181,7 +182,7 @@ async function markdownBind(
   scope: RepositoryScope,
   channel: GitDecodeChannel,
   accumulator: InvocationAccumulator,
-  handle: (id: ContractId) => Keiyaku,
+  handle: (id: ContractId) => Kei,
 ): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> {
   const { debt, target, actor, gates, after } = prepared;
   if (gates === undefined || after === undefined) throw new Error("Markdown bind requires prepared terms");
@@ -203,7 +204,7 @@ async function markdownBind(
   const id = leading.value.contractId;
   const warnings = regionWarnings(document.region);
   accumulator.extendConclusions(id, {
-    keiyaku: handle(id),
+    kei: handle(id),
     warnings,
   });
   const value = await bindComplete(accumulator, id, scope, channel, leading, hooks, async () =>

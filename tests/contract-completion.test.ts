@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -32,7 +32,7 @@ let template: ReturnType<typeof candidateTemplate> | undefined;
 async function fixture() {
   const prepared = await (template ??= candidateTemplate());
   const repository = snapshotGitRepository(prepared.repository);
-  const contract = Keiyaku.with().select({ repo: await cachedRepoAt(repository.path), id: prepared.id });
+  const contract = Keis.of(await cachedRepoAt(repository.path)).kei({ id: prepared.id });
   const state = present(await contract.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   repository.run(["worktree", "add", "--quiet", "--detach", worktree, prepared.candidate]);
@@ -42,7 +42,7 @@ async function fixture() {
 }
 
 // These tests exercise the real admission boundary, not a synthetic accepted object.
-import { createKeiyakuHandle } from "../src/library/keiyaku.js";
+import { createKeiHandle } from "../src/library/kei.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 import { KeiyakuError } from "../src/library/outcome.js";
 import { acquireTargetPlacementFence } from "../src/git/target-placement.js";
@@ -79,14 +79,13 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
   test("review cancellation after admission stops fenced placement and retains the real receipt", async () => {
     const repository = repositoryWithMain();
     const primary = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document(),
         target: "refs/heads/main",
         workspace: "worktree",
         gates: ["reviewed"],
       }),
-    ).value.keiyaku;
+    ).value.kei;
     const state = present(await primary.state());
     await primary.deliver();
     const scope = await cachedRepositoryAt(repository.path);
@@ -94,7 +93,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const committed = deferred(),
       controller = new AbortController();
     try {
-      const native = createKeiyakuHandle(state.id, { ...scope, onPrivateStateSeatClose: committed.resolve }, captureLocalContractComposition());
+      const native = createKeiHandle(state.id, { ...scope, onPrivateStateSeatClose: committed.resolve }, captureLocalContractComposition());
       const pending = native.review({ verdict: "satisfied", signal: controller.signal });
       await committed.promise;
       controller.abort(new Error("cancel review after its receipt"));
@@ -121,8 +120,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
   test("dependent continuation skips ungated Verification", async () => {
     const { repository, contract: primary, state: prerequisite } = await fixture();
     const bound = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document("exit 1"),
         workspace: "worktree",
         gates: [],
@@ -131,16 +129,16 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
         after: [prerequisite.id],
       }),
     );
-    const state = present(await bound.value.keiyaku.state());
-    const delivered = accepted(await bound.value.keiyaku.deliver());
+    const state = present(await bound.value.kei.state());
+    const delivered = accepted(await bound.value.kei.deliver());
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
     assert.deepEqual(delivered.value.gates, []);
-    assert.equal(present(await bound.value.keiyaku.state()).terminal, null);
+    assert.equal(present(await bound.value.kei.state()).terminal, null);
     await primary.deliver();
     const reviewed = accepted(await primary.review({ verdict: "satisfied" }));
     assert.deepEqual(reviewed.value.continuation?.claimed, [state.id], JSON.stringify(reviewed.value.continuation));
     assert.deepEqual(reviewed.value.continuation?.stopped, []);
-    const final = present(await bound.value.keiyaku.state());
+    const final = present(await bound.value.kei.state());
     assert.deepEqual(final.attestations, []);
     assert.equal(final.terminal?.kind, "claimed");
   });
@@ -149,13 +147,12 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const repository = repositoryWithMain();
     const marker = join(repository.path, ".git", "verification-ran");
     const contract = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document(`touch '${marker}'`),
         target: "refs/heads/main",
         gates: ["reviewed", "verified"],
       }),
-    ).value.keiyaku;
+    ).value.kei;
     const state = present(await contract.state());
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
     commitCandidate(repository, worktree);
@@ -196,14 +193,13 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const { repository, contract: primary, state: prerequisite } = await fixture();
     const marker = join(repository.path, ".git", "dependent-verification-ran");
     const dependent = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document(`touch '${marker}'`),
         gates: ["verified"],
         target: null,
         after: [prerequisite.id],
       }),
-    ).value.keiyaku;
+    ).value.kei;
     const delivered = accepted(await dependent.deliver());
     assert.deepEqual(
       delivered.facts.map((fact) => fact.kind),
@@ -224,12 +220,11 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
   test("pre-delivery Verification remains current in preview and unchanged later delivery", async () => {
     const repository = repositoryWithMain();
     const contract = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document("exit 0"),
         gates: ["verified"],
       }),
-    ).value.keiyaku;
+    ).value.kei;
     const verified = accepted(await contract.verify());
     const verifiedState = present(await contract.state());
     assert.equal(verifiedState.delivery, null);
@@ -257,12 +252,11 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const repository = repositoryWithMain();
     const markdown = document("exit 1") + "\n~~~bash timeout=5m\nexit 0\n~~~\n";
     const contract = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown,
         gates: ["verified"],
       }),
-    ).value.keiyaku;
+    ).value.kei;
     accepted(await contract.verify({ index: 1 }));
     const preview = accepted(await contract.previewDelivery());
     assert.ok(preview.value.verification.kind === "requirements");
@@ -294,12 +288,11 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
   test("Verification of a moved target supplies the exact snapshot for completion reintegration", async () => {
     const repository = repositoryWithMain();
     const contract = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document("exit 0"),
         gates: ["reviewed", "verified"],
       }),
-    ).value.keiyaku;
+    ).value.kei;
     const state = present(await contract.state());
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
     commitCandidate(repository, worktree);
@@ -327,13 +320,12 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
   test("dirty targetless pre-delivery Verification survives a later delivery note", async () => {
     const repository = repositoryWithMain();
     const contract = accepted(
-      await Keiyaku.with().bind({
-        repo: await Repo.at({ path: repository.path }),
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document("exit 0"),
         gates: ["verified"],
         target: null,
       }),
-    ).value.keiyaku;
+    ).value.kei;
     const state = present(await contract.state());
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
     commitCandidate(repository, worktree);
@@ -349,7 +341,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const scope = await cachedRepositoryAt(repository.path),
       original = new TypeError("injected trailing bug");
     let armed = false;
-    const native = createKeiyakuHandle(state.id, { ...scope,
+    const native = createKeiHandle(state.id, { ...scope,
       onPrivateStateSeatClose: () => { armed = true; },
       get gitPath(): string { if (armed) throw original; return scope.gitPath; },
     }, captureLocalContractComposition());
@@ -384,8 +376,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const repo = await Repo.at({ path: repository.path });
     const child = async (title: string, after: readonly ContractId[]) =>
       accepted(
-        await Keiyaku.with().bind({
-          repo,
+        await Keis.of(repo).bind({
           markdown: document().replace("# Library verbs", `# ${title}`),
           workspace: "worktree",
           gates: [],
@@ -393,7 +384,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
           target: null,
           after,
         }),
-      ).value.keiyaku;
+      ).value.kei;
     const left = await child("Diamond a", [state.id]),
       right = await child("Diamond b", [state.id]);
     const leftId = present(await left.state()).id,
@@ -428,7 +419,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       ].join("\n"),
       { CONFIRMED_MARKER: marker },
       async (gitPath) => {
-        const native = createKeiyakuHandle(state.id, await cachedRepositoryAt(repository.path, gitPath), captureLocalContractComposition());
+        const native = createKeiHandle(state.id, await cachedRepositoryAt(repository.path, gitPath), captureLocalContractComposition());
         const pending = native.review({ verdict: "satisfied", signal: controller.signal });
         try {
           await waitForFile(marker);

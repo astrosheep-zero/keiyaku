@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { Square, harnessOwner } from "@astrosheep/square";
-import { Akuma, Keiyaku, Repo, World } from "../src/index.js";
+import { Akuma, Keis, Repo, World } from "../src/index.js";
 import { HeldAkumaLeash, beginTurn, breakBody, endTurn } from "../src/akuma/heart/index.js";
 import { moveAlias } from "../src/alias/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
@@ -130,15 +130,14 @@ test("self declarations do not adopt outgoing attribution", async (t) => {
 test("Akuma self distinguishes open Turn, birth parent, context and dispatch without signals", async (t) => {
   const repository = repositoryWithCommit();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keiyaku.with().bind({
-    repo,
+  const bound = accepted(await Keis.of(repo).bind({
     markdown: contractMarkdown("Whoami fixture", {
       Context: "read-only identity", Objective: "show caller", Design: "observe facts", Region: "src/**",
       Criteria: "### Facts\nReport the caller.",
     }),
     gates: ["reviewed"],
   }));
-  const row = (await Keiyaku.with().list({ repo })).rows[0]!;
+  const row = (await Keis.of(repo).list({  })).rows[0]!;
   assert.ok(row.worktreePath);
   const world = await World.at(repository.path);
   const trace = writeSignalRecorder(world);

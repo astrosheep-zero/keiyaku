@@ -3,49 +3,15 @@
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
-/**
- * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
- * Settings, and Plugin surfaces. Internal composition, execution, and
- * configuration helpers stay off this entry; only CLI and Body import them.
- */
 export { AkumaHost } from "./body-host.js";
 export type { AkumaHostScope } from "./body-host.js";
 export { AuthorityCorruptionError } from "./core/facts/errors.js";
-/**
- * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
- * Settings, and Plugin surfaces. Internal composition, execution, and
- * configuration helpers stay off this entry; only CLI and Body import them.
- */
 export { Delivery } from "./library/delivery.js";
-/**
- * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
- * Settings, and Plugin surfaces. Internal composition, execution, and
- * configuration helpers stay off this entry; only CLI and Body import them.
- */
-export { Keiyaku } from "./library/keiyaku.js";
-/**
- * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
- * Settings, and Plugin surfaces. Internal composition, execution, and
- * configuration helpers stay off this entry; only CLI and Body import them.
- */
+export { Kei } from "./library/kei.js";
+export { Keis } from "./library/contract-composition.js";
 export { KeiyakuError } from "./library/outcome.js";
-/**
- * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
- * Settings, and Plugin surfaces. Internal composition, execution, and
- * configuration helpers stay off this entry; only CLI and Body import them.
- */
 export { NoGitWorldError, Repo } from "./library/repo.js";
-/**
- * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
- * Settings, and Plugin surfaces. Internal composition, execution, and
- * configuration helpers stay off this entry; only CLI and Body import them.
- */
 export { actorId } from "./core/facts/types.js";
-/**
- * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
- * Settings, and Plugin surfaces. Internal composition, execution, and
- * configuration helpers stay off this entry; only CLI and Body import them.
- */
 export { z } from "zod";
 export {
   Akuma,
@@ -154,7 +120,7 @@ export type {
   ContractWaitMember,
   ContractWaitResult,
 } from "./library/contract-wait.js";
-export type { KeiyakuLibrary, ReconcileInput } from "./library/contract-composition.js";
+export type { ReconcileInput } from "./library/contract-composition.js";
 export type {
   AbandonOutcome,
   AmendOutcome,
@@ -181,8 +147,7 @@ export type {
   ContractResolution,
   ContractSelectorRefusal,
   DeliverInput,
-  KeiyakuSelectInput,
-  LocalContractComposition,
+  KeisOptions,
   ReviewInput,
   VerifyInput,
 } from "./library/contract-types.js";

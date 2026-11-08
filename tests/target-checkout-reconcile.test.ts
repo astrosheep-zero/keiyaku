@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test, { describe } from "node:test";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
 import { singletonRequirement } from "../src/verification/declaration.js";
@@ -89,7 +89,7 @@ async function candidateFixture(template: ManagedCandidateTemplate) {
   restoreWorktreeFiles(worktree, template.generatedFiles);
   repository.run(["update-ref", "-d", TEMPLATE_CANDIDATE_REF]);
   const repo = await Repo.at({ path: repository.path });
-  const contract = Keiyaku.with().select({ repo, id: template.id });
+  const contract = Keis.of(repo).kei({ id: template.id });
   return { repository, contract, id: template.id, path: worktree };
 }
 
@@ -170,12 +170,12 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     if (delivery === undefined) throw new Error("delivery was not recorded");
     const repo = await cachedRepoAt(repository.path);
     const contractId = present(await contract.state()).id;
-    const placed = await Keiyaku.with().observe({ repo, id: contractId });
+    const placed = await Keis.of(repo).observe({ id: contractId });
     assert.ok(placed.kind === "present", 'expected placed.kind = "present"');
     assert.deepEqual(placed.row.targetObservation, { head: delivery.integration.snapshot, drift: false });
 
     repository.run(["reset", "--hard", delivery.integration.predecessor]);
-    const rewound = await Keiyaku.with().observe({ repo, id: contractId });
+    const rewound = await Keis.of(repo).observe({ id: contractId });
     assert.ok(rewound.kind === "present", 'expected rewound.kind = "present"');
     assert.deepEqual(rewound.row.targetObservation, { head: delivery.integration.predecessor, drift: true });
   });
@@ -273,7 +273,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
       ].join("\n"),
       {},
       async (gitPath) =>
-        Keiyaku.with().reconcile({ repo: await Repo.at({ path: repository.path, gitPath }), contract: candidate.id }),
+        Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({ contract: candidate.id }),
     );
 
     assert.deepEqual(reconciled.lag, []);
@@ -308,7 +308,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     const secretPath = resolve(repository.path, "artifact", "local-secret");
     writeFileSync(secretPath, secret);
 
-    const retained = await Keiyaku.with().reconcile({ repo, contract: candidate.id });
+    const retained = await Keis.of(repo).reconcile({ contract: candidate.id });
 
     assert.deepEqual(readFileSync(secretPath), secret);
     assert.equal(readFileSync(resolve(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
@@ -324,7 +324,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.ok(!retained.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
 
     rmSync(secretPath);
-    const recovered = await Keiyaku.with().reconcile({ repo, contract: candidate.id });
+    const recovered = await Keis.of(repo).reconcile({ contract: candidate.id });
 
     assert.deepEqual(recovered.lag, []);
     assert.equal(readFileSync(resolve(repository.path, "artifact"), "utf8"), "candidate file\n");
@@ -347,8 +347,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.equal(repository.run(["diff", "--cached", "--name-only", delivery.integration.predecessor]), "local.txt\n");
     assert.equal(repository.run(["diff-files", "--name-only"]), "delivered.txt\n");
 
-    const reconciled = await Keiyaku.with().reconcile({
-      repo: await Repo.at({ path: repository.path }),
+    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({
       contract: candidate.id,
     });
 
@@ -389,8 +388,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
         KEIYAKU_STAGED_BYTES: stagedBytes,
       },
       async (gitPath) =>
-        Keiyaku.with().reconcile({
-          repo: await Repo.at({ path: repository.path, gitPath }),
+        Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({
           contract: candidate.id,
         }),
     );
@@ -411,8 +409,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     const { repository } = candidate;
     writeFileSync(resolve(repository.path, "delivered.txt"), "changed after publication\n");
 
-    const reconciled = await Keiyaku.with().reconcile({
-      repo: await Repo.at({ path: repository.path }),
+    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({
       contract: candidate.id,
     });
 

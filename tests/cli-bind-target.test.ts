@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { contractId, type ContractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { Keiyaku, Repo } from "../src/index.js";
+import { Keis, Repo } from "../src/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { parseArgv, renderHelp } from "../src/cli/parse.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
@@ -55,14 +55,13 @@ test("CLI and SDK share the one omitted-target default", async () => {
   assert.ok(fromCli.value.contract);
 
   const fromSdk = accepted(
-    await Keiyaku.with().bind({
-      repo: await Repo.at({ path: raw.path }),
+    await Keis.of(await Repo.at({ path: raw.path })).bind({
       markdown: document(),
       workspace: "worktree",
       gates: [],
     }),
   );
-  const sdkState = present(await fromSdk.value.keiyaku.state());
+  const sdkState = present(await fromSdk.value.kei.state());
   assert.equal(sdkState.coordinates.target, "refs/heads/main");
   assert.equal(await boundTarget(raw.path, contractId(fromCli.value.contract)), sdkState.coordinates.target);
 });
@@ -153,8 +152,8 @@ test("an omitted target reads the explicit linked worktree coordinate, not the p
   assert.equal(repo.root, raw.path);
   assert.equal(repo.cwd, await realpath(linked));
 
-  const bound = accepted(await Keiyaku.with().bind({ repo, markdown: document(), workspace: "worktree", gates: [] }));
-  assert.equal(present(await bound.value.keiyaku.state()).coordinates.target, "refs/heads/feature");
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), workspace: "worktree", gates: [] }));
+  assert.equal(present(await bound.value.kei.state()).coordinates.target, "refs/heads/feature");
 
   const fromCli = await cliBind(linked);
   assert.equal(fromCli.value.kind, "accepted", JSON.stringify(fromCli.value));

@@ -2,7 +2,7 @@ import type { CliOutcome } from "../streams.js";
 import { AkumaOwner } from "../../akuma/akuma-owner.js";
 import { readHeart, readLatestTurnForBody } from "../../akuma/heart/index.js";
 import { parseAkumaId, pathsForAkumaId } from "../../akuma/identity.js";
-import { Keiyaku, NoGitWorldError, Repo, type AkumaCaller, type AkumaStatus, type ContractId } from "../../index.js";
+import { Keis, NoGitWorldError, Repo, type AkumaCaller, type AkumaStatus, type ContractId } from "../../index.js";
 import { observeNamedAddress } from "../../library/address.js";
 import { dispatchAssociations } from "../../library/selection.js";
 import { World, type WorldRoot } from "../../world.js";
@@ -55,7 +55,7 @@ async function selfFrom(environment: NodeJS.ProcessEnv): Promise<Self> {
 async function contextualContract(coordinates: CliCoordinates, world: WorldRoot | null): Promise<Contract> {
   if (world === null || coordinates.repo === undefined) return { kind: "none" };
   try {
-    const result = await Keiyaku.with().resolve({ repo: coordinates.repo, cwd: coordinates.cwd });
+    const result = await Keis.of(coordinates.repo).resolve({ cwd: coordinates.cwd });
     if (result.kind === "resolved") return result;
     return { kind: result.refusal.kind === "ambiguous-selector" ? "ambiguous" : "none" };
   } catch (error) {
