@@ -19,7 +19,8 @@ Requirement derivation and declaration identity belong to
 Only explicit verify invokes this producer. It requires an active Contract with
 a selected `verified` gate and valid declarations, and selects all current
 declarations or one by its current one-based position. An out-of-range selection
-refuses before execution or admission. An unselected section is inert text.
+refuses before execution or admission. Without `verified`, the section serves as
+reference documentation and creates no placement requirements.
 Delivery, review, preview, refreshed-target completion, and dependent continuation
 never execute declarations or their hooks; they consume standing evidence only.
 

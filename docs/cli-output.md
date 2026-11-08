@@ -32,61 +32,48 @@ and operational failure. Text labels name a candidate and its integration result
 and a content identity is distinguished from a commit by its kind name alone —
 the teaching that a content identity is never Git-addressable lives in leaf
 help, not on receipt rows. Journal blobs, entry ids, and record-field
-enumeration stay out of ordinary text -
-evidence handles live in JSON and `history` alone. Verification evidence remains
-associated with its exact captured snapshot and individual requirement. A verify
-receipt exposes every executed check's verdict or stop, its current declaration
-position and requirement, and testimony admission or admission reuse. Execution
-and admission reuse remain distinct. Delivery and review receipts consume
-standing evidence without claiming they executed or reused a producer run.
-No selected satisfied check or compact delivery association can imply whole-gate
-satisfaction; only the owner's universal requirement judgment establishes that.
-When a verified snapshot later lands, the landing names the same identity, and
-a completed placement also names the landed diff's shape in the shared diffstat
-vocabulary. A terminal receipt
-names its appointed worktree's short name when it retired the worktree, and
-names the retained worktree's path when its own removal failed. A landed
-placement is never vetoed by uncommitted checkout state: the receipt names each
-target checkout this command's own follow could not carry as one `checkout
-behind` lag row with its path and target, one row per retained arm, and leaves
-retention that predates the command to the typed result.
+enumeration stay out of ordinary text — evidence handles live in JSON and
+`history` alone. Verification evidence remains associated with its exact
+captured snapshot and individual requirement: a verify receipt exposes every
+executed check's verdict or stop, current declaration position, requirement, and
+whether testimony was newly admitted or reused, while delivery and review
+receipts consume standing evidence without claiming a producer run. When a
+verified snapshot lands, the landing names the same identity and the landed
+diff's shape in the shared diffstat vocabulary. A terminal receipt names its
+appointed worktree's short name when retired, or the retained path when removal
+failed. A landed placement is never vetoed by uncommitted checkout state: the
+receipt names each target checkout this command's own follow could not carry as
+one `checkout behind` lag row with its path and target, leaving earlier
+retention to the typed result.
 
 A completed placement names a Contract destination by its complete identity,
-not by its private Git reference or another branch. A completed placement reads
-like Git movement, identically for review, delivery, and verify: the title
-states the operation's outcome and Contract, the movement names its reference,
-and the final lifecycle state remains explicit. Evidence retains its snapshot
-and requirement scope rather than becoming a single aggregate green fact. The
-completed lifecycle state reads `accepted`; its recorded fact kind is not
-user-facing vocabulary. Receipt
-Git identities are abbreviated in text by the shared collision-aware display
-rule and remain full in JSON; absent content identity has no row. Amend receipts
-use a verb-past title, name gate and prerequisite changes independently, and
-reserve an unchanged-terms fact for a genuinely unchanged amendment. Their
-bounded terms comparison keeps only the comparison headers, without decorative
-banners or trailing header whitespace. Debt mutation receipts use verb-past
-titles and field-level changes, never projection-file
-diffs. Debt show timestamps omit millisecond precision in text; JSON retains
-full precision. An incomplete placement keeps its candidate and content-identity
-rows and its current reason for waiting. A placement receipt has three
-registers: landed states the reference movement and closes on `accepted`,
-pending states the target's non-movement in the movement row's slot and closes
-on the hourglass margin line `⧗ awaiting <events>`, and failed keeps its stop
-rows. The pending line names the not-yet-happened requirements as plain event
-nouns with no `gate` class word, and is omitted when every unmet requirement
-already holds a recorded verdict; such a verdict alarms as its own row with its
-timestamp and payload instead of being restated there. Requirement states are
-met or unmet while recorded verdicts are satisfied or unsatisfied. A dependent
-stop on unmet requirements speaks the same pending vocabulary in its
-continuation line. Internal refusal kinds never print on receipts.
+not by its private Git reference or another branch, and reads like Git movement
+identically for review, delivery, and verify: the title states the outcome and
+Contract, the movement names its reference, and the final lifecycle state reads
+`accepted`. Receipt Git identities are abbreviated in text by the shared
+collision-aware display rule and remain full in JSON; absent content identity
+has no row. Amend receipts use a verb-past title, name gate and prerequisite
+changes independently, reserve an unchanged-terms fact for a genuinely unchanged
+amendment, and keep only comparison headers in bounded terms diffs. Debt
+mutation receipts use verb-past titles and field-level changes, never
+projection-file diffs; Debt show timestamps omit millisecond precision in text
+and retain full precision in JSON. A placement receipt has three registers:
+landed states the reference movement and closes on `accepted`; pending states
+the target's non-movement and closes on `⧗ awaiting <events>` (omitted when
+every unmet requirement already holds a recorded verdict, which alarms on its
+own row); and failed keeps its stop rows. When completion re-integrates the
+candidate across target movement, the receipt names that re-integration count
+for delivery, review, and verify alike. Requirement states are met or unmet
+while recorded verdicts are satisfied or unsatisfied. A dependent stop on unmet
+requirements speaks the same pending vocabulary. Internal refusal kinds never
+print on receipts.
 
 A birth or admission receipt takes the admitted fact's native grammar and stops
 at that fact: a timeline admission uses a row, and Git movement uses a reference
 line. A frame rule appears only when content follows; no admission receipt adds
-an observation conclusion or claims a live state. Labels, arrows, and key-value
-columns are not receipt vocabulary. Reset receipts enumerate owner-confirmed
-removals and explain retained coordination residue without claiming a
-world-wide transaction.
+an observation conclusion or claims a live state. Reset receipts enumerate
+owner-confirmed removals and explain retained coordination residue without
+claiming a world-wide transaction.
 
 ## Shared rendering
 
@@ -141,15 +128,11 @@ facts from their respective public results. Activity summaries retain the
 concrete work observed rather than substituting a broad category; a tool row
 names the actual tool observed with a bounded argument preview, and a partial
 capture truncates visibly. Gate evidence keeps its compact visual state beside
-each gate and requirement's identity; missing, stale, and current unsatisfied
-evidence remain distinct. Current declarations may be labeled by current
-one-based position; removed historical requirements retain stable identity,
-never a fabricated position. Status, board, history, preview, receipts, and JSON
-all preserve this adjudicated requirement scope. The World Akuma board stays a
-catalogue rather than expanding each member's timeline: a running member may
-carry one bounded latest-activity preview through the shared activity renderer.
-A raw caller answer remains raw when that operation promises answer bytes. Recording review
-testimony and completing placement remain distinct facts; absence of
+each gate and requirement's identity across status, board, history, preview,
+receipts, and JSON; current declarations may be labeled by current one-based
+position while removed historical requirements retain stable identity. A raw
+caller answer remains raw when that operation promises answer bytes. Recording
+review testimony and completing placement remain distinct facts; absence of
 completion does not establish a candidate.
 
 Roster, world-status, and debt rows state each fact once in words. A Contract
@@ -191,15 +174,13 @@ One shared Akuma observation discipline serves status, observing call, ask, and
 history. Complete identity and known static context precede chronological
 activity, followed by one truthful conclusion, reported changes, and diagnostics.
 Known coordinates appear once; unknown coordinates stay absent. Selected Akuma
-status text bounds ordinary activity to its latest rendered lines and visibly
-acknowledges earlier omitted content; identity, conclusion, reported changes,
-and actionable failure or pending evidence remain outside that bound. This
-presentation does not narrow the public snapshot, history, or observing streams.
-A diagnostic
-keeps its subject, unavailable state, cause, and recovery coordinates together,
-never as an unlabeled static property. Activity retains the owner's event order,
-selection, omissions, payloads, and attribution. A conclusion already supplied
-by the timeline is not repeated.
+status bounds ordinary activity to its latest rendered lines with a visible
+omission marker, while keeping identity, conclusion, reported changes, and
+actionable failure or pending evidence visible. A diagnostic keeps its subject,
+unavailable state, cause, and recovery coordinates together, never as an
+unlabeled static property. Activity retains the owner's event order, selection,
+omissions, payloads, and attribution. A conclusion already supplied by the
+timeline is not repeated.
 
 History is immutable: it neither fabricates current state nor reads extra state
 to fill its panel. Status consumes the same completion judgment as wait,
@@ -217,9 +198,7 @@ truncation, preferring word boundaries. World-board answer previews show the
 tail with a leading omission; selected detail keeps the head.
 
 Selected Contract status foregrounds current work or the terminal outcome,
-without repeating settled mechanics. Associated Akumas retain their complete
-identities, available aliases, and observed life, including unavailable
-association or observation evidence. A delivered integration observed before
+without repeating settled mechanics. A delivered integration observed before
 target movement is identified as such. Delivery preview identifies itself as a
 dry-run observation, never delivery success. Candidate preparation, standing
 requirement evidence, and target followability stay distinct. Known checkout
@@ -262,18 +241,15 @@ rows never replay, and failures are never hidden by compaction.
 
 A wait is not a stream. It observes each selected Akuma to its completion
 judgment or the caller deadline and then prints one compact result line per
-member, in the result's own order, on stdout: an observed life mark, that
-member's complete identity with any single-target alias as a parenthetical, and
-the final public snapshot's own summary, folded and bounded to the terminal
-without truncating identity. The summary names a stopped life even when an
-older answer exists, keeps pending input and a resume-unsupported strand
-visible, and otherwise reads the current answered preview, failure diagnostic,
-or completion; a running member stays running. The mark reports an observed
-state, never continuing liveness or successful work. No wall clock, static
-coordinate, tool timeline, reported change, Debt, or separately extracted
-answer appears. Members the wait could not read follow as one failure line each,
-retaining complete identity and diagnostic. A wait opens no live frame and
-redraws no progress.
+member in result order on stdout: an observed life mark, complete identity with
+any single-target alias as a parenthetical, and the final public snapshot's
+summary folded and bounded to the terminal without truncating identity. The
+summary names a stopped life even when an older answer exists, keeps pending
+input and a resume-unsupported strand visible, and otherwise reads the current
+answered preview, failure diagnostic, or completion; a running member stays
+running. Members the wait could not read follow as one failure line each with
+complete identity and diagnostic. A wait opens no live frame and redraws no
+progress.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a
 warning or a separate report; it groups by related Contract and renders

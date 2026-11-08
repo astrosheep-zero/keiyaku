@@ -1,36 +1,36 @@
 ---
 name: keiyaku
 description: >-
-  Keiyaku is a CLI that records unresolved work, writes handoff terms for deliveries,
-  and calls delegates. Use this skill when you need to figure out which
-  Keiyaku skill or command to reach for.
+  Keiyaku records unresolved work, writes handoff terms for deliveries, and
+  calls delegates. Use this skill when deciding which Keiyaku concept or skill
+  to reach for.
 ---
 
 # Keiyaku
 
-## Model
+## Three Independent Pillars
 
-Keiyaku has three independent pillars: **Debt** records unresolved work,
-**Contract** makes acceptance auditable, **Akuma** runs delegates. Use any one
-alone. Each Contract in flight has one holder who runs its loop: you by
-default, or one Aku you hand the whole loop to.
+Keiyaku has three pillars that work alone or together:
 
-- Shaping and binding a Contract: `keiyaku-bind`
-- Holding a Contract to acceptance: `keiyaku-workflow`
-- Calling and steering Akumas: `keiyaku-akuma`
-- Recording unresolved work: `keiyaku-debt`
-- Watching many lanes at once: `keiyaku-babysit`
+- **Debt (`keiyaku-debt`):** confirmed unresolved work and its dependencies.
+  Does **not** require a closed design — record a Debt as soon as a problem or
+  prerequisite is confirmed, even while the solution is still open.
+- **Contract (`kei`):** one independently acceptable delivery whose objective,
+  design, and acceptance boundary are already closed, owned by **one and only
+  one holder** (you by default, or one Akuma handed the whole Contract loop). If
+  the design is not closed yet, investigate the codebase yourself or send an
+  Akuma to settle the approach before binding. Complex `kei`s divide their
+  execution into **Arcs** (chapters inside that one acceptance boundary).
+- **Akuma (`keiyaku-akuma`):** delegated workers addressed by `@alias` or
+  `AkuId` across parallel lanes.
 
-## Quick Start
+## Which Skill To Read
 
-```bash
-keiyaku -C <repo> debt add "title"
-keiyaku -C <repo> bind [--debt <debt/...>] -
-keiyaku -C <repo> status
-keiyaku -C <repo> deliver [<contract>|@<contract>]
-keiyaku -C <repo> review [<contract>|@<contract>] --satisfied --summary "<evidence>"
-```
+- Recording or querying unresolved work and prerequisites: `keiyaku-debt`
+- Splitting acceptance boundaries and authoring a Contract: `keiyaku-bind`
+- Running a Contract's fulfillment loop (deliver, verify, review): `keiyaku-workflow`
+- Calling, aliasing, steering, and waiting on Akumas: `keiyaku-akuma`
+- Supervising multiple active Contracts and Akumas in parallel: `keiyaku-babysit`
 
-`-C <path>` sets the invocation directory and with it the World. `--repo <path>`
-only picks the Contract repository. `call --workdir <path>` only picks where the
-Akuma runs.
+Get exact command or tool syntax from CLI `--help` or the exposed tool
+descriptions.

@@ -68,38 +68,16 @@ frame. Append-only output admits activity only after settlement; closing
 accounts for every row still in flight with an explicit unknown (`?`) row.
 Status and history are frozen projections, so they never assert liveness.
 
-For an open Turn, the public timeline projector selects and retains its opening
-input as current work independently of the ordinary-detail budget. Its retained
-call wins; only without that call, the earliest retained settled Tell delivered
-at launch for that Turn is selected. A live delivery is ordinary activity, not
-an opening input. Both monitoring and receipt observations retain that one
-sequence-ordered evidence row without duplicating it; no opening input is
-invented when its qualifying evidence is unavailable. Consumers receive the
-selected row's typed identity and do not reconstruct Turn ownership from its
-content or delivery metadata.
-
-The ordinary current-work window is the open Turn's call, explicit reports, and
-provider activity along with its retained settled delivered Tells, all in durable sequence order.
-Every settled say in that current Turn is protected from the ordinary status
-budget. File-change activity follows the same bounded selection as other tools;
-when selected it retains its typed operation and available path and diffstat. A
-settled tool row also carries the observed result text and, for every file it
-reported, any observed patch content; the reported-change summary stays a
-read-time aggregation of operation, path, and known diffstat alone, and never a
-second copy of that content. Only the selected opening input and the existing active, pending, and
-receipt-specific evidence add their own pins; a later or unrelated settled Tell
-gains no global status privilege. Its omission gaps therefore describe only
-that current window, never an earlier Turn or unrelated Tell.
-
-Placement discharges reported changes at the observation composition. While the
-Akuma's dispatch-associated Contract is active, a composed status surfaces them
-as above; once that Contract is accepted, the same observation presents no
-reported changes — the candidate they described is placed and preserved in Git.
-The discharge is derived at read time from the existing Dispatch association
-and the Contract's phase; it writes no fact and never alters the Heart
-projection. A dropped or failed Contract, an absent or failed association, and
-an unproven Contract read all keep the reported changes: unplaced work still
-matters.
+For an open Turn, the public timeline projector retains its opening input (the
+retained call, or else the earliest retained settled Tell delivered at launch)
+and every settled say in that Turn independently of the ordinary-detail budget,
+alongside bounded provider activity, explicit reports, and settled delivered
+Tells in durable sequence order. A settled tool row carries its observed result
+text and any per-file patch content, while the reported-change summary aggregates
+operation, path, and known diffstat alone. Omission gaps describe only that
+current window. Placement discharge of reported changes for an accepted
+associated Contract belongs to composite observation in [kanshi.md](kanshi.md)
+and never alters the Heart projection.
 
 Public status, idle, history, and input-bound answer observation may notify
 optional plugins when they establish a retained committed outcome identity.
@@ -240,20 +218,11 @@ World — it returns the directly called Akumas and their transitively descended
 Akumas. Only frozen Soul caller edges are followed; fork origin is not a caller
 edge, and absent attribution is never inferred. The complete caller closure is
 computed across every Archetype before a requested Archetype narrows it, then
-presented in the same semantic activity order and bound. A caller-scoped
-observation never opens every historical Heart merely to build a roster
-projection: a disposable World-local record of born identity and caller offers
-candidate edges. That record never justifies a returned member by itself: that
-member's
-own edge and every parent link back to the exact query root are rechecked
-against the born Souls, and any disagreement discards the record and answers
-from direct Soul evidence instead of an empty success. A record row whose Akuma
-directory no longer exists never joins the closure, and a member that cannot be
-proven is omitted honestly rather than claimed absent. A skipped or unprovable
-matching member leaves the reported extent honest rather than claiming there is
-nothing more. Born rows
-carry their frozen caller attribution; unborn or stillborn allocation state
-never enters a caller-scoped set because it has no Soul attribution.
+presented in the same semantic activity order and bound. Any World-local
+candidate index is verified against born Souls before returning a member and
+falls back to direct Soul evidence on disagreement; unprovable or deleted
+members are omitted honestly without claiming there is nothing more, and unborn
+or stillborn allocations never enter a caller-scoped set.
 
 ## Boundary
 

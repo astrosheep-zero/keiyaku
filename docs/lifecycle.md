@@ -76,10 +76,11 @@ protocol adapter, or board recomputes it.
 
 Producer methodology for `verified` belongs to
 [verification.md](verification.md). Selection makes its current requirements
-placement obligations; an unselected Verification section is inert text and
-creates none. Review and custom gates have a singleton requirement derived from
-the gate identity. The document boundary derives and replaces the effective
-requirement set on bind, amend, and fork without teaching core producer vocabulary.
+placement obligations; without `verified`, the Verification section serves as
+reference documentation and creates none. Review and custom gates have a
+singleton requirement derived from the gate identity. The document boundary
+derives and replaces the effective requirement set on bind, amend, and fork
+without teaching core producer vocabulary.
 
 Placement claims only a delivered Contract whose current prerequisites and gates
 pass. Missing delivery, terminal state, unmet prerequisites, and unmet gates are

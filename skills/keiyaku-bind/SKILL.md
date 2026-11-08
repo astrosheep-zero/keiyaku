@@ -7,94 +7,34 @@ description: >-
 
 # Before Binding A Keiyaku
 
-Bind records a Contract whose objective, design, and acceptance boundary are
-settled. Do not use it to leave an open design for someone else to decide.
+`bind` records a Contract whose objective, design, and acceptance boundary are
+closed. Never bind a wish list ("support X", "clean up Y") that leaves the
+mechanism for the Deliverer to invent — if the design is still open, inspect
+the codebase yourself or send an Akuma to settle the approach first (or record
+a Debt if deferring the work).
 
-## 1. What Must Be Clear Before Binding
+## 1. Boundaries, Arcs, And Parallelism
 
-Settle these facts first:
+- **One independently acceptable outcome per `kei`:** if part of the work can
+  be reviewed and accepted while another part remains unfinished, bind them as
+  separate `kei`s. Shared themes, workers, verification commands, or
+  overlapping Regions do not justify combining outcomes.
+- **Divide complex `kei`s into Arcs:** when one indivisible outcome is still
+  large or multi-stage, break its execution into **Arcs** (`arc`) so each
+  commission tackles one focused chapter (`This Arc: ...`) rather than a
+  monolith.
+- **Parallel lanes and `after`:** run independent `kei`s in parallel. Inspect
+  active write surfaces with `region` for planning, and declare `after` only
+  for true logical prerequisites. Omitting the target selects the current
+  branch; targeting another active `kei` stacks on its appointed worktree.
 
-- objective and intended outcome;
-- architecture and module boundaries;
-- detailed design and implementation approach;
-- public interfaces, behavior, data, and persistence;
-- ordering, concurrency, dependencies, and failure behavior;
-- acceptance conditions;
-- verification and required evidence;
-- the affected Region;
-- the one holder responsible for the `kei`.
+## 2. Authoring The Contract Document
 
-The Design section is a detailed design document. Use the subsections in the
-template below as needed, add others when useful, and record every decision the
-implementation must follow. Do not bind while design or acceptance is open.
+Put weight on **`### Approach And Flow`**: state the concrete mechanism, data
+and control flow, invariants, and failure handling clearly enough that two
+Deliverers would not invent incompatible designs.
 
-### Contract Shape: Mandatory Acceptance Boundary Check
-
-Before every bind, identify the independently acceptable outcomes. For each
-proposed part, ask whether it can be reviewed and accepted while another part
-remains unfinished. If it can, you MUST bind it as a separate `kei`. Do not bind
-an aggregate Contract containing independently acceptable outcomes.
-
-A shared request, audit, theme, product name, worker, verification command, or
-overlapping Region does NOT justify combining acceptance boundaries. Worker
-assignment and Contract boundaries are separate decisions: one worker may
-serve several Contracts, and several workers may contribute to one outcome.
-A request to "open a kei" does not by itself instruct you to combine outcomes.
-
-Keep parts together only when they jointly establish one outcome that cannot
-be meaningfully accepted in parts. State that inseparability in Context and
-make Criteria judge the same outcome. Do not manufacture inseparability by
-writing one broad Objective around unrelated fixes.
-
-- Use an Arc only for a chapter inside that one acceptance boundary; an Arc is
-  not separately accepted and MUST NOT substitute for an independent `kei`.
-- Use a Debt for confirmed unresolved work and dependencies that must outlive
-  the current conversation.
-
-A `kei` owns one independently acceptable outcome and its delivery lifecycle. A
-Debt records confirmed unresolved work; it may exist without a `kei`,
-and it does not create a second acceptance or lifecycle. Associate a `kei` with
-an existing Debt only when the delivery actually settles that unresolved work.
-Do not create a Debt just to mirror a `kei`.
-
-### Parallel Work
-
-Parallel work is the default.
-
-- Bind and advance independent `kei`s in parallel. Each has its own acceptance
-  boundary and holder.
-- Within one `kei`, run independent Debts or Arc chapters in parallel whenever
-  their work can proceed independently. They converge on the one acceptance
-  boundary, which the holder owns.
-
-Region overlap is planning information. It does not prevent parallel work and
-is not a lock, ownership claim, exact diff, or dependency. Use `--after` only
-when one result must exist before another can proceed because of a real logical
-dependency. Do not add `--after` merely because work touches the same Region.
-
-## 2. Bind Syntax
-
-Read the command's help for the complete option grammar:
-
-```bash
-keiyaku -C <repo> bind --help
-```
-
-Inspect declared Regions when planning parallel work:
-
-```bash
-keiyaku -C <repo> region
-keiyaku -C <repo> region <kei/...>
-keiyaku -C <repo> region --path 'src/**' --path 'tests/**'
-```
-
-These list active Regions, read one Contract's Region, or show active Regions
-overlapping the supplied patterns. Overlap is coordination information only.
-
-Bind from stdin with a heredoc or a saved Markdown file:
-
-~~~~bash
-keiyaku -C <repo> bind - <<'KEIYAKU'
+~~~~markdown
 # <Delivery name>
 
 ## Context
@@ -114,13 +54,13 @@ keiyaku -C <repo> bind - <<'KEIYAKU'
 <Data shape, identity, lifecycle facts, and persistence decisions.>
 
 ### Approach And Flow
-<Implementation approach, dependencies, ordering, concurrency, and failure.>
+<Concrete mechanism, step-by-step flow, ordering, concurrency, and failure handling.>
 
 ### Pseudocode
-<Algorithms and control flow.>
+<Key algorithms and control flow.>
 
 ## Region
-<One repository-relative write pattern per nonblank line.>
+<One repository-relative write pattern per nonblank line; trailing / means /**.>
 
 ## Criteria
 ### <observable acceptance condition>
@@ -130,73 +70,20 @@ keiyaku -C <repo> bind - <<'KEIYAKU'
 ```bash timeout=5m
 <commands runnable exactly as written>
 ```
-KEIYAKU
 ~~~~
 
-Use the narrowest justified Region patterns for likely writes. A trailing `/`
-is directory shorthand for `/**`. Patterns may be fenced lines, list items, or
-bare lines; those forms are combined. Region patterns are planning evidence,
-not a prediction of the exact diff.
-
-Verification is optional. Each declaration is a closed bash, zsh, or pwsh
-fence containing commands runnable as written. Separate fences give independent
-checks and deadlines. Each check gets its own clean scratch, setup, and cleanup;
-put any prerequisite build in that check's script or setup, never in a preceding
-fence. Use an explicit timeout for bounded commands; `5m` is the normal baseline.
-
-Select `verified` at binding to make declarations requirements; otherwise the
-section is inert. `reviewed` independently requires review evidence. For
-execution, evidence, and placement, see [Keiyaku Workflow](../keiyaku-workflow/SKILL.md).
-
-For an existing Debt that this delivery settles:
-
-```bash
-keiyaku -C <repo> bind --debt <debt/...> - < CONTRACT.md
-```
-
-For a real logical dependency between Contracts:
-
-```bash
-keiyaku -C <repo> bind --after <kei/...> - < CONTRACT.md
-```
-
-Gate selection is part of binding:
-
-```bash
-keiyaku -C <repo> bind --gates <name,...> - < CONTRACT.md
-keiyaku -C <repo> bind --gates "" - < CONTRACT.md
-keiyaku -C <repo> bind --gates reviewed - < CONTRACT.md
-```
-
-Omitting `--gates` uses `gates.default` if configured, otherwise `reviewed`.
-`--gates ""` selects no gates. Gates are named acceptance obligations, not work
-assignments. Named gate groups and worktree hooks live in Settings;
-see the README Configuration section or `keiyaku settings --help`.
+- **Gates and `verified`:** omitting gates uses `gates.default` if configured,
+  otherwise `reviewed`. Without the `verified` gate, `## Verification` serves
+  as reference documentation for the Deliverer and Reviewer rather than a gate
+  requirement executed by `verify`.
+- **Independent scratch:** each closed fence in `## Verification` runs in its
+  own clean scratch directory; include any required build in that fence or its
+  setup hook.
 
 ## 3. After Binding
 
-Binding appoints one managed worktree for the `kei`. Read the receipt as the
-handoff. Keep the complete `kei/...` identity and note:
-
-- the holder;
-- the appointed worktree path (absent when appointment lagged);
-- the target;
-- gates and prerequisites;
-- whether the `kei` is ready or waiting.
-
-Work in the appointed worktree. When appointment lags, the receipt carries no
-path and the `kei` shows pending reconciliation instead. If the receipt is
-waiting, the stated prerequisites remain; do not bind a duplicate Contract.
-
-The holder now owns the lifecycle:
-
-1. Start the work directly or delegate Debts, Arc chapters, Akumas, or Contract roles.
-2. Run independent work in parallel and let it converge on the one acceptance
-   boundary.
-3. Follow [Keiyaku Workflow](../keiyaku-workflow/SKILL.md) for candidate,
-   verification, review, and placement.
-4. Continue until the `kei` is accepted, amend terms while keeping the same
-   objective and acceptance boundary, or abandon it when either has changed.
-
-Continue with `keiyaku-workflow` for this lifecycle. For Akuma invocation,
-telling, waiting, and history, read `keiyaku-akuma`.
+Every `kei` has **one and only one holder** accountable for driving it to a
+terminal outcome — you by default, unless you explicitly hand the entire holder
+loop to one dedicated Akuma. Work and commit inside the appointed worktree path
+from the receipt (run `reconcile` if appointment lagged), advance multi-stage
+work with `arc`, and continue with `keiyaku-workflow`.

@@ -24,15 +24,11 @@ repair an inconsistency it encountered.
 Read-time association is enrichment, not a prerequisite for observing either
 product. A failed DebtHolder or Dispatch observation makes affected links
 unavailable; it does not fail readable Debt or Akuma rows or establish that no
-link exists. Alias remains independently observed from Akuma, so failure to
-read Alias does not erase the Akuma observation.
-
-Alias availability belongs to the composite Akuma section, not to any single
-row: a failed Alias observation leaves the section present and readable, and
-its evidence survives an empty roster instead of failing the section or
-disappearing into an evidence-free emptiness. Readable alias values remain the
-Alias owner's, and an attached Contract roster derives availability from this
-one section fact.
+link exists. Alias availability belongs to the composite Akuma section, not to
+any single row: a failed Alias read leaves the Akuma section and empty roster
+present with Alias marked unavailable, while readable alias values remain the
+Alias owner's and attached Contract rosters derive availability from that
+section fact.
 
 The World Debt section is a recent bounded catalogue. It attaches only
 relationships already observed for those rows, while a selected Contract's
@@ -42,26 +38,14 @@ Contract.
 The bare World Contract section is likewise a recent bounded catalogue. A
 selected Contract retains its exact owner observation, so the convenience of a
 World aperture never weakens the detail that selection asks the Contract owner
-to explain.
-Its aperture bounds physical detail observation as well as returned rows. A
-Contract's workspace is not inspected merely to discard its detail, while a
-selected row's target still supplies the evidence required to explain it.
-Shared target evidence is reused only within the same observation,
-without weakening incarnation checks or turning unavailable evidence into a
-clean judgment. Exact selection preserves complete relationship evidence while
-observing physical detail only for the requested Contract and its target.
-Its judgment is phase-driven: active Contracts foreground the outstanding hand
-and acceptance evidence, while terminal Contracts foreground the settled outcome.
-The World Contract section offers the same concise judgment at catalogue scale.
-Contract evidence retains the owner's per-requirement currentness and verdicts,
-including missing, stale, and unsatisfied requirements. A selected successful
-check cannot appear as satisfaction of the whole gate. Current declaration
-positions may label current requirements, while removed historical requirements
-remain identifiable by stable identity. Kanshi never recomputes aggregation or
-infers a producer run from pending evidence.
-An association outside that aperture is unavailable rather than missing; Kanshi
-uses missing only when the Contract observation is complete enough to establish
-absence.
+to explain. Its judgment is phase-driven: active Contracts foreground the
+outstanding hand and acceptance evidence, while terminal Contracts foreground
+the settled outcome. The World Contract section offers the same concise judgment
+at catalogue scale. Contract evidence retains the owner's per-requirement
+currentness and verdicts without recomputing gate satisfaction or inferring a
+producer run. An association outside that aperture is unavailable rather than
+missing; Kanshi uses missing only when the Contract observation is complete
+enough to establish absence.
 
 For bare World status, Kanshi obtains one bounded recent Akuma observation and
 keeps that owner order. It observes detailed activity only for its first few
@@ -70,20 +54,13 @@ manufacturing a roster total. This bounded display observation never supplies
 the frozen complete subject set required by selection, waiting, mutation, or
 other complete roster operations.
 
-A requested category retains the same recent owner order and bounded extent as
-the corresponding World section. It observes that section independently, preserving
-absence and failure, and attaches only available Alias, Dispatch, and DebtHolder
-facts without reading the Debt board. The category aperture is never used to
-resolve exact identities.
-
-That bounded category observation is part of the package root: a library consumer
-and the CLI reach the same operation through one public crossing input and tagged
-report, and neither repeats the other's observation. The caller boundary belongs
-to Kanshi and is decided before any owner read: a malformed request, an unexpected
-key, an invalid category, an invalid coordinate, or an invalid bound is
-caller-invalid, an unrecognized category is never read as Akuma, and a Contract
-category without a Repo is refused rather than reported as a failed section. A
-failure that the owner actually produces stays that owner's evidence in the report.
+A requested category is a package-root observation that retains the same recent
+owner order and bounded extent as the corresponding World section. It validates
+the caller boundary before any owner read — refusing malformed requests or a
+Contract category without a Repo — then observes that section independently,
+preserving absence and owner failure while attaching available Alias, Dispatch,
+and DebtHolder facts without reading the Debt board or resolving exact
+identities.
 
 An exact aggregate observes the complete owner-classified running Akumas,
 active Contracts, and open Debts across their respective authorities. It never

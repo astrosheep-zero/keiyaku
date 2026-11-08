@@ -6,91 +6,42 @@ description: >-
 
 # Keiyaku Debt
 
-A Debt records confirmed unresolved work and its relationships. Debt is an
-independent product; it is not a Contract, Arc, Akuma, permission, acceptance
-boundary, or fulfillment lifecycle.
+A Debt records confirmed unresolved work and its relationships (`open`, `done`,
+`drop`). Unlike a `kei`, a Debt does not require a closed design — use it to
+capture a confirmed problem or prerequisite that must outlive the current
+conversation, while keeping transient scratch plans in session notes.
 
-## 1. When To Use A Debt
+## 1. Recording A Useful Debt
 
-Use a Debt when confirmed unresolved work or a dependency must outlive the
-current conversation. Keep plans and execution progress in reasoning or session
-notes instead.
+- **Self-contained body:** write enough concrete evidence (files, symbols,
+  repro, or why work was deferred) that a future reader can act on the Debt
+  cold without rediscovering the problem.
+- **Priority (`0..3` ascending):** `0` is highest urgency (`priority <= 1`
+  selects high-priority work in queries).
+- **No mirror Debts:** never create a Debt just to mirror an already-bound `kei`.
 
-- Use a `kei` for one independently acceptable outcome.
-- Use an Arc for a chapter inside one `kei`.
-- Use a Debt for confirmed unresolved work and its prerequisites.
-- Do not create a Debt just to mirror a `kei`.
+## 2. Relationships And Readiness
 
-A Debt may exist without a Contract. Associating a Debt with a `kei` does not
-transfer the Contract's holder, acceptance, or lifecycle to the Debt.
+Only `needs` orders work: a Debt with unresolved `needs` is `blocked`, and
+becomes `ready` once every prerequisite is `done` or `drop`. Do not add `needs`
+merely because two Debts touch the same Region or are related.
 
-## 2. Relationships And Parallel Work
+- `needs`: prerequisite that must become terminal first.
+- `parent`: decomposition grouping (does not block).
+- `supersedes`: earlier Debt replaced by this one.
+- `relates`: non-blocking link.
 
-Independent work may proceed in parallel when its dependencies allow it.
-Debt records no execution-progress state.
+`show` displays only outbound relations declared on that Debt; use `tree`,
+parent-scoped `ready`/`blocked`, or `query` (`blocks`, `under`) to inspect
+reverse links.
 
-Use the relationships for their actual meanings:
+## 3. Scope And Contract Settlement
 
-- `needs` means this Debt must wait for another Debt to become terminal.
-- `parent` groups decomposition; it does not create a dependency.
-- `supersedes` points to work replaced by this Debt.
-- `relates` records a connection without affecting readiness.
-
-Only `needs` orders work. Do not add it because Debts touch the same Region or
-because one Debt is related to another. A terminal Debt releases its dependents.
-
-## 3. Debt Commands
-
-Create and inspect Debts:
-
-```bash
-keiyaku debt add "<title>"
-keiyaku debt add "<title>" --priority 1 --needs <debt/...>
-keiyaku debt show <debt/...>
-keiyaku debt ls
-keiyaku debt ready
-keiyaku debt blocked
-keiyaku debt tree <debt/...>
-keiyaku debt doctor
-keiyaku debt query --where 'priority <= 1 and ready' --world
-keiyaku debt context                  # read the default namespace
-keiyaku debt context <namespace>      # set it; / resets to root
-```
-
-Use complete Debt IDs for targeted commands. `ls`, `ready`, and `blocked` use
-the current namespace; use `--world` to inspect the complete Debt world.
-
-Close work:
-
-```bash
-keiyaku debt done <debt/...>...
-keiyaku debt drop <debt/...>... --note "<reason>"
-```
-
-Use `done` when the Debt is complete. Use `drop` when it is no longer owed.
-Both terminal states release dependent Debts. Unresolved `needs` appear in
-`blocked`; open work with all prerequisites terminal appears in `ready`.
-
-Update a Debt without changing its lifecycle:
-
-```bash
-keiyaku debt update <debt/...> --title "<title>"
-keiyaku debt update <debt/...> --body "<body>"
-keiyaku debt update <debt/...> --needs <debt/...>
-keiyaku debt update <debt/...> --parent <debt/...> --relates <debt/...>
-keiyaku debt update <debt/...> --drop-needs <debt/...>
-```
-
-## 4. After Creating A Debt
-
-Read the returned Debt identity. Then:
-
-1. Add or remove relationships when the confirmed prerequisites change.
-2. Mark completed work `done`, or work no longer owed `drop` with a reason.
-3. Use `ready`, `blocked`, `tree`, or `doctor` to inspect the current ledger.
-
-Debt records unresolved work. It does not perform the work, claim acceptance,
-assign a holder, or decide what a Contract may accept.
-
-Read `keiyaku-bind` for Contract authoring and `keiyaku-workflow` for Contract
-lifecycle.
+- **Namespace scope:** an appointed Contract worktree scopes its default Debt
+  context to `debt/<contract>/...`. Select the root namespace `/` when filing a
+  repo-wide Debt from inside a worktree, and enable world scope on `ls`,
+  `ready`, `blocked`, or `query` to inspect across all namespaces. Always
+  address a specific Debt by its complete `debt/...` ID.
+- **Contract settlement:** associating a Debt when binding a `kei` holds that
+  Debt; accepting the `kei` marks it `done`, while abandoning the `kei`
+  releases it back to `open`.
