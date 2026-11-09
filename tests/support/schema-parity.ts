@@ -25,7 +25,9 @@ type WireObject<T> = {
     Exclude<T[K], undefined | void>
   >;
 };
-export type Wire<T> = T extends { toJSON(): infer J }
+export type Wire<T> = T extends string | number | boolean | bigint | null | undefined
+  ? T
+  : T extends { toJSON(): infer J }
   ? Wire<J>
   : T extends readonly unknown[]
     ? { [K in keyof T]: Wire<T[K]> }
