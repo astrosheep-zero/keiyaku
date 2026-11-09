@@ -1,6 +1,6 @@
 import { type DebtPriority, type DebtState } from "./document.js";
 import { isDebtSegment, parseDebtId, type DebtId } from "./identity.js";
-import type { AddDebtInput, UpdateDebtInput } from "./operations.js";
+import type { AddDebtDocumentInput, AddDebtInput, UpdateDebtInput } from "./operations.js";
 import type { DebtQuerySort } from "./query.js";
 
 export function record(value: unknown, label: string): Record<string, unknown> {
@@ -137,6 +137,22 @@ export function addInput(input: unknown): AddDebtInput {
     ...(parent === undefined ? {} : { parent }),
     ...(supersedes === undefined ? {} : { supersedes }),
     ...(relates === undefined ? {} : { relates }),
+    ...(createdBy === undefined ? {} : { actor: createdBy }),
+    ...(abort === undefined ? {} : { signal: abort }),
+  };
+}
+
+export function addDocumentInput(input: unknown): AddDebtDocumentInput {
+  const v = record(input, "addDocument input");
+  closed(v, ["markdown", "namespace", "actor", "signal"], "addDocument input");
+  const markdown = text(v.markdown, "markdown");
+  if (markdown === undefined) throw new TypeError("markdown is required");
+  const ns = namespace(v.namespace),
+    createdBy = actor(v.actor),
+    abort = signal(v.signal);
+  return {
+    markdown,
+    ...(ns === undefined ? {} : { namespace: ns }),
     ...(createdBy === undefined ? {} : { actor: createdBy }),
     ...(abort === undefined ? {} : { signal: abort }),
   };

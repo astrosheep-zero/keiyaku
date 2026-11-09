@@ -15,6 +15,13 @@ initiator attribution. These declarations are not authentication. Akuma
 execution directories remain independent of Contract association. Product
 surfaces neither depend on the facet nor require it to operate.
 
+Debt invocation resolves the caller's World independently of a selected Repo.
+Only operations consuming a default namespace read installed context; explicit
+namespace and World scope bypass it. Creation alone derives actor testimony,
+and only creation or deliberate context replacement establishes a missing World.
+Debt reads retain native absence and refusal distinctions; listing defaults to
+open work.
+
 Mixed reads select the appropriate existing owner without inventing a catalogue
 or merging independent authorities. A plural status may contain different
 selector families and retains their order; a Contract wait and an Akuma wait

@@ -21,6 +21,22 @@ test("Debt replaces the old family without restoring planning or progress verbs"
   assert.equal(command(["debt", "show", "debt/example"]).command, "debt");
 });
 
+test("root Debt listings select closed or all only for Debt", () => {
+  assert.deepEqual(command(["ls", "debt/", "--closed"]), {
+    command: "ls",
+    output: "text",
+    query: { kind: "debts", namespace: [], selection: "closed" },
+  });
+  assert.deepEqual(command(["ls", "debt/ns/", "--all"]), {
+    command: "ls",
+    output: "text",
+    query: { kind: "debts", namespace: ["ns"], selection: "all" },
+  });
+  assert.throws(() => command(["ls", "debt", "--all", "--closed"]), CliUsageError);
+  assert.throws(() => command(["ls", "kei", "--all"]), CliUsageError);
+  assert.throws(() => command(["ls", "aku", "--closed"]), CliUsageError);
+});
+
 test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.deepEqual(parseArgv(["nuke"]), {
     command: { command: "nuke", output: "text" },

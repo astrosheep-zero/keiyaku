@@ -8,7 +8,7 @@ do not depend on Debt; Debt does not interpret Contract authority or Git state.
 
 ## World, identity, and custody
 
-A Debt board belongs to one World. The process edge resolves the World and the
+A Debt board belongs to one World. The invocation facet resolves the World and the
 directory-local namespace context before calling Debt. The directory-local
 context is the nearest one the invocation directory or an ancestor declares, and
 that walk includes the World boundary itself: a nearer context overrides a
@@ -90,7 +90,8 @@ authority, so a synthetic history would be dishonest.
 
 ## Views
 
-A targeted Debt read exposes only Debt-owned outbound relations; reverse
+Invocation listing and query default to open work; callers may explicitly select
+terminal work or all work. A targeted Debt read exposes only Debt-owned outbound relations; reverse
 relations are derived only by named board projections. Debt's board,
 readiness, blocked, query, tree, and diagnostic views are read-only
 interpretations of current Debt authority. Growing row catalogues

@@ -8,6 +8,7 @@ import type {
   DebtDetail,
   DebtDoctorIssue,
   DebtDoctorReport,
+  DebtAbsent,
   DebtList,
   DebtMutationResult,
   DebtQueryResult,
@@ -32,9 +33,8 @@ import {
 
 export { debtMark } from "./marks.js";
 
-type DebtListOutcome = DebtList | BlockedDebtList | DebtQueryResult;
-/** One addressed show selection: native details, or a refusal naming a missing addressed read. */
-export type DebtShowResult = DebtDetail | DebtDetail[] | Extract<DebtMutationResult, { kind: "refused" }>;
+type DebtListOutcome = DebtList | BlockedDebtList | DebtQueryResult | DebtAbsent;
+export type DebtShowResult = DebtDetail | null | readonly (DebtDetail | null)[];
 /** Presentation-only list scope the leaf acquired; never part of a product value. */
 export type DebtListScope = "world" | "current" | Readonly<{ namespace: string }>;
 /** The union of native Debt SDK answers one leaf renders directly; the CLI adds no result envelope. */
@@ -43,12 +43,10 @@ type DebtNativeResult =
   | DebtUpdateResult
   | DebtBatchResult
   | DebtShowResult
-  | DebtList
-  | BlockedDebtList
-  | DebtQueryResult
   | DebtDecompositionTree
   | DebtDoctorReport
-  | DebtContextResult;
+  | DebtContextResult
+  | DebtListOutcome;
 type DebtFailure =
   | Extract<DebtMutationResult, { kind: "refused" | "retry" }>
   | Extract<DebtContextResult, { kind: "refused" | "retry" }>;
@@ -182,6 +180,7 @@ export function renderDebtList(
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
   const columns = context.columns;
+  if (result.kind === "absent") return "debt world absent";
   if (result.kind !== "accepted") return renderFailure(action, result, columns);
   const view = action === "ls" ? "debts" : action;
   const footer = result.value.hasMore ? ["…"] : [];
@@ -225,11 +224,16 @@ function renderShowDetail(result: DebtDetail, columns: number): string {
   return lines.join("\n");
 }
 
-export function renderDebtShow(result: DebtShowResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
-  const columns = context.columns;
-  if (Array.isArray(result)) return result.map((detail) => renderShowDetail(detail, columns)).join("\n\n");
-  if ("kind" in result) return renderFailure("show", result, columns);
-  return renderShowDetail(result, columns);
+export function renderDebtShow(
+  result: DebtShowResult,
+  ids: readonly string[],
+  context: TextRenderContext = DEFAULT_CONTEXT,
+): string {
+  const details = Array.isArray(result) ? result : [result];
+  const missing = details.findIndex((detail) => detail === null);
+  if (missing >= 0)
+    return refusalLines("show", ["reason  debt missing", `debt  ${ids[missing]!}`], context.columns).join("\n");
+  return (details as readonly DebtDetail[]).map((detail) => renderShowDetail(detail, context.columns)).join("\n\n");
 }
 
 function treeLines(node: DebtTreeNode, columns: number, depth = 0): readonly string[] {
@@ -247,7 +251,8 @@ function doctorIssue(issue: DebtDoctorIssue): string {
   return `! cycle ${issue.relation} ${issue.debts.join(" ")}`;
 }
 
-export function renderDoctor(report: DebtDoctorReport): string {
+export function renderDoctor(report: DebtDoctorReport | DebtAbsent): string {
+  if ("kind" in report) return "debt world absent";
   if (report.issues.length === 0) return "✓ doctor  healthy";
   const noun = report.issues.length === 1 ? "issue" : "issues";
   return [`! doctor  ${report.issues.length} ${noun}`, ...report.issues.map(doctorIssue)].join("\n");
@@ -327,6 +332,8 @@ export function renderDebtLifecycle(
 }
 
 export function debtOutcome(result: DebtNativeResult): CliOutcome {
+  if (result === null) return "refused";
+  if (Array.isArray(result)) return result.some((item) => item === null) ? "refused" : "accepted";
   if ("issues" in result) return result.issues.length === 0 ? "accepted" : "failed";
   if ("items" in result) {
     const kinds = result.items.map((item) => item.outcome.kind);
@@ -334,7 +341,7 @@ export function debtOutcome(result: DebtNativeResult): CliOutcome {
   }
   if ("kind" in result) {
     if (result.kind === "retry") return "retryable";
-    if (result.kind === "refused") return "refused";
+    if (result.kind === "refused" || result.kind === "absent") return "refused";
   }
   return "accepted";
 }

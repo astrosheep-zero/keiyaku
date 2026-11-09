@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import test from "node:test";
 import {
@@ -22,6 +22,81 @@ import { repositoryWithCommit } from "./support/git.js";
 import { accepted, commitCandidate, document } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { temporaryDirectory } from "./support/process.js";
+
+test("Debt facet preserves native lifecycle, context, and absent World", async (t) => {
+  const cwd = temporaryDirectory(t, "debt-facet-");
+  const facet = Keiyaku.at({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
+  assert.equal(await facet.debtShow({ id: "debt/missing" }), null);
+  assert.deepEqual(await facet.debtShow({ ids: ["debt/missing", "debt/missing"] }), [null, null]);
+  await assert.rejects(facet.debtShow({ ids: [] }), TypeError);
+  await assert.rejects(facet.debtDone({ ids: ["debt/missing", "debt/missing"] }), TypeError);
+  assert.deepEqual(await facet.ls({ of: "debt" }), { kind: "absent" });
+  assert.deepEqual(await facet.debtDoctor(), { kind: "absent" });
+  assert.equal((await facet.debtTree({ id: "debt/missing" })).kind, "refused");
+  assert.equal((await facet.debtUpdate({ id: "debt/missing", note: "note" })).kind, "refused");
+  assert.equal((await facet.debtDone({ ids: ["debt/missing"] })).items[0]?.outcome.kind, "refused");
+  assert.equal((await facet.debtDrop({ ids: ["debt/missing"] })).items[0]?.outcome.kind, "refused");
+  const reason = new Error("cancelled"),
+    controller = new AbortController();
+  controller.abort(reason);
+  for (const operation of [
+    () => facet.debtUpdate({ id: "debt/missing", note: "note", signal: controller.signal }),
+    () => facet.debtDone({ ids: ["debt/missing"], signal: controller.signal }),
+    () => facet.debtDrop({ ids: ["debt/missing"], signal: controller.signal }),
+  ])
+    await assert.rejects(operation, (error: unknown) => error === reason);
+  assert.equal(existsSync(join(cwd, ".keiyaku")), false);
+  assert.deepEqual(await facet.debtContext(), { kind: "accepted", value: { namespace: [], source: "default-root" } });
+  await assert.rejects(facet.debtContext({ namespace: ["INVALID"] }), TypeError);
+  await assert.rejects(facet.debtAdd({ title: " " }), TypeError);
+  assert.deepEqual(await facet.ls({ of: "debt" }), { kind: "absent" });
+  assert.equal(existsSync(join(cwd, ".keiyaku")), false);
+  assert.equal((await facet.debtContext({ namespace: ["nested"] })).kind, "accepted");
+  const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" })).value;
+  const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] })).value;
+  const third = accepted(await facet.debtAdd({ title: "Third" })).value;
+  const root = accepted(await facet.debtAdd({ title: "Root", namespace: [] })).value;
+  assert.equal(first.createdBy, "fixture");
+  assert.equal(second.createdBy, "ambient-fixture");
+  assert.deepEqual(first.namespace, ["nested"]);
+  assert.deepEqual(
+    await facet.debtShow({ id: first.id }),
+    await Debts.of(await World.at(cwd))
+      .debt({ id: first.id })
+      .read(),
+  );
+  assert.equal((await facet.debtUpdate({ id: first.id, note: "changed" })).kind, "accepted");
+  const batch = await facet.debtDone({ ids: [first.id, second.id] });
+  assert.deepEqual(
+    batch.items.map((item) => [item.id, item.outcome.kind]),
+    [
+      [first.id, "accepted"],
+      [second.id, "accepted"],
+    ],
+  );
+  assert.equal((await facet.debtDrop({ ids: [third.id] })).items[0]?.outcome.kind, "accepted");
+  const active = await facet.ls({ of: "debt" });
+  const closed = await facet.ls({ of: "debt", selection: "closed" });
+  assert.equal(active.kind, "accepted");
+  assert.equal(closed.kind, "accepted");
+  if (active.kind === "accepted" && closed.kind === "accepted") {
+    assert.equal(active.value.rows.length, 0);
+    assert.equal(closed.value.rows.length, 3);
+  }
+  const all = await facet.ls({ of: "debt", scope: "world", selection: "all", limit: 2 });
+  assert.equal(all.kind, "accepted");
+  if (all.kind === "accepted") {
+    assert.equal(all.value.rows.length, 2);
+    assert.equal(all.value.hasMore, true);
+  }
+  const rootOnly = await facet.ls({ of: "debt", namespace: [] });
+  assert.equal(rootOnly.kind, "accepted");
+  if (rootOnly.kind === "accepted")
+    assert.deepEqual(
+      rootOnly.value.rows.map((row) => row.id),
+      [root.id],
+    );
+});
 
 function withoutObservationTimes(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value, (key, item: unknown) => (key === "observedAt" ? undefined : item)));
@@ -201,11 +276,11 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
       await facet.history({ selector: born.allocated.id }),
       await Akumas.of(world).history({ akuma: born.allocated.id }),
     );
-    for (const invalid of [
-      { ...environment, KEIYAKU_ACTOR_ID: "invalid" },
-      {},
-    ]) {
-      await assert.rejects(Keiyaku.at({ cwd: world, environment: invalid, home }).report({ text: "bad" }), KeiyakuUsageError);
+    for (const invalid of [{ ...environment, KEIYAKU_ACTOR_ID: "invalid" }, {}]) {
+      await assert.rejects(
+        Keiyaku.at({ cwd: world, environment: invalid, home }).report({ text: "bad" }),
+        KeiyakuUsageError,
+      );
     }
   } finally {
     born.holder.release();

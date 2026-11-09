@@ -42,7 +42,28 @@ import type { AkumaList } from "../akuma/akuma.js";
 import { listArchetypeDefinitions, type ArchetypeCatalog } from "../akuma/archetype.js";
 import type { AkumaCaller } from "../akuma/caller.js";
 import type { AkumaId } from "../akuma/identity.js";
-import { Debts, type DebtList } from "../debt/index.js";
+import type { AddDebtInput, AddDebtDocumentInput, DebtDetail } from "../debt/index.js";
+import * as debt from "./keiyaku-debt.js";
+import type {
+  DebtLsInvocation,
+  DebtReadyInvocation,
+  DebtQueryInvocation,
+  DebtUpdateInvocation,
+  DebtCloseInvocation,
+  DebtShowInvocation,
+  DebtContextInvocation,
+} from "./keiyaku-debt.js";
+export type {
+  DebtSelection,
+  DebtReadScope,
+  DebtLsInvocation,
+  DebtReadyInvocation,
+  DebtQueryInvocation,
+  DebtUpdateInvocation,
+  DebtCloseInvocation,
+  DebtShowInvocation,
+  DebtContextInvocation,
+} from "./keiyaku-debt.js";
 export { KeiyakuUsageError } from "./keiyaku-coordinates.js";
 
 export type KeiyakuAt = Readonly<{
@@ -59,7 +80,6 @@ type LsCaller =
 type KeiInput = Readonly<{ of: "kei"; limit?: number }>;
 type AkumaInput = Readonly<{ of: "aku"; limit?: number; akumaName?: string; caller?: AkumaCaller }>;
 type NameInput = Readonly<{ of: "akuma-name"; limit?: number }>;
-type DebtInput = Readonly<{ of: "debt"; limit?: number; namespace?: readonly string[] }>;
 type Selected<T> = T & Readonly<{ contract?: string }>;
 type BindInvocation =
   | (Omit<Extract<BindInput, { markdown: string }>, "after"> & Readonly<{ after?: readonly string[] }>)
@@ -435,13 +455,53 @@ export class Keiyaku {
     return caller;
   }
 
+  debtAdd(input: AddDebtInput) {
+    return debt.debtAdd(this.#input, input, false);
+  }
+  debtAddDocument(input: AddDebtDocumentInput) {
+    return debt.debtAdd(this.#input, input, true);
+  }
+  debtUpdate(input: DebtUpdateInvocation) {
+    return debt.debtUpdate(this.#input, input);
+  }
+  debtShow(input: Readonly<{ id: string; ids?: never }>): Promise<DebtDetail | null>;
+  debtShow(input: Readonly<{ ids: readonly string[]; id?: never }>): Promise<readonly (DebtDetail | null)[]>;
+  debtShow(input: DebtShowInvocation): Promise<DebtDetail | null | readonly (DebtDetail | null)[]> {
+    return debt.debtShow(this.#input, input);
+  }
+  debtDone(input: DebtCloseInvocation) {
+    return debt.debtClose(this.#input, input, "done");
+  }
+  debtDrop(input: DebtCloseInvocation) {
+    return debt.debtClose(this.#input, input, "drop");
+  }
+  debtReady(input: DebtReadyInvocation = {}) {
+    return debt.debtReady(this.#input, input, false);
+  }
+  debtBlocked(input: DebtReadyInvocation = {}) {
+    return debt.debtReady(this.#input, input, true);
+  }
+  debtQuery(input: DebtQueryInvocation = {}) {
+    return debt.debtQuery(this.#input, input);
+  }
+  debtTree(input: Readonly<{ id: string }>) {
+    return debt.debtTree(this.#input, input);
+  }
+  debtDoctor() {
+    return debt.debtDoctor(this.#input);
+  }
+  debtContext(input: DebtContextInvocation = {}) {
+    return debt.debtContext(this.#input, input);
+  }
+
   ls(input: KeiInput): Promise<ContractList>;
   ls(input: AkumaInput): Promise<AkumaList>;
   ls(input: NameInput): Promise<ArchetypeCatalog>;
-  ls(input: DebtInput): Promise<DebtList>;
+  ls(input: DebtLsInvocation): ReturnType<typeof debt.debtList>;
   async ls(
-    input: KeiInput | AkumaInput | NameInput | DebtInput,
-  ): Promise<ContractList | AkumaList | ArchetypeCatalog | DebtList> {
+    input: KeiInput | AkumaInput | NameInput | DebtLsInvocation,
+  ): Promise<ContractList | AkumaList | ArchetypeCatalog | Awaited<ReturnType<typeof debt.debtList>>> {
+    if (input.of === "debt") return debt.debtList(this.#input, input);
     const at = await this.#coordinates(input.of === "kei" ? "required" : "none");
     const limit = input.limit === undefined ? {} : { limit: input.limit };
     if (input.of === "kei") {
@@ -456,9 +516,6 @@ export class Keiyaku {
       });
     }
     if (at.world === null) throw new KeiyakuUsageError("no Keiyaku world contains the invocation cwd");
-    if (input.of === "debt") {
-      return Debts.of(at.world).list({ selection: "all", namespace: input.namespace ?? [], ...limit });
-    }
     return Akumas.of(at.world).list({
       ...limit,
       ...(input.akumaName === undefined ? {} : { akumaName: input.akumaName }),

@@ -41,7 +41,18 @@ export {
   contractHistoryEventSchema,
 } from "./library/contract-types.js";
 export { Keiyaku, KeiyakuUsageError } from "./library/keiyaku.js";
-export type { KeiyakuAt } from "./library/keiyaku.js";
+export type {
+  KeiyakuAt,
+  DebtSelection,
+  DebtReadScope,
+  DebtLsInvocation,
+  DebtReadyInvocation,
+  DebtQueryInvocation,
+  DebtUpdateInvocation,
+  DebtCloseInvocation,
+  DebtShowInvocation,
+  DebtContextInvocation,
+} from "./library/keiyaku.js";
 export { Keis } from "./library/contract-composition.js";
 export { KeiyakuError } from "./library/outcome.js";
 export { NoGitWorldError, Repo } from "./library/repo.js";

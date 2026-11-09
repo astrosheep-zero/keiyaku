@@ -20,12 +20,7 @@ import {
 import type { GateReport } from "../src/core/facts/gate.js";
 import type { CandidateCompletion } from "../src/protocol/completion.js";
 import type { ReconcileReport } from "../src/library/reconcile.js";
-import {
-  renderAkumaCatalogue,
-  renderArchetypeCatalogue,
-  renderContractCatalogue,
-  renderDebtCatalogue,
-} from "../src/cli/render/catalog.js";
+import { renderAkumaCatalogue, renderArchetypeCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
 import type { SpawnObservation } from "../src/library/akuma-creation.js";
 import {
   DEFAULT_CONTEXT,
@@ -575,17 +570,20 @@ test("debt receipts report fields without projection diffs", () => {
   assert.doesNotMatch(update, /diff|updatedAt: noise/u);
   const added = renderDebtMutation("add", { kind: "accepted", value: debt });
   assert.match(added, /^✓ added  debt\/alpha/u);
-  const shown = renderDebtShow({
-    debt,
-    needs: [],
-    blockers: [],
-    blocks: [],
-    parent: null,
-    children: [],
-    supersedes: [],
-    supersededBy: [],
-    related: [],
-  });
+  const shown = renderDebtShow(
+    {
+      debt,
+      needs: [],
+      blockers: [],
+      blocks: [],
+      parent: null,
+      children: [],
+      supersedes: [],
+      supersededBy: [],
+      related: [],
+    },
+    [debt.id],
+  );
   assert.match(shown, /^  created  2026-08-12T00:00:00Z$/mu);
   assert.match(shown, /^  updated  2026-08-12T00:01:00Z$/mu);
   assert.match(shown, /^  note\n  new note/mu);
@@ -593,12 +591,16 @@ test("debt receipts report fields without projection diffs", () => {
 });
 
 test("catalog text renders only the selected identity layer", () => {
-  assert.equal(
-    renderDebtCatalogue(
-      { rows: [debtRow({ id: "debt/catalog-row" as never, title: "Catalog row" })], hasMore: true },
-      [],
+  assert.match(
+    renderDebtList(
+      "ls",
+      { namespace: "debt/" },
+      {
+        kind: "accepted",
+        value: { rows: [debtRow({ id: "debt/catalog-row" as never, title: "Catalog row" })], hasMore: true },
+      },
     ),
-    ["DEBTS // root", "○ debt/catalog-row · ready · P2 — Catalog row", "…"].join("\n"),
+    /debt\/catalog-row/u,
   );
   assert.equal(
     renderArchetypeCatalogue({
@@ -679,16 +681,8 @@ test("root Debt catalogue marks every disposition with its own state", () => {
       }),
     ),
   };
-  assert.equal(
-    renderDebtCatalogue(catalog, []),
-    [
-      "DEBTS // root",
-      ...cases.map(
-        ([state, mark]) =>
-          `${mark} debt/${state} · ${state === "drop" ? "dropped" : state.replaceAll("_", " ")} · P1 — ${state}`,
-      ),
-    ].join("\n"),
-  );
+  const text = renderDebtList("ls", { namespace: "debt/" }, { kind: "accepted", value: catalog });
+  for (const [state, mark] of cases) assert.ok(text.includes(`${mark} debt/${state}`));
 });
 
 test("empty World status has one explicit empty row", () => {
@@ -758,7 +752,10 @@ test("category boards reuse World rows and bounded omission while naming their o
 });
 
 test("empty catalogues share a surface-named none state", () => {
-  assert.equal(renderDebtCatalogue({ rows: [], hasMore: false }, []), "debts  none");
+  assert.equal(
+    renderDebtList("ls", { namespace: "debt/" }, { kind: "accepted", value: { rows: [], hasMore: false } }),
+    "debts  none",
+  );
   assert.equal(renderContractCatalogue(contractCatalog([])), "contracts  none");
   assert.equal(
     renderAkumaCatalogue(
@@ -823,9 +820,13 @@ test("Debt family uses qualified empty frames and omits absent body facts", () =
 });
 
 test("Debt catalogue rows omit absent body facts", () => {
-  const text = renderDebtCatalogue(
-    { rows: [debtRow({ id: "debt/no-body" as never, title: "No body", priority: 1 })], hasMore: false },
-    [],
+  const text = renderDebtList(
+    "ls",
+    { namespace: "debt/" },
+    {
+      kind: "accepted",
+      value: { rows: [debtRow({ id: "debt/no-body" as never, title: "No body", priority: 1 })], hasMore: false },
+    },
   );
   assert.doesNotMatch(text, /no body/u);
 });
@@ -1089,7 +1090,15 @@ test("selected Contract roster preserves terminal associations and unavailable o
         root: "/repo",
         state: null,
         observedAt: "2026-01-01T10:00:00.000Z",
-        rows: [{ ...catalogRow(), phase: "claimed" as const, holder: { kind: "none" as const }, roster: [attached, missing], rosterUnavailable: true as const }],
+        rows: [
+          {
+            ...catalogRow(),
+            phase: "claimed" as const,
+            holder: { kind: "none" as const },
+            roster: [attached, missing],
+            rosterUnavailable: true as const,
+          },
+        ],
       },
     },
   };

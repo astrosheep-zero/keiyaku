@@ -10,7 +10,7 @@ type AkumaCallerSelector =
   | Readonly<{ kind: "external"; caller: AkumaCaller }>
   | Readonly<{ kind: "akuma"; akumaId: AkumaId }>;
 type CatalogQuery =
-  | Readonly<{ kind: "debts"; namespace?: readonly string[]; limit?: number }>
+  | Readonly<{ kind: "debts"; namespace?: readonly string[]; limit?: number; selection?: "closed" | "all" }>
   | Readonly<{ kind: "contracts"; limit?: number }>
   | Readonly<{ kind: "archetypes"; limit?: number }>
   | Readonly<{ kind: "akuma"; akumaName?: string; caller?: AkumaCallerSelector; limit?: number }>;
@@ -418,12 +418,23 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
   const limit = listLimit(parts);
   const caller = parseCallerSelector(parts);
   const callerRefusal = "--mine and --caller select Akuma instances only";
+  const all = parts.flags.all === true,
+    closed = parts.flags.closed === true;
+  if (all && closed) refuse("ls", "--all and --closed are mutually exclusive");
   if (path !== undefined) {
     const debtQuery = debtCatalogQuery(path, limit);
     if (debtQuery !== null) {
       if (caller !== undefined) refuse("ls", callerRefusal);
-      return { command: "ls", query: debtQuery, output: parts.output };
+      return {
+        command: "ls",
+        query: {
+          ...debtQuery,
+          ...(all ? { selection: "all" as const } : closed ? { selection: "closed" as const } : {}),
+        },
+        output: parts.output,
+      };
     }
+    if (all || closed) refuse("ls", "--all and --closed select Debts only");
     if (path === "kei" || path === "kei/") {
       if (caller !== undefined) refuse("ls", callerRefusal);
       return {
@@ -435,6 +446,7 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
     if (caller !== undefined && (path === "aku" || path === "aku/"))
       refuse("ls", "--mine and --caller need an Akuma instance catalogue, not Akuma names");
   }
+  if (all || closed) refuse("ls", "--all and --closed select Debts only");
   if (path === undefined && caller === undefined) refuse("ls", "ls requires a selector");
   try {
     const query = path === undefined ? ({ kind: "akuma" } as const) : parseAkumaCatalogPath(path);

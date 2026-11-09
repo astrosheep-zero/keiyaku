@@ -234,11 +234,12 @@ export const CONTRACT_COMMAND_SPECS = {
   ls: {
     positional: "optional",
     stdin: "none",
-    flags: { limit: "value", json: "boolean", mine: "boolean", caller: "value" },
+    flags: { limit: "value", json: "boolean", mine: "boolean", caller: "value", closed: "boolean", all: "boolean" },
     usage:
-      'ls debt[/] [--limit <count>]\nls debt/<namespace>/ [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] (--mine | --caller (<integration>:<id> | aku/<name>/<suffix>)) [--limit <count>]',
+      'ls debt[/] [--closed | --all] [--limit <count>]\nls debt/<namespace>/ [--closed | --all] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] (--mine | --caller (<integration>:<id> | aku/<name>/<suffix>)) [--limit <count>]',
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
+      "Debt lists open work by default; --closed selects terminal work and --all selects both.",
       "ls kei lists active Contracts; accepted and abandoned ones leave the list, and their record stays in history and Git.",
       "ls aku/ lists the spawnable Akuma-name catalog; ls aku/<name> lists recent retained Akuma instances under one name.",
       'ls "aku/<name>/*" is the same roster in glob form; ls "aku/*/*" lists recent retained Akuma instances across names.',

@@ -1,6 +1,10 @@
 import {
   Debts,
+  Keiyaku,
   World,
+  type DebtDetail,
+  type DebtBatchResult,
+  type DebtLsInvocation,
   type Debt,
   type DebtDecompositionTree,
   type DebtId,
@@ -8,6 +12,25 @@ import {
   type DebtTreeNode,
 } from "@astrosheep/keiyaku";
 const world = null as unknown as import("@astrosheep/keiyaku").WorldRoot;
+const facet = Keiyaku.at({ cwd: "/tmp", environment: {} });
+const listing: DebtLsInvocation = { of: "debt", namespace: [], selection: "all" };
+void facet.ls(listing);
+const one: Promise<DebtDetail | null> = facet.debtShow({ id: "debt/example" });
+const many: Promise<readonly (DebtDetail | null)[]> = facet.debtShow({ ids: ["debt/example"] });
+const batch: Promise<DebtBatchResult> = facet.debtDone({ ids: ["debt/example"] });
+void facet.debtAdd({ title: "Example" });
+void facet.debtAddDocument({ markdown: "# Example" });
+void facet.debtUpdate({ id: "debt/example", note: "updated" });
+void facet.debtDrop({ ids: ["debt/example"] });
+void facet.debtReady();
+void facet.debtBlocked();
+void facet.debtQuery();
+void facet.debtDoctor();
+void facet.debtTree({ id: "debt/example" });
+void facet.debtContext({ namespace: [] });
+void one;
+void many;
+void batch;
 const debts = Debts.of(world);
 const debt: Debt = debts.debt({ id: "debt/example" });
 const id: DebtId = debt.id;

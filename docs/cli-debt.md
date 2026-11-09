@@ -17,6 +17,8 @@ leaf help and the parser, not this chapter.
 | context | Observe or deliberately change the caller's default Debt namespace. | Context is not authority and cannot retarget a complete Debt identity. |
 | doctor | Diagnose Debt authority and relationship health. | It reports; it never repairs. |
 
+The Debt CLI adapts through the invocation facet, preserving native answers.
+Both listing spellings share the same operation and default to open work.
 The Debt CLI acquires only the input a selected verb permits and refuses an
 ambiguous, surplus, or ill-formed request before invoking Debt. It does not
 infer a namespace, Debt identity, lifecycle state, association, or actor from

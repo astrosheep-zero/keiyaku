@@ -59,7 +59,7 @@ test("namespace and leaf help expose executable usage and flags", () => {
   assert.match(statusHelp, /status \(kei\|kei\/\|kei\/\*\) \[--limit <count>\]/u);
   const lsHelp = renderContractHelp("ls");
   assert.match(lsHelp, /--mine \| --caller \(<integration>:<id> \| aku\/<name>\/<suffix>\)/u);
-  assert.match(lsHelp, /ls debt\/<namespace>\/ \[--limit <count>\]/u);
+  assert.match(lsHelp, /ls debt\/<namespace>\/ \[--closed \| --all\] \[--limit <count>\]/u);
 });
 
 test("leaf help and usage refusals share accepted invocation options", () => {

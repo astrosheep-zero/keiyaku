@@ -2,7 +2,6 @@ import type { AkumaList } from "../../akuma/akuma.js";
 import { akumaCallerKey, type AkumaCaller } from "../../akuma/caller.js";
 import type { ArchetypeCatalog } from "../../index.js";
 import type { ContractList } from "../../library/contract-types.js";
-import type { DebtPage, DebtRow } from "../../debt/index.js";
 import {
   abbreviateGitIds,
   displayGitId,
@@ -13,7 +12,6 @@ import {
 } from "./contract-observation.js";
 import { ageText, emptyCatalogue, renderBoundedPayload, safeText } from "./terminal.js";
 import { akumaMark, contractMark } from "./marks.js";
-import { dispositionText, debtFrameHead, debtMark } from "./debt.js";
 
 function relativeAge(source: string | null, observedAt: string): string | null {
   if (source === null) return null;
@@ -119,19 +117,5 @@ export function renderArchetypeCatalogue(list: ArchetypeCatalog): string {
           }),
           ...(list.hasMore ? ["…"] : []),
         ]),
-  ].join("\n");
-}
-
-export function renderDebtCatalogue(list: DebtPage<DebtRow>, namespace: readonly string[]): string {
-  const scope = namespace.length === 0 ? "root" : `namespace ${namespace.join("/")}`;
-  const head = debtFrameHead("debts", scope);
-  if (list.rows.length === 0) return emptyCatalogue("debts");
-  return [
-    head,
-    ...list.rows.map(
-      (row) =>
-        `${debtMark(row.disposition)} ${safeText(row.id)} · ${dispositionText(row.disposition)} · P${row.priority} — ${safeText(row.title)}`,
-    ),
-    ...(list.hasMore ? ["…"] : []),
   ].join("\n");
 }

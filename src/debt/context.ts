@@ -84,8 +84,12 @@ function descendsFrom(candidate: string, boundary: string): boolean {
   return step === "" || (!isAbsolute(step) && step !== ".." && !step.startsWith(`..${sep}`));
 }
 
-export async function installNamespaceContext(root: string, segments: readonly string[]): Promise<void> {
+export function validateNamespaceContext(segments: unknown): asserts segments is readonly string[] {
   if (!validNamespaceSegments(segments)) throw new TypeError("namespace must contain normalized segments");
+}
+
+export async function installNamespaceContext(root: string, segments: readonly string[]): Promise<void> {
+  validateNamespaceContext(segments);
   const parent = directory(root);
   await mkdir(parent, { recursive: true });
   await installIgnore(root);

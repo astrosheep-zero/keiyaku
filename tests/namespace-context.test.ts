@@ -1,13 +1,5 @@
 import assert from "node:assert/strict";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  realpathSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -184,13 +176,26 @@ test("an explicit context replacement installs the supplied namespace over malfo
 test("a malformed context still refuses the operations that need the default", async () => {
   const { root, current } = malformedContext();
   const refusal = { kind: "invalid-namespace-context", path: current };
-  for (const argv of [["context"], ["ls"], ["add", "Needs the default"]]) {
+  for (const argv of [["context"], ["ls"], ["query"], ["add", "Needs the default"]]) {
     const result = await cliJson<unknown>(["-C", root, "debt", ...argv], { environment: {} });
     assert.equal(result.exit, 1, `${argv.join(" ")}: ${result.stderr}`);
     assert.deepEqual(result.value, { kind: "refused", refusal });
   }
   assert.equal(readFileSync(current, "utf8"), "Bad Namespace\n");
   assert.equal(existsSync(join(root, ".keiyaku", "debts")), false);
+  const added = await cliJson<unknown>(["-C", root, "debt", "add", "Explicit root", "--namespace", "/"], {
+    environment: {},
+  });
+  assert.equal(added.exit, 0, added.stderr);
+  const explicit = await cliJson<unknown>(["-C", root, "debt", "ls", "debt/"], { environment: {} });
+  const rootList = await cliJson<unknown>(["-C", root, "ls", "debt/"], { environment: {} });
+  assert.equal(explicit.exit, 0, explicit.stderr);
+  assert.deepEqual(explicit.value, rootList.value);
+  const explicitText = await captureOutput(() => main(["-C", root, "debt", "ls", "debt/"]));
+  const rootText = await captureOutput(() => main(["-C", root, "ls", "debt/"]));
+  assert.equal(explicitText.stdout, rootText.stdout);
+  const world = await cliJson<unknown>(["-C", root, "debt", "query", "--world"], { environment: {} });
+  assert.equal(world.exit, 0, world.stderr);
 });
 
 test("an unusable context replacement refuses before the installed bytes are touched", async () => {

@@ -59,7 +59,7 @@ import {
 import { boundedListLimit } from "../bounded-list.js";
 import { readBoard } from "./store.js";
 import {
-  actor,
+  addDocumentInput,
   addInput,
   closed,
   namespace,
@@ -194,19 +194,7 @@ class DebtsHandle {
     return addDebt(this.world, addInput(input));
   }
   addDocument(input: AddDebtDocumentInput): Promise<DebtMutationResult> {
-    const v = record(input, "addDocument input");
-    closed(v, ["markdown", "namespace", "actor", "signal"], "addDocument input");
-    const markdown = text(v.markdown, "markdown");
-    if (markdown === undefined) throw new TypeError("markdown is required");
-    const ns = namespace(v.namespace),
-      createdBy = actor(v.actor),
-      abort = signal(v.signal);
-    return addDebtDocument(this.world, {
-      markdown,
-      ...(ns === undefined ? {} : { namespace: ns }),
-      ...(createdBy === undefined ? {} : { actor: createdBy }),
-      ...(abort === undefined ? {} : { signal: abort }),
-    });
+    return addDebtDocument(this.world, addDocumentInput(input));
   }
   async list(
     input: Readonly<{

@@ -15,12 +15,7 @@ import { SettingsError } from "../../settings.js";
 import { resolveInvocationCwd } from "../coordinates.js";
 import { BindDraftError, preserveBindDraft } from "../draft.js";
 import { snapshotText } from "../render/akuma-activity.js";
-import {
-  renderAkumaCatalogue,
-  renderArchetypeCatalogue,
-  renderContractCatalogue,
-  renderDebtCatalogue,
-} from "../render/catalog.js";
+import { renderAkumaCatalogue, renderArchetypeCatalogue, renderContractCatalogue } from "../render/catalog.js";
 import { renderAccepted, renderContractHistory, renderRetry, type ContractOutcome } from "../render/contract.js";
 import { renderKanshiCategoryText, renderKanshiText } from "../render/kanshi.js";
 import { nukeOutcome, renderNukeText } from "../render/nuke.js";
@@ -31,6 +26,7 @@ import { renderSettingsText, settingsJsonValue } from "../render/settings.js";
 import type { TextRenderContext } from "../render/terminal.js";
 import type { CliRuntime } from "../runtime.js";
 import { type CliOutcome, displayContext, emit, writeJson, writeStdout } from "../streams.js";
+import { debtOutcome, renderDebtList } from "../render/debt.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import type { ParsedContractCommand } from "./contract-grammar.js";
 
@@ -359,10 +355,21 @@ async function runLs(
     const listed = await runtime.facet.ls({
       of: "debt",
       namespace: query.namespace ?? [],
+      ...(query.selection === undefined ? {} : { selection: query.selection }),
       ...(query.limit === undefined ? {} : { limit: query.limit }),
     });
-    if (listed.kind !== "accepted") throw new Error("Debt list did not return an accepted observation");
-    return emit(command.output, listed, () => renderDebtCatalogue(listed.value, query.namespace ?? []), "accepted");
+    return emit(
+      command.output,
+      listed,
+      () =>
+        renderDebtList(
+          "ls",
+          { namespace: query.namespace?.length ? `debt/${query.namespace.join("/")}/` : "debt/" },
+          listed,
+          displayContext(),
+        ),
+      debtOutcome(listed),
+    );
   }
   const caller = await runtime.facet.resolveLsCaller(query.caller);
   const listed = await runtime.facet.ls({

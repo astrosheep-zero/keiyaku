@@ -280,7 +280,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
       return await runContractHistoryCommand(command, runtime);
     if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, invocation.workdir, runtime);
     if (command.command === "debt")
-      return await runDebtCommand(command, await invocationCoordinates(invocation, input, environment), runtime);
+      return await runDebtCommand(command, runtime);
     return await runContractCommand(command, runtime);
   } catch (error) {
     if (error instanceof KeiyakuUsageError) {
