@@ -1,4 +1,12 @@
 /** @architectureCompositionRoot */
+import { z } from "zod";
+import { privateStateSeatCloseLagSchema } from "../git/private-state-seat.js";
+import { aliasBindingSchema } from "../alias/index.js";
+import { dispatchSchema, dispatchFailureSchema } from "../dispatch/index.js";
+import { tellResultSchema } from "../akuma/call-initial-tell.js";
+import { akumaAskObservationSchema } from "../akuma/selection-observation.js";
+import { akumaIdSchema } from "../akuma/identity.js";
+import { forkFailureSchemas } from "../akuma/akuma-owner.js";
 import { randomUUID } from "node:crypto";
 import { appendFile } from "node:fs/promises";
 import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
@@ -31,6 +39,79 @@ type IntegrationFailure = Readonly<{
   kind: "authority-corruption" | "infrastructure";
   diagnostic: string;
 }>;
+
+const integrationFailureSchema = z
+  .strictObject({ kind: z.enum(["authority-corruption", "infrastructure"]), diagnostic: z.string() })
+  .readonly();
+export const dispatchStageSchema = z.union([
+  z.strictObject({ kind: z.literal("none") }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("dispatched"),
+      dispatch: dispatchSchema,
+      seatClose: z.array(privateStateSeatCloseLagSchema.readonly()).readonly().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({ kind: z.literal("failed"), failure: z.union([dispatchFailureSchema, integrationFailureSchema]) })
+    .readonly(),
+]);
+const aliasStageSchema = z.union([
+  z.strictObject({ kind: z.literal("none") }).readonly(),
+  z
+    .strictObject({ kind: z.literal("aliased"), alias: aliasBindingSchema, previous: akumaIdSchema.nullable() })
+    .readonly(),
+  z.strictObject({ kind: z.literal("skipped"), reason: z.literal("dispatch-failed") }).readonly(),
+  z.strictObject({ kind: z.literal("failed"), failure: integrationFailureSchema }).readonly(),
+]);
+export const spawnWaitHeadSchema = z
+  .strictObject({ dispatch: dispatchStageSchema, alias: aliasStageSchema })
+  .readonly();
+export const spawnObservationSchema = z.union([
+  z.strictObject({ kind: z.literal("born") }).readonly(),
+  z.strictObject({ kind: z.literal("detached"), tell: tellResultSchema }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("observed"),
+      tell: tellResultSchema,
+      observation: akumaAskObservationSchema,
+      completedAt: z.string().nullable().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("failed"),
+      tellId: z.string(),
+      tell: tellResultSchema.exactOptional(),
+      failure: integrationFailureSchema,
+    })
+    .readonly(),
+]);
+export const spawnResultSchema = z
+  .strictObject({
+    kind: z.literal("spawned"),
+    akuma: akumaIdSchema,
+    execution: z.strictObject({ cwd: z.string(), source: z.enum(["input", "process", "world"]) }).readonly(),
+    dispatch: dispatchStageSchema,
+    alias: aliasStageSchema,
+    structured: z.literal(true).exactOptional(),
+    observation: spawnObservationSchema,
+  })
+  .readonly();
+export const forkResultSchema = z.union([
+  z
+    .strictObject({
+      kind: z.literal("forked"),
+      parent: akumaIdSchema,
+      child: akumaIdSchema,
+      dispatch: dispatchStageSchema,
+    })
+    .readonly(),
+  forkFailureSchemas.unsupported.unwrap().extend({ parent: akumaIdSchema }).readonly(),
+  forkFailureSchemas.unknownHistory.unwrap().extend({ parent: akumaIdSchema }).readonly(),
+  forkFailureSchemas.failed.unwrap().extend({ parent: akumaIdSchema }).readonly(),
+  forkFailureSchemas.upstream.unwrap().extend({ parent: akumaIdSchema }).readonly(),
+]);
 
 export type DispatchStage =
   | Readonly<{ kind: "none" }>

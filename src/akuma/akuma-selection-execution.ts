@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { akumaStatusSchema } from "./akuma.js";
+import { activityRowSchema } from "./projection.js";
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import type { LiveStatusObservation, OutcomeObserver } from "./akuma-observe.js";
@@ -8,6 +11,13 @@ import type { BodyLauncher } from "./body-launch.js";
 import type { Schema } from "./schema.js";
 import type { AkumaAskObservation, AkumaAskResult, AkumaKillResult, AkumaTellResult } from "./selection-observation.js";
 
+export const liveStatusObservationSchema = z
+  .strictObject({
+    status: akumaStatusSchema,
+    ordinarySelected: z.number(),
+    rows: z.array(activityRowSchema).readonly(),
+  })
+  .readonly();
 export type AskObserver = Readonly<{
   admitted?: (tell: TellResult, id: AkumaStatus["id"]) => void | Promise<void>;
   observe?: (observation: LiveStatusObservation) => void | Promise<void>;

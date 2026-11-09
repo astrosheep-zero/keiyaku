@@ -10,7 +10,14 @@ import { debtIdSchema, parseDebtId, sameNamespace, type DebtId } from "./identit
 import { z } from "zod";
 import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
 
-export type DebtRef = Readonly<{ id: DebtId; title: string | null; state: DebtState | "missing" }>;
+export const debtRefSchema = z
+  .strictObject({
+    id: debtIdSchema,
+    title: z.string().nullable(),
+    state: z.union([debtStateSchema, z.literal("missing")]),
+  })
+  .readonly();
+export type DebtRef = z.output<typeof debtRefSchema>;
 const debtRowTimestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
 export const debtRowSchema = z
   .object({
@@ -28,8 +35,17 @@ export const debtRowSchema = z
   })
   .strict();
 export const debtRowsSchema = z.array(debtRowSchema).readonly();
+export const debtResultRowSchema = z
+  .strictObject({
+    ...debtRowSchema.shape,
+    children: z
+      .strictObject({ live: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
+      .readonly()
+      .exactOptional(),
+  })
+  .readonly();
 export type DebtDisposition = z.infer<typeof debtRowSchema>["disposition"];
-export type DebtRow = z.infer<typeof debtRowSchema>;
+export type DebtRow = z.output<typeof debtResultRowSchema>;
 export type BlockedDebtRow = DebtRow & Readonly<{ blockers: readonly DebtRef[] }>;
 export type DebtDetailFacts = Readonly<{
   debt: DebtDocument;

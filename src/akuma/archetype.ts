@@ -1,8 +1,9 @@
+import { z } from "zod";
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { parseDocument } from "yaml";
-import { boundedListLimit, type BoundedList } from "../bounded-list.js";
+import { boundedListLimit, boundedListSchema, type BoundedList } from "../bounded-list.js";
 import type { Settings } from "../settings.js";
 import { validateAkumaName } from "../identity/normalize.js";
 import {
@@ -30,6 +31,11 @@ type DecodedArchetype = Readonly<{
   hidden?: boolean;
   options: ProviderOptions;
 }>;
+
+export const archetypeCatalogRowSchema = z
+  .strictObject({ name: z.string(), model: z.string().exactOptional(), description: z.string().exactOptional() })
+  .readonly();
+export const archetypeCatalogSchema = boundedListSchema(archetypeCatalogRowSchema);
 
 export type ArchetypeCatalogRow = Readonly<{
   name: string;

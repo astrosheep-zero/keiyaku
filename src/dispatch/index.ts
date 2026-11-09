@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
+import { z } from "zod";
+import { contractIdSchema } from "../git/identity.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
-import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
+import { akumaIdSchema, parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import {
   appendPrivateStateSeatClose,
   confirmPrivateStatePublication,
@@ -35,6 +37,14 @@ import { NO_DISPATCH_ASSOCIATION, type DispatchAssociation } from "../akuma/disp
 const DISPATCH_ROOT = "dispatch";
 const DISPATCH_PREFIX = `${DISPATCH_ROOT}/`;
 const DISPATCH_SUFFIX = ".json";
+
+export const dispatchSchema = z
+  .strictObject({ akumaId: akumaIdSchema, contractId: contractIdSchema, dispatchedAt: z.string() })
+  .readonly();
+export const dispatchFailureSchema = z.union([
+  z.strictObject({ kind: z.literal("conflict"), current: dispatchSchema }).readonly(),
+  z.strictObject({ kind: z.literal("publication-failed"), diagnostic: z.string() }).readonly(),
+]);
 
 export type Dispatch = Readonly<{
   akumaId: AkumaId;

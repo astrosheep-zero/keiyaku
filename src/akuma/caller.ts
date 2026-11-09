@@ -2,14 +2,18 @@ import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import type { WorldRoot } from "../world.js";
 import { akumaIdSchema } from "./identity.js";
-import { akumaOriginSchema, type Soul } from "./heart/facts.js";
+import { akumaOriginSchema, akumaOriginWireSchema, type Soul } from "./heart/facts.js";
 
 // Stored attribution is a coordinate, not a live World capability or lookup.
-const callerWorldSchema = z.custom<WorldRoot>(
-  (value) => typeof value === "string" && isAbsolute(value) && resolve(value) === value,
-  "caller world must be an absolute normalized path",
-);
-export const akumaCallerSchema = z.discriminatedUnion("kind", [
+const callerWorldSchema = z
+  .string()
+  .pipe(
+    z.custom<WorldRoot>(
+      (value) => typeof value === "string" && isAbsolute(value) && resolve(value) === value,
+      "caller world must be an absolute normalized path",
+    ),
+  );
+export const retainedCallerSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("akuma"), world: callerWorldSchema, akumaId: akumaIdSchema }).strict(),
   z
     .object({
@@ -25,21 +29,40 @@ export const akumaCallerSchema = z.discriminatedUnion("kind", [
     })
     .strict(),
 ]);
-export type AkumaCaller = z.infer<typeof akumaCallerSchema>;
+export const akumaCallerSchema = z.union([
+  retainedCallerSchema.options[0].readonly(),
+  retainedCallerSchema.options[1].readonly(),
+]);
+export type AkumaCaller = z.output<typeof retainedCallerSchema>;
 export const akumaBirthSchema = z
   .object({
+    origin: akumaOriginWireSchema,
+    caller: z.union([
+      akumaCallerSchema,
+      z
+        .object({ kind: z.literal("unknown") })
+        .strict()
+        .readonly(),
+    ]),
+  })
+  .strict()
+  .readonly();
+
+export const nativeAkumaBirthSchema = z
+  .object({
+    ...akumaBirthSchema.unwrap().shape,
     origin: akumaOriginSchema,
-    caller: z.union([akumaCallerSchema, z.object({ kind: z.literal("unknown") }).strict()]),
+    caller: z.union([retainedCallerSchema, z.object({ kind: z.literal("unknown") }).strict()]),
   })
   .strict();
 
-export function projectAkumaBirth(soul: Soul): z.infer<typeof akumaBirthSchema> {
+export function projectAkumaBirth(soul: Soul): z.output<typeof nativeAkumaBirthSchema> {
   return { origin: soul.origin, caller: soul.caller ?? { kind: "unknown" } };
 }
 
 export function decodeAkumaCaller(value: unknown): AkumaCaller | undefined {
   if (value === undefined) return undefined;
-  const parsed = akumaCallerSchema.safeParse(value);
+  const parsed = retainedCallerSchema.safeParse(value);
   if (!parsed.success) throw new TypeError(`Invalid Akuma caller: ${parsed.error.message}`);
   return parsed.data;
 }

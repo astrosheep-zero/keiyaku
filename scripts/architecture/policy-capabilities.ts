@@ -15,6 +15,9 @@ export const capabilityPolicy = {
       owners: [
         { source: "index.ts" },
         { source: "bounded-list.ts", symbols: ["z"] },
+        { source: "identity/selector.ts", symbols: ["z"] },
+        { source: "alias/index.ts", symbols: ["z"] },
+        { source: "dispatch/index.ts", symbols: ["z"] },
         { source: "akuma/**" },
         { source: "library/**" },
         { source: "protocol/execution-observation.ts" },

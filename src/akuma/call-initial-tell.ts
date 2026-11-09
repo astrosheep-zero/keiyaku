@@ -1,3 +1,5 @@
+import { z } from "zod";
+import { tellRowSchema } from "./projection.js";
 import type { WorldRoot } from "../world.js";
 import { bornStatus, defaultWaitComplete, readWaitComplete, waitForObservation } from "./akuma-observe.js";
 import { recordTell, type TellFact } from "./heart/index.js";
@@ -18,6 +20,52 @@ export type InitialTellAdmissionInput = Readonly<{
   contractId?: string;
   signal?: AbortSignal;
 }>;
+
+export const tellWakeSchema = z.union([
+  z.strictObject({ kind: z.literal("told") }).readonly(),
+  z.strictObject({ kind: z.literal("held") }).readonly(),
+  z.strictObject({ kind: z.literal("pursuing"), bodySequence: z.number() }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("failed"),
+      diagnostic: z.string(),
+      child: z
+        .strictObject({
+          code: z.number().nullable(),
+          signal: z.string().nullable(),
+          log: z.strictObject({ path: z.string(), from: z.number(), to: z.number() }).readonly(),
+        })
+        .readonly()
+        .exactOptional(),
+    })
+    .readonly(),
+]);
+export const tellResultSchema = z
+  .strictObject({
+    admission: z.strictObject({ fact: z.literal("recorded"), tellId: z.string() }).readonly(),
+    row: tellRowSchema,
+    wake: tellWakeSchema,
+    interruption: z
+      .union([
+        z
+          .strictObject({
+            kind: z.literal("completed"),
+            bodySequence: z.number(),
+            putDown: z.enum(["was-idle", "self-aborted"]),
+          })
+          .readonly(),
+        z.strictObject({ kind: z.literal("pending"), bodySequence: z.number() }).readonly(),
+        z
+          .strictObject({
+            kind: z.literal("unavailable"),
+            bodySequence: z.number(),
+            evidence: z.enum(["hung", "untidy"]),
+          })
+          .readonly(),
+      ])
+      .exactOptional(),
+  })
+  .readonly();
 
 export type TellWake =
   | Readonly<{ kind: "told" }>

@@ -1,17 +1,19 @@
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
+import { z } from "zod";
+import { akumaIdSchema, parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import { replaceFileDurably } from "../coordination/durable-file.js";
 import {
   acquireSqliteTransactionLock,
   tryAcquireSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import { parseAkumaAlias, parseReadableAkumaAlias, type AkumaAlias } from "../identity/selector.js";
+import { akumaAliasSchema, parseAkumaAlias, parseReadableAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 
 const VERSION = 1;
 
+export const aliasBindingSchema = z.strictObject({ alias: akumaAliasSchema, akumaId: akumaIdSchema }).readonly();
 export type AliasBinding = Readonly<{ alias: AkumaAlias; akumaId: AkumaId }>;
 export type AliasMove = Readonly<{ alias: AliasBinding; previous: AkumaId | null }>;
 

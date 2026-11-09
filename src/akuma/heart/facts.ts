@@ -19,6 +19,10 @@ export const akumaOriginSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("fork"), parent: akumaIdSchema, at: originText }),
 ]);
 export type AkumaOrigin = z.infer<typeof akumaOriginSchema>;
+export const akumaOriginWireSchema = z.union([
+  akumaOriginSchema.options[0].strict().readonly(),
+  akumaOriginSchema.options[1].strict().readonly(),
+]);
 
 export type Soul = Readonly<{
   id: AkumaId;
@@ -103,6 +107,7 @@ export const reportFactSchema = z
   .strict();
 
 export type ReportFact = z.infer<typeof reportFactSchema>;
+export const reportFactWireSchema = reportFactSchema.readonly();
 
 export type ReportAdmission =
   | Readonly<{ kind: "recorded"; report: ReportFact; initiator?: string }>
@@ -188,7 +193,15 @@ export type TellReceiptInput = Readonly<{
     | Readonly<{ evidence: "fence"; turnSequence: number; fence: string }>
   );
 
-export type KillEvidence = "killed" | "already-killed" | "already-stopped" | "hung" | "untidy" | "unavailable";
+export const killEvidenceSchema = z.enum([
+  "killed",
+  "already-killed",
+  "already-stopped",
+  "hung",
+  "untidy",
+  "unavailable",
+]);
+export type KillEvidence = z.output<typeof killEvidenceSchema>;
 export type KillFact = Readonly<{ sequence: number; bodySequence: number; evidence: "killed"; at: string }>;
 export type StopFact = Readonly<{ bodySequence: number; requestedAt: string }>;
 export type PauseFact = Readonly<{

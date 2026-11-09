@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { MAX_AKUMA_NAME_BYTES, normalizeIdentityStem, validateAkumaName } from "./normalize.js";
 
 declare const AKUMA_ALIAS: unique symbol;
@@ -5,6 +6,15 @@ declare const AKUMA_GLOB: unique symbol;
 
 export type AkumaAlias = string & { readonly [AKUMA_ALIAS]: true };
 export type AkumaGlob = string & { readonly [AKUMA_GLOB]: true };
+
+export const akumaAliasSchema = z.string().transform((value, context) => {
+  try {
+    return parseReadableAkumaAlias(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid Akuma alias" });
+    return z.NEVER;
+  }
+});
 
 const AKUMA_GLOB_SUFFIX = /^[0-9a-f*]+$/u;
 

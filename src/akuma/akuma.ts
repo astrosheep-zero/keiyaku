@@ -1,12 +1,19 @@
-import { akumaBirthSchema, akumaCallerKey, decodeAkumaCaller, type AkumaCaller } from "./caller.js";
+import {
+  akumaBirthSchema,
+  nativeAkumaBirthSchema,
+  akumaCallerSchema,
+  retainedCallerSchema,
+  akumaCallerKey,
+  decodeAkumaCaller,
+  type AkumaCaller,
+} from "./caller.js";
 import { readdir, stat } from "node:fs/promises";
 import { z } from "zod";
-import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
-import type { AkumaAlias } from "../identity/selector.js";
+import { boundedListLimit, boundedListSchema, projectBoundedList } from "../bounded-list.js";
+import { akumaAliasSchema } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import { rosterListRow } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
-import type { AkumaLife } from "./heart/index.js";
 import { readSoul } from "./heart/index.js";
 import {
   akumaIdFromDirectoryName,
@@ -26,33 +33,46 @@ import {
   rebuildAkumaLineage,
   type AkumaLineage,
 } from "./lineage-cache.js";
-import { activitySnapshotSchema } from "./projection.js";
+import { activitySnapshotSchema, nativeActivitySnapshotSchema } from "./projection.js";
 import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
 
-export type AkumaListRow = Readonly<{
-  id: AkumaId;
-  akumaName: string;
-  description?: string;
-  life: AkumaLife;
-  lifeAt: string | null;
-  lastActivityAt: string | null;
-  pending: readonly string[];
-  aliases: readonly AkumaAlias[];
-  caller?: AkumaCaller;
-}>;
+export const akumaListRowSchema = z
+  .strictObject({
+    id: akumaIdSchema,
+    akumaName: z.string(),
+    description: z.string().exactOptional(),
+    life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
+    lifeAt: z.string().nullable(),
+    lastActivityAt: z.string().nullable(),
+    pending: z.array(z.string()).readonly(),
+    aliases: z.array(akumaAliasSchema).readonly(),
+    caller: akumaCallerSchema.exactOptional(),
+  })
+  .readonly();
+export const unbornAkumaListRowSchema = z
+  .strictObject({
+    id: akumaIdSchema,
+    life: z.enum(["unborn", "stillborn"]),
+    aliases: z.array(akumaAliasSchema).readonly(),
+    seal: z.strictObject({ evidence: z.string(), at: z.string() }).readonly().exactOptional(),
+  })
+  .readonly();
+export const akumaListSchema = boundedListSchema(z.union([akumaListRowSchema, unbornAkumaListRowSchema]), {
+  observedAt: z.string(),
+  searched: z.array(z.string()).readonly(),
+});
 
-export type UnbornAkumaListRow = Readonly<{
-  id: AkumaId;
-  life: "unborn" | "stillborn";
-  aliases: readonly AkumaAlias[];
-  seal?: Readonly<{ evidence: string; at: string }>;
-}>;
-
-export type AkumaList = BoundedList<AkumaListRow | UnbornAkumaListRow> &
-  Readonly<{
-    observedAt: string;
-    searched: readonly string[];
-  }>;
+const nativeAkumaListRowSchema = akumaListRowSchema
+  .unwrap()
+  .extend({ caller: retainedCallerSchema.exactOptional() })
+  .readonly();
+export type AkumaListRow = z.output<typeof nativeAkumaListRowSchema>;
+export type UnbornAkumaListRow = z.output<typeof unbornAkumaListRowSchema>;
+const nativeAkumaListSchema = boundedListSchema(z.union([nativeAkumaListRowSchema, unbornAkumaListRowSchema]), {
+  observedAt: z.string(),
+  searched: z.array(z.string()).readonly(),
+});
+export type AkumaList = z.output<typeof nativeAkumaListSchema>;
 
 export type AkumaCompleteList = Omit<AkumaList, "hasMore">;
 
@@ -67,14 +87,23 @@ export const akumaStatusSchema = z
     id: akumaIdSchema,
     birth: akumaBirthSchema,
     life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
-    cwd: z.string().optional(),
-    provider: z.string().optional(),
-    model: z.string().optional(),
+    cwd: z.string().exactOptional(),
+    provider: z.string().exactOptional(),
+    model: z.string().exactOptional(),
     timeline: activitySnapshotSchema,
-    strandedReason: z.literal("resume-unsupported").optional(),
+    strandedReason: z.literal("resume-unsupported").exactOptional(),
   })
-  .strict();
-export type AkumaStatus = z.infer<typeof akumaStatusSchema>;
+  .strict()
+  .readonly();
+const nativeAkumaStatusSchema = akumaStatusSchema.unwrap().extend({
+  timeline: nativeActivitySnapshotSchema,
+  birth: nativeAkumaBirthSchema,
+  cwd: z.string().optional(),
+  provider: z.string().optional(),
+  model: z.string().optional(),
+  strandedReason: z.literal("resume-unsupported").optional(),
+});
+export type AkumaStatus = z.output<typeof nativeAkumaStatusSchema>;
 
 type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
 

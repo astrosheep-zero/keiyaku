@@ -1,11 +1,17 @@
 import type { WorldRoot } from "../world.js";
 import { z } from "zod";
-import { createDebtRelations, projectCreatedByRows, debtRowsSchema, type DebtBoard } from "./board.js";
+import { createDebtRelations, projectCreatedByRows, debtResultRowSchema, type DebtBoard } from "./board.js";
 import { readBoard } from "./store.js";
 
 export const createdDebtObservationSchema = z.union([
-  z.object({ kind: z.literal("present"), rows: debtRowsSchema }).strict(),
-  z.object({ kind: z.literal("failed"), diagnostic: z.string() }).strict(),
+  z
+    .object({ kind: z.literal("present"), rows: z.array(debtResultRowSchema).readonly() })
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("failed"), diagnostic: z.string() })
+    .strict()
+    .readonly(),
 ]);
 
 export type CreatedDebtObservation = z.infer<typeof createdDebtObservationSchema>;

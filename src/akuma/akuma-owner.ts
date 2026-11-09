@@ -51,8 +51,23 @@ import type { ActivityHistory, ExactHistory } from "./projection.js";
 import { projectTurns, selectExactHistory, selectHistory } from "./projection.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
+import { z } from "zod";
+import { resumeCoordinateWireSchema } from "./coordinate.js";
 
 export type InterruptReceipt = TellResult | Extract<InterruptTellAdmission, { kind: "unavailable" }>;
+
+export const forkFailureSchemas = {
+  unsupported: z.strictObject({ kind: z.literal("provider-cannot-fork"), provider: z.string() }).readonly(),
+  unknownHistory: z.strictObject({ kind: z.literal("unknown-history"), at: z.string() }).readonly(),
+  failed: z.strictObject({ kind: z.literal("fork-failed"), diagnostic: z.string() }).readonly(),
+  upstream: z
+    .strictObject({
+      kind: z.literal("upstream-forked"),
+      childSession: resumeCoordinateWireSchema,
+      diagnostic: z.string(),
+    })
+    .readonly(),
+};
 
 export type ForkReceipt =
   | Readonly<{ kind: "forked"; child: AkumaId }>

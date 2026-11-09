@@ -12,6 +12,11 @@ export const resumeCoordinateSchema = z.union([
   z.object({ sessionId: coordinateText }).strict(),
 ]);
 export type ResumeCoordinate = z.infer<typeof resumeCoordinateSchema>;
+export const resumeCoordinateWireSchema = z.union([
+  z.strictObject({ sessionFile: coordinateText }).readonly(),
+  z.strictObject({ sessionFile: coordinateText, sessionId: coordinateText }).readonly(),
+  z.strictObject({ sessionId: coordinateText }).readonly(),
+]);
 
 export function decodeResumeCoordinate(value: unknown): ResumeCoordinate | null {
   const result = resumeCoordinateSchema.safeParse(value);

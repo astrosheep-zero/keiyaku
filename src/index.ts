@@ -3,6 +3,32 @@
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
+export { akumaListSchema, akumaListRowSchema, unbornAkumaListRowSchema, akumaStatusSchema } from "./akuma/akuma.js";
+export { activityHistorySchema, activityRowSchema, activitySnapshotSchema, tellRowSchema } from "./akuma/projection.js";
+export { akumaCallerSchema } from "./akuma/caller.js";
+export { killEvidenceSchema } from "./akuma/heart/facts.js";
+export { tellWakeSchema, tellResultSchema } from "./akuma/call-initial-tell.js";
+export { akumaIdleResultSchema, akumaReportResultSchema } from "./akuma/akuma-instance.js";
+export { liveStatusObservationSchema } from "./akuma/akuma-selection-execution.js";
+export { archetypeCatalogSchema, archetypeCatalogRowSchema } from "./akuma/archetype.js";
+export {
+  akumaObservationSchema,
+  akumaObservationStageSchema,
+  akumaWaitResultSchema,
+  akumaKillResultSchema,
+  akumaTellResultSchema,
+  akumaAskResultSchema,
+  akumaAskObservationSchema,
+} from "./akuma/selection-observation.js";
+export { akumaHistoryResultSchema } from "./library/selection.js";
+export {
+  spawnResultSchema,
+  spawnObservationSchema,
+  spawnWaitHeadSchema,
+  dispatchStageSchema,
+  forkResultSchema,
+} from "./library/akuma-creation.js";
+export { dispatchSchema, dispatchFailureSchema } from "./dispatch/index.js";
 export { AkumaHost } from "./body-host.js";
 export type { AkumaHostScope } from "./body-host.js";
 export { AuthorityCorruptionError } from "./core/facts/errors.js";

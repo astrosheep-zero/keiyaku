@@ -1,4 +1,8 @@
 /** @architectureCompositionRoot */
+import { z } from "zod";
+import { akumaIdSchema } from "../akuma/identity.js";
+import { activityHistorySchema, outcomeRowSchema, reportRowSchema } from "../akuma/projection.js";
+import { dispatchAssociationSchema } from "../akuma/dispatch-association.js";
 import { observeStatusOutcome } from "../akuma/akuma-observe.js";
 import { withoutReportedChanges } from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
@@ -70,6 +74,16 @@ export type AkumaHistoryInput = AkumaAddressInput &
     limit?: number;
     last?: boolean;
   }>;
+const historyCommon = { id: akumaIdSchema, contract: dispatchAssociationSchema };
+export const akumaHistoryResultSchema = z.union([
+  z.strictObject({ kind: z.literal("history"), ...historyCommon, history: activityHistorySchema }).readonly(),
+  z.strictObject({ kind: z.literal("exact"), ...historyCommon, outcome: outcomeRowSchema }).readonly(),
+  z.strictObject({ kind: z.literal("exact-report"), ...historyCommon, report: reportRowSchema }).readonly(),
+  z.strictObject({ kind: z.literal("unknown-history"), ...historyCommon, historyId: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("last"), ...historyCommon, answer: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("no-answer"), ...historyCommon }).readonly(),
+]);
+
 export type AkumaHistoryResult =
   | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory; contract: DispatchAssociation }>
   | Readonly<{ kind: "exact"; id: AkumaStatus["id"]; outcome: OutcomeRow; contract: DispatchAssociation }>

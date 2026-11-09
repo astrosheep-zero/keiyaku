@@ -1,3 +1,6 @@
+import { z } from "zod";
+import { akumaStatusSchema } from "./akuma.js";
+import { reportFactWireSchema } from "./heart/facts.js";
 import type { AkumaCaller } from "./caller.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
@@ -23,6 +26,14 @@ import { parseAkumaId, type AkumaId } from "./identity.js";
 import type { ActivityHistory } from "./projection.js";
 import { schemaFromStandard, schemaJsonText, type Schema, type StandardSchemaV1 } from "./schema.js";
 import { type AkumaAskResult, type AkumaTellResult } from "./selection-observation.js";
+
+export const akumaIdleResultSchema = z
+  .strictObject({ reason: z.enum(["completed", "deadline"]), status: akumaStatusSchema })
+  .readonly();
+export const akumaReportResultSchema = z.union([
+  z.strictObject({ kind: z.literal("recorded"), report: reportFactWireSchema }).readonly(),
+  z.strictObject({ kind: z.literal("refused"), reason: z.enum(["not-born", "not-current-execution"]) }).readonly(),
+]);
 
 export type AkumaIdleOptions = Readonly<{ timeoutMs?: number; signal?: AbortSignal }>;
 export type AkumaIdleResult = Readonly<{ reason: "completed" | "deadline"; status: AkumaStatus }>;
