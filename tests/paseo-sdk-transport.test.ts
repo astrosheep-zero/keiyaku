@@ -117,8 +117,7 @@ test("the in-process transport serves the real public package's own stream, stat
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
     event: { type: "tool", phase: "started", id: "edit", name: "edit",
       call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch }] } } });
-  const recorded = await recordReport(value.allocated.paths, { bodySequence: body.sequence,
-    turnSequence: started.sequence, text: "working", at });
+  const recorded = await recordReport(value.allocated.paths, { text: "working", at });
   assert.equal(recorded.kind, "recorded");
   const transport = createSdkTransport({ entry: PUBLIC_ENTRY });
   t.after(() => transport.close());

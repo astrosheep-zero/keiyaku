@@ -127,7 +127,7 @@ test("v30 preserves canceled history and a pruned timeline's high-water when adm
     assert.equal(raw(value.paths.heart).version, 31);
     assert.deepEqual(raw(value.paths.heart).contents, before);
     assert.deepEqual((await readTurn(value.paths, 6))?.end?.outcome, { kind: "canceled" });
-    const report = await recordReport(value.paths, { bodySequence: 2, turnSequence: 11, text: "first report", at });
+    const report = await recordReport(value.paths, { text: "first report", at });
     assert.equal(report.kind, "recorded");
     if (report.kind !== "recorded") assert.fail("report refused");
     assert.equal(report.report.sequence, 9001);

@@ -69,15 +69,6 @@ create a fresh Akuma. This integration does not promise session continuity acros
 unsupported native reload. It adds
 no registry, daemon, plugin, inferred retention proof, or automatic repair.
 
-The native execution's reporting context is frozen for its admitted Body and
-Turn. A retained native environment that
-cannot refresh that exact context keeps its execution and resume capabilities,
-but report admission refuses its obsolete coordinates. In particular, a later
-Paseo drive currently retains the creation drive's report context; progress
-reporting from that old environment is unavailable until a native per-turn
-context mechanism is supported. A latest Heart read or model-visible instruction
-is never a substitute for exact execution custody.
-
 A born Akuma may name another Akuma as its direct caller. The optional Paseo
 observer attaches that child beneath the parent's exact existing mirror only
 when persisted provider identity proves the caller's canonical World and AkuId

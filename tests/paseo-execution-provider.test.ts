@@ -809,7 +809,7 @@ test("Paseo observation invalidation fails honestly and control failure survives
 });
 
 test(
-  "retained Paseo execution resumes through wake and pending-Tell handoff while old report context stays frozen",
+  "retained Paseo execution reports through wake and pending-Tell handoff",
   { timeout: 15_000 },
   async (context) => {
     const root = await World.at(temporaryDirectory(context, "keiyaku-paseo-retained-"));
@@ -876,11 +876,7 @@ test(
       assert.equal(retained.KEIYAKU_ACTOR_ID, allocated.id);
       assert.equal(retained.KEIYAKU_ACTOR_WORLD, root);
       assert.equal(retained.KEIYAKU_EXTERNAL_CALLER, undefined);
-      const reportExecution = {
-        bodySequence: Number(retained.KEIYAKU_BODY_SEQUENCE),
-        turnSequence: Number(retained.KEIYAKU_TURN_SEQUENCE),
-        at: new Date().toISOString(),
-      };
+      const reportExecution = { at: new Date().toISOString() };
       assert.equal((await recordReport(allocated.paths, { ...reportExecution, text: "First Body progress" })).kind, "recorded");
       assistant(first, "first answer");
       complete(first);
@@ -896,9 +892,7 @@ test(
       await receipt;
       assert.equal(second.createInput, undefined);
       assert.equal(second.sendInput!.agentId, first.agent.id);
-      assert.deepEqual(await recordReport(allocated.paths, { ...reportExecution, text: "Old creation context" }), {
-        kind: "refused", reason: "not-current-execution",
-      });
+      assert.equal((await recordReport(allocated.paths, { ...reportExecution, text: "Retained creation context" })).kind, "recorded");
 
       // A live session without native tell takes the existing Heart-owned handoff,
       // not a provider emulation. Native cancel is explicit control for that work.
@@ -917,7 +911,7 @@ test(
       assert.equal((await readTell(allocated.paths, "pending-handoff"))?.state, "told");
       assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
       assert.equal(clients.filter((client) => client.createInput !== undefined).length, 1);
-      assert.equal((await activitySlice(allocated.paths)).rows.filter((row) => row.kind === "report").length, 1);
+      assert.equal((await activitySlice(allocated.paths)).rows.filter((row) => row.kind === "report").length, 2);
       assert.ok(clients.every((client) => client.closed));
     } finally {
       cleaning = true;

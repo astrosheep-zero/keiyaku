@@ -89,13 +89,6 @@ type KillInvocation = Omit<AkumaKillInput, "repo">;
 type HistoryInvocation = Omit<AkumaHistoryInput, "akuma" | "repo"> & Readonly<{ selector: string }>;
 type WaitInvocation = Omit<ContractWaitInput, "contracts"> & Readonly<{ selectors: readonly string[] }>;
 
-function executionSequence(environment: NodeJS.ProcessEnv, key: string): number {
-  const value = environment[key];
-  if (value === undefined || !/^[1-9][0-9]*$/u.test(value) || !Number.isSafeInteger(Number(value)))
-    throw new KeiyakuUsageError(`report requires an explicit positive execution coordinate: ${key}`);
-  return Number(value);
-}
-
 /** Invalid arc material retains the resolved subject for the process-edge refusal. */
 export class KeiyakuArcDocumentError extends Error {
   constructor(
@@ -408,8 +401,6 @@ export class Keiyaku {
       throw new KeiyakuUsageError("report requires nonblank text");
     if (environment.KEIYAKU_ACTOR_ID === undefined || environment.KEIYAKU_ACTOR_WORLD === undefined)
       throw new KeiyakuUsageError("report requires explicit KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD");
-    const bodySequence = executionSequence(environment, "KEIYAKU_BODY_SEQUENCE");
-    const turnSequence = executionSequence(environment, "KEIYAKU_TURN_SEQUENCE");
     let caller;
     try {
       caller = await akumaCallerFromEnvironment(environment);
@@ -418,11 +409,10 @@ export class Keiyaku {
       throw error;
     }
     if (caller?.kind !== "akuma") throw new KeiyakuUsageError("report requires explicit Akuma identity");
-    return Akuma.select(caller.world, caller.akumaId).report(input.text, {
-      bodySequence,
-      turnSequence,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
+    return Akuma.select(caller.world, caller.akumaId).report(
+      input.text,
+      input.signal === undefined ? {} : { signal: input.signal },
+    );
   }
 
   async resolveLsCaller(selection: LsCaller | undefined): Promise<AkumaCaller | undefined> {

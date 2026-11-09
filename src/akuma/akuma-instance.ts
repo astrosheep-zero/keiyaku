@@ -32,7 +32,7 @@ export const akumaIdleResultSchema = z
   .readonly();
 export const akumaReportResultSchema = z.union([
   z.strictObject({ kind: z.literal("recorded"), report: reportFactWireSchema }).readonly(),
-  z.strictObject({ kind: z.literal("refused"), reason: z.enum(["not-born", "not-current-execution"]) }).readonly(),
+  z.strictObject({ kind: z.literal("refused"), reason: z.enum(["not-born", "not-executing"]) }).readonly(),
 ]);
 
 export type AkumaIdleOptions = Readonly<{ timeoutMs?: number; signal?: AbortSignal }>;
@@ -57,10 +57,10 @@ export type AkumaBirthInput = Readonly<{
   host?: AkumaHostOptions;
 }>;
 
-export type AkumaReportOptions = AkumaSignalOptions & Readonly<{ bodySequence: number; turnSequence: number }>;
+export type AkumaReportOptions = AkumaSignalOptions;
 export type AkumaReportResult =
   | Readonly<{ kind: "recorded"; report: ReportFact }>
-  | Readonly<{ kind: "refused"; reason: "not-born" | "not-current-execution" }>;
+  | Readonly<{ kind: "refused"; reason: "not-born" | "not-executing" }>;
 
 export type AkumaTellOptions = AkumaSignalOptions & Readonly<{ interrupt?: boolean; initiator?: string }>;
 export type AkumaAskOptions<T> = AkumaTellOptions &
@@ -157,26 +157,14 @@ class AkumaHandle {
     );
   }
 
-  async report(text: string, options: AkumaReportOptions): Promise<AkumaReportResult> {
+  async report(text: string, options: AkumaReportOptions = {}): Promise<AkumaReportResult> {
     if (typeof text !== "string" || text.trim() === "") throw new TypeError("Akuma report text must be nonblank");
     if (typeof options !== "object" || options === null || Array.isArray(options))
-      throw new TypeError("Akuma report requires exact execution options");
-    const unknown = Object.keys(options).find((key) => !["bodySequence", "turnSequence", "signal"].includes(key));
+      throw new TypeError("Akuma report options must be an object");
+    const unknown = Object.keys(options).find((key) => !["signal"].includes(key));
     if (unknown !== undefined) throw new TypeError(`Akuma report options has unknown field: ${unknown}`);
-    for (const key of ["bodySequence", "turnSequence"] as const) {
-      if (!Number.isSafeInteger(options[key]) || options[key] <= 0)
-        throw new TypeError(`Akuma report ${key} must be a positive safe integer`);
-    }
     const signal = signalOption(options.signal);
-    const result = await this.owner().report(
-      {
-        bodySequence: options.bodySequence,
-        turnSequence: options.turnSequence,
-        text,
-        at: new Date().toISOString(),
-      },
-      signal,
-    );
+    const result = await this.owner().report({ text, at: new Date().toISOString() }, signal);
     if (result.kind !== "recorded") return result;
     const { report, initiator } = result;
     await emitPluginSignal(

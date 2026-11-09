@@ -1893,7 +1893,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
     freshInput("work", {
       launchTells: [{ id: "tell-1", text: "also" }],
       cwd: tmpdir(),
-      execution: { akumaId: "aku/pi/1234abcd", world: "/work", bodySequence: 7, turnSequence: 19 },
+      execution: { akumaId: "aku/pi/1234abcd", world: "/work" },
     }),
   );
   const drive = await attempt.result;
@@ -1938,8 +1938,8 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
       SAFE: "keep",
       KEIYAKU_ACTOR_ID: "aku/pi/1234abcd",
       KEIYAKU_ACTOR_WORLD: "/work",
-      KEIYAKU_BODY_SEQUENCE: "7",
-      KEIYAKU_TURN_SEQUENCE: "19",
+      KEIYAKU_BODY_SEQUENCE: "1",
+      KEIYAKU_TURN_SEQUENCE: "2",
       PI_SESSION_ID: "native-session",
       PI_SESSION_FILE: "native-session-file",
     },

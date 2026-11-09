@@ -224,10 +224,7 @@ export class AkumaOwner {
     return selectExactHistory((await this.projectHistoryTurns()).rows, selector);
   }
 
-  async report(
-    input: Readonly<{ bodySequence: number; turnSequence: number; text: string; at: string }>,
-    signal?: AbortSignal,
-  ): Promise<ReportAdmission> {
+  async report(input: Readonly<{ text: string; at: string }>, signal?: AbortSignal): Promise<ReportAdmission> {
     return await recordReport(this.paths, input, signal);
   }
 

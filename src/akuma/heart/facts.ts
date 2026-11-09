@@ -111,7 +111,7 @@ export const reportFactWireSchema = reportFactSchema.readonly();
 
 export type ReportAdmission =
   | Readonly<{ kind: "recorded"; report: ReportFact; initiator?: string }>
-  | Readonly<{ kind: "refused"; reason: "not-born" | "not-current-execution" }>;
+  | Readonly<{ kind: "refused"; reason: "not-born" | "not-executing" }>;
 
 export type CallFact = Readonly<{
   kind: "call";

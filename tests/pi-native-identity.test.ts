@@ -75,7 +75,7 @@ async function withNativeBashTool<T>(
     cwd: root,
     options: {},
     signal: new AbortController().signal,
-    execution: { akumaId: "aku/pi/1234abcd", world: root, bodySequence: 7, turnSequence: 19 },
+    execution: { akumaId: "aku/pi/1234abcd", world: root },
     session: { kind: "fresh" },
   });
   try {
@@ -108,12 +108,12 @@ test("Pi Bash preserves native session identity and the current execution coordi
     await withNativeBashTool(root, async (tool) => {
       const result = await tool.execute(
         "native-identity",
-        { command: `printf '%s' "$PI_SESSION_ID|$PI_SESSION_FILE|$KEIYAKU_ACTOR_ID|$KEIYAKU_ACTOR_WORLD|$KEIYAKU_BODY_SEQUENCE|$KEIYAKU_TURN_SEQUENCE"` },
+        { command: `printf '%s' "$PI_SESSION_ID|$PI_SESSION_FILE|$KEIYAKU_ACTOR_ID|$KEIYAKU_ACTOR_WORLD"` },
         new AbortController().signal,
         undefined,
         nativeSessionContext("native-child-session", "/sessions/native.jsonl"),
       );
-      assert.deepEqual(result.content, [{ type: "text", text: `native-child-session|/sessions/native.jsonl|aku/pi/1234abcd|${root}|7|19` }]);
+      assert.deepEqual(result.content, [{ type: "text", text: `native-child-session|/sessions/native.jsonl|aku/pi/1234abcd|${root}` }]);
       assert.equal(process.env[PI_SESSION_VARIABLE], "ancestor-session");
     });
   } finally {

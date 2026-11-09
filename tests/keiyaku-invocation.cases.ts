@@ -182,15 +182,13 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
   await pluginRuntime({ world, settings: await settings({ root: world, home }) });
   const born = await bornBody(world, "feed0021", "2026-10-30T00:00:00.000Z");
   try {
-    const turn = await beginTurn(born.allocated.paths, {
+    await beginTurn(born.allocated.paths, {
       bodySequence: born.body.sequence,
       startedAt: "2026-10-30T00:00:00.000Z",
     });
     const environment = {
       KEIYAKU_ACTOR_ID: born.allocated.id,
       KEIYAKU_ACTOR_WORLD: world,
-      KEIYAKU_BODY_SEQUENCE: String(born.body.sequence),
-      KEIYAKU_TURN_SEQUENCE: String(turn.sequence),
     };
     const facet = Keiyaku.at({ cwd: world, environment, home });
     const native = Akuma.select(world, born.allocated.id);
@@ -203,13 +201,7 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
       await facet.history({ selector: born.allocated.id }),
       await Akumas.of(world).history({ akuma: born.allocated.id }),
     );
-    const stale = Keiyaku.at({ cwd: world, home, environment: { ...environment, KEIYAKU_TURN_SEQUENCE: "999999" } });
-    assert.deepEqual(
-      await stale.report({ text: "stale" }),
-      await native.report("stale", { bodySequence: born.body.sequence, turnSequence: 999999 }),
-    );
     for (const invalid of [
-      { ...environment, KEIYAKU_BODY_SEQUENCE: "0" },
       { ...environment, KEIYAKU_ACTOR_ID: "invalid" },
       {},
     ]) {

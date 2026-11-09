@@ -7,7 +7,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { Akuma, Akumas, type AkumaReportResult } from "../src/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { HeldAkumaLeash, activitySlice, beginTurn, breakBody, endTurn, readHeart, recordReport } from "../src/akuma/heart/index.js";
+import { activitySlice, beginTurn, breakBody, endTurn, readHeart, recordReport } from "../src/akuma/heart/index.js";
 import { insertActivityFact } from "../src/akuma/heart/rows.js";
 import { withHeartTransaction } from "../src/akuma/heart/storage.js";
 import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
@@ -18,7 +18,7 @@ import { pluginRuntime } from "../src/plugin/runtime.js";
 import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import { bornBody, allocatedHeart, claudeBodyLaunch, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { bornBody, bornDirectAkuma, allocatedHeart, claudeBodyLaunch, noBodyLaunch } from "./support/akuma-fixtures.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { temporaryDirectory } from "./support/process.js";
@@ -83,7 +83,7 @@ test("native report is a distinct durable history/stream row and does not comple
     try {
       await stream.next();
       const text = "first milestone\n  exact whitespace\n";
-      const recorded = await akuma.report(text, value.execution);
+      const recorded = await akuma.report(text);
       assert.equal(recorded.kind, "recorded");
       if (recorded.kind !== "recorded") assert.fail("report refused");
       const history = await akuma.history();
@@ -115,8 +115,8 @@ test("exact report history selects retained identity without observing outcomes"
   const observed: string[] = [];
   const owner = new AkumaOwner(value.allocated.id, value.world, async (_id, ids) => { observed.push(...ids); });
   try {
-    const first = await akuma.report("first", value.execution);
-    const second = await akuma.report(" second\n  complete\n", value.execution);
+    const first = await akuma.report("first");
+    const second = await akuma.report(" second\n  complete\n");
     if (first.kind !== "recorded" || second.kind !== "recorded") assert.fail("report refused");
     const id = `report/${second.report.sequence}`;
     assert.equal(parsePublicHistoryId(id), null);
@@ -154,34 +154,43 @@ test("exact report history selects retained identity without observing outcomes"
   } finally { value.holder.release(); }
 });
 
-test("report admission refuses absent and stale Body/Turn without writes, including same-Body succession", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-report-fence-");
+test("report admission selects current execution and refuses closed execution", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-report-admission-");
   const value = await reportFixture(root, "feed0002");
-  const input = { ...value.execution, text: "stale", at: AT };
+  const input = { text: "progress", at: AT };
   const absent = await allocateAkumaDirectory({ worldRoot: value.world, akumaName: "claude", draw: () => "feedffff" });
   assert.deepEqual(await recordReport(absent.paths, input), { kind: "refused", reason: "not-born" });
   try {
-    const before = await activitySlice(value.allocated.paths);
-    assert.deepEqual(await recordReport(value.allocated.paths, { ...input, bodySequence: value.body.sequence + 1 }),
-      { kind: "refused", reason: "not-current-execution" });
-    assert.deepEqual(await activitySlice(value.allocated.paths), before);
     await endTurn(value.allocated.paths, { turnSequence: value.turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });
-    const nextTurn = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
-    const next = await activitySlice(value.allocated.paths);
-    assert.deepEqual(await recordReport(value.allocated.paths, input), { kind: "refused", reason: "not-current-execution" });
-    assert.deepEqual(await activitySlice(value.allocated.paths), next);
+    assert.deepEqual(await recordReport(value.allocated.paths, input), { kind: "refused", reason: "not-executing" });
+    const next = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
+    const result = await recordReport(value.allocated.paths, input);
+    assert.equal(result.kind, "recorded");
+    if (result.kind === "recorded") assert.equal(result.report.turnSequence, next.sequence);
     await breakBody(value.allocated.paths, { sequence: value.body.sequence, end: "put-down", at: AT });
-    value.holder.release();
-    const successorHolder = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    try {
-      const nextBody = await successorHolder.recordBody(value.allocated.paths, { leashTakenAt: AT });
-      await beginTurn(value.allocated.paths, { bodySequence: nextBody.sequence, startedAt: AT });
-      const successor = await activitySlice(value.allocated.paths);
-      assert.deepEqual(await recordReport(value.allocated.paths, { ...input, turnSequence: nextTurn.sequence }),
-        { kind: "refused", reason: "not-current-execution" });
-      assert.deepEqual(await activitySlice(value.allocated.paths), successor);
-    } finally { successorHolder.release(); }
+    assert.deepEqual(await recordReport(value.allocated.paths, input), { kind: "refused", reason: "not-executing" });
+    await assert.rejects(Akuma.select(value.world, value.allocated.id).report("bad", { bodySequence: 1 } as never), /unknown field/u);
   } finally { value.holder.release(); }
+});
+
+test("report refuses a born Akuma without a Body, Turn, or non-hung execution", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-report-inactive-");
+  const world = await World.at(root);
+  const born = await bornDirectAkuma({ root: world, akumaName: "claude", draw: "feed0010", createdAt: AT });
+  const input = { text: "progress", at: AT };
+  try {
+    assert.deepEqual(await recordReport(born.paths, input), { kind: "refused", reason: "not-executing" });
+    const body = await born.leash.recordBody(born.paths, { leashTakenAt: AT });
+    assert.deepEqual(await recordReport(born.paths, input), { kind: "refused", reason: "not-executing" });
+    await beginTurn(born.paths, { bodySequence: body.sequence, startedAt: AT });
+    await born.leash.recordBodyHung(born.paths, { sequence: body.sequence, diagnostic: "custody live", at: AT });
+    assert.deepEqual(await recordReport(born.paths, input), { kind: "refused", reason: "not-executing" });
+    const result = await cliJson<AkumaReportResult>(["report", "progress"], {
+      cwd: root, environment: { KEIYAKU_ACTOR_ID: born.id, KEIYAKU_ACTOR_WORLD: world },
+    });
+    assert.equal(result.exit, 1);
+    assert.deepEqual(result.value, { kind: "refused", reason: "not-executing" });
+  } finally { born.leash.release(); }
 });
 
 test("reports use the existing retention sequence and do not acquire a second history store", async (context) => {
@@ -189,7 +198,7 @@ test("reports use the existing retention sequence and do not acquire a second hi
   const value = await reportFixture(root, "feed0003");
   const akuma = Akuma.select(value.world, value.allocated.id);
   try {
-    const old = await akuma.report("old", value.execution);
+    const old = await akuma.report("old");
     assert.equal(old.kind, "recorded");
     await endTurn(value.allocated.paths, { turnSequence: value.turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });
     const current = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
@@ -199,7 +208,7 @@ test("reports use the existing retention sequence and do not acquire a second hi
       });
       pruneActivityFacts(database, 5_000);
     });
-    const latest = await akuma.report("retained", { bodySequence: value.body.sequence, turnSequence: current.sequence });
+    const latest = await akuma.report("retained", {});
     assert.equal(latest.kind, "recorded");
     if (latest.kind !== "recorded" || old.kind !== "recorded") assert.fail("report refused");
     const retained = await activitySlice(value.allocated.paths);
@@ -242,7 +251,7 @@ export default { manifest: { id: 'report-test', apiVersion: 1 }, activate() {
   const akuma = Akuma.select(world, value.allocated.id, { reportDiagnostic: message => diagnostics.push(message) });
   try {
     const turn = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT, initiator: "Alice" });
-    const recorded = await akuma.report("exact\nreport", { bodySequence: value.body.sequence, turnSequence: turn.sequence });
+    const recorded = await akuma.report("exact\nreport", {});
     if (recorded.kind !== "recorded") assert.fail("report refused");
     assert.deepEqual(JSON.parse(readFileSync(trace, "utf8").trim()), {
       kind: "akuma.reported", akumaId: value.allocated.id, bodySequence: value.body.sequence,
@@ -252,8 +261,8 @@ export default { manifest: { id: 'report-test', apiVersion: 1 }, activate() {
     assert.ok(diagnostics.some(message => message.includes("notification deliberately failed")));
     assert.deepEqual((await akuma.history()).rows.filter(row => row.kind === "report"), [recorded.report]);
     await endTurn(value.allocated.paths, { turnSequence: turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });
-    const next = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
-    const unattributed = await akuma.report("without recipient", { bodySequence: value.body.sequence, turnSequence: next.sequence });
+    await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
+    const unattributed = await akuma.report("without recipient", {});
     assert.equal(unattributed.kind, "recorded");
     const signals = readFileSync(trace, "utf8").trim().split("\n").map(line => JSON.parse(line) as Record<string, unknown>);
     assert.equal(signals.length, 2, "one attempt per committed report; reads do not replay");
@@ -266,7 +275,7 @@ test("retained report corruption fails observation instead of becoming a partial
   const value = await reportFixture(root, "feed0006");
   const akuma = Akuma.select(value.world, value.allocated.id);
   try {
-    assert.equal((await akuma.report("valid", value.execution)).kind, "recorded");
+    assert.equal((await akuma.report("valid")).kind, "recorded");
     await withHeartTransaction(value.allocated.paths, database => {
       database.prepare("UPDATE reports SET at = 'not a timestamp'").run();
     });
@@ -278,7 +287,7 @@ test("CLI report adapts explicit immutable execution and takes stdin", async (co
   const root = temporaryDirectory(context, "keiyaku-report-cli-");
   const value = await reportFixture(root, "feed0005");
   const environment = akumaExecutionEnvironment({}, {}, [], {
-    akumaId: value.allocated.id, world: value.world, ...value.execution,
+    akumaId: value.allocated.id, world: value.world,
   });
   try {
     const result = await cliJson<AkumaReportResult>(["report", "-"], {
@@ -290,27 +299,13 @@ test("CLI report adapts explicit immutable execution and takes stdin", async (co
     assert.equal(result.value.report.text, "report from stdin\n");
     await assert.rejects(runCli(["report", "cannot guess"], { cwd: root, environment: { KEIYAKU_EXTERNAL_CALLER: "pi:host" } }),
       /requires explicit KEIYAKU_ACTOR_ID/u);
-    const noTurn = { ...environment };
-    delete noTurn.KEIYAKU_TURN_SEQUENCE;
-    await assert.rejects(runCli(["report", "no latest-Turn fallback"], { cwd: root, environment: noTurn }),
-      /KEIYAKU_TURN_SEQUENCE/u);
     assert.throws(() => parseArgv(["report", "recipient", "text"]), /one text argument/u);
-    assert.throws(() => parseArgv(["report", "text", "-"]), /one text argument/u);
     const akuma = Akuma.select(value.world, value.allocated.id);
-    assert.equal((await akuma.history()).rows.filter(row => row.kind === "report").length, 1);
-    // A retained native runtime (currently Paseo) keeps this creation environment.
-    // Its normal successor executes, but that old process cannot report as the new Turn.
     await endTurn(value.allocated.paths, { turnSequence: value.turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });
     const resumed = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
-    const stale = await cliJson<AkumaReportResult>(["report", "old native context"], { cwd: root, environment });
-    assert.notEqual(stale.exit, 0);
-    assert.deepEqual(stale.value, { kind: "refused", reason: "not-current-execution" });
-    assert.equal((await akuma.status()).timeline.kind, "open", "report refusal must not break resumed execution");
-    assert.equal((await akuma.history()).rows.filter(row => row.kind === "report").length, 1);
-    const fresh = await akuma.report("explicit fresh context", { bodySequence: value.body.sequence, turnSequence: resumed.sequence });
-    assert.equal(fresh.kind, "recorded");
-    const successorEnvironment = akumaExecutionEnvironment(environment);
-    assert.equal(successorEnvironment.KEIYAKU_BODY_SEQUENCE, undefined);
-    assert.equal(successorEnvironment.KEIYAKU_TURN_SEQUENCE, undefined);
+    const text = await runCli(["report", "resumed"], { cwd: root, environment });
+    assert.equal(text.exit, 0);
+    assert.match(text.stdout, new RegExp(`recorded ${value.allocated.id} report/\\d+ · body/${value.body.sequence} · turn/${resumed.sequence}`));
+    assert.equal((await akuma.history()).rows.filter(row => row.kind === "report").length, 2);
   } finally { value.holder.release(); }
 });

@@ -200,15 +200,13 @@ test("both public hosts preserve Contract runtime context and exact native repor
     const contractId = present(await contract.state()).id;
     const host = { hosting };
     const api = Akumas.of(world, host);
-    const reporting = (text: string, stale?: { bodySequence: number; turnSequence: number }) => {
+    const reporting = (text: string) => {
       const script = `const { execFileSync } = require('node:child_process');
 const args = ${JSON.stringify(["--import", import.meta.resolve("tsx"), cli, "report", text, "--json"])};
 const run = env => { try { return JSON.parse(execFileSync(process.execPath, args, { env, encoding: 'utf8' })); }
 catch (error) { if (error.stdout) return JSON.parse(String(error.stdout)); throw error; } };
 console.log(JSON.stringify({
-  bodySequence: Number(process.env.KEIYAKU_BODY_SEQUENCE), turnSequence: Number(process.env.KEIYAKU_TURN_SEQUENCE),
-  current: run(process.env),
-  stale: ${stale === undefined ? "undefined" : `run({ ...process.env, KEIYAKU_BODY_SEQUENCE: '${stale.bodySequence}', KEIYAKU_TURN_SEQUENCE: '${stale.turnSequence}' })`}
+  current: run(process.env)
 }));`;
       return prompt([process.execPath, "-e", script].map(quote).join(" "));
     };
@@ -221,16 +219,13 @@ console.log(JSON.stringify({
       assert.fail(JSON.stringify(called));
     const first = JSON.parse(String(called.observation.observation.answer));
     assert.equal(first.current.kind, "recorded");
-    assert.equal(first.current.report.bodySequence, first.bodySequence);
-    assert.equal(first.current.report.turnSequence, first.turnSequence);
     const handle = Akuma.select(world, called.akuma, host);
-    const next = await handle.ask(reporting("wake report", first), { timeoutMs: 20_000, signal: t.signal });
+    const next = await handle.ask(reporting("wake report"), { timeoutMs: 20_000, signal: t.signal });
     if (next.observation.reason !== "answered") assert.fail(JSON.stringify(next));
     const resumed = JSON.parse(next.observation.answer);
-    assert.ok(resumed.bodySequence > first.bodySequence);
-    assert.ok(resumed.turnSequence > first.turnSequence);
+    assert.ok(resumed.current.report.bodySequence > first.current.report.bodySequence);
+    assert.ok(resumed.current.report.turnSequence > first.current.report.turnSequence);
     assert.equal(resumed.current.kind, "recorded");
-    assert.deepEqual(resumed.stale, { kind: "refused", reason: "not-current-execution" });
     assert.deepEqual((await handle.history()).rows.filter(row => row.kind === "report").map(row => row.text),
       ["first report", "wake report"]);
     const runtime = () => readFileSync(join(world, "runtime.jsonl"), "utf8").trim().split("\n")

@@ -49,10 +49,9 @@ Activity is bounded retained provider narration, not a raw payload log or a
 recovery authority. An explicit progress report is instead an Akuma-owned
 retained timeline fact: it preserves its exact text, time, and Body and Turn
 correlation without ending execution or becoming input or provider narration.
-Admission judges the caller's exact declared execution against the latest open
-Body and its latest open Turn in one transaction. Missing, ended, hung, or
-superseded execution refuses without recording; observing newer execution never
-repairs a stale declaration. The opening Turn initiator is observed in that same
+Admission selects the latest open, non-hung Body and its latest open Turn in
+one transaction; missing or closed execution refuses without recording.
+The opening Turn initiator is observed in that same
 admission, and its absence does not refuse a report. Reports share ordinary
 timeline ordering, retention, and loss semantics, with no second inbox or cursor.
 Where a native adapter admitted a bounded preview of a

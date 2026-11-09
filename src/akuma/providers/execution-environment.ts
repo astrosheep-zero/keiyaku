@@ -1,13 +1,9 @@
 export type ExecutionCoordinate = Readonly<{
   akumaId: string;
   world: string;
-  bodySequence: number;
-  turnSequence: number;
 }>;
 
 const PARENT_HARNESS_IDENTITY_KEYS = [
-  "KEIYAKU_BODY_SEQUENCE",
-  "KEIYAKU_TURN_SEQUENCE",
   "CLAUDE_CODE_SESSION_ID",
   "CLAUDE_CODE_CHILD_SESSION",
   "CLAUDECODE",
@@ -44,8 +40,6 @@ export function akumaExecutionEnvironment(
     Object.assign(environment, {
       KEIYAKU_ACTOR_ID: execution.akumaId,
       KEIYAKU_ACTOR_WORLD: execution.world,
-      KEIYAKU_BODY_SEQUENCE: String(execution.bodySequence),
-      KEIYAKU_TURN_SEQUENCE: String(execution.turnSequence),
     });
   return environment;
 }

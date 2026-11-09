@@ -426,7 +426,7 @@ export async function recordTell(
 
 export async function recordReport(
   paths: AkumaPaths,
-  input: Readonly<{ bodySequence: number; turnSequence: number; text: string; at: string }>,
+  input: Readonly<{ text: string; at: string }>,
   signal?: AbortSignal,
 ): Promise<ReportAdmission> {
   try {
@@ -438,15 +438,13 @@ export async function recordReport(
         const turn = body === null ? null : latestTurnFactForBody(heart, body.sequence);
         if (
           body === null ||
-          body.sequence !== input.bodySequence ||
           body.end !== undefined ||
           body.hung !== undefined ||
           turn === null ||
-          turn.sequence !== input.turnSequence ||
           turn.end !== undefined
         )
-          return { kind: "refused", reason: "not-current-execution" };
-        const report = insertReportFact(heart, input);
+          return { kind: "refused", reason: "not-executing" };
+        const report = insertReportFact(heart, { ...input, bodySequence: body.sequence, turnSequence: turn.sequence });
         pruneActivityFacts(heart, ACTIVITY_LIMIT);
         return {
           kind: "recorded",

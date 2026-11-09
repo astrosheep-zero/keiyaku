@@ -10,9 +10,9 @@ and DebtHolder association, and plural selection around this product;
 those concerns do not become single-Akuma handle methods. `Akuma` remains
 independent of Repo and selector composition.
 
-A selected Akuma may record an explicit progress report against caller-supplied
-exact current Body and Turn custody. The operation never infers execution from
-ambient state or substitutes newer execution for a stale caller. Its result means recorded, not received; optional notification failure
+A selected Akuma may record an explicit progress report on its current execution
+as observed at admission; it is refused when the Akuma is not executing.
+Its result means recorded, not received; optional notification failure
 cannot undo the fact. Reports appear as distinct rows in the same public history
 and stream, under their existing sequence and retention meaning. They are not
 answers, and neither completion observation nor final-answer selection changes.

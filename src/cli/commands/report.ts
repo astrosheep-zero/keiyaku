@@ -8,13 +8,12 @@ export async function runReport(
 ): Promise<CliOutcome> {
   const text = command.prompt.kind === "stdin" ? await runtime.readStdin() : command.prompt.value;
   const result = await runtime.facet.report({ text, signal: runtime.signal });
-  const environment = runtime.environment;
   return emit(
     command.output,
     result,
     () =>
       result.kind === "recorded"
-        ? `recorded ${environment.KEIYAKU_ACTOR_ID} report/${result.report.sequence} · body/${environment.KEIYAKU_BODY_SEQUENCE} · turn/${environment.KEIYAKU_TURN_SEQUENCE}`
+        ? `recorded ${runtime.environment.KEIYAKU_ACTOR_ID} report/${result.report.sequence} · body/${result.report.bodySequence} · turn/${result.report.turnSequence}`
         : `refused report · ${result.reason}`,
     result.kind === "recorded" ? "accepted" : "refused",
   );

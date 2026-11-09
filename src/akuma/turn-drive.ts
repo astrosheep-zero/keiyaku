@@ -173,7 +173,6 @@ function startProviderAttempt(
     recipe: Awaited<ReturnType<typeof turnRecipe>>;
     tells: readonly TellFact[];
     signal: AbortSignal;
-    turnSequence: number;
     schemaJson: string | undefined;
     runtimeInstructions: string | undefined;
   }>,
@@ -188,8 +187,6 @@ function startProviderAttempt(
     execution: {
       akumaId: input.soul.id,
       world: input.world,
-      bodySequence: input.bodySequence,
-      turnSequence: setup.turnSequence,
     },
     ...(setup.runtimeInstructions === undefined ? {} : { runtimeInstructions: setup.runtimeInstructions }),
     ...(setup.schemaJson === undefined ? {} : { schemaJson: setup.schemaJson }),
@@ -250,7 +247,6 @@ async function establishTurnDrive(
     recipe,
     tells: boundTells,
     signal: input.supervisor.signal,
-    turnSequence,
     schemaJson,
     runtimeInstructions,
   });

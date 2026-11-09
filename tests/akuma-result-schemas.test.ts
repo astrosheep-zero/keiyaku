@@ -10,7 +10,7 @@ import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provid
 import type { Akuma, Akumas, listArchetypeDefinitions } from "../src/index.js";
 import * as root from "../src/index.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { beginTurn } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn } from "../src/akuma/heart/index.js";
 import { createdDebtObservationSchema } from "../src/debt/created-observation.js";
 import { debtRowSchema } from "../src/debt/board.js";
 import { bornBody } from "./support/akuma-fixtures.js";
@@ -109,7 +109,7 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   );
   assertWireRoundTrip(
     root.akumaReportResultSchema,
-    await fixture.akuma.report("hello", { bodySequence: 1, turnSequence: 1 }),
+    await fixture.akuma.report("hello"),
   );
   assertWireRoundTrip(root.akumaHistoryResultSchema, await akumas.history({ akuma: id, id: "turn/999" }));
   assertWireRoundTrip(root.activityHistorySchema, await fixture.akuma.history());
@@ -243,10 +243,11 @@ test("recorded and refused reports retain their wire evidence", async (context) 
     const ask = await api.ask({ akuma: born.allocated.id, body: "queued", timeoutMs: 0 });
     assert.equal(ask.observation.reason, "deadline");
     assertWireRoundTrip(root.akumaAskResultSchema, ask);
-    const report = await akuma.report("working", { bodySequence: born.body.sequence, turnSequence: turn.sequence });
+    const report = await akuma.report("working");
     assert.equal(report.kind, "recorded");
     assertWireRoundTrip(root.akumaReportResultSchema, report);
-    const refused = await akuma.report("stale", { bodySequence: born.body.sequence + 1, turnSequence: turn.sequence });
+    await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:00.000Z", outcome: { kind: "canceled" } });
+    const refused = await akuma.report("closed");
     assert.equal(refused.kind, "refused");
     assertWireRoundTrip(root.akumaReportResultSchema, refused);
   } finally {

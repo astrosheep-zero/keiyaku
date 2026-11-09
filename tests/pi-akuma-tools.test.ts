@@ -224,10 +224,7 @@ test(
     await waitForCondition("native child bash", () => existsSync(join(world, "first.ready")));
     const status = await native("akuma_status", { akuma: id });
     assert.equal(status.status.life, "running");
-    const turn = status.status.timeline.turn;
-    const report = await Akuma.select(world, id).report("Pi exact report\n", {
-      bodySequence: turn.bodySequence, turnSequence: turn.turnSequence,
-    });
+    const report = await Akuma.select(world, id).report("Pi exact report\n");
     assert.equal(report.kind, "recorded");
     if (report.kind !== "recorded") assert.fail("report refused");
     const exactReport = await native("akuma_history", { akuma: id, id: `report/${report.report.sequence}` });
