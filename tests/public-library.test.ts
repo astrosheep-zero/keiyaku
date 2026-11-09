@@ -1,3 +1,4 @@
+import "./keiyaku-invocation.cases.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Keis, Repo } from "../src/index.js";

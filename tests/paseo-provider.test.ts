@@ -11,7 +11,7 @@ import type { PluginServerContext } from "@getpaseo/plugin/server";
 import { createPaseoApi } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PluginContext } from "../src/plugin/public.js";
-import { akumaCallerFromEnvironment } from "../src/cli/akuma-caller.js";
+import { akumaCallerFromEnvironment } from "../src/library/keiyaku-identity.js";
 import { createForwarder } from "../plugins/paseo/forwarder/index.js";
 import contribute from "../plugins/paseo/plugin/index.server.js";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";

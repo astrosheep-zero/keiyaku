@@ -1,30 +1,17 @@
-import { Akumas, Keis, KeiyakuError, kanshiCategory, listArchetypeDefinitions, nuke } from "../../index.js";
+import { KeiyakuError, KeiyakuUsageError } from "../../index.js";
+import { KeiyakuArcDocumentError } from "../../library/keiyaku.js";
 import type {
-  ActorId,
-  AkumaCaller,
   AkumaObservation,
   DeliveryPreviewOutcome,
   ContractHistory,
   ContractId,
   DeliverOutcome,
-  KanshiCategoryReport,
-  Kei as KeiyakuContract,
   ReviewOutcome,
   VerifyOutcome,
-  Settings,
-  WorldRoot,
 } from "../../index.js";
-import type { KanshiReport, RegionRead, Section } from "../../kanshi/index.js";
-import { kanshi, selectRegion } from "../../kanshi/index.js";
-import { observeNamedAddress, resolveNamedAddress, type NamedAddressAuthority } from "../../library/address.js";
-import { validateArcMarkdown, validateContractMarkdown } from "../../library/input.js";
-import type { ReconcileCompletion, RepoReconcileReport } from "../../library/reconcile.js";
-import type { Repo } from "../../library/repo.js";
-import { SettingsError, settings } from "../../settings.js";
-import { akumaCallerFromEnvironment } from "../akuma-caller.js";
-import { Debts } from "../../debt/index.js";
-import { actorFromEdge } from "../actor.js";
-import type { CliCoordinates } from "../coordinates.js";
+import type { KanshiReport } from "../../kanshi/index.js";
+import { validateContractMarkdown } from "../../library/input.js";
+import { SettingsError } from "../../settings.js";
 import { resolveInvocationCwd } from "../coordinates.js";
 import { BindDraftError, preserveBindDraft } from "../draft.js";
 import { snapshotText } from "../render/akuma-activity.js";
@@ -43,11 +30,9 @@ import { renderRegionText } from "../render/region.js";
 import { renderSettingsText, settingsJsonValue } from "../render/settings.js";
 import type { TextRenderContext } from "../render/terminal.js";
 import type { CliRuntime } from "../runtime.js";
-import { canonicalContractSelector, contractFromInput, resolveContractId } from "../selectors.js";
-import { type CliOutcome, displayContext, emit, writeJson, writeStderr, writeStdout } from "../streams.js";
-import { CliUsageError, commandGuide, isBlankInput } from "../usage.js";
-import { CONTRACT_COMMAND_SPECS } from "./contract-help.js";
-import type { ParsedContractCommand, StatusCategory } from "./contract-grammar.js";
+import { type CliOutcome, displayContext, emit, writeJson, writeStdout } from "../streams.js";
+import { CliUsageError, isBlankInput } from "../usage.js";
+import type { ParsedContractCommand } from "./contract-grammar.js";
 
 // ---------------------------------------------------------------------------
 // Leaf dispatch: acquisition, one public SDK invocation, direct rendering
@@ -57,31 +42,6 @@ type ContractMutation = Extract<
   ParsedContractCommand,
   { command: "bind" | "amend" | "deliver" | "verify" | "review" | "arc" | "abandon" }
 >;
-type ExistingContractCommand = Exclude<ContractMutation, { command: "bind" }>;
-
-type ExistingSeat = Readonly<{
-  id: ContractId;
-  contract: KeiyakuContract;
-  actor?: ActorId;
-}>;
-
-type ContractMutationInput = Readonly<{
-  coordinates: CliCoordinates;
-  runtime: CliRuntime;
-  configuration?: Settings;
-}>;
-
-function requiredRepo(coordinates: CliCoordinates): Repo {
-  if (coordinates.repo === undefined) throw new CliUsageError("this command requires a resolved Repo");
-  return coordinates.repo;
-}
-
-async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<Settings> {
-  return settings({
-    ...(root === undefined ? {} : { root }),
-    ...(home === undefined ? {} : { home }),
-  });
-}
 
 function draftWarning(error: unknown): Readonly<{ warning: string }> {
   return { warning: `bind draft could not be preserved: ${error instanceof Error ? error.message : String(error)}` };
@@ -159,85 +119,56 @@ async function finishContractAnswer(
   return emit(output, answer, () => renderContractAnswer(answer, project, displayContext()), outcome);
 }
 
-async function selectedContract(
-  library: Keis,
-  selector: string | undefined,
-  scope: string,
-): Promise<Readonly<{ id: ContractId; contract: KeiyakuContract }>> {
-  const id = await resolveContractId(library, selector, scope);
-  return { id, contract: contractFromInput(library, id).contract };
-}
-
-async function existingSeat(
-  command: ExistingContractCommand,
-  coordinates: CliCoordinates,
-  runtime: CliRuntime,
-  library: Keis,
-): Promise<ExistingSeat> {
-  const id = await resolveContractId(library, command.contract, coordinates.cwd);
-  const actor = "actor" in command ? actorFromEdge(command.actor, runtime.environment) : undefined;
-  return {
-    id,
-    contract: library.kei({ id }),
-    ...(actor === undefined ? {} : { actor }),
-  };
-}
-
 async function runBind(
   command: Extract<ContractMutation, { command: "bind" }>,
-  input: ContractMutationInput,
-  library: Keis,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const { coordinates, runtime } = input;
-  const actor = actorFromEdge(command.actor, runtime.environment);
   if (command.forkOf !== undefined) {
-    const answer = await library.bind({
-      forkOf: contractFromInput(library, command.forkOf).id,
+    const answer = await runtime.facet.bind({
+      forkOf: command.forkOf,
       ...(command.target === undefined ? {} : { target: command.target }),
-      ...(actor === undefined ? {} : { actor }),
+      ...(command.actor === undefined ? {} : { actor: command.actor }),
     });
     return await finishContractAnswer(answer, command.output);
   }
   const markdown = await runtime.readStdin();
   try {
-    const after = command.after?.map((id) => contractFromInput(library, id).id);
-    const answer = await library.bind({
+    const answer = await runtime.facet.bind({
       markdown,
       ...(command.debt === undefined ? {} : { debt: command.debt as `debt/${string}` }),
       ...(command.target === undefined ? {} : { target: command.target }),
-      ...(actor === undefined ? {} : { actor }),
-      ...(after === undefined ? {} : { after }),
+      ...(command.actor === undefined ? {} : { actor: command.actor }),
+      ...(command.after === undefined ? {} : { after: command.after }),
       ...(command.gates === undefined ? {} : { gates: command.gates }),
     });
     if (answer.kind !== "refused") return await finishContractAnswer(answer, command.output);
-    const draft = await bindDraftReceipt(coordinates.establishWorld, markdown);
+    const draft = await bindDraftReceipt(runtime.draftWorld, markdown);
     const text = () => renderRefusal(refusedInvocation(answer), draft, displayContext());
     return emit(command.output, answer, text, "refused");
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
+    if (error instanceof KeiyakuUsageError) throw error;
     // A selected Settings namespace failure is the Contract owner's invalid input, not a bad draft.
     if (error instanceof KeiyakuError && error.category === "invalid-input" && error.cause instanceof SettingsError)
       throw error;
     if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
       throw error;
-    throw new BindDraftError(error, await bindDraftReceipt(coordinates.establishWorld, markdown));
+    throw new BindDraftError(error, await bindDraftReceipt(runtime.draftWorld, markdown));
   }
 }
 
 async function runAmend(
   command: Extract<ContractMutation, { command: "amend" }>,
-  input: ContractMutationInput,
-  seat: ExistingSeat,
-  library: Keis,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const { runtime } = input;
   const markdown = command.stdin === true ? await runtime.readStdin() : undefined;
   if (markdown !== undefined && isBlankInput(markdown))
     throw new CliUsageError("amend requires a nonblank stdin document");
-  const after = command.clearAfter === true ? [] : command.after?.map((id) => contractFromInput(library, id).id);
-  const answer = await seat.contract.amend({
+  const after = command.clearAfter === true ? [] : command.after;
+  const answer = await runtime.facet.amend({
+    ...(command.contract === undefined ? {} : { contract: command.contract }),
     ...(markdown === undefined ? {} : { markdown }),
-    ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+    ...(command.actor === undefined ? {} : { actor: command.actor }),
     ...(after === undefined ? {} : { after }),
     ...(command.gates === undefined ? {} : { gates: command.gates }),
   });
@@ -247,7 +178,6 @@ async function runAmend(
 async function runDeliver(
   command: Extract<ContractMutation, { command: "deliver" }>,
   runtime: CliRuntime,
-  seat: ExistingSeat,
 ): Promise<CliOutcome> {
   const driver = command.output === "text" ? await runtime.progress() : undefined;
   let answer: DeliverOutcome | DeliveryPreviewOutcome;
@@ -255,12 +185,18 @@ async function runDeliver(
     const progress = { ...(driver === undefined ? {} : { observe: driver.observe }) };
     const signal = { ...(runtime.signal === undefined ? {} : { signal: runtime.signal }) };
     answer = command.dryRun
-      ? await seat.contract.previewDelivery(
-          { includeDirty: command.includeDirty, showDiff: command.showDiff, ...signal },
+      ? await runtime.facet.previewDelivery(
+          {
+            ...(command.contract === undefined ? {} : { contract: command.contract }),
+            includeDirty: command.includeDirty,
+            showDiff: command.showDiff,
+            ...signal,
+          },
           progress,
         )
-      : await seat.contract.deliver(
+      : await runtime.facet.deliver(
           {
+            ...(command.contract === undefined ? {} : { contract: command.contract }),
             ...(command.message === undefined ? {} : { message: command.message }),
             includeDirty: command.includeDirty,
             materializeConflict: command.materializeConflict,
@@ -278,13 +214,13 @@ async function runDeliver(
 async function runVerify(
   command: Extract<ContractMutation, { command: "verify" }>,
   runtime: CliRuntime,
-  seat: ExistingSeat,
 ): Promise<CliOutcome> {
   const driver = command.output === "text" ? await runtime.progress() : undefined;
   let answer: VerifyOutcome;
   try {
-    answer = await seat.contract.verify(
+    answer = await runtime.facet.verify(
       {
+        ...(command.contract === undefined ? {} : { contract: command.contract }),
         ...(command.index === undefined ? {} : { index: command.index }),
         includeDirty: command.includeDirty,
         ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
@@ -300,7 +236,6 @@ async function runVerify(
 async function runReview(
   command: Extract<ContractMutation, { command: "review" }>,
   runtime: CliRuntime,
-  seat: ExistingSeat,
 ): Promise<CliOutcome> {
   const summary = command.summaryFromStdin === true ? await runtime.readStdin() : command.summary;
   if (command.summaryFromStdin === true && isBlankInput(summary ?? ""))
@@ -308,11 +243,12 @@ async function runReview(
   const driver = command.output === "text" ? await runtime.progress() : undefined;
   let answer: ReviewOutcome;
   try {
-    answer = await seat.contract.review(
+    answer = await runtime.facet.review(
       {
+        ...(command.contract === undefined ? {} : { contract: command.contract }),
         verdict: command.verdict,
         ...(summary === undefined ? {} : { summary }),
-        ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+        ...(command.actor === undefined ? {} : { actor: command.actor }),
         ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
       },
       { ...(driver === undefined ? {} : { observe: driver.observe }) },
@@ -326,60 +262,51 @@ async function runReview(
 async function runArc(
   command: Extract<ContractMutation, { command: "arc" }>,
   runtime: CliRuntime,
-  seat: ExistingSeat,
 ): Promise<CliOutcome> {
   const markdown = await runtime.readStdin();
   try {
-    validateArcMarkdown(markdown);
+    const answer = await runtime.facet.arc({
+      ...(command.contract === undefined ? {} : { contract: command.contract }),
+      markdown,
+      ...(command.actor === undefined ? {} : { actor: command.actor }),
+    });
+    return await finishContractAnswer(answer, command.output);
   } catch (error) {
-    if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
-      throw error;
+    if (!(error instanceof KeiyakuArcDocumentError)) throw error;
     const refusal: RenderableRefusal = { kind: "invalid-document", diagnostic: error.message };
-    const refused = { kind: "refused", operation: "arc", contract: seat.id, refusal };
+    const refused = { kind: "refused", operation: "arc", contract: error.contract, refusal };
     return emit(command.output, refused, () => renderRefusal(refused, undefined, displayContext()), "refused");
   }
-  const answer = await seat.contract.arc({
-    markdown,
-    ...(seat.actor === undefined ? {} : { actor: seat.actor }),
-  });
-  return await finishContractAnswer(answer, command.output);
 }
 
 async function runAbandon(
   command: Extract<ContractMutation, { command: "abandon" }>,
-  seat: ExistingSeat,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const answer = await seat.contract.abandon({
-    ...(seat.actor === undefined ? {} : { actor: seat.actor }),
+  const answer = await runtime.facet.abandon({
+    ...(command.contract === undefined ? {} : { contract: command.contract }),
+    ...(command.actor === undefined ? {} : { actor: command.actor }),
     ...(command.note === undefined ? {} : { note: command.note }),
   });
   return await finishContractAnswer(answer, command.output);
 }
 
-async function runContractMutation(command: ContractMutation, input: ContractMutationInput): Promise<CliOutcome> {
-  const { configuration, runtime } = input;
-  const actor = ["deliver", "verify", "review"].includes(command.command)
-    ? actorFromEdge(undefined, runtime.environment)
-    : undefined;
-  const library = Keis.of(requiredRepo(input.coordinates), {
-    ...(configuration === undefined ? {} : { settings: configuration }),
-    ...(actor === undefined ? {} : { actor }),
-  });
-  if (command.command === "bind") return await runBind(command, input, library);
-  const seat = await existingSeat(command, input.coordinates, input.runtime, library);
+export async function runContractMutation(command: ContractMutation, runtime: CliRuntime): Promise<CliOutcome> {
   switch (command.command) {
-    case "amend":
-      return await runAmend(command, input, seat, library);
     case "deliver":
-      return await runDeliver(command, input.runtime, seat);
+      return await runDeliver(command, runtime);
     case "verify":
-      return await runVerify(command, input.runtime, seat);
+      return await runVerify(command, runtime);
     case "review":
-      return await runReview(command, input.runtime, seat);
-    case "arc":
-      return await runArc(command, input.runtime, seat);
+      return await runReview(command, runtime);
     case "abandon":
-      return await runAbandon(command, seat);
+      return await runAbandon(command, runtime);
+    case "bind":
+      return await runBind(command, runtime);
+    case "amend":
+      return await runAmend(command, runtime);
+    case "arc":
+      return await runArc(command, runtime);
   }
 }
 
@@ -394,22 +321,16 @@ function statusRefusal(
   return { operation, contract, refusal: { kind: "contract-missing", contractId: contract } };
 }
 
-async function runSettings(
-  coordinates: CliCoordinates,
-  home: string | undefined,
-  output: "text" | "json",
-): Promise<CliOutcome> {
-  const value = await settingsAt(coordinates.world ?? undefined, home);
+async function runSettings(runtime: CliRuntime, output: "text" | "json"): Promise<CliOutcome> {
+  const value = await runtime.facet.settings();
   return emit(output, settingsJsonValue(value), () => renderSettingsText(value, displayContext().columns), "accepted");
 }
 
 async function runNuke(
   command: Extract<ParsedContractCommand, { command: "nuke" }>,
-  coordinates: CliCoordinates,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  if (coordinates.world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-  const result = await nuke({
-    world: coordinates.world,
+  const result = await runtime.facet.nuke({
     ...(command.confirm === undefined ? {} : { confirm: command.confirm }),
   });
   return emit(command.output, result, () => renderNukeText(result), nukeOutcome(result));
@@ -417,37 +338,35 @@ async function runNuke(
 
 async function runLs(
   command: Extract<ParsedContractCommand, { command: "ls" }>,
-  coordinates: CliCoordinates,
-  home: string | undefined,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   const query = command.query;
   if (query.kind === "contracts") {
-    const list = await Keis.of(requiredRepo(coordinates)).list({
+    const list = await runtime.facet.ls({
+      of: "kei",
       ...(query.limit === undefined ? {} : { limit: query.limit }),
     });
     return emit(command.output, list, () => renderContractCatalogue(list), "accepted");
   }
   if (query.kind === "archetypes") {
-    const list = await listArchetypeDefinitions({
-      ...(coordinates.world === null ? {} : { project: coordinates.world }),
+    const list = await runtime.facet.ls({
+      of: "akuma-name",
       ...(query.limit === undefined ? {} : { limit: query.limit }),
-      ...(home === undefined ? {} : { home }),
     });
     return emit(command.output, list, () => renderArchetypeCatalogue(list), "accepted");
   }
-  if (coordinates.world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
   if (query.kind === "debts") {
-    const listed = await Debts.of(coordinates.world).list({
-      selection: "all",
+    const listed = await runtime.facet.ls({
+      of: "debt",
       namespace: query.namespace ?? [],
       ...(query.limit === undefined ? {} : { limit: query.limit }),
     });
     if (listed.kind !== "accepted") throw new Error("Debt list did not return an accepted observation");
     return emit(command.output, listed, () => renderDebtCatalogue(listed.value, query.namespace ?? []), "accepted");
   }
-  const caller = await lsCaller(query.caller, coordinates, runtime);
-  const listed = await Akumas.of(coordinates.world).list({
+  const caller = await runtime.facet.resolveLsCaller(query.caller);
+  const listed = await runtime.facet.ls({
+    of: "aku",
     ...(query.akumaName === undefined ? {} : { akumaName: query.akumaName }),
     ...(query.limit === undefined ? {} : { limit: query.limit }),
     ...(caller === undefined ? {} : { caller }),
@@ -455,214 +374,84 @@ async function runLs(
   return emit(command.output, listed, () => renderAkumaCatalogue(listed, query.akumaName ?? null, caller), "accepted");
 }
 
-/** `--mine` is the process caller identity; `--caller` names the same coordinate explicitly. */
-async function lsCaller(
-  selection: Extract<Extract<ParsedContractCommand, { command: "ls" }>["query"], { kind: "akuma" }>["caller"],
-  coordinates: CliCoordinates,
-  runtime: CliRuntime,
-): Promise<AkumaCaller | undefined> {
-  const usage = (diagnostic: string) =>
-    new CliUsageError(diagnostic, commandGuide("ls", CONTRACT_COMMAND_SPECS.ls.usage));
-  if (selection === undefined) return undefined;
-  if (selection.kind === "external") return selection.caller;
-  if (selection.kind === "akuma") {
-    if (coordinates.world === null) throw usage("no Keiyaku world contains the invocation cwd");
-    return { kind: "akuma", world: coordinates.world, akumaId: selection.akumaId };
+function renderStatusObservation(value: AkumaObservation | KanshiReport, selector?: string): string {
+  if ("status" in value) {
+    const alias = selector?.startsWith("@") === true ? selector : undefined;
+    return snapshotText(value, displayContext(), ...(alias === undefined ? [{}] : [{ alias }]));
   }
-  let caller: AkumaCaller | undefined;
-  try {
-    caller = await akumaCallerFromEnvironment(runtime.environment);
-  } catch (error) {
-    throw usage(error instanceof Error ? error.message : String(error));
-  }
-  if (caller === undefined)
-    throw usage(
-      "--mine requires a caller identity; set KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD or run inside a calling host",
-    );
-  return caller;
-}
-
-async function readAkumaStatus(
-  akuma: string,
-  alias: string | undefined,
-  coordinates: CliCoordinates,
-): Promise<Readonly<{ value: AkumaObservation; project: () => string }>> {
-  if (coordinates.world === null) throw new CliUsageError("no Keiyaku world contains the Akuma selector");
-  const status = await Akumas.of(coordinates.world, { reportDiagnostic: writeStderr }).status({
-    akuma,
-    ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
-  });
-  return {
-    value: status,
-    project: () => snapshotText(status, displayContext(), ...(alias === undefined ? [{}] : [{ alias }])),
-  };
-}
-
-async function readContractStatus(
-  selector: string | undefined,
-  coordinates: CliCoordinates,
-): Promise<Readonly<{ value: KanshiReport; project: () => string }>> {
-  const repo = requiredRepo(coordinates);
-  const contract = selector === undefined ? undefined : canonicalContractSelector(selector);
-  const report = await kanshi({ world: coordinates.world, repo, ...(contract === undefined ? {} : { contract }) });
-  return { value: report, project: () => renderKanshiText(report, displayContext(), "contract") };
-}
-
-/** Identity comes from the complete candidate observation; display detail is requested only after it. */
-async function namedStatus(
-  selector: string,
-  coordinates: CliCoordinates,
-  authority: NamedAddressAuthority,
-): Promise<Readonly<{ value: AkumaObservation | KanshiReport; project: () => string }>> {
-  const address = resolveNamedAddress({ selector, contracts: authority.contracts, aliases: authority.aliases });
-  if (address.kind === "akuma") return await readAkumaStatus(address.id, selector, coordinates);
-  return await readContractStatus(address.id, coordinates);
+  return renderKanshiText(value, displayContext(), selector === undefined ? "world" : "contract");
 }
 
 async function runShow(
   command: Extract<ParsedContractCommand, { command: "show" }>,
-  coordinates: CliCoordinates,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const repo = coordinates.repo;
-  if (repo === undefined) throw new CliUsageError("cannot select a contract while the Contract world is absent");
-  const selected = await selectedContract(Keis.of(repo), command.contract, coordinates.cwd);
-  const guidance = await selected.contract.guidance();
+  const guidance = await runtime.facet.show(command.contract === undefined ? {} : { contract: command.contract });
   if (guidance === null) {
-    const refusal = statusRefusal(command.command, selected.id);
+    const refusal = statusRefusal(command.command, command.contract as ContractId);
     return emit(command.output, null, () => renderRefusal(refusal, undefined, displayContext()), "refused");
   }
   return emit(command.output, guidance, () => guidance, "accepted");
 }
 
-async function runStatusSelection(
-  command: Extract<ParsedContractCommand, { command: "status" }> & Readonly<{ selectors: readonly string[] }>,
-  coordinates: CliCoordinates,
-): Promise<CliOutcome> {
-  const selectors = command.selectors;
-  if (selectors.length < 2) throw new CliUsageError("status requires at least two selectors");
-  if (
-    selectors.some((selector) => !selector.startsWith("aku/") && !selector.startsWith("@")) &&
-    coordinates.repo === undefined
-  )
-    throw new CliUsageError("cannot select a contract while the Contract world is absent");
-  const authority = selectors.some((selector) => selector.startsWith("@"))
-    ? await observeNamedAddress({ world: coordinates.world, repo: coordinates.repo ?? null })
-    : undefined;
-  const values: (AkumaObservation | KanshiReport)[] = [];
-  const blocks: string[] = [];
-  for (const selector of selectors) {
-    const resolved = selector.startsWith("aku/")
-      ? await readAkumaStatus(selector, undefined, coordinates)
-      : selector.startsWith("@")
-        ? await namedStatus(selector, coordinates, authority!)
-        : await readContractStatus(selector, coordinates);
-    values.push(resolved.value);
-    if (command.output === "text") blocks.push(resolved.project());
-  }
-  return emit(command.output, values, () => blocks.join("\n\n"), "accepted");
-}
-
-async function runStatusCategory(
-  command: Extract<ParsedContractCommand, { command: "status" }> & Readonly<{ category: StatusCategory }>,
-  coordinates: CliCoordinates,
-): Promise<CliOutcome> {
-  if (command.category === "contract") requiredRepo(coordinates);
-  const report: KanshiCategoryReport = await kanshiCategory({
-    world: coordinates.world,
-    ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
-    category: command.category,
-    ...(command.limit === undefined ? {} : { limit: command.limit }),
-  });
-  return emit(command.output, report, () => renderKanshiCategoryText(report, displayContext()), "accepted");
-}
-
-async function runStatusIdentity(
-  command: Extract<ParsedContractCommand, { command: "status" }>,
-  coordinates: CliCoordinates,
-): Promise<CliOutcome> {
-  if (command.contract === undefined) {
-    const report = await kanshi({
-      world: coordinates.world,
-      ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
-    });
-    return emit(command.output, report, () => renderKanshiText(report, displayContext(), "world"), "accepted");
-  }
-  if (command.contract.startsWith("@")) {
-    const resolved = await namedStatus(
-      command.contract,
-      coordinates,
-      await observeNamedAddress({ world: coordinates.world, repo: coordinates.repo ?? null }),
-    );
-    return emit(command.output, resolved.value, () => resolved.project(), "accepted");
-  }
-  if (command.contract.startsWith("kei/")) {
-    const repo = requiredRepo(coordinates);
-    const contract = canonicalContractSelector(command.contract);
-    const report = await kanshi({ world: coordinates.world, repo, contract });
-    if (report.contracts.kind === "present" && report.contracts.value.rows.length === 0) {
-      const refusal = statusRefusal("status", contract);
-      return emit(
-        command.output,
-        refusal.refusal,
-        () => renderRefusal(refusal, undefined, displayContext()),
-        "refused",
-      );
-    }
-    return emit(command.output, report, () => renderKanshiText(report, displayContext(), "contract"), "accepted");
-  }
-  throw new CliUsageError(`contract selector must use kei/: ${command.contract}`);
-}
-
 async function runStatus(
   command: Extract<ParsedContractCommand, { command: "status" }>,
-  coordinates: CliCoordinates,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  if (command.category !== undefined) return await runStatusCategory(command, coordinates);
-  if ("selectors" in command && command.selectors !== undefined)
-    return await runStatusSelection({ ...command, selectors: command.selectors }, coordinates);
-  if (command.akuma === true && command.contract !== undefined) {
-    const resolved = await readAkumaStatus(command.contract, undefined, coordinates);
-    return emit(command.output, resolved.value, () => resolved.project(), "accepted");
+  if (command.category !== undefined) {
+    const report = await runtime.facet.status({
+      category: command.category,
+      ...(command.limit === undefined ? {} : { limit: command.limit }),
+    });
+    if (!("category" in report)) throw new Error("status did not return a category observation");
+    return emit(command.output, report, () => renderKanshiCategoryText(report, displayContext()), "accepted");
   }
-  return await runStatusIdentity(command, coordinates);
+  if ("selectors" in command && command.selectors !== undefined) {
+    const selectors = command.selectors;
+    const values = await runtime.facet.status({ selectors });
+    if (!Array.isArray(values)) throw new Error("status did not return a selection observation");
+    return emit(
+      command.output,
+      values,
+      () => values.map((value, index) => renderStatusObservation(value, selectors[index])).join("\n\n"),
+      "accepted",
+    );
+  }
+  const selector = command.contract;
+  const value = await runtime.facet.status(selector === undefined ? {} : { selector });
+  if (Array.isArray(value) || "category" in value) throw new Error("status did not return an identity observation");
+  const observation = value as AkumaObservation | KanshiReport;
+  if (
+    selector?.startsWith("kei/") === true &&
+    "contracts" in observation &&
+    observation.contracts.kind === "present" &&
+    observation.contracts.value.rows.length === 0
+  ) {
+    const refusal = statusRefusal("status", selector as ContractId);
+    return emit(command.output, refusal.refusal, () => renderRefusal(refusal, undefined, displayContext()), "refused");
+  }
+  return emit(command.output, observation, () => renderStatusObservation(observation, selector), "accepted");
 }
 
 async function runRegion(
   command: Extract<ParsedContractCommand, { command: "region" }>,
-  coordinates: CliCoordinates,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const repo = requiredRepo(coordinates);
-  const emitSection = (section: Section<RegionRead>): CliOutcome =>
-    emit(command.output, section, () => renderRegionText(section), "accepted");
-  if (command.paths !== undefined) {
-    const report = await kanshi({ world: coordinates.world, repo, region: { kind: "path", patterns: command.paths } });
-    return emitSection(report.region ?? { kind: "absent" });
-  }
-  const contract =
-    command.contract === undefined
-      ? undefined
-      : await resolveContractId(Keis.of(repo), command.contract, coordinates.cwd);
-  const report = await kanshi({ world: coordinates.world, repo, region: { kind: "declarations" } });
-  if (contract === undefined) return emitSection(report.region ?? { kind: "absent" });
-  const observed = await Keis.of(repo).observe({ id: contract });
-  if (observed.kind === "missing" || observed.row.phase === "claimed" || observed.row.phase === "abandoned") {
+  const result = await runtime.facet.region({
+    ...(command.contract === undefined ? {} : { contract: command.contract }),
+    ...(command.paths === undefined ? {} : { paths: command.paths }),
+  });
+  if (result.kind === "missing" || "row" in result) {
+    const contract = result.kind === "missing" ? result.id : result.row.id;
     const refusal: RenderableRefusal = {
-      kind: observed.kind === "missing" ? "contract-missing" : "terminal",
+      kind: result.kind === "missing" ? "contract-missing" : "terminal",
       contractId: contract,
     };
     if (command.output === "json") writeJson(refusal);
     else writeStdout(renderRefusal({ operation: "region", contract, refusal }, undefined, displayContext()));
     return "refused";
   }
-  if (report.region?.kind !== "present" || report.region.value.kind !== "declarations")
-    return emitSection(report.region ?? { kind: "absent" });
-  return emitSection({
-    kind: "present",
-    value: selectRegion({
-      declarations: report.region.value.declarations,
-      selection: { kind: "contract", contract },
-    }),
-  });
+  return emit(command.output, result, () => renderRegionText(result), "accepted");
 }
 
 type ParsedContractHistory = Readonly<{
@@ -674,75 +463,60 @@ type ParsedContractHistory = Readonly<{
 
 export async function runContractHistoryCommand(
   command: ParsedContractHistory,
-  coordinates: CliCoordinates,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const repo = requiredRepo(coordinates);
-  const selected = contractFromInput(Keis.of(repo), command.contract);
-  const history: ContractHistory | null = await selected.contract.history();
+  const history = await runtime.facet.history({ selector: command.contract });
   if (history === null) {
-    const refusal: RenderableRefusal = { kind: "contract-missing", contractId: selected.id };
+    const contract = command.contract as ContractId;
+    const refusal: RenderableRefusal = { kind: "contract-missing", contractId: contract };
     if (command.output === "json") writeJson(refusal);
-    else
-      writeStdout(renderRefusal({ operation: "history", contract: selected.id, refusal }, undefined, displayContext()));
+    else writeStdout(renderRefusal({ operation: "history", contract, refusal }, undefined, displayContext()));
     return "refused";
   }
-  return emit(command.output, history, () => renderContractHistory(history, { full: command.full }), "accepted");
+  return emit(
+    command.output,
+    history,
+    () => renderContractHistory(history as ContractHistory, { full: command.full }),
+    "accepted",
+  );
 }
 
 async function runReconcile(
   command: Extract<ParsedContractCommand, { command: "reconcile" }>,
-  coordinates: CliCoordinates,
-  home: string | undefined,
+  runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const repo = requiredRepo(coordinates);
-  const configuration = await settingsAt(coordinates.world ?? undefined, home);
-  const library = Keis.of(repo, { settings: configuration });
-  let report: ReconcileCompletion | RepoReconcileReport;
-  if (command.contract === undefined) {
-    report = await library.reconcile({ retryHooks: command.retryHooks });
-  } else {
-    const selected = await selectedContract(library, command.contract, coordinates.cwd);
-    const observed = await library.observe({ id: selected.id });
-    if (observed.kind === "missing") {
-      if (command.output === "json") writeJson(statusRefusal("reconcile", selected.id).refusal);
-      else writeStdout(renderRefusal(statusRefusal("reconcile", selected.id), undefined, displayContext()));
-      return "refused";
-    }
-    report = await library.reconcile({ contract: selected.id, retryHooks: command.retryHooks });
+  const report = await runtime.facet.reconcile({
+    ...(command.contract === undefined ? {} : { contract: command.contract }),
+    retryHooks: command.retryHooks,
+  });
+  if ("kind" in report && report.kind === "missing") {
+    const refusal = statusRefusal("reconcile", report.id);
+    if (command.output === "json") writeJson(refusal.refusal);
+    else writeStdout(renderRefusal(refusal, undefined, displayContext()));
+    return "refused";
   }
   if (command.output === "json") writeJson(report);
   else writeStdout(renderReconcile(report, displayContext()));
   return reconcileHasFailure(report) ? "failed" : "accepted";
 }
 
-export async function runContractCommand(
-  command: ParsedContractCommand,
-  coordinates: CliCoordinates,
-  runtime: CliRuntime,
-): Promise<CliOutcome> {
-  const home = runtime.home;
+export async function runContractCommand(command: ParsedContractCommand, runtime: CliRuntime): Promise<CliOutcome> {
   switch (command.command) {
     case "settings":
-      return await runSettings(coordinates, home, command.output);
+      return await runSettings(runtime, command.output);
     case "nuke":
-      return await runNuke(command, coordinates);
+      return await runNuke(command, runtime);
     case "ls":
-      return await runLs(command, coordinates, home, runtime);
+      return await runLs(command, runtime);
     case "show":
-      return await runShow(command, coordinates);
+      return await runShow(command, runtime);
     case "status":
-      return await runStatus(command, coordinates);
+      return await runStatus(command, runtime);
     case "region":
-      return await runRegion(command, coordinates);
+      return await runRegion(command, runtime);
     case "reconcile":
-      return await runReconcile(command, coordinates, home);
-    default: {
-      const configuration = await settingsAt(coordinates.world ?? undefined, home);
-      return await runContractMutation(command, {
-        coordinates,
-        runtime,
-        ...(configuration === undefined ? {} : { configuration }),
-      });
-    }
+      return await runReconcile(command, runtime);
+    default:
+      return await runContractMutation(command, runtime);
   }
 }

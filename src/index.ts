@@ -8,6 +8,8 @@ export type { AkumaHostScope } from "./body-host.js";
 export { AuthorityCorruptionError } from "./core/facts/errors.js";
 export { Delivery } from "./library/delivery.js";
 export { Kei } from "./library/kei.js";
+export { Keiyaku, KeiyakuUsageError } from "./library/keiyaku.js";
+export type { KeiyakuAt } from "./library/keiyaku.js";
 export { Keis } from "./library/contract-composition.js";
 export { KeiyakuError } from "./library/outcome.js";
 export { NoGitWorldError, Repo } from "./library/repo.js";

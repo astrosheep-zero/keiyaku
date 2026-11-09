@@ -6,7 +6,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import type { CreateAgentSessionOptions, ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { harnessOwner } from "@astrosheep/square";
-import { deliveryOwner } from "../src/cli/delivery-identity.js";
+import { deliveryOwner } from "../src/library/keiyaku-attribution.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 
 const PI_SESSION_VARIABLE = "PI_SESSION_ID";

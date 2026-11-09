@@ -12,7 +12,7 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { scopeForRepo } from "../src/library/repo.js";
 import { contractId } from "../src/core/facts/types.js";
 import { main } from "../src/cli/main.js";
-import type { WhoamiFacts } from "../src/cli/commands/whoami.js";
+import type { WhoamiFacts } from "../src/library/keiyaku-identity.js";
 import { renderWhoami } from "../src/cli/render/whoami.js";
 import { allocatedHeart } from "./support/akuma-fixtures.js";
 import { captureOutput, cliJson, runCli } from "./support/cli-fixtures.js";

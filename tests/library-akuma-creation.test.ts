@@ -23,10 +23,10 @@ import {
 import { parseAkumaId, pathsForAkumaId } from "../src/akuma/identity.js";
 import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { cliJson } from "./support/cli-fixtures.js";
+import { cliJson, runCli } from "./support/cli-fixtures.js";
 import type { SpawnResult } from "../src/library/akumas.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { Akumas, Keis, Repo, World, settings } from "../src/index.js";
+import { Akumas, Keis, Keiyaku, Repo, World, settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
@@ -819,6 +819,42 @@ test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn sett
         timeoutMs: 15_000,
         operationFailed,
       });
+    } finally {
+      restoreBodyPidReceipt();
+      restoreSquareLedger();
+    }
+  }
+});
+
+test("observing spawn displays the same canonical workdir as the native result", async (t) => {
+  const { raw, world, configured } = await directCallFixture();
+  const workdir = join(world, "actual-workdir");
+  mkdirSync(workdir);
+  symlinkSync(workdir, join(world, "linked-workdir"), "dir");
+  const bodyPidReceipt = join(raw.path, "body-pids");
+  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
+  let operationFailed = true;
+  try {
+    const environment = { KEIYAKU_HOME: configured.home };
+    let admittedCwd: string | undefined;
+    const result = await Keiyaku.at({ cwd: world, environment, home: configured.home }).spawn({
+      akumaName: "worker", prompt: "inspect workdir", mode: "wait", timeoutMs: 20_000,
+      workdir: "linked-workdir", bare: true,
+      observe: { admitted: (_tell, _id, head) => { admittedCwd = head.cwd; } },
+    });
+    assert.equal(admittedCwd, result.execution.cwd);
+    assert.equal(result.execution.cwd, realpathSync(workdir));
+    const output = await runCli(
+      ["-C", world, "spawn", "worker", "--bare", "--wait", "20s", "--workdir", "linked-workdir", "inspect workdir"],
+      { environment },
+    );
+    assert.equal(output.exit, 0, output.stderr);
+    assert.equal(output.stderr.split("\n")[1], `  ${result.execution.cwd}`);
+    operationFailed = false;
+  } finally {
+    try {
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
     } finally {
       restoreBodyPidReceipt();
       restoreSquareLedger();

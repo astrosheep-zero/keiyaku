@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
 import { captureOutput, runCli as runCliInProcess } from "./support/cli-fixtures.js";
 import { tmpdir } from "node:os";
@@ -55,6 +55,30 @@ test("category status refuses invalid combinations before reading the invocation
     assert.equal(result.exit, 64);
     assert.equal(result.stdout, "");
     assert.doesNotMatch(result.stderr, /invocation cwd/u);
+  }
+});
+
+test("observing spawn rejects an invalid workdir without establishing a World", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-spawn-invalid-workdir-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  const result = await captureOutput(() =>
+    main(["-C", root, "spawn", "worker", "--workdir", "missing", "--wait", "1s", "prompt"]),
+  );
+  assert.equal(result.exit, 3);
+  assert.equal(result.stdout, "");
+  assert.match(result.stderr, /workdir is not an existing directory: missing/u);
+  assert.equal(existsSync(join(root, ".keiyaku")), false);
+});
+
+test("debt coordinate failures retain usage output for text and JSON", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-debt-coordinate-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  writeFileSync(join(root, ".keiyaku"), "not a directory");
+  for (const flags of [[], ["--json"]]) {
+    const result = await captureOutput(() => main(["-C", root, "debt", "ls", ...flags]));
+    assert.equal(result.exit, 64);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /world marker is not a directory/u);
   }
 });
 

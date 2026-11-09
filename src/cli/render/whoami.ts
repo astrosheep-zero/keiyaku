@@ -1,5 +1,5 @@
 import type { AkumaCaller, AkumaOrigin, ContractId } from "../../index.js";
-import type { WhoamiFacts } from "../commands/whoami.js";
+import type { WhoamiFacts } from "../../library/keiyaku-identity.js";
 import { panelHead } from "./akuma-activity.js";
 import { safeText } from "./terminal.js";
 

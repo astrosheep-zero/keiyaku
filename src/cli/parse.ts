@@ -1,3 +1,4 @@
+import { commandRepoPolicy } from "../library/keiyaku-policy.js";
 import {
   isDebtAction,
   parseDebtCommand,
@@ -159,54 +160,6 @@ export type ParsedInvocation =
   | Readonly<{ cwd?: string; repo?: string; workdir?: string; command: ParsedCommand }>
   | Readonly<{ help: CliHelpCoordinate }>
   | Readonly<{ version: true }>;
-
-type RepoUse = "none" | "optional" | "required";
-type CommandRepoPolicy = Readonly<{ use: RepoUse; acceptsExplicit: boolean }>;
-
-export function commandRepoPolicy(command: ParsedCommand): CommandRepoPolicy {
-  switch (command.command) {
-    case "bind":
-    case "amend":
-    case "deliver":
-    case "verify":
-    case "review":
-    case "arc":
-    case "abandon":
-    case "reconcile":
-    case "region":
-    case "show":
-      return { use: "required", acceptsExplicit: true };
-    case "ls":
-      return { use: command.query.kind === "contracts" ? "required" : "none", acceptsExplicit: false };
-    case "status":
-    case "whoami":
-    case "tell":
-    case "ask":
-      return { use: "optional", acceptsExplicit: false };
-    case "history":
-      return "contract" in command
-        ? { use: "required", acceptsExplicit: true }
-        : { use: "optional", acceptsExplicit: false };
-    case "fork":
-      return { use: "optional", acceptsExplicit: true };
-    case "wait":
-    case "kill": {
-      const contractSelector = command.akuma.some((selector) => selector.startsWith("kei/"));
-      return { use: contractSelector ? "required" : "optional", acceptsExplicit: contractSelector };
-    }
-    case "spawn":
-      return {
-        use: command.contract === undefined ? "none" : "required",
-        acceptsExplicit: command.contract !== undefined,
-      };
-    case "report":
-    case "settings":
-    case "nuke":
-    case "debt":
-    case "install":
-      return { use: "none", acceptsExplicit: false };
-  }
-}
 
 function refuseUnusedRepo(command: ParsedCommand): never {
   if (command.command === "spawn") throw new CliUsageError("--repo has no consumer without --contract");

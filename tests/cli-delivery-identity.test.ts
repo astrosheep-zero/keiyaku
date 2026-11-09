@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { harnessOwner } from "@astrosheep/square";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
-import { deliveryOwner } from "../src/cli/delivery-identity.js";
+import { deliveryOwner } from "../src/library/keiyaku-attribution.js";
 
 test("one native coordinate selects its host Owner, ahead of Paseo", () => {
   for (const [variable, channel] of [

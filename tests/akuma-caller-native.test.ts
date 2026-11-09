@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { akumaCallerFromEnvironment } from "../src/cli/akuma-caller.js";
+import { akumaCallerFromEnvironment } from "../src/library/keiyaku-identity.js";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { temporaryDirectory } from "./support/process.js";
 

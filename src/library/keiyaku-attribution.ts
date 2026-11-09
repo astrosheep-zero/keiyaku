@@ -1,4 +1,20 @@
 import { harnessOwner, type Owner } from "@astrosheep/square";
+import { actorId as mintActorId, type ActorId } from "../core/facts/types.js";
+
+type ActorResolutionInput = Readonly<{
+  env?: Readonly<Record<string, string | undefined>>;
+  actor?: string;
+}>;
+
+/** Resolve optional caller testimony from explicit invocation input. */
+export function resolveActor(input: ActorResolutionInput = {}): ActorId | undefined {
+  if (input.actor !== undefined) {
+    if (input.actor.trim().length === 0) throw new TypeError("actor must be a nonblank string");
+    return mintActorId(input.actor);
+  }
+  const actorId = input.env?.KEIYAKU_ACTOR_ID;
+  return actorId !== undefined && actorId.trim().length > 0 ? mintActorId(actorId) : undefined;
+}
 
 /** Select attribution at the submitting edge; no host or artifact lookup. */
 export function deliveryOwner(environment: NodeJS.ProcessEnv): Owner | undefined {

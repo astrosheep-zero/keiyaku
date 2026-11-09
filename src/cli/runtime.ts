@@ -1,5 +1,6 @@
+import { resolve } from "node:path";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { AkumaArchetypeError, type ActorId } from "../index.js";
+import { AkumaArchetypeError, Keiyaku, KeiyakuUsageError } from "../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
 import { projectFailure, KeiyakuError } from "../library/outcome.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
@@ -31,18 +32,17 @@ type ExecutionProgressDriver = Readonly<{ observe: ExecutionObserver; finish: ()
 /** Everything one invocation's leaves need at the process edge; Product JSON never sees this. */
 export type CliRuntime = Readonly<{
   environment: NodeJS.ProcessEnv;
-  home?: string;
+  facet: Keiyaku;
   readStdin: () => Promise<string>;
+  draftWorld: () => Promise<string>;
   signal: AbortSignal;
   progress: () => Promise<ExecutionProgressDriver>;
-  actor?: ActorId;
 }>;
 
 export type CliRuntimeInput = Readonly<{
   cwd?: string;
   environment?: NodeJS.ProcessEnv;
   readStdin?: () => Promise<string>;
-  actor?: ActorId;
   signal?: AbortSignal;
 }>;
 
@@ -235,13 +235,13 @@ function invocationCoordinates(
       processCwd: input.cwd ?? process.cwd(),
       ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
-      ...(invocation.workdir === undefined ? {} : { workdir: invocation.workdir }),
       command: invocation.command,
     },
     environment,
   );
 }
 
+// eslint-disable-next-line complexity -- dispatch keeps acquisition, the facet, and process outcome in one edge.
 async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput): Promise<CliOutcome> {
   const command = invocation.command;
   assertExplicitRepoUse(command, invocation.repo);
@@ -252,11 +252,16 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
   try {
     const runtime: CliRuntime = {
       environment,
-      ...(home === undefined ? {} : { home }),
+      facet: Keiyaku.at({
+        cwd: resolve(input.cwd ?? process.cwd(), invocation.cwd ?? "."),
+        environment,
+        ...(home === undefined ? {} : { home }),
+        ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+      }),
       readStdin: memoized(input.readStdin ?? processStdin),
+      draftWorld: async () => (await invocationCoordinates(invocation, input, environment)).establishWorld(),
       signal: cancellation.signal,
       progress: () => (progress ??= writeExecutionProgress()),
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
     };
     if (command.command === "install") {
       const result = await installHarnesses(command.harnesses, environment);
@@ -270,14 +275,20 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
       });
     }
     if (command.command === "report") return await runReport(command, runtime);
-    const coordinates = await invocationCoordinates(invocation, input, environment);
-    if (command.command === "whoami") return await runWhoami(command, coordinates, environment);
-    if (command.command === "debt") return await runDebtCommand(command, coordinates, runtime);
-    if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, coordinates, invocation.workdir, runtime);
+    if (command.command === "whoami") return await runWhoami(command, runtime);
     if (command.command === "history" && "contract" in command)
-      return await runContractHistoryCommand(command, coordinates);
-    return await runContractCommand(command, coordinates, runtime);
+      return await runContractHistoryCommand(command, runtime);
+    if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, invocation.workdir, runtime);
+    if (command.command === "debt")
+      return await runDebtCommand(command, await invocationCoordinates(invocation, input, environment), runtime);
+    return await runContractCommand(command, runtime);
   } catch (error) {
+    if (error instanceof KeiyakuUsageError) {
+      const usage = new CliUsageError(error.message, usageGuideForCommand(command));
+      if (command.command === "ls" && command.query.kind === "akuma" && command.query.caller?.kind === "mine")
+        return await writeFailure(usage, command);
+      throw usage;
+    }
     if (error instanceof CliUsageError && error.guide === undefined) {
       throw new CliUsageError(error.diagnostic, usageGuideForCommand(command));
     }

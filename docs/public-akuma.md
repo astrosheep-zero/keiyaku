@@ -171,9 +171,8 @@ so a root-only caller lists the same spawnable definitions the CLI shows and
 identifies that error without a private module. An archetype definition may declare `hidden: true`: a hidden definition
 never appears in the archetype catalogue, but it resolves and answers spawns by
 name exactly as a visible one, and hiddenness is the definition's own
-catalogue visibility, never inherited through `base`. There is no
-cross-product SDK catalogue or `ls` operation, and no public definition loader. The CLI's
-`ls` command adapts Contract, Akuma, archetype, and Debt listing through their
-respective owners — catalogue and error adaptation alike through those public
-symbols — and renderers consume those adjudicated values without
-performing their own owner lookup.
+catalogue visibility, never inherited through `base`. The pillars and product
+compositions expose no cross-product catalogue or `ls` operation, and no public
+definition loader. The invocation-level exception is owned by
+[public-keiyaku.md](public-keiyaku.md): it routes to existing owner listings
+without introducing another catalogue model.

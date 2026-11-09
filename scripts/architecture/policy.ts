@@ -14,6 +14,8 @@ const protocolOperations = [
   any("protocol/review.ts"),
 ] as const;
 
+const invocationFacet = [any("library/keiyaku.ts"), any("library/keiyaku-*.ts")] as const;
+
 const contractOwner = {
   allow: [
     any("body/**"),
@@ -37,6 +39,7 @@ const contractOwner = {
     any("workspace-place.ts"),
   ],
   deny: [
+    ...invocationFacet,
     any("library/akuma-creation.ts"),
     any("library/bind.ts"),
     any("protocol/attempt.ts"),
@@ -78,6 +81,7 @@ const libraryOwner = {
     any("workspace-place.ts"),
   ],
   deny: [
+    ...invocationFacet,
     any("library/akuma-creation.ts"),
     any("git/target-placement.ts"),
     any("protocol/attempt.ts"),
@@ -295,6 +299,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       deny: [any("core/facts/gate.ts")],
     },
     { source: "protocol/**", ...protocolOwner },
+    ...["library/keiyaku.ts", "library/keiyaku-*.ts"].map((source) => ({
+      source,
+      allow: libraryOwner.allow,
+      deny: libraryOwner.deny.filter((rule) => !invocationFacet.includes(rule)),
+    })),
     {
       source: "library/continuation.ts",
       allow: [...libraryOwner.allow, any("protocol/completion.ts"), any("protocol/progress.ts")],
@@ -328,6 +337,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/execution-observation.ts"),
       ],
       deny: [
+        ...invocationFacet,
         any("library/akuma-creation.ts"),
         any("protocol/attempt.ts"),
         any("protocol/placement.ts"),
@@ -345,6 +355,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/execution-observation.ts"),
       ],
       deny: [
+        ...invocationFacet,
         any("library/akuma-creation.ts"),
         any("protocol/attempt.ts"),
         any("protocol/placement.ts"),
@@ -364,6 +375,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/operations.ts"),
         any("workspace-place.ts"),
       ],
+      deny: invocationFacet,
     },
     { source: "library/contract*.ts", ...contractOwner },
     { source: "library/contract/**", ...contractOwner },
@@ -384,6 +396,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/akumas.ts",
       allow: [...libraryOwner.allow, any("library/akuma-creation.ts"), any("body-host.ts")],
       deny: [
+        ...invocationFacet,
         any("git/target-placement.ts"),
         any("protocol/attempt.ts"),
         any("protocol/placement.ts"),
@@ -664,6 +677,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         runtime("core/facts/types.ts", ["actorId"]),
         types("core/facts/types.ts"),
         any("library/kei.ts", ["Kei"]),
+        any("library/keiyaku.ts"),
         runtime("library/contract-composition.ts", ["Keis"]),
         any("library/delivery.ts", ["Delivery"]),
         any("library/outcome.ts", ["KeiyakuError"]),
@@ -694,6 +708,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "*.ts",
+      deny: invocationFacet,
       allow: [
         any("akuma/**"),
         any("contract-worktree.ts"),

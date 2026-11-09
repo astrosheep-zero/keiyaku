@@ -9,37 +9,12 @@ adjudication, verification, reconciliation, nor Debt or Akuma authority.
 
 The edge owns literal command usage, input acquisition, and the distinction
 between an omitted selector and an explicit one. Leaf help and the executable
-parser are the only owners of that grammar. Before an operation begins, the
-edge resolves caller-supplied filesystem coordinates once, preserves their
-meaning for the receiving public surface, and rejects malformed, repeated,
-ambiguous, or unused invocation input. A parse or acquisition refusal performs
-no product operation and does not create runtime state.
-
-The invocation World remains the scope for Debt, Settings, and composite
-observation. The edge loads the shared Settings resource once and hands that
-immutable value to the private Contract composition; gate bundles, worktree
-hooks, and branch freshness are then derived by the Contract operation that
-consumes them, not by the edge. A caller may separately nominate a Contract repository for a
-Contract operation; that choice cannot silently retarget the invocation World
-or splice facts from two Worlds into one report. The edge supplies environment
-or current-directory facts only as explicit process inputs. Libraries do not
-rediscover them.
-
-Akuma spawn execution is a separate coordinate from invocation scope. An
-explicit spawn execution directory is the only selection; otherwise the spawn
-uses the effective invocation directory. Contract association never supplies
-or displaces an execution directory, and selecting the invocation directory
-explicitly is equivalent to omitting that selection. Spawn and fork may omit only
-Keiyaku's runtime instruction section; this choice persists through later
-execution and fork inheritance without narrowing any capability. A successful spawn or fork
-may perform best-effort inactive-Akuma maintenance after its new child is
-durable; list, status, history, wait, tell, and ask never retire bytes.
-
-The spawn edge resolves explicit additional writable directories relative to the
-effective invocation directory and canonicalizes existing directories before
-handing them to creation. Native provider policy governs this filesystem
-exposure; it never automatically includes the World, repository, or Home.
-Native-provider support and immutable recipe composition belong to Akuma.
+parser are the only owners of that grammar. A parse or acquisition refusal
+performs no product operation and does not create runtime state. The edge
+supplies explicit invocation inputs to [public-keiyaku.md](public-keiyaku.md),
+which owns coordinate discovery, selection, and caller attribution. When draft
+preservation fails, the edge presents that failure's diagnostic without
+replacing the original operation outcome or claiming the draft was saved.
 
 Help is dependency-light, read-only, and available without an existing World.
 Package identification likewise reads the running package's own metadata before
@@ -129,7 +104,7 @@ Debts through `Debts.of(world).list`. Contract-only selection, including region 
 Contract resolver owned by [public-api.md](public-api.md). The edge renders its
 typed refusal evidence as invocation diagnostics without owning candidate
 matching; a bounded display never narrows selector meaning. Complete identities
-retain the requested operation's missing-Contract refusal. The SDK exposes product `list` operations and no mixed `ls`.
+retain the requested operation's missing-Contract refusal. The invocation facet routes mixed `ls` to those native owner listings.
 
 An Akuma-instance `ls` may additionally select one caller: `--mine` uses the
 invocation's own caller identity, and `--caller` names an external
@@ -145,7 +120,7 @@ Schema acquisition failures are usage or input failures, while ordinary spawn,
 ask, tell, wait, history, and kill behavior remains unchanged.
 
 Spawn, fork, tell, and ask select the submitting process's opaque host Owner at
-the invocation edge and pass it unchanged as optional initiator attribution.
+the invocation facet and pass it unchanged as optional initiator attribution.
 A nonblank explicit integration Owner wins; otherwise one unambiguous native
 host coordinate supplies attribution, with the external host fallback used only
 when no native coordinate exists. Ambiguous, absent, or child-only host identity
@@ -154,7 +129,7 @@ reads no notification artifact or membership. The Body uses frozen input and
 Turn recipients, never its environment to reconstruct the submitting Owner.
 Caller lineage remains independent from notification attribution.
 
-Direct spawn and fork derive optional declared caller attribution at this edge:
+Direct spawn and fork derive optional declared caller attribution at the invocation facet:
 a complete Akuma-and-World environment pair wins over external integration
 attribution, and an incomplete pair refuses rather than inventing a World.
 The supplied World is canonicalized here. Without Akuma custody, the enclosing
@@ -162,4 +137,4 @@ native host session supplies external attribution. Conflicting native host
 identities refuse rather than select an arbitrary parent. Only when no native
 host identity is declared does the edge use the explicit external-integration
 fallback. These declarations remain attribution, not authentication or authority;
-the SDK does not infer them from its environment.
+the underlying product surfaces do not infer them from an environment.

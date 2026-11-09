@@ -135,10 +135,16 @@ test("global coordinates are independent of command position", () => {
 
 test("spawn repeats native writable-directory grants and refuses retired options", () => {
   assert.deepEqual(command(["spawn", "worker", "--add-dir", "../runtime", "--add-dir", "/square"]), {
-    command: "spawn", akumaName: "worker", mode: "detach", output: "text",
+    command: "spawn",
+    akumaName: "worker",
+    mode: "detach",
+    output: "text",
     writableDirectories: ["../runtime", "/square"],
   });
-  assert.throws(() => command(["spawn", "worker", "--allowed", "contract.review"]), /option --allowed is not valid for spawn/u);
+  assert.throws(
+    () => command(["spawn", "worker", "--allowed", "contract.review"]),
+    /option --allowed is not valid for spawn/u,
+  );
   assert.throws(() => command(["spawn", "worker", "--add-dir"]), /--add-dir requires/u);
   assert.throws(() => command(["fork", "@worker", "--at", "turn/1", "--add-dir", "/square"]), /--add-dir/u);
 });
@@ -481,8 +487,12 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
 });
 
-test("wait separates Contract and Akuma selectors while kill retains mixed selection", () => {
-  assert.throws(() => parseArgv(["wait", "kei/example", "aku/work*/12*"]), /cannot mix Contract and Akuma/u);
+test("wait parses selectors before facet routing while kill retains mixed selection", () => {
+  assert.deepEqual(command(["wait", "kei/example", "aku/work*/12*"]), {
+    command: "wait",
+    akuma: ["kei/example", "aku/work*/12*"],
+    output: "text",
+  });
   for (const action of ["wait", "kill"] as const) {
     const selectors = action === "wait" ? ["kei/example"] : ["kei/example", "aku/work*/12*"];
     const parsed = parseArgv([action, ...selectors, "--repo", "/repo", "--json"]);

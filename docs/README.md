@@ -8,6 +8,7 @@ surface. Read every owner named for the surface being changed.
 | Chapter | Owns |
 | --- | --- |
 | [public-api.md](public-api.md) | Package-root composition, Contract handles and operations, construction, and delivery diff. |
+| [public-keiyaku.md](public-keiyaku.md) | Invocation facet, coordinate discovery, selection routing, and caller attribution. |
 | [public-akuma.md](public-akuma.md) | Package-root Akuma creation, addressing, selection operations, and cross-product composition. |
 | [public-results.md](public-results.md) | Public result and progress schema ownership, and the meaning of Contract outcomes including refusal, retry, delivery preview, and admission. |
 | [document.md](document.md) | Contract document authority, amendment and arc intent, and reserved authorial boundaries. |

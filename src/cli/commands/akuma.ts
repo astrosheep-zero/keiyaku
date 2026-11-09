@@ -1,17 +1,8 @@
-import { akumaCallerFromEnvironment } from "../akuma-caller.js";
 import type { AkumaPromptSource, InvokedAkumaCommand } from "./akuma-grammar.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
-import { deliveryOwner } from "../delivery-identity.js";
-import { canonicalBirthCwd } from "../../akuma/call-input.js";
 import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
-import { settings, type Settings } from "../../settings.js";
-import { Akumas, AkumaWorldScopeError, type Kei as KeiyakuContract, type Repo, type SpawnInput } from "../../index.js";
-import { Keis } from "../../index.js";
-import type { CliCoordinates } from "../coordinates.js";
-import { World, type WorldRoot } from "../../world.js";
-import { contractFromInput } from "../selectors.js";
+import { AkumaWorldScopeError, KeiyakuUsageError, type AkumaAskInput } from "../../index.js";
 import { ActivityDriver } from "../activity.js";
 import {
   type CliOutcome,
@@ -53,31 +44,10 @@ export { isParsedAkumaCommand, renderAkumaHelp } from "./akuma-grammar.js";
 // Leaf dispatch: acquisition, one public SDK invocation, direct rendering
 // ---------------------------------------------------------------------------
 
-async function settingsAt(root: WorldRoot | undefined, home?: string): Promise<Settings> {
-  return settings({
-    ...(root === undefined ? {} : { root }),
-    ...(home === undefined ? {} : { home }),
-  });
-}
-
 type InvokeInput = Readonly<{
-  path: WorldRoot;
-  executionCwd?: string;
-  writableDirectories?: readonly string[];
-  home?: string;
-  settings?: Settings;
-  contract?: KeiyakuContract;
-  repo?: Repo;
-  environment: NodeJS.ProcessEnv;
-  readStdin: () => Promise<string>;
-  signal?: AbortSignal;
+  workdir?: string;
+  runtime: CliRuntime;
 }>;
-
-type SpawnRequest = Omit<SpawnInput, "mode" | "timeoutMs">;
-
-function akumas(input: InvokeInput) {
-  return Akumas.of(input.path, { reportDiagnostic: writeStderr });
-}
 
 async function schemaFromFile(path: string): Promise<Schema<unknown>> {
   try {
@@ -98,14 +68,9 @@ async function promptBody(
   input: InvokeInput,
 ): Promise<string> {
   if (command.prompt.kind !== "stdin") return command.prompt.value;
-  const bytes = await input.readStdin();
+  const bytes = await input.runtime.readStdin();
   if (isBlankInput(bytes)) throw new CliUsageError(`${action} requires a nonblank prompt`);
   return bytes;
-}
-
-function inputInitiator(input: InvokeInput): Readonly<{ initiator?: string }> {
-  const initiator = deliveryOwner(input.environment);
-  return initiator === undefined ? {} : { initiator };
 }
 
 function emitAnswer(body: string, exact: boolean): void {
@@ -120,28 +85,11 @@ async function runSpawn(
 ): Promise<CliOutcome> {
   const body = command.prompt === undefined ? undefined : await promptBody("spawn", { prompt: command.prompt }, input);
   const schema = command.schema === undefined ? undefined : await schemaFromFile(command.schema);
-  const declaredCaller = await akumaCallerFromEnvironment(input.environment);
-  await World.at(input.path);
-  const caller = akumas(input);
-  const request: SpawnRequest = {
-    ...(await inputInitiator(input)),
-    ...(declaredCaller === undefined ? {} : { caller: declaredCaller }),
-    akumaName: command.akumaName,
-    ...(body === undefined ? {} : { body }),
-    ...(input.home === undefined ? {} : { home: input.home }),
-    ...(input.settings === undefined ? {} : { settings: input.settings }),
-    ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
-    ...(input.contract === undefined ? {} : { contract: input.contract }),
-    ...(command.alias === undefined ? {} : { alias: command.alias }),
-    ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
-    ...(command.bare === undefined ? {} : { bare: command.bare }),
-    ...(schema === undefined ? {} : { schema }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  };
+
   let stream: ReturnType<typeof callObservationStream> | undefined;
   const driver = new ActivityDriver(process.stderr);
   const observing = command.mode === "wait" && command.output === "text";
-  const observe: SpawnRequest["observe"] = observing
+  const observe: Parameters<typeof input.runtime.facet.spawn>[0]["observe"] = observing
     ? {
         admitted: (tell, id, head) => {
           stream = callObservationStream(
@@ -149,7 +97,6 @@ async function runSpawn(
             callObservationHead({
               akuma: id,
               ...head,
-              ...(input.executionCwd === undefined ? {} : { cwd: input.executionCwd }),
             }),
             { admittedAt: tell.row.at },
           );
@@ -161,8 +108,16 @@ async function runSpawn(
       }
     : undefined;
   try {
-    const result = await caller.spawn({
-      ...request,
+    const result = await input.runtime.facet.spawn({
+      akumaName: command.akumaName,
+      ...(body === undefined ? {} : { prompt: body }),
+      ...(command.contract === undefined ? {} : { contract: command.contract }),
+      ...(input.workdir === undefined ? {} : { workdir: input.workdir }),
+      ...(command.alias === undefined ? {} : { alias: command.alias }),
+      ...(command.writableDirectories === undefined ? {} : { writableDirectories: command.writableDirectories }),
+      ...(command.bare === undefined ? {} : { bare: command.bare }),
+      ...(schema === undefined ? {} : { schema }),
+      signal: input.runtime.signal,
       mode: command.mode,
       ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
       ...(observe === undefined ? {} : { observe }),
@@ -191,13 +146,17 @@ async function runWait(
   input: InvokeInput,
 ): Promise<CliOutcome> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
-  const result = await akumas(input).wait({
-    akuma: command.akuma,
-    ...(input.repo === undefined ? {} : { repo: input.repo }),
+  const result = await input.runtime.facet.wait({
+    selectors: command.akuma,
     ...(command.completion === undefined ? {} : { completion: command.completion }),
     ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    signal: input.runtime.signal,
   });
+  if ("contracts" in result) {
+    if (command.output === "json") writeJson(result);
+    else writeStdout(contractWaitText(result));
+    return result.kind === "missing" ? "refused" : "accepted";
+  }
   const outcome = result.unobserved.length === 0 ? "accepted" : "failed";
   if (command.output === "json") writeJson(result);
   else emitAnswer(waitText(result, { ...(alias === undefined ? {} : { alias }) }, displayContext()), false);
@@ -209,13 +168,11 @@ async function runTell(
   input: InvokeInput,
 ): Promise<CliOutcome> {
   const body = await promptBody("tell", command, input);
-  const result = await akumas(input).tell({
-    ...(await inputInitiator(input)),
+  const result = await input.runtime.facet.tell({
     akuma: command.akuma,
-    body,
+    prompt: body,
     ...(command.interrupt ? { interrupt: true } : {}),
-    ...(input.repo === undefined ? {} : { repo: input.repo }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    signal: input.runtime.signal,
   });
   const text = () => tellText(result, inputAlias(command.akuma), displayContext());
   return emit(command.output, result, text, tellOutcome(result));
@@ -230,28 +187,26 @@ async function runAsk(
   const alias = inputAlias(command.akuma);
   const progress = command.output === "text" ? askProgressStream(undefined, alias, resultContext()) : undefined;
   const driver = new ActivityDriver(process.stderr);
+  const observe: AkumaAskInput<unknown>["observe"] =
+    progress === undefined
+      ? undefined
+      : {
+          admitted: (tell, id) => {
+            driver.settle(progress.admitted(tell, id), progress.frame());
+          },
+          observe: (observation) => {
+            driver.settle(progress.observe(observation), progress.frame());
+          },
+        };
   try {
-    const result = await akumas(input).ask({
-      ...(await inputInitiator(input)),
+    const result = await input.runtime.facet.ask({
       akuma: command.akuma,
-      body,
+      prompt: body,
       ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
       ...(schema === undefined ? {} : { schema }),
       ...(command.interrupt ? { interrupt: true } : {}),
-      ...(input.repo === undefined ? {} : { repo: input.repo }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(progress === undefined
-        ? {}
-        : {
-            observe: {
-              admitted: (tell, id) => {
-                driver.settle(progress.admitted(tell, id), progress.frame());
-              },
-              observe: (observation) => {
-                driver.settle(progress.observe(observation), progress.frame());
-              },
-            },
-          }),
+      signal: input.runtime.signal,
+      ...(observe === undefined ? {} : { observe }),
     });
     if (progress !== undefined) driver.conclude(progress.conclude(result).join("\n"));
     if (command.output === "json") writeJson(result);
@@ -266,15 +221,15 @@ async function runHistory(
   command: Extract<InvokedAkumaCommand, { command: "history" }>,
   input: InvokeInput,
 ): Promise<CliOutcome> {
-  const result = await akumas(input).history({
-    akuma: command.akuma,
-    ...(input.repo === undefined ? {} : { repo: input.repo }),
+  const result = await input.runtime.facet.history({
+    selector: command.akuma,
     ...(command.before === undefined ? {} : { before: command.before }),
     ...(command.since === undefined ? {} : { since: command.since }),
     ...(command.limit === undefined ? {} : { limit: command.limit }),
     ...(command.id === undefined ? {} : { id: command.id }),
     last: command.last,
   });
+  if (result === null || !("kind" in result)) throw new Error("Akuma history returned a non-Akuma result");
   if (command.output === "json") {
     writeJson(result);
     return historyOutcome(result, command.id);
@@ -295,14 +250,10 @@ async function runFork(
   command: Extract<InvokedAkumaCommand, { command: "fork" }>,
   input: InvokeInput,
 ): Promise<CliOutcome> {
-  const caller = await akumaCallerFromEnvironment(input.environment);
-  const receipt = await akumas(input).fork({
-    ...(await inputInitiator(input)),
-    ...(caller === undefined ? {} : { caller }),
+  const receipt = await input.runtime.facet.fork({
     akuma: command.akuma,
     at: command.at,
     ...(command.bare === undefined ? {} : { bare: command.bare }),
-    ...(input.repo === undefined ? {} : { repo: input.repo }),
   });
   return emit(command.output, receipt, () => renderForkText(receipt), forkOutcome(receipt));
 }
@@ -312,97 +263,21 @@ async function runKill(
   input: InvokeInput,
 ): Promise<CliOutcome> {
   const alias = command.akuma.length === 1 ? inputAlias(command.akuma[0]!) : undefined;
-  const result = await akumas(input).kill({
+  const result = await input.runtime.facet.kill({
     akuma: command.akuma,
-    ...(input.repo === undefined ? {} : { repo: input.repo }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
+    signal: input.runtime.signal,
   });
   const text = () => renderKillText(result, alias, displayContext());
   return emit(command.output, result, text, killOutcome(result));
 }
 
-async function akumaWorld(command: InvokedAkumaCommand, coordinates: CliCoordinates): Promise<WorldRoot> {
-  const world =
-    command.command === "spawn"
-      ? (coordinates.candidateWorld ?? (await coordinates.establishWorld()))
-      : coordinates.world;
-  if (world === null) throw new CliUsageError("no Keiyaku world contains the invocation cwd");
-  return world;
-}
-
-async function spawnExecutionCwd(
-  command: InvokedAkumaCommand,
-  cwd: string,
-  workdir: string | undefined,
-): Promise<string | undefined> {
-  if (command.command !== "spawn") return undefined;
-  if (workdir !== undefined)
-    return await canonicalBirthCwd(resolve(cwd, workdir), `workdir is not an existing directory: ${workdir}`);
-  return cwd;
-}
-
-async function akumaInput(
-  command: InvokedAkumaCommand,
-  coordinates: CliCoordinates,
-  workdir: string | undefined,
-  runtime: CliRuntime,
-): Promise<InvokeInput> {
-  const path = await akumaWorld(command, coordinates);
-  const executionCwd = await spawnExecutionCwd(command, coordinates.cwd, workdir);
-  const writableDirectories =
-    command.command !== "spawn" || command.writableDirectories === undefined
-      ? undefined
-      : await Promise.all(
-          command.writableDirectories.map((path) => {
-            if (path.trim() === "") throw new TypeError("--add-dir requires a nonblank directory");
-            return canonicalBirthCwd(resolve(coordinates.cwd, path));
-          }),
-        );
-  const home = command.command === "spawn" ? runtime.home : undefined;
-  const configuration = command.command === "spawn" ? await settingsAt(path, home) : undefined;
-  if (command.command === "spawn" && command.contract !== undefined && coordinates.repo === undefined)
-    throw new Error("spawn with Contract requires a resolved Repo");
-  const contract =
-    command.command === "spawn" && command.contract !== undefined
-      ? contractFromInput(Keis.of(coordinates.repo!), command.contract).contract
-      : undefined;
-  return {
-    path,
-    ...(executionCwd === undefined ? {} : { executionCwd }),
-    ...(writableDirectories === undefined ? {} : { writableDirectories }),
-    ...(home === undefined ? {} : { home }),
-    ...(configuration === undefined ? {} : { settings: configuration }),
-    ...(contract === undefined ? {} : { contract }),
-    ...(coordinates.repo === undefined ? {} : { repo: coordinates.repo }),
-    environment: runtime.environment,
-    readStdin: runtime.readStdin,
-    ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
-  };
-}
-
 export async function runAkumaCommand(
   command: InvokedAkumaCommand,
-  coordinates: CliCoordinates,
   workdir: string | undefined,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   try {
-    if (command.command === "wait") {
-      const contracts = command.akuma.filter((selector) => selector.startsWith("kei/"));
-      if (contracts.length > 0) {
-        if (coordinates.repo === undefined) throw new CliUsageError("Contract wait requires a repository");
-        const result = await Keis.of(coordinates.repo).wait({
-          contracts,
-          ...(command.completion === undefined ? {} : { completion: command.completion }),
-          ...(command.timeoutMs === undefined ? {} : { timeoutMs: command.timeoutMs }),
-          ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
-        });
-        if (command.output === "json") writeJson(result);
-        else writeStdout(contractWaitText(result));
-        return result.kind === "missing" ? "refused" : "accepted";
-      }
-    }
-    const input = await akumaInput(command, coordinates, workdir, runtime);
+    const input: InvokeInput = { ...(workdir === undefined ? {} : { workdir }), runtime };
     switch (command.command) {
       case "spawn":
         return await runSpawn(command, input);
@@ -421,7 +296,7 @@ export async function runAkumaCommand(
     }
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
-    if (error instanceof AkumaWorldScopeError) throw error;
+    if (error instanceof AkumaWorldScopeError || error instanceof KeiyakuUsageError) throw error;
     if (error instanceof TypeError) throw new CliUsageError(error.message);
     throw error;
   }

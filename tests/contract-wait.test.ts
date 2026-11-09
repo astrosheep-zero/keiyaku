@@ -7,7 +7,6 @@ import { Akumas, Kei, Keis, Repo, World } from "../src/index.js";
 import { contractJournalPaths } from "../src/git/identity.js";
 import { readGitPaths, repositoryAt, updateGitTree, writeCommit } from "../src/git/repository.js";
 import { publishDispatch } from "../src/dispatch/index.js";
-import { parseArgv } from "../src/cli/parse.js";
 import { bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { withContractWaitBarrier } from "./support/contract-wait.js";
 import { withGitShim } from "./support/git.js";
@@ -224,6 +223,9 @@ test("CLI Contract waits need no Akuma World and mixed families refuse", async (
     const missing = await runCli(["--repo", repository.path, "wait", "kei/not-present", "--timeout", "0ms"], { environment, cwd });
     assert.notEqual(missing.exit, 0);
     assert.match(missing.stdout + missing.stderr, /kei\/not-present/u);
-    assert.throws(() => parseArgv(["--repo", repository.path, "wait", first.id, "@worker"]), /cannot mix Contract and Akuma/u);
+    await assert.rejects(
+      runCli(["--repo", repository.path, "wait", first.id, "@worker"], { environment, cwd }),
+      /cannot mix Contract and Akuma/u,
+    );
   });
 });

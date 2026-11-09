@@ -273,9 +273,6 @@ function parseWait(
   fail: (message: string) => never,
 ): ParsedAkumaCommand {
   if (flags.any === true && flags.all === true) fail("wait --any and --all are mutually exclusive");
-  const contracts = rawSelectors.filter((selector) => selector.startsWith("kei/"));
-  if (contracts.length > 0 && contracts.length !== rawSelectors.length)
-    fail("wait cannot mix Contract and Akuma selectors");
   const completion = flags.any === true ? ("any" as const) : flags.all === true ? ("all" as const) : undefined;
   return {
     command: "wait",

@@ -6,8 +6,9 @@ Repo-bound Contract collection, Akuma as the standalone single-Akuma product, Ak
 plural Akuma composition, Debt as its independent product, Kanshi as composite
 observation including its bounded category aperture, Settings, Plugin types,
 Repo, World, and the named `nuke` operation. No other subpath, compatibility
-alias, or generic mixed orchestration facade exists, and no private execution,
-composition, or storage mechanism is reachable from either entry.
+alias, or other generic mixed orchestration facade exists. The one invocation
+facet is `Keiyaku`, owned by [public-keiyaku.md](public-keiyaku.md). No private
+execution, composition, or storage mechanism is reachable from either entry.
 
 ## Composition Boundary
 

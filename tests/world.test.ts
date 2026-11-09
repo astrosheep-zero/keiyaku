@@ -4,7 +4,7 @@ import { realpath } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import test, { after } from "node:test";
-import { cliCoordinateDiscovery } from "../src/cli/coordinates.js";
+import { resolveInvocationCoordinates } from "../src/cli/coordinates.js";
 import { parseArgv as parseInvocation } from "../src/cli/parse.js";
 import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
 import { World, WorldError } from "../src/world.js";
@@ -27,18 +27,16 @@ function temporary(): string {
   return root;
 }
 
-test("CLI coordinates retain explicit versus ambient cwd statedness", async () => {
+test("CLI coordinates resolve explicit and ambient cwd", async () => {
   const root = temporary();
   const explicit = join(root, "explicit");
   mkdirSync(explicit);
   const command = parseArgv(["spawn", "worker", "body"]).command;
 
-  const ambient = await cliCoordinateDiscovery.resolve({ processCwd: root, command });
-  assert.equal(ambient.cwdSource, "process");
+  const ambient = await resolveInvocationCoordinates({ processCwd: root, command }, {});
   assert.equal(ambient.cwd, await realpath(root));
 
-  const stated = await cliCoordinateDiscovery.resolve({ processCwd: root, cwd: "explicit", command });
-  assert.equal(stated.cwdSource, "input");
+  const stated = await resolveInvocationCoordinates({ processCwd: root, cwd: "explicit", command }, {});
   assert.equal(stated.cwd, await realpath(explicit));
 });
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { resolveActor } from "../src/cli/actor.js";
+import { resolveActor } from "../src/library/keiyaku-attribution.js";
 
 const ENV = "KEIYAKU_ACTOR_ID";
 
