@@ -5,7 +5,7 @@ import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import WebSocket from "ws";
-import { observeKanshi, World } from "@astrosheep/keiyaku";
+import { Akumas, World } from "@astrosheep/keiyaku";
 const refreshRpc = defineRpc({ name: "refresh",
     input: z.object({ world: z.string(), akuId: z.string() }),
     output: z.object({ woken: z.number().int().nonnegative() }),
@@ -24,16 +24,7 @@ const mirrorPersistence = z.object({ version: z.literal(1),
 export async function syncMirrorTitles(client, path, akuId, signal) {
     const world = await World.prove(await realpath(path));
     signal?.throwIfAborted();
-    const { aliases } = await observeKanshi({ world });
-    if (aliases.kind !== "present")
-        throw new Error(`Keiyaku aliases unavailable: ${aliases.kind === "failed" ? aliases.failure.message : "absent"}`);
-    const names = new Map();
-    for (const binding of aliases.value) {
-        const current = names.get(binding.akumaId) ?? [];
-        current.push(binding.alias.replace(/^@/u, ""));
-        names.set(binding.akumaId, current);
-    }
-    const updates = [];
+    const mirrors = [];
     let cursor;
     do {
         signal?.throwIfAborted();
@@ -51,11 +42,7 @@ export async function syncMirrorTitles(client, path, akuId, signal) {
             const target = parsed.data.data;
             if (target.world !== world)
                 continue;
-            const bound = names.get(target.akuId);
-            const title = bound?.length ? `${target.akuId} (${bound.join(", ")})` : target.akuId;
-            if (agent.title === title)
-                continue;
-            updates.push({ id: agent.id, name: title });
+            mirrors.push({ id: agent.id, akuId: target.akuId, title: agent.title });
         }
         if (!page.pageInfo.hasMore)
             break;
@@ -64,12 +51,27 @@ export async function syncMirrorTitles(client, path, akuId, signal) {
             throw new Error("Incomplete mirror directory pagination");
         cursor = next;
     } while (cursor);
-    // Finish directory pagination before renames can reorder its entries.
-    for (const update of updates) {
-        signal?.throwIfAborted();
-        await client.updateAgent(update.id, { name: update.name });
+    if (mirrors.length === 0)
+        return 0;
+    const bindings = await Akumas.of(world).aliases({ akumaIds: mirrors.map((mirror) => mirror.akuId) });
+    const names = new Map();
+    for (const binding of bindings) {
+        const current = names.get(binding.akumaId) ?? [];
+        current.push(binding.alias);
+        names.set(binding.akumaId, current);
     }
-    return updates.length;
+    // Finish directory pagination and the one Alias snapshot before any renames.
+    let updated = 0;
+    for (const mirror of mirrors) {
+        const bound = names.get(mirror.akuId);
+        const title = bound?.length ? `${bound.join(", ")} (${mirror.akuId})` : mirror.akuId;
+        if (mirror.title === title)
+            continue;
+        signal?.throwIfAborted();
+        await client.updateAgent(mirror.id, { name: title });
+        updated++;
+    }
+    return updated;
 }
 async function connect(signal) {
     const home = resolvePaseoHome({ PASEO_HOME: process.env.PASEO_HOME });
@@ -149,8 +151,18 @@ export function createForwarder(openClient = connect) {
                     signal.removeEventListener("abort", abort);
                 }
             };
+            const syncTitles = async (akumaId, cancellation) => {
+                const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
+                try {
+                    await backfillMirrorTitles(world, akumaId, signal, openClient);
+                }
+                catch (error) {
+                    console.warn(`Keiyaku mirror title synchronization failed: ${error instanceof Error ? error.message : String(error)}`);
+                }
+            };
             const refresh = async (event, cancellation) => {
                 await hint(refreshRpc, { world, akuId: event.akumaId }, cancellation);
+                await syncTitles(event.akumaId, cancellation);
             };
             return { signals: { "akuma.turn-started": refresh, "akuma.turn-outcome": refresh,
                     async "akuma.born"(event, cancellation) {
@@ -158,13 +170,7 @@ export function createForwarder(openClient = connect) {
                         const result = await hint(attachRpc, { world, akuId: event.akumaId, caller }, cancellation);
                         if (!("attached" in result) || !result.attached)
                             return;
-                        const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
-                        try {
-                            await backfillMirrorTitles(world, event.akumaId, signal, openClient);
-                        }
-                        catch (error) {
-                            console.warn(`Keiyaku mirror attached, but title synchronization failed: ${error instanceof Error ? error.message : String(error)}`);
-                        }
+                        await syncTitles(event.akumaId, cancellation);
                     },
                     async "akuma.body-ended"(event, cancellation) {
                         try {

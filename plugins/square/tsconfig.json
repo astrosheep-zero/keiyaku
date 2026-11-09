@@ -5,6 +5,7 @@
     "outDir": ".",
     "baseUrl": ".",
     "paths": {
+      "@astrosheep/keiyaku": ["../../build/src/index.d.ts"],
       "@astrosheep/keiyaku/plugin": ["../../build/src/plugin/public.d.ts"]
     }
   },

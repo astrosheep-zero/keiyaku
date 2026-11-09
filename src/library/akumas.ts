@@ -6,6 +6,7 @@ import type { TellResult, TellWake } from "../akuma/body.js";
 import { captureAkumaHost } from "../body-host.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
+import { parseAkumaId } from "../akuma/identity.js";
 import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { CreatedDebtObservation } from "../debt/created-observation.js";
@@ -14,7 +15,7 @@ import { sweepInactiveAkumas } from "./akuma-retention.js";
 import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
 import type { DispatchStage, ForkInput, ForkResult, SpawnInput, SpawnResult, SpawnWaitHead } from "./akuma-creation.js";
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
-import { requireInput } from "./input.js";
+import { normalizedList, requireInput } from "./input.js";
 import {
   askAkuma,
   historyAkuma,
@@ -42,6 +43,7 @@ export type { AkumaAddressInput } from "./address.js";
 export type { ForkInput, SpawnInput } from "./akuma-creation.js";
 export type { AkumaAskInput, AkumaHistoryInput, AkumaKillInput, AkumaTellInput, AkumaWaitInput } from "./selection.js";
 export type {
+  AliasBinding,
   AkumaAskResult,
   AkumaHistoryResult,
   AkumaKillResult,
@@ -65,6 +67,8 @@ export type {
 
 export type Akumas = AkumasHandle;
 
+export type AkumaAliasesInput = Readonly<{ akumaIds: readonly string[] }>;
+
 class AkumasHandle {
   #world: WorldRoot;
   #spawn: BodyLauncher;
@@ -83,6 +87,14 @@ class AkumasHandle {
     const roster = await readAkumaRoster(path, input);
     if (roster.rows.length === 0) return roster;
     return withRosterAliases(roster, await readAliases(path));
+  }
+
+  async aliases(input: AkumaAliasesInput): Promise<readonly AliasBinding[]> {
+    const values = requireInput(input, "Akumas.aliases input", ["akumaIds"]);
+    if (!Array.isArray(values.akumaIds)) throw new TypeError("akumaIds must be an array");
+    const selected = new Set(normalizedList(values.akumaIds, "akumaIds", (value) => parseAkumaId(value).id));
+    const path = await World.prove(this.#world);
+    return (await readAliases(path)).filter((binding) => selected.has(binding.akumaId));
   }
 
   spawn(input: SpawnInput): Promise<SpawnResult> {

@@ -69,22 +69,24 @@ function ledgerLifetime(ledger) {
         },
     };
 }
-function turnOutcomeBody(signal) {
+function turnOutcomeBody(signal, label) {
     const { kind } = signal.outcome;
     const verdict = kind === "failed" ? "× failed" : kind === "canceled" ? "○ canceled" : "✓ done";
     const result = kind === "failed" ? signal.outcome.reason : kind === "answered" ? signal.outcome.text : "";
     const footer = [
+        label === signal.akumaId ? undefined : `\`${signal.akumaId}\``,
         `\`turn/${signal.turnSequence}\``,
         signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
     ]
         .filter((value) => value !== undefined)
         .join(" · ");
-    const head = `\`${signal.akumaId}\` ${verdict}`;
+    const head = `\`${label}\` ${verdict}`;
     return result.trim() === "" ? `${head}\n\n---\n\n${footer}` : `${head}\n${result}\n\n---\n\n${footer}`;
 }
-function bodyEndExpression(signal) {
+function bodyEndExpression(signal, label) {
     const diagnostic = signal.diagnostic === undefined ? "" : `: ${signal.diagnostic}`;
     const footer = [
+        label === signal.akumaId ? undefined : `\`${signal.akumaId}\``,
         `\`body/${signal.bodySequence}\``,
         signal.initiator === undefined ? undefined : `requested by ${signal.initiator}`,
         signal.contractId === undefined ? undefined : `\`${signal.contractId}\``,
@@ -92,12 +94,13 @@ function bodyEndExpression(signal) {
     ]
         .filter((value) => value !== undefined)
         .join(" · ");
-    return `\`${signal.akumaId}\` × interrupted\n${signal.end}${diagnostic}\n\n---\n\n${footer}`;
+    return `\`${label}\` × interrupted\n${signal.end}${diagnostic}\n\n---\n\n${footer}`;
 }
 const bodyKey = (signal) => `${signal.akumaId}/body/${signal.bodySequence}`;
 const plugin = {
     manifest: { id: "square", apiVersion: 1 },
-    async activate() {
+    async activate(context) {
+        const world = context.world;
         const environment = { ...process.env };
         const location = deliveryLedgerLocation(environment);
         const bodyNotifications = new Map();
@@ -109,14 +112,26 @@ const plugin = {
             state.tail = result.catch(() => { });
             return result;
         };
-        const sendNotice = async (akumaId, ref, body, recipients, cancellation, committed) => {
+        const sendNotice = async (akumaId, ref, renderBody, recipients, cancellation, committed) => {
             cancellation?.throwIfAborted();
             if (!recipients?.length)
                 return;
+            let label = akumaId;
+            try {
+                const { Akumas } = await import("@astrosheep/keiyaku");
+                const bindings = await Akumas.of(world).aliases({ akumaIds: [akumaId] });
+                if (bindings.length)
+                    label = bindings.map((binding) => binding.alias).join(", ");
+            }
+            catch (error) {
+                console.warn(`Keiyaku notice alias lookup failed: ${error instanceof Error ? error.message : String(error)}`);
+            }
+            cancellation?.throwIfAborted();
+            const body = renderBody(label);
             const ledger = await DeliveryLedger.open({ location });
             const lifetime = ledgerLifetime(ledger);
             try {
-                const details = { kind: "presentation", origin: "Keiyaku", author: akumaId, ref, body };
+                const details = { kind: "presentation", origin: "Keiyaku", author: label, ref, body };
                 const results = await Promise.allSettled([...new Set(recipients)].map(async (recipient) => {
                     cancellation?.throwIfAborted();
                     const result = await postAndDispatch(ledger, {
@@ -250,7 +265,7 @@ const plugin = {
                 async "akuma.reported"(signal, cancellation) {
                     if (signal.initiator === undefined)
                         return;
-                    await sendNotice(signal.akumaId, `report/${signal.reportSequence}`, `\`${signal.akumaId}\` ▸ update\n${signal.text}\n\n---\n\n\`report/${signal.reportSequence}\``, [signal.initiator], cancellation);
+                    await sendNotice(signal.akumaId, `report/${signal.reportSequence}`, (label) => `\`${label}\` ▸ update\n${signal.text}\n\n---\n\n${label === signal.akumaId ? "" : `\`${signal.akumaId}\` · `}\`report/${signal.reportSequence}\``, [signal.initiator], cancellation);
                 },
                 async "akuma.outcome-observed"(signal, cancellation) {
                     cancellation?.throwIfAborted();
@@ -270,7 +285,7 @@ const plugin = {
                 },
                 async "akuma.turn-outcome"(signal, cancellation) {
                     await serialize(signal, async (state) => {
-                        await sendNotice(signal.akumaId, `turn/${signal.turnSequence}`, turnOutcomeBody(signal), signal.participants, cancellation, (recipient) => {
+                        await sendNotice(signal.akumaId, `turn/${signal.turnSequence}`, (label) => turnOutcomeBody(signal, label), signal.participants, cancellation, (recipient) => {
                             if (signal.outcome.kind !== "answered")
                                 state.terminalRecipients.add(recipient);
                         });
@@ -281,7 +296,7 @@ const plugin = {
                         try {
                             if (signal.end === "exited" || signal.end === "put-down")
                                 return;
-                            await sendNotice(signal.akumaId, `body/${signal.bodySequence}`, bodyEndExpression(signal), signal.participants?.filter((recipient) => !state.terminalRecipients.has(recipient)), cancellation);
+                            await sendNotice(signal.akumaId, `body/${signal.bodySequence}`, (label) => bodyEndExpression(signal, label), signal.participants?.filter((recipient) => !state.terminalRecipients.has(recipient)), cancellation);
                         }
                         finally {
                             if (bodyNotifications.get(bodyKey(signal)) === state)

@@ -56,20 +56,22 @@ the direct Paseo-ID lookup for compatibility.
 Child creation reuses daemon idempotency for the Akuma's canonical World and
 identity, not an identity registry or duplicate worker. Its creation title stays
 the bare full AkuId so alias moves never change the creation fingerprint. After
-successful attachment only, the forwarder makes one awaited, bounded title
-attempt on a separately owned local client. It renames matching mirrors to
-`aku/elite/abcd (reviewer)` or, with multiple aliases,
-`aku/elite/abcd (audit, reviewer)`. With no aliases the title is the bare full ID.
-Ordinary Turn-start, Turn-outcome and Body-end refresh hints do no alias reads,
-directory scans, or renames. A failed title attempt logs a warning and closes its
-own client, without failing a successful attachment or closing the cached runtime
-refresh client. No title work is queued or detached.
+successful attachment and after each successful Turn-start, Turn-outcome and
+Body-end runtime refresh, the forwarder makes one awaited, bounded title attempt
+for that Akuma on a separately owned local client. It renames matching mirrors to
+`@reviewer (aku/elite/1234abcd)` or, with multiple aliases,
+`@audit, @reviewer (aku/elite/1234abcd)`. All aliases retain their markers and
+canonical order. With no aliases the title is the bare full ID. A failed title
+attempt logs a warning and closes its own client, without preventing the ordinary
+runtime refresh, failing a successful attachment, or closing the cached runtime
+client. Body-end still releases the runtime client. No title work is queued or
+detached.
 
-Aliases come from the complete public `observeKanshi(...).aliases` observation,
-not a bounded roster or decoded storage. The installed package has no narrower
-complete public alias query; bounded `Akumas.list` cannot prove an older mirror's
-bindings absent. Alias read failure retains the prior title rather than treating
-unavailable bindings as empty.
+Aliases come from `Akumas.of(world).aliases({ akumaIds })`, with one mapping
+snapshot for the selected exact-World mirror identities after complete directory
+enumeration. Neither a full Kanshi observation, a bounded roster, nor decoded
+storage resolves names. Alias read failure retains prior titles rather than
+treating unavailable bindings as empty.
 
 Mirror matching uses the public Paseo snapshot's Keiyaku provider persistence
 metadata and its canonical World plus AkuId, never the title or an opaque session
@@ -81,7 +83,7 @@ entries, can be backfilled without replaying birth or creation. The Paseo
 directory supports both `includeArchived` and `includeBackground`; title backfill
 intentionally includes archived entries but keeps its existing background scope.
 
-The flagship must run this one-shot backfill when deploying the title fix:
+An explicit one-shot title sync can also update existing mirrors:
 
 ```sh
 cd /Users/astrosheep/Developer/keiyaku-v4
@@ -101,9 +103,11 @@ node plugins/paseo/forwarder/backfill-titles.mjs /Users/astrosheep/Developer/kei
 The operation only lists and renames existing matching agents; it is safe to
 repeat and skips already-correct titles. Partial rename failure may leave some
 titles updated; rerunning converges without duplicate creation. An alias move
-alone emits no title update. Existing or inactive mirrors need an explicit
-backfill, or another successful attachment, to reflect changed aliases. Ordinary
-refresh hints and the provider's timeline refresh do not update titles.
+alone emits no title update. Each old or new alias target converges on its next
+ordinary runtime refresh, successful attachment, or explicit title sync. Inactive
+mirrors can use the explicit backfill; there is no immediate alias-move signal,
+watcher, or background retry. The provider's timeline refresh alone does not
+update titles.
 
 Completed creation replay does not reattach a detached child or revive an
 archived child. Unknown and unsupported callers create no automatic mirror. A

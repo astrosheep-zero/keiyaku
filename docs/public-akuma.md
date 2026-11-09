@@ -108,6 +108,14 @@ history, wait, tell, ask, and every other observation path never run it.
 
 ## Address, Selection, And Listing
 
+Callers may observe current Alias bindings for an explicit set of complete Akuma
+identities through the World-bound composition. This narrow observation validates
+and deduplicates the selection, then filters one complete Alias snapshot in its
+canonical order. It neither proves Akuma existence nor reads roster, Heart,
+Dispatch, Contract, or composite World observation. Missing bindings are empty;
+corrupt or unavailable Alias authority remains exceptional. Alias retains sole
+mapping authority and supplies the binding declaration.
+
 The Address facet is the sole selector interpreter for Akumas. It resolves
 complete Akuma identity, Alias, glob, and Contract selection from one frozen owner observation,
 and refuses an ambiguous human selector. Akuma itself remains unaware of Alias,

@@ -6,7 +6,8 @@ import test, { type TestContext } from "node:test";
 import { createPaseoApi } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
-import { backfillMirrorTitles, createForwarder, syncMirrorTitles } from "../plugins/paseo/forwarder/index.js";
+import "./support/local-public-package.js";
+const { backfillMirrorTitles, createForwarder, syncMirrorTitles } = await import("../plugins/paseo/forwarder/index.js");
 import { attach } from "../plugins/paseo/plugin/server/attach.js";
 import { World } from "../src/world.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -28,18 +29,19 @@ function snapshot(id: string, world: string, akuId: string, title: string | null
 }
 const pageInfo = { hasMore: false, nextCursor: null, prevCursor: null };
 
-test("new alias/no-alias mirrors and mutable aliases preserve the daemon creation fingerprint", async t => {
+test("birth and ordinary refresh converge alias titles without changing the creation fingerprint", async t => {
   for (const initiallyAliased of [true, false]) await t.test(initiallyAliased ? "aliased" : "bare", async t => {
     const h = await fixture(t), akuId = "aku/elite/1234abcd", other = "aku/elite/8765abcd";
     if (initiallyAliased) await h.bind("reviewer", akuId);
     let child: AgentSnapshotPayload | undefined;
+    const nextTarget = snapshot("next-target", h.world, other, other);
     let fingerprint: string | undefined, creates = 0;
     const renames: string[] = [];
     const wire: Parameters<DaemonClient["createAgent"]>[0][] = [];
     const client = {
       getLastServerInfoMessage() { return { serverId: "test-server" }; },
       async fetchAgent() { return { agent: { id: "parent", cwd: h.world, archivedAt: null }, project: null }; },
-      async fetchAgents() { return { entries: child ? [{ agent: child, project: null }] : [], pageInfo }; },
+      async fetchAgents() { return { entries: child ? [child, nextTarget].map(agent => ({ agent, project: null })) : [], pageInfo }; },
       async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
         const request = JSON.stringify(options);
         if (fingerprint !== undefined) assert.equal(request, fingerprint, "changed idempotent payload would conflict");
@@ -48,7 +50,8 @@ test("new alias/no-alias mirrors and mutable aliases preserve the daemon creatio
         return child!;
       },
       async updateAgent(id: string, update: { name?: string }) {
-        assert.equal(id, child!.id); child!.title = update.name!; renames.push(update.name!);
+        const target = id === child!.id ? child! : nextTarget;
+        target.title = update.name!; renames.push(update.name!);
       },
       async invokePluginRpc(_plugin: string, method: string, input: unknown) {
         return method === "attach" ? await attach(input as Parameters<typeof attach>[0], { paseo }) : { woken: 0 };
@@ -63,25 +66,28 @@ test("new alias/no-alias mirrors and mutable aliases preserve the daemon creatio
     const born = { kind: "akuma.born" as const, akumaId: akuId, bodySequence: 1, origin: { kind: "direct" as const },
       caller: { kind: "external" as const, integration: "paseo", id: "parent" } };
     await signals?.["akuma.born"]?.(born);
-    assert.equal(child!.title, initiallyAliased ? `${akuId} (reviewer)` : akuId);
+    assert.equal(child!.title, initiallyAliased ? `@reviewer (${akuId})` : akuId);
     await h.bind("reviewer", akuId);
     await h.bind("audit", akuId);
-    await signals?.["akuma.born"]?.(born);
-    assert.equal(child!.title, `${akuId} (audit, reviewer)`);
+    await signals?.["akuma.turn-started"]?.({ kind: "akuma.turn-started", akumaId: akuId, turnSequence: 1 });
+    assert.equal(child!.title, `@audit, @reviewer (${akuId})`, "post-birth bindings appear on the next refresh");
+    assert.equal(await syncMirrorTitles(client as unknown as DaemonClient, h.world, akuId), 0);
     await h.bind("reviewer", other); await h.bind("audit", other);
     await signals?.["akuma.turn-outcome"]?.({ kind: "akuma.turn-outcome", akumaId: akuId, bodySequence: 1,
       turnSequence: 1, outcome: { kind: "answered", text: "done" } });
-    assert.equal(child!.title, `${akuId} (audit, reviewer)`, "runtime refresh never does title work");
-    assert.equal(await syncMirrorTitles(client as unknown as DaemonClient, h.alias, akuId), 1);
-    assert.equal(child!.title, akuId, "explicit backfill removes aliases moved away");
+    assert.equal(child!.title, akuId, "the old target loses moved aliases on its own refresh");
+    assert.equal(nextTarget.title, other, "refresh does not globally rename other mirrors");
+    await signals?.["akuma.turn-started"]?.({ kind: "akuma.turn-started", akumaId: other, turnSequence: 1 });
+    assert.equal(nextTarget.title, `@audit, @reviewer (${other})`, "the new target converges on its own refresh");
     await signals?.["akuma.born"]?.(born);
     assert.equal(creates, 1);
-    assert.equal(wire.length, 3);
+    assert.equal(wire.length, 2);
     for (const input of wire) {
       assert.equal(input.config?.title, akuId, "create is always bare ID, even after rename");
       assert.equal(input.idempotencyKey, `keiyaku:${h.world}:${akuId}`);
     }
-    assert.deepEqual(renames, [...(initiallyAliased ? [`${akuId} (reviewer)`] : []), `${akuId} (audit, reviewer)`, akuId]);
+    assert.deepEqual(renames, [...(initiallyAliased ? [`@reviewer (${akuId})`] : []),
+      `@audit, @reviewer (${akuId})`, akuId, `@audit, @reviewer (${other})`]);
   });
 });
 
@@ -105,15 +111,17 @@ test("one-shot backfill renames only exact world mirrors, enumerating all pages 
     async updateAgent(id: string, update: { name?: string }) {
       assert.equal(lists % 2, 0, "do not reorder directory while paginating");
       updates.push([id, update]); agents.find(agent => agent.id === id)!.title = update.name!;
+      if (id === "old") await h.bind("reviewer", bare);
     },
   } as unknown as Pick<DaemonClient, "fetchAgents" | "updateAgent">;
   assert.equal(await syncMirrorTitles(client, h.alias), 3);
-  assert.deepEqual(updates, [["old", { name: `${akuId} (reviewer)` }], ["bare", { name: bare }],
-    ["archived", { name: `${akuId} (reviewer)` }]]);
+  assert.deepEqual(updates, [["old", { name: `@reviewer (${akuId})` }], ["bare", { name: bare }],
+    ["archived", { name: `@reviewer (${akuId})` }]], "alias moves during rename do not split the batch's name snapshot");
+  await h.bind("reviewer", akuId);
   assert.equal(await syncMirrorTitles(client, h.world), 0, "correct titles do not produce redundant mutations");
   assert.equal(updates.length, 3);
   await writeFile(join(h.world, ".keiyaku", "akuma", "alias.json"), "corrupt\n");
-  await assert.rejects(syncMirrorTitles(client, h.world), /Keiyaku aliases unavailable/u);
+  await assert.rejects(syncMirrorTitles(client, h.world), /invalid Alias JSON/u);
   assert.equal(updates.length, 3, "unavailable aliases never erase known titles");
 });
 
@@ -128,12 +136,13 @@ test("AkuId-filtered backfill leaves another mirror in the same World unchanged"
     async updateAgent(id: string, update: { name?: string }) { updates.push([id, update]); },
   } as unknown as DaemonClient;
   assert.equal(await syncMirrorTitles(client, h.world, selected), 1);
-  assert.deepEqual(updates, [["selected", { name: `${selected} (reviewer)` }]]);
+  assert.deepEqual(updates, [["selected", { name: `@reviewer (${selected})` }]]);
   assert.equal(agents[1]!.title, "other customized title");
 });
 
-test("failed owned title attempts preserve the successful attach and cached runtime client", async t => {
+test("failed owned title attempts preserve attach, ordinary refresh and runtime cleanup", async t => {
   const h = await fixture(t), akuId = "aku/elite/1234abcd";
+  await h.bind("reviewer", akuId);
   let opens = 0, runtimeCloses = 0, titleCloses = 0, refreshes = 0;
   const warning = t.mock.method(console, "warn", () => {});
   const runtime = {
@@ -158,14 +167,21 @@ test("failed owned title attempts preserve the successful attach and cached runt
   assert.equal(titleCloses, 1, "the title attempt is closed before born delivery returns");
   assert.equal(runtimeCloses, 0, "rename failure does not close the successful attach connection");
   assert.equal(warning.mock.callCount(), 1);
-  assert.match(String(warning.mock.calls[0]?.arguments[0]), /attached, but title synchronization failed: rename unavailable/u);
+  assert.match(String(warning.mock.calls[0]?.arguments[0]), /title synchronization failed: rename unavailable/u);
   await signals?.["akuma.turn-started"]?.({ kind: "akuma.turn-started", akumaId: akuId, turnSequence: 1 });
+  await writeFile(join(h.world, ".keiyaku", "akuma", "alias.json"), "corrupt\n");
   await signals?.["akuma.turn-outcome"]?.({ kind: "akuma.turn-outcome", akumaId: akuId, bodySequence: 1,
     turnSequence: 1, outcome: { kind: "answered", text: "done" } });
-  assert.equal(opens, 2, "refreshes reuse the original runtime connection without opening title connections");
+  assert.equal(opens, 4, "each title attempt owns a new connection while runtime refresh reuses the first");
+  assert.equal(titleCloses, 3);
+  assert.equal(runtimeCloses, 0);
+  assert.equal(warning.mock.callCount(), 3);
+  assert.match(String(warning.mock.calls[2]?.arguments[0]), /invalid Alias JSON/u);
   assert.equal(refreshes, 2);
   await signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: akuId, bodySequence: 1, end: "exited" });
   assert.equal(runtimeCloses, 1, "Body end still owns normal runtime cleanup");
+  assert.equal(refreshes, 3);
+  assert.equal(titleCloses, 4);
 });
 
 test("canceling a title attempt closes and drains its owned in-flight rename before returning", async t => {

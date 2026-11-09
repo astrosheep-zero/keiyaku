@@ -87,6 +87,21 @@ text, with generic presentation facts for receivers. Each recipient owns an
 independent card under the stable Akuma/event identity; repeat posting is
 idempotent. Reports, Turn outcomes, and Body endings have distinct identities.
 
+Aliases are observer presentation, never identity, routing, or execution
+authority. Observers prefer all current bindings without inventing a primary
+alias, while preserving complete Akuma identity. Names come from the narrow
+World-bound Alias observation, not a bounded roster or composite observation.
+Square cards retain one consistent event-time name snapshot after alias moves;
+unaddressed notices need no name observation. Alias failure is diagnostic-only
+and cannot prevent an addressed notice from using complete identity.
+
+Paseo mirrors instead converge to current bindings at their next ordinary
+refresh or explicit title synchronization. Alias moves promise no immediate
+update, signal, watcher, or retry queue. Names never change mirror creation
+identity or persistent matching. Unavailable Alias authority preserves known
+titles; title failures remain diagnostic-only and independent of runtime refresh
+and observer resource retirement.
+
 Within one activation, same-Body notifications serialize. A committed or
 suppressed failed or canceled Turn card prevents a redundant abnormal Body card
 for that recipient alone. Failed posting never claims a recipient was notified.

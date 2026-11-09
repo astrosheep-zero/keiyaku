@@ -8,6 +8,8 @@ import {
   listArchetypeDefinitions,
   nuke,
   type AkumaId,
+  type AkumaAliasesInput,
+  type AliasBinding,
   type AkumaHostOptions,
   type AkumaHostScope,
   type ArchetypeCatalog,
@@ -45,6 +47,9 @@ void [scoped, scopedSingle, closed];
 const host: AkumaHostOptions = { reportDiagnostic: (message) => console.error(message) };
 const plural = Akumas.of(world, host);
 const roster = plural.list({ limit: 25 });
+const aliasInput: AkumaAliasesInput = { akumaIds: [aku, "aku/worker/1234abcd"] };
+const aliases: Promise<readonly AliasBinding[]> = plural.aliases(aliasInput);
+void aliases;
 const status = plural.status({ akuma: aku });
 const single = Akuma.select(world, aku, host);
 const constructor: Function = Akuma;

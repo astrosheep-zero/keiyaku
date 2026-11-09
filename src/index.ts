@@ -116,7 +116,9 @@ export type {
 } from "./kanshi/index.js";
 export { AkumaAddressError, AkumaWorldScopeError, Akumas } from "./library/akumas.js";
 export type {
+  AliasBinding,
   AkumaAddressInput,
+  AkumaAliasesInput,
   AkumaAskInput,
   AkumaHistoryInput,
   AkumaHistoryResult,
