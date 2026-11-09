@@ -1,40 +1,56 @@
-import type { z } from "zod";
-import type { AttestationData, ContractState, EntryUlid, SnapshotId } from "../core/facts/types.js";
+import { z } from "zod";
+import { snapshotIdSchema } from "../git/identity.js";
+import { entryUlidSchema } from "./result-leaves.js";
+import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { activeContract, documentIsCurrent, targetContractRefusal } from "../core/facts/observation.js";
 import { observeGitForAdmissionAt } from "../git/observe.js";
 import { VERIFIED, verificationRequirement, type VerificationDefinition } from "../verification/declaration.js";
 import { prepareDelivery, deliveryIntegrationSnapshots } from "./deliver.js";
 import { verifyRequirement } from "./intent.js";
-import type { DocumentDerivation, MutationOperationInput, VerificationStop } from "./operations.js";
+import type { DocumentDerivation, MutationOperationInput } from "./operations.js";
 import { timestamp, unpackVerificationOutcome } from "./operations.js";
 import { executionStop, type ContractCheckpoint } from "./progress.js";
 import {
+  verificationStopSchema,
   verifyRefusalSchema,
   deliverRefusalSchema,
   deliveryPreparationRefusalSchema,
   verificationDeclarationRefusalSchema,
 } from "./operations.js";
-import type { CompletionEvidence } from "./completion.js";
+import { completionEvidenceShape, type CompletionEvidence } from "./completion.js";
 
-type VerificationCoordinate = Readonly<{
-  index: number;
-  requirement: string;
-  snapshot: SnapshotId;
-  retainedPath?: string;
-}>;
-type VerificationAdmission =
-  | Readonly<{ kind: "admitted" | "reused"; entry: EntryUlid }>
-  | Readonly<{ kind: "stopped"; stop: VerificationStop }>;
-export type VerificationCheck = VerificationCoordinate &
-  (
-    | Readonly<{
-        kind: "terminal";
-        verdict: AttestationData["verdict"];
-        summary?: string;
-        admission: VerificationAdmission;
-      }>
-    | Readonly<{ kind: "stopped"; stop: VerificationStop }>
-  );
+const checkCoordinate = {
+  index: z.number(),
+  requirement: z.string(),
+  snapshot: snapshotIdSchema,
+  retainedPath: z.string().exactOptional(),
+};
+const verificationAdmissionSchema = z.union([
+  z.strictObject({ kind: z.enum(["admitted", "reused"]), entry: entryUlidSchema }).readonly(),
+  z.strictObject({ kind: z.literal("stopped"), stop: verificationStopSchema }).readonly(),
+]);
+export const verificationCheckSchema = z.union([
+  z
+    .strictObject({
+      ...checkCoordinate,
+      kind: z.literal("terminal"),
+      verdict: z.enum(["satisfied", "unsatisfied"]),
+      summary: z.string().exactOptional(),
+      admission: verificationAdmissionSchema,
+    })
+    .readonly(),
+  z.strictObject({ ...checkCoordinate, kind: z.literal("stopped"), stop: verificationStopSchema }).readonly(),
+]);
+export const verifyValueSchema = z
+  .strictObject({
+    ...completionEvidenceShape,
+    snapshot: snapshotIdSchema,
+    checks: z.array(verificationCheckSchema).readonly(),
+  })
+  .readonly();
+
+type VerificationCoordinate = Pick<VerificationCheck, "index" | "requirement" | "snapshot" | "retainedPath">;
+export type VerificationCheck = z.output<typeof verificationCheckSchema>;
 export type VerifyValue = CompletionEvidence &
   Readonly<{
     snapshot: SnapshotId;

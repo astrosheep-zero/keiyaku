@@ -2,6 +2,7 @@
 import { z } from "zod";
 import {
   contractFileLagSchema,
+  contractFileEffectSchema,
   projectContractWorktree,
   type ContractFileEffect,
   type ContractFileLag,
@@ -11,12 +12,13 @@ import type { ContractId, ContractState } from "../core/facts/types.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { ReconcileResult } from "../git/reconcile.js";
-import { gitReconcileLagSchema, reconcileObservationFailure } from "../git/reconcile.js";
+import { gitReconcileLagSchema, reconcileEffectSchema, reconcileObservationFailure } from "../git/reconcile.js";
+import { contractIdSchema } from "../git/identity.js";
 import { worktreePath } from "../git/workspace.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { isOperationalFailure, isOperationalStop, executionStop, type ProtocolProgress } from "../protocol/progress.js";
 import { reconcileAllOperation, reconcileOperation, worldContractStates } from "../protocol/reconcile.js";
-import { settle, settleAll, type SettlementReport } from "../settlement/settle.js";
+import { settle, settleAll, settlementReportSchema, type SettlementReport } from "../settlement/settle.js";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
@@ -25,11 +27,43 @@ import {
 } from "../workspace-place.js";
 import type { InvocationAccumulator } from "./invocation.js";
 
-export type ReconcileReport = Readonly<{
-  effects: readonly (ReconcileResult["effects"][number] | ContractFileEffect)[];
-  lag: readonly (ReconcileResult["lag"][number] | ContractFileLag)[];
-  settlement: SettlementReport;
-}>;
+const reconcileFields = {
+  effects: z.array(z.union([reconcileEffectSchema, contractFileEffectSchema])).readonly(),
+  lag: z.array(z.union([gitReconcileLagSchema, contractFileLagSchema])).readonly(),
+  settlement: settlementReportSchema,
+};
+export const reconcileCompletionSchema = z
+  .strictObject({
+    ...reconcileFields,
+    hookRuns: z
+      .array(z.strictObject({ phase: z.enum(["create", "destroy"]), name: z.string() }).readonly())
+      .readonly()
+      .exactOptional(),
+    retiredWorktree: z.string().exactOptional(),
+    retainedWorktree: z.string().exactOptional(),
+  })
+  .readonly();
+export const repoReconcileReportSchema = z.union([
+  z
+    .strictObject({
+      kind: z.literal("completed"),
+      contracts: z
+        .array(
+          z
+            .strictObject({
+              contractId: contractIdSchema,
+              report: reconcileCompletionSchema,
+            })
+            .readonly(),
+        )
+        .readonly(),
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("world-observation-failed"), diagnostic: z.string() }).readonly(),
+]);
+export const reconcileResultSchema = z.union([reconcileCompletionSchema, repoReconcileReportSchema]);
+
+export type ReconcileReport = Pick<z.output<typeof reconcileCompletionSchema>, "effects" | "lag" | "settlement">;
 
 export type TopologyEffect = ReconcileReport["effects"][number];
 

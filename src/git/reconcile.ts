@@ -44,11 +44,9 @@ export const reconcileEffectSchema = z.union([
       kind: z.literal("worktree"),
       path: z.string().refine((value) => value.trim() !== ""),
       action: z.enum(["created", "removed", "unchanged"]),
-      before: z.unknown().optional(),
-      after: z.unknown().optional(),
     })
     .strict()
-    .transform(({ before: _before, after: _after, ...effect }) => effect),
+    .readonly(),
   z
     .object({
       kind: z.literal("worktree"),
@@ -57,7 +55,8 @@ export const reconcileEffectSchema = z.union([
       before: snapshotIdSchema,
       after: snapshotIdSchema,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("recovery-snapshot"),
@@ -65,7 +64,8 @@ export const reconcileEffectSchema = z.union([
       snapshot: snapshotIdSchema,
       retention: z.literal("ephemeral"),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   targetCheckoutEffectSchema,
   z
     .object({
@@ -75,7 +75,8 @@ export const reconcileEffectSchema = z.union([
       after: z.string().min(1).nullable(),
       action: z.enum(["created", "updated", "removed", "unchanged"]),
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 export type Effect = z.infer<typeof reconcileEffectSchema>;
 type ReconcileInput = Readonly<{
@@ -95,7 +96,8 @@ const reconcileFailureSchema = z
     stage: z.enum(["observation", "effect"]),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
-  .strict();
+  .strict()
+  .readonly();
 type ReconcileFailure = z.infer<typeof reconcileFailureSchema>;
 export const gitReconcileLagSchema = z.union([
   z
@@ -105,9 +107,10 @@ export const gitReconcileLagSchema = z.union([
       diagnostic: z
         .string()
         .refine((value) => value.trim() !== "")
-        .optional(),
+        .exactOptional(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("worktree-follow-retained"),
@@ -118,9 +121,10 @@ export const gitReconcileLagSchema = z.union([
       paths: z
         .array(z.string().refine((value) => value.trim() !== ""))
         .readonly()
-        .optional(),
+        .exactOptional(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   unsealedBytesSchema,
   targetCheckoutLagSchema,
   targetWorkspaceLagSchema,

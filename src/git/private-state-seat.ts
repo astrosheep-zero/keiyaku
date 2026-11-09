@@ -29,7 +29,8 @@ export const privateStateSeatCloseLagSchema = z
     kind: z.literal("private-state-seat-close-failed"),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type PrivateStateSeatCloseLag = z.infer<typeof privateStateSeatCloseLagSchema>;
 export type PrivateStateSeatOutcome<T> = Readonly<{
   value: T;

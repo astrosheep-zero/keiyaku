@@ -11,9 +11,10 @@ export const unsealedBytesSchema = z
     kind: z.literal("unsealed-bytes"),
     path: z.string().refine((value) => value.trim() !== ""),
     paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-    head: mintedSnapshotInputSchema.optional(),
+    head: mintedSnapshotInputSchema.exactOptional(),
   })
-  .strict();
+  .strict()
+  .readonly();
 type UnsealedBytes = z.infer<typeof unsealedBytesSchema>;
 export type TerminalSealExpectations = Readonly<{
   heads: readonly SnapshotId[];

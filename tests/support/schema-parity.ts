@@ -31,12 +31,21 @@ type WireObject<T> = {
     Exclude<T[K], undefined | void>
   >;
 };
+type PlainArray<T extends readonly unknown[]> = number extends T["length"]
+  ? "0" extends keyof T
+    ? false
+    : T extends readonly [...unknown[], unknown]
+      ? false
+      : true
+  : false;
 export type Wire<T> = T extends string | number | boolean | bigint | null | undefined
   ? T
   : T extends { toJSON(): infer J }
     ? Wire<J>
-    : T extends readonly unknown[]
-      ? { readonly [K in keyof T]: Wire<T[K]> }
+    : T extends readonly (infer E)[]
+      ? PlainArray<T> extends true
+        ? readonly Wire<E>[]
+        : { readonly [K in keyof T]: Wire<T[K]> }
       : T extends object
         ? { [K in keyof WireObject<T>]: WireObject<T>[K] }
         : T;

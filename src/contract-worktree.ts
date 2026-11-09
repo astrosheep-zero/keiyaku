@@ -35,7 +35,8 @@ export const contractFileEffectSchema = z
     path: z.string().refine((value) => value.trim() !== ""),
     action: z.enum(["created", "updated", "unchanged", "removed"]),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type ContractFileEffect = z.infer<typeof contractFileEffectSchema>;
 export const contractFileLagSchema = z
   .object({
@@ -44,7 +45,8 @@ export const contractFileLagSchema = z
     path: z.string().refine((value) => value.trim() !== ""),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type ContractFileLag = z.infer<typeof contractFileLagSchema>;
 
 export type ContractWorktreeResult = Readonly<{

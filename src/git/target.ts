@@ -16,7 +16,8 @@ export const targetWorkspaceRefusalSchema = z
     contractId: contractIdSchema,
     reason: z.enum(["unappointed", "missing", "association", "replaced", "attached", "uncommitted", "operation"]),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type TargetWorkspaceRefusal = z.infer<typeof targetWorkspaceRefusalSchema>;
 type TargetWorkspaceReason = TargetWorkspaceRefusal["reason"];
 type TargetResolution =

@@ -1,5 +1,10 @@
-import type { ActorId, AttestationData, ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
-import type { Dispatch } from "../dispatch/index.js";
+/** @architectureCompositionRoot */
+import { z } from "zod";
+import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
+import { worktreeWorkspaceSchema } from "../git/workspace.js";
+import { dispatchSchema } from "../dispatch/index.js";
+import { journalEntrySchema } from "../protocol/result-leaves.js";
+import type { ActorId, AttestationData, ContractId } from "../core/facts/types.js";
 import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
 import type { Settings } from "../settings.js";
 import type { DebtId } from "../debt/identity.js";
@@ -7,15 +12,22 @@ import type { DebtId } from "../debt/identity.js";
 /** Public gate words remain ordinary strings; private policy interprets them. */
 export type Gate = string;
 
-export type ContractHistoryEvent =
-  | Readonly<{ source: "journal"; fact: JournalEntry }>
-  | Readonly<{ source: "dispatch"; dispatch: Dispatch }>;
-export type ContractHistory = Readonly<{
-  id: ContractId;
-  state: SnapshotId;
-  workspace?: Readonly<{ kind: "worktree"; path: string }>;
-  events: readonly ContractHistoryEvent[];
-}>;
+export const contractHistoryEventSchema = z.union([
+  z.strictObject({ source: z.literal("journal"), fact: journalEntrySchema }).readonly(),
+  z.strictObject({ source: z.literal("dispatch"), dispatch: dispatchSchema }).readonly(),
+]);
+export const contractHistorySchema = z
+  .strictObject({
+    id: contractIdSchema,
+    state: snapshotIdSchema,
+    workspace: worktreeWorkspaceSchema.exactOptional(),
+    events: z.array(contractHistoryEventSchema).readonly(),
+  })
+  .readonly()
+  .nullable();
+
+export type ContractHistoryEvent = z.output<typeof contractHistoryEventSchema>;
+export type ContractHistory = NonNullable<z.output<typeof contractHistorySchema>>;
 
 type MarkdownBindInput = Readonly<{
   markdown: string;
@@ -53,16 +65,20 @@ export type ContractListInput = Readonly<{ limit?: number }>;
 export type ContractList = Omit<ContractBoard, "rows"> & Readonly<{ rows: readonly ContractRow[]; hasMore: boolean }>;
 export type ContractObservationInput = Readonly<{ id: ContractId }>;
 export type ContractResolveInput = Readonly<{ selector?: string; cwd?: string }>;
-export type ContractSelectorRefusal =
-  | Readonly<{ kind: "invalid-selector"; selector: string; diagnostic: string }>
-  | Readonly<{ kind: "redundant-short-selector"; selector: string }>
-  | Readonly<{ kind: "unknown-short-selector"; selector: string }>
-  | Readonly<{ kind: "ambiguous-selector"; selector: string }>
-  | Readonly<{ kind: "ambiguous-selector"; cwd: string }>
-  | Readonly<{ kind: "no-contextual-match"; cwd: string }>;
-export type ContractResolution =
-  | Readonly<{ kind: "resolved"; id: ContractId }>
-  | Readonly<{ kind: "refused"; refusal: ContractSelectorRefusal }>;
+export const contractSelectorRefusalSchema = z.union([
+  z.strictObject({ kind: z.literal("invalid-selector"), selector: z.string(), diagnostic: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("redundant-short-selector"), selector: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("unknown-short-selector"), selector: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("ambiguous-selector"), selector: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("ambiguous-selector"), cwd: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("no-contextual-match"), cwd: z.string() }).readonly(),
+]);
+export const contractResolutionSchema = z.union([
+  z.strictObject({ kind: z.literal("resolved"), id: contractIdSchema }).readonly(),
+  z.strictObject({ kind: z.literal("refused"), refusal: contractSelectorRefusalSchema }).readonly(),
+]);
+export type ContractSelectorRefusal = z.output<typeof contractSelectorRefusalSchema>;
+export type ContractResolution = z.output<typeof contractResolutionSchema>;
 export type ReviewInput = ActorOptions &
   Readonly<{ verdict: AttestationData["verdict"]; summary?: string; signal?: AbortSignal }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;

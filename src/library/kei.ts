@@ -1,4 +1,5 @@
 /** @architectureCompositionRoot */
+import { z } from "zod";
 import { renderContractGuidance } from "../contract-guidance.js";
 import type { ContractId, ContractState } from "../core/facts/types.js";
 import { readDispatchesAt } from "../dispatch/index.js";
@@ -43,6 +44,8 @@ import {
   type ContractWaitOptions,
   type ContractWaitResult,
 } from "./contract-wait.js";
+
+export const guidanceSchema = z.string().nullable();
 
 const KEIYAKU_HANDLE = Symbol("Kei handle");
 

@@ -32,8 +32,14 @@ export { dispatchSchema, dispatchFailureSchema } from "./dispatch/index.js";
 export { AkumaHost } from "./body-host.js";
 export type { AkumaHostScope } from "./body-host.js";
 export { AuthorityCorruptionError } from "./core/facts/errors.js";
-export { Delivery } from "./library/delivery.js";
-export { Kei } from "./library/kei.js";
+export { Delivery, deliverySchema } from "./library/delivery.js";
+export { Kei, guidanceSchema } from "./library/kei.js";
+export {
+  contractResolutionSchema,
+  contractSelectorRefusalSchema,
+  contractHistorySchema,
+  contractHistoryEventSchema,
+} from "./library/contract-types.js";
 export { Keiyaku, KeiyakuUsageError } from "./library/keiyaku.js";
 export type { KeiyakuAt } from "./library/keiyaku.js";
 export { Keis } from "./library/contract-composition.js";
@@ -144,6 +150,7 @@ export type {
   TellWake,
 } from "./library/akumas.js";
 export type { ContinuationReport } from "./library/continuation.js";
+export { contractWaitMemberSchema, contractWaitResultSchema } from "./library/contract-wait.js";
 export type {
   ContractWaitInput,
   ContractWaitOptions,
@@ -151,6 +158,16 @@ export type {
   ContractWaitResult,
 } from "./library/contract-wait.js";
 export type { ReconcileInput } from "./library/contract-composition.js";
+export {
+  arcOutcomeSchema,
+  abandonOutcomeSchema,
+  bindOutcomeSchema,
+  amendOutcomeSchema,
+  deliveryPreviewOutcomeSchema,
+  deliverOutcomeSchema,
+  verifyOutcomeSchema,
+  reviewOutcomeSchema,
+} from "./library/contract-outcomes.js";
 export type {
   AbandonOutcome,
   AmendOutcome,
@@ -220,9 +237,17 @@ export type {
 export type { VerifyValue, VerificationCheck } from "./protocol/verify.js";
 export type { DeliveryPreviewReport } from "./protocol/delivery-preview.js";
 export type { IntegrationConflictMaterialized } from "./protocol/deliver.js";
+export { executionObservationSchema } from "./protocol/execution-observation.js";
+export { contractStateSchema, journalEntrySchema } from "./protocol/result-leaves.js";
 export type { ExecutionObservation, ExecutionObserver } from "./protocol/execution-observation.js";
 export type { PlacementStop, VerificationStop } from "./protocol/operations.js";
 export type { ExecutionCleanup, ExecutionStop } from "./protocol/progress.js";
+export {
+  contractBoardSchema,
+  contractRowSchema,
+  contractListSchema,
+  contractObservationSchema,
+} from "./protocol/read/status.js";
 export type {
   ContractAfterEdge,
   ContractBoard,
@@ -253,4 +278,5 @@ export { DEBT_RELATION_PREDICATE_FIELDS, DebtAuthorityCorruptionError, Debts } f
 export { World, WorldError } from "./world.js";
 export type { WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";
 
+export { reconcileCompletionSchema, repoReconcileReportSchema, reconcileResultSchema } from "./library/reconcile.js";
 export type { ReconcileReport, TopologyEffect } from "./library/reconcile.js";

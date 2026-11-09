@@ -1,10 +1,23 @@
-import type { z } from "zod";
+import { z } from "zod";
 import type { DeliverData, SnapshotId } from "../core/facts/types.js";
+import { completionEvidenceShape } from "../protocol/completion.js";
 import type { CompletionEvidence } from "../protocol/completion.js";
-import type { deliverLeadingSchema } from "../protocol/deliver.js";
-import type { candidateContentChangeSchema } from "../protocol/operations.js";
+import { deliverLeadingSchema } from "../protocol/deliver.js";
+import { candidateContentChangeSchema, deliverDataSchema } from "../protocol/operations.js";
 import { deliveryDiffOperation, type RepositoryScope } from "../protocol/operations.js";
-import type { ContinuationReport } from "./continuation.js";
+import { continuationReportSchema, type ContinuationReport } from "./continuation.js";
+
+const deliveryFields = {
+  ...deliverDataSchema.unwrap().shape,
+  ...completionEvidenceShape,
+  contentChange: candidateContentChangeSchema.exactOptional(),
+  continuation: continuationReportSchema.exactOptional(),
+};
+export const deliverySchema = z
+  .strictObject({ ...deliveryFields, leading: deliverLeadingSchema.exactOptional() })
+  .readonly()
+  .nullable();
+export const deliveredValueSchema = z.strictObject({ ...deliveryFields, leading: deliverLeadingSchema }).readonly();
 
 export type DeliveryValue = DeliverData &
   CompletionEvidence &

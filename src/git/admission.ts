@@ -38,7 +38,8 @@ type Accepted = Readonly<{
 
 export const publicationFailedSchema = z
   .object({ kind: z.literal("publication-failed"), diagnostic: z.string() })
-  .strict();
+  .strict()
+  .readonly();
 export type PublicationFailed = z.infer<typeof publicationFailedSchema>;
 type Unknown = Readonly<{ kind: "unknown" }>;
 

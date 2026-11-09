@@ -84,9 +84,10 @@ export const deliverLeadingSchema = z
   .object({
     kind: z.enum(["admitted-now", "already-admitted"]),
     fact: entryUlidSchema,
-    reusedIntegration: snapshotIdSchema.optional(),
+    reusedIntegration: snapshotIdSchema.exactOptional(),
   })
-  .strict();
+  .strict()
+  .readonly();
 type DeliverLeading = z.infer<typeof deliverLeadingSchema>;
 type DeliverValue = DeliveryIdentity &
   CompletionEvidence &
@@ -104,7 +105,8 @@ export const materializedConflictSchema = z
     handoffBase: snapshotIdSchema,
     recovery: conflictRecoverySchema,
   })
-  .strict();
+  .strict()
+  .readonly();
 export type IntegrationConflictMaterialized = z.infer<typeof materializedConflictSchema>;
 
 const DELIVER_CONFLICT_RECOVERY = conflictRecovery;

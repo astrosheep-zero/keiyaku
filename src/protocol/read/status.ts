@@ -1,3 +1,12 @@
+import { z } from "zod";
+import { boundedListSchema } from "../../bounded-list.js";
+import { contractIdSchema, snapshotIdSchema } from "../../git/identity.js";
+import {
+  contractWorkspaceObservationSchema,
+  contractTargetLagSchema,
+  worktreeWorkspaceSchema,
+} from "../../git/workspace.js";
+import { contractTargetSchema, deliverDataSchema, gateCurrentSchema } from "../result-leaves.js";
 import {
   observeActiveContractWorld,
   observeContractsForAdmissionInObservationAt,
@@ -23,27 +32,72 @@ import type { GitRepository } from "../../git/process.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import { verificationRequirement } from "../../verification/declaration.js";
-import {
-  type ContractId,
-  type ContractState,
-  type ContractTarget,
-  type DeliverData,
-  type JournalEntry,
-  type SnapshotId,
-} from "../../core/facts/types.js";
-import { projectBoundedList, type BoundedList } from "../../bounded-list.js";
+import { type ContractId, type ContractState, type JournalEntry } from "../../core/facts/types.js";
+import { projectBoundedList } from "../../bounded-list.js";
+
+const phaseSchema = z.enum(["bound", "claimed", "abandoned"]);
+const rowRequirementSchema = z
+  .strictObject({
+    requirement: z.string(),
+    current: gateCurrentSchema,
+    index: z.number().exactOptional(),
+  })
+  .readonly();
+const rowGateSchema = z
+  .strictObject({
+    gate: z.string(),
+    current: gateCurrentSchema,
+    satisfied: z.boolean(),
+    requirements: z.array(rowRequirementSchema).readonly(),
+  })
+  .readonly();
+const endpointSchema = z.union([
+  z.strictObject({ kind: z.literal("claimed") }).readonly(),
+  z.strictObject({ kind: z.literal("active"), phase: phaseSchema }).readonly(),
+  z.strictObject({ kind: z.literal("abandoned") }).readonly(),
+  z.strictObject({ kind: z.literal("missing") }).readonly(),
+]);
+export const contractRowSchema = z
+  .strictObject({
+    id: contractIdSchema,
+    title: z.string().nullable(),
+    phase: phaseSchema,
+    phaseAt: z.string(),
+    lastJournalAt: z.string(),
+    disposition: z.enum(["active", "terminal"]),
+    workspace: z.literal("worktree"),
+    worktreePath: z.string().nullable(),
+    workspaceObservation: contractWorkspaceObservationSchema,
+    target: contractTargetSchema.nullable(),
+    targetLag: z.union([
+      contractTargetLagSchema,
+      z.strictObject({ kind: z.literal("counted"), behind: z.number(), subject: worktreeWorkspaceSchema }).readonly(),
+      z.strictObject({ kind: z.literal("unknown"), subject: worktreeWorkspaceSchema }).readonly(),
+    ]),
+    delivery: deliverDataSchema.nullable(),
+    abandonNote: z.string().exactOptional(),
+    targetObservation: z.strictObject({ head: snapshotIdSchema.nullable(), drift: z.boolean() }).readonly().nullable(),
+    gates: z.strictObject({ reports: z.array(rowGateSchema).readonly(), satisfied: z.boolean() }).readonly(),
+    after: z.array(z.strictObject({ contractId: contractIdSchema, endpoint: endpointSchema }).readonly()).readonly(),
+    dependents: z.array(z.strictObject({ contractId: contractIdSchema, phase: phaseSchema }).readonly()).readonly(),
+  })
+  .readonly();
+const boardFields = { root: z.string(), state: snapshotIdSchema.nullable(), observedAt: z.string() };
+export const contractBoardSchema = z
+  .strictObject({ ...boardFields, rows: z.array(contractRowSchema).readonly() })
+  .readonly();
+export const contractListSchema = boundedListSchema(contractRowSchema, boardFields);
+export const contractObservationSchema = z.union([
+  z.strictObject({ kind: z.literal("missing"), id: contractIdSchema }).readonly(),
+  z.strictObject({ kind: z.literal("present"), row: contractRowSchema }).readonly(),
+]);
 
 export type ContractPhase = "bound" | "claimed" | "abandoned";
 export type ContractDisposition = "active" | "terminal";
 
 export type ContractGateCurrent = GateCurrent;
 
-export type ContractGateReport = Readonly<{
-  gate: string;
-  current: GateCurrent;
-  satisfied: boolean;
-  requirements: readonly Readonly<{ requirement: string; current: GateCurrent; index?: number }>[];
-}>;
+export type ContractGateReport = z.output<typeof rowGateSchema>;
 
 export type ContractTargetLag =
   | GitContractTargetLag
@@ -51,62 +105,13 @@ export type ContractTargetLag =
   | Readonly<{ kind: "unknown"; subject: Readonly<{ kind: "worktree"; path: string }> }>;
 export type { ContractWorkspaceObservation };
 
-type AfterEndpointObservation =
-  | Readonly<{ kind: "claimed" }>
-  | Readonly<{ kind: "active"; phase: ContractPhase }>
-  | Readonly<{ kind: "abandoned" }>
-  | Readonly<{ kind: "missing" }>;
-
-export type ContractAfterEdge = Readonly<{
-  contractId: ContractId;
-  endpoint: AfterEndpointObservation;
-}>;
-
-export type ContractDependent = Readonly<{
-  contractId: ContractId;
-  phase: ContractPhase;
-}>;
-
-export type ContractRow = Readonly<{
-  id: ContractId;
-  title: string | null;
-  phase: ContractPhase;
-  phaseAt: string;
-  lastJournalAt: string;
-  disposition: ContractDisposition;
-  workspace: "worktree";
-  worktreePath: string | null;
-  workspaceObservation: ContractWorkspaceObservation;
-  target: ContractTarget | null;
-  targetLag: ContractTargetLag;
-  delivery: DeliverData | null;
-  abandonNote?: string;
-  targetObservation: Readonly<{ head: SnapshotId | null; drift: boolean }> | null;
-  gates: Readonly<{
-    reports: readonly ContractGateReport[];
-    satisfied: boolean;
-  }>;
-  after: readonly ContractAfterEdge[];
-  dependents: readonly ContractDependent[];
-}>;
-
-export type ContractBoard = Readonly<{
-  root: string;
-  state: SnapshotId | null;
-  observedAt: string;
-  rows: readonly ContractRow[];
-}>;
-
-export type ContractCatalogue = Readonly<{
-  root: string;
-  state: SnapshotId | null;
-  observedAt: string;
-}> &
-  BoundedList<ContractRow>;
-
-export type ContractObservation =
-  | Readonly<{ kind: "missing"; id: ContractId }>
-  | Readonly<{ kind: "present"; row: ContractRow }>;
+type AfterEndpointObservation = z.output<typeof endpointSchema>;
+export type ContractAfterEdge = ContractRow["after"][number];
+export type ContractDependent = ContractRow["dependents"][number];
+export type ContractRow = z.output<typeof contractRowSchema>;
+export type ContractBoard = z.output<typeof contractBoardSchema>;
+export type ContractCatalogue = z.output<typeof contractListSchema>;
+export type ContractObservation = z.output<typeof contractObservationSchema>;
 
 function documentFor(state: ContractState): ReturnType<typeof decodeContractDocument> | undefined {
   try {

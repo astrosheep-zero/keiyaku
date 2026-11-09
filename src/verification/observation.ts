@@ -4,9 +4,9 @@ import { snapshotId } from "../core/facts/types.js";
 const phase = z.enum(["materialize", "setup", "declaration", "cleanup"]);
 const coordinate = {
   phase,
-  cwd: z.string().optional(),
-  name: z.string().optional(),
-  command: z.string().optional(),
+  cwd: z.string().exactOptional(),
+  name: z.string().exactOptional(),
+  command: z.string().exactOptional(),
   requirement: z.string(),
   snapshot: z.string().transform(snapshotId),
   index: z.number().int().positive(),
@@ -19,10 +19,11 @@ export const verificationObservationSchema = z.discriminatedUnion("kind", [
       kind: z.literal("phase"),
       ...coordinate,
       state: z.enum(["started", "finished"]),
-      outcome: z.string().optional(),
-      elapsedMs: z.number().nonnegative().optional(),
+      outcome: z.string().exactOptional(),
+      elapsedMs: z.number().nonnegative().exactOptional(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("output"),
@@ -30,7 +31,8 @@ export const verificationObservationSchema = z.discriminatedUnion("kind", [
       stream: z.enum(["stdout", "stderr"]),
       text: z.string(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 
 /** Attempt-local observations, never testimony, liveness, or recovery authority. */

@@ -17,7 +17,8 @@ import { worktreeMissingRefusalSchema, dirtyWorkspaceRefusalSchema } from "../gi
 
 const forkSourceUnavailableSchema = z
   .object({ kind: z.enum(["fork-source-missing", "fork-source-unavailable"]), contractId: contractIdSchema })
-  .strict();
+  .strict()
+  .readonly();
 const forkSourceRefusalSchema = z.union([forkSourceUnavailableSchema, forkSourceMovedRefusalSchema]);
 export type ForkSourceRefusal = z.infer<typeof forkSourceRefusalSchema>;
 export const nukeConfirmationRefusalSchema = z

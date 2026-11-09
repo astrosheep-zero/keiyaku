@@ -3,8 +3,18 @@ import { boundedListLimit } from "../bounded-list.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import type { ActiveContractRefusal } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
-import { gate, requirementId } from "../core/facts/types.js";
-import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
+import { gateReportSchema } from "./result-leaves.js";
+export {
+  deliverDataSchema,
+  gateSchema,
+  verdictSchema,
+  candidateContentChangeSchema,
+  gateCurrentSchema,
+  requirementIdSchema,
+  requirementReportSchema,
+  gateReportSchema,
+} from "./result-leaves.js";
+import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
 import { integrationPreparationRefusalSchema, readDeliveryDiff } from "../git/integration.js";
 import { observeContractAt } from "../git/observe.js";
@@ -44,32 +54,10 @@ import { protocolTerminalSchema } from "./run.js";
 
 export { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 export { entryUlidSchema } from "./attempt.js";
-export const gateSchema = z.string().transform((value, context) => {
-  try {
-    return gate(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid gate" });
-    return z.NEVER;
-  }
-});
-export const deliverDataSchema = z
-  .object({
-    note: z
-      .string()
-      .refine((value) => value.trim() !== "")
-      .optional(),
-    tenderSnapshot: snapshotIdSchema,
-    integration: z
-      .object({ predecessor: snapshotIdSchema, snapshot: snapshotIdSchema, changeId: changeIdSchema })
-      .strict(),
-    method: z.literal("squash"),
-    policy: z.object({ requireBranchesToBeUpToDate: z.boolean() }).strict(),
-  })
-  .strict();
-export const verdictSchema = z.enum(["satisfied", "unsatisfied"]);
 export const activeContractRefusalSchema = z
   .object({ kind: z.enum(["contract-missing", "terminal"]), contractId: contractIdSchema })
-  .strict();
+  .strict()
+  .readonly();
 export const bindRefusalSchema = z
   .object({
     kind: z.enum([
@@ -82,13 +70,15 @@ export const bindRefusalSchema = z
     ]),
     contractId: contractIdSchema,
   })
-  .strict();
+  .strict()
+  .readonly();
 export const amendRefusalSchema = z
   .object({
     kind: z.enum(["contract-missing", "terminal", "terms-moved", "unknown-prerequisite", "cyclic-prerequisite"]),
     contractId: contractIdSchema,
   })
-  .strict();
+  .strict()
+  .readonly();
 export const deliverRefusalSchema = z
   .object({
     kind: z.enum([
@@ -101,47 +91,17 @@ export const deliverRefusalSchema = z
     ]),
     contractId: contractIdSchema,
   })
-  .strict();
+  .strict()
+  .readonly();
 export const verificationDeclarationRefusalSchema = z
-  .object({ kind: z.literal("verification-declaration-invalid"), contractId: contractIdSchema.optional() })
-  .strict();
-export const candidateContentChangeSchema = z
-  .object({
-    kind: z.literal("candidate-content-changed"),
-    target: z.string().optional(),
-    previousChange: changeIdSchema,
-    currentChange: changeIdSchema,
-  })
-  .strict();
-export const gateCurrentSchema = z.union([
-  z.object({ kind: z.literal("missing") }).strict(),
-  z
-    .object({ kind: z.literal("attested"), verdict: verdictSchema, at: z.string(), summary: z.string().optional() })
-    .strict(),
-  z
-    .object({ kind: z.literal("stale"), priorVerdict: verdictSchema, reason: candidateContentChangeSchema.optional() })
-    .strict(),
-]);
-export const requirementIdSchema = z
-  .string()
-  .min(1)
-  .transform((value) => requirementId(value));
-export const requirementReportSchema = z
-  .object({
-    requirement: requirementIdSchema,
-    current: gateCurrentSchema,
-  })
-  .strict();
-export const gateReportSchema = z
-  .object({
-    gate: gateSchema,
-    requirements: z.array(requirementReportSchema).readonly(),
-    satisfied: z.boolean(),
-    current: gateCurrentSchema,
-  })
-  .strict();
+  .object({ kind: z.literal("verification-declaration-invalid"), contractId: contractIdSchema.exactOptional() })
+  .strict()
+  .readonly();
 export const verifyRefusalSchema = z.union([
-  z.object({ kind: z.literal("verification-not-selected"), contractId: contractIdSchema }).strict(),
+  z
+    .object({ kind: z.literal("verification-not-selected"), contractId: contractIdSchema })
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("verification-index-out-of-range"),
@@ -149,7 +109,8 @@ export const verifyRefusalSchema = z.union([
       index: z.number().int().positive(),
       total: z.number().int().nonnegative(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 export const placementRefusalSchema = z.union([
   z
@@ -157,33 +118,43 @@ export const placementRefusalSchema = z.union([
       kind: z.enum(["target-contract-missing", "target-contract-terminal", "target-contract-self"]),
       contractId: contractIdSchema,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   targetWorkspaceRefusalSchema,
   z
     .object({ kind: z.enum(["contract-missing", "delivery-missing", "terminal"]), contractId: contractIdSchema })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("gates-unsatisfied"),
       contractId: contractIdSchema,
       unmet: z.array(gateReportSchema).readonly(),
-      target: z.string().min(1).optional(),
+      target: z.string().min(1).exactOptional(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("prerequisites-unsatisfied"),
       contractId: contractIdSchema,
       unmet: z
-        .array(z.object({ contractId: contractIdSchema, state: z.enum(["missing", "active", "abandoned"]) }).strict())
+        .array(
+          z
+            .object({ contractId: contractIdSchema, state: z.enum(["missing", "active", "abandoned"]) })
+            .strict()
+            .readonly(),
+        )
         .readonly(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 
 const mergeStatePresentRefusalSchema = z
   .object({ kind: z.literal("merge-state-present"), contractId: contractIdSchema, workspace: worktreeWorkspaceSchema })
-  .strict();
+  .strict()
+  .readonly();
 export const deliverConflictRefusalSchema = z
   .object({
     kind: z.literal("integration-failed"),
@@ -193,11 +164,13 @@ export const deliverConflictRefusalSchema = z
     conflictPaths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
     recovery: conflictRecoverySchema,
   })
-  .strict();
+  .strict()
+  .readonly();
 export type DeliverConflictRefusal = z.infer<typeof deliverConflictRefusalSchema>;
 const targetMissingRefusalSchema = z
   .object({ kind: z.literal("target-missing"), contractId: contractIdSchema })
-  .strict();
+  .strict()
+  .readonly();
 export const deliveryPreparationRefusalSchema = z.union([
   targetWorkspaceRefusalSchema,
   targetMissingRefusalSchema,
@@ -267,8 +240,11 @@ export type DocumentDerivation = Readonly<{
 
 type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
 export const verificationStopSchema = z.union([
-  z.object({ refusal: z.union([activeContractRefusalSchema, verificationDeclarationRefusalSchema]) }).strict(),
-  z.object({ retry: protocolTerminalSchema }).strict(),
+  z
+    .object({ refusal: z.union([activeContractRefusalSchema, verificationDeclarationRefusalSchema]) })
+    .strict()
+    .readonly(),
+  z.object({ retry: protocolTerminalSchema }).strict().readonly(),
   verificationRuntimeStopSchema,
 ]);
 export type VerificationStop = z.infer<typeof verificationStopSchema>;
@@ -282,14 +258,16 @@ export const placementStopSchema = z.union([
         targetMissingRefusalSchema,
       ]),
     })
-    .strict(),
-  z.object({ retry: protocolTerminalSchema }).strict(),
+    .strict()
+    .readonly(),
+  z.object({ retry: protocolTerminalSchema }).strict().readonly(),
   z
     .object({
       failure: z.literal("target-placement-failed"),
       diagnostic: z.string().refine((value) => value.trim() !== ""),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       failure: z.literal("target-moved"),
@@ -300,7 +278,8 @@ export const placementStopSchema = z.union([
       attempts: z.number().int(),
       observedTreeEqualsCandidate: z.boolean(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       failure: z.literal("target-moved"),
@@ -310,7 +289,8 @@ export const placementStopSchema = z.union([
       observed: snapshotIdSchema.nullable(),
       observedTreeEqualsCandidate: z.boolean(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 export type PlacementStop = z.infer<typeof placementStopSchema>;
 export type AttemptDecision<Value, Refusal = IntentRefusal> =

@@ -126,26 +126,31 @@ type VerifyRequirementInput = Readonly<{
 }>;
 
 const verificationCapturedOutputFields = {
-  stdout: z.string().min(1).optional(),
-  stderr: z.string().min(1).optional(),
-  truncated: z.literal(true).optional(),
+  stdout: z.string().min(1).exactOptional(),
+  stderr: z.string().min(1).exactOptional(),
+  truncated: z.literal(true).exactOptional(),
 };
 export const verificationRuntimeStopSchema = z.union([
-  z.object({ failure: z.enum(["unknown-exit", "cancelled"]), ...verificationCapturedOutputFields }).strict(),
+  z
+    .object({ failure: z.enum(["unknown-exit", "cancelled"]), ...verificationCapturedOutputFields })
+    .strict()
+    .readonly(),
   z
     .object({
       failure: z.enum(["candidate-unavailable", "spawn-error"]),
       diagnostic: z.string().refine((value) => value.trim() !== ""),
       ...verificationCapturedOutputFields,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       failure: z.literal("environment-failure"),
       diagnostic: z.string().refine((value) => value.trim() !== ""),
       ...verificationCapturedOutputFields,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       failure: z.literal("environment-failure"),
@@ -153,7 +158,8 @@ export const verificationRuntimeStopSchema = z.union([
       detail: hookFailureSchema,
       ...verificationCapturedOutputFields,
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 type VerificationRuntimeStop = z.infer<typeof verificationRuntimeStopSchema>;
 type VerificationReuseRefusal = Readonly<{

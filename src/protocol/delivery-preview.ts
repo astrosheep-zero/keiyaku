@@ -30,14 +30,17 @@ import type {
 export const deliveryPreviewReportSchema = z
   .object({
     candidate: z.union([
-      z.object({ kind: z.literal("blocked"), refusal: deliveryPreparationRefusalSchema }).strict(),
+      z
+        .object({ kind: z.literal("blocked"), refusal: deliveryPreparationRefusalSchema })
+        .strict()
+        .readonly(),
       z
         .object({
           kind: z.literal("ready"),
           workspace: worktreeWorkspaceSchema,
           identity: deliverDataSchema,
-          scope: deliveryDiffScopeSchema,
-          diff: z.string().optional(),
+          scope: deliveryDiffScopeSchema.readonly(),
+          diff: z.string().exactOptional(),
           requirements: z
             .object({
               gates: z.array(gateReportSchema).readonly(),
@@ -48,43 +51,63 @@ export const deliveryPreviewReportSchema = z
                       contractId: contractIdSchema,
                       state: z.enum(["missing", "active", "abandoned"]),
                     })
-                    .strict(),
+                    .strict()
+                    .readonly(),
                 )
                 .readonly(),
             })
-            .strict(),
+            .strict()
+            .readonly(),
         })
-        .strict(),
+        .strict()
+        .readonly(),
     ]),
     verification: z.union([
-      z.object({ kind: z.literal("not-run") }).strict(),
-      z.object({ kind: z.literal("undeclared") }).strict(),
+      z
+        .object({ kind: z.literal("not-run") })
+        .strict()
+        .readonly(),
+      z
+        .object({ kind: z.literal("undeclared") })
+        .strict()
+        .readonly(),
       z
         .object({
           kind: z.literal("requirements"),
           requirements: z
             .array(
               requirementReportSchema
+                .unwrap()
                 .extend({
-                  index: z.number().int().positive().optional(),
+                  index: z.number().int().positive().exactOptional(),
                 })
-                .strict(),
+                .strict()
+                .readonly(),
             )
             .readonly(),
         })
-        .strict(),
+        .strict()
+        .readonly(),
     ]),
-    target: z.union([z.object({ kind: z.literal("not-observed") }).strict(), previewTargetAnswerSchema]),
-    targetLag: contractTargetLagSchema.optional(),
+    target: z.union([
+      z
+        .object({ kind: z.literal("not-observed") })
+        .strict()
+        .readonly(),
+      previewTargetAnswerSchema,
+    ]),
+    targetLag: contractTargetLagSchema.exactOptional(),
     delivery: z
       .object({
         changeId: changeIdSchema,
         relation: z.enum(["identical", "differs"]),
       })
       .strict()
-      .optional(),
+      .readonly()
+      .exactOptional(),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type DeliveryPreviewReport = z.infer<typeof deliveryPreviewReportSchema>;
 
 type DeliveryPreviewOperationInput = MutationOperationInput &

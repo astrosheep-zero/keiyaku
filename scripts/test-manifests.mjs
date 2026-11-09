@@ -96,6 +96,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/contract-completion.test.ts",
   "tests/contract-fork.test.ts",
   "tests/contract-lifecycle.test.ts",
+  "tests/contract-result-schemas.test.ts",
   "tests/contract-target-landing.test.ts",
   "tests/contract-target-ref.test.ts",
   "tests/contract-wait.test.ts",

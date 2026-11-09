@@ -6,6 +6,7 @@ import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../
 import {
   appendPrivateStateSeatClose,
   withPrivateStatePublicationSeat,
+  privateStateSeatCloseLagSchema,
   type PrivateStateSeatCloseLag,
 } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
@@ -26,27 +27,32 @@ import { World, type WorldRoot } from "../world.js";
 
 export const settlementActionSchema = z
   .object({ kind: z.literal("debt"), debtId: debtIdSchema, action: z.literal("done") })
-  .strict();
+  .strict()
+  .readonly();
 export type SettlementAction = z.infer<typeof settlementActionSchema>;
 export const settlementLagSchema = z
   .object({
     kind: z.literal("settlement-failed"),
     surface: z.enum(["debt-holder", "debt"]),
     contractId: contractIdSchema,
-    debtId: debtIdSchema.optional(),
+    debtId: debtIdSchema.exactOptional(),
     path: z
       .string()
       .refine((value) => value.trim() !== "")
-      .optional(),
+      .exactOptional(),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type SettlementLag = z.infer<typeof settlementLagSchema>;
-export type SettlementReport = Readonly<{
-  actions: readonly SettlementAction[];
-  lags: readonly SettlementLag[];
-  seatClose?: readonly PrivateStateSeatCloseLag[];
-}>;
+export const settlementReportSchema = z
+  .strictObject({
+    actions: z.array(settlementActionSchema).readonly(),
+    lags: z.array(settlementLagSchema).readonly(),
+    seatClose: z.array(privateStateSeatCloseLagSchema).readonly().exactOptional(),
+  })
+  .readonly();
+export type SettlementReport = z.output<typeof settlementReportSchema>;
 
 type SettlementProgress = Readonly<{
   recordSettlement(contractId: ContractId, report: SettlementReport): void;

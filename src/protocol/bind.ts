@@ -28,13 +28,17 @@ import type { CompanionDecorator, ExternalProtocolPreparation, InCustodyProtocol
 export type { BindRefusal } from "../core/verbs/bind.js";
 export type { BindTargetSelection };
 export const targetInputRefusalSchema = z.union([
-  z.object({ kind: z.enum(["invalid-target", "target-missing", "unborn-head"]) }).strict(),
+  z
+    .object({ kind: z.enum(["invalid-target", "target-missing", "unborn-head"]) })
+    .strict()
+    .readonly(),
   targetWorkspaceRefusalSchema,
 ]);
 type TargetInputRefusal = z.infer<typeof targetInputRefusalSchema>;
 export const forkSourceMovedRefusalSchema = z
   .object({ kind: z.literal("fork-source-moved"), contractId: contractIdSchema })
-  .strict();
+  .strict()
+  .readonly();
 type ForkSourceMovedRefusal = z.infer<typeof forkSourceMovedRefusalSchema>;
 
 type BindOperationInput = Readonly<{

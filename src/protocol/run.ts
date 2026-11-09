@@ -26,7 +26,10 @@ export const STALE_PRIVATE_STATE_PREPARATION = {
 } as const;
 
 export const protocolTerminalSchema = z.union([
-  z.object({ kind: z.enum(["exhausted", "collision"]) }).strict(),
+  z
+    .object({ kind: z.enum(["exhausted", "collision"]) })
+    .strict()
+    .readonly(),
   publicationFailedSchema,
 ]);
 export type ProtocolTerminal = z.infer<typeof protocolTerminalSchema>;

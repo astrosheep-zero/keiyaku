@@ -1,16 +1,17 @@
 import { z } from "zod";
-import { validateEntry } from "../core/facts/codec.js";
+import { journalEntrySchema } from "./result-leaves.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { verificationObservationSchema } from "../verification/observation.js";
 
-export const observationSchema = z.discriminatedUnion("kind", [
+export const executionObservationSchema = z.discriminatedUnion("kind", [
   z
     .object({
       kind: z.literal("admitted"),
       contractId: contractIdSchema,
-      fact: z.unknown().transform(validateEntry),
+      fact: journalEntrySchema,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("verification"),
@@ -18,7 +19,8 @@ export const observationSchema = z.discriminatedUnion("kind", [
       snapshot: snapshotIdSchema,
       observation: verificationObservationSchema,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("stage"),
@@ -26,10 +28,11 @@ export const observationSchema = z.discriminatedUnion("kind", [
       stage: z.enum(["placement", "continuation", "reconciliation"]),
       state: z.enum(["started", "finished"]),
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 
-export type ExecutionObservation = z.infer<typeof observationSchema>;
+export type ExecutionObservation = z.infer<typeof executionObservationSchema>;
 export type ExecutionObserver = (event: ExecutionObservation) => void | PromiseLike<void>;
 
 /** Observation failure cannot change execution, admission, or process custody. */

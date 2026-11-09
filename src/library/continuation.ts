@@ -23,16 +23,25 @@ import { z } from "zod";
 const continuationStopSchema = z.union([
   placementStopSchema,
   executionStopSchema,
-  z.object({ kind: z.literal("already-terminal") }).strict(),
-  z.object({ kind: z.literal("physical-lag"), lags: z.array(gitReconcileLagSchema).readonly() }).strict(),
+  z
+    .object({ kind: z.literal("already-terminal") })
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("physical-lag"), lags: z.array(gitReconcileLagSchema).readonly() })
+    .strict()
+    .readonly(),
 ]);
 export type ContinuationStop = z.infer<typeof continuationStopSchema>;
 export const continuationReportSchema = z
   .object({
     claimed: z.array(contractIdSchema).readonly(),
-    stopped: z.array(z.object({ contractId: contractIdSchema, stop: continuationStopSchema }).strict()).readonly(),
+    stopped: z
+      .array(z.object({ contractId: contractIdSchema, stop: continuationStopSchema }).strict().readonly())
+      .readonly(),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type ContinuationReport = z.infer<typeof continuationReportSchema>;
 
 type RetainedDependent = Readonly<{ state: ContractState; journal: readonly JournalEntry[] }>;

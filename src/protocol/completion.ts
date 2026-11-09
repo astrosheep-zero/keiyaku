@@ -1,4 +1,8 @@
-import { targetName, type ActorId, type ContractId, type SnapshotId } from "../core/facts/types.js";
+import { z } from "zod";
+import { targetName, type ActorId, type ContractId } from "../core/facts/types.js";
+import { snapshotIdSchema } from "../git/identity.js";
+import { deliveryDiffScopeSchema } from "../git/integration.js";
+import { gateReportSchema } from "./result-leaves.js";
 import { gateReports, type GateReport } from "../core/facts/gate.js";
 import { readDeliveryScope } from "../git/integration.js";
 import type { GitRepository } from "../git/process.js";
@@ -16,16 +20,24 @@ import {
   type ExecutionStop,
 } from "./progress.js";
 import type { PlacementStop } from "./operations.js";
-import { placementStop, timestamp } from "./operations.js";
+import { placementStop, placementStopSchema, timestamp } from "./operations.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
-export type CandidateCompletion = Readonly<{
-  integration: SnapshotId;
-  predecessor?: SnapshotId;
-  target?: string;
-  scope?: Readonly<{ filesChanged: number; insertions: number; deletions: number }>;
-}>;
+export const candidateCompletionSchema = z
+  .strictObject({
+    integration: snapshotIdSchema,
+    predecessor: snapshotIdSchema.exactOptional(),
+    target: z.string().exactOptional(),
+    scope: deliveryDiffScopeSchema.omit({ paths: true }).readonly().exactOptional(),
+  })
+  .readonly();
+export const completionEvidenceShape = {
+  completion: candidateCompletionSchema.exactOptional(),
+  gates: z.array(gateReportSchema).readonly().exactOptional(),
+  placement: placementStopSchema.exactOptional(),
+};
+export type CandidateCompletion = z.output<typeof candidateCompletionSchema>;
 export type CompletionEvidence = Readonly<{
   completion?: CandidateCompletion;
   gates?: readonly GateReport[];

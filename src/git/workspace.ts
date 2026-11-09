@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
-import { contractPhysicalName, gitObjectId, mintSnapshotId, type GitObjectId } from "./identity.js";
+import { contractPhysicalName, gitObjectId, mintSnapshotId, snapshotIdSchema, type GitObjectId } from "./identity.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
 import {
   HANDOFF_RECEIPT_REF_NAMESPACE,
@@ -261,12 +261,7 @@ export async function unmergedWorkspacePaths(repository: GitRepository, workspac
   return (await workspaceStatus(repository, workspace)).unmergedPaths;
 }
 
-type WorkspaceChangeCounts = Readonly<{
-  staged: number;
-  unstaged: number;
-  untracked: number;
-  submodules: number;
-}>;
+type WorkspaceChangeCounts = Extract<ContractWorkspaceObservation, { kind: "clean" | "dirty" }>["counts"];
 
 export const conflictRecoverySchema = z
   .object({
@@ -274,7 +269,8 @@ export const conflictRecoverySchema = z
     deliver: z.literal("deliver --include-dirty"),
     staging: z.literal("not-required"),
   })
-  .strict();
+  .strict()
+  .readonly();
 type ConflictRecovery = z.infer<typeof conflictRecoverySchema>;
 
 export const conflictRecovery: ConflictRecovery = Object.freeze({
@@ -283,37 +279,52 @@ export const conflictRecovery: ConflictRecovery = Object.freeze({
   staging: "not-required",
 });
 
-type ContractWorkspaceMerge = Readonly<{
-  head: SnapshotId;
-  unmergedPaths: readonly string[];
-  handoffBase?: SnapshotId;
-  recovery?: ConflictRecovery;
-}>;
-
-export type ContractWorkspaceObservation =
-  | Readonly<{
-      kind: "clean" | "dirty";
-      location: ContractWorkspaceLocation;
-      counts: WorkspaceChangeCounts;
-      merge: ContractWorkspaceMerge | null;
-    }>
-  | Readonly<{ kind: "unavailable"; location: ContractWorkspaceLocation }>
-  | Readonly<{ kind: "unappointed" }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>;
+export type ContractWorkspaceObservation = z.output<typeof contractWorkspaceObservationSchema>;
 
 export const worktreeWorkspaceSchema = z
   .object({ kind: z.literal("worktree"), path: z.string().refine((value) => value.trim() !== "") })
-  .strict();
+  .strict()
+  .readonly();
+export const contractWorkspaceObservationSchema = z.union([
+  z
+    .strictObject({
+      kind: z.enum(["clean", "dirty"]),
+      location: worktreeWorkspaceSchema,
+      counts: z
+        .strictObject({ staged: z.number(), unstaged: z.number(), untracked: z.number(), submodules: z.number() })
+        .readonly(),
+      merge: z
+        .strictObject({
+          head: snapshotIdSchema,
+          unmergedPaths: z.array(z.string()).readonly(),
+          handoffBase: snapshotIdSchema.exactOptional(),
+          recovery: conflictRecoverySchema.exactOptional(),
+        })
+        .readonly()
+        .nullable(),
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("unavailable"), location: worktreeWorkspaceSchema }).readonly(),
+  z.strictObject({ kind: z.literal("unappointed") }).readonly(),
+  z.strictObject({ kind: z.literal("failed"), diagnostic: z.string() }).readonly(),
+]);
 export const contractTargetLagSchema = z.union([
-  z.object({ kind: z.literal("none") }).strict(),
-  z.object({ kind: z.literal("unknown"), subject: worktreeWorkspaceSchema.optional() }).strict(),
+  z
+    .object({ kind: z.literal("none") })
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("unknown"), subject: worktreeWorkspaceSchema.exactOptional() })
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("counted"),
       behind: z.number().int().nonnegative(),
-      subject: worktreeWorkspaceSchema.optional(),
+      subject: worktreeWorkspaceSchema.exactOptional(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 export type ContractTargetLag = z.infer<typeof contractTargetLagSchema>;
 

@@ -8,9 +8,9 @@ export type WorktreeHooks = Readonly<{
   destroy: readonly HookCommand[];
 }>;
 const hookOutputFields = {
-  stdout: z.string().optional(),
-  stderr: z.string().optional(),
-  truncated: z.boolean().optional(),
+  stdout: z.string().exactOptional(),
+  stderr: z.string().exactOptional(),
+  truncated: z.boolean().exactOptional(),
 };
 export const hookFailureSchema = z.union([
   z
@@ -21,10 +21,20 @@ export const hookFailureSchema = z.union([
       stderr: z.string(),
       truncated: z.boolean(),
     })
-    .strict(),
-  z.object({ kind: z.literal("timeout"), ...hookOutputFields }).strict(),
-  z.object({ kind: z.literal("unknown-exit"), ...hookOutputFields }).strict(),
-  z.object({ kind: z.literal("spawn-error"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("timeout"), ...hookOutputFields })
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("unknown-exit"), ...hookOutputFields })
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("spawn-error"), diagnostic: z.string().refine((value) => value.trim() !== "") })
+    .strict()
+    .readonly(),
 ]);
 export type HookFailure = z.infer<typeof hookFailureSchema>;
 export const worktreeHookLagSchema = z
@@ -36,7 +46,8 @@ export const worktreeHookLagSchema = z
     name: z.string().refine((value) => value.trim() !== ""),
     failure: hookFailureSchema,
   })
-  .strict();
+  .strict()
+  .readonly();
 export type WorktreeHookLag = z.infer<typeof worktreeHookLagSchema>;
 type HookPhase = "create" | "destroy";
 type WorktreeHooksFromInput = Readonly<{ settings: Settings }>;

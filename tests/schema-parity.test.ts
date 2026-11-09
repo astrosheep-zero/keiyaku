@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
-import { akumaStatusSchema, type AkumaStatus } from "../src/index.js";
+import { akumaStatusSchema, type AkumaStatus, type Delivery } from "../src/index.js";
+import type { DeliveryValue } from "../src/library/delivery.js";
+import { gateReportSchema } from "../src/protocol/result-leaves.js";
 import { assertWireRoundTrip, type Assert, type Exact, type Wire } from "./support/schema-parity.js";
 export type Same = Assert<Exact<{ a?: string }, { a?: string }>>;
 // @ts-expect-error optional and required-with-undefined are different
@@ -10,10 +12,14 @@ export type OptionalMismatch = Assert<Exact<{ a?: string }, { a: string | undefi
 export type OptionalUndefinedMismatch = Assert<Exact<{ a?: string }, { a?: string | undefined }>>;
 // @ts-expect-error nested exact optional excludes explicit undefined
 export type NestedOptionalUndefinedMismatch = Assert<Exact<{ a: { b?: string } }, { a: { b?: string | undefined } }>>;
-// @ts-expect-error optional-undefined drift inside an array element is different
-export type ArrayOptionalUndefinedMismatch = Assert<Exact<{ a: { b?: string }[] }, { a: { b?: string | undefined }[] }>>;
-// @ts-expect-error optional-undefined drift inside a union member is different
-export type UnionOptionalUndefinedMismatch = Assert<Exact<{ a: { kind: "a"; b?: string } | { kind: "b" } }, { a: { kind: "a"; b?: string | undefined } | { kind: "b" } }>>;
+export type ArrayOptionalUndefinedMismatch = Assert<
+  // @ts-expect-error optional-undefined drift inside an array element is different
+  Exact<{ a: { b?: string }[] }, { a: { b?: string | undefined }[] }>
+>;
+export type UnionOptionalUndefinedMismatch = Assert<
+  // @ts-expect-error optional-undefined drift inside a union member is different
+  Exact<{ a: { kind: "a"; b?: string } | { kind: "b" } }, { a: { kind: "a"; b?: string | undefined } | { kind: "b" } }>
+>;
 export type NestedOptionalSame = Assert<Exact<{ a: readonly { b?: string }[] }, { a: readonly { b?: string }[] }>>;
 // @ts-expect-error a missing field is different
 export type MissingMismatch = Assert<Exact<{ a: string }, { a: string; b: number }>>;
@@ -48,6 +54,18 @@ export function publicSnapshotEntryRemainsReadonly(status: z.output<typeof akuma
 }
 
 export type WireTupleReadonly = Assert<Exact<Wire<[{ nested: string }]>, readonly [{ readonly nested: string }]>>;
+export type WireVariadicHead = Assert<Exact<Wire<[string, ...number[]]>, readonly [string, ...number[]]>>;
+export type WireVariadicOptional = Assert<Exact<Wire<[string?, ...number[]]>, readonly [string?, ...number[]]>>;
+export type WireVariadicTail = Assert<Exact<Wire<[...string[], number]>, readonly [...string[], number]>>;
+export type WireVariadicUnknown = Assert<Exact<Wire<[unknown?, ...unknown[]]>, readonly [unknown?, ...unknown[]]>>;
+type Branded = string & { readonly __brand: "identity" };
+export type WireBrandPreserved = Assert<Exact<Wire<Branded>, Branded>>;
+const gateReports = z.array(gateReportSchema).readonly();
+export type DeliveryGates = Assert<
+  Exact<Wire<NonNullable<(Delivery & DeliveryValue)["gates"]>>, z.output<typeof gateReports>>
+>;
+// @ts-expect-error tuples retain their fixed length rather than becoming arrays
+export type TupleNotArray = Assert<Exact<Wire<[string, number]>, readonly (string | number)[]>>;
 
 class Handle {
   readonly id = "k";

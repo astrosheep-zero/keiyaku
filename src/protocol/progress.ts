@@ -28,7 +28,8 @@ export const verificationCleanupFailureSchema = z
     name: z.string().refine((value) => value.trim() !== ""),
     detail: hookFailureSchema,
   })
-  .strict();
+  .strict()
+  .readonly();
 export type VerificationCleanupFailure = z.infer<typeof verificationCleanupFailureSchema>;
 
 export const executionCleanupSchema = z.union([
@@ -38,34 +39,38 @@ export const executionCleanupSchema = z.union([
       contractId: contractIdSchema,
       diagnostic: z.string().min(1),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("verification-cleanup"),
       contractId: contractIdSchema,
-      snapshot: snapshotIdSchema.optional(),
-      requirement: z.string().min(1).optional(),
-      index: z.number().int().positive().optional(),
+      snapshot: snapshotIdSchema.exactOptional(),
+      requirement: z.string().min(1).exactOptional(),
+      index: z.number().int().positive().exactOptional(),
       failure: verificationCleanupFailureSchema,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("worktree-leak"),
       contractId: contractIdSchema,
-      snapshot: snapshotIdSchema.optional(),
-      requirement: z.string().min(1).optional(),
-      index: z.number().int().positive().optional(),
+      snapshot: snapshotIdSchema.exactOptional(),
+      requirement: z.string().min(1).exactOptional(),
+      index: z.number().int().positive().exactOptional(),
       leak: worktreeLeakSchema,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("private-state-seat-close"),
       contractId: contractIdSchema,
       failure: privateStateSeatCloseLagSchema,
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 export type ExecutionCleanup = z.infer<typeof executionCleanupSchema>;
 export const executionStageSchema = z.enum([
@@ -85,7 +90,8 @@ export const executionStopSchema = z
     reason: z.enum(["cancelled", "failed"]),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type ExecutionStop = z.infer<typeof executionStopSchema>;
 /** Only owner-declared operational classes and native system I/O failures are operational. */
 export function isOperationalFailure(error: unknown): error is Error {

@@ -30,7 +30,10 @@ type CollectableScratchWorktree = Readonly<{
   release(): void;
 }>;
 
-export const worktreeLeakSchema = z.object({ path: z.string().optional(), diagnostic: z.string() }).strict();
+export const worktreeLeakSchema = z
+  .object({ path: z.string().exactOptional(), diagnostic: z.string() })
+  .strict()
+  .readonly();
 export type WorktreeLeak = z.infer<typeof worktreeLeakSchema>;
 
 export class ScratchMaterializationError extends Error {

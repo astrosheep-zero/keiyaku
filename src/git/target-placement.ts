@@ -36,7 +36,8 @@ export const checkoutNotFollowableRefusalSchema = z
     reason: z.literal("untracked"),
     paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
   })
-  .strict();
+  .strict()
+  .readonly();
 type CheckoutNotFollowableRefusal = z.infer<typeof checkoutNotFollowableRefusalSchema>;
 export type TargetPlacementRefusal = CheckoutNotFollowableRefusal | TargetWorkspaceRefusal;
 export const targetCheckoutEffectSchema = z
@@ -46,7 +47,8 @@ export const targetCheckoutEffectSchema = z
     target: z.string().refine((value) => value.trim() !== ""),
     action: z.enum(["followed", "recovered"]),
   })
-  .strict();
+  .strict()
+  .readonly();
 type TargetCheckoutEffect = z.infer<typeof targetCheckoutEffectSchema>;
 export const targetCheckoutLagSchema = z
   .object({
@@ -55,15 +57,17 @@ export const targetCheckoutLagSchema = z
     target: z.string().refine((value) => value.trim() !== ""),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
-  .strict();
+  .strict()
+  .readonly();
 type TargetCheckoutLag = z.infer<typeof targetCheckoutLagSchema>;
 export const targetWorkspaceLagSchema = z
   .object({
     kind: z.literal("target-workspace-retained"),
     contractId: contractIdSchema,
-    reason: targetWorkspaceRefusalSchema.shape.reason,
+    reason: targetWorkspaceRefusalSchema.unwrap().shape.reason,
   })
-  .strict();
+  .strict()
+  .readonly();
 type TargetPlacementPhysicalResult = Readonly<{
   effects: readonly TargetCheckoutEffect[];
   lag: readonly (TargetCheckoutLag | z.infer<typeof targetWorkspaceLagSchema>)[];
@@ -343,8 +347,14 @@ type TargetPlacementObservationInput = Readonly<{
 }>;
 
 const targetCheckoutObservationSchema = z.union([
-  z.object({ kind: z.literal("followable"), path: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("not-followable"), path: z.string().min(1), diagnostic: z.string().min(1) }).strict(),
+  z
+    .object({ kind: z.literal("followable"), path: z.string().min(1) })
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("not-followable"), path: z.string().min(1), diagnostic: z.string().min(1) })
+    .strict()
+    .readonly(),
 ]);
 type TargetCheckoutObservation = z.infer<typeof targetCheckoutObservationSchema>;
 type TargetPlacementObservation =
@@ -395,7 +405,8 @@ export const previewTargetAnswerSchema = z.union([
       head: snapshotIdSchema,
       checkouts: z.array(targetCheckoutObservationSchema).readonly(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("moved"),
@@ -403,14 +414,19 @@ export const previewTargetAnswerSchema = z.union([
       expected: snapshotIdSchema,
       observed: snapshotIdSchema.nullable(),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("refused"),
       refusal: z.union([checkoutNotFollowableRefusalSchema, targetWorkspaceRefusalSchema]),
     })
-    .strict(),
-  z.object({ kind: z.literal("failed"), diagnostic: z.string().refine((value) => value.trim() !== "") }).strict(),
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("failed"), diagnostic: z.string().refine((value) => value.trim() !== "") })
+    .strict()
+    .readonly(),
 ]);
 type PreviewTargetAnswer = z.infer<typeof previewTargetAnswerSchema>;
 /** Adjudicate prospective target followability without placing or running Verification. */

@@ -1,5 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
-import { contractId, type ContractHead, type ContractId, type ContractState } from "../core/facts/types.js";
+import { z } from "zod";
+import { contractHeadSchema, contractIdSchema } from "../git/identity.js";
+import { contractId, type ContractId, type ContractState } from "../core/facts/types.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { RepositoryScope } from "../protocol/operations.js";
@@ -10,19 +12,26 @@ export type ContractWaitOptions = Readonly<{ completion?: "any" | "all"; timeout
 export type ContractWaitInput = ContractWaitOptions & Readonly<{ contracts: readonly string[] }>;
 
 // An unknown presence means the deadline interrupted the initial observation.
-export type ContractWaitMember = Readonly<{
-  contract: ContractId;
-  baseline: ContractHead | null;
-  head: ContractHead | null;
-  changed: boolean;
-  present: boolean | null;
-  terminal: "claimed" | "abandoned" | null;
-}>;
-export type ContractWaitResult = Readonly<{
-  kind: "changed" | "terminal" | "deadline" | "missing";
-  completion: "any" | "all";
-  contracts: readonly ContractWaitMember[];
-}>;
+export const contractWaitMemberSchema = z
+  .strictObject({
+    contract: contractIdSchema,
+    baseline: contractHeadSchema.nullable(),
+    head: contractHeadSchema.nullable(),
+    changed: z.boolean(),
+    present: z.boolean().nullable(),
+    terminal: z.enum(["claimed", "abandoned"]).nullable(),
+  })
+  .readonly();
+export const contractWaitResultSchema = z
+  .strictObject({
+    kind: z.enum(["changed", "terminal", "deadline", "missing"]),
+    completion: z.enum(["any", "all"]),
+    contracts: z.array(contractWaitMemberSchema).readonly(),
+  })
+  .readonly();
+
+export type ContractWaitMember = z.output<typeof contractWaitMemberSchema>;
+export type ContractWaitResult = z.output<typeof contractWaitResultSchema>;
 
 export type ValidatedWait = Readonly<{
   scope: RepositoryScope;

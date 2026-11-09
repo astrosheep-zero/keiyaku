@@ -45,22 +45,18 @@ export const integrationPreparationRefusalSchema = z.union([
       conflictPaths: z
         .array(z.string().refine((value) => value.trim() !== ""))
         .readonly()
-        .optional(),
+        .exactOptional(),
     })
     .strict()
-    .transform(
-      ({ conflictPaths, ...refusal }) =>
-        ({ ...refusal, ...(conflictPaths === undefined ? {} : { conflictPaths }) }) as typeof refusal & {
-          conflictPaths?: readonly string[];
-        },
-    ),
+    .readonly(),
   z
     .object({
       kind: z.literal("integration-unsupported"),
       contractId: contractIdSchema,
       requiredGit: z.literal(REQUIRED_GIT),
     })
-    .strict(),
+    .strict()
+    .readonly(),
 ]);
 export type IntegrationPreparationRefusal = z.infer<typeof integrationPreparationRefusalSchema>;
 type IntegrationCoordinates = Readonly<{
@@ -422,7 +418,7 @@ export const deliveryDiffScopeSchema = z
     filesChanged: z.number().int(),
     insertions: z.number().int(),
     deletions: z.number().int(),
-    paths: z.array(z.string()).readonly().optional(),
+    paths: z.array(z.string()).readonly().exactOptional(),
   })
   .strict();
 type DeliveryDiffScope = z.infer<typeof deliveryDiffScopeSchema>;

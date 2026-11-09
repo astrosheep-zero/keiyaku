@@ -24,6 +24,21 @@ export const regionOverlapSchema = z
   .strict();
 export type RegionOverlap = z.infer<typeof regionOverlapSchema>;
 
+const regionPatternSchema = regionOverlapSchema.shape.patterns.unwrap().element;
+export const regionOverlapResultSchema = regionOverlapSchema
+  .extend({
+    patterns: z
+      .array(
+        regionPatternSchema
+          .extend({
+            relation: regionPatternSchema.shape.relation.unwrap().exactOptional(),
+          })
+          .readonly(),
+      )
+      .readonly(),
+  })
+  .readonly();
+
 export type RegionObservation = Readonly<
   { overlaps: readonly RegionOverlap[]; overlapFailure?: never } | { overlapFailure: string; overlaps?: never }
 >;

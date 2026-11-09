@@ -5,8 +5,11 @@ import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types
 import { reconcileEffectSchema } from "../git/reconcile.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { CompletionEvidence } from "../protocol/completion.js";
+import { materializedConflictSchema } from "../protocol/deliver.js";
 import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
 import { contractIdSchema } from "../protocol/operations.js";
+import { contractHeadSchema } from "../git/identity.js";
+import { journalEntrySchema } from "../protocol/result-leaves.js";
 import { executionCleanupSchema, executionStageSchema, type ExecutionStage } from "../protocol/progress.js";
 import type { ReviewAdmissionValue } from "../protocol/review.js";
 import { settlementActionSchema, settlementLagSchema } from "../settlement/settle.js";
@@ -49,7 +52,8 @@ const contractEffectSchema = z.union([
       contract: contractIdSchema,
       effect: reconciliationEffectSchema,
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({
       kind: z.literal("reconciliation-lag"),
@@ -58,7 +62,8 @@ const contractEffectSchema = z.union([
       lag: reconciliationLagSchema,
     })
     .strict()
-    .refine((value) => value.affects === reconcileLagScope(value.lag), "invalid reconciliation requiredness"),
+    .refine((value) => value.affects === reconcileLagScope(value.lag), "invalid reconciliation requiredness")
+    .readonly(),
   z
     .object({
       kind: z.literal("checkout-retained"),
@@ -67,15 +72,21 @@ const contractEffectSchema = z.union([
       target: z.string().min(1),
       diagnostic: z.string().min(1),
     })
-    .strict(),
+    .strict()
+    .readonly(),
   z
     .object({ kind: z.literal("settlement-action"), contract: contractIdSchema, action: settlementActionSchema })
-    .strict(),
-  z.object({ kind: z.literal("settlement-lag"), contract: contractIdSchema, lag: settlementLagSchema }).strict(),
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("settlement-lag"), contract: contractIdSchema, lag: settlementLagSchema })
+    .strict()
+    .readonly(),
   z
     .object({ kind: z.literal("cleanup"), contract: contractIdSchema, issue: executionCleanupSchema })
     .strict()
-    .refine((value) => value.contract === value.issue.contractId, "invalid cleanup owner"),
+    .refine((value) => value.contract === value.issue.contractId, "invalid cleanup owner")
+    .readonly(),
   z
     .object({
       kind: z.literal("execution-stopped"),
@@ -84,9 +95,16 @@ const contractEffectSchema = z.union([
       reason: z.enum(["cancelled", "failed"]),
       diagnostic: z.string().refine((value) => value.trim() !== ""),
     })
-    .strict(),
-  z.object({ kind: z.literal("worktree-retired"), contract: contractIdSchema, name: z.string().min(1) }).strict(),
-  z.object({ kind: z.literal("worktree-retained"), contract: contractIdSchema, path: z.string().min(1) }).strict(),
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("worktree-retired"), contract: contractIdSchema, name: z.string().min(1) })
+    .strict()
+    .readonly(),
+  z
+    .object({ kind: z.literal("worktree-retained"), contract: contractIdSchema, path: z.string().min(1) })
+    .strict()
+    .readonly(),
 ]);
 const invocationEffectSchema = z.union([contractEffectSchema, resetEffectSchema]);
 export type InvocationEffect = z.infer<typeof invocationEffectSchema>;
@@ -101,7 +119,35 @@ const pendingActionSchema = z.enum([
   "execution",
 ]);
 type PendingAction = z.infer<typeof pendingActionSchema>;
-const pendingSurfaceSchema = z.object({ surface: pendingActionSchema, required: z.boolean() }).strict();
+const pendingSurfaceSchema = z.object({ surface: pendingActionSchema, required: z.boolean() }).strict().readonly();
+
+export function operationOutcomeSchema<
+  Operation extends ContractVerb,
+  Fields extends z.ZodRawShape,
+  Refusal extends z.ZodType,
+  Retry extends z.ZodType,
+>(operation: Operation, fields: Fields, refusal: Refusal, retry: Retry) {
+  const base = {
+    operation: z.literal(operation),
+    contract: contractIdSchema.exactOptional(),
+    facts: z.array(journalEntrySchema).readonly(),
+    effects: z.array(contractEffectSchema).readonly(),
+    pending: z.array(pendingSurfaceSchema).readonly(),
+  };
+  return z.union([
+    z
+      .strictObject({
+        ...base,
+        kind: z.literal("accepted"),
+        contract: contractIdSchema,
+        head: contractHeadSchema,
+        ...fields,
+      })
+      .readonly(),
+    z.strictObject({ ...base, kind: z.literal("refused"), refusal }).readonly(),
+    z.strictObject({ ...base, kind: z.literal("retry"), reason: retry }).readonly(),
+  ]);
+}
 export type PendingSurface = z.infer<typeof pendingSurfaceSchema>;
 
 // ---------------------------------------------------------------------------
@@ -135,6 +181,17 @@ type RetryOutcome<Operation extends ContractVerb> = EnvelopeFields &
     kind: "retry";
     reason: OperationRetries[Operation];
   }>;
+export const handoffOutcomeSchema = z
+  .strictObject({
+    operation: z.literal("deliver"),
+    contract: contractIdSchema,
+    facts: z.array(journalEntrySchema).readonly(),
+    effects: z.array(contractEffectSchema).readonly(),
+    pending: z.array(pendingSurfaceSchema).readonly(),
+    kind: z.literal("handoff"),
+    value: materializedConflictSchema,
+  })
+  .readonly();
 export type HandoffOutcome = EnvelopeFields &
   Readonly<{
     operation: "deliver";

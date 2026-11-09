@@ -20,7 +20,8 @@ type TenderCaptureCoordinates = Readonly<{
 
 export const worktreeMissingRefusalSchema = z
   .object({ kind: z.literal("worktree-missing"), contractId: contractIdSchema })
-  .strict();
+  .strict()
+  .readonly();
 type WorktreeMissingRefusal = z.infer<typeof worktreeMissingRefusalSchema>;
 export const unmergedPathsRefusalSchema = z
   .object({
@@ -28,7 +29,8 @@ export const unmergedPathsRefusalSchema = z
     contractId: contractIdSchema,
     paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
   })
-  .strict();
+  .strict()
+  .readonly();
 type TenderCaptureRefusal = WorktreeMissingRefusal | z.infer<typeof unmergedPathsRefusalSchema>;
 export const workspaceDirtyDeltaSchema = z
   .object({
@@ -55,9 +57,11 @@ export const dirtyWorkspaceRefusalSchema = z
         insertions: z.number().int().nonnegative(),
         deletions: z.number().int().nonnegative(),
       })
-      .strict(),
+      .strict()
+      .readonly(),
   })
-  .strict();
+  .strict()
+  .readonly();
 export type DirtyWorkspaceRefusal = z.infer<typeof dirtyWorkspaceRefusalSchema>;
 export type TenderCapture = Readonly<{
   tree: GitObjectId;
