@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { targetName } from "../../core/facts/types.js";
 import { resolveContractTarget } from "../../git/target.js";
 import type { GitRepository } from "../../git/process.js";
@@ -5,7 +6,10 @@ import { registeredWorktrees } from "../../git/repository.js";
 import { observeTargetCheckoutShape } from "../../git/target-placement.js";
 import type { ContractRow } from "./status.js";
 
-export type CurrentPhysicalIssue = Readonly<{ kind: "target-checkout-retained"; target: string }>;
+export const currentPhysicalIssueSchema = z
+  .strictObject({ kind: z.literal("target-checkout-retained"), target: z.string() })
+  .readonly();
+export type CurrentPhysicalIssue = z.output<typeof currentPhysicalIssueSchema>;
 
 /** Selected-only pure projection of retained target checkout state. */
 export async function observeCurrentPhysicalIssue(

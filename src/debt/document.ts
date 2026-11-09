@@ -1,27 +1,30 @@
 import { isMap, parseDocument, stringify } from "yaml";
 import { z } from "zod";
-import { formatDebtId, parseDebtId, type DebtCoordinate, type DebtId } from "./identity.js";
+import { debtIdSchema, formatDebtId, parseDebtId, type DebtCoordinate, type DebtId } from "./identity.js";
 
 export const debtNonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 export const debtStateSchema = z.enum(["open", "done", "drop"]);
 export const debtPrioritySchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
 export type DebtState = z.infer<typeof debtStateSchema>;
 export type DebtPriority = z.infer<typeof debtPrioritySchema>;
-export type DebtDocument = Readonly<{
-  id: DebtId;
-  title: string;
-  state: DebtState;
-  priority: DebtPriority;
-  needs: readonly DebtId[];
-  parent: DebtId | null;
-  supersedes: readonly DebtId[];
-  relates: readonly DebtId[];
-  note: string;
-  createdBy?: string;
-  createdAt: string;
-  updatedAt: string;
-  body: string;
-}>;
+export const debtDocumentSchema = z
+  .strictObject({
+    id: debtIdSchema,
+    title: z.string(),
+    state: debtStateSchema,
+    priority: debtPrioritySchema,
+    needs: z.array(debtIdSchema).readonly(),
+    parent: debtIdSchema.nullable(),
+    supersedes: z.array(debtIdSchema).readonly(),
+    relates: z.array(debtIdSchema).readonly(),
+    note: z.string(),
+    createdBy: z.string().exactOptional(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    body: z.string(),
+  })
+  .readonly();
+export type DebtDocument = z.output<typeof debtDocumentSchema>;
 export type DebtCreationDocument = Omit<DebtDocument, "id" | "createdBy" | "createdAt" | "updatedAt">;
 
 export class DebtAuthorityCorruptionError extends Error {

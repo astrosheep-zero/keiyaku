@@ -1,3 +1,20 @@
+import { z } from "zod";
+import { boundedListSchema } from "../bounded-list.js";
+import {
+  debtRefSchema,
+  debtResultRowSchema,
+  blockedDebtRowSchema,
+  debtTreeNodeSchema,
+  debtDoctorIssueSchema,
+} from "./board.js";
+import {
+  debtViewSchema,
+  debtOutcomeSchema,
+  debtMutationResultSchema,
+  debtUpdateResultSchema,
+  debtBatchResultSchema,
+} from "./operation-types.js";
+import { debtQueryRowSchema } from "./query.js";
 import type { WorldRoot } from "../world.js";
 import type { NamespaceContextSource, ResolvedNamespaceContext } from "./context.js";
 import type { DebtLifecycleVerb } from "./operation-types.js";
@@ -66,6 +83,8 @@ import {
   type DebtRelationPredicateField,
 } from "./query.js";
 
+export const debtAbsentSchema = z.strictObject({ kind: z.literal("absent") }).readonly();
+export type DebtAbsent = z.output<typeof debtAbsentSchema>;
 export type DebtDetail = Omit<DebtDetailFacts, "debt"> & Readonly<{ debt: DebtView }>;
 export type DebtList = DebtOutcome<DebtPage<DebtRow>>;
 export type BlockedDebtList = DebtOutcome<DebtPage<BlockedDebtRow>>;
@@ -74,6 +93,26 @@ export type DebtContextSource = NamespaceContextSource;
 export type { ResolvedNamespaceContext };
 export type DebtContextResult = DebtOutcome<ResolvedNamespaceContext>;
 export type DebtDoctorReport = Readonly<{ issues: readonly DebtDoctorIssue[] }>;
+export const debtDetailSchema = z
+  .strictObject({
+    debt: debtViewSchema,
+    needs: z.array(z.strictObject({ ...debtRefSchema.unwrap().shape, released: z.boolean() }).readonly()).readonly(),
+    blockers: z.array(debtRefSchema).readonly(),
+    blocks: z.array(debtRefSchema).readonly(),
+    parent: debtRefSchema.nullable(),
+    children: z.array(debtRefSchema).readonly(),
+    supersedes: z.array(debtRefSchema).readonly(),
+    supersededBy: z.array(debtRefSchema).readonly(),
+    related: z.array(debtRefSchema).readonly(),
+  })
+  .readonly();
+export const debtReadSchema = debtDetailSchema.nullable();
+export const debtListSchema = debtOutcomeSchema(boundedListSchema(debtResultRowSchema));
+export const blockedDebtListSchema = debtOutcomeSchema(boundedListSchema(blockedDebtRowSchema));
+export const debtQueryResultSchema = debtOutcomeSchema(boundedListSchema(debtQueryRowSchema));
+export const debtDoctorReportSchema = z.strictObject({ issues: z.array(debtDoctorIssueSchema).readonly() }).readonly();
+export const debtDecompositionTreeSchema = debtOutcomeSchema(debtTreeNodeSchema);
+export { debtOutcomeSchema, debtViewSchema, debtMutationResultSchema, debtUpdateResultSchema, debtBatchResultSchema };
 export type DebtDecompositionTree = DebtOutcome<DebtTreeNode>;
 export type {
   AddDebtDocumentInput,

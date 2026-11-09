@@ -9,7 +9,9 @@ import { nukeDebt } from "../debt/operations.js";
 import { World, type WorldRoot } from "../world.js";
 import { requireInput, requireMarkdown } from "./input.js";
 import { InvocationAccumulator } from "./invocation.js";
-import { project, validated, type ResetOutcome, type ResetOwner } from "./outcome.js";
+import { project, validated, resetOutcomeSchema, type ResetOutcome, type ResetOwner } from "./outcome.js";
+
+export const nukeResultSchema = resetOutcomeSchema;
 
 export type NukeInput = Readonly<{ world: WorldRoot; confirm?: string }>;
 export type NukeResult = ResetOutcome;

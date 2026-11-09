@@ -1,7 +1,8 @@
-export { kanshi, kanshiCategory, observeKanshi } from "./read.js";
-export { kanshiCounts } from "./counts.js";
+export { kanshi, kanshiCategory, observeKanshi, kanshiObservationSchema } from "./read.js";
+export { kanshiCounts, kanshiCountsReportSchema } from "./counts.js";
 export type { KanshiCountsInput, KanshiCountsReport } from "./counts.js";
 export { selectKanshi, selectRegion } from "./select.js";
+export { regionReadSchema, kanshiReportSchema, kanshiCategoryReportSchema } from "./report.js";
 
 export type { KanshiCategoryInput, KanshiInput } from "./read.js";
 export type {

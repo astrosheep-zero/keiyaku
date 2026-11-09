@@ -1,9 +1,16 @@
+import { z } from "zod";
 import { lstat, mkdir, realpath, stat } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
 
 const WORLD_BRAND: unique symbol = Symbol("keiyaku.world");
 
 export type WorldRoot = string & { readonly [WORLD_BRAND]: true };
+export const worldRootSchema = z.string().transform(brand);
+export const worldResolutionSchema = z
+  .strictObject({ root: worldRootSchema.nullable(), candidate: worldRootSchema.nullable() })
+  .readonly();
+export const worldLocationSchema = worldRootSchema.nullable();
+export const worldEstablishedSchema = z.boolean();
 export type WorldResolutionInput = Readonly<{
   cwd: string;
   repositoryRoot?: string;

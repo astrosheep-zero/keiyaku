@@ -1,13 +1,11 @@
+import { z } from "zod";
 import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 
 export type SettingsScope = "project" | "user";
 
-export type SettingsScopeState =
-  | Readonly<{ kind: "absent"; path?: string }>
-  | Readonly<{ kind: "failed"; path: string; diagnostic: string }>
-  | Readonly<{ kind: "read"; path: string; namespaces: readonly string[] }>;
+export type SettingsScopeState = z.output<typeof settingsScopeStateSchema>;
 
 export type SettingsEntry = Readonly<{
   name: string;
@@ -16,10 +14,7 @@ export type SettingsEntry = Readonly<{
   shadows: boolean;
 }>;
 
-export type SettingsNamespaceFailure = Readonly<{
-  scope: SettingsScope;
-  diagnostic: string;
-}>;
+export type SettingsNamespaceFailure = z.output<typeof settingsNamespaceFailureSchema>;
 
 export type SettingsNamespaceView =
   | Readonly<{ kind: "read"; name: string; entries: readonly SettingsEntry[] }>
@@ -34,6 +29,41 @@ export type Settings = Readonly<{
   scopes: Readonly<{ project: SettingsScopeState; user: SettingsScopeState }>;
   namespace(name: string): SettingsNamespaceView;
 }>;
+
+export const settingsScopeStateSchema = z.union([
+  z.strictObject({ kind: z.literal("absent"), path: z.string().exactOptional() }).readonly(),
+  z.strictObject({ kind: z.literal("failed"), path: z.string(), diagnostic: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("read"), path: z.string(), namespaces: z.array(z.string()).readonly() }).readonly(),
+]);
+export const settingsEntrySchema = z
+  .strictObject({
+    name: z.string(),
+    value: z.unknown().exactOptional(),
+    source: z.enum(["project", "user"]),
+    shadows: z.boolean(),
+  })
+  .readonly();
+const settingsNamespaceFailureSchema = z
+  .strictObject({ scope: z.enum(["project", "user"]), diagnostic: z.string() })
+  .readonly();
+export const settingsNamespaceViewSchema = z.union([
+  z
+    .strictObject({ kind: z.literal("read"), name: z.string(), entries: z.array(settingsEntrySchema).readonly() })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("failed"),
+      name: z.string(),
+      entries: z.array(settingsEntrySchema).readonly(),
+      failures: z.array(settingsNamespaceFailureSchema).readonly(),
+    })
+    .readonly(),
+]);
+export const settingsSchema = z
+  .strictObject({
+    scopes: z.strictObject({ project: settingsScopeStateSchema, user: settingsScopeStateSchema }).readonly(),
+  })
+  .readonly();
 
 export type SettingsInput = Readonly<{ root?: string; home?: string }>;
 

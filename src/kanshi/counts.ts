@@ -1,20 +1,25 @@
+import { z } from "zod";
 import { countRunningAkuma } from "../akuma/akuma.js";
 import { DebtAuthorityCorruptionError } from "../debt/index.js";
 import { observeDebtBoard } from "../debt/operations.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../git/read-observation.js";
 import { Repo, scopeForRepo } from "../library/repo.js";
 import { readContractBoard } from "../protocol/read/status.js";
-import { World, type WorldRoot } from "../world.js";
-import type { Section } from "./report.js";
+import { World, worldRootSchema, type WorldRoot } from "../world.js";
+import { sectionSchema, type Section } from "./report.js";
 
 export type KanshiCountsInput = Readonly<{ world: WorldRoot | null; repo?: Repo }>;
-export type KanshiCountsReport = Readonly<{
-  root: WorldRoot | null;
-  observedAt: string;
-  akuma: Section<number>;
-  contracts: Section<number>;
-  debts: Section<number>;
-}>;
+export type KanshiCountsReport = z.output<typeof kanshiCountsReportSchema>;
+
+export const kanshiCountsReportSchema = z
+  .strictObject({
+    root: worldRootSchema.nullable(),
+    observedAt: z.string(),
+    akuma: sectionSchema(z.number()),
+    contracts: sectionSchema(z.number()),
+    debts: sectionSchema(z.number()),
+  })
+  .readonly();
 
 async function section(read: () => Promise<number>): Promise<Section<number>> {
   try {

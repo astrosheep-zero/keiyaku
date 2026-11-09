@@ -1,43 +1,10 @@
-import { z } from "zod";
-import { contractIdSchema } from "../protocol/operations.js";
+import { type RegionOverlap } from "../region.js";
+export { regionOverlapSchema, regionOverlapResultSchema, type RegionOverlap } from "../region.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { regionsOverlapWithRelation } from "../body/region.js";
 import type { ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { documentsOperationAt, type RepositoryScope } from "../protocol/operations.js";
-
-export const regionOverlapSchema = z
-  .object({
-    contract: contractIdSchema,
-    patterns: z
-      .array(
-        z
-          .object({
-            mine: z.string(),
-            theirs: z.string(),
-            relation: z.enum(["same", "mine-within-theirs", "theirs-within-mine", "intersect"]).optional(),
-          })
-          .strict(),
-      )
-      .readonly(),
-  })
-  .strict();
-export type RegionOverlap = z.infer<typeof regionOverlapSchema>;
-
-const regionPatternSchema = regionOverlapSchema.shape.patterns.unwrap().element;
-export const regionOverlapResultSchema = regionOverlapSchema
-  .extend({
-    patterns: z
-      .array(
-        regionPatternSchema
-          .extend({
-            relation: regionPatternSchema.shape.relation.unwrap().exactOptional(),
-          })
-          .readonly(),
-      )
-      .readonly(),
-  })
-  .readonly();
 
 export type RegionObservation = Readonly<
   { overlaps: readonly RegionOverlap[]; overlapFailure?: never } | { overlapFailure: string; overlaps?: never }

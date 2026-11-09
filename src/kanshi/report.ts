@@ -1,58 +1,50 @@
+import { z } from "zod";
+import { akumaListRowSchema, unbornAkumaListRowSchema, akumaListSchema } from "../akuma/akuma.js";
+import { activitySnapshotSchema } from "../akuma/projection.js";
+import { boundedListSchema } from "../bounded-list.js";
+import { debtRefSchema, debtResultRowSchema } from "../debt/board.js";
+import { debtIdSchema } from "../debt/identity.js";
+import { akumaAliasSchema } from "../identity/selector.js";
+import { contractRowSchema, contractBoardSchema } from "../protocol/read/status.js";
+import { currentPhysicalIssueSchema } from "../protocol/read/observation.js";
+import { worldRootSchema } from "../world.js";
+import { contractIdSchema } from "../git/identity.js";
+import { regionOverlapResultSchema } from "../region.js";
 import type { AkumaList, AkumaListRow, UnbornAkumaListRow } from "../akuma/akuma.js";
 import type { ActivitySnapshot } from "../akuma/projection.js";
-import type { BoundedList } from "../bounded-list.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import type { ContractId } from "../index.js";
-import type { RegionOverlap } from "../library/region.js";
+import type { RegionOverlap } from "../region.js";
 import type { CurrentPhysicalIssue } from "../protocol/read/observation.js";
-import type { ContractBoard, ContractDisposition, ContractPhase } from "../protocol/read/status.js";
-import type { DebtId, DebtRef, DebtRow } from "../debt/index.js";
+import type { ContractDisposition } from "../protocol/read/status.js";
 import type { WorldRoot } from "../world.js";
 
 export type { RegionOverlap };
 
-export type Section<Value> =
-  | Readonly<{ kind: "present"; value: Value }>
-  | Readonly<{ kind: "absent" }>
-  | Readonly<{ kind: "failed"; failure: Readonly<{ message: string; coordinate?: string }> }>;
+export type Section<Value> = z.output<ReturnType<typeof sectionSchema<z.ZodType<Value>>>>;
+
+export function sectionSchema<S extends z.ZodType>(value: S) {
+  return z.union([
+    z.strictObject({ kind: z.literal("present"), value }).readonly(),
+    z.strictObject({ kind: z.literal("absent") }).readonly(),
+    z
+      .strictObject({
+        kind: z.literal("failed"),
+        failure: z.strictObject({ message: z.string(), coordinate: z.string().exactOptional() }).readonly(),
+      })
+      .readonly(),
+  ]);
+}
 
 export type ContractEndpointObservation = ContractDisposition | "missing" | "unavailable";
 
-export type ContractHolderObservation =
-  | Readonly<{ kind: "held"; debtId: DebtId }>
-  | Readonly<{ kind: "none" }>
-  | Readonly<{ kind: "unavailable" }>;
+export type ContractHolderObservation = z.output<typeof holderSchema>;
+export type ContractRosterAttachment = z.output<typeof rosterSchema>;
 
-export type ContractRosterAttachment = Readonly<{
-  id: string;
-  aliases: readonly AkumaAlias[];
-  aliasesUnavailable?: true;
-}>;
-
-export type ContractKanshiRow = ContractBoard["rows"][number] &
-  Readonly<{
-    phase: ContractPhase;
-    holder: ContractHolderObservation;
-    roster: readonly ContractRosterAttachment[];
-    rosterUnavailable?: true;
-    namespaceDebts?: Section<readonly DebtRow[]>;
-    issue?: CurrentPhysicalIssue;
-  }>;
-
-export type ContractKanshiBoard = Omit<ContractBoard, "rows"> &
-  Readonly<{
-    rows: readonly ContractKanshiRow[];
-    hasMore?: boolean;
-  }>;
-
-export type DebtKanshiRow = DebtRow &
-  Readonly<{
-    contract?: Readonly<{ id: string; observed: ContractEndpointObservation }>;
-    contractAssociationUnavailable?: true;
-    blockers?: readonly DebtRef[];
-  }>;
-
-export type DebtKanshiWorld = BoundedList<DebtKanshiRow> & Readonly<{ root: WorldRoot }>;
+export type ContractKanshiRow = z.output<typeof contractRow>;
+export type ContractKanshiBoard = z.output<typeof contractBoard>;
+export type DebtKanshiRow = z.output<typeof debtRow>;
+export type DebtKanshiWorld = z.output<typeof debtWorld>;
 
 export type AkumaKanshiRow = (AkumaListRow | UnbornAkumaListRow) &
   Readonly<{
@@ -73,7 +65,7 @@ export type KanshiRegionSelection =
   | Readonly<{ kind: "contract"; contract: ContractId }>
   | Readonly<{ kind: "path"; patterns: readonly [string, ...string[]] }>;
 
-export type RegionDeclaration = Readonly<{ contract: ContractId; patterns: readonly string[] }>;
+export type RegionDeclaration = z.output<typeof regionDeclarationSchema>;
 export type RegionRead =
   | Readonly<{ kind: "declarations"; declarations: readonly RegionDeclaration[] }>
   | Readonly<{
@@ -86,6 +78,109 @@ export type RegionRead =
       patterns: readonly string[];
       overlaps: readonly RegionOverlap[];
     }>;
+
+export const regionDeclarationSchema = z
+  .strictObject({ contract: contractIdSchema, patterns: z.array(z.string()).readonly() })
+  .readonly();
+export const regionReadSchema = z.union([
+  z
+    .strictObject({ kind: z.literal("declarations"), declarations: z.array(regionDeclarationSchema).readonly() })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("contract"),
+      declaration: regionDeclarationSchema,
+      overlaps: z.array(regionOverlapResultSchema).readonly(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("path"),
+      patterns: z.array(z.string()).readonly(),
+      overlaps: z.array(regionOverlapResultSchema).readonly(),
+    })
+    .readonly(),
+]);
+
+const endpointSchema = z.enum(["active", "terminal", "missing", "unavailable"]);
+const associationSchema = z.strictObject({ id: z.string(), observed: endpointSchema }).readonly();
+const holderSchema = z.union([
+  z.strictObject({ kind: z.literal("held"), debtId: debtIdSchema }).readonly(),
+  z.strictObject({ kind: z.literal("none") }).readonly(),
+  z.strictObject({ kind: z.literal("unavailable") }).readonly(),
+]);
+const rosterSchema = z
+  .strictObject({
+    id: z.string(),
+    aliases: z.array(akumaAliasSchema).readonly(),
+    aliasesUnavailable: z.literal(true).exactOptional(),
+  })
+  .readonly();
+const contractRow = contractRowSchema
+  .unwrap()
+  .extend({
+    holder: holderSchema,
+    roster: z.array(rosterSchema).readonly(),
+    rosterUnavailable: z.literal(true).exactOptional(),
+    namespaceDebts: sectionSchema(z.array(debtResultRowSchema).readonly()).exactOptional(),
+    issue: currentPhysicalIssueSchema.exactOptional(),
+  })
+  .readonly();
+const contractBoard = contractBoardSchema
+  .unwrap()
+  .extend({ rows: z.array(contractRow).readonly(), hasMore: z.boolean().exactOptional() })
+  .readonly();
+const debtRow = debtResultRowSchema
+  .unwrap()
+  .extend({
+    contract: associationSchema.exactOptional(),
+    contractAssociationUnavailable: z.literal(true).exactOptional(),
+    blockers: z.array(debtRefSchema).readonly().exactOptional(),
+  })
+  .readonly();
+const debtWorld = boundedListSchema(debtRow, { root: worldRootSchema });
+const akumaExtras = {
+  contract: associationSchema.exactOptional(),
+  contractAssociationUnavailable: z.literal(true).exactOptional(),
+  snapshot: activitySnapshotSchema.exactOptional(),
+};
+const akumaRow = z.union([
+  akumaListRowSchema.unwrap().extend(akumaExtras).readonly(),
+  unbornAkumaListRowSchema.unwrap().extend(akumaExtras).readonly(),
+]);
+const akumaWorld = akumaListSchema
+  .unwrap()
+  .extend({ rows: z.array(akumaRow).readonly(), aliasesUnavailable: z.literal(true).exactOptional() })
+  .readonly();
+export const kanshiReportSchema = z
+  .strictObject({
+    root: worldRootSchema.nullable(),
+    observedAt: z.string(),
+    branch: z.string().nullable(),
+    contracts: sectionSchema(contractBoard),
+    debts: sectionSchema(debtWorld),
+    akuma: sectionSchema(akumaWorld),
+    region: sectionSchema(regionReadSchema).exactOptional(),
+  })
+  .readonly();
+export const kanshiCategoryReportSchema = z.union([
+  z
+    .strictObject({
+      category: z.literal("akuma"),
+      root: worldRootSchema.nullable(),
+      observedAt: z.string(),
+      akuma: sectionSchema(akumaWorld),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      category: z.literal("contract"),
+      root: worldRootSchema.nullable(),
+      observedAt: z.string(),
+      contracts: sectionSchema(contractBoard),
+    })
+    .readonly(),
+]);
 
 export type KanshiReport = Readonly<{
   root: WorldRoot | null;

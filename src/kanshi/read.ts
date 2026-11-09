@@ -1,6 +1,7 @@
+import { z } from "zod";
 import { withoutReportedChanges } from "../akuma/projection.js";
 import { observeAkumaRoster, readAkumaTimeline } from "../akuma/akuma.js";
-import { readAliases, type AliasBinding } from "../alias/index.js";
+import { aliasBindingSchema, readAliases, type AliasBinding } from "../alias/index.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { assertRegionPattern } from "../body/region.js";
 import { contractId } from "../core/facts/types.js";
@@ -28,6 +29,7 @@ import type {
   Section,
   DebtKanshiWorld,
 } from "./report.js";
+import { kanshiReportSchema, sectionSchema } from "./report.js";
 import { ROSTER_SNAPSHOT_ROWS, ROSTER_VISIBLE_ROWS } from "./roster.js";
 import { selectKanshi, selectRegion } from "./select.js";
 
@@ -44,6 +46,10 @@ export type KanshiObservation = Readonly<{
   report: KanshiReport;
   aliases: Section<readonly AliasBinding[]>;
 }>;
+
+export const kanshiObservationSchema = z
+  .strictObject({ report: kanshiReportSchema, aliases: sectionSchema(z.array(aliasBindingSchema).readonly()) })
+  .readonly();
 
 function diagnostic(error: unknown): string {
   let source: string;

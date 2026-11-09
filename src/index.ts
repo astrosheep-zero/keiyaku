@@ -99,7 +99,19 @@ export type {
   FactKind,
   SnapshotId,
 } from "./core/facts/types.js";
-export { kanshi, kanshiCategory, kanshiCounts, observeKanshi, selectKanshi, selectRegion } from "./kanshi/index.js";
+export {
+  kanshi,
+  kanshiCategory,
+  kanshiCounts,
+  kanshiCountsReportSchema,
+  observeKanshi,
+  selectKanshi,
+  selectRegion,
+  regionReadSchema,
+  kanshiReportSchema,
+  kanshiCategoryReportSchema,
+  kanshiObservationSchema,
+} from "./kanshi/index.js";
 export type { KanshiCountsInput, KanshiCountsReport } from "./kanshi/index.js";
 export type {
   AkumaKanshiRow,
@@ -198,7 +210,7 @@ export type {
   ReviewInput,
   VerifyInput,
 } from "./library/contract-types.js";
-export { nukeKeiyaku as nuke } from "./library/nuke.js";
+export { nukeKeiyaku as nuke, nukeResultSchema } from "./library/nuke.js";
 export type { NukeInput, NukeResult } from "./library/nuke.js";
 export type {
   InvocationEffect,
@@ -261,7 +273,14 @@ export type {
   ContractRow,
   ContractWorkspaceObservation,
 } from "./protocol/read/status.js";
-export { SettingsError, settings } from "./settings.js";
+export {
+  SettingsError,
+  settings,
+  settingsSchema,
+  settingsNamespaceViewSchema,
+  settingsScopeStateSchema,
+  settingsEntrySchema,
+} from "./settings.js";
 export type { Gate } from "./library/contract-types.js";
 export type {
   Settings,
@@ -274,8 +293,32 @@ export type {
 } from "./settings.js";
 export type { SettlementAction, SettlementLag, SettlementReport } from "./settlement/settle.js";
 export type * from "./debt/index.js";
-export { DEBT_RELATION_PREDICATE_FIELDS, DebtAuthorityCorruptionError, Debts } from "./debt/index.js";
-export { World, WorldError } from "./world.js";
+export {
+  DEBT_RELATION_PREDICATE_FIELDS,
+  DebtAuthorityCorruptionError,
+  Debts,
+  debtAbsentSchema,
+  debtDetailSchema,
+  debtOutcomeSchema,
+  debtViewSchema,
+  debtReadSchema,
+  debtListSchema,
+  blockedDebtListSchema,
+  debtQueryResultSchema,
+  debtDoctorReportSchema,
+  debtDecompositionTreeSchema,
+  debtMutationResultSchema,
+  debtUpdateResultSchema,
+  debtBatchResultSchema,
+} from "./debt/index.js";
+export {
+  World,
+  WorldError,
+  worldRootSchema,
+  worldResolutionSchema,
+  worldLocationSchema,
+  worldEstablishedSchema,
+} from "./world.js";
 export type { WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";
 
 export { reconcileCompletionSchema, repoReconcileReportSchema, reconcileResultSchema } from "./library/reconcile.js";

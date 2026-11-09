@@ -84,6 +84,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/akuma-schema.test.ts",
   "tests/akuma-stream.test.ts",
   "tests/akuma-turn-wait.test.ts",
+  "tests/ambient-result-schemas.test.ts",
   "tests/arc.test.ts",
   "tests/boundary-validation.test.ts",
   "tests/cli-adaptation.test.ts",

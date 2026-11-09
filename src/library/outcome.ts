@@ -13,6 +13,7 @@ import { journalEntrySchema } from "../protocol/result-leaves.js";
 import { executionCleanupSchema, executionStageSchema, type ExecutionStage } from "../protocol/progress.js";
 import type { ReviewAdmissionValue } from "../protocol/review.js";
 import { settlementActionSchema, settlementLagSchema } from "../settlement/settle.js";
+import { worldRootSchema } from "../world.js";
 import type { WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { AmendValue, BindValue } from "./contract-outcomes.js";
@@ -221,6 +222,35 @@ export type ResetOutcome = ResetEnvelope &
     | Readonly<{ kind: "accepted"; value: { removed: ResetCounts } }>
     | Readonly<{ kind: "refused"; refusal: ResetRefusal }>
   );
+
+const resetEnvelopeShape = {
+  operation: z.literal("nuke"),
+  world: worldRootSchema,
+  effects: z
+    .array(z.union([resetEffectSchema.options[0].readonly(), resetEffectSchema.options[1].readonly()]))
+    .readonly(),
+  pending: z.array(pendingSurfaceSchema).readonly(),
+};
+export const resetOutcomeSchema = z.union([
+  z
+    .strictObject({
+      ...resetEnvelopeShape,
+      kind: z.literal("accepted"),
+      value: z
+        .strictObject({
+          removed: z.strictObject({ refs: z.number(), worktrees: z.number(), debts: z.number() }).readonly(),
+        })
+        .readonly(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...resetEnvelopeShape,
+      kind: z.literal("refused"),
+      refusal: z.union([nukeConfirmationRefusalSchema.readonly(), nukeConfirmationRequiredRefusalSchema.readonly()]),
+    })
+    .readonly(),
+]);
 
 type ResetProjection = Readonly<{ world: WorldRoot }> &
   (

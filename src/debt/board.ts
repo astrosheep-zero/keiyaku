@@ -3,7 +3,6 @@ import {
   debtStateSchema,
   debtPrioritySchema,
   type DebtDocument,
-  type DebtPriority,
   type DebtState,
 } from "./document.js";
 import { debtIdSchema, parseDebtId, sameNamespace, type DebtId } from "./identity.js";
@@ -38,15 +37,15 @@ export const debtRowsSchema = z.array(debtRowSchema).readonly();
 export const debtResultRowSchema = z
   .strictObject({
     ...debtRowSchema.shape,
-    children: z
-      .strictObject({ live: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
-      .readonly()
-      .exactOptional(),
+    children: debtRowSchema.shape.children.unwrap().readonly().exactOptional(),
   })
   .readonly();
 export type DebtDisposition = z.infer<typeof debtRowSchema>["disposition"];
 export type DebtRow = z.output<typeof debtResultRowSchema>;
-export type BlockedDebtRow = DebtRow & Readonly<{ blockers: readonly DebtRef[] }>;
+export const blockedDebtRowSchema = z
+  .strictObject({ ...debtResultRowSchema.unwrap().shape, blockers: z.array(debtRefSchema).readonly() })
+  .readonly();
+export type BlockedDebtRow = z.output<typeof blockedDebtRowSchema>;
 export type DebtDetailFacts = Readonly<{
   debt: DebtDocument;
   needs: readonly (DebtRef & Readonly<{ released: boolean }>)[];
@@ -58,11 +57,23 @@ export type DebtDetailFacts = Readonly<{
   supersededBy: readonly DebtRef[];
   related: readonly DebtRef[];
 }>;
+const debtTreeReferenceSchema = z
+  .strictObject({ ...debtRefSchema.unwrap().shape, priority: debtPrioritySchema.nullable() })
+  .readonly();
 export type DebtTreeNode = Readonly<{
-  debt: DebtRef & Readonly<{ priority: DebtPriority | null }>;
+  debt: z.output<typeof debtTreeReferenceSchema>;
   cycle?: true;
   children: readonly DebtTreeNode[];
 }>;
+export const debtTreeNodeSchema: z.ZodType<DebtTreeNode> = z.lazy(() =>
+  z
+    .strictObject({
+      debt: debtTreeReferenceSchema,
+      cycle: z.literal(true).exactOptional(),
+      children: z.array(debtTreeNodeSchema).readonly(),
+    })
+    .readonly(),
+);
 export type DebtBoard = Readonly<{ debts: ReadonlyMap<DebtId, DebtDocument> }>;
 
 /** The local ids occupied across one namespace of the current board. */
@@ -76,10 +87,31 @@ export function occupiedLocalIds(board: DebtBoard, namespace: readonly string[])
 }
 
 type DebtRelation = "needs" | "parent" | "supersedes" | "relates";
-export type DebtDoctorIssue =
-  | Readonly<{ kind: "missing-target"; debtId: DebtId; relation: DebtRelation; target: DebtId }>
-  | Readonly<{ kind: "self-relation"; debtId: DebtId; relation: DebtRelation }>
-  | Readonly<{ kind: "cycle"; relation: "needs" | "parent" | "supersedes"; debts: readonly DebtId[] }>;
+export const debtDoctorIssueSchema = z.union([
+  z
+    .strictObject({
+      kind: z.literal("missing-target"),
+      debtId: debtIdSchema,
+      relation: z.enum(["needs", "parent", "supersedes", "relates"]),
+      target: debtIdSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("self-relation"),
+      debtId: debtIdSchema,
+      relation: z.enum(["needs", "parent", "supersedes", "relates"]),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("cycle"),
+      relation: z.enum(["needs", "parent", "supersedes"]),
+      debts: z.array(debtIdSchema).readonly(),
+    })
+    .readonly(),
+]);
+export type DebtDoctorIssue = z.output<typeof debtDoctorIssueSchema>;
 
 const terminal = (state: DebtState): boolean => state === "done" || state === "drop";
 const none: readonly DebtRef[] = Object.freeze([]);

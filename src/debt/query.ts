@@ -1,7 +1,8 @@
+import { z } from "zod";
 import type { DebtDocument, DebtPriority, DebtState } from "./document.js";
-import { formatDebtId, parseDebtId, sameNamespace, type DebtId } from "./identity.js";
-import type { DebtBoard, DebtRef, DebtRelationProjection, DebtRow } from "./board.js";
-import { projectDebtRow, debtBlocked, debtDisposition, debtRef } from "./board.js";
+import { debtIdSchema, formatDebtId, parseDebtId, sameNamespace, type DebtId } from "./identity.js";
+import type { DebtBoard, DebtRelationProjection } from "./board.js";
+import { debtResultRowSchema, debtRefSchema, projectDebtRow, debtBlocked, debtDisposition, debtRef } from "./board.js";
 import { projectBoundedList, type BoundedList } from "../bounded-list.js";
 
 export const DEBT_RELATION_PREDICATE_FIELDS = ["under", "needs", "blocks"] as const;
@@ -24,14 +25,17 @@ export type DebtQueryExpression =
   | Readonly<{ kind: "predicate"; predicate: DebtQueryPredicate }>;
 
 export type DebtQuerySort = "priority" | "created" | "updated" | "id";
-export type DebtQueryRow = DebtRow &
-  Readonly<{
-    parent: DebtId | null;
-    needs: readonly DebtRef[];
-    blocks: readonly DebtRef[];
-    createdAt: string;
-    updatedAt: string;
-  }>;
+export const debtQueryRowSchema = z
+  .strictObject({
+    ...debtResultRowSchema.unwrap().shape,
+    parent: debtIdSchema.nullable(),
+    needs: z.array(debtRefSchema).readonly(),
+    blocks: z.array(debtRefSchema).readonly(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+  })
+  .readonly();
+export type DebtQueryRow = z.output<typeof debtQueryRowSchema>;
 export type DebtPage<Row> = BoundedList<Row>;
 
 const states: readonly DebtState[] = ["open", "done", "drop"];
