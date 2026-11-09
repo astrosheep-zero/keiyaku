@@ -1,11 +1,27 @@
-# Public Mutation Results
+# Public Results
 
-This chapter owns the conceptual public answers to Contract mutation,
+This chapter owns the structural boundary for all public operation results and
+progress observations, and the conceptual public answers to Contract mutation,
 non-admission, delivery preview, and post-admission work. Exact TypeScript unions, fields,
 and literal codes belong to the exported declarations and executable
 specifications.
 
 ## Structural Boundary
+
+Every public operation result and observer progress event has one structural
+schema, owned beside its type by the producing owner, not a facet, adapter, or
+test. Thrown errors are not results. Schemas describe the JSON wire form:
+round-tripping a native value through JSON and its schema preserves that value,
+with handles represented by their JSON form. JSON Schema represents the input
+side of transformations. Object schemas are strict and readonly, with exact
+optional fields. Types are derived from their owner schemas where that owner
+already uses Zod; otherwise type-level tests establish exact parity.
+
+These schemas are published for consumers, not enforced on the operation,
+facet, or CLI hot path. Core does not depend on Zod; the nearest schema-using
+owner that projects a core fact owns its schema. Shared schemas live below all
+consumers, without import cycles. Root-exported schemas use the value's name
+with a Schema suffix.
 
 Unknown caller values are structurally validated once at their Library
 boundary. Nested evidence retains its native structural owner within the

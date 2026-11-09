@@ -242,6 +242,8 @@ for (const [owner, module, symbol, rule] of [
   ["core/verbs/bind.ts", "node:child_process", "spawn", "capability-import"],
   ["core/verbs/bind.ts", "node:fs", "readFileSync", "capability-import"],
   ["core/verbs/bind.ts", "zod", "z", "capability-import"],
+  ["bounded-list.ts", "zod", "z", ""],
+  ["bounded-list.ts", "zod", "other", "capability-import"],
   ["akuma/providers/opencode-sdk/client.ts", "@opencode-ai/sdk", "client", ""],
   ["protocol/attempt.ts", "@opencode-ai/sdk", "client", "provider-sdk-boundary"],
 ]) {

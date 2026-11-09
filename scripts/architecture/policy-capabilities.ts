@@ -14,6 +14,7 @@ export const capabilityPolicy = {
       module: "zod",
       owners: [
         { source: "index.ts" },
+        { source: "bounded-list.ts", symbols: ["z"] },
         { source: "akuma/**" },
         { source: "library/**" },
         { source: "protocol/execution-observation.ts" },
