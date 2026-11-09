@@ -142,7 +142,7 @@ test("delivery, verification, review and preview carry their native wire results
   const preview = await kei.previewDelivery(undefined, options);
   assert.equal(preview.kind, "accepted");
   assertWireRoundTrip(deliveryPreviewOutcomeSchema, preview);
-  const review = await kei.review({ verdict: "satisfied" }, options);
+  const review = await kei.review({ verdict: "satisfied", summary: "Schema review passed" }, options);
   assert.equal(review.kind, "accepted");
   assertWireRoundTrip(reviewOutcomeSchema, review);
   const verify = await kei.verify(undefined, options);
@@ -156,7 +156,7 @@ test("delivery, verification, review and preview carry their native wire results
   for (const event of events) assertWireRoundTrip(executionObservationSchema, event);
 
   assertWireRoundTrip(deliveryPreviewOutcomeSchema, await kei.previewDelivery());
-  assertWireRoundTrip(reviewOutcomeSchema, await kei.review({ verdict: "satisfied" }));
+  assertWireRoundTrip(reviewOutcomeSchema, await kei.review({ verdict: "satisfied", summary: "Schema review passed" }));
   assertWireRoundTrip(verifyOutcomeSchema, await kei.verify());
   assertWireRoundTrip(deliverOutcomeSchema, await kei.deliver());
 });

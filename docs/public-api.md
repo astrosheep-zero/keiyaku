@@ -150,6 +150,9 @@ cached as authority.
 Native Contract and delivery abilities keep process custody private while their
 JSON projection retains public result data.
 
+A caller submitting review testimony supplies a nonblank summary; historical
+testimony remains readable whether or not it included one.
+
 Delivery, review, verify, and delivery preview each expose one promised answer
 and an optional observation callback. Execution never depends on observation; a callback cannot
 hold custody, cancel execution, or change finality, even when it throws or

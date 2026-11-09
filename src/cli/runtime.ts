@@ -3,6 +3,7 @@ import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.
 import { AkumaArchetypeError, Keiyaku, KeiyakuUsageError } from "../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
 import { projectFailure, KeiyakuError } from "../library/outcome.js";
+import { classifyVerb, type VerbInput, type VerbName } from "../library/keiyaku-verbs.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import { isParsedAkumaCommand, runAkumaCommand } from "./commands/akuma.js";
 import { admitBindMarkdown, runContractCommand, runContractHistoryCommand } from "./commands/contract.js";
@@ -20,10 +21,11 @@ import {
   type ParsedInvocation,
 } from "./parse.js";
 import { createExecutionProgressRenderer } from "./render/execution-progress.js";
-import { executionFailureLines } from "./render/receipt.js";
-import { renderRefusal, renderStructuredRefusal } from "./render/refusal.js";
+import { renderVerb } from "./render/verbs.js";
+import { renderRefusal } from "./render/refusal.js";
 import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
 import { cliExitCode, displayContext, emit, writeJson, writeStderr, writeStdout, type CliOutcome } from "./streams.js";
+import { usageAcceptanceLines } from "./usage.js";
 
 export type ParsedCommandInvocation = Extract<ParsedInvocation, { command: ParsedCommand }>;
 
@@ -95,71 +97,35 @@ function cliCancellation(signal: AbortSignal | undefined): Readonly<{ signal: Ab
   };
 }
 
-type AkumaFailureProjection = Readonly<{ body: string; outcome: CliOutcome }>;
+type FacetCommand = Exclude<ParsedCommand, { command: "install" }>;
 
-/** Projection of one native Akuma addressing/observation failure into its stated refusal body. */
-export async function akumaFailureProjection(
-  error: unknown,
-  command: ParsedCommand,
-): Promise<AkumaFailureProjection | undefined> {
-  if (error instanceof AkumaNotBornError) {
-    return {
-      body:
-        command.output === "json"
-          ? error.message
-          : renderStructuredRefusal(
-              command.command,
-              "Akuma not found",
-              [`id  ${safeText(error.id)}`],
-              usageGuideForCommand(command),
-            ),
-      outcome: "refused",
-    };
-  }
-  if (error instanceof AkumaAddressError) {
-    const body =
-      error.refusal.kind === "akuma-alias-not-found"
-        ? renderStructuredRefusal(
-            command.command,
-            "Akuma alias not found",
-            [`alias  ${safeText(error.refusal.alias)}`],
-            usageGuideForCommand(command),
-          )
-        : renderStructuredRefusal(
-            command.command,
-            "invalid Akuma address",
-            [`selector  ${safeText(error.refusal.selector)}`],
-            usageGuideForCommand(command),
-          );
-    return { body: command.output === "json" ? error.message : body, outcome: "refused" };
-  }
-  if (error instanceof AkumaWorldScopeError) {
-    return {
-      body:
-        command.output === "json"
-          ? JSON.stringify(error.refusal)
-          : renderStructuredRefusal(
-              command.command,
-              "Akuma not in this World",
-              [
-                `ids  ${error.refusal.ids.map((id) => safeText(id)).join(" · ")}`,
-                `world  ${safeText(error.refusal.world)}`,
-              ],
-              usageGuideForCommand(command),
-            ),
-      outcome: "refused",
-    };
-  }
-  if (error instanceof AkumaObservationError) {
-    return {
-      body:
-        command.output === "json"
-          ? error.message
-          : `× Akuma observation failed  ${safeText(error.id)} — ${safeText(error.diagnostic)}`,
-      outcome: "failed",
-    };
-  }
-  return undefined;
+// A thrown completion does not consult input; acquisition may have failed before
+// there was a wire input. The name still selects operation-specific judgment.
+function thrownCompletion(error: unknown, command: FacetCommand) {
+  const name = (
+    command.command === "debt"
+      ? command.action === "ls"
+        ? "ls"
+        : command.action === "add" && command.stdin === "document"
+          ? "debt.addDocument"
+          : `debt.${command.action}`
+      : command.command === "deliver" && command.dryRun
+        ? "deliver.preview"
+        : command.command
+  ) as VerbName;
+  const input = undefined as unknown as VerbInput<VerbName>;
+  const completion = { kind: "threw", error } as const;
+  return {
+    outcome: classifyVerb(name, input, completion),
+    text: () => renderVerb(name, input, completion, displayContext()),
+  };
+}
+
+/** Install is a CLI-only operation, not a facet verb. */
+function writeInstallFailure(error: unknown, command: Extract<ParsedCommand, { command: "install" }>): CliOutcome {
+  if (command.output === "json") writeJson(projectFailure(error));
+  else writeStderr(`× install failed\n  reason  ${safeText(error instanceof Error ? error.message : String(error))}`);
+  return "failed";
 }
 
 function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): CliOutcome {
@@ -172,53 +138,60 @@ function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): C
   return error.original instanceof CliUsageError ? "usage" : "refused";
 }
 
+function writeAkumaFailure(
+  error: AkumaNotBornError | AkumaAddressError | AkumaWorldScopeError | AkumaObservationError,
+  command: FacetCommand,
+  shared: ReturnType<typeof thrownCompletion>,
+): CliOutcome {
+  if (command.output === "json")
+    writeStderr(error instanceof AkumaWorldScopeError ? JSON.stringify(error.refusal) : error.message);
+  else {
+    const guide = error instanceof AkumaObservationError ? [] : usageAcceptanceLines(usageGuideForCommand(command));
+    writeStderr([shared.text(), ...guide].join("\n"));
+  }
+  return shared.outcome;
+}
+
+function writeArchetypeFailure(
+  error: AkumaArchetypeError,
+  command: FacetCommand,
+  shared: ReturnType<typeof thrownCompletion>,
+): CliOutcome {
+  const missing = error.reason === "was not found";
+  if (command.output === "json") {
+    writeJson({
+      kind: "refused",
+      diagnostic: missing ? "Akuma not found" : error.reason,
+      akumaName: error.akumaName,
+      searched: error.searched,
+      ...(missing ? { available: "keiyaku ls aku/" } : {}),
+    });
+  } else writeStdout([shared.text(), ...usageAcceptanceLines(usageGuideForCommand(command))].join("\n"));
+  return shared.outcome;
+}
+
 async function writeFailure(error: unknown, command: ParsedCommand): Promise<CliOutcome> {
   if (error instanceof BindDraftError) return writeBindDraftFailure(error, command);
-  if (error instanceof KeiyakuError) {
-    const diagnostic = error.message;
+  if (error instanceof CliUsageError) {
     if (command.output === "json") writeJson(projectFailure(error));
-    else if (error.outcome !== undefined) {
-      writeStdout(
-        executionFailureLines(error.outcome, error.category, diagnostic, displayContext().columns).join("\n"),
-      );
-    } else writeStderr(`× ${command.command} failed\n  reason  ${safeText(diagnostic)}`);
-    return "failed";
+    else writeStderr(error.message);
+    return "usage";
   }
-  const akumaFailure = await akumaFailureProjection(error, command);
-  if (akumaFailure !== undefined) {
-    writeStderr(akumaFailure.body);
-    return akumaFailure.outcome;
-  }
-  if (error instanceof AkumaArchetypeError && command.command === "spawn") {
-    const missing = error.reason === "was not found";
-    const diagnostic = missing ? "Akuma not found" : error.reason;
-    return emit(
-      command.output,
-      {
-        kind: "refused",
-        diagnostic,
-        akumaName: error.akumaName,
-        searched: error.searched,
-        ...(missing ? { available: "keiyaku ls aku/" } : {}),
-      },
-      () =>
-        renderStructuredRefusal(
-          "spawn",
-          `${diagnostic} · ${error.akumaName}`,
-          [...error.searched.map((path) => `searched  ${path}`), ...(missing ? ["available  keiyaku ls aku/"] : [])],
-          usageGuideForCommand(command),
-        ),
-      "refused",
-    );
-  }
+  if (command.command === "install") return writeInstallFailure(error, command);
+  const shared = thrownCompletion(error, command);
+  if (
+    error instanceof AkumaNotBornError ||
+    error instanceof AkumaAddressError ||
+    error instanceof AkumaWorldScopeError ||
+    error instanceof AkumaObservationError
+  )
+    return writeAkumaFailure(error, command, shared);
+  if (error instanceof AkumaArchetypeError && command.command === "spawn")
+    return writeArchetypeFailure(error, command, shared);
   if (command.output === "json") writeJson(projectFailure(error));
-  else {
-    const diagnostic = error instanceof Error ? error.message : String(error);
-    writeStderr(
-      error instanceof CliUsageError ? diagnostic : `× ${command.command} failed\n  reason  ${safeText(diagnostic)}`,
-    );
-  }
-  return error instanceof CliUsageError ? "usage" : "failed";
+  else if (error instanceof KeiyakuError && error.outcome !== undefined) writeStdout(shared.text());
+  else writeStderr(shared.text());
+  return shared.outcome;
 }
 
 export async function runCliCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput = {}): Promise<number> {
@@ -279,8 +252,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
     if (command.command === "history" && "contract" in command)
       return await runContractHistoryCommand(command, runtime);
     if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, invocation.workdir, runtime);
-    if (command.command === "debt")
-      return await runDebtCommand(command, runtime);
+    if (command.command === "debt") return await runDebtCommand(command, runtime);
     return await runContractCommand(command, runtime);
   } catch (error) {
     if (error instanceof KeiyakuUsageError) {

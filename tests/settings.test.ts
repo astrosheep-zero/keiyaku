@@ -58,6 +58,76 @@ function contractGates(context: TestContext) {
   };
 }
 
+test("Settings namespaces match individual resolution, including provenance and failures", async () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({
+      providers: { shared: { user: true }, userOnly: 1 },
+      broken: [],
+    }));
+    writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({
+      providers: { shared: { project: true }, projectOnly: 2 },
+    }));
+    let loaded = await settings({ root: value.project, home: value.home });
+    assert.deepEqual(loaded.namespaces.map((view) => view.name), ["broken", "providers"]);
+    assert.deepEqual(loaded.namespaces, loaded.namespaces.map(({ name }) => loaded.namespace(name)));
+    assert.deepEqual(loaded.namespace("providers"), {
+      kind: "read", name: "providers", entries: [
+        { name: "projectOnly", value: 2, source: "project", shadows: false },
+        { name: "shared", value: { project: true }, source: "project", shadows: true },
+        { name: "userOnly", value: 1, source: "user", shadows: false },
+      ],
+    });
+    assert.equal(loaded.namespace("broken").kind, "failed");
+
+    writeFileSync(join(value.project, ".keiyaku", "settings.json"), "{");
+    loaded = await settings({ root: value.project, home: value.home });
+    assert.deepEqual(loaded.namespaces, loaded.namespaces.map(({ name }) => loaded.namespace(name)));
+    const providers = loaded.namespaces.find(({ name }) => name === "providers");
+    assert.equal(providers?.kind, "failed");
+    if (providers?.kind === "failed") assert.equal(providers.failures[0]?.scope, "project");
+  } finally {
+    value.close();
+  }
+});
+
+test("opaque blank namespace names do not poison Settings construction or unrelated lookups", async () => {
+  const value = fixture();
+  try {
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({
+      "": { shared: "user", userOnly: 1 },
+      " ": { userOnly: true },
+      providers: { local: "available" },
+    }));
+    writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({
+      "": { shared: "project" },
+      " ": { projectOnly: true },
+    }));
+    const loaded = await settings({ root: value.project, home: value.home });
+    assert.deepEqual(loaded.namespaces, [
+      { kind: "read", name: "", entries: [
+        { name: "shared", value: "project", source: "project", shadows: true },
+        { name: "userOnly", value: 1, source: "user", shadows: false },
+      ] },
+      { kind: "read", name: " ", entries: [
+        { name: "projectOnly", value: true, source: "project", shadows: false },
+        { name: "userOnly", value: true, source: "user", shadows: false },
+      ] },
+      { kind: "read", name: "providers", entries: [
+        { name: "local", value: "available", source: "user", shadows: false },
+      ] },
+    ]);
+    assert.deepEqual(loaded.namespace("providers"), loaded.namespaces[2]);
+    assert.throws(() => loaded.namespace(""), /namespace must be nonblank/u);
+    assert.throws(() => loaded.namespace(" "), /namespace must be nonblank/u);
+    const project = await projectSettings(value.project);
+    assert.equal(project.namespaces[0]?.name, "");
+    assert.equal(project.namespaces[1]?.name, " ");
+  } finally {
+    value.close();
+  }
+});
+
 test("Settings isolates malformed namespaces but never falls through a failed higher scope", async (context) => {
   const gates = contractGates(context);
   const value = fixture();
@@ -867,7 +937,7 @@ test("hooks and freshness derive only at the operation that consumes them", asyn
     await assert.rejects(selected.deliver(), invalidInputFromSettings);
     await assert.rejects(selected.verify(), invalidInputFromSettings);
     // Review consumes neither namespace and reaches its own admission instead.
-    assert.equal((await selected.review({ verdict: "satisfied" })).kind, "refused");
+    assert.equal((await selected.review({ verdict: "satisfied", summary: "Settings review passed" })).kind, "refused");
 
     const cause = new SettingsError("unavailable git observation");
     const unavailable: Settings = {

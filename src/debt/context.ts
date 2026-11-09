@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { lstat, mkdir, readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repairDerivedFile, replaceFileDurably } from "../coordination/durable-file.js";
@@ -16,10 +17,13 @@ export type NamespaceContextInput = Readonly<{
   managed?: boolean;
 }>;
 export type NamespaceContextSource = "default-root" | "contract-installed" | "local-override";
-export type ResolvedNamespaceContext = Readonly<{
-  namespace: readonly string[];
-  source: NamespaceContextSource;
-}>;
+export const resolvedNamespaceContextSchema = z
+  .strictObject({
+    namespace: z.array(z.string()).readonly(),
+    source: z.enum(["default-root", "contract-installed", "local-override"]),
+  })
+  .readonly();
+export type ResolvedNamespaceContext = z.output<typeof resolvedNamespaceContextSchema>;
 
 function directory(root: string): string {
   return join(root, ".keiyaku", "namespace");

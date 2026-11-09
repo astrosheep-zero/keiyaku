@@ -710,13 +710,15 @@ function durationText(durationMs: number): string {
  * settled names no duration, and an unfinished target carries the elapsed wait.
  */
 function waitConclusionRow(
-  input: Readonly<{ at?: number; startedAt: number; complete: boolean; end: number; mark: string; verb: string }>,
+  input: Readonly<{ at?: number; startedAt: number; complete: boolean; end?: number; mark: string; verb: string }>,
 ): string {
   const duration = input.complete
     ? input.at !== undefined && input.at >= input.startedAt
       ? ` — ${durationText(Math.max(0, input.at - input.startedAt))}`
       : ""
-    : ` — waited ${durationText(Math.max(0, input.end - input.startedAt))}`;
+    : input.end === undefined || !Number.isFinite(input.startedAt)
+      ? ""
+      : ` — waited ${durationText(Math.max(0, input.end - input.startedAt))}`;
   return `${input.mark} ${input.verb}${duration}`;
 }
 
@@ -724,7 +726,7 @@ export function inputWaitConclusion(
   observation: AkumaAskObservation,
   input: Readonly<{ startedAt: number; completedAt?: string | null; now?: number; status?: AkumaStatus }>,
 ): readonly string[] {
-  const end = input.now ?? Date.now();
+  const end = input.now;
   const complete = observation.reason !== "deadline";
   const pinned = input.completedAt == null ? Number.NaN : Date.parse(input.completedAt);
   const at = complete ? (Number.isFinite(pinned) ? pinned : undefined) : end;
@@ -743,7 +745,7 @@ export function inputWaitConclusion(
       ...(at === undefined ? {} : { at }),
       startedAt: input.startedAt,
       complete,
-      end,
+      ...(end === undefined ? {} : { end }),
       ...conclusion,
     }),
     ...(observation.reason === "failed" || observation.reason === "invalid-output"
@@ -806,7 +808,7 @@ function failedOutcomeDiagnostic(status: AkumaStatus): string | undefined {
 export function inputWaitStream(
   context: TextRenderContext,
   head: () => ObservedCallHead,
-  options: Readonly<{ cursor: "empty" | "admission"; now?: () => number; answerSeparator?: true }>,
+  options: Readonly<{ cursor: "empty" | "admission"; now?: () => number | undefined; answerSeparator?: true }>,
 ): InputWaitStream {
   const now = options.now ?? ((): number => Date.now());
   const activity = activityStream(context);
@@ -820,7 +822,7 @@ export function inputWaitStream(
   const admit: InputWaitStream["admitted"] = (input) => {
     if (admitted) throw new Error("input wait admitted more than once");
     const pinned = input.at === undefined ? Number.NaN : Date.parse(input.at);
-    startedAt = Number.isFinite(pinned) ? pinned : now();
+    startedAt = Number.isFinite(pinned) ? pinned : (now() ?? Number.NaN);
     admittedSequence = input.sequence;
     admitted = true;
     if (input.rows.length === 0) return [];
@@ -861,15 +863,17 @@ export function inputWaitStream(
     if (result.kind === "failed" && result.evidence !== undefined) lines.push(...result.evidence);
     lines.push(...activity.flush());
     if (result.kind === "failed") lines.push(`! ${safeText(result.diagnostic)}`);
-    else
+    else {
+      const currentTime = now();
       lines.push(
         ...inputWaitConclusion(result.observation, {
           startedAt,
           ...(result.completedAt === undefined ? {} : { completedAt: result.completedAt }),
-          now: now(),
+          ...(currentTime === undefined ? {} : { now: currentTime }),
           ...(lastStatus === undefined ? {} : { status: lastStatus }),
         }),
       );
+    }
     lines.push(...subordinateLines(head().facts));
     return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;
   };

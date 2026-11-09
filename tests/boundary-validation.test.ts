@@ -58,6 +58,21 @@ test("amend validates programmer input before observing a missing contract", asy
   assert.deepEqual((await Keis.of(repo).list({  })).rows, before);
 });
 
+test("review rejects missing or blank summary before repository execution", async () => {
+  const repository = makeGitRepository();
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repo = await Repo.at({ path: repository.path });
+  const contract = Keis.of(repo).kei({ id: "kei/missing" as never });
+  let observations = 0;
+  for (const input of [{ verdict: "satisfied" }, { verdict: "satisfied", summary: " \t\n" }]) {
+    await assert.rejects(
+      () => withGitShim("exit 99", {}, () => contract.review(input as never, { observe: () => { observations++; } })),
+      invalidInput,
+    );
+  }
+  assert.equal(observations, 0);
+});
+
 test("boundary validation precedes Git and unrepresentable targets stay typed", async () => {
   const repository = makeGitRepository();
   repository.run(["config", "user.name", "Boundary Test"]);
@@ -125,7 +140,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     (error: unknown) => invalidInput(error, "deliver input has unknown field: actor"),
   );
   await assert.rejects(
-    () => bound.value.kei.review({ verdict: "satisfied", hooks: { create: [], destroy: [] } } as never),
+    () => bound.value.kei.review({ verdict: "satisfied", summary: "Boundary review", hooks: { create: [], destroy: [] } } as never),
     (error: unknown) => invalidInput(error, "review input has unknown field: hooks"),
   );
   await assert.rejects(

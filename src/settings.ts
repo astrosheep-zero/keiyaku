@@ -27,6 +27,7 @@ export type SettingsNamespaceView =
 
 export type Settings = Readonly<{
   scopes: Readonly<{ project: SettingsScopeState; user: SettingsScopeState }>;
+  namespaces: readonly SettingsNamespaceView[];
   namespace(name: string): SettingsNamespaceView;
 }>;
 
@@ -62,6 +63,7 @@ export const settingsNamespaceViewSchema = z.union([
 export const settingsSchema = z
   .strictObject({
     scopes: z.strictObject({ project: settingsScopeStateSchema, user: settingsScopeStateSchema }).readonly(),
+    namespaces: z.array(settingsNamespaceViewSchema).readonly(),
   })
   .readonly();
 
@@ -146,32 +148,40 @@ function namespaceEntries(
 }
 
 function settingsFromScopes(project: LoadedScope, user: LoadedScope): Settings {
+  function resolveNamespace(name: string): SettingsNamespaceView {
+    const fromUser = namespaceEntries(name, "user", user);
+    const fromProject = namespaceEntries(name, "project", project);
+    const userByName = new Map(fromUser.entries.map((entry) => [entry.name, entry]));
+    const projectByName = new Map(fromProject.entries.map((entry) => [entry.name, entry]));
+    const names = [...new Set([...userByName.keys(), ...projectByName.keys()])].sort();
+    const entries = Object.freeze(
+      names.map((entryName) => {
+        const higher = projectByName.get(entryName);
+        if (higher !== undefined) return Object.freeze({ ...higher, shadows: userByName.has(entryName) });
+        return userByName.get(entryName)!;
+      }),
+    );
+    const failures = Object.freeze(
+      [fromUser.failure, fromProject.failure].filter(
+        (failure): failure is SettingsNamespaceFailure => failure !== undefined,
+      ),
+    );
+    return failures.length === 0
+      ? Object.freeze({ kind: "read" as const, name, entries })
+      : Object.freeze({ kind: "failed" as const, name, entries, failures });
+  }
+  function namespace(name: string): SettingsNamespaceView {
+    if (typeof name !== "string" || name.trim().length === 0)
+      throw new TypeError("settings namespace must be nonblank");
+    return resolveNamespace(name);
+  }
+  const names = [
+    ...new Set([user.state, project.state].flatMap((scope) => (scope.kind === "read" ? scope.namespaces : []))),
+  ].sort();
   return Object.freeze({
     scopes: Object.freeze({ project: project.state, user: user.state }),
-    namespace(name: string): SettingsNamespaceView {
-      if (typeof name !== "string" || name.trim().length === 0)
-        throw new TypeError("settings namespace must be nonblank");
-      const fromUser = namespaceEntries(name, "user", user);
-      const fromProject = namespaceEntries(name, "project", project);
-      const userByName = new Map(fromUser.entries.map((entry) => [entry.name, entry]));
-      const projectByName = new Map(fromProject.entries.map((entry) => [entry.name, entry]));
-      const names = [...new Set([...userByName.keys(), ...projectByName.keys()])].sort();
-      const entries = Object.freeze(
-        names.map((entryName) => {
-          const higher = projectByName.get(entryName);
-          if (higher !== undefined) return Object.freeze({ ...higher, shadows: userByName.has(entryName) });
-          return userByName.get(entryName)!;
-        }),
-      );
-      const failures = Object.freeze(
-        [fromUser.failure, fromProject.failure].filter(
-          (failure): failure is SettingsNamespaceFailure => failure !== undefined,
-        ),
-      );
-      return failures.length === 0
-        ? Object.freeze({ kind: "read" as const, name, entries })
-        : Object.freeze({ kind: "failed" as const, name, entries, failures });
-    },
+    namespaces: Object.freeze(names.map(resolveNamespace)),
+    namespace,
   });
 }
 

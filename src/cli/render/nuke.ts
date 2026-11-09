@@ -1,4 +1,3 @@
-import type { CliOutcome } from "../streams.js";
 import type { NukeResult } from "../../index.js";
 import { renderRefusal } from "./refusal.js";
 
@@ -21,9 +20,4 @@ export function renderNukeText(result: NukeResult): string {
     return renderRefusal({ operation: "nuke", refusal: result.refusal });
   }
   return "";
-}
-
-export function nukeOutcome(result: NukeResult): CliOutcome {
-  if (result.kind === "refused") return "refused";
-  return result.pending.some((surface) => surface.required) ? "retryable" : "accepted";
 }

@@ -1,7 +1,7 @@
 # CLI Output
 
 CLI Output owns help composition, shared rendering, and process outcome
-classification. It consumes typed public values only. It does not reread
+projection. It consumes typed public values only. It does not reread
 authority, change an owner's judgment, or make a display convenience durable.
 
 ## Help and outcome
@@ -15,9 +15,11 @@ and help handles without trying the command or appending a complete help page.
 Explicit help remains complete, including supported invocation coordinates.
 
 Process outcomes form a fixed five-way classification — accepted, refused,
-retryable, failed, usage — with one definition site in the runtime; changing
-the classification or its exit mapping is a product change, and ordinary
-receipt text never carries the numeric map.
+retryable, failed, usage — shared with other invocation adapters by the facet.
+The CLI owns its numeric exit projection; changing either the classification or
+its exit mapping is a product change, and ordinary receipt text never carries
+the numeric map. Final text rendering is shared, pure projection of native
+answers and explicitly supplied presentation context.
 
 Substantive refusals use one text grammar: a denied-verdict title naming the
 verb, a labeled reason with machine kinds rendered as words, and
@@ -117,9 +119,11 @@ without adding counts, an exhaustive-mode claim, or a continuation
 instruction; the omission marker renders bounded observation, not a recovery
 route. A complete catalogue has no omission tail. Multi-line payloads sit
 directly under their label, bounded, and name their own truncation. A
-caller-scoped Akuma catalogue names a descendant row's immediate calling Akuma
-after its own facts (`· by <akuId>`); ordinary catalogue rows keep their shape,
-and a direct child of the selected Akuma caller needs no such label.
+caller-scoped Akuma catalogue names a descendant row's immediate calling
+Akuma when the resolved selected caller is available to the renderer; a direct
+child of that caller needs no such label. When the selected caller is unavailable,
+the label is omitted without another observation or a new result envelope.
+Ordinary catalogue rows keep their shape.
 
 Kanshi owns what a composite report means; this chapter owns its terminal
 projection. Debt owns Debt facts and [cli-debt.md](cli-debt.md) owns their

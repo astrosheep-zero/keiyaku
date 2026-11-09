@@ -6,7 +6,12 @@ It captures those explicit inputs without observing the filesystem or reading
 ambient process state. Each operation resolves its invocation scope anew; the
 facet keeps no persistent authority, observation cache, or separate result model.
 Its operations return native owner values and preserve owner refusal, retry,
-cancellation, and observation semantics.
+cancellation, and observation semantics. A single described verb surface offers
+both typed methods and generic execution over the same caller boundary. The
+facet also owns the shared interpretation of returned and thrown outcomes for
+adapters; this classification does not replace or alter the native answer.
+Structural descriptions expose wire inputs and owner result and progress schemas
+without validating trusted owner values as they flow through execution.
 
 The invocation World is distinct from an explicitly selected Contract Repo:
 selecting a Repo never retargets the World. The facet adapts caller-supplied

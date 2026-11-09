@@ -139,7 +139,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     }
     assert.equal(present(await keiyaku.state()).terminal, null);
 
-    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied", summary: "Lifecycle review passed" }));
     assert.equal(reviewed.kind, "accepted");
     assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
   });
@@ -221,7 +221,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
       delivered.effects.some((effect) => effect.kind === "worktree-retired"),
       false,
     );
-    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied", summary: "Lifecycle review passed" }));
     assertNoVerification(reviewed.value);
     assert.equal(reviewed.value.completion?.integration, check.snapshot);
     assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
@@ -237,7 +237,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
       false,
       "an active Contract retires nothing",
     );
-    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied", summary: "Lifecycle review passed" }));
     assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
     assert.deepEqual(
       reviewed.effects.find((effect) => effect.kind === "worktree-retired"),
@@ -297,7 +297,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const audited = accepted(await keiyaku.previewDelivery());
     assert.deepEqual(audited.value.verification, { kind: "undeclared" });
     assert.equal(audited.value.delivery?.relation, "identical");
-    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await keiyaku.review({ verdict: "satisfied", summary: "Lifecycle review passed" }));
     assertNoVerification(reviewed.value);
     assert.equal(present(await keiyaku.state()).terminal?.kind, "claimed");
   });

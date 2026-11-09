@@ -299,7 +299,11 @@ export class ContractExecution {
       throw new KeiyakuError("invalid-input", "verdict must be satisfied or unsatisfied", {
         cause: new TypeError("verdict must be satisfied or unsatisfied"),
       });
-    const summary = validated(() => optionalNonblank(values.summary, "review summary"));
+    const summary = validated(() => {
+      const value = optionalNonblank(values.summary, "review summary");
+      if (value === undefined) throw new TypeError("review summary is required");
+      return value;
+    });
     const signal = validated(() => optionalSignal(values.signal));
     const observer = validated(() => observationOptions(options));
     const hooks = derivedHooks(this.composition);
@@ -323,7 +327,7 @@ export class ContractExecution {
             ...actor,
             ...(signal === undefined ? {} : { signal }),
             verdict,
-            ...(summary === undefined ? {} : { summary }),
+            summary,
           });
           if (outcome.kind !== "accepted") return expected(this.id, outcome);
           value = outcome.value;

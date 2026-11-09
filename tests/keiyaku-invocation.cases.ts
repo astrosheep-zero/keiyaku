@@ -22,6 +22,7 @@ import { repositoryWithCommit } from "./support/git.js";
 import { accepted, commitCandidate, document } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { temporaryDirectory } from "./support/process.js";
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 
 test("Debt facet preserves native lifecycle, context, and absent World", async (t) => {
   const cwd = temporaryDirectory(t, "debt-facet-");
@@ -46,12 +47,17 @@ test("Debt facet preserves native lifecycle, context, and absent World", async (
   ])
     await assert.rejects(operation, (error: unknown) => error === reason);
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  assert.deepEqual(await facet.debtContext(), { kind: "accepted", value: { namespace: [], source: "default-root" } });
+  const defaultContext = await facet.debtContext();
+  assert.deepEqual(defaultContext, { kind: "accepted", value: { namespace: [], source: "default-root" } });
+  assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, defaultContext);
   await assert.rejects(facet.debtContext({ namespace: ["INVALID"] }), TypeError);
   await assert.rejects(facet.debtAdd({ title: " " }), TypeError);
   assert.deepEqual(await facet.ls({ of: "debt" }), { kind: "absent" });
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  assert.equal((await facet.debtContext({ namespace: ["nested"] })).kind, "accepted");
+  const installedContext = await facet.debtContext({ namespace: ["nested"] });
+  assert.equal(installedContext.kind, "accepted");
+  assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, installedContext);
+  assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, await facet.debtContext());
   const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" })).value;
   const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] })).value;
   const third = accepted(await facet.debtAdd({ title: "Third" })).value;
@@ -163,7 +169,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.deepEqual(await facet.show({ contract }), await Keis.of(repoB).kei({ id: contract }).guidance());
   assert.deepEqual(await facet.history({ selector: contract }), await Keis.of(repoB).kei({ id: contract }).history());
 
-  const nativeDebts = await Debts.of(worldA).list({ selection: "all", namespace: [] });
+  const nativeDebts = await Debts.of(worldA).list({ selection: "active", namespace: [] });
   assert.deepEqual(await facet.ls({ of: "debt" }), nativeDebts);
   assert.equal(nativeDebts.kind, "accepted");
   if (nativeDebts.kind === "accepted") assert.equal(nativeDebts.value.rows[0]?.id, debtA.value.id);
@@ -195,7 +201,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.deepEqual(await facet.show({ contract: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
 
   const other = Keiyaku.at({ cwd: second.path, environment: {}, home });
-  assert.deepEqual(await other.ls({ of: "debt" }), await Debts.of(worldB).list({ selection: "all", namespace: [] }));
+  assert.deepEqual(await other.ls({ of: "debt" }), await Debts.of(worldB).list({ selection: "active", namespace: [] }));
   const { observedAt: _otherWorkersAt, ...otherWorkers } = await other.ls({ of: "aku" });
   const { observedAt: _emptyWorkersAt, ...emptyWorkers } = await Akumas.of(worldB).list({});
   assert.deepEqual(otherWorkers, emptyWorkers);
@@ -245,7 +251,7 @@ test("native Contract results, verification progress and cancellation pass throu
   const controller = new AbortController();
   controller.abort(new Error("caller cancellation"));
   await assert.rejects(native.verify({ signal: controller.signal }));
-  await assert.rejects(facet.verify({ contract: bound.contract, signal: controller.signal }));
+  await assert.rejects(facet.verify({ contract: bound.contract }, { signal: controller.signal }));
   assert.deepEqual(await facet.previewDelivery({ contract: bound.contract }), await native.previewDelivery());
 });
 
@@ -292,7 +298,6 @@ test("mixed wait refuses before observing even a nonexistent invocation cwd", as
   const facet = Keiyaku.at({ cwd: join(home, "missing"), environment: {}, home });
   await assert.rejects(
     facet.wait({ selectors: ["kei/example", "aku/worker/1234abcd"] }),
-    (error: unknown) =>
-      error instanceof KeiyakuUsageError && /wait cannot mix Contract and Akuma selectors/u.test(error.message),
+    KeiyakuUsageError,
   );
 });

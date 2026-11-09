@@ -61,7 +61,7 @@ test("explicit checks accumulate on the prospective snapshot and unchanged deliv
     ["deliver"],
   );
   assert.equal(delivered.value.gates?.find((gate) => gate.gate === "verified")?.satisfied, true);
-  const reviewed = accepted(await contract.review({ verdict: "satisfied" }));
+  const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
   assert.ok(reviewed.value.completion);
 });
 
@@ -116,7 +116,7 @@ test("verify validates selection and dirty capture before executing or admitting
 test("the last selected check completes a delivered and reviewed candidate", async () => {
   const { contract } = await fixture(["true", "test -f candidate.txt"]);
   accepted(await contract.deliver());
-  accepted(await contract.review({ verdict: "satisfied" }));
+  accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
   const first = accepted(await contract.verify({ index: 1 }));
   assert.equal(first.value.completion, undefined);
   const last = accepted(await contract.verify({ index: 2 }));
@@ -136,7 +136,7 @@ test("target movement cannot retarget prior check evidence", async () => {
   writeFileSync(join(repository.path, "target-only.txt"), "moved\n");
   repository.run(["add", "target-only.txt"]);
   repository.run(["commit", "--quiet", "-m", "advance target"]);
-  const reviewed = accepted(await contract.review({ verdict: "satisfied" }));
+  const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
   assert.equal(reviewed.value.completion, undefined);
   assert.equal(reviewed.value.gates?.find((gate) => gate.gate === "verified")?.current.kind, "stale");
   const next = accepted(await contract.verify({ index: 1 }));
@@ -149,7 +149,7 @@ test("target movement cannot retarget prior check evidence", async () => {
 test("verify after target movement reuses its prospective snapshot during ordinary completion", async () => {
   const { repository, contract } = await fixture(["true"]);
   accepted(await contract.deliver());
-  accepted(await contract.review({ verdict: "satisfied" }));
+  accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
   writeFileSync(join(repository.path, "target-only.txt"), "moved\n");
   repository.run(["add", "target-only.txt"]);
   repository.run(["commit", "--quiet", "-m", "advance target"]);

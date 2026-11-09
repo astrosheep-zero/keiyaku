@@ -15,7 +15,8 @@ import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provid
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { main } from "../src/cli/main.js";
-import { nukeOutcome, renderNukeText } from "../src/cli/render/nuke.js";
+import { renderNukeText } from "../src/cli/render/nuke.js";
+import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { nukeGit } from "../src/git/nuke.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
@@ -666,36 +667,36 @@ test("nuke receipt names confirmed removals and retained coordination locks", ()
 
 test("CLI nuke outcome retains required pending work", () => {
   assert.equal(
-    nukeOutcome({
+    classifyVerb("nuke", {}, { kind: "returned", value: {
       operation: "nuke",
       kind: "accepted",
       world: "/world" as never,
       effects: [{ kind: "reset-owner-stopped", world: "/world", owner: "git", diagnostic: "busy" }],
       pending: [{ surface: "reset", required: true }],
       value: { removed: { refs: 1, worktrees: 0, debts: 0 } },
-    }),
+    } }),
     "retryable",
   );
   assert.equal(
-    nukeOutcome({
+    classifyVerb("nuke", {}, { kind: "returned", value: {
       operation: "nuke",
       kind: "accepted",
       world: "/world" as never,
       effects: [],
       pending: [],
       value: { removed: { refs: 0, worktrees: 0, debts: 0 } },
-    }),
+    } }),
     "accepted",
   );
   assert.equal(
-    nukeOutcome({
+    classifyVerb("nuke", {}, { kind: "returned", value: {
       operation: "nuke",
       kind: "refused",
       world: "/world" as never,
       effects: [],
       pending: [],
       refusal: { kind: "nuke-confirmation-required", world: "/world" as never },
-    }),
+    } }),
     "refused",
   );
 });

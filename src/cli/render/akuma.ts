@@ -1,11 +1,9 @@
-import type { CliOutcome } from "../streams.js";
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/body.js";
 import type { AkumaId } from "../../akuma/identity.js";
-import type { AkumaAskResult, AkumaKillResult, AkumaTellResult } from "../../akuma/selection-observation.js";
+import type { AkumaAskResult, AkumaKillResult } from "../../akuma/selection-observation.js";
 import type { DispatchStage, ForkResult, SpawnWaitHead } from "../../index.js";
 import type { SpawnResult } from "../../library/akuma-creation.js";
-import type { AkumaHistoryResult } from "../../library/selection.js";
 import {
   actionReceipt,
   callObservationStream,
@@ -30,6 +28,7 @@ export function askProgressStream(
   akuma: AkumaId | undefined,
   alias: string | undefined,
   context: TextRenderContext,
+  now?: () => number | undefined,
 ): AskProgress {
   let target = akuma;
   const stream = inputWaitStream(
@@ -38,7 +37,7 @@ export function askProgressStream(
       if (target === undefined) throw new Error("Tell progress used before admission");
       return { id: target, ...(alias === undefined ? {} : { alias }), contract: { kind: "none" }, facts: [] };
     },
-    { cursor: "admission", answerSeparator: true },
+    { cursor: "admission", answerSeparator: true, ...(now === undefined ? {} : { now }) },
   );
   return {
     admitted: (tell, id) => {
@@ -67,7 +66,7 @@ export function waitedTellProgress(
   alias: string | undefined,
   context: TextRenderContext,
 ): string {
-  const stream = askProgressStream(result.akuma, alias, context);
+  const stream = askProgressStream(result.akuma, alias, context, () => context.now);
   return [...stream.admitted(result.tell, result.akuma), ...stream.conclude(result)].join("\n");
 }
 
@@ -148,7 +147,7 @@ export function renderCallText(result: SpawnResult, streamed: boolean, context: 
     ].join("\n");
   }
   const inputObservation = result.observation;
-  const stream = inputWaitStream(context, () => head, { cursor: "empty" });
+  const stream = inputWaitStream(context, () => head, { cursor: "empty", now: () => context.now });
   stream.admitted({ at: inputObservation.tell.row.at, rows: [] });
   return stream.conclude({
     kind: "observed",
@@ -200,42 +199,4 @@ export function renderForkText(receipt: ForkResult): string {
 export function renderKillText(result: AkumaKillResult, alias: string | undefined, context: TextRenderContext): string {
   void context;
   return result.results.map((member) => killResultText(member.id, member.evidence, alias)).join("\n");
-}
-
-export function callOutcome(result: SpawnResult): CliOutcome {
-  if (result.dispatch.kind === "failed" || result.alias.kind === "failed" || result.observation.kind === "failed")
-    return "failed";
-  if (result.observation.kind !== "observed") return "accepted";
-  return result.observation.observation.reason === "failed" ||
-    result.observation.observation.reason === "invalid-output"
-    ? "failed"
-    : "accepted";
-}
-
-export function killOutcome(result: AkumaKillResult): CliOutcome {
-  return result.results.some(
-    (member) => member.evidence === "unavailable" || member.evidence === "hung" || member.evidence === "untidy",
-  )
-    ? "failed"
-    : "accepted";
-}
-
-export function tellOutcome(result: AkumaTellResult): CliOutcome {
-  return result.tell.wake.kind === "failed" ? "failed" : "accepted";
-}
-
-export function askOutcome(result: AkumaAskResult): CliOutcome {
-  return result.observation.reason === "failed" || result.observation.reason === "invalid-output"
-    ? "failed"
-    : "accepted";
-}
-
-export function forkOutcome(receipt: ForkResult): CliOutcome {
-  if (receipt.kind === "forked") return receipt.dispatch.kind === "failed" ? "failed" : "accepted";
-  return receipt.kind === "upstream-forked" || receipt.kind === "fork-failed" ? "failed" : "refused";
-}
-
-export function historyOutcome(result: AkumaHistoryResult, id: string | undefined): CliOutcome {
-  if (id === undefined) return "accepted";
-  return result.kind === "exact" || result.kind === "exact-report" ? "accepted" : "refused";
 }

@@ -67,7 +67,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       delivered.facts.map((fact) => fact.kind),
       ["deliver"],
     );
-    const review = accepted(await contract.review({ verdict: "satisfied" }));
+    const review = accepted(await contract.review({ verdict: "satisfied", summary: "Completion review passed" }));
     assert.deepEqual(
       review.facts.map((fact) => fact.kind),
       ["attestation", "claimed"],
@@ -94,7 +94,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       controller = new AbortController();
     try {
       const native = createKeiHandle(state.id, { ...scope, onPrivateStateSeatClose: committed.resolve }, captureLocalContractComposition());
-      const pending = native.review({ verdict: "satisfied", signal: controller.signal });
+      const pending = native.review({ verdict: "satisfied", summary: "Completion review passed", signal: controller.signal });
       await committed.promise;
       controller.abort(new Error("cancel review after its receipt"));
       const reviewed = accepted(await pending);
@@ -135,7 +135,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     assert.deepEqual(delivered.value.gates, []);
     assert.equal(present(await bound.value.kei.state()).terminal, null);
     await primary.deliver();
-    const reviewed = accepted(await primary.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await primary.review({ verdict: "satisfied", summary: "Completion review passed" }));
     assert.deepEqual(reviewed.value.continuation?.claimed, [state.id], JSON.stringify(reviewed.value.continuation));
     assert.deepEqual(reviewed.value.continuation?.stopped, []);
     const final = present(await bound.value.kei.state());
@@ -164,7 +164,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     writeFileSync(join(repository.path, "target-only.txt"), "target movement\n");
     repository.run(["add", "target-only.txt"]);
     repository.run(["commit", "--quiet", "-m", "move target"]);
-    const reviewed = accepted(await contract.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Completion review passed" }));
     assert.deepEqual(
       reviewed.facts.map((fact) => fact.kind),
       ["attestation", "reintegrated"],
@@ -206,7 +206,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       ["deliver"],
     );
     await primary.deliver();
-    const reviewed = accepted(await primary.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await primary.review({ verdict: "satisfied", summary: "Completion review passed" }));
     assert.deepEqual(reviewed.value.continuation?.claimed, []);
     const stopped = reviewed.value.continuation?.stopped[0];
     assert.equal(stopped?.contractId, present(await dependent.state()).id);
@@ -306,7 +306,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     assert.notEqual(second.value.snapshot, delivered.value.integration.snapshot);
     assert.equal(second.value.gates?.find((report) => report.gate === "verified")?.satisfied, true);
     assert.equal(present(await contract.state()).currentIntegration?.snapshot, second.value.snapshot);
-    const reviewed = accepted(await contract.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Completion review passed" }));
     assert.ok(reviewed.value.completion);
     assert.equal(reviewed.value.completion.integration, second.value.snapshot);
     assert.deepEqual(
@@ -347,7 +347,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     }, captureLocalContractComposition());
     let caught: unknown;
     try {
-      await native.review({ verdict: "unsatisfied" });
+      await native.review({ verdict: "unsatisfied", summary: "Completion review found an issue" });
     } catch (error) {
       caught = error;
     }
@@ -395,7 +395,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     await right.deliver();
     await leaf.deliver();
     await primary.deliver();
-    const reviewed = accepted(await primary.review({ verdict: "satisfied" }));
+    const reviewed = accepted(await primary.review({ verdict: "satisfied", summary: "Completion review passed" }));
     assert.deepEqual(reviewed.value.continuation?.claimed, [leftId, rightId, leafId]);
     assert.deepEqual(reviewed.value.continuation?.stopped, []);
     assert.equal(reviewed.facts.filter((fact) => fact.contract === leafId && fact.kind === "claimed").length, 1);
@@ -420,7 +420,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       { CONFIRMED_MARKER: marker },
       async (gitPath) => {
         const native = createKeiHandle(state.id, await cachedRepositoryAt(repository.path, gitPath), captureLocalContractComposition());
-        const pending = native.review({ verdict: "satisfied", signal: controller.signal });
+        const pending = native.review({ verdict: "satisfied", summary: "Completion review passed", signal: controller.signal });
         try {
           await waitForFile(marker);
         } finally {

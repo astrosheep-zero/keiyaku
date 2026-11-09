@@ -1,5 +1,5 @@
-import type { ReconcileReport } from "../../library/reconcile.js";
-import { reconcileLagIsFailure, type RepoReconcileReport } from "../../library/reconcile.js";
+import { classifyVerb } from "../../library/keiyaku-classify.js";
+import type { ReconcileReport, RepoReconcileReport } from "../../library/reconcile.js";
 import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import { receiptPayload, receiptRow } from "./receipt.js";
 import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "./terminal.js";
@@ -188,24 +188,12 @@ function isRepoReport(report: ReconcileReport | RepoReconcileReport): report is 
   return "kind" in report && (report.kind === "completed" || report.kind === "world-observation-failed");
 }
 
-export function reconcileHasFailure(report: ReconcileReport | RepoReconcileReport): boolean {
-  if (isRepoReport(report)) {
-    if (report.kind === "world-observation-failed") return true;
-    return report.contracts.some((item) => reconcileHasFailure(item.report));
-  }
-  return (
-    report.lag.some((lag) => reconcileLagIsFailure(lag)) ||
-    (report.settlement?.lags.length ?? 0) > 0 ||
-    (report.settlement?.seatClose?.length ?? 0) > 0
-  );
-}
-
 export function renderReconcile(report: ReconcileReport | RepoReconcileReport, context?: TextRenderContext): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   const lines: string[] = [
     isRepoReport(report) && report.kind === "world-observation-failed"
       ? "! reconcile failed"
-      : reconcileHasFailure(report)
+      : classifyVerb("reconcile", {}, { kind: "returned", value: report }) === "failed"
         ? "! reconcile incomplete"
         : "✓ reconcile",
   ];

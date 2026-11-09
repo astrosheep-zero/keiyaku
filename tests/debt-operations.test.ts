@@ -42,6 +42,27 @@ function acceptedId(result: Awaited<ReturnType<ReturnType<typeof Debts.of>["add"
   return result.value.id;
 }
 
+test("a pre-aborted Debt CLI mutation leaves authority unchanged", async (t) => {
+  const { root, debts } = await world();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const id = acceptedId(await debts.add({ title: "Cancellation fixture", note: "original" }));
+  const path = debtAuthorityFile(root, id);
+  const before = readFileSync(path, "utf8");
+  const controller = new AbortController();
+  controller.abort(new Error("caller cancelled Debt mutation"));
+  const read = await runCli(["-C", root, "debt", "show", id, "--json"], {
+    environment: {}, signal: controller.signal,
+  });
+  assert.equal(read.exit, 0, read.stderr);
+  assert.equal(JSON.parse(read.stdout).debt.id, id);
+  const result = await runCli(["-C", root, "debt", "update", id, "--note", "changed"], {
+    environment: {}, signal: controller.signal,
+  });
+  assert.notEqual(result.exit, 0);
+  assert.match(result.stdout + result.stderr, /caller cancelled Debt mutation/u);
+  assert.equal(readFileSync(path, "utf8"), before);
+});
+
 test("created Debt association rows match complete board views and re-read manual edits", async (t) => {
   const { root, debts } = await world();
   t.after(() => rmSync(root, { recursive: true, force: true }));

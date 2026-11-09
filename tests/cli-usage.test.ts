@@ -12,8 +12,8 @@ import { CliUsageError, parseArgv, renderHelp } from "../src/cli/parse.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { akumaFailureProjection } from "../src/cli/runtime.js";
-import { reconcileHasFailure } from "../src/cli/render/reconcile.js";
+import { classifyVerb } from "../src/library/keiyaku-verbs.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import type { ReconcileReport } from "../src/library/reconcile.js";
 import { contractId } from "../src/core/facts/types.js";
 import type { WorldRoot } from "../src/world.js";
@@ -80,6 +80,19 @@ test("debt coordinate failures retain usage output for text and JSON", async (co
     assert.equal(result.stdout, "");
     assert.match(result.stderr, /world marker is not a directory/u);
   }
+});
+
+test("debt owner failures use the shared verb failure projection", async (context) => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-debt-failure-"));
+  context.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, ".keiyaku", "debts"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "debts", "broken.md"), "not a Debt document\n");
+  const text = await captureOutput(() => main(["-C", root, "debt", "ready", "--world"]));
+  assert.equal(text.exit, 3);
+  assert.match(text.stderr, /debt\.ready failed/u);
+  const json = await captureOutput(() => main(["-C", root, "debt", "ready", "--world", "--json"]));
+  assert.equal(json.exit, 3);
+  assert.ok(JSON.parse(json.stdout));
 });
 
 test("debt query defaults to active rows and opts into terminal rows", () => {
@@ -160,7 +173,7 @@ test("worktree hook failure reports failure at the CLI boundary", async () => {
     ],
     settlement: { actions: [], lags: [] },
   };
-  assert.equal(reconcileHasFailure(report), true);
+  assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
 });
 
 test("target checkout retention reports failure at the CLI boundary", async () => {
@@ -176,7 +189,7 @@ test("target checkout retention reports failure at the CLI boundary", async () =
     ],
     settlement: { actions: [], lags: [] },
   };
-  assert.equal(reconcileHasFailure(report), true);
+  assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
 });
 
 test("private-state seat-close failure reports failure at the CLI boundary", async () => {
@@ -189,7 +202,7 @@ test("private-state seat-close failure reports failure at the CLI boundary", asy
       seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "could not close publication seat" }],
     },
   };
-  assert.equal(reconcileHasFailure(report), true);
+  assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
 });
 
 test("reconcile failure reports failure at the CLI boundary", async () => {
@@ -208,7 +221,7 @@ test("reconcile failure reports failure at the CLI boundary", async () => {
       ],
     },
   };
-  assert.equal(reconcileHasFailure(report), true);
+  assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
 });
 
 test("debt show preserves a multi-line body end to end", () => {
@@ -279,8 +292,7 @@ test("a local status on an absent complete id reports one caller-facing fact", (
 
 test("Akuma address refusals keep Alias absence, a malformed selector, and a foreign World distinct", async () => {
   const id = parseAkumaId("aku/intern/33dd4670").id;
-  const parsed = parseArgv(["wait", id]);
-  if (!("command" in parsed)) throw new Error("wait did not parse as an executable command");
+  const input = { selectors: [id] };
   const refusals: readonly (readonly [unknown, readonly string[]])[] = [
     [
       new AkumaAddressError({ kind: "akuma-alias-not-found", alias: parseAkumaAlias("@missing") }),
@@ -296,10 +308,10 @@ test("Akuma address refusals keep Alias absence, a malformed selector, and a for
     ],
   ];
   for (const [error, facts] of refusals) {
-    const projected = await akumaFailureProjection(error, parsed.command);
-    assert.equal(projected!.outcome, "refused");
-    for (const fact of facts) assert.ok(projected!.body.includes(fact));
-    assert.ok(projected!.body.includes("keiyaku wait --help"));
+    const completion = { kind: "threw" as const, error };
+    assert.equal(classifyVerb("wait", input, completion), "refused");
+    const body = renderVerb("wait", input, completion, { columns: 100, color: false });
+    for (const fact of facts) assert.ok(body.includes(fact));
   }
 });
 

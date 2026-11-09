@@ -14,7 +14,12 @@ import { prepareAkumaCall, publishAkumaCall, type InitialCallTell } from "../aku
 import { discardPreparedCall } from "../akuma/publication.js";
 import { AkumaOwner, type ForkReceipt } from "../akuma/akuma-owner.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
-import { decodeAskObservation, observeAdmittedAskAkuma, type AskObserver } from "../akuma/akuma-selection-execution.js";
+import {
+  decodeAskObservation,
+  liveStatusObservationSchema,
+  observeAdmittedAskAkuma,
+  type AskObserver,
+} from "../akuma/akuma-selection-execution.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
 import type { TellResult } from "../akuma/body.js";
 import { bareOption, canonicalBirthCwd } from "../akuma/call-input.js";
@@ -128,6 +133,19 @@ export type SpawnWaitHead = Readonly<{
   dispatch: DispatchStage;
   alias: AliasStage;
 }>;
+
+export const spawnProgressSchema = z.union([
+  z
+    .strictObject({
+      kind: z.literal("admitted"),
+      tell: tellResultSchema,
+      id: akumaIdSchema,
+      head: spawnWaitHeadSchema.unwrap().extend({ cwd: z.string() }).readonly(),
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("live"), observation: liveStatusObservationSchema }).readonly(),
+]);
+export type SpawnProgress = z.output<typeof spawnProgressSchema>;
 
 type SpawnWaitObserver = Readonly<{
   admitted?: (tell: TellResult, id: AkumaStatus["id"], head: SpawnWaitHead) => void | Promise<void>;

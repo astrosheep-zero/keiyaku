@@ -1,5 +1,6 @@
 import {
   Debts,
+  debtRowViewLimit,
   type AddDebtInput,
   type AddDebtDocumentInput,
   type UpdateDebtInput,
@@ -24,7 +25,6 @@ import {
 import { parseDebtCreationDocument } from "../debt/document.js";
 import { debtQuerySelection, normalizeDebtQuery } from "../debt/query.js";
 import { installNamespaceContext, resolveDebtNamespaceContext, validateNamespaceContext } from "../debt/context.js";
-import { boundedListLimit } from "../bounded-list.js";
 import { invocationCoordinates, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import { resolveActor } from "./keiyaku-attribution.js";
 import type { KeiyakuAt } from "./keiyaku.js";
@@ -60,7 +60,7 @@ function readInput(input: unknown, label: string, extra: readonly string[]) {
     throw new TypeError("scope must be namespace or world");
   const ns = namespace(v.namespace);
   if (v.scope === "world" && ns !== undefined) throw new TypeError("namespace and world scope are mutually exclusive");
-  boundedListLimit(v.limit);
+  debtRowViewLimit(v.limit);
   return v;
 }
 async function selectedScope(

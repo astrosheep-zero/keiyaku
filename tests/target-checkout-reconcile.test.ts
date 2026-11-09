@@ -108,7 +108,7 @@ async function admitClaimWithoutFollow(
   contract: Awaited<ReturnType<typeof managedCandidate>>["contract"],
 ): Promise<void> {
   await contract.deliver({ includeDirty: true });
-  await contract.review({ verdict: "unsatisfied" });
+  await contract.review({ verdict: "unsatisfied", summary: "Checkout review found an issue" });
   const git = await cachedRepositoryAt(repository.path);
   const contractId = present(await contract.state()).id;
   const state = (await observeContract(git, contractId)).state;

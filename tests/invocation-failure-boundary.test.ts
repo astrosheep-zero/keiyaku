@@ -217,7 +217,7 @@ test("native review retains an earlier claimed sibling when a later continuation
   const native = createKeiHandle(primaryId, scope, captureLocalContractComposition());
   await assert.rejects(
     native.review(
-      { verdict: "satisfied" },
+      { verdict: "satisfied", summary: "Invocation review passed" },
       {
         observe: (event) => {
           if (event.kind === "admitted" && event.contractId === childIds[0] && event.fact.kind === "claimed")

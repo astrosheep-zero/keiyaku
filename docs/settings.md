@@ -19,7 +19,9 @@ Missing configuration is ordinary absence; a read, decoding, or outer-resource
 failure remains scoped failure with bounded diagnostic evidence. One scope's
 failure never makes an unrelated scope or namespace look empty.
 
-Settings exposes named namespace views as opaque product material. A malformed
+Settings exposes resolved views of the namespaces observed in its loaded scopes,
+as well as lookup of an individual named namespace. These remain opaque product
+material and use the same resolution and failure rules. A malformed
 namespace affects that namespace when it is selected, not unrelated namespaces.
 An unavailable higher scope cannot silently fall through to a lower candidate:
 the caller must see that the potential shadowing authority could not be read.

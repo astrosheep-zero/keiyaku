@@ -16,7 +16,11 @@ import {
 } from "./operation-types.js";
 import { debtQueryRowSchema } from "./query.js";
 import type { WorldRoot } from "../world.js";
-import type { NamespaceContextSource, ResolvedNamespaceContext } from "./context.js";
+import {
+  resolvedNamespaceContextSchema,
+  type NamespaceContextSource,
+  type ResolvedNamespaceContext,
+} from "./context.js";
 import type { DebtLifecycleVerb } from "./operation-types.js";
 export type { WorldRoot } from "../world.js";
 import {
@@ -91,7 +95,9 @@ export type BlockedDebtList = DebtOutcome<DebtPage<BlockedDebtRow>>;
 export type DebtQueryResult = DebtOutcome<DebtPage<DebtQueryRow>>;
 export type DebtContextSource = NamespaceContextSource;
 export type { ResolvedNamespaceContext };
-export type DebtContextResult = DebtOutcome<ResolvedNamespaceContext>;
+export const debtContextResultSchema = debtOutcomeSchema(resolvedNamespaceContextSchema);
+export { resolvedNamespaceContextSchema };
+export type DebtContextResult = z.output<typeof debtContextResultSchema>;
 export type DebtDoctorReport = Readonly<{ issues: readonly DebtDoctorIssue[] }>;
 export const debtDetailSchema = z
   .strictObject({

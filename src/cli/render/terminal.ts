@@ -11,7 +11,7 @@ export function orderRefusalFacts(facts: readonly string[]): readonly string[] {
   ];
 }
 
-export type TextRenderContext = Readonly<{ columns: number; color: boolean }>;
+export type TextRenderContext = Readonly<{ columns: number; color: boolean; actor?: string; now?: number }>;
 
 type GitShortStat = Readonly<{
   filesChanged: number;

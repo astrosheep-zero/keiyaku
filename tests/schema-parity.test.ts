@@ -1,10 +1,46 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { z } from "zod";
-import { akumaStatusSchema, type AkumaStatus, type Delivery } from "../src/index.js";
+import {
+  akumaStatusSchema, askProgressSchema, spawnProgressSchema, whoamiFactsSchema,
+  type AkumaStatus, type AskProgress, type SpawnProgress, type WhoamiFacts, type Delivery,
+} from "../src/index.js";
 import type { DeliveryValue } from "../src/library/delivery.js";
 import { gateReportSchema } from "../src/protocol/result-leaves.js";
+import { verbs, type VerbName, type VerbOutputs } from "../src/library/keiyaku-verbs.js";
+import { bindOutcomeSchema, deliverOutcomeSchema } from "../src/library/contract-outcomes.js";
+import { spawnResultSchema } from "../src/library/akuma-creation.js";
+import { akumaAskResultSchema } from "../src/akuma/selection-observation.js";
+import { settingsSchema } from "../src/settings.js";
+import { resetOutcomeSchema } from "../src/library/outcome.js";
+import { debtMutationResultSchema, debtUpdateResultSchema, debtBatchResultSchema, debtDecompositionTreeSchema, debtContextResultSchema } from "../src/debt/index.js";
 import { assertWireRoundTrip, type Assert, type Exact, type Wire } from "./support/schema-parity.js";
+export type VerbKeysMatchNativeOutputs = Assert<Exact<VerbName, keyof VerbOutputs>>;
+type VerbWireMismatches = {
+  [K in VerbName]: Exact<z.output<(typeof verbs)[K]["output"]>, Wire<VerbOutputs[K]>> extends true ? never : K;
+}[VerbName];
+export type VerbSchemasMatchNativeWire = Assert<Exact<VerbWireMismatches, never>>;
+export type RootWhoamiWire = Assert<Exact<z.output<typeof whoamiFactsSchema>, Wire<WhoamiFacts>>>;
+export type RootAskProgressWire = Assert<Exact<z.output<typeof askProgressSchema>, AskProgress>>;
+export type RootSpawnProgressWire = Assert<Exact<z.output<typeof spawnProgressSchema>, SpawnProgress>>;
+
+test("verb output schemas directly reference their owners", () => {
+  assert.strictEqual(verbs.bind.output, bindOutcomeSchema);
+  assert.strictEqual(verbs.deliver.output, deliverOutcomeSchema);
+  assert.strictEqual(verbs.spawn.output, spawnResultSchema);
+  assert.strictEqual(verbs.ask.output, akumaAskResultSchema);
+  assert.strictEqual(verbs.ask.progress, askProgressSchema);
+  assert.strictEqual(verbs.spawn.progress, spawnProgressSchema);
+  assert.strictEqual(verbs.whoami.output, whoamiFactsSchema);
+  assert.strictEqual(verbs.settings.output, settingsSchema);
+  assert.strictEqual(verbs.nuke.output, resetOutcomeSchema);
+  assert.strictEqual(verbs["debt.add"].output, debtMutationResultSchema);
+  assert.strictEqual(verbs["debt.update"].output, debtUpdateResultSchema);
+  assert.strictEqual(verbs["debt.done"].output, debtBatchResultSchema);
+  assert.strictEqual(verbs["debt.tree"].output, debtDecompositionTreeSchema);
+  assert.strictEqual(verbs["debt.context"].output, debtContextResultSchema);
+});
+
 export type Same = Assert<Exact<{ a?: string }, { a?: string }>>;
 // @ts-expect-error optional and required-with-undefined are different
 export type OptionalMismatch = Assert<Exact<{ a?: string }, { a: string | undefined }>>;

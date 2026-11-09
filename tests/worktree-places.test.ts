@@ -391,7 +391,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const path = placeRegisterPath(git);
     writeFileSync(path, '{"version":1}\n');
     await assert.rejects(() => bound.value.kei.deliver(), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
-    await assert.rejects(() => bound.value.kei.review({ verdict: "satisfied" }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
+    await assert.rejects(() => bound.value.kei.review({ verdict: "satisfied", summary: "Worktree review passed" }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
     await assert.rejects(async () => Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
     type StatusReport = Readonly<{
       contracts: Readonly<{ kind: string; failure?: Readonly<{ message: string }> }>;

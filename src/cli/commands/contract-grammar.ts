@@ -413,6 +413,27 @@ function parseCallerSelector(parts: ParsedContractParts): AkumaCallerSelector | 
   }
 }
 
+function parseAkumaLs(
+  parts: ParsedContractParts,
+  path: string | undefined,
+  limit: number | undefined,
+  caller: AkumaCallerSelector | undefined,
+): ParsedLs {
+  if (path === undefined && caller === undefined) refuse("ls", "ls requires a selector");
+  try {
+    const query = path === undefined ? ({ kind: "akuma" } as const) : parseAkumaCatalogPath(path);
+    if (query === null) refuse("ls", "ls requires a supported identity directory selector");
+    return {
+      command: "ls",
+      query: { ...query, ...(limit === undefined ? {} : { limit }), ...(caller === undefined ? {} : { caller }) },
+      output: parts.output,
+    };
+  } catch (error) {
+    if (error instanceof CliUsageError) throw error;
+    refuse("ls", error instanceof Error ? error.message : "invalid ls directory");
+  }
+}
+
 function parseLs(parts: ParsedContractParts): ParsedLs {
   const path = parts.positionals[0];
   const limit = listLimit(parts);
@@ -447,19 +468,7 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
       refuse("ls", "--mine and --caller need an Akuma instance catalogue, not Akuma names");
   }
   if (all || closed) refuse("ls", "--all and --closed select Debts only");
-  if (path === undefined && caller === undefined) refuse("ls", "ls requires a selector");
-  try {
-    const query = path === undefined ? ({ kind: "akuma" } as const) : parseAkumaCatalogPath(path);
-    if (query === null) refuse("ls", "ls requires a supported identity directory selector");
-    return {
-      command: "ls",
-      query: { ...query, ...(limit === undefined ? {} : { limit }), ...(caller === undefined ? {} : { caller }) },
-      output: parts.output,
-    };
-  } catch (error) {
-    if (error instanceof CliUsageError) throw error;
-    refuse("ls", error instanceof Error ? error.message : "invalid ls directory");
-  }
+  return parseAkumaLs(parts, path, limit, caller);
 }
 
 export function parseContractCommand(parts: ParsedContractParts): ParsedContractCommand {

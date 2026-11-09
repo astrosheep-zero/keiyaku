@@ -377,7 +377,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
           id: await publicContractId(contract),
         });
         const pending = traced.review(
-          { verdict: "satisfied" },
+          { verdict: "satisfied", summary: "Contract operation review passed" },
           {
             observe: (event) => {
               if (event.kind === "stage" && event.stage === "placement" && event.state === "started")

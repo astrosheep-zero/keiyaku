@@ -18,7 +18,7 @@ async function readyPlacementFixture() {
   const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
   const value = { repository, ...(await managedCandidate(repository, ["reviewed"])) };
   await value.contract.deliver();
-  await value.contract.review({ verdict: "unsatisfied" });
+  await value.contract.review({ verdict: "unsatisfied", summary: "Placement review found an issue" });
   const git = await cachedRepositoryAt(value.repository.path);
   const subject = present(await value.contract.state()).attestations.at(-1)!.data.subject;
   await withGitDecodeChannel(git, async (channel) => {

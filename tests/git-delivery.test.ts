@@ -847,7 +847,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     repository.run(["-C", worktree, "add", "candidate.txt"]);
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
     await contract.deliver();
-    await contract.review({ verdict: "satisfied" });
+    await contract.review({ verdict: "satisfied", summary: "Delivery review passed" });
     const state = present(await contract.state());
     const id = state.id;
     assert.equal(state.terminal?.kind, "claimed");

@@ -66,18 +66,21 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   });
   const environment = { KEIYAKU_EXTERNAL_CALLER: "test:root" };
   const facet = Keiyaku.at({ cwd: root, environment });
-  const caller = await facet.resolveLsCaller({ kind: "mine" });
-  assert.deepEqual(caller, external);
-  assert.deepEqual(await facet.resolveLsCaller({ kind: "external", caller: external }), external);
-  assert.deepEqual(await facet.resolveLsCaller({ kind: "akuma", akumaId: direct.id }), {
-    kind: "akuma", world: root, akumaId: direct.id,
-  });
-  const { observedAt: _facetTime, ...facetList } = await facet.ls({ of: "aku", caller });
-  const { observedAt: _nativeTime, ...nativeList } = await Akumas.of(root).list({ caller });
+  const { observedAt: _facetTime, ...facetList } = await facet.ls({ of: "aku", caller: { kind: "mine" } });
+  const { observedAt: _nativeTime, ...nativeList } = await Akumas.of(root).list({ caller: external });
   assert.deepEqual(facetList, nativeList);
   const invalidEnvironmentFacet = Keiyaku.at({ cwd: root, environment: { KEIYAKU_ACTOR_ID: direct.id } });
-  const { observedAt: _directTime, ...directList } = await invalidEnvironmentFacet.ls({ of: "aku", caller: external });
-  assert.deepEqual(directList, nativeList, "a resolved SDK caller is not re-derived from the environment");
+  const { observedAt: _directTime, ...directList } = await invalidEnvironmentFacet.ls({
+    of: "aku", caller: { kind: "external", caller: external },
+  });
+  assert.deepEqual(directList, nativeList, "an explicit caller is not re-derived from the environment");
+  const { observedAt: _childTime, ...childList } = await facet.ls({
+    of: "aku", caller: { kind: "akuma", akumaId: direct.id },
+  });
+  const { observedAt: _nativeChildTime, ...nativeChildList } = await Akumas.of(root).list({
+    caller: { kind: "akuma", world: root, akumaId: direct.id },
+  });
+  assert.deepEqual(childList, nativeChildList);
 
   const shorthand = await cliJson<AkumaList>(["-C", root, "ls", "--mine"], { environment });
   const globbed = await cliJson<AkumaList>(["-C", root, "ls", "aku/*/*", "--mine"], { environment });
@@ -95,7 +98,9 @@ test("ls --mine selects this process caller's World-local descendants", async (t
 
   const text = await runCli(["-C", root, "ls", "aku/*/*", "--mine"], { environment });
   assert.equal(text.exit, 0, text.stderr);
-  assert.match(text.stdout, new RegExp(`aku/intern/dddd0003 .* · by ${direct.id}`, "u"));
+  const descendantLine = text.stdout.split("\n").find((line) => line.includes(grandchild.id));
+  assert.ok(descendantLine, "the descendant remains in the filtered catalogue");
+  assert.equal(descendantLine.includes("· by"), false, "unavailable resolved caller does not produce a by label");
   const directLine = text.stdout.split("\n").find((line) => line.includes(`${direct.id} ·`));
   assert.equal(directLine?.includes("· by"), false, "a direct child names no calling Akuma");
   assert.doesNotMatch(text.stdout, /dddd0004/u);
@@ -119,7 +124,7 @@ test("ls --mine selects this process caller's World-local descendants", async (t
 test("ls caller selection refuses absent identity and non-Akuma catalogues", async (t) => {
   const root = await World.at(temporaryDirectory(t, "keiyaku-cli-caller-refusal-"));
   const facet = Keiyaku.at({ cwd: root, environment: {} });
-  await assert.rejects(facet.resolveLsCaller({ kind: "mine" }), (error: unknown) =>
+  await assert.rejects(facet.ls({ of: "aku", caller: { kind: "mine" } }), (error: unknown) =>
     error instanceof KeiyakuUsageError && /--mine requires a caller identity/u.test(error.message));
   const missing = await runCli(["-C", root, "ls", "--mine"], { environment: {} });
   assert.equal(missing.exit, 64);

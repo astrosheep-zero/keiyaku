@@ -2,6 +2,17 @@ import { lstat, realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { World, WorldError, type WorldRoot } from "../world.js";
 import { NoGitWorldError, Repo } from "./repo.js";
+import type { ContractId } from "../core/facts/types.js";
+
+/** Invalid arc material retains the resolved subject for the process-edge refusal. */
+export class KeiyakuArcDocumentError extends Error {
+  constructor(
+    readonly contract: ContractId,
+    cause: Error,
+  ) {
+    super(cause.message, { cause });
+  }
+}
 export class KeiyakuUsageError extends TypeError {
   constructor(message: string) {
     super(message);

@@ -503,12 +503,11 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
 });
 
-test("wait parses selectors before facet routing while kill retains mixed selection", () => {
-  assert.deepEqual(command(["wait", "kei/example", "aku/work*/12*"]), {
-    command: "wait",
-    akuma: ["kei/example", "aku/work*/12*"],
-    output: "text",
-  });
+test("wait rejects mixed selector families while kill retains mixed selection", () => {
+  assert.throws(
+    () => command(["wait", "kei/example", "aku/work*/12*"]),
+    /wait cannot mix Contract and Akuma selectors/u,
+  );
   for (const action of ["wait", "kill"] as const) {
     const selectors = action === "wait" ? ["kei/example"] : ["kei/example", "aku/work*/12*"];
     const parsed = parseArgv([action, ...selectors, "--repo", "/repo", "--json"]);

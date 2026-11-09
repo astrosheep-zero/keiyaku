@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { akumaStatusSchema } from "./akuma.js";
 import { activityRowSchema } from "./projection.js";
+import { tellResultSchema } from "./call-initial-tell.js";
+import { akumaIdSchema } from "./identity.js";
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import type { LiveStatusObservation, OutcomeObserver } from "./akuma-observe.js";
@@ -18,6 +20,12 @@ export const liveStatusObservationSchema = z
     rows: z.array(activityRowSchema).readonly(),
   })
   .readonly();
+export const askProgressSchema = z.union([
+  z.strictObject({ kind: z.literal("admitted"), tell: tellResultSchema, id: akumaIdSchema }).readonly(),
+  z.strictObject({ kind: z.literal("live"), observation: liveStatusObservationSchema }).readonly(),
+]);
+export type AskProgress = z.output<typeof askProgressSchema>;
+
 export type AskObserver = Readonly<{
   admitted?: (tell: TellResult, id: AkumaStatus["id"]) => void | Promise<void>;
   observe?: (observation: LiveStatusObservation) => void | Promise<void>;

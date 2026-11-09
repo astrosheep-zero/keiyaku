@@ -1,32 +1,16 @@
 import { KeiyakuError, KeiyakuUsageError } from "../../index.js";
 import { KeiyakuArcDocumentError } from "../../library/keiyaku.js";
-import type {
-  AkumaObservation,
-  DeliveryPreviewOutcome,
-  ContractHistory,
-  ContractId,
-  DeliverOutcome,
-  ReviewOutcome,
-  VerifyOutcome,
-} from "../../index.js";
-import type { KanshiReport } from "../../kanshi/index.js";
+import { classifyVerb, type VerbInput, type VerbName, type VerbOutput } from "../../library/keiyaku-verbs.js";
+import { renderVerb } from "../render/verbs.js";
+import type { ContractId } from "../../index.js";
 import { validateContractMarkdown } from "../../library/input.js";
 import { SettingsError } from "../../settings.js";
 import { resolveInvocationCwd } from "../coordinates.js";
 import { BindDraftError, preserveBindDraft } from "../draft.js";
-import { snapshotText } from "../render/akuma-activity.js";
-import { renderAkumaCatalogue, renderArchetypeCatalogue, renderContractCatalogue } from "../render/catalog.js";
-import { renderAccepted, renderContractHistory, renderRetry, type ContractOutcome } from "../render/contract.js";
-import { renderKanshiCategoryText, renderKanshiText } from "../render/kanshi.js";
-import { nukeOutcome, renderNukeText } from "../render/nuke.js";
-import { reconcileHasFailure, renderReconcile } from "../render/reconcile.js";
-import { renderConflictMaterialized, renderRefusal, type RenderableRefusal } from "../render/refusal.js";
-import { renderRegionText } from "../render/region.js";
-import { renderSettingsText, settingsJsonValue } from "../render/settings.js";
-import type { TextRenderContext } from "../render/terminal.js";
+import type { ContractOutcome } from "../render/contract.js";
+import { renderRefusal, type RenderableRefusal } from "../render/refusal.js";
 import type { CliRuntime } from "../runtime.js";
-import { type CliOutcome, displayContext, emit, writeJson, writeStdout } from "../streams.js";
-import { debtOutcome, renderDebtList } from "../render/debt.js";
+import { type CliOutcome, displayContext, emit } from "../streams.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import type { ParsedContractCommand } from "./contract-grammar.js";
 
@@ -72,47 +56,28 @@ async function bindDraftReceipt(world: () => Promise<string>, markdown: string) 
 
 function refusedInvocation(
   answer: Extract<ContractOutcome, { kind: "refused" }>,
-  project?: (refusal: RenderableRefusal) => RenderableRefusal,
 ): Readonly<{ operation: string; contract?: ContractId; refusal: RenderableRefusal }> {
-  const refusal: RenderableRefusal = project === undefined ? answer.refusal : project(answer.refusal);
   return {
     operation: answer.operation,
     ...(answer.contract === undefined ? {} : { contract: answer.contract }),
-    refusal,
+    refusal: answer.refusal,
   };
 }
 
-/** The CLI's own presentation of a refused dirty delivery: the available opt-in is not SDK evidence. */
-function deliverRefusalProjection(refusal: RenderableRefusal): RenderableRefusal {
-  if (refusal.kind !== "dirty-workspace") return refusal;
-  const submodules = "submodules" in refusal && Array.isArray(refusal.submodules) ? refusal.submodules : [];
-  return { ...refusal, option: { flag: "--include-dirty", available: submodules.length === 0 } };
-}
-
-function renderContractAnswer(
-  answer: ContractOutcome,
-  project: ((refusal: RenderableRefusal) => RenderableRefusal) | undefined,
-  context: TextRenderContext,
-): string {
-  switch (answer.kind) {
-    case "handoff":
-      return renderConflictMaterialized(answer.value, context);
-    case "refused":
-      return renderRefusal(refusedInvocation(answer, project), undefined, context);
-    case "retry":
-      return renderRetry(answer, context);
-    case "accepted":
-      return renderAccepted(answer, context);
-  }
-}
-
-async function finishContractAnswer(
-  answer: ContractOutcome,
+function finishVerb<K extends VerbName>(
+  name: K,
+  input: VerbInput<K>,
+  value: VerbOutput<K>,
   output: "text" | "json",
-  project?: (refusal: RenderableRefusal) => RenderableRefusal,
-): Promise<CliOutcome> {
-  const outcome = answer.kind === "refused" ? "refused" : answer.kind === "retry" ? "retryable" : "accepted";
-  return emit(output, answer, () => renderContractAnswer(answer, project, displayContext()), outcome);
+  json: unknown = value,
+): CliOutcome {
+  const completion = { kind: "returned" as const, value };
+  return emit(
+    output,
+    json,
+    () => renderVerb(name, input, completion, displayContext()),
+    classifyVerb(name, input, completion),
+  );
 }
 
 async function runBind(
@@ -120,27 +85,29 @@ async function runBind(
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   if (command.forkOf !== undefined) {
-    const answer = await runtime.facet.bind({
+    const input = {
       forkOf: command.forkOf,
       ...(command.target === undefined ? {} : { target: command.target }),
       ...(command.actor === undefined ? {} : { actor: command.actor }),
-    });
-    return await finishContractAnswer(answer, command.output);
+    };
+    const answer = await runtime.facet.run("bind", input);
+    return finishVerb("bind", input, answer, command.output);
   }
   const markdown = await runtime.readStdin();
   try {
-    const answer = await runtime.facet.bind({
+    const input = {
       markdown,
       ...(command.debt === undefined ? {} : { debt: command.debt as `debt/${string}` }),
       ...(command.target === undefined ? {} : { target: command.target }),
       ...(command.actor === undefined ? {} : { actor: command.actor }),
       ...(command.after === undefined ? {} : { after: command.after }),
       ...(command.gates === undefined ? {} : { gates: command.gates }),
-    });
-    if (answer.kind !== "refused") return await finishContractAnswer(answer, command.output);
+    };
+    const answer = await runtime.facet.run("bind", input);
+    if (answer.kind !== "refused") return finishVerb("bind", input, answer, command.output);
     const draft = await bindDraftReceipt(runtime.draftWorld, markdown);
     const text = () => renderRefusal(refusedInvocation(answer), draft, displayContext());
-    return emit(command.output, answer, text, "refused");
+    return emit(command.output, answer, text, classifyVerb("bind", input, { kind: "returned", value: answer }));
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
     if (error instanceof KeiyakuUsageError) throw error;
@@ -161,14 +128,15 @@ async function runAmend(
   if (markdown !== undefined && isBlankInput(markdown))
     throw new CliUsageError("amend requires a nonblank stdin document");
   const after = command.clearAfter === true ? [] : command.after;
-  const answer = await runtime.facet.amend({
+  const input = {
     ...(command.contract === undefined ? {} : { contract: command.contract }),
     ...(markdown === undefined ? {} : { markdown }),
     ...(command.actor === undefined ? {} : { actor: command.actor }),
     ...(after === undefined ? {} : { after }),
     ...(command.gates === undefined ? {} : { gates: command.gates }),
-  });
-  return await finishContractAnswer(answer, command.output);
+  };
+  const answer = await runtime.facet.run("amend", input);
+  return finishVerb("amend", input, answer, command.output);
 }
 
 async function runDeliver(
@@ -176,35 +144,32 @@ async function runDeliver(
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   const driver = command.output === "text" ? await runtime.progress() : undefined;
-  let answer: DeliverOutcome | DeliveryPreviewOutcome;
-  try {
-    const progress = { ...(driver === undefined ? {} : { observe: driver.observe }) };
-    const signal = { ...(runtime.signal === undefined ? {} : { signal: runtime.signal }) };
-    answer = command.dryRun
-      ? await runtime.facet.previewDelivery(
-          {
-            ...(command.contract === undefined ? {} : { contract: command.contract }),
-            includeDirty: command.includeDirty,
-            showDiff: command.showDiff,
-            ...signal,
-          },
-          progress,
-        )
-      : await runtime.facet.deliver(
-          {
-            ...(command.contract === undefined ? {} : { contract: command.contract }),
-            ...(command.message === undefined ? {} : { message: command.message }),
-            includeDirty: command.includeDirty,
-            materializeConflict: command.materializeConflict,
-            overwrite: command.overwrite,
-            ...signal,
-          },
-          progress,
-        );
-  } finally {
-    if (driver !== undefined) await driver.finish().catch(() => undefined);
+  const run = { signal: runtime.signal, ...(driver === undefined ? {} : { observe: driver.observe }) };
+  const withProgress = async <T>(operation: () => Promise<T>): Promise<T> => {
+    try {
+      return await operation();
+    } finally {
+      if (driver !== undefined) await driver.finish().catch(() => undefined);
+    }
+  };
+  if (command.dryRun) {
+    const input = {
+      ...(command.contract === undefined ? {} : { contract: command.contract }),
+      includeDirty: command.includeDirty,
+      showDiff: command.showDiff,
+    };
+    const answer = await withProgress(() => runtime.facet.run("deliver.preview", input, run));
+    return finishVerb("deliver.preview", input, answer, command.output);
   }
-  return await finishContractAnswer(answer, command.output, deliverRefusalProjection);
+  const input = {
+    ...(command.contract === undefined ? {} : { contract: command.contract }),
+    ...(command.message === undefined ? {} : { message: command.message }),
+    includeDirty: command.includeDirty,
+    materializeConflict: command.materializeConflict,
+    overwrite: command.overwrite,
+  };
+  const answer = await withProgress(() => runtime.facet.run("deliver", input, run));
+  return finishVerb("deliver", input, answer, command.output);
 }
 
 async function runVerify(
@@ -212,21 +177,21 @@ async function runVerify(
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   const driver = command.output === "text" ? await runtime.progress() : undefined;
-  let answer: VerifyOutcome;
+  const input = {
+    ...(command.contract === undefined ? {} : { contract: command.contract }),
+    ...(command.index === undefined ? {} : { index: command.index }),
+    includeDirty: command.includeDirty,
+  };
+  let answer: VerbOutput<"verify">;
   try {
-    answer = await runtime.facet.verify(
-      {
-        ...(command.contract === undefined ? {} : { contract: command.contract }),
-        ...(command.index === undefined ? {} : { index: command.index }),
-        includeDirty: command.includeDirty,
-        ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
-      },
-      { ...(driver === undefined ? {} : { observe: driver.observe }) },
-    );
+    answer = await runtime.facet.run("verify", input, {
+      signal: runtime.signal,
+      ...(driver === undefined ? {} : { observe: driver.observe }),
+    });
   } finally {
     if (driver !== undefined) await driver.finish().catch(() => undefined);
   }
-  return await finishContractAnswer(answer, command.output, deliverRefusalProjection);
+  return finishVerb("verify", input, answer, command.output);
 }
 
 async function runReview(
@@ -234,25 +199,24 @@ async function runReview(
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   const summary = command.summaryFromStdin === true ? await runtime.readStdin() : command.summary;
-  if (command.summaryFromStdin === true && isBlankInput(summary ?? ""))
-    throw new CliUsageError("review requires a nonblank summary");
+  if (summary === undefined || isBlankInput(summary)) throw new CliUsageError("review requires a nonblank summary");
   const driver = command.output === "text" ? await runtime.progress() : undefined;
-  let answer: ReviewOutcome;
+  const input = {
+    ...(command.contract === undefined ? {} : { contract: command.contract }),
+    verdict: command.verdict,
+    summary,
+    ...(command.actor === undefined ? {} : { actor: command.actor }),
+  };
+  let answer: VerbOutput<"review">;
   try {
-    answer = await runtime.facet.review(
-      {
-        ...(command.contract === undefined ? {} : { contract: command.contract }),
-        verdict: command.verdict,
-        ...(summary === undefined ? {} : { summary }),
-        ...(command.actor === undefined ? {} : { actor: command.actor }),
-        ...(runtime.signal === undefined ? {} : { signal: runtime.signal }),
-      },
-      { ...(driver === undefined ? {} : { observe: driver.observe }) },
-    );
+    answer = await runtime.facet.run("review", input, {
+      signal: runtime.signal,
+      ...(driver === undefined ? {} : { observe: driver.observe }),
+    });
   } finally {
     if (driver !== undefined) await driver.finish().catch(() => undefined);
   }
-  return await finishContractAnswer(answer, command.output);
+  return finishVerb("review", input, answer, command.output);
 }
 
 async function runArc(
@@ -260,18 +224,25 @@ async function runArc(
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   const markdown = await runtime.readStdin();
+  const input = {
+    ...(command.contract === undefined ? {} : { contract: command.contract }),
+    markdown,
+    ...(command.actor === undefined ? {} : { actor: command.actor }),
+  };
   try {
-    const answer = await runtime.facet.arc({
-      ...(command.contract === undefined ? {} : { contract: command.contract }),
-      markdown,
-      ...(command.actor === undefined ? {} : { actor: command.actor }),
-    });
-    return await finishContractAnswer(answer, command.output);
+    const answer = await runtime.facet.run("arc", input);
+    return finishVerb("arc", input, answer, command.output);
   } catch (error) {
     if (!(error instanceof KeiyakuArcDocumentError)) throw error;
+    const completion = { kind: "threw" as const, error };
     const refusal: RenderableRefusal = { kind: "invalid-document", diagnostic: error.message };
     const refused = { kind: "refused", operation: "arc", contract: error.contract, refusal };
-    return emit(command.output, refused, () => renderRefusal(refused, undefined, displayContext()), "refused");
+    return emit(
+      command.output,
+      refused,
+      () => renderVerb("arc", input, completion, displayContext()),
+      classifyVerb("arc", input, completion),
+    );
   }
 }
 
@@ -279,12 +250,13 @@ async function runAbandon(
   command: Extract<ContractMutation, { command: "abandon" }>,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const answer = await runtime.facet.abandon({
+  const input = {
     ...(command.contract === undefined ? {} : { contract: command.contract }),
     ...(command.actor === undefined ? {} : { actor: command.actor }),
     ...(command.note === undefined ? {} : { note: command.note }),
-  });
-  return await finishContractAnswer(answer, command.output);
+  };
+  const answer = await runtime.facet.run("abandon", input);
+  return finishVerb("abandon", input, answer, command.output);
 }
 
 export async function runContractMutation(command: ContractMutation, runtime: CliRuntime): Promise<CliOutcome> {
@@ -318,18 +290,18 @@ function statusRefusal(
 }
 
 async function runSettings(runtime: CliRuntime, output: "text" | "json"): Promise<CliOutcome> {
-  const value = await runtime.facet.settings();
-  return emit(output, settingsJsonValue(value), () => renderSettingsText(value, displayContext().columns), "accepted");
+  const input = {};
+  const value = await runtime.facet.run("settings", input);
+  return finishVerb("settings", input, value, output);
 }
 
 async function runNuke(
   command: Extract<ParsedContractCommand, { command: "nuke" }>,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const result = await runtime.facet.nuke({
-    ...(command.confirm === undefined ? {} : { confirm: command.confirm }),
-  });
-  return emit(command.output, result, () => renderNukeText(result), nukeOutcome(result));
+  const input = { ...(command.confirm === undefined ? {} : { confirm: command.confirm }) };
+  const result = await runtime.facet.run("nuke", input);
+  return finishVerb("nuke", input, result, command.output);
 }
 
 async function runLs(
@@ -338,127 +310,85 @@ async function runLs(
 ): Promise<CliOutcome> {
   const query = command.query;
   if (query.kind === "contracts") {
-    const list = await runtime.facet.ls({
-      of: "kei",
-      ...(query.limit === undefined ? {} : { limit: query.limit }),
-    });
-    return emit(command.output, list, () => renderContractCatalogue(list), "accepted");
+    const input = { of: "kei" as const, ...(query.limit === undefined ? {} : { limit: query.limit }) };
+    const list = await runtime.facet.run("ls", input);
+    return finishVerb("ls", input, list, command.output);
   }
   if (query.kind === "archetypes") {
-    const list = await runtime.facet.ls({
-      of: "akuma-name",
-      ...(query.limit === undefined ? {} : { limit: query.limit }),
-    });
-    return emit(command.output, list, () => renderArchetypeCatalogue(list), "accepted");
+    const input = { of: "akuma-name" as const, ...(query.limit === undefined ? {} : { limit: query.limit }) };
+    const list = await runtime.facet.run("ls", input);
+    return finishVerb("ls", input, list, command.output);
   }
   if (query.kind === "debts") {
-    const listed = await runtime.facet.ls({
-      of: "debt",
+    const input = {
+      of: "debt" as const,
       namespace: query.namespace ?? [],
       ...(query.selection === undefined ? {} : { selection: query.selection }),
       ...(query.limit === undefined ? {} : { limit: query.limit }),
-    });
-    return emit(
-      command.output,
-      listed,
-      () =>
-        renderDebtList(
-          "ls",
-          { namespace: query.namespace?.length ? `debt/${query.namespace.join("/")}/` : "debt/" },
-          listed,
-          displayContext(),
-        ),
-      debtOutcome(listed),
-    );
+    };
+    const listed = await runtime.facet.run("ls", input);
+    return finishVerb("ls", input, listed, command.output);
   }
-  const caller = await runtime.facet.resolveLsCaller(query.caller);
-  const listed = await runtime.facet.ls({
-    of: "aku",
+  const input = {
+    of: "aku" as const,
     ...(query.akumaName === undefined ? {} : { akumaName: query.akumaName }),
     ...(query.limit === undefined ? {} : { limit: query.limit }),
-    ...(caller === undefined ? {} : { caller }),
-  });
-  return emit(command.output, listed, () => renderAkumaCatalogue(listed, query.akumaName ?? null, caller), "accepted");
-}
-
-function renderStatusObservation(value: AkumaObservation | KanshiReport, selector?: string): string {
-  if ("status" in value) {
-    const alias = selector?.startsWith("@") === true ? selector : undefined;
-    return snapshotText(value, displayContext(), ...(alias === undefined ? [{}] : [{ alias }]));
-  }
-  return renderKanshiText(value, displayContext(), selector === undefined ? "world" : "contract");
+    ...(query.caller === undefined ? {} : { caller: query.caller }),
+  };
+  const listed = await runtime.facet.run("ls", input);
+  return finishVerb("ls", input, listed, command.output);
 }
 
 async function runShow(
   command: Extract<ParsedContractCommand, { command: "show" }>,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const guidance = await runtime.facet.show(command.contract === undefined ? {} : { contract: command.contract });
-  if (guidance === null) {
-    const refusal = statusRefusal(command.command, command.contract as ContractId);
-    return emit(command.output, null, () => renderRefusal(refusal, undefined, displayContext()), "refused");
-  }
-  return emit(command.output, guidance, () => guidance, "accepted");
+  const input = command.contract === undefined ? {} : { contract: command.contract };
+  const guidance = await runtime.facet.run("show", input);
+  return finishVerb("show", input, guidance, command.output);
 }
 
 async function runStatus(
   command: Extract<ParsedContractCommand, { command: "status" }>,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  if (command.category !== undefined) {
-    const report = await runtime.facet.status({
-      category: command.category,
-      ...(command.limit === undefined ? {} : { limit: command.limit }),
-    });
-    if (!("category" in report)) throw new Error("status did not return a category observation");
-    return emit(command.output, report, () => renderKanshiCategoryText(report, displayContext()), "accepted");
-  }
-  if ("selectors" in command && command.selectors !== undefined) {
-    const selectors = command.selectors;
-    const values = await runtime.facet.status({ selectors });
-    if (!Array.isArray(values)) throw new Error("status did not return a selection observation");
-    return emit(
-      command.output,
-      values,
-      () => values.map((value, index) => renderStatusObservation(value, selectors[index])).join("\n\n"),
-      "accepted",
-    );
-  }
-  const selector = command.contract;
-  const value = await runtime.facet.status(selector === undefined ? {} : { selector });
-  if (Array.isArray(value) || "category" in value) throw new Error("status did not return an identity observation");
-  const observation = value as AkumaObservation | KanshiReport;
-  if (
-    selector?.startsWith("kei/") === true &&
-    "contracts" in observation &&
-    observation.contracts.kind === "present" &&
-    observation.contracts.value.rows.length === 0
-  ) {
-    const refusal = statusRefusal("status", selector as ContractId);
-    return emit(command.output, refusal.refusal, () => renderRefusal(refusal, undefined, displayContext()), "refused");
-  }
-  return emit(command.output, observation, () => renderStatusObservation(observation, selector), "accepted");
+  const input =
+    command.category !== undefined
+      ? { category: command.category, ...(command.limit === undefined ? {} : { limit: command.limit }) }
+      : "selectors" in command && command.selectors !== undefined
+        ? { selectors: command.selectors }
+        : command.contract === undefined
+          ? {}
+          : { selector: command.contract };
+  const value = await runtime.facet.run("status", input);
+  const completion = { kind: "returned" as const, value };
+  const outcome = classifyVerb("status", input, completion);
+  const json =
+    outcome === "refused" && "selector" in input && input.selector !== undefined
+      ? statusRefusal("status", input.selector as ContractId).refusal
+      : value;
+  return emit(command.output, json, () => renderVerb("status", input, completion, displayContext()), outcome);
 }
 
 async function runRegion(
   command: Extract<ParsedContractCommand, { command: "region" }>,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const result = await runtime.facet.region({
-    ...(command.contract === undefined ? {} : { contract: command.contract }),
-    ...(command.paths === undefined ? {} : { paths: command.paths }),
-  });
-  if (result.kind === "missing" || "row" in result) {
-    const contract = result.kind === "missing" ? result.id : result.row.id;
-    const refusal: RenderableRefusal = {
-      kind: result.kind === "missing" ? "contract-missing" : "terminal",
-      contractId: contract,
-    };
-    if (command.output === "json") writeJson(refusal);
-    else writeStdout(renderRefusal({ operation: "region", contract, refusal }, undefined, displayContext()));
-    return "refused";
-  }
-  return emit(command.output, result, () => renderRegionText(result), "accepted");
+  const input =
+    command.paths !== undefined
+      ? { paths: command.paths }
+      : command.contract !== undefined
+        ? { contract: command.contract }
+        : {};
+  const result = await runtime.facet.run("region", input);
+  const json =
+    result.kind === "missing" || "row" in result
+      ? {
+          kind: result.kind === "missing" ? "contract-missing" : "terminal",
+          contractId: result.kind === "missing" ? result.id : result.row.id,
+        }
+      : result;
+  return finishVerb("region", input, result, command.output, json);
 }
 
 type ParsedContractHistory = Readonly<{
@@ -472,39 +402,23 @@ export async function runContractHistoryCommand(
   command: ParsedContractHistory,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const history = await runtime.facet.history({ selector: command.contract });
-  if (history === null) {
-    const contract = command.contract as ContractId;
-    const refusal: RenderableRefusal = { kind: "contract-missing", contractId: contract };
-    if (command.output === "json") writeJson(refusal);
-    else writeStdout(renderRefusal({ operation: "history", contract, refusal }, undefined, displayContext()));
-    return "refused";
-  }
-  return emit(
-    command.output,
-    history,
-    () => renderContractHistory(history as ContractHistory, { full: command.full }),
-    "accepted",
-  );
+  const input = { selector: command.contract, full: command.full };
+  const history = await runtime.facet.run("history", input);
+  const json = history === null ? { kind: "contract-missing", contractId: command.contract as ContractId } : history;
+  return finishVerb("history", input, history, command.output, json);
 }
 
 async function runReconcile(
   command: Extract<ParsedContractCommand, { command: "reconcile" }>,
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
-  const report = await runtime.facet.reconcile({
+  const input = {
     ...(command.contract === undefined ? {} : { contract: command.contract }),
     retryHooks: command.retryHooks,
-  });
-  if ("kind" in report && report.kind === "missing") {
-    const refusal = statusRefusal("reconcile", report.id);
-    if (command.output === "json") writeJson(refusal.refusal);
-    else writeStdout(renderRefusal(refusal, undefined, displayContext()));
-    return "refused";
-  }
-  if (command.output === "json") writeJson(report);
-  else writeStdout(renderReconcile(report, displayContext()));
-  return reconcileHasFailure(report) ? "failed" : "accepted";
+  };
+  const report = await runtime.facet.run("reconcile", input);
+  const json = "kind" in report && report.kind === "missing" ? statusRefusal("reconcile", report.id).refusal : report;
+  return finishVerb("reconcile", input, report, command.output, json);
 }
 
 export async function runContractCommand(command: ParsedContractCommand, runtime: CliRuntime): Promise<CliOutcome> {

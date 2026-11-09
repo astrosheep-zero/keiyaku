@@ -80,7 +80,7 @@ export const contractResolutionSchema = z.union([
 export type ContractSelectorRefusal = z.output<typeof contractSelectorRefusalSchema>;
 export type ContractResolution = z.output<typeof contractResolutionSchema>;
 export type ReviewInput = ActorOptions &
-  Readonly<{ verdict: AttestationData["verdict"]; summary?: string; signal?: AbortSignal }>;
+  Readonly<{ verdict: AttestationData["verdict"]; summary: string; signal?: AbortSignal }>;
 export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
 export type VerifyInput = Readonly<{ index?: number; includeDirty?: boolean; signal?: AbortSignal }>;
 export type DeliverInput = Readonly<{

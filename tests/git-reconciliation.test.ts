@@ -230,7 +230,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
     repository.run(["add", "target-only.txt"]);
     repository.run(["commit", "--quiet", "-m", "target only"]);
-    await contract.review({ verdict: "satisfied" });
+    await contract.review({ verdict: "satisfied", summary: "Reconciliation review passed" });
     const state = present(await contract.state());
     assert.equal(state.terminal?.kind, "claimed");
     const tender = state.delivery?.data.tenderSnapshot;
@@ -256,7 +256,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
 
   test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
     const { contract, repository, repo } = await deliveredReviewGatedTargetFixture();
-    await contract.review({ verdict: "satisfied" });
+    await contract.review({ verdict: "satisfied", summary: "Reconciliation review passed" });
     const state = present(await contract.state());
     assert.equal(state.terminal?.kind, "claimed");
     const tender = state.delivery?.data.tenderSnapshot;

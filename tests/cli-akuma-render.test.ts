@@ -16,9 +16,6 @@ import {
 } from "../src/cli/render/akuma-activity.js";
 import {
   askProgressStream,
-  askOutcome,
-  callOutcome,
-  tellOutcome,
   renderCallText,
   renderForkText,
   renderKillText,
@@ -30,6 +27,8 @@ import { parseAkumaId } from "../src/akuma/identity.js";
 import type { AkumaTellResult } from "../src/akuma/selection-observation.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import type { SpawnObservation, SpawnResult } from "../src/library/akuma-creation.js";
+import { classifyVerb } from "../src/library/keiyaku-verbs.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import type { DispatchStage, ForkResult } from "../src/index.js";
 import { contractId } from "../src/core/facts/types.js";
 import type { DebtRow } from "../src/debt/board.js";
@@ -850,13 +849,35 @@ function createdDebtRow(): DebtRow {
 
 test("Akuma outcomes distinguish admission from failed execution", () => {
   const tell = tellReceipt("go", "told", { kind: "told" });
-  assert.equal(callOutcome(called({ kind: "born" })), "accepted");
-  assert.equal(tellOutcome({ akuma: SPECIMEN_ID, tell }), "accepted");
-  assert.equal(tellOutcome({ akuma: SPECIMEN_ID, tell: { ...tell, wake: { kind: "failed", diagnostic: "wake refused" } } }), "failed");
+  const spawn = { akumaName: "worker" };
+  const input = { akuma: SPECIMEN_ID, prompt: "go" };
+  assert.equal(classifyVerb("spawn", spawn, { kind: "returned", value: called({ kind: "born" }) }), "accepted");
+  assert.equal(classifyVerb("tell", input, { kind: "returned", value: { akuma: SPECIMEN_ID, tell } }), "accepted");
+  assert.equal(classifyVerb("tell", input, { kind: "returned", value: { akuma: SPECIMEN_ID, tell: { ...tell, wake: { kind: "failed", diagnostic: "wake refused" } } } }), "failed");
   const observation = { reason: "failed" as const, diagnostic: "provider stopped" };
-  assert.equal(callOutcome(called({ kind: "observed", tell, observation })), "failed");
-  assert.equal(askOutcome({ akuma: SPECIMEN_ID, tell, observation }), "failed");
-  assert.equal(askOutcome({ akuma: SPECIMEN_ID, tell, observation: { reason: "invalid-output", diagnostic: "schema mismatch", answer: "wrong" } }), "failed");
+  assert.equal(classifyVerb("spawn", spawn, { kind: "returned", value: called({ kind: "observed", tell, observation }) }), "failed");
+  assert.equal(classifyVerb("ask", input, { kind: "returned", value: { akuma: SPECIMEN_ID, tell, observation } }), "failed");
+  assert.equal(classifyVerb("ask", input, { kind: "returned", value: { akuma: SPECIMEN_ID, tell, observation: { reason: "invalid-output", diagnostic: "schema mismatch", answer: "wrong" } } }), "failed");
+});
+
+test("shared ask rendering preserves answer bytes and non-answer conclusions", () => {
+  const tell = tellReceipt("go", "told", { kind: "told" });
+  const input = { akuma: SPECIMEN_ID, prompt: "go" };
+  const context = { columns: 100, color: false };
+  const render = (observation: import("../src/akuma/selection-observation.js").AkumaAskObservation) =>
+    renderVerb("ask", input, { kind: "returned", value: { akuma: SPECIMEN_ID, tell, observation } }, context);
+  assert.equal(render({ reason: "answered", answer: "exact\nanswer" }), "exact\nanswer");
+  assert.match(render({ reason: "failed", diagnostic: "provider stopped" }), /provider stopped/u);
+  assert.match(render({ reason: "invalid-output", diagnostic: "schema mismatch", answer: "wrong" }), /schema mismatch/u);
+  const deadline = render({ reason: "deadline" });
+  assert.match(deadline, /pending tell/u);
+  assert.doesNotMatch(deadline, /waited|NaN/u);
+  assert.equal(render({ reason: "deadline" }), deadline);
+  const spawn = called({ kind: "observed", tell, observation: { reason: "deadline" } });
+  const renderedSpawn = renderVerb("spawn", { akumaName: "worker" }, { kind: "returned", value: spawn }, context);
+  assert.match(renderedSpawn, /pending tell/u);
+  assert.doesNotMatch(renderedSpawn, /waited|NaN/u);
+  assert.equal(renderVerb("spawn", { akumaName: "worker" }, { kind: "returned", value: spawn }, context), renderedSpawn);
 });
 
 test("every action receipt leads with a verdict and subject, then indented evidence", () => {

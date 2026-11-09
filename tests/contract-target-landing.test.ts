@@ -68,7 +68,7 @@ test("a parent delivers combined content while the child's exact integration rem
   raw.run(["-C", parentPath, "add", "parent.txt"]);
   raw.run(["-C", parentPath, "commit", "--quiet", "-m", "parent"]);
   accepted(await parent.value.kei.deliver());
-  accepted(await parent.value.kei.review({ verdict: "satisfied" }));
+  accepted(await parent.value.kei.review({ verdict: "satisfied", summary: "Landing review passed" }));
   assert.equal(present(await parent.value.kei.state()).terminal?.kind, "claimed");
   assert.equal(existsSync(parentPath), false);
   assert.equal(raw.run(["show", "main:child.txt"]), "child\n");
@@ -104,7 +104,7 @@ test("siblings reintegrate against a moved parent without losing reviewed conten
   accepted(await firstBind.value.kei.deliver());
   assert.equal(present(await firstBind.value.kei.state()).terminal, null);
   accepted(await secondBind.value.kei.deliver());
-  const reviewed = accepted(await firstBind.value.kei.review({ verdict: "satisfied" }));
+  const reviewed = accepted(await firstBind.value.kei.review({ verdict: "satisfied", summary: "Landing review passed" }));
   assert.equal(reviewed.value.gates?.find(({ gate }) => gate === "verified")?.requirements[0]?.current.kind, "stale");
   assert.equal(present(await firstBind.value.kei.state()).terminal, null);
   assert.equal(
@@ -232,7 +232,7 @@ test("a parent terminal before placement cannot receive an already delivered chi
   raw.run(["-C", path, "commit", "--quiet", "-m", "child"]);
   accepted(await child.value.kei.deliver());
   accepted(await parent.value.kei.abandon());
-  accepted(await child.value.kei.review({ verdict: "satisfied" }));
+  accepted(await child.value.kei.review({ verdict: "satisfied", summary: "Landing review passed" }));
   assert.equal(present(await child.value.kei.state()).terminal, null);
   assert.equal(present(await parent.value.kei.state()).terminal?.kind, "abandoned");
 });

@@ -1,5 +1,7 @@
+import { classifyVerb } from "../../library/keiyaku-verbs.js";
 import type { CliRuntime } from "../runtime.js";
-import { emit, type CliOutcome } from "../streams.js";
+import { renderVerb } from "../render/verbs.js";
+import { displayContext, emit, type CliOutcome } from "../streams.js";
 import type { ParsedAkumaCommand } from "./akuma-grammar.js";
 
 export async function runReport(
@@ -7,14 +9,18 @@ export async function runReport(
   runtime: CliRuntime,
 ): Promise<CliOutcome> {
   const text = command.prompt.kind === "stdin" ? await runtime.readStdin() : command.prompt.value;
-  const result = await runtime.facet.report({ text, signal: runtime.signal });
+  const wire = { text };
+  const result = await runtime.facet.run("report", wire, { signal: runtime.signal });
+  const completion = { kind: "returned" as const, value: result };
+  const actor = runtime.environment.KEIYAKU_ACTOR_ID;
   return emit(
     command.output,
     result,
     () =>
-      result.kind === "recorded"
-        ? `recorded ${runtime.environment.KEIYAKU_ACTOR_ID} report/${result.report.sequence} · body/${result.report.bodySequence} · turn/${result.report.turnSequence}`
-        : `refused report · ${result.reason}`,
-    result.kind === "recorded" ? "accepted" : "refused",
+      renderVerb("report", wire, completion, {
+        ...displayContext(),
+        ...(actor === undefined ? {} : { actor }),
+      }),
+    classifyVerb("report", wire, completion),
   );
 }

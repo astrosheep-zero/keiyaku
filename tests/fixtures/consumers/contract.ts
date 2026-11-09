@@ -67,7 +67,10 @@ if (verified.kind === "accepted") {
 }
 // @ts-expect-error Verification indexes are numbers at the public boundary
 selected.verify({ index: "1" });
-const cancellable: ReviewInput = { verdict: "satisfied", signal: new AbortController().signal };
+const cancellable: ReviewInput = { verdict: "satisfied", summary: "Consumer review passed", signal: new AbortController().signal };
+// @ts-expect-error review testimony requires a summary
+const missingReviewSummary: ReviewInput = { verdict: "satisfied" };
+void missingReviewSummary;
 const reviewed: ReviewOutcome = await selected.review(cancellable, {
   observe: async (event) => {
     void event.kind;

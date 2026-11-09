@@ -1,4 +1,3 @@
-import type { CliOutcome } from "../streams.js";
 import type {
   BlockedDebtList,
   BlockedDebtRow,
@@ -37,16 +36,6 @@ type DebtListOutcome = DebtList | BlockedDebtList | DebtQueryResult | DebtAbsent
 export type DebtShowResult = DebtDetail | null | readonly (DebtDetail | null)[];
 /** Presentation-only list scope the leaf acquired; never part of a product value. */
 export type DebtListScope = "world" | "current" | Readonly<{ namespace: string }>;
-/** The union of native Debt SDK answers one leaf renders directly; the CLI adds no result envelope. */
-type DebtNativeResult =
-  | DebtMutationResult
-  | DebtUpdateResult
-  | DebtBatchResult
-  | DebtShowResult
-  | DebtDecompositionTree
-  | DebtDoctorReport
-  | DebtContextResult
-  | DebtListOutcome;
 type DebtFailure =
   | Extract<DebtMutationResult, { kind: "refused" | "retry" }>
   | Extract<DebtContextResult, { kind: "refused" | "retry" }>;
@@ -135,8 +124,8 @@ export function debtFrameHead(view: string, scope: string): string {
   return `${view.toUpperCase()} // ${scope}`;
 }
 
-function updatedAge(updatedAt: string): string {
-  const elapsed = Math.max(0, performance.timeOrigin + performance.now() - Date.parse(updatedAt));
+function updatedAge(updatedAt: string, now: number): string {
+  const elapsed = Math.max(0, now - Date.parse(updatedAt));
   const minutes = Math.floor(elapsed / 60_000);
   if (minutes < 60) return `${minutes}m`;
   const hours = Math.floor(minutes / 60);
@@ -144,19 +133,19 @@ function updatedAge(updatedAt: string): string {
   return `${Math.floor(hours / 24)}d`;
 }
 
-function compactFacts(item: DebtRow): string {
+function compactFacts(item: DebtRow, now: number | undefined): string {
   return [
-    `updated ${updatedAge(item.updatedAt)}`,
+    `updated ${now === undefined ? item.updatedAt : updatedAge(item.updatedAt, now)}`,
     ...(item.children === undefined ? [] : [`children ${item.children.live} live · ${item.children.total} total`]),
   ].join(" · ");
 }
 
-function listEntity(item: DebtRow, omitDisposition: boolean): DebtEntity {
+function listEntity(item: DebtRow, omitDisposition: boolean, now: number | undefined): DebtEntity {
   return {
     id: item.id,
     priority: item.priority,
     ...(omitDisposition ? {} : { word: item.disposition }),
-    facts: compactFacts(item),
+    facts: compactFacts(item, now),
     title: item.title,
   };
 }
@@ -165,8 +154,9 @@ function renderListRow(
   item: DebtRow | BlockedDebtRow | DebtQueryRow,
   columns: number,
   omitDisposition: boolean,
+  now: number | undefined,
 ): readonly string[] {
-  const lines = [...entityLines(listEntity(item, omitDisposition), columns)];
+  const lines = [...entityLines(listEntity(item, omitDisposition, now), columns)];
   if ("blockers" in item) {
     for (const blocker of item.blockers) lines.push(`  needs ${blocker.id} · ${dispositionText(blocker.state)}`);
   }
@@ -194,7 +184,7 @@ export function renderDebtList(
   if (result.value.rows.length === 0) return emptyCatalogue(view);
   return [
     heading,
-    ...result.value.rows.flatMap((item) => renderListRow(item, columns, action === "ready")),
+    ...result.value.rows.flatMap((item) => renderListRow(item, columns, action === "ready", context.now)),
     ...footer,
   ].join("\n");
 }
@@ -329,19 +319,4 @@ export function renderDebtLifecycle(
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
   return "items" in result ? renderBatch(verb, result, context.columns) : renderMutation(verb, result, context.columns);
-}
-
-export function debtOutcome(result: DebtNativeResult): CliOutcome {
-  if (result === null) return "refused";
-  if (Array.isArray(result)) return result.some((item) => item === null) ? "refused" : "accepted";
-  if ("issues" in result) return result.issues.length === 0 ? "accepted" : "failed";
-  if ("items" in result) {
-    const kinds = result.items.map((item) => item.outcome.kind);
-    return kinds.includes("retry") ? "retryable" : kinds.includes("refused") ? "refused" : "accepted";
-  }
-  if ("kind" in result) {
-    if (result.kind === "retry") return "retryable";
-    if (result.kind === "refused" || result.kind === "absent") return "refused";
-  }
-  return "accepted";
 }

@@ -841,8 +841,7 @@ test("observing spawn displays the same canonical workdir as the native result",
     const result = await Keiyaku.at({ cwd: world, environment, home: configured.home }).spawn({
       akumaName: "worker", prompt: "inspect workdir", mode: "wait", timeoutMs: 20_000,
       workdir: "linked-workdir", bare: true,
-      observe: { admitted: (_tell, _id, head) => { admittedCwd = head.cwd; } },
-    });
+    }, { observe: (event) => { if (event.kind === "admitted") admittedCwd = event.head.cwd; } });
     assert.equal(admittedCwd, result.execution.cwd);
     assert.equal(result.execution.cwd, realpathSync(workdir));
     const output = await runCli(

@@ -28,6 +28,7 @@ export function displayContext(): TextRenderContext {
         ? process.stdout.columns
         : DEFAULT_CLI_COLUMNS,
     color: process.stdout.isTTY === true && process.env.NO_COLOR === undefined,
+    now: Date.now(),
   };
 }
 

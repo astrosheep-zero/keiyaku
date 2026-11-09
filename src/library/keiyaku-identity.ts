@@ -1,4 +1,6 @@
 /** @architectureCompositionRoot */
+import { z } from "zod";
+import { contractIdSchema } from "../git/identity.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
 import { readHeart, readLatestTurnForBody } from "../akuma/heart/index.js";
@@ -8,8 +10,8 @@ import { Keis } from "./contract-composition.js";
 import { NoGitWorldError, Repo } from "./repo.js";
 import { observeNamedAddress } from "./address.js";
 import { dispatchAssociations } from "./selection.js";
-import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
-import { World, type WorldRoot } from "../world.js";
+import { akumaBirthSchema, akumaCallerSchema, decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
+import { World, worldRootSchema, type WorldRoot } from "../world.js";
 
 /** Environment attribution is explicit invocation input, never SDK admission. */
 export async function akumaCallerFromEnvironment(environment: NodeJS.ProcessEnv): Promise<AkumaCaller | undefined> {
@@ -67,6 +69,42 @@ export type WhoamiFacts = Readonly<{
   contract: Contract;
   profile?: Profile;
 }>;
+
+export const whoamiFactsSchema = z
+  .strictObject({
+    world: worldRootSchema.nullable(),
+    self: z.union([
+      akumaCallerSchema,
+      z.strictObject({ kind: z.literal("none") }).readonly(),
+      z.strictObject({ kind: z.literal("invalid"), reason: z.string() }).readonly(),
+    ]),
+    initiator: z.string().nullable(),
+    initiatorUnavailable: z.string().exactOptional(),
+    contract: z.union([
+      z.strictObject({ kind: z.literal("resolved"), id: contractIdSchema }).readonly(),
+      z.strictObject({ kind: z.enum(["none", "ambiguous"]) }).readonly(),
+      z.strictObject({ kind: z.literal("unavailable"), reason: z.string() }).readonly(),
+    ]),
+    profile: z
+      .union([
+        z
+          .strictObject({
+            kind: z.literal("available"),
+            akumaName: z.string(),
+            aliases: z.array(z.string()).readonly(),
+            provider: z.string().nullable(),
+            model: z.string().nullable(),
+            workdir: z.string().nullable(),
+            birth: akumaBirthSchema,
+            bornAt: z.string().nullable(),
+            contracts: z.array(contractIdSchema).readonly(),
+          })
+          .readonly(),
+        z.strictObject({ kind: z.literal("unavailable"), reason: z.string() }).readonly(),
+      ])
+      .exactOptional(),
+  })
+  .readonly();
 
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

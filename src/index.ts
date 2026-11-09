@@ -9,7 +9,8 @@ export { akumaCallerSchema } from "./akuma/caller.js";
 export { killEvidenceSchema } from "./akuma/heart/facts.js";
 export { tellWakeSchema, tellResultSchema } from "./akuma/call-initial-tell.js";
 export { akumaIdleResultSchema, akumaReportResultSchema } from "./akuma/akuma-instance.js";
-export { liveStatusObservationSchema } from "./akuma/akuma-selection-execution.js";
+export { liveStatusObservationSchema, askProgressSchema } from "./akuma/akuma-selection-execution.js";
+export type { AskProgress } from "./akuma/akuma-selection-execution.js";
 export { archetypeCatalogSchema, archetypeCatalogRowSchema } from "./akuma/archetype.js";
 export {
   akumaObservationSchema,
@@ -23,11 +24,15 @@ export {
 export { akumaHistoryResultSchema } from "./library/selection.js";
 export {
   spawnResultSchema,
+  spawnProgressSchema,
   spawnObservationSchema,
   spawnWaitHeadSchema,
   dispatchStageSchema,
   forkResultSchema,
 } from "./library/akuma-creation.js";
+export type { SpawnProgress } from "./library/akuma-creation.js";
+export { whoamiFactsSchema } from "./library/keiyaku-identity.js";
+export type { WhoamiFacts } from "./library/keiyaku-identity.js";
 export { dispatchSchema, dispatchFailureSchema } from "./dispatch/index.js";
 export { AkumaHost } from "./body-host.js";
 export type { AkumaHostScope } from "./body-host.js";
@@ -53,6 +58,20 @@ export type {
   DebtShowInvocation,
   DebtContextInvocation,
 } from "./library/keiyaku.js";
+export { classifyVerb } from "./library/keiyaku-verbs.js";
+export type {
+  VerbEntry,
+  VerbName,
+  VerbInput,
+  VerbOutput,
+  VerbProgress,
+  VerbRun,
+  VerbRunFor,
+  AskRun,
+  SpawnRun,
+  VerbDisposition,
+  VerbCompletion,
+} from "./library/keiyaku-verbs.js";
 export { Keis } from "./library/contract-composition.js";
 export { KeiyakuError } from "./library/outcome.js";
 export { NoGitWorldError, Repo } from "./library/repo.js";
@@ -309,6 +328,8 @@ export {
   DebtAuthorityCorruptionError,
   Debts,
   debtAbsentSchema,
+  resolvedNamespaceContextSchema,
+  debtContextResultSchema,
   debtDetailSchema,
   debtOutcomeSchema,
   debtViewSchema,

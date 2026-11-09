@@ -112,16 +112,14 @@ test("opaque strings and keys escape format characters without collapsing distin
 });
 
 test("settings text retains shadow provenance and exact configuration names", () => {
+  const entries = [{ name: "local", source: "project" as const, shadows: true, value: { env: { LONG_VALUE: "false" } } }];
   const value: Settings = {
     scopes: {
       user: { kind: "read", path: "/user/settings.json", namespaces: ["providers"] },
       project: { kind: "read", path: "/repo/settings.json", namespaces: ["providers"] },
     },
-    namespace: (name) => ({
-      kind: "read",
-      name,
-      entries: [{ name: "local", source: "project", shadows: true, value: { env: { LONG_VALUE: "false" } } }],
-    }),
+    namespaces: [{ kind: "read", name: "providers", entries }],
+    namespace: (name) => ({ kind: "read", name, entries }),
   };
   assert.equal(
     renderSettingsText(value),

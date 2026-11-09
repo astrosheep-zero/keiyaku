@@ -7,11 +7,13 @@ import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
 import { runContractMutation } from "../src/cli/commands/contract.js";
 import { resolveInvocationCoordinates } from "../src/cli/coordinates.js";
 import { parseArgv } from "../src/cli/parse.js";
-import type { CliRuntime } from "../src/cli/runtime.js";
+import { writeExecutionProgress, type CliRuntime } from "../src/cli/runtime.js";
 import { cliExitCode } from "../src/cli/streams.js";
 import { captureOutput, runCli } from "./support/cli-fixtures.js";
-import { renderBindDraftReceipt } from "../src/cli/render/refusal.js";
+import { renderBindDraftReceipt, renderRefusal } from "../src/cli/render/refusal.js";
 import { World, type WorldRoot } from "../src/world.js";
+import { Keiyaku } from "../src/index.js";
+import { document, repositoryWithMain } from "./support/library-verbs.js";
 
 async function draftWorld(): Promise<WorldRoot> {
   return World.at(mkdtempSync(join(tmpdir(), "keiyaku-bind-draft-")));
@@ -84,26 +86,37 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
   assert.doesNotMatch(early.stdout, /draft  \.keiyaku\/draft\//u);
   assert.equal(existsSync(absent), false);
 
-  const refusal = { kind: "refused", operation: "bind", refusal: { kind: "invalid-document", diagnostic: "original refusal" } } as const;
+  const repository = repositoryWithMain();
+  const facet = Keiyaku.at({ cwd: repository.path, environment: {}, home: root });
+  const markdown = document();
+  const refusal = await facet.run("bind", { markdown, target: "missing-target" });
+  assert.equal(refusal.kind, "refused");
+  if (refusal.kind !== "refused") throw new Error("expected native bind refusal");
+  assert.equal(refusal.refusal.kind, "target-missing");
   for (const output of ["text", "json"] as const) {
-    const parsed = parseArgv(["bind", "-", ...(output === "json" ? ["--json"] : [])]);
+    const parsed = parseArgv(["bind", "-", "--target", "missing-target", ...(output === "json" ? ["--json"] : [])]);
     if (!("command" in parsed) || parsed.command.command !== "bind") throw new Error("expected bind");
     const command = parsed.command;
-    const runtime = {
-      facet: { bind: async () => refusal },
-      readStdin: async () => "document bytes",
+    const runtime: CliRuntime = {
+      environment: {},
+      facet,
+      readStdin: async () => markdown,
       draftWorld: async () => (await resolveInvocationCoordinates(
         { processCwd: root, command }, { KEIYAKU_GIT_PATH: " " },
       )).establishWorld(),
-    } as unknown as CliRuntime;
+      signal: new AbortController().signal,
+      progress: writeExecutionProgress,
+    };
     const result = await captureOutput(async () => cliExitCode(await runContractMutation(command, runtime)));
     assert.equal(result.exit, 1);
     if (output === "json") {
       assert.deepEqual(JSON.parse(result.stdout), refusal);
     } else {
-      assert.match(result.stdout, /original refusal/u);
+      const original = renderRefusal({ operation: refusal.operation, refusal: refusal.refusal });
+      assert.ok(result.stdout.startsWith(`${original}\n`));
+      assert.equal(result.stdout.split(original).length - 1, 1);
       assert.match(result.stdout, /draft warning/u);
-      assert.match(result.stdout, /KEIYAKU_GIT_PATH requires a nonblank value/u);
+      assert.equal((result.stdout.match(/KEIYAKU_GIT_PATH requires a nonblank value/gu) ?? []).length, 1);
       assert.doesNotMatch(result.stdout, /draft  \.keiyaku\/draft\//u);
     }
   }
