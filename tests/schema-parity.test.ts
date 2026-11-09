@@ -26,9 +26,18 @@ class Handle {
     return { contract: this.id };
   }
 }
-type Capability = Readonly<{ root: string | null; establish: () => Promise<string>; items?: readonly Handle[] }>;
-export type WireDropsFunctions = Assert<
-  Exact<Wire<Capability>, { readonly root: string | null; readonly items?: readonly { contract: string }[] }>
+type Capability = Readonly<{
+  root: string | null;
+  establish: () => Promise<string>;
+  items?: readonly Handle[];
+  value: undefined;
+  note: string | undefined;
+}>;
+export type WireDropsFunctionsAndUndefined = Assert<
+  Exact<
+    Wire<Capability>,
+    { readonly root: string | null; readonly items?: readonly { contract: string }[]; readonly note?: string }
+  >
 >;
 
 test("wire round-trip compares against the JSON projection of handles and capabilities", () => {
