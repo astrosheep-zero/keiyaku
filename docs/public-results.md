@@ -11,8 +11,11 @@ specifications.
 Every public operation result and observer progress event has one structural
 schema, owned beside its type by the producing owner, not a facet, adapter, or
 test. Thrown errors are not results. Schemas describe the JSON wire form:
-round-tripping a native value through JSON and its schema preserves that value,
-with handles represented by their JSON form. JSON Schema represents the input
+round-tripping a native value through JSON and its schema preserves that value's
+JSON form. Handles are represented by their JSON form; capability members such as
+methods and process custody are absent from the wire, never re-encoded or
+reconstructed, and type parity is against that wire projection of the native
+type. JSON Schema represents the input
 side of transformations. Object schemas are strict and readonly, with exact
 optional fields. Types are derived from their owner schemas where that owner
 already uses Zod; otherwise type-level tests establish exact parity.
