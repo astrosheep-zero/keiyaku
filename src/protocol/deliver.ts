@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { snapshotIdSchema } from "./operations.js";
+import { snapshotIdSchema, changeIdSchema } from "../git/identity.js";
 import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
 import {
   materializeIntegrationSnapshot,
@@ -53,7 +53,7 @@ import type {
 import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/verbs/deliver.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import type { LeadingOutcome } from "./outcome.js";
-import type { CompletionEvidence } from "./completion.js";
+
 import { appointmentFor, readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import type {
   AttemptDecision,
@@ -65,7 +65,29 @@ import type {
 } from "./operations.js";
 import { timestamp } from "./operations.js";
 
-type DeliveryIdentity = DeliverData;
+export const deliveryIdentitySchema = z
+  .strictObject({
+    candidate: snapshotIdSchema,
+    integration: snapshotIdSchema,
+    contentId: changeIdSchema,
+    admission: z.literal("reused").exactOptional(),
+    previousContentId: changeIdSchema.exactOptional(),
+  })
+  .readonly();
+export type DeliveryIdentity = z.output<typeof deliveryIdentitySchema>;
+export function compactDelivery(
+  delivery: DeliverData,
+  leading?: DeliverLeading,
+  previousContentId?: ChangeId,
+): DeliveryIdentity {
+  return {
+    candidate: delivery.tenderSnapshot,
+    integration: delivery.integration.snapshot,
+    contentId: delivery.integration.changeId,
+    ...(leading?.kind === "already-admitted" ? { admission: "reused" as const } : {}),
+    ...(previousContentId === undefined ? {} : { previousContentId }),
+  };
+}
 
 /** Known prospective and delivered integrations, newest first, without giving Git producer vocabulary. */
 export function deliveryIntegrationSnapshots(journal: readonly JournalEntry[]): readonly SnapshotId[] {
@@ -84,12 +106,7 @@ export type DeliverLeading = Readonly<{
   kind: "admitted-now" | "already-admitted";
   fact: EntryUlid;
 }>;
-type DeliverValue = DeliveryIdentity &
-  CompletionEvidence &
-  Readonly<{
-    leading: DeliverLeading;
-    previousContentId?: ChangeId;
-  }>;
+type DeliverValue = DeliveryIdentity & Readonly<{ leading: DeliverLeading }>;
 type AppointedWorkspace = z.infer<typeof worktreeWorkspaceSchema>;
 export const materializedConflictSchema = z
   .object({
@@ -274,7 +291,7 @@ type DeliveryArtifacts =
   | Readonly<{ kind: "defer" }>
   | Readonly<{ kind: "reuse"; worktree: WorktreeWitness }>
   | Readonly<{ kind: "refused"; refusal: DeliveryFailure }>
-  | Readonly<{ kind: "mechanical"; data: DeliveryIdentity; worktree: WorktreeWitness }>;
+  | Readonly<{ kind: "mechanical"; data: DeliverData; worktree: WorktreeWitness }>;
 
 type ExternalDeliveryPreparation =
   | Readonly<{ kind: "unavailable" }>
@@ -331,7 +348,7 @@ async function mechanicalDeliveryPreparation(
   | Readonly<{
       kind: "prepared";
       document: DocumentDerivation["document"];
-      data: DeliveryIdentity;
+      data: DeliverData;
       worktree: WorktreeWitness;
     }>
 > {
@@ -523,16 +540,13 @@ function currentCandidateDeliveryDecision(
   const delivery = record?.entries.findLast((entry) => entry.kind === "deliver");
   if (record === undefined || delivery === undefined) throw new Error("current delivery is missing its journal fact");
   input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries });
-  return {
-    kind: "accepted",
-    facts: [],
-    state,
-    journal: record.entries,
-    value: {
-      ...state.delivery!.data,
-      leading: { kind: "already-admitted", fact: delivery.entry },
-    },
-  };
+  const leading: DeliverLeading = { kind: "already-admitted", fact: delivery.entry };
+  const value = compactDelivery(
+    { ...state.delivery!.data, integration: state.currentIntegration ?? state.delivery!.data.integration },
+    leading,
+  );
+  input.progress?.recordDelivery(input.contractId, value);
+  return { kind: "accepted", facts: [], state, journal: record.entries, value: { ...value, leading } };
 }
 
 async function validateDeliveryTarget(
@@ -588,19 +602,14 @@ async function decideAndAdmitDelivery(
   const deliverFact = admission.facts.find((fact) => fact.contract === input.contractId && fact.kind === "deliver");
   if (deliverFact?.kind !== "deliver") throw new Error("confirmed delivery requires its own receipt");
   const previousContentId = assembled.state?.delivery?.data.integration.changeId;
-  return {
-    ...admission,
-    value: {
-      ...preparation.data,
-      leading: {
-        kind: "admitted-now",
-        fact: deliverFact.entry,
-      },
-      ...(previousContentId === undefined || previousContentId === preparation.data.integration.changeId
-        ? {}
-        : { previousContentId }),
-    },
-  };
+  const leading: DeliverLeading = { kind: "admitted-now", fact: deliverFact.entry };
+  const value = compactDelivery(
+    preparation.data,
+    leading,
+    previousContentId === preparation.data.integration.changeId ? undefined : previousContentId,
+  );
+  input.progress?.recordDelivery(input.contractId, value);
+  return { ...admission, value: { ...value, leading } };
 }
 
 /**

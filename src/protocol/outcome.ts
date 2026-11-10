@@ -38,7 +38,7 @@ export function accepted<Value, Refusal = never>(
   value: Value,
   physical?: ReconcileResult,
   obligations?: AcceptedObligations,
-): IntentOutcome<Value, Refusal> {
+): Extract<IntentOutcome<Value, Refusal>, { kind: "accepted" }> {
   if (state.head === null) throw new Error("accepted contract is missing its journal head");
   return {
     kind: "accepted",

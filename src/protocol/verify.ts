@@ -15,7 +15,7 @@ import {
   deliverRefusalSchema,
   verificationDeclarationRefusalSchema,
 } from "./operations.js";
-import { compactPlacement, placementSchema, type CompletionEvidence } from "./completion.js";
+import { placementSchema } from "./completion.js";
 import { activeReasonSchema, retrySchema, compactRetry, compactReason } from "./result-reasons.js";
 
 const checkCoordinate = {
@@ -101,15 +101,6 @@ export function compactVerificationStop(stop: z.output<typeof rawVerificationSto
 }
 
 type VerifyAcceptedValue = Readonly<{ snapshot: SnapshotId; checks: readonly VerificationCheck[] }>;
-
-export function compactVerify(value: CompletionEvidence & VerifyAcceptedValue): VerifyValue {
-  const placement = compactPlacement(value);
-  return {
-    snapshot: value.snapshot,
-    checks: value.checks,
-    ...(placement === undefined ? {} : { placement }),
-  };
-}
 
 type VerifyRefusal =
   | z.infer<typeof verifyRefusalSchema>

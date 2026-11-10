@@ -75,7 +75,6 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["library/keiyaku.ts", ["library/keiyaku-selectors.ts", "select"], true],
   ["library/keiyaku-selectors.ts", ["library/contract-composition.ts", "Keis"], true],
   ["library/kei.ts", ["library/keiyaku.ts", "Keiyaku"], false],
-  ["library/contract-execution.ts", ["library/keiyaku-selectors.ts", "select"], false],
   ["library/contract-creation.ts", ["library/keiyaku.ts", "Keiyaku"], false],
   ["library/contract-composition.ts", ["library/keiyaku.ts", "Keiyaku"], false],
   ["library/akumas.ts", ["library/keiyaku.ts", "Keiyaku"], false],
@@ -229,7 +228,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["protocol/run.ts", ["git/target-placement.ts", "prepareTargetPlacement"], false],
   ["akuma/akuma.ts", ["library/contract.ts", "contract"], false],
   ["akuma/akuma.ts", ["library/contract.ts", "Contract", true], false],
-  ["library/kei.ts", ["protocol/completion.ts", "completeCandidate"], false],
+  ["library/kei.ts", ["protocol/completion.ts", "completeCandidate"], true],
   ["protocol/attempt.ts", ["protocol/result-leaves.ts", "entryUlidSchema"], true],
   ["protocol/execution-observation.ts", ["protocol/result-leaves.ts", "journalEntrySchema"], true],
   ["index.ts", ["protocol/result-leaves.ts", "contractStateSchema"], true],
@@ -264,7 +263,6 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["index.ts", ["library/contract-wait.ts", "contractWaitResultSchema"], true],
   ["index.ts", ["library/kei.ts", "Kei"], true],
   ["index.ts", ["library/contract-composition.ts", "Keis"], true],
-  ["library/contract-execution.ts", ["protocol/completion.ts", "completeCandidate"], true],
   ["library/contract-creation.ts", ["library/bind.ts", "prepareMarkdownBind"], true],
   ["library/invocation.ts", ["protocol/completion.ts", "completeCandidate"], false],
   ["library/invocation.ts", ["protocol/progress.ts", "ProtocolProgress", true], true],
@@ -313,7 +311,7 @@ for (const verb of ["review", "deliver"]) {
     }
   });
 }
-for (const owner of ["contract-execution", "continuation"]) {
+for (const owner of ["kei", "continuation"]) {
   test(`${owner} calls completion, never raw admission`, () => {
     assert.deepEqual(graph(`library/${owner}.ts`, [["protocol/completion.ts", "completeCandidate"]]), []);
     for (const low of ["attempt", "placement", "run"]) {

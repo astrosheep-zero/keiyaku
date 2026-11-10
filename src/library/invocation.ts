@@ -6,6 +6,8 @@ import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { ReconcileResult } from "../git/reconcile.js";
 import type { DeliveryPreviewReport } from "../protocol/delivery-preview.js";
 import type { CandidateCompletion, CompletionEvidence } from "../protocol/completion.js";
+import { compactPlacement } from "../protocol/completion.js";
+import { compactDelivery, type DeliveryIdentity } from "../protocol/deliver.js";
 import {
   observeExecution,
   type ExecutionObservation,
@@ -22,22 +24,27 @@ import type {
 import type { SettlementReport } from "../settlement/settle.js";
 import type { WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
-import type { InvocationEffect, ReconciliationLag, ResetCounts } from "./outcome.js";
+import type {
+  ContractConclusion,
+  ContractVerb,
+  InvocationEffect,
+  ReconciliationLag,
+  ResetCounts,
+  admittedEvidenceSchema,
+} from "./outcome.js";
+import type { z } from "zod";
 import { compactEffect, reconcileLagScope } from "./outcome.js";
 
 type RecordedVerificationCheck = Parameters<ProtocolProgress["recordVerificationCheck"]>[2];
-export type CandidateConclusion = Readonly<Record<string, unknown>> &
-  Readonly<{
-    checks?: readonly RecordedVerificationCheck[];
-  }>;
 
 export type InvocationSnapshot = Readonly<{
   facts: readonly JournalEntry[];
+  admitted: readonly z.output<typeof admittedEvidenceSchema>[];
   checkpoints: ReadonlyMap<ContractId, ContractCheckpoint>;
   heads: ReadonlyMap<ContractId, ContractHead>;
   affected: readonly ContractId[];
   effects: readonly InvocationEffect[];
-  conclusions: ReadonlyMap<ContractId, CandidateConclusion>;
+  conclusions: ReadonlyMap<ContractId, ContractConclusion>;
   reset?: Readonly<{ world: WorldRoot; removed: ResetCounts; attempted: readonly ("git" | "debt")[] }>;
 }>;
 
@@ -47,7 +54,31 @@ type ReconciliationRecord = Readonly<{
   settlement?: SettlementReport;
 }>;
 
-const CANDIDATE_CONCLUSION_KEYS = ["completion", "placement"] as const;
+function admissionEvidence(fact: JournalEntry): z.output<typeof admittedEvidenceSchema> {
+  const base = { contractId: fact.contract };
+  switch (fact.kind) {
+    case "deliver":
+      return {
+        ...base,
+        kind: fact.kind,
+        candidate: fact.data.tenderSnapshot,
+        integration: fact.data.integration.snapshot,
+        contentId: fact.data.integration.changeId,
+      };
+    case "reintegrated":
+      return { ...base, kind: fact.kind, integration: fact.data.snapshot, predecessor: fact.data.predecessor };
+    case "attestation":
+      return {
+        ...base,
+        kind: fact.kind,
+        ...(fact.data.gate === "verified" ? { requirement: fact.data.requirement, verdict: fact.data.verdict } : {}),
+      };
+    case "arc":
+      return { ...base, kind: fact.kind, chapter: fact.data.seq };
+    default:
+      return { ...base, kind: fact.kind };
+  }
+}
 
 function entryKey(fact: JournalEntry): string {
   return `${fact.contract}\u0000${fact.entry}`;
@@ -65,7 +96,8 @@ export class InvocationAccumulator implements ProtocolProgress {
   private readonly admittedCheckpoints = new Map<ContractId, ContractCheckpoint>();
   private readonly affectedContracts = new Set<ContractId>();
   private readonly records: InvocationEffect[] = [];
-  private readonly candidateConclusions = new Map<ContractId, CandidateConclusion>();
+  private readonly admitted: z.output<typeof admittedEvidenceSchema>[] = [];
+  private readonly candidateConclusions = new Map<ContractId, ContractConclusion>();
   private readonly reportedResidue = new WeakSet<object>();
 
   private resetState?: {
@@ -74,7 +106,10 @@ export class InvocationAccumulator implements ProtocolProgress {
     attempted: ("git" | "debt")[];
   };
 
-  constructor(private readonly observer?: ExecutionObserver) {}
+  constructor(
+    private readonly observer?: ExecutionObserver,
+    private readonly operation?: ContractVerb,
+  ) {}
 
   beginReset(world: WorldRoot): void {
     this.resetState = { world, removed: { refs: 0, worktrees: 0, debts: 0 }, attempted: [] };
@@ -110,11 +145,10 @@ export class InvocationAccumulator implements ProtocolProgress {
       if (this.entries.has(key)) continue;
       this.entries.set(key, bytes);
       this.admittedFacts.push(fact);
-      if (fact.kind === "deliver")
-        this.extendConclusions(fact.contract, {
-          ...fact.data,
-          leading: { kind: "admitted-now", fact: fact.entry },
-        });
+      this.admitted.push(admissionEvidence(fact));
+      if (fact.kind === "deliver") this.recordDelivery(fact.contract, compactDelivery(fact.data));
+      if (fact.kind === "reintegrated" && this.conclusions(fact.contract)?.candidate !== undefined)
+        this.extendConclusions(fact.contract, { integration: fact.data.snapshot });
       this.observe({ kind: "admitted", contractId: contract, fact });
       this.affectedContracts.add(fact.contract);
       fresh = true;
@@ -191,19 +225,18 @@ export class InvocationAccumulator implements ProtocolProgress {
 
   /** Replace the current candidate's conclusions; accumulated resources are never erased. */
   recordCandidate(contract: ContractId, evidence: CompletionEvidence): void {
-    const next: Record<string, unknown> = { ...(this.candidateConclusions.get(contract) ?? {}) };
-    for (const key of CANDIDATE_CONCLUSION_KEYS) delete next[key];
-    for (const [key, value] of Object.entries(evidence)) if (value !== undefined) next[key] = value;
-    this.candidateConclusions.set(contract, next);
+    const { placement: _placement, ...current } = this.candidateConclusions.get(contract) ?? {};
+    const placement = compactPlacement(evidence);
+    this.candidateConclusions.set(contract, { ...current, ...(placement === undefined ? {} : { placement }) });
   }
 
   /** The candidate's completion base, known before an optional observation can fail. */
   recordCompletion(contract: ContractId, completion: CandidateCompletion): void {
-    this.extendConclusions(contract, { completion });
+    this.extendConclusions(contract, { placement: { kind: "placed", ...completion } });
   }
 
   recordDeliveryPreview(contract: ContractId, report: Partial<DeliveryPreviewReport>): void {
-    this.extendConclusions(contract, report);
+    this.extendConclusions(contract, { preview: { ...this.conclusions(contract)?.preview, ...report } });
   }
 
   /** Physical residue a continuation's dependent reconciliation observed. */
@@ -215,9 +248,10 @@ export class InvocationAccumulator implements ProtocolProgress {
     this.recordReconciliation(contract, physical);
   }
 
-  /** Incremental continuation progress for the primary Contract. */
+  /** Incremental continuation progress; verify also retains its known-empty partial observation. */
   recordContinuation(contract: ContractId, report: ContinuationReport): void {
-    this.extendConclusions(contract, { continuation: report });
+    if (this.operation === "verify" || report.claimed !== undefined || report.stopped !== undefined)
+      this.extendConclusions(contract, { continuation: report });
   }
 
   recordStop(stop: ExecutionStop): void {
@@ -258,7 +292,8 @@ export class InvocationAccumulator implements ProtocolProgress {
   }
 
   recordSettlement(contract: ContractId, report: SettlementReport): void {
-    for (const action of report.actions) this.records.push({ kind: "settlement-action", contract, action });
+    for (const action of report.actions)
+      this.records.push({ kind: "movement", contract, effect: { kind: "debt-settled", debtId: action.debtId } });
     for (const lag of report.lags)
       this.records.push({
         kind: "issue",
@@ -288,22 +323,22 @@ export class InvocationAccumulator implements ProtocolProgress {
     this.records.push(effect);
   }
 
-  /** Replace the current candidate conclusions; accumulated resources are never erased. */
-  recordConclusions(contract: ContractId, patch: Readonly<Record<string, unknown>>): void {
-    this.candidateConclusions.set(contract, patch);
+  recordDelivery(contract: ContractId, value: DeliveryIdentity): void {
+    this.extendConclusions(contract, value);
   }
 
-  extendConclusions(contract: ContractId, patch: Readonly<Record<string, unknown>>): void {
+  extendConclusions(contract: ContractId, patch: ContractConclusion): void {
     this.candidateConclusions.set(contract, { ...(this.candidateConclusions.get(contract) ?? {}), ...patch });
   }
 
-  conclusions(contract: ContractId): CandidateConclusion | undefined {
+  conclusions(contract: ContractId): ContractConclusion | undefined {
     return this.candidateConclusions.get(contract);
   }
 
   snapshot(): InvocationSnapshot {
     return {
       facts: Object.freeze([...this.admittedFacts]),
+      admitted: Object.freeze([...this.admitted]),
       checkpoints: new Map(this.admittedCheckpoints),
       heads: new Map(this.admittedHeads),
       affected: Object.freeze([...this.affectedContracts]),

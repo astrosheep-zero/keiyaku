@@ -9,7 +9,7 @@ import { executionStop, isOperationalFailure, isOperationalStop } from "../proto
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
 import type { BindOutcome, BindValue } from "./contract-outcomes.js";
-import { acceptedOutcome, expected, retainAdmission } from "./contract-outcomes.js";
+import { retainAdmission } from "./contract-outcomes.js";
 import {
   captureLocalContractComposition,
   derivedGates,
@@ -21,10 +21,9 @@ import type { BindInput } from "./contract-types.js";
 import { actorOption, normalizedList, requireInput, requireMarkdown, debtOption } from "./input.js";
 import { InvocationAccumulator } from "./invocation.js";
 import type { Kei, createKeiHandle } from "./kei.js";
-import { project, validated, type OutcomeProjection } from "./outcome.js";
+import { project, validated, type InvocationFailure } from "./outcome.js";
 import { reconcileAffectedContracts } from "./reconcile.js";
-import { compactReason } from "../protocol/result-reasons.js";
-import type { OperationRefusals } from "./refusal.js";
+import { compactReason, compactRetry } from "../protocol/result-reasons.js";
 import { observeRegion, type RegionObservation } from "./region.js";
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
@@ -82,14 +81,14 @@ export async function bindKei(
   const { forkOf, document, target, actor } = prepared;
   const handle = (id: ContractId) => createHandle(id, scope, composition);
   const accumulator = new InvocationAccumulator();
-  const projection = await (async (): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> => {
-    let completed: OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]> | undefined;
+  const projection = await (async (): Promise<BindOutcome | InvocationFailure> => {
+    let completed: BindOutcome | InvocationFailure | undefined;
     let retirement: { error: unknown } | undefined;
     try {
       return await withGitDecodeChannel(
         scope,
         async (channel) => {
-          completed = await (async (): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> => {
+          completed = await (async (): Promise<BindOutcome | InvocationFailure> => {
             if (forkOf !== undefined) {
               const fork = await admitForkBindWithAppointment({
                 scope,
@@ -99,19 +98,27 @@ export async function bindKei(
                 ...(target === undefined ? {} : { target }),
                 ...actor,
               });
-              if (fork.kind === "refused") return { kind: "refused", refusal: compactReason(fork.refusal) };
+              if (fork.kind === "refused") return { kind: "refused", reason: compactReason(fork.refusal) };
               const admission = fork.admission;
-              if (admission.kind !== "accepted") return expected(undefined, admission);
+              if (admission.kind !== "accepted")
+                return admission.kind === "refused"
+                  ? { kind: "refused", reason: compactReason(admission.refusal) }
+                  : compactRetry(admission.reason);
               const id = admission.value.contractId;
               retainBindCoordinates(accumulator, admission);
               const value = await bindComplete(accumulator, id, scope, channel, admission, hooks, () =>
                 observeRegion(scope, channel, id, fork.document.region).then((region) => bindValue(handle(id), region)),
               );
-              return acceptedOutcome(id, accumulator, value);
+              return Object.defineProperty({ kind: "accepted" as const, contractId: id, ...value }, "kei", {
+                value: value.kei,
+                enumerable: false,
+              });
             }
             if (document === undefined) throw new Error("Markdown bind requires its prepared document");
             return await markdownBind(prepared, document, hooks, scope, channel, accumulator, handle);
           })();
+          if (completed.kind === "accepted" && accumulator.head(completed.contractId) === undefined)
+            throw new Error("missing leading admission receipt");
           return completed;
         },
         (error) => {
@@ -132,7 +139,7 @@ export async function bindKei(
       return { kind: "failed", ...(contract === undefined ? {} : { contract }), error };
     }
   })();
-  const projected = project("bind", accumulator.snapshot(), projection);
+  const projected = project<BindOutcome>("bind", accumulator.snapshot(), projection);
   if (projected.kind === "failed") throw projected.error;
   return projected.outcome;
 }
@@ -181,7 +188,7 @@ async function markdownBind(
   channel: GitDecodeChannel,
   accumulator: InvocationAccumulator,
   handle: (id: ContractId) => Kei,
-): Promise<OutcomeProjection<"bind", BindValue, OperationRefusals["bind"]>> {
+): Promise<BindOutcome | InvocationFailure> {
   const { debt, target, actor, gates, after } = prepared;
   if (gates === undefined || after === undefined) throw new Error("Markdown bind requires prepared terms");
   const targetSelection = bindTargetSelection(target);
@@ -198,13 +205,19 @@ async function markdownBind(
     ...actor,
   });
   const leading = admission.admission === null ? admission.result : admission.admission.result;
-  if (leading.kind !== "accepted") return expected(undefined, leading);
+  if (leading.kind !== "accepted")
+    return leading.kind === "refused"
+      ? { kind: "refused", reason: compactReason(leading.refusal) }
+      : compactRetry(leading.reason);
   const id = leading.value.contractId;
   retainBindCoordinates(accumulator, leading);
   const value = await bindComplete(accumulator, id, scope, channel, leading, hooks, async () =>
     bindValue(handle(id), await observeRegion(scope, channel, id, document.region)),
   );
-  return acceptedOutcome(id, accumulator, value);
+  return Object.defineProperty({ kind: "accepted" as const, contractId: id, ...value }, "kei", {
+    value: value.kei,
+    enumerable: false,
+  });
 }
 
 function retainBindCoordinates<Value>(accumulator: InvocationAccumulator, leading: AcceptedIntent<Value>): void {

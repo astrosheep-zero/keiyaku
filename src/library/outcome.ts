@@ -1,23 +1,21 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { contractFileLagSchema } from "../contract-worktree.js";
-import type { ContractId, JournalEntry, SnapshotId } from "../core/facts/types.js";
+import type { ChangeId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { reconcileEffectSchema, gitReconcileLagSchema } from "../git/reconcile.js";
+import { worktreeLeakSchema } from "../git/scratch.js";
+import { verificationCleanupFailureSchema } from "../protocol/progress.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
-import { compactPlacement, placedSchema, placementSchema, type CompletionEvidence } from "../protocol/completion.js";
-import { type VerifyValue } from "../protocol/verify.js";
-import type { IntegrationConflictMaterialized } from "../protocol/deliver.js";
-import type { ReviewAdmissionValue } from "../protocol/review.js";
-import { settlementActionSchema } from "../settlement/settle.js";
+import { placementSchema, placedSchema } from "../protocol/completion.js";
+
 import { worldRootSchema, type WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
-import { compactDelivery, type RawDeliveryValue } from "./delivery.js";
+import type { ReviewOutcome, VerifyOutcome } from "./contract-outcomes.js";
 import type { SpawnResult } from "./akuma-creation.js";
-import type { InvocationSnapshot, CandidateConclusion } from "./invocation.js";
-import { compactRetry, retrySchema, executionIssueSchema, type Retry } from "../protocol/result-reasons.js";
+import type { InvocationSnapshot } from "./invocation.js";
+import { retrySchema, executionIssueSchema } from "../protocol/result-reasons.js";
 export { executionIssueSchema } from "../protocol/result-reasons.js";
-import type { IntentRetry } from "../protocol/operations.js";
 
 export type ContractVerb = "bind" | "amend" | "deliver" | "verify" | "review" | "deliver-preview" | "arc" | "abandon";
 type OutcomeOperation = ContractVerb | "nuke";
@@ -61,13 +59,7 @@ const scoped = { contractId: contractIdSchema.exactOptional() };
 const diagnostic = z.string().min(1);
 const path = z.string().min(1);
 export const reconcileIssueSchema = z.union([
-  gitReconcileLagSchema.options[0].unwrap().extend(scoped).readonly(),
-  gitReconcileLagSchema.options[1].unwrap().extend(scoped).readonly(),
-  gitReconcileLagSchema.options[2].unwrap().extend(scoped).readonly(),
-  gitReconcileLagSchema.options[3].unwrap().extend(scoped).readonly(),
-  gitReconcileLagSchema.options[4].unwrap().extend(scoped).readonly(),
-  gitReconcileLagSchema.options[5].unwrap().extend(scoped).readonly(),
-  gitReconcileLagSchema.options[6].unwrap().extend(scoped).readonly(),
+  ...gitReconcileLagSchema.options.map((schema) => schema.unwrap().extend(scoped).readonly()),
   contractFileLagSchema.unwrap().extend(scoped).readonly(),
 ]);
 const checkResource = {
@@ -75,27 +67,38 @@ const checkResource = {
   requirement: z.string().min(1).exactOptional(),
   index: z.number().int().positive().exactOptional(),
 };
+const decodeRetirementIssue = z
+  .strictObject({ ...scoped, kind: z.literal("decode-channel-retirement"), diagnostic })
+  .readonly();
+// Public cleanup leaves retain their published nonempty-string acceptance.
+const verificationCleanupIssue = verificationCleanupFailureSchema
+  .unwrap()
+  .extend({
+    ...scoped,
+    kind: z.literal("verification-cleanup"),
+    ...checkResource,
+    name: diagnostic,
+    diagnostic,
+  })
+  .readonly();
+const worktreeLeakIssue = worktreeLeakSchema
+  .unwrap()
+  .extend({
+    ...scoped,
+    kind: z.literal("worktree-leak"),
+    ...checkResource,
+    path: path.exactOptional(),
+    diagnostic,
+  })
+  .readonly();
+const seatCloseIssue = z
+  .strictObject({ ...scoped, kind: z.literal("private-state-seat-close"), diagnostic })
+  .readonly();
 export const cleanupIssueSchema = z.union([
-  z.strictObject({ ...scoped, kind: z.literal("decode-channel-retirement"), diagnostic }).readonly(),
-  z
-    .strictObject({
-      ...scoped,
-      kind: z.literal("verification-cleanup"),
-      ...checkResource,
-      name: z.string().min(1),
-      diagnostic,
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...scoped,
-      kind: z.literal("worktree-leak"),
-      ...checkResource,
-      path: path.exactOptional(),
-      diagnostic,
-    })
-    .readonly(),
-  z.strictObject({ ...scoped, kind: z.literal("private-state-seat-close"), diagnostic }).readonly(),
+  decodeRetirementIssue,
+  verificationCleanupIssue,
+  worktreeLeakIssue,
+  seatCloseIssue,
 ]);
 
 const settlementIssueSchema = z
@@ -106,48 +109,35 @@ const settlementIssueSchema = z
     diagnostic,
   })
   .readonly();
-const issueLeaves = [
+const executionIssue = executionIssueSchema.unwrap().extend(scoped).readonly();
+const localReconcileLeaves = reconcileIssueSchema.options.filter(
+  (schema): schema is Exclude<typeof schema, z.ZodType<{ kind: "worktree-follow-retained" }>> =>
+    schema.unwrap().shape.kind.value !== "worktree-follow-retained",
+);
+export const invocationIssueSchema = z.union([
   ...reconcileIssueSchema.options,
   ...cleanupIssueSchema.options,
-  executionIssueSchema.unwrap().extend(scoped).readonly(),
+  executionIssue,
   settlementIssueSchema,
-] as const;
-export const invocationIssueSchema = z.union(issueLeaves);
+]);
 export type InvocationIssue = z.output<typeof invocationIssueSchema>;
 export type Issue = InvocationIssue;
-const localLeaves = [
-  reconcileIssueSchema.options[0],
-  reconcileIssueSchema.options[2],
-  reconcileIssueSchema.options[3],
-  reconcileIssueSchema.options[4],
-  reconcileIssueSchema.options[5],
-  reconcileIssueSchema.options[6],
-  reconcileIssueSchema.options[7],
-  cleanupIssueSchema.options[0],
-  cleanupIssueSchema.options[3],
-  issueLeaves[12],
+export const localIssueSchema = z.union([
+  ...localReconcileLeaves,
+  decodeRetirementIssue,
+  seatCloseIssue,
+  executionIssue,
   settlementIssueSchema,
-] as const;
-export const localIssueSchema = z.union(localLeaves);
+]);
 export const completionIssueSchema = z.union([
   ...reconcileIssueSchema.options,
-  cleanupIssueSchema.options[0],
-  cleanupIssueSchema.options[3],
-  issueLeaves[12],
+  decodeRetirementIssue,
+  seatCloseIssue,
+  executionIssue,
   settlementIssueSchema,
 ]);
-export const previewIssueSchema = cleanupIssueSchema.options[0].unwrap().omit({ contractId: true }).readonly();
-export const reconcilePublicIssueSchema = z.union([
-  reconcileIssueSchema.options[0],
-  reconcileIssueSchema.options[2],
-  reconcileIssueSchema.options[3],
-  reconcileIssueSchema.options[4],
-  reconcileIssueSchema.options[5],
-  reconcileIssueSchema.options[6],
-  reconcileIssueSchema.options[7],
-  cleanupIssueSchema.options[3],
-  settlementIssueSchema,
-]);
+export const previewIssueSchema = decodeRetirementIssue.unwrap().omit({ contractId: true }).readonly();
+export const reconcilePublicIssueSchema = z.union([...localReconcileLeaves, seatCloseIssue, settlementIssueSchema]);
 
 /** An issue before its containing receipt supplies the owning Contract. */
 type LocalInvocationIssue = InvocationIssue;
@@ -226,8 +216,7 @@ type ResetEffect = (Readonly<{ kind: "reset-owner-stopped" }> | Readonly<{ kind:
 export type InvocationEffect =
   | Readonly<{ kind: "issue"; contract: ContractId; issue: LocalInvocationIssue }>
   | ResetEffect
-  | Readonly<{ kind: "movement"; contract: ContractId; effect: MovementEffect }>
-  | Readonly<{ kind: "settlement-action"; contract: ContractId; action: z.output<typeof settlementActionSchema> }>;
+  | Readonly<{ kind: "movement"; contract: ContractId; effect: MovementEffect }>;
 
 const admittedFields = scoped;
 export const admittedEvidenceSchema = z.union([
@@ -282,7 +271,7 @@ export const meaningfulEffectSchema = z.union([
     .readonly(),
   z.strictObject({ kind: z.literal("debt-settled"), debtId: z.string().min(1) }).readonly(),
 ]);
-export type MovementEffect = Exclude<z.output<typeof meaningfulEffectSchema>, { kind: "debt-settled" }>;
+export type MovementEffect = z.output<typeof meaningfulEffectSchema>;
 export function compactEffect(effect: ReconciliationEffect): MovementEffect | undefined {
   switch (effect.kind) {
     case "worktree":
@@ -311,30 +300,6 @@ type PartialEvidence = Readonly<{
   effects?: readonly z.output<typeof exceptionalEffectSchema>[];
 }>;
 type ReceiptFields = Readonly<{ contractId?: ContractId; issues?: readonly InvocationIssue[] }>;
-export type StopOutcome<Refusal> =
-  | Readonly<{ kind: "refused"; contractId: ContractId; reason: Refusal }>
-  | (Readonly<{ contractId: ContractId }> & Retry);
-type OperationIssue<Operation extends ContractVerb> = Operation extends "bind" | "amend" | "arc" | "abandon"
-  ? z.output<typeof localIssueSchema>
-  : Operation extends "deliver" | "review"
-    ? z.output<typeof completionIssueSchema>
-    : InvocationIssue;
-type OperationRecovery<Operation extends ContractVerb> = Operation extends "bind" | "amend" | "arc" | "abandon"
-  ? SnapshotId
-  : z.output<typeof recoverySnapshotSchema>;
-export type OperationOutcome<Operation extends ContractVerb, Value, Refusal> =
-  | (Readonly<{
-      kind: "accepted";
-      contractId: ContractId;
-      issues?: readonly OperationIssue<Operation>[];
-      recoverySnapshots?: readonly OperationRecovery<Operation>[];
-    }> &
-      Value)
-  | (Operation extends "bind"
-      ? Readonly<{ kind: "refused"; reason: Refusal }> | Retry
-      : Operation extends "verify" | "deliver-preview"
-        ? Readonly<{ kind: "refused"; contractId: ContractId; reason: Refusal }>
-        : StopOutcome<Refusal>);
 
 export function operationOutcomeSchema<
   Fields extends z.ZodRawShape,
@@ -368,11 +333,6 @@ export const handoffOutcomeSchema = z
   })
   .readonly();
 export type HandoffOutcome = z.output<typeof handoffOutcomeSchema>;
-export type ProjectedOutcome<Operation extends ContractVerb, Value, Refusal> = Operation extends "deliver-preview"
-  ?
-      | (Value & Readonly<{ issues?: readonly z.output<typeof previewIssueSchema>[] }>)
-      | Readonly<{ kind: "refused"; contractId: ContractId; reason: Refusal }>
-  : OperationOutcome<Operation, Value, Refusal> | (Operation extends "deliver" ? HandoffOutcome : never);
 
 export type ResetCounts = Readonly<{ refs: number; worktrees: number; debts: number }>;
 export type ResetRefusal =
@@ -398,17 +358,14 @@ type ResetProjection = Readonly<{ world: WorldRoot }> &
     | Readonly<{ kind: "failed"; error: unknown }>
   );
 
-export type Verify = VerifyValue & Readonly<{ continuation?: ContinuationReport }>;
-export type Review = Readonly<{
-  placement?: z.output<typeof placementSchema>;
-  worktreeChanges?: Readonly<{
-    staged?: readonly string[];
-    unstaged?: readonly string[];
-    untracked?: readonly string[];
-    unmergedPaths?: readonly string[];
-  }>;
-  continuation?: ContinuationReport;
-}>;
+export type Verify = Omit<
+  Extract<VerifyOutcome, { kind: "accepted" }>,
+  "kind" | "contractId" | "issues" | "recoverySnapshots"
+>;
+export type Review = Omit<
+  Extract<ReviewOutcome, { kind: "accepted" }>,
+  "kind" | "contractId" | "issues" | "recoverySnapshots"
+>;
 type PartialContractEnvelope = ReceiptFields &
   PartialEvidence &
   Readonly<{
@@ -418,14 +375,14 @@ type PartialContractEnvelope = ReceiptFields &
     changedSections?: readonly string[];
     gatesChanged?: true;
     afterChanged?: true;
-    candidate?: string;
-    integration?: string;
-    contentId?: string;
+    candidate?: SnapshotId;
+    integration?: SnapshotId;
+    contentId?: ChangeId;
     admission?: "reused";
-    previousContentId?: string;
-    snapshot?: string;
+    previousContentId?: ChangeId;
+    snapshot?: SnapshotId;
     checks?: readonly import("../protocol/verify.js").VerificationCheck[];
-    worktreeChanges?: Review["worktreeChanges"];
+    worktreeChanges?: NonNullable<Review["worktreeChanges"]>;
     continuation?: ContinuationReport;
     chapter?: number;
     preview?: Partial<import("../protocol/delivery-preview.js").DeliveryPreviewReport>;
@@ -440,18 +397,11 @@ export type PartialOutcomeEnvelope =
       contracts?: readonly import("./reconcile.js").RepoContractReconcileReport[];
     }>;
 
-/** Internal execution conclusion before the final, independently awaited resource retirement. */
-export type OutcomeProjection<Operation extends ContractVerb, Value, Refusal> =
-  | Readonly<{ kind: "accepted"; contract: ContractId; value: Value }>
-  | Readonly<{ kind: "refused"; contract?: ContractId; refusal: Refusal }>
-  | Readonly<{ kind: "retry"; contract?: ContractId; reason: IntentRetry }>
-  | Readonly<{ kind: "failed"; contract?: ContractId; error: unknown }>
-  | (Operation extends "deliver"
-      ? Readonly<{ kind: "handoff"; contract: ContractId; value: IntegrationConflictMaterialized }>
-      : never);
-export type Projected<Operation extends ContractVerb, Value, Refusal> =
-  | Readonly<{ kind: "returned"; outcome: ProjectedOutcome<Operation, Value, Refusal> }>
-  | Readonly<{ kind: "failed"; error: KeiyakuError }>;
+export type ContractConclusion = Omit<
+  PartialContractEnvelope,
+  "kind" | "contractId" | "issues" | "admitted" | "effects"
+>;
+export type InvocationFailure = Readonly<{ kind: "failed"; contract?: ContractId; error: unknown }>;
 
 export function invocationIssues(
   effects: readonly InvocationEffect[],
@@ -492,139 +442,41 @@ function uniqueIssues(issues: readonly InvocationIssue[]): readonly InvocationIs
   );
 }
 
-function admissionEvidence(
-  fact: JournalEntry,
-  primary: ContractId | undefined,
-): z.output<typeof admittedEvidenceSchema> {
-  const base = fact.contract === primary ? {} : { contractId: fact.contract };
-  switch (fact.kind) {
-    case "deliver":
-      return {
-        ...base,
-        kind: fact.kind,
-        candidate: fact.data.tenderSnapshot,
-        integration: fact.data.integration.snapshot,
-        contentId: fact.data.integration.changeId,
-      };
-    case "reintegrated":
-      return { ...base, kind: fact.kind, integration: fact.data.snapshot, predecessor: fact.data.predecessor };
-    case "attestation":
-      return {
-        ...base,
-        kind: fact.kind,
-        ...(fact.data.gate === "verified" ? { requirement: fact.data.requirement, verdict: fact.data.verdict } : {}),
-      };
-    case "arc":
-      return { ...base, kind: fact.kind, chapter: fact.data.seq };
-    default:
-      return { ...base, kind: fact.kind };
-  }
-}
-
-function physicalEvidence(
-  snapshot: InvocationSnapshot,
-  primary: ContractId | undefined,
-): NonNullable<PartialEvidence["effects"]> {
-  const effects: NonNullable<PartialEvidence["effects"]>[number][] = [];
-  for (const record of snapshot.effects) {
-    if (record.kind !== "settlement-action" && record.kind !== "movement") continue;
-    const owner = record.contract === primary ? {} : { contractId: record.contract };
-    if (record.kind === "settlement-action") {
-      effects.push({ ...owner, kind: "debt-settled", debtId: record.action.debtId });
-      continue;
-    }
-    effects.push({ ...record.effect, ...owner });
-  }
-  return [...new Map(effects.map((effect) => [JSON.stringify(effect), effect])).values()];
-}
-
-/** Retain witnessed irreversible effects even when the operation never produced a complete value. */
+/** Retain compact observations with their invocation-local owner and order. */
 function partialEvidence(snapshot: InvocationSnapshot, primary: ContractId | undefined): PartialEvidence {
-  const admitted = snapshot.facts.map((fact) => admissionEvidence(fact, primary));
-  const effects = [...physicalEvidence(snapshot, primary)];
+  const admitted = snapshot.admitted.map(({ contractId, ...fact }) =>
+    contractId === primary || contractId === undefined ? fact : { ...fact, contractId },
+  );
+  const effects: NonNullable<PartialEvidence["effects"]>[number][] = snapshot.effects.flatMap((record) =>
+    record.kind === "movement"
+      ? [{ ...record.effect, ...(record.contract === primary ? {} : { contractId: record.contract }) }]
+      : [],
+  );
   let placement: z.output<typeof placementSchema> | undefined;
   for (const [contractId, value] of snapshot.conclusions) {
-    const observed = compactPlacement(value as CompletionEvidence);
-    if (observed === undefined) continue;
-    if (contractId === primary) placement = observed;
-    else if (observed.kind === "placed") effects.push({ ...observed, contractId });
+    if (value.placement === undefined) continue;
+    if (contractId === primary) placement = value.placement;
+    else if (value.placement.kind === "placed") effects.push({ ...value.placement, contractId });
   }
   return {
     ...(admitted.length === 0 ? {} : { admitted }),
-    ...(effects.length === 0 ? {} : { effects }),
+    ...(effects.length === 0
+      ? {}
+      : { effects: [...new Map(effects.map((effect) => [JSON.stringify(effect), effect])).values()] }),
     ...(placement === undefined ? {} : { placement }),
   };
 }
 
 function acceptedRecoveries(operation: ContractVerb, snapshot: InvocationSnapshot, contract: ContractId) {
-  const recoveries = physicalEvidence(snapshot, contract).flatMap((effect) =>
-    effect.kind === "recovery-snapshot"
-      ? [{ snapshot: effect.snapshot, ...(effect.contractId === undefined ? {} : { contractId: effect.contractId }) }]
+  const recoveries = snapshot.effects.flatMap((record) =>
+    record.kind === "movement" && record.effect.kind === "recovery-snapshot"
+      ? [{ snapshot: record.effect.snapshot, ...(record.contract === contract ? {} : { contractId: record.contract }) }]
       : [],
   );
   if (recoveries.length === 0) return {};
+  const unique = [...new Map(recoveries.map((recovery) => [JSON.stringify(recovery), recovery])).values()];
   const local = operation === "bind" || operation === "amend" || operation === "arc" || operation === "abandon";
-  return { recoverySnapshots: local ? recoveries.map((recovery) => recovery.snapshot) : recoveries };
-}
-
-export function compactReview(
-  value: CompletionEvidence & ReviewAdmissionValue & Readonly<{ continuation?: ContinuationReport }>,
-): Review {
-  const placement = compactPlacement(value);
-  return {
-    ...(placement === undefined ? {} : { placement }),
-    ...(value.worktreeChanges === undefined ? {} : { worktreeChanges: value.worktreeChanges }),
-    ...(value.continuation === undefined || Object.keys(value.continuation).length === 0
-      ? {}
-      : { continuation: value.continuation }),
-  };
-}
-
-function partialConclusion(
-  operation: ContractVerb,
-  value: CandidateConclusion | undefined,
-): Partial<PartialContractEnvelope> {
-  if (value === undefined) return {};
-  switch (operation) {
-    case "bind":
-      return {
-        ...(typeof value.worktreePath === "string" ? { worktreePath: value.worktreePath } : {}),
-        ...(value.target === undefined
-          ? {}
-          : { target: value.target as NonNullable<PartialContractEnvelope["target"]> }),
-      };
-    case "amend":
-      return {
-        ...(value.changedSections === undefined ? {} : { changedSections: value.changedSections as readonly string[] }),
-        ...(value.gatesChanged === true ? { gatesChanged: true as const } : {}),
-        ...(value.afterChanged === true ? { afterChanged: true as const } : {}),
-      };
-    case "deliver":
-      return value.tenderSnapshot === undefined || value.integration === undefined
-        ? {}
-        : (() => {
-            const compact = compactDelivery(value as RawDeliveryValue);
-            const placement = compactPlacement(value as CompletionEvidence);
-            const { placement: _placement, ...rest } = compact;
-            return { ...rest, ...(placement === undefined ? {} : { placement }) };
-          })();
-    case "verify":
-      return {
-        ...(typeof value.snapshot === "string" ? { snapshot: value.snapshot } : {}),
-        ...(value.checks === undefined ? {} : { checks: value.checks }),
-        ...(value.continuation === undefined ? {} : { continuation: value.continuation as ContinuationReport }),
-      };
-    case "review":
-      return compactReview(value as CompletionEvidence & ReviewAdmissionValue);
-    case "arc":
-      return {
-        ...(value.chapter === undefined ? {} : { chapter: value.chapter as number }),
-      };
-    case "deliver-preview":
-      return { preview: value as Partial<import("../protocol/delivery-preview.js").DeliveryPreviewReport> };
-    case "abandon":
-      return {};
-  }
+  return { recoverySnapshots: local ? unique.map((recovery) => recovery.snapshot) : unique };
 }
 
 function projectReset(
@@ -672,91 +524,65 @@ function projectReset(
 export function project(
   operation: "nuke",
   snapshot: InvocationSnapshot,
-  projection: ResetProjection,
+  conclusion: ResetProjection,
 ): Readonly<{ kind: "returned"; outcome: ResetOutcome }> | Readonly<{ kind: "failed"; error: KeiyakuError }>;
-export function project<Operation extends ContractVerb, Value, Refusal>(
-  operation: Operation,
+export function project<Answer extends Readonly<{ kind: string; contractId?: ContractId }>>(
+  operation: ContractVerb,
   snapshot: InvocationSnapshot,
-  projection: OutcomeProjection<Operation, Value, Refusal>,
-): Projected<Operation, Value, Refusal>;
-export function project<Value, Refusal>(
+  conclusion: Answer | InvocationFailure,
+): Readonly<{ kind: "returned"; outcome: Answer }> | Readonly<{ kind: "failed"; error: KeiyakuError }>;
+export function project<Answer extends Readonly<{ kind: string; contractId?: ContractId }>>(
   operation: OutcomeOperation,
   snapshot: InvocationSnapshot,
-  projection: OutcomeProjection<ContractVerb, Value, Refusal> | ResetProjection,
-): Projected<ContractVerb, Value, Refusal> | Readonly<{ kind: "returned"; outcome: ResetOutcome }> {
-  if ("world" in projection) {
+  conclusion: Answer | InvocationFailure | ResetProjection,
+): Readonly<{ kind: "returned"; outcome: Answer | ResetOutcome }> | Readonly<{ kind: "failed"; error: KeiyakuError }> {
+  if ("world" in conclusion) {
     if (operation !== "nuke") throw new Error("reset projection requires nuke");
-    return projectReset(snapshot, projection);
+    return projectReset(snapshot, conclusion);
   }
   if (operation === "nuke") throw new Error("nuke requires a World projection");
-  const contract = projection.contract ?? snapshot.facts.find((fact) => fact.kind === "bind")?.contract;
-  const captured = contract === undefined ? undefined : snapshot.conclusions.get(contract)?.snapshot;
-  const issues = invocationIssues(snapshot.effects, contract, typeof captured === "string" ? captured : undefined);
+  const contract =
+    "contract" in conclusion ? conclusion.contract : "contractId" in conclusion ? conclusion.contractId : undefined;
+  const current = contract === undefined ? undefined : snapshot.conclusions.get(contract);
+  const issues = invocationIssues(snapshot.effects, contract, current?.snapshot);
   const base = {
     ...(contract === undefined ? {} : { contractId: contract }),
     ...(issues.length === 0 ? {} : { issues }),
   };
-  switch (projection.kind) {
-    case "accepted": {
-      if (operation === "deliver-preview")
-        return {
-          kind: "returned",
-          outcome: { ...projection.value, ...base } as ProjectedOutcome<ContractVerb, Value, Refusal>,
-        };
-      const receipt = {
-        kind: "accepted" as const,
-        contractId: projection.contract,
-        ...(issues.length === 0 ? {} : { issues }),
-        ...acceptedRecoveries(operation, snapshot, projection.contract),
-      };
-      const outcome = { ...receipt, ...projection.value };
-      if (operation === "bind")
-        Object.defineProperty(outcome, "kei", {
-          value: (projection.value as import("./contract-outcomes.js").BindValue).kei,
-          enumerable: false,
-        });
-      return { kind: "returned", outcome: outcome as ProjectedOutcome<ContractVerb, Value, Refusal> };
-    }
-    case "handoff":
-      return {
-        kind: "returned",
-        outcome: {
-          kind: "handoff",
-          contractId: projection.contract,
-          worktreePath: projection.value.workspace.path,
-          targetHead: projection.value.targetHead,
-          conflictPaths: projection.value.conflictPaths,
-          handoffBase: projection.value.handoffBase,
-        },
-      };
-    case "refused":
-    case "retry": {
-      const evidence = partialEvidence(snapshot, contract);
-      if (Object.keys(evidence).length > 0 || issues.length > 0)
-        throw withOutcomeReceipt(new Error("non-admission followed confirmed invocation effects"), {
-          kind: "contract",
-          ...base,
-          ...evidence,
-        });
-      const addressed = operation === "bind" ? {} : { contractId: contract! };
-      return {
-        kind: "returned",
-        outcome: (projection.kind === "refused"
-          ? { kind: "refused", ...addressed, reason: projection.refusal }
-          : { ...addressed, ...compactRetry(projection.reason) }) as ProjectedOutcome<ContractVerb, Value, Refusal>,
-      };
-    }
-    case "failed":
-      return {
-        kind: "failed",
-        error: withOutcomeReceipt(projection.error, {
-          kind: "contract",
-          ...base,
-          ...partialConclusion(operation, contract === undefined ? undefined : snapshot.conclusions.get(contract)),
-          ...partialEvidence(snapshot, contract),
-        }),
-      };
+  if ("error" in conclusion)
+    return {
+      kind: "failed",
+      error: withOutcomeReceipt(conclusion.error, {
+        kind: "contract",
+        ...base,
+        ...current,
+        ...partialEvidence(snapshot, contract),
+      }),
+    };
+  if (conclusion.kind === "refused" || conclusion.kind === "retry") {
+    const evidence = partialEvidence(snapshot, contract);
+    if (Object.keys(evidence).length > 0 || issues.length > 0)
+      throw withOutcomeReceipt(new Error("non-admission followed confirmed invocation effects"), {
+        kind: "contract",
+        ...base,
+        ...evidence,
+      });
   }
+  const { kind, ...value } = conclusion;
+  const outcome = {
+    kind,
+    ...base,
+    ...(conclusion.kind === "accepted" && contract !== undefined
+      ? acceptedRecoveries(operation, snapshot, contract)
+      : {}),
+    ...value,
+  };
+  if (operation === "bind" && "kei" in conclusion)
+    Object.defineProperty(outcome, "kei", {
+      value: conclusion.kei,
+      enumerable: false,
+    });
+  return { kind: "returned", outcome: outcome as Answer };
 }
 
 export type KeiyakuErrorCategory = "invalid-input" | "authority-corruption" | "aborted" | "internal";

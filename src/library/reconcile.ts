@@ -404,29 +404,10 @@ async function projectAndSettleWorld(
   return { projections, settlements };
 }
 
-function meaningfulEffects(effects: ReconcileWork["effects"]): readonly MeaningfulEffect[] {
-  return effects.flatMap((effect): MeaningfulEffect[] => {
-    switch (effect.kind) {
-      case "worktree":
-        if (effect.action === "unchanged") return [];
-        if (effect.action === "followed") throw new Error("explicit reconcile cannot follow a dependent");
-        return [{ kind: effect.action === "created" ? "worktree-created" : "worktree-removed", path: effect.path }];
-      case "ref":
-        return effect.before === effect.after
-          ? []
-          : [{ kind: "ref", name: effect.name, before: effect.before, after: effect.after }];
-      case "target-checkout":
-        return [{ kind: effect.kind, path: effect.path, target: effect.target }];
-      case "recovery-snapshot":
-        return [{ kind: effect.kind, snapshot: effect.snapshot }];
-    }
-  });
-}
-
 function compactReconcile(
   contractId: ContractId,
-  effects: ReconcileWork["effects"],
   records: readonly InvocationEffect[],
+  completed = false,
 ): RepoContractReconcileReport {
   const own = records.filter((record) => "contract" in record && record.contract === contractId);
   const issues = invocationIssues(own, contractId).map((issue) => {
@@ -441,18 +422,14 @@ function compactReconcile(
         return issue;
     }
   });
-  const movements = [
-    ...meaningfulEffects(effects),
-    ...own.flatMap((record): MeaningfulEffect[] =>
-      record.kind === "movement"
-        ? record.effect.kind === "worktree-followed"
-          ? []
-          : [record.effect]
-        : record.kind === "settlement-action"
-          ? [{ kind: "debt-settled", debtId: record.action.debtId }]
-          : [],
-    ),
-  ];
+  const movements = own.flatMap((record): MeaningfulEffect[] => {
+    if (record.kind !== "movement") return [];
+    if (record.effect.kind === "worktree-followed") throw new Error("explicit reconcile cannot follow a dependent");
+    return [record.effect];
+  });
+  // Completed receipts retain their established physical-before-settlement order.
+  if (completed)
+    movements.sort((left, right) => Number(left.kind === "debt-settled") - Number(right.kind === "debt-settled"));
   return {
     contractId,
     ...(movements.length === 0
@@ -466,7 +443,7 @@ export function observedReconcileContracts(accumulator: InvocationAccumulator): 
   const snapshot = accumulator.snapshot();
   const ids = new Set(snapshot.effects.flatMap((effect) => ("contract" in effect ? [effect.contract] : [])));
   return [...ids]
-    .map((id) => compactReconcile(id, [], snapshot.effects))
+    .map((id) => compactReconcile(id, snapshot.effects))
     .filter((row) => row.effects !== undefined || row.issues !== undefined);
 }
 
@@ -487,7 +464,7 @@ export async function completeReconcile(
   try {
     const report = await reconcileContractWork({ ...input, progress: accumulator });
     if (report.missing === true) return { kind: "missing", contractId: input.contractId };
-    return { kind: "contract", ...compactReconcile(input.contractId, report.effects, accumulator.snapshot().effects) };
+    return { kind: "contract", ...compactReconcile(input.contractId, accumulator.snapshot().effects, true) };
   } catch (error) {
     return reconcileException(error, accumulator, input.contractId);
   }
@@ -501,7 +478,7 @@ export async function completeRepoReconcile(
     const report = await reconcileWorldWork({ ...input, progress: accumulator });
     if (report.kind === "world-observation-failed") return report;
     const contracts = report.contracts
-      .map(({ contractId, report }) => compactReconcile(contractId, report.effects, accumulator.snapshot().effects))
+      .map(({ contractId }) => compactReconcile(contractId, accumulator.snapshot().effects, true))
       .filter((row) => row.effects !== undefined || row.issues !== undefined);
     return { kind: "world", ...(contracts.length === 0 ? {} : { contracts }) };
   } catch (error) {

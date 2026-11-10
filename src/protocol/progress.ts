@@ -117,6 +117,7 @@ export interface ProtocolProgress {
     contractId: ContractId,
     report: Partial<import("./delivery-preview.js").DeliveryPreviewReport>,
   ): void;
+  recordDelivery(contractId: ContractId, value: import("./deliver.js").DeliveryIdentity): void;
   /** Current candidate conclusions, retained before the next await can fail. */
   recordCandidate(contractId: ContractId, evidence: CompletionEvidence): void;
   /** The candidate's completion base, retained before an optional scope read can fail. */

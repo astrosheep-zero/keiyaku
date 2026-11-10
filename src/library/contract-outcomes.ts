@@ -1,21 +1,17 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
-import { compactReason, retrySchema, type CompactReason } from "../protocol/result-reasons.js";
-import { deliveryPreviewReportSchema, type DeliveryPreviewReport } from "../protocol/delivery-preview.js";
+import { retrySchema } from "../protocol/result-reasons.js";
+import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
 import { placementSchema } from "../protocol/completion.js";
 import { verifyValueSchema } from "../protocol/verify.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
-import type { IntentOutcome, IntentRetry } from "../protocol/operations.js";
-import { deliveredValueSchema, type Delivery } from "./delivery.js";
+import type { IntentOutcome } from "../protocol/operations.js";
+import { deliveredValueSchema } from "./delivery.js";
 import { continuationReportSchema } from "./continuation.js";
 import type { InvocationAccumulator } from "./invocation.js";
 import type { Kei } from "./kei.js";
 import {
-  type OperationOutcome,
-  type HandoffOutcome,
-  type Review,
-  type Verify,
   handoffOutcomeSchema,
   operationOutcomeSchema,
   invocationIssueSchema,
@@ -23,7 +19,7 @@ import {
   completionIssueSchema,
   previewIssueSchema,
 } from "./outcome.js";
-import { operationRefusalSchemas, type OperationRefusals } from "./refusal.js";
+import { operationRefusalSchemas } from "./refusal.js";
 import { regionOverlapResultSchema } from "./region.js";
 import type { ContractId } from "../core/facts/types.js";
 
@@ -119,49 +115,24 @@ export const deliveryPreviewOutcomeSchema = z.union([
     .readonly(),
 ]);
 
-export type BindOutcome = OperationOutcome<"bind", BindValue, OperationRefusals["bind"]>;
-export type AmendOutcome = OperationOutcome<"amend", AmendValue, OperationRefusals["amend"]>;
-export type DeliverOutcome = OperationOutcome<"deliver", Delivery, OperationRefusals["deliver"]> | HandoffOutcome;
-export type VerifyOutcome = OperationOutcome<"verify", Verify, OperationRefusals["verify"]>;
-export type ReviewOutcome = OperationOutcome<"review", Review, OperationRefusals["review"]>;
-export type ArcOutcome = OperationOutcome<"arc", Readonly<{ chapter: number }>, OperationRefusals["arc"]>;
-export type AbandonOutcome = OperationOutcome<"abandon", Record<never, never>, OperationRefusals["abandon"]>;
-export type DeliveryPreviewOutcome =
-  | (DeliveryPreviewReport & Readonly<{ issues?: readonly z.output<typeof previewIssueSchema>[] }>)
-  | Readonly<{ kind: "refused"; contractId: ContractId; reason: OperationRefusals["deliver-preview"] }>;
+export type BindOutcome =
+  z.output<typeof bindOutcomeSchema> extends infer Answer
+    ? Answer extends { kind: "accepted" }
+      ? Answer & Readonly<{ kei: Kei }>
+      : Answer
+    : never;
+export type AmendOutcome = z.output<typeof amendOutcomeSchema>;
+export type DeliverOutcome = z.output<typeof deliverOutcomeSchema>;
+export type VerifyOutcome = z.output<typeof verifyOutcomeSchema>;
+export type ReviewOutcome = z.output<typeof reviewOutcomeSchema>;
+export type ArcOutcome = z.output<typeof arcOutcomeSchema>;
+export type AbandonOutcome = z.output<typeof abandonOutcomeSchema>;
+export type DeliveryPreviewOutcome = z.output<typeof deliveryPreviewOutcomeSchema>;
 export type MutationObservation = Readonly<{ observe?: ExecutionObserver }>;
 export type DeliveryPreviewInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; signal?: AbortSignal }>;
 export type BindResult = BindOutcome;
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
-type ExpectedProjection<Refusal> =
-  | Readonly<{ kind: "refused"; contract?: ContractId; refusal: Refusal }>
-  | Readonly<{ kind: "retry"; contract?: ContractId; reason: IntentRetry }>;
-type RetryProjection = Readonly<{ kind: "retry"; contract?: ContractId; reason: IntentRetry }>;
-export function expected(
-  contract: ContractId | undefined,
-  admission: Readonly<{ kind: "retry"; reason: IntentRetry }>,
-): RetryProjection;
-export function expected<Refusal extends Parameters<typeof compactReason>[0]>(
-  contract: ContractId | undefined,
-  admission: Readonly<{ kind: "refused"; refusal: Refusal }> | Readonly<{ kind: "retry"; reason: IntentRetry }>,
-): ExpectedProjection<CompactReason<Refusal>>;
-export function expected<Refusal extends Parameters<typeof compactReason>[0]>(
-  contract: ContractId | undefined,
-  admission: Readonly<{ kind: "refused"; refusal: Refusal }> | Readonly<{ kind: "retry"; reason: IntentRetry }>,
-): ExpectedProjection<CompactReason<Refusal>> {
-  return admission.kind === "refused"
-    ? { kind: "refused", ...(contract === undefined ? {} : { contract }), refusal: compactReason(admission.refusal) }
-    : { kind: "retry", ...(contract === undefined ? {} : { contract }), reason: admission.reason };
-}
-export function acceptedOutcome<Value>(
-  contract: ContractId,
-  accumulator: InvocationAccumulator,
-  value: Value,
-): Readonly<{ kind: "accepted"; contract: ContractId; value: Value }> {
-  if (accumulator.head(contract) === undefined) throw new Error("missing leading admission receipt");
-  return { kind: "accepted", contract, value };
-}
 export function retainAdmission<Value>(
   accumulator: InvocationAccumulator,
   contract: ContractId,

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { DeliveryPreviewReport } from "../src/index.js";
+import type { ReviewOutcome, AmendOutcome } from "../src/library/contract-outcomes.js";
 import type { Review } from "../src/library/outcome.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project, KeiyakuError } from "../src/library/outcome.js";
@@ -19,10 +20,10 @@ function outcome(
   value: Review = {},
   operation: "review" | "amend" = "review",
 ) {
-  const result = project(operation, progress.snapshot(), {
+  const result = project<ReviewOutcome | AmendOutcome>(operation, progress.snapshot(), {
     kind: "accepted",
-    contract: id,
-    value,
+    contractId: id,
+    ...value,
   });
   assert.equal(result.kind, "returned");
   assert.ok(result.kind === "returned");
@@ -35,9 +36,7 @@ function previewReport(): DeliveryPreviewReport {
 }
 
 test("blocked preview is a completed read, not an admitted mutation", () => {
-  const result = project("deliver-preview", new InvocationAccumulator().snapshot(), {
-    kind: "accepted", contract: id, value: previewReport(),
-  });
+  const result = project("deliver-preview", new InvocationAccumulator().snapshot(), previewReport());
   assert.ok(result.kind === "returned");
   assert.deepEqual(result.outcome, previewReport());
 });
@@ -214,14 +213,13 @@ test("mutation nuke confirmed seat-close failure remains a typed outcome", async
 
 test("public refusal and retry are compact operation stops", () => {
   for (const projection of [
-    { kind: "refused" as const, contract: id, refusal: { kind: "target-missing" as const } },
-    { kind: "retry" as const, contract: id, reason: { kind: "exhausted" as const } },
+    { kind: "refused" as const, contractId: id, reason: { kind: "target-missing" as const } },
+    { kind: "retry" as const, contractId: id, reason: "exhausted" as const },
   ]) {
     const result = project("deliver", new InvocationAccumulator().snapshot(), projection);
     assert.ok(result.kind === "returned");
     assert.equal(result.outcome.kind, projection.kind);
-    assert.deepEqual(result.outcome, { kind: projection.kind, contractId: id,
-      reason: projection.kind === "refused" ? projection.refusal : "exhausted" });
+    assert.deepEqual(result.outcome, projection);
   }
 });
 

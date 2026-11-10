@@ -43,7 +43,8 @@ explicit worktree coordinate the caller supplies. A missing or unresolved
 coordinate is caller-invalid input, never quietly replaced by an ambient
 current directory. `Kei` is the native branded Contract handle created by
 binding or selecting a complete identity within that repository; instance operations never accept a
-second repository coordinate. A handle offers state and guidance reads, history,
+second repository coordinate. The handle owns its Contract operations directly,
+with their captured composition kept private. A handle offers state and guidance reads, history,
 amendment, explicit Verification, delivery and its read-only preview, review,
 abandonment, and arc. `Keis.of(repo)` synchronously captures the Repo, an optional
 already-loaded immutable Settings value, and the Contract-local actor. Its collection

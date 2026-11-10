@@ -200,7 +200,7 @@ async function observeReadyPreview(
 /** A native read answer, never an admission or an invitation to run Verification. */
 export async function previewDeliveryOperation(
   input: DeliveryPreviewOperationInput,
-): Promise<IntentOutcome<DeliveryPreviewReport, PreviewRefusal>> {
+): Promise<Exclude<IntentOutcome<DeliveryPreviewReport, PreviewRefusal>, { kind: "retry" }>> {
   input.signal?.throwIfAborted();
   const observed = await observeGitForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = activeContract(observed.decision, input.contractId);
