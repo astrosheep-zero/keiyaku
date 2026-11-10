@@ -3,22 +3,19 @@ import { z } from "zod";
 export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
 import { akumaCallerSchema } from "../akuma/caller.js";
 import { askProgressSchema, type AskProgress } from "../akuma/akuma-selection-execution.js";
-import { akumaReportResultSchema, type AkumaReportResult } from "../akuma/akuma-instance.js";
-import { akumaListSchema, type AkumaList } from "../akuma/akuma.js";
-import { archetypeCatalogSchema, type ArchetypeCatalog } from "../akuma/archetype.js";
+import { akumaReportResultSchema } from "../akuma/akuma-instance.js";
+import { akumaListSchema } from "../akuma/akuma.js";
+import { archetypeCatalogSchema } from "../akuma/archetype.js";
 import {
   akumaAskResultSchema,
   akumaKillResultSchema,
   akumaTellResultSchema,
   akumaWaitResultSchema,
   type AkumaAskResult,
-  type AkumaKillResult,
-  type AkumaTellResult,
-  type AkumaWaitResult,
 } from "../akuma/selection-observation.js";
-import { regionResultSchema, type RegionResult } from "../kanshi/report.js";
+import { regionResultSchema } from "../kanshi/report.js";
 import { settingsSchema, type Settings } from "../settings.js";
-import { contractCatalogueSchema, type ContractCatalogue } from "../protocol/read/status.js";
+import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
 import {
   spawnProgressSchema,
@@ -26,7 +23,6 @@ import {
   forkResultSchema,
   type SpawnProgress,
   type SpawnResult,
-  type ForkResult,
 } from "./akuma-creation.js";
 import {
   bindOutcomeSchema,
@@ -38,22 +34,15 @@ import {
   reviewOutcomeSchema,
   abandonOutcomeSchema,
   type BindOutcome,
-  type AmendOutcome,
-  type ArcOutcome,
-  type DeliverOutcome,
-  type DeliveryPreviewOutcome,
-  type VerifyOutcome,
-  type ReviewOutcome,
-  type AbandonOutcome,
 } from "./contract-outcomes.js";
-import { contractHistorySchema, type ContractHistory } from "./contract-types.js";
-import { guidanceSchema, type Guidance } from "./kei.js";
-import { contractWaitResultSchema, type ContractWaitResult } from "./contract-wait.js";
-import { reconcileResultSchema, type ReconcileCompletion, type RepoReconcileReport } from "./reconcile.js";
-import { akumaHistoryResultSchema, type AkumaHistoryResult } from "./selection.js";
-import { statusResultSchema, type StatusResult } from "./keiyaku-status.js";
-import { whoamiFactsSchema, type WhoamiFacts } from "./keiyaku-identity.js";
-import { resetOutcomeSchema, type ResetOutcome } from "./outcome.js";
+import { contractHistorySchema } from "./contract-types.js";
+import { guidanceSchema } from "./kei.js";
+import { contractWaitResultSchema } from "./contract-wait.js";
+import { reconcileResultSchema } from "./reconcile.js";
+import { akumaHistoryResultSchema } from "./selection.js";
+import { statusResultSchema } from "./keiyaku-status.js";
+import { whoamiFactsSchema } from "./keiyaku-identity.js";
+import { resetOutcomeSchema } from "./outcome.js";
 import {
   debtAbsentSchema,
   debtBatchResultSchema,
@@ -67,19 +56,7 @@ import {
   debtQueryResultSchema,
   debtContextResultSchema,
   debtUpdateResultSchema,
-  type DebtAbsent,
-  type DebtBatchResult,
-  type DebtTreeResult,
-  type DebtCatalogue,
-  type DebtShowResult,
-  type DebtDoctorReport,
-  type DebtReadyList,
-  type BlockedDebtList,
-  type DebtMutationResult,
   type DebtQueryExpression,
-  type DebtQueryResult,
-  type DebtUpdateResult,
-  type DebtContextResult,
 } from "../debt/index.js";
 import { debtPrioritySchema, debtStateSchema } from "../debt/document.js";
 import { debtIdSchema } from "../debt/identity.js";
@@ -538,43 +515,14 @@ export const verbs = Object.freeze({
   },
 } as const satisfies Record<string, VerbEntry>);
 
-export type VerbOutputs = {
+export type VerbOutputs = Omit<
+  { [K in keyof typeof verbs]: z.output<(typeof verbs)[K]["output"]> },
+  "bind" | "settings" | "ask" | "spawn"
+> & {
   bind: BindOutcome;
-  amend: AmendOutcome;
-  arc: ArcOutcome;
-  deliver: DeliverOutcome;
-  "deliver.preview": DeliveryPreviewOutcome;
-  verify: VerifyOutcome;
-  review: ReviewOutcome;
-  abandon: AbandonOutcome;
-  show: Guidance;
-  reconcile: ReconcileCompletion | RepoReconcileReport;
-  spawn: SpawnResult;
-  fork: ForkResult;
-  tell: AkumaTellResult;
-  ask: AkumaAskResult<unknown>;
-  kill: AkumaKillResult;
-  wait: ContractWaitResult | AkumaWaitResult;
-  history: ContractHistory | AkumaHistoryResult;
-  report: AkumaReportResult;
-  whoami: WhoamiFacts;
   settings: Settings;
-  nuke: ResetOutcome;
-  status: StatusResult;
-  region: RegionResult;
-  ls: ContractCatalogue | AkumaList | ArchetypeCatalog | DebtCatalogue;
-  "debt.add": DebtMutationResult;
-  "debt.addDocument": DebtMutationResult;
-  "debt.update": DebtUpdateResult;
-  "debt.show": DebtShowResult | DebtAbsent;
-  "debt.done": DebtBatchResult;
-  "debt.drop": DebtBatchResult;
-  "debt.ready": DebtReadyList;
-  "debt.blocked": BlockedDebtList;
-  "debt.query": DebtQueryResult;
-  "debt.tree": DebtTreeResult | DebtAbsent;
-  "debt.doctor": DebtDoctorReport | DebtAbsent;
-  "debt.context": DebtContextResult;
+  ask: AkumaAskResult<unknown>;
+  spawn: SpawnResult;
 };
 export type VerbName = keyof typeof verbs;
 export type VerbInput<K extends VerbName> = z.input<(typeof verbs)[K]["input"]>;
