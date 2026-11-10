@@ -218,15 +218,7 @@ export function renderBoundedPayload(input: BoundedPayload): readonly string[] {
     return [
       `${body}${suffix}${truncateDisplayText(extra, diagnosticWidth)}`,
       ...(input.trailer.complete && extraWidth > diagnosticWidth
-        ? renderPreservedPayload({
-            ...input,
-            text: diagnostic,
-            first: continuation,
-            continuation,
-            columns,
-            maxLines: Number.MAX_SAFE_INTEGER,
-            truncated: false,
-          })
+        ? renderBoundedTextBlock(diagnostic, { first: continuation, continuation, columns })
         : []),
     ];
   }

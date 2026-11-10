@@ -138,9 +138,10 @@ payload discipline. Tool rows preserve a nonempty work preview and the semantic
 trailer of read ranges, diffstats, durations, and exit/error status within the
 terminal width. Result messages, including row counts, are bounded diagnostic
 previews, and partial captures remain visibly truncated. Increasing width never
-reduces the body allowance. Only a cut inline diagnostic expands into a complete
+reduces the body allowance. Only a cut inline diagnostic expands into a bounded
 continuation block in selected Akuma detail and history, preferring word
-boundaries; world and compact observations retain one line per tool.
+boundaries. Diagnostics that fit are shown whole; longer diagnostics end with a
+visible omission. World and compact observations retain one line per tool.
 Gate evidence keeps its compact visual
 state beside each gate and requirement's identity across status, board, history,
 preview, receipts, and JSON; current declarations may be labeled by current one-based

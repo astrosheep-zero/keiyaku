@@ -2073,7 +2073,9 @@ test("failed tool detail and history retain word-wrapped diagnostics beneath a b
   for (const text of views) {
     const lines = text.split("\n");
     assert.ok(lines.every((line) => displayColumns(line) <= context.columns), text);
-    assert.ok(lines.slice(lines.findIndex((line) => line.includes("run")) + 1).join(" ").replace(/\s+/gu, " ").includes(diagnostic));
+    const continuation = lines.slice(lines.findIndex((line) => line.includes("run")) + 1).join(" ").replace(/\s+/gu, " ");
+    assert.ok(continuation.includes(diagnostic));
+    assert.doesNotMatch(continuation, /…/u, "a diagnostic that fits the continuation stays whole");
     assert.match(text, /run\s+\$[^…\n]+… — (?:error|exit 7)/u, "the command and failure status survive together");
   }
   const short = completedTool(2, "bash", { kind: "run", command: "npm test" }, { status: "error", message: "hook failed" });
@@ -2081,6 +2083,26 @@ test("failed tool detail and history retain word-wrapped diagnostics beneath a b
   for (const text of [snapshotText(observation(shortStatus), context), nativeHistoryText(
     { kind: "akuma", akumaId: status.id, events: [short] }, {}, context)])
     assert.equal(text.split("hook failed").length - 1, 1, "a complete inline diagnostic is not repeated");
+});
+
+test("selected tool detail and history bound long diagnostics with a visible omission", () => {
+  const message = "diagnostic word ".repeat(1000);
+  for (const columns of [24, 48, 100, 200]) {
+    const context = { columns, color: false };
+    for (const failed of [false, true]) {
+      const row = completedTool(1, "bash", { kind: "run", command: "npm test" }, { status: failed ? "error" : "ok", message });
+      const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "running",
+        timeline: openAkumaSnapshot([snapshotRow(row)]) });
+      for (const text of [snapshotText(observation(status), context), nativeHistoryText(
+        { kind: "akuma", akumaId: status.id, events: [row] }, {}, context)]) {
+        const lines = text.split("\n");
+        const continuation = lines.slice(lines.findIndex((line) => line.includes("run")) + 1).filter((line) => /^\s/u.test(line));
+        assert.ok(continuation.length > 0 && continuation.length <= 3, "diagnostic continuation has a finite line bound");
+        assert.match(continuation.at(-1)!, /…/u, "the bounded diagnostic visibly omits its remainder");
+        assert.ok(lines.every((line) => displayColumns(line) <= columns), "wrapped diagnostics respect terminal width");
+      }
+    }
+  }
 });
 
 test("compact and world tool rows keep trailers, bounded diagnostics and partial-capture marks", () => {
