@@ -61,47 +61,14 @@ const scoped = { contractId: contractIdSchema.exactOptional() };
 const diagnostic = z.string().min(1);
 const path = z.string().min(1);
 export const reconcileIssueSchema = z.union([
-  z
-    .strictObject({ ...scoped, kind: z.literal("worktree-retained"), path, diagnostic: diagnostic.exactOptional() })
-    .readonly(),
-  z
-    .strictObject({
-      ...scoped,
-      kind: z.literal("worktree-follow-retained"),
-      path,
-      reason: z.enum(["head-moved", "head-attached", "operation-in-progress"]),
-    })
-    .readonly(),
-  z.strictObject({ ...scoped, kind: z.literal("unsealed-bytes"), path }).readonly(),
-  z
-    .strictObject({
-      ...scoped,
-      kind: z.literal("target-checkout-retained"),
-      path,
-      target: z.string().min(1),
-      diagnostic,
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...scoped,
-      kind: z.literal("target-workspace-retained"),
-      targetContractId: contractIdSchema,
-      reason: z.enum(["unappointed", "missing", "association", "replaced", "attached", "uncommitted", "operation"]),
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...scoped,
-      kind: z.literal("worktree-hook-failed"),
-      phase: z.enum(["create", "destroy"]),
-      path,
-      name: z.string().min(1),
-      diagnostic,
-    })
-    .readonly(),
-  z.strictObject({ ...scoped, kind: z.literal("reconcile-failed"), diagnostic }).readonly(),
-  z.strictObject({ ...scoped, kind: z.literal("contract-file-failed"), path, diagnostic }).readonly(),
+  gitReconcileLagSchema.options[0].unwrap().extend(scoped).readonly(),
+  gitReconcileLagSchema.options[1].unwrap().extend(scoped).readonly(),
+  gitReconcileLagSchema.options[2].unwrap().extend(scoped).readonly(),
+  gitReconcileLagSchema.options[3].unwrap().extend(scoped).readonly(),
+  gitReconcileLagSchema.options[4].unwrap().extend(scoped).readonly(),
+  gitReconcileLagSchema.options[5].unwrap().extend(scoped).readonly(),
+  gitReconcileLagSchema.options[6].unwrap().extend(scoped).readonly(),
+  contractFileLagSchema.unwrap().extend(scoped).readonly(),
 ]);
 const checkResource = {
   snapshot: snapshotIdSchema.exactOptional(),
