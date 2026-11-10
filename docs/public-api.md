@@ -119,9 +119,14 @@ same candidates, never an ancestor or inferred namespace. The caller supplies an
 absolute directory coordinate or uses the explicit Repo's pinned worktree
 coordinate; resolution never consults ambient process state.
 
-Short and contextual resolution freezes one complete live board, never a bounded
-catalogue. Invalid, redundant, unknown, ambiguous, and unmatched contextual
-selectors return operation-owned refusal evidence. Malformed caller values or
+Contextual resolution freezes complete live membership, never a bounded
+catalogue. A short selector already identifies one Contract and observes only
+that journal. Both derive phase and managed workspace appointment without
+observing gates, prerequisites, physical workspaces, or targets. Unrelated
+physical observation failures cannot prevent selection; corrupt observed
+journal authority remains exceptional. Invalid, redundant, unknown, ambiguous,
+and unmatched contextual selectors return operation-owned refusal evidence.
+Malformed caller values or
 invalid coordinates are caller-input errors, while corrupt or unavailable
 authority remains exceptional with its native cause. Resolution neither creates
 a handle nor reserves selection for a later mutation, which retains its own

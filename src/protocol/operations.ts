@@ -38,10 +38,10 @@ import type { PlacementProtocolResult } from "./placement.js";
 import type { ProtocolProgress } from "./progress.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
-  readContractBoard,
+  readContractMembershipAt,
   readContractCatalogue,
   readContractObservationAt,
-  type ContractBoard,
+  type ContractMembership,
   type ContractCatalogue,
   type ContractObservation,
 } from "./read/status.js";
@@ -352,9 +352,10 @@ export async function contractsOperation(
   input: Readonly<{
     scope: RepositoryScope;
     channel: GitDecodeChannel;
+    ids?: readonly ContractId[];
   }>,
-): Promise<ContractBoard> {
-  return withGitReadObservation(input.scope, input.channel, (observation) => readContractBoard(observation));
+): Promise<readonly ContractMembership[]> {
+  return readContractMembershipAt(input.scope, input.channel, input.ids);
 }
 
 export async function contractCatalogueOperation(

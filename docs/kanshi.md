@@ -69,10 +69,13 @@ preserving absence and owner failure while attaching available Alias, Dispatch,
 and DebtHolder facts without reading the Debt board or resolving exact
 identities.
 
-An exact aggregate observes the complete owner-classified running Akumas,
-active Contracts, and open Debts across their respective authorities. It never
-uses bounded catalogue rows as totals. An incomplete owner observation fails
-only that count; absence and a complete empty authority remain distinct. Repo
+An exact aggregate observes the complete owner-classified running Akumas and
+open Debts, and counts active Contract journal membership in the observed Git
+tree. Contract counting does not decode journals or observe prerequisites,
+workspaces, targets, or gates. It never uses bounded catalogue rows as totals;
+unrelated detail failures cannot prevent a count. An incomplete membership
+observation fails only that count; absence and a complete empty authority remain
+distinct. Repo
 and World availability are independent, and the aggregate is one read-time
 observation rather than a cross-product transaction.
 

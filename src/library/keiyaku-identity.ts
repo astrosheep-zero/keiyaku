@@ -154,7 +154,7 @@ async function callerProfile(
     const id = parseAkumaId(caller.akumaId);
     const [status, aliases, repo] = await Promise.all([
       new AkumaOwner(id.id, caller.world).status(),
-      observeNamedAddress({ world: caller.world, repo: null }),
+      observeNamedAddress({ world: caller.world, repo: null, selectors: [] }),
       callerRepo(caller.world, coordinates, environment),
     ]);
     if (aliases.aliases.kind !== "present") {

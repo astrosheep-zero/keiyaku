@@ -1263,7 +1263,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   const source = await answered(repository.path, "worker", "00000001");
   const path = await World.at(repository.path);
   await moveAlias({ world: path, alias, akumaId: source.id });
-  const authority = await observeNamedAddress({ world: path, repo });
+  const authority = await observeNamedAddress({ world: path, repo, selectors: [alias] });
   assert.throws(
     () => resolveNamedAddress({ selector: alias, contracts: authority.contracts, aliases: authority.aliases }),
     /ambiguous selector matches Contract and Akuma/u,
@@ -1276,7 +1276,7 @@ test("named Address refuses failed Kanshi Contract and Alias observations", asyn
   const source = await answered(root, "worker", "00000002");
   const alias = parseAkumaAlias("@readable");
   await moveAlias({ world: root, alias, akumaId: source.id });
-  const detached = await observeNamedAddress({ world: root, repo: null });
+  const detached = await observeNamedAddress({ world: root, repo: null, selectors: [] });
   assert.deepEqual(
     resolveNamedAddress({
       selector: alias,
@@ -1306,7 +1306,7 @@ test("named Address resolves a retained Alias outside Kanshi roster rows", async
   const id = akumaId({ akumaName: "worker", suffix: "deadbeef" });
   await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akumaId: id });
   const observation = await observeKanshi({ world: root });
-  const authority = await observeNamedAddress({ world: root, repo: null });
+  const authority = await observeNamedAddress({ world: root, repo: null, selectors: [] });
   assert.ok("akumas" in observation.report);
   if (!("akumas" in observation.report)) throw new Error("expected a world report");
   const akumas = observation.report.akumas;

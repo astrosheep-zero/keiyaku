@@ -13,9 +13,9 @@ import {
   type AkumaGlob,
 } from "../identity/selector.js";
 import type { Section } from "../kanshi/index.js";
-import type { ContractDetail } from "../protocol/read/status.js";
+import type { ContractMembership } from "../protocol/read/status.js";
 import { World, type WorldRoot } from "../world.js";
-import { matchContractCandidates, readCompleteContractCandidates } from "./contract-address.js";
+import { matchContractCandidates, readContractCandidates } from "./contract-address.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
@@ -105,7 +105,7 @@ export type NamedAddress =
 
 /** The frozen authority a named selector is adjudicated against. */
 export type NamedAddressAuthority = Readonly<{
-  contracts: Section<readonly ContractDetail[]>;
+  contracts: Section<readonly ContractMembership[]>;
   aliases: Section<readonly AliasBinding[]>;
 }>;
 
@@ -119,18 +119,28 @@ async function observe<T>(read: () => Promise<T>): Promise<Section<T>> {
   }
 }
 
-/**
- * Freeze the one complete Contract candidate observation and the Alias
- * observation a named selector is judged against. The complete candidate set is
- * the Contract owner's board, so display-age bounds never decide membership. An
- * absent Repo is a World without a Contract family, not a failed observation.
- */
+/** Freeze only the named Contract journals and Alias authority in this invocation. */
 export async function observeNamedAddress(
-  input: Readonly<{ world: WorldRoot | null; repo: Repo | null }>,
+  input: Readonly<{ world: WorldRoot | null; repo: Repo | null; selectors: readonly string[] }>,
 ): Promise<NamedAddressAuthority> {
   const { world, repo } = input;
   return {
-    contracts: repo === null ? { kind: "absent" } : await observe(() => readCompleteContractCandidates(repo)),
+    contracts:
+      repo === null
+        ? { kind: "absent" }
+        : await observe(() =>
+            readContractCandidates(
+              scopeForRepo(repo),
+              input.selectors.flatMap((selector) => {
+                if (!selector.startsWith("@")) return [];
+                try {
+                  return [contractId(`kei/${selector.slice(1)}`)];
+                } catch {
+                  return [];
+                }
+              }),
+            ),
+          ),
     aliases: world === null ? { kind: "absent" } : await observe(() => readAliases(world)),
   };
 }

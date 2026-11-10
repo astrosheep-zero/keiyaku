@@ -1,19 +1,18 @@
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
-import { contractId } from "../core/facts/types.js";
+import { contractId, type ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import { contractsOperation, type RepositoryScope } from "../protocol/operations.js";
-import type { ContractBoard, ContractDetail } from "../protocol/read/status.js";
+import type { ContractMembership } from "../protocol/read/status.js";
 import type { ContractResolution, ContractResolveInput } from "./contract-types.js";
 import { requireInput } from "./input.js";
 import { readContractValue } from "./outcome.js";
-import { scopeForRepo, type Repo } from "./repo.js";
 
 /** Pure Contract membership shared with mixed Address; no cross-family judgment. */
 export function matchContractCandidates(
-  rows: readonly ContractDetail[],
+  rows: readonly ContractMembership[],
   selection: Readonly<{ selector: string }> | Readonly<{ cwd: string }>,
-): readonly ContractDetail[] {
+): readonly ContractMembership[] {
   return rows.filter(
     (row) =>
       row.phase === "bound" &&
@@ -24,17 +23,14 @@ export function matchContractCandidates(
   );
 }
 
-/** The complete live Contract board: the Contract owner's own candidate set, never a display catalogue. */
-function completeBoard(scope: RepositoryScope): Promise<ContractBoard> {
-  return withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
-}
-
-/**
- * The complete live Contract candidates a named selection judges membership
- * against. No display bound applies, so age never decides which names exist.
- */
-export async function readCompleteContractCandidates(repo: Repo): Promise<readonly ContractDetail[]> {
-  return (await completeBoard(scopeForRepo(repo))).rows;
+/** Observe complete contextual membership, or only the explicitly named identities. */
+export function readContractCandidates(
+  scope: RepositoryScope,
+  ids?: readonly ContractId[],
+): Promise<readonly ContractMembership[]> {
+  return withGitDecodeChannel(scope, (channel) =>
+    contractsOperation({ scope, channel, ...(ids === undefined ? {} : { ids }) }),
+  );
 }
 
 export async function resolveContract(
@@ -56,12 +52,14 @@ export async function resolveContract(
       throw new TypeError("cwd must be an absolute directory coordinate", { cause });
     }
   }
+  let ids: readonly ContractId[] | undefined;
   if (selector !== undefined) {
     if (selector.startsWith("@kei/"))
       return { kind: "refused", refusal: { kind: "redundant-short-selector", selector } };
     try {
       const id = contractId(selector.startsWith("@") ? `kei/${selector.slice(1)}` : selector);
       if (!selector.startsWith("@")) return { kind: "resolved", id };
+      ids = [id];
     } catch (error) {
       return {
         kind: "refused",
@@ -73,8 +71,8 @@ export async function resolveContract(
       };
     }
   }
-  const board = await readContractValue(() => completeBoard(scope));
-  const candidates = matchContractCandidates(board.rows, selector === undefined ? { cwd } : { selector });
+  const rows = await readContractValue(() => readContractCandidates(scope, ids));
+  const candidates = matchContractCandidates(rows, selector === undefined ? { cwd } : { selector });
   if (candidates.length === 1) return { kind: "resolved", id: candidates[0]!.id };
   if (selector === undefined) {
     return {

@@ -95,7 +95,7 @@ export async function statusAt(at: StatusAt, input: StatusInput): Promise<Status
       throw new KeiyakuUsageError("cannot select a contract while the Contract world is absent");
     }
     const authority = input.selectors.some((selector) => selector.startsWith("@"))
-      ? await observeNamedAddress({ world: at.world, repo: at.repo ?? null })
+      ? await observeNamedAddress({ world: at.world, repo: at.repo ?? null, selectors: input.selectors })
       : undefined;
     const items: StatusItem[] = [];
     for (const selector of input.selectors) {
@@ -114,7 +114,11 @@ export async function statusAt(at: StatusAt, input: StatusInput): Promise<Status
   }
   if (input.selector.startsWith("aku/")) return akumaStatus(at, input.selector);
   if (input.selector.startsWith("@")) {
-    const authority = await observeNamedAddress({ world: at.world, repo: at.repo ?? null });
+    const authority = await observeNamedAddress({
+      world: at.world,
+      repo: at.repo ?? null,
+      selectors: [input.selector],
+    });
     return namedStatus(at, input.selector, authority);
   }
   if (input.selector.startsWith("kei/")) return contractStatus(at, input.selector);

@@ -561,7 +561,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/akuma.ts"),
         any("debt/index.ts"),
         any("debt/operations.ts"),
-        kanshiGitObservation,
+        any("git/read-observation.ts", [...kanshiGitObservation.symbols!, "withGitTargetedReadObservation"]),
         any("kanshi/**"),
         any("library/repo.ts"),
         any("protocol/read/status.ts"),

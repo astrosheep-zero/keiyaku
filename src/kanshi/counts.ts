@@ -2,9 +2,9 @@ import { z } from "zod";
 import { countRunningAkuma } from "../akuma/akuma.js";
 import { DebtAuthorityCorruptionError } from "../debt/index.js";
 import { observeDebtBoard } from "../debt/operations.js";
-import { withGitDecodeChannel, withGitReadObservation } from "../git/read-observation.js";
+import { withGitDecodeChannel, withGitTargetedReadObservation } from "../git/read-observation.js";
 import { Repo, scopeForRepo } from "../library/repo.js";
-import { readContractBoard } from "../protocol/read/status.js";
+import { readContractCount } from "../protocol/read/status.js";
 import { World, worldRootSchema, type WorldRoot } from "../world.js";
 import { sectionSchema, type Section } from "./report.js";
 
@@ -55,11 +55,7 @@ export async function kanshiCounts(input: KanshiCountsInput): Promise<KanshiCoun
       : section(async () => {
           const repo = scopeForRepo(input.repo!);
           return withGitDecodeChannel(repo, (channel) =>
-            withGitReadObservation(
-              repo,
-              channel,
-              async (observation) => (await readContractBoard(observation)).rows.length,
-            ),
+            withGitTargetedReadObservation(repo, channel, { subtrees: ["contracts/active"] }, readContractCount),
           );
         });
   const worldSections = async (): Promise<readonly [Section<number>, Section<number>]> => {

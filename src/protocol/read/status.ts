@@ -1,8 +1,10 @@
 import { z } from "zod";
-import { contractIdSchema, snapshotIdSchema } from "../../git/identity.js";
+import { contractIdSchema, contractJournalPaths, snapshotIdSchema } from "../../git/identity.js";
 import { type ContractTargetLag as GitContractTargetLag } from "../../git/workspace.js";
 import { gateSchema } from "../result-leaves.js";
 import {
+  activeContractJournalPaths,
+  observeActiveContractJournals,
   observeActiveContractWorld,
   observeContractsForAdmissionInObservationAt,
   deliveryTargetObserver,
@@ -13,7 +15,11 @@ import { observeTargetLag, observeWorkspace, worktreePath } from "../../git/work
 import { appointmentFor, readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
 import type { ContractWorkspaceObservation, HandoffReceiptCoordinate } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
-import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
+import {
+  withGitTargetedReadObservation,
+  type GitDecodeChannel,
+  type GitReadObservation,
+} from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import { verificationRequirement } from "../../verification/declaration.js";
 import { type ContractId, type ContractState, type JournalEntry, type SnapshotId } from "../../core/facts/types.js";
@@ -186,21 +192,6 @@ export const contractDetailSchema = z
   .readonly();
 export type ContractDetail = z.output<typeof contractDetailSchema>;
 
-const dependentSchema = z.strictObject({ contractId: contractIdSchema, phase: phaseSchema }).readonly();
-export const contractBoardSchema = z
-  .strictObject({
-    rows: z
-      .array(
-        contractDetailSchema
-          .unwrap()
-          .extend({
-            dependents: z.array(dependentSchema).min(1).readonly().exactOptional(),
-          })
-          .readonly(),
-      )
-      .readonly(),
-  })
-  .readonly();
 export const contractObservationSchema = z.union([
   z.strictObject({ kind: z.literal("missing"), id: contractIdSchema }).readonly(),
   z.strictObject({ kind: z.literal("present"), row: contractDetailSchema }).readonly(),
@@ -211,9 +202,52 @@ export type ContractGateReport = z.output<typeof rowGateSchema>;
 export type ContractTargetLag = ContractDetailTargetLag;
 export type { ContractWorkspaceObservation };
 export type ContractAfterEdge = NonNullable<ContractDetail["after"]>[number];
-export type ContractDependent = z.output<typeof dependentSchema>;
-export type ContractBoard = z.output<typeof contractBoardSchema>;
 export type ContractObservation = z.output<typeof contractObservationSchema>;
+
+export type ContractMembership = Pick<ContractDetail, "id" | "phase" | "workspace">;
+
+export function readContractCount(observation: GitReadObservation): number {
+  return activeContractJournalPaths(observation).length;
+}
+
+/** Selection observes journals and appointments, never physical state or dependencies. */
+export async function readContractMembership(
+  observation: GitReadObservation,
+  ids?: readonly ContractId[],
+): Promise<readonly ContractMembership[]> {
+  const contracts =
+    ids === undefined
+      ? await observeActiveContractJournals(observation)
+      : (await observeContractsForAdmissionInObservationAt(observation, ids)).journals;
+  const register = await readPlaceRegister(observation.repository);
+  return [...contracts.values()].flatMap(({ state }) => {
+    if (state === null) return [];
+    const appointed = appointedWorkspace(observation.repository, register, state);
+    return [
+      {
+        id: state.id,
+        phase: phaseFor(state),
+        workspace:
+          appointed === undefined
+            ? { kind: "unappointed" as const }
+            : { kind: "present" as const, path: appointed.workspace },
+      },
+    ];
+  });
+}
+
+export function readContractMembershipAt(
+  repository: GitRepository,
+  channel: GitDecodeChannel,
+  ids?: readonly ContractId[],
+): Promise<readonly ContractMembership[]> {
+  return withGitTargetedReadObservation(
+    repository,
+    channel,
+    ids === undefined ? { subtrees: ["contracts/active"] } : { paths: ids.flatMap(contractJournalPaths) },
+    (observation) => readContractMembership(observation, ids),
+  );
+}
 
 function documentFor(state: ContractState): ReturnType<typeof decodeContractDocument> | undefined {
   try {
@@ -392,17 +426,6 @@ function summaryAttention({
   return attention;
 }
 
-type ContractRowInput = Readonly<{
-  repository: GitRepository;
-  state: ContractState;
-  bindAt: string;
-  targetObservation: RawTargetObservation;
-  workspace: HandoffReceiptCoordinate | undefined;
-  after: readonly ContractAfterEdge[];
-  dependents: readonly ContractDependent[];
-  physicalIssue: boolean;
-}>;
-
 function afterEndpoint(state: ContractState | null | undefined): ContractAfterEdge["state"] | undefined {
   if (state === undefined || state === null) return "missing";
   if (state.terminal?.kind === "claimed") return undefined;
@@ -419,15 +442,22 @@ function afterEdges(
   });
 }
 
-function reverseDependents(id: ContractId, states: readonly SelectedContractState[]): readonly ContractDependent[] {
-  return states
-    .filter(({ state }) => state.terminal === null && state.terms.after.includes(id))
-    .map(({ state }) => ({ contractId: state.id, phase: phaseFor(state) }))
-    .sort((left, right) => left.contractId.localeCompare(right.contractId));
-}
-
-async function rowFor(input: ContractRowInput): Promise<ContractBoard["rows"][number]> {
-  const { repository, state, targetObservation: rawTargetObservation, workspace, after, dependents } = input;
+/** Observe one Contract and its target from one fresh ref epoch. */
+export async function readContractObservation(
+  observation: GitReadObservation,
+  id: ContractId,
+): Promise<ContractObservation> {
+  const observed = await observeContractsForAdmissionInObservationAt(observation, [id]);
+  const record = observed.journals.get(id);
+  if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
+  const state = record.state;
+  if (state === null) return { kind: "missing", id };
+  const endpoints = await afterEndpointMap(observation, new Map([[id, state]]), state.terms.after);
+  const repository = observation.repository;
+  const register = await readPlaceRegister(repository);
+  const workspace = appointedWorkspace(repository, register, state);
+  const rawTargetObservation = await deliveryTargetObserver(observation)(state);
+  const after = afterEdges(state, endpoints);
   const document = documentFor(state);
   const indexes = new Map<string, number>();
   document?.verification.forEach((declaration, index) => {
@@ -484,12 +514,11 @@ async function rowFor(input: ContractRowInput): Promise<ContractBoard["rows"][nu
     ...(targetObservation === undefined ? {} : { targetObservation }),
     ...(gates.length === 0 ? {} : { gates }),
     ...(after.length === 0 ? {} : { after }),
-    ...(dependents.length === 0 ? {} : { dependents }),
     ...(state.terminal?.kind === "abandoned" && state.terminal.data.note !== undefined
       ? { abandonNote: state.terminal.data.note }
       : {}),
   };
-  return input.physicalIssue ? await selectedDetailWithIssue(repository, state, row, rawTargetObservation) : row;
+  return { kind: "present", row: await selectedDetailWithIssue(repository, state, row, rawTargetObservation) };
 }
 
 async function afterEndpointMap(
@@ -501,61 +530,6 @@ async function afterEndpointMap(
   if (missing.length === 0) return known;
   const extra = await observeContractsForAdmissionInObservationAt(observation, missing);
   return new Map([...known, ...[...extra.journals].map(([id, record]) => [id, record.state] as const)]);
-}
-
-async function hydrateRows(
-  observation: GitReadObservation,
-  states: readonly SelectedContractState[],
-  endpoints: ReadonlyMap<ContractId, ContractState | null>,
-  dependentStates: readonly SelectedContractState[] = [],
-  physicalIssue = false,
-): Promise<readonly ContractBoard["rows"][number][]> {
-  const register = await readPlaceRegister(observation.repository);
-  const selected = states.map((value) => ({
-    ...value,
-    workspace: appointedWorkspace(observation.repository, register, value.state),
-  }));
-  const observeTarget = deliveryTargetObserver(observation);
-  return await Promise.all(
-    selected.map(
-      async ({ state, bindAt, workspace }) =>
-        await rowFor({
-          repository: observation.repository,
-          state,
-          bindAt,
-          targetObservation: await observeTarget(state),
-          workspace,
-          after: afterEdges(state, endpoints),
-          dependents: reverseDependents(state.id, dependentStates),
-          physicalIssue,
-        }),
-    ),
-  );
-}
-
-/** Build the complete board by default; a selected detail read retains complete dependency evidence. */
-export async function readContractBoard(
-  observation: GitReadObservation,
-  include?: ContractId,
-  detail: "board" | "selected" = "board",
-): Promise<ContractBoard> {
-  const observed = await observeActiveContractWorld(observation);
-  const contracts = new Map(observed.contracts);
-  let endpoints = new Map(observed.eligibility);
-  if (include !== undefined && !contracts.has(include)) {
-    const extra = await observeContractsForAdmissionInObservationAt(observation, [include]);
-    const record = extra.journals.get(include);
-    if (record === undefined) throw new Error(`missing requested Contract observation: ${include}`);
-    contracts.set(include, record);
-    endpoints.set(include, record.state);
-    if (record.state !== null) {
-      endpoints = new Map(await afterEndpointMap(observation, endpoints, record.state.terms.after));
-    }
-  }
-  const states = selectedContractStates(contracts);
-  const selected = detail === "selected" ? states.filter(({ state }) => state.id === include) : states;
-  const rows = await hydrateRows(observation, selected, endpoints, states);
-  return { rows };
 }
 
 type SelectedContractState = Readonly<{
@@ -636,21 +610,6 @@ export async function readContractPhase(
   const record = observed.journals.get(id);
   if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
   return record.state === null ? null : phaseFor(record.state);
-}
-
-/** Observe one Contract and its target from one fresh ref epoch. */
-export async function readContractObservation(
-  observation: GitReadObservation,
-  id: ContractId,
-): Promise<ContractObservation> {
-  const observed = await observeContractsForAdmissionInObservationAt(observation, [id]);
-  const record = observed.journals.get(id);
-  if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
-  const state = record.state;
-  if (state === null) return { kind: "missing", id };
-  const endpoints = await afterEndpointMap(observation, new Map([[id, state]]), state.terms.after);
-  const rows = await hydrateRows(observation, selectedContractStates(observed.journals), endpoints, [], true);
-  return { kind: "present", row: rows[0]! };
 }
 
 /** The exact selected read carries its physical issue; only that physical read can turn unavailable. */

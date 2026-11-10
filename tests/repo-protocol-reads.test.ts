@@ -7,6 +7,7 @@ import { appointManagedWorktrees } from "../src/workspace-place.js";
 import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import {
+  GIT_FORMAT_PATH,
   GIT_REF,
   readBlob,
   readGitPaths,
@@ -16,9 +17,11 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
-import { readContractBoard } from "../src/protocol/read/status.js";
+import { readContractCount, readContractMembership, readContractObservation } from "../src/protocol/read/status.js";
+import { Keis, Repo, kanshiCounts } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
-import { encodeEntry } from "../src/core/facts/codec.js";
+import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
+import { observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
 import { contractJournalPath, contractJournalPaths } from "../src/git/identity.js";
 import { bindOperation } from "../src/protocol/bind.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
@@ -106,6 +109,19 @@ test("public Contract rows select the source entry for every phase", async () =>
   const deliveredDelivery = deliverEntry(ids.delivered, times.delivered, "01ARZ3NDEKTSV4RRFFQ69G5FBC");
   const claimedDelivery = deliverEntry(ids.claimed, "2026-08-12T00:02:30.000Z", "01ARZ3NDEKTSV4RRFFQ69G5FBD");
   const additions = new Map<ContractId, readonly JournalEntry[]>([
+    [
+      ids.bound,
+      [
+        {
+          v: 1,
+          kind: "amend",
+          contract: ids.bound,
+          entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBN"),
+          at: times.delivered,
+          data: terms("Phase bound", [ids.claimed, ids.delivered, ids.abandoned, protocolContractId("Missing")]),
+        },
+      ],
+    ],
     [ids.delivered, [deliveredDelivery]],
     [
       ids.claimed,
@@ -174,150 +190,118 @@ test("public Contract rows select the source entry for every phase", async () =>
     if (observed.kind !== "present") continue;
     assert.equal(observed.row.phase, phase);
   }
-  const board = await withGitDecodeChannel(scope, (channel) =>
+  const detailed = await withGitDecodeChannel(scope, (channel) =>
+    withGitReadObservation(scope, channel, (observation) => readContractObservation(observation, ids.bound)),
+  );
+  assert.equal(detailed.kind, "present");
+  if (detailed.kind === "present")
+    assert.deepEqual(detailed.row.after, [
+      { contractId: ids.delivered, state: "active" },
+      { contractId: ids.abandoned, state: "abandoned" },
+      { contractId: protocolContractId("Missing"), state: "missing" },
+    ]);
+  const membership = await withGitDecodeChannel(scope, (channel) =>
     contractsOperation({
       scope,
       channel,
     }),
   );
-  const delivered = board.rows.find((row) => row.id === ids.delivered);
+  const delivered = membership.find((row) => row.id === ids.delivered);
   assert.equal(delivered?.phase, "bound");
   assert.equal(JSON.parse(JSON.stringify(delivered)).phase, "bound");
-  const catalogue = await withGitDecodeChannel(scope, (channel) =>
-    contractCatalogueOperation({ scope, channel }),
-  );
+  const catalogue = await withGitDecodeChannel(scope, (channel) => contractCatalogueOperation({ scope, channel }));
   const catalog = renderContractCatalogue(catalogue);
   assert.match(catalog, new RegExp(`${ids.delivered} · [^\\n]+ · Phase delivered`, "u"));
+  const current = await readGitPaths(git, contractJournalPaths(ids.claimed));
+  const corrupt = await writeBlob(git, "corrupt prerequisite\n");
+  const corruptTree = await updateGitTree(
+    git,
+    current.tree,
+    new Map([[contractJournalPath(ids.claimed, "terminal"), { oid: corrupt }]]),
+  );
+  const corruptCommit = await writeCommit({ repository: git, tree: corruptTree, parent: current.commit });
+  repository.run(["update-ref", GIT_REF, corruptCommit, current.commit!]);
+  const unchanged = await withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
+  assert.deepEqual(unchanged, membership, "contextual membership never expands prerequisite journals");
 });
 
-test("Contract boards preserve endpoint kinds and lexical active reverse dependents", async () => {
+test("counts and selection observe only their membership authority", async () => {
   const repository = repositoryWithMain();
-  const active = await bind(repository, "Active prerequisite", "worktree");
-  const claimed = await bind(repository, "Claimed prerequisite", "worktree");
-  const abandoned = await bind(repository, "Abandoned prerequisite", "worktree");
-  const missing = protocolContractId("Missing prerequisite");
-  const dependent = await bind(repository, "Dependent", "worktree", [claimed, active, abandoned]);
-  const alpha = await bind(repository, "Alpha dependent", "worktree", [active]);
-  const zulu = await bind(repository, "Zulu dependent", "worktree", [active]);
-  const git = await repositoryAt(repository.path);
-  const before = await readGitPaths(git, [claimed, abandoned, dependent].flatMap(contractJournalPaths));
-  if (before.commit === null) throw new Error("Keiyaku state was not published");
-  const snapshot = snapshotId(repository.run(["rev-parse", "HEAD"]).trim());
-  const claimDelivery: JournalEntry = {
-    v: 1,
-    kind: "deliver",
-    contract: claimed,
-    entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBK"),
-    at: "2026-08-12T00:01:00.000Z",
-    data: {
-      tenderSnapshot: snapshot,
-      integration: { predecessor: snapshot, snapshot, changeId: changeId("change-claimed-prerequisite") },
-      method: "squash",
-      policy: { requireBranchesToBeUpToDate: false },
-    },
+  const good = await bind(repository, "Selectable", "worktree");
+  const bad = await bind(repository, "Broken target", "worktree");
+  const scope = await repositoryAt(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  const library = Keis.of(repo);
+  await appointManagedWorktrees(scope, [good, bad]);
+  const cwd = await appointedWorktreePath(scope, good);
+  mkdirSync(cwd, { recursive: true });
+  const selector = `@${good.slice(4)}`;
+  const badPath = contractJournalPath(bad);
+  const publish = async (path: string, bytes: string) => {
+    const before = await readGitPaths(scope, [path]);
+    const oid = await writeBlob(scope, bytes);
+    const tree = await updateGitTree(scope, before.tree, new Map([[path, { oid }]]));
+    const commit = await writeCommit({ repository: scope, tree, parent: before.commit });
+    repository.run(["update-ref", GIT_REF, commit, before.commit!]);
   };
-  const terminalEntries = new Map<ContractId, readonly JournalEntry[]>([
-    [
-      claimed,
-      [
-        claimDelivery,
-        {
-          v: 1,
-          kind: "claimed",
-          contract: claimed,
-          entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBR"),
-          at: "2026-08-12T00:02:00.000Z",
-          data: { delivery: claimDelivery.entry },
-        },
-      ],
-    ],
-    [
-      abandoned,
-      [
-        {
-          v: 1,
-          kind: "abandoned",
-          contract: abandoned,
-          entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBM"),
-          at: "2026-08-12T00:03:00.000Z",
-          data: {},
-        },
-      ],
-    ],
-  ]);
-  const updates = new Map<string, { oid: string } | null>();
-  for (const [id, entries] of terminalEntries) {
-    const activePath = contractJournalPath(id, "active");
-    const current = before.paths.get(activePath);
-    if (current?.type !== "blob") throw new Error("missing active journal");
-    const oid = await writeBlob(
-      git,
-      Buffer.concat([await readBlob(git, current.oid), ...entries.map((entry) => Buffer.from(encodeEntry(entry)))]),
-    );
-    updates.set(activePath, null);
-    updates.set(contractJournalPath(id, "terminal"), { oid });
-  }
-  const dependentPath = contractJournalPath(dependent, "active");
-  const dependentJournal = before.paths.get(dependentPath);
-  if (dependentJournal?.type !== "blob") throw new Error("missing dependent journal");
-  const amendedDependent = await writeBlob(
-    git,
-    Buffer.concat([
-      await readBlob(git, dependentJournal.oid),
-      Buffer.from(
-        encodeEntry({
-          v: 1,
-          kind: "amend",
-          contract: dependent,
-          entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FBN"),
-          at: "2026-08-12T00:04:00.000Z",
-          data: terms("Dependent", [claimed, active, abandoned, missing]),
-        }),
-      ),
-    ]),
+  const original = await readGitPaths(scope, [badPath]);
+  const journal = original.paths.get(badPath)!;
+  const entries = decodeJournal((await readBlob(scope, journal.oid)).toString("utf8"));
+  const brokenTarget = entries.map((entry) =>
+    entry.kind === "bind"
+      ? {
+          ...entry,
+          data: { ...entry.data, coordinates: { ...entry.data.coordinates, target: "invalid Git ref" } },
+        }
+      : entry,
   );
-  updates.set(dependentPath, { oid: amendedDependent });
-  const tree = await updateGitTree(git, before.tree, updates);
-  const commit = await writeCommit({ repository: git, tree, parent: before.commit });
-  repository.run(["update-ref", GIT_REF, commit, before.commit]);
-
-  const scope = await scopeOperation({ coordinate: repository.path });
-  const board = await withGitDecodeChannel(scope, (channel) =>
-    contractsOperation({
-      scope,
-      channel,
+  await publish(badPath, brokenTarget.map(encodeEntry).join(""));
+  await assert.rejects(library.observe({ id: bad }), /invalid Git ref/u);
+  assert.deepEqual((await kanshiCounts({ world: null, repo })).contracts, { kind: "present", value: 2 });
+  assert.deepEqual(await library.resolve({ selector }), { kind: "resolved", id: good });
+  assert.deepEqual(await library.resolve({ cwd }), { kind: "resolved", id: good });
+  const authority = await observeNamedAddress({ world: null, repo, selectors: [selector] });
+  assert.deepEqual(resolveNamedAddress({ ...authority, selector }), { kind: "contract", id: good });
+  await withGitDecodeChannel(scope, (channel) =>
+    withGitReadObservation(scope, channel, async (observation) => {
+      assert.equal(
+        readContractCount({
+          ...observation,
+          readBlobs: async () => {
+            throw new Error("count must not read journal blobs");
+          },
+        }),
+        2,
+      );
+      const goodBlob = observation.snapshot.paths.get(contractJournalPath(good))!.oid;
+      const reads: string[] = [];
+      await readContractMembership(
+        {
+          ...observation,
+          readBlobs: async (oids) => {
+            reads.push(...oids);
+            return observation.readBlobs(oids);
+          },
+        },
+        [good],
+      );
+      assert.deepEqual(reads, [goodBlob]);
     }),
   );
-  const row = board.rows.find((candidate) => candidate.id === dependent);
-  assert.deepEqual(row?.after, [
-    { contractId: active, state: "active" },
-    { contractId: abandoned, state: "abandoned" },
-    { contractId: missing, state: "missing" },
-  ]);
-  assert.deepEqual(board.rows.find((candidate) => candidate.id === active)?.dependents, [
-    { contractId: alpha, phase: "bound" },
-    { contractId: dependent, phase: "bound" },
-    { contractId: zulu, phase: "bound" },
-  ]);
-  assert.equal(
-    board.rows.some((candidate) => candidate.id === claimed || candidate.id === abandoned),
-    false,
+  await publish(badPath, "corrupt journal\n");
+  assert.deepEqual((await kanshiCounts({ world: null, repo })).contracts, { kind: "present", value: 2 });
+  assert.deepEqual(await library.resolve({ selector }), { kind: "resolved", id: good });
+  assert.deepEqual(
+    resolveNamedAddress({
+      ...(await observeNamedAddress({ world: null, repo, selectors: [selector] })),
+      selector,
+    }),
+    { kind: "contract", id: good },
   );
-  const included = await withGitDecodeChannel(scope, (channel) =>
-    withGitReadObservation(scope, channel, (observation) => readContractBoard(observation, claimed)),
-  );
-  assert.deepEqual(included.rows.slice(0, -1), board.rows);
-  assert.equal(included.rows.at(-1)?.id, claimed);
-  assert.equal(included.rows.at(-1)?.phase, "claimed");
-  assert.deepEqual(included.rows.at(-1)?.dependents, [{ contractId: dependent, phase: "bound" }]);
-  const targeted = await withGitDecodeChannel(scope, (channel) =>
-    contractObservationOperation({ scope, channel, contractId: active }),
-  );
-  assert.equal(targeted.kind, "present");
-  if (targeted.kind === "present") {
-    const { dependents: _dependents, ...detail } = board.rows.find((candidate) => candidate.id === active)!;
-    assert.deepEqual(targeted.row, detail);
-  }
+  await assert.rejects(library.resolve({ selector: `@${bad.slice(4)}` }));
+  await assert.rejects(library.resolve({ cwd }));
+  await publish(GIT_FORMAT_PATH, "corrupt membership format\n");
+  assert.equal((await kanshiCounts({ world: null, repo })).contracts.kind, "failed");
 });
 
 test("repo reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {

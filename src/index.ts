@@ -292,7 +292,6 @@ export {
 export type {
   ContractAfterEdge,
   ContractCatalogue,
-  ContractDependent,
   ContractSummary,
   ContractDetail,
   ContractDetailWorkspace,
