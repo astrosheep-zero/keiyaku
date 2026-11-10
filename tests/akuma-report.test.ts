@@ -19,6 +19,7 @@ import { settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { bornBody, bornDirectAkuma, allocatedHeart, claudeBodyLaunch, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { createProviderAttempt } from "../src/akuma/provider.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { temporaryDirectory } from "./support/process.js";
@@ -44,7 +45,7 @@ test("a driven Body supplies exact execution to a real reporting CLI child befor
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
   const allocated = await allocatedHeart(root, "claude", "feed0007");
   const cli = fileURLToPath(new URL(`../src/cli/index.${import.meta.url.endsWith(".ts") ? "ts" : "js"}`, import.meta.url));
-  const adapter = fixtureAdapter(async input => {
+  const adapter = fixtureAdapter(input => createProviderAttempt(input.signal, async (custody) => {
     assert.ok(input.execution, "Body must freeze its exact admitted context before provider work");
     const environment = akumaExecutionEnvironment(process.env, {}, [], input.execution);
     const child = await promisify(execFile)(process.execPath, [
@@ -53,13 +54,15 @@ test("a driven Body supplies exact execution to a real reporting CLI child befor
     ], { cwd: root, env: environment });
     const recorded = JSON.parse(child.stdout) as AkumaReportResult;
     assert.equal(recorded.kind, "recorded");
+    custody.own({ closed: Promise.resolve(), forceDispose: async () => {} });
     return {
+      admission: { fence: "report-child-turn" },
       events: { async *[Symbol.asyncIterator]() {
         yield { type: "session" as const, coordinate: { sessionId: "report-child-native" } };
       } },
       completion: Promise.resolve({ kind: "answered" as const, answer: "final, not the report" }),
     };
-  });
+  }));
   await driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), adapter, {
     world, spawn: noBodyLaunch,
   });

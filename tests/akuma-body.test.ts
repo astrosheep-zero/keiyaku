@@ -18,7 +18,7 @@ import { bodyLaunchSchema, type BodyLaunch, type LiveBodyLaunch } from "../src/a
 import { bodyProcessInput, spawnAkumaBody } from "../src/akuma/detached-body.js";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
-import { driveAkumaBody as runAkumaBody } from "../src/akuma/body.js";
+import { driveAkumaBody } from "../src/akuma/body.js";
 import {
   HeldAkumaLeash,
   activitySlice,
@@ -41,7 +41,6 @@ import {
   AgentEventChannel,
   type AgentEvent,
   type ProviderAdapter,
-  type ProviderAttempt,
   type Session,
   type TurnResult,
 } from "../src/akuma/provider.js";
@@ -279,15 +278,11 @@ function installTurnOutcomeRecorder(paths: Parameters<typeof outcomes>[0]): Turn
 }
 
 type FixtureResource = Readonly<{
-  closed?: Promise<void>;
   abort?: () => Promise<void>;
   forceDispose?: () => Promise<void>;
 }>;
 
-type FixtureSession = Omit<Session, "admission"> &
-  Readonly<{ admission?: Session["admission"]; resource?: FixtureResource }>;
-
-function sessionResource(session: FixtureSession): Readonly<{
+function sessionResource(completion: Session["completion"], resource: FixtureResource = {}): Readonly<{
   closed: Promise<void>;
   abort(): Promise<void>;
   forceDispose(): Promise<void>;
@@ -296,91 +291,33 @@ function sessionResource(session: FixtureSession): Readonly<{
   const defaultClosed = new Promise<void>((resolve) => {
     settleClosed = resolve;
   });
-  const hasCustomClosure = session.resource?.closed !== undefined;
-  if (!hasCustomClosure) void session.completion.then(settleClosed, settleClosed);
-  const closeDefaultResource = (): void => {
-    if (!hasCustomClosure) settleClosed();
-  };
+  void completion.then(settleClosed, settleClosed);
   return {
-    closed: session.resource?.closed ?? defaultClosed,
+    closed: defaultClosed,
     abort: async () => {
-      await session.resource?.abort?.();
-      closeDefaultResource();
+      await resource.abort?.();
+      settleClosed();
     },
     forceDispose: async () => {
-      await (session.resource?.forceDispose ?? session.resource?.abort)?.();
-      closeDefaultResource();
+      await (resource.forceDispose ?? resource.abort)?.();
+      settleClosed();
     },
   };
 }
 
-function sessionAttempt(establish: () => Promise<FixtureSession>, signal?: AbortSignal) {
-  return createProviderAttempt(signal, async (custody) => {
-    const session = await establish();
-    custody.own(sessionResource(session));
-    return normalizeSession(session);
-  });
-}
-
-type FixtureProviderAdapter = Omit<ProviderAdapter, "start" | "resume"> & {
-  start: (input: Parameters<ProviderAdapter["start"]>[0]) => Promise<FixtureSession> | ProviderAttempt<FixtureSession>;
-  resume?: (
-    input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
-  ) => Promise<FixtureSession> | ProviderAttempt<FixtureSession>;
-};
-
-/** One scenario provider that admits every option; its session body stays at the call site. */
+/** One scenario provider that admits every option; its attempt stays at the call site. */
 function scenarioProvider(
-  start: FixtureProviderAdapter["start"],
-  extra: Omit<FixtureProviderAdapter, "admitOptions" | "start"> = {},
-): FixtureProviderAdapter {
+  start: ProviderAdapter["start"],
+  extra: Omit<ProviderAdapter, "admitOptions" | "start"> = {},
+): ProviderAdapter {
   return { admitOptions: (options) => ({ kind: "admitted", options }), start, ...extra };
-}
-
-function normalizeSession(session: FixtureSession): Session {
-  const { admission, resource: _resource, ...drive } = session;
-  return { ...drive, admission: admission ?? { fence: "fixture" } };
-}
-
-function attemptForFixtureSession(
-  value: Promise<FixtureSession> | ProviderAttempt<FixtureSession>,
-  signal?: AbortSignal,
-): ProviderAttempt<Session> {
-  if ("result" in value) return value as unknown as ProviderAttempt<Session>;
-  return createProviderAttempt(signal, async (custody) => {
-    const fixture = await value;
-    custody.own(sessionResource(fixture));
-    return normalizeSession(fixture);
-  });
-}
-
-function bodyAdapter(adapter: FixtureProviderAdapter): ProviderAdapter {
-  return {
-    ...adapter,
-    start: (input) => attemptForFixtureSession(adapter.start(input), input.signal),
-    ...(adapter.resume === undefined
-      ? {}
-      : {
-          resume: (input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0]) =>
-            attemptForFixtureSession(adapter.resume!(input), input.signal),
-        }),
-  } as ProviderAdapter;
-}
-
-async function driveAkumaBody(
-  launch: BodyLaunch,
-  adapter: FixtureProviderAdapter | undefined,
-  runtime: Parameters<typeof runAkumaBody>[2],
-): Promise<void> {
-  if (adapter === undefined) await runAkumaBody(launch, undefined, runtime);
-  else await runAkumaBody(launch, bodyAdapter(adapter), runtime);
 }
 
 function unresolved<T = never>(): Promise<T> {
   return new Promise<T>(() => undefined);
 }
 
-function hangingSession(fence: string, abort: () => Promise<void> = async () => {}): FixtureSession {
+function hangingSession(fence: string): Session {
   return {
     admission: { fence },
     events: {
@@ -389,15 +326,16 @@ function hangingSession(fence: string, abort: () => Promise<void> = async () => 
       },
     },
     completion: unresolved<TurnResult>(),
-    resource: { abort },
   };
 }
 
-function hangingAdapter(fence: string, abort?: () => Promise<void>, onStart?: () => void): FixtureProviderAdapter {
-  return scenarioProvider(async () => {
-      onStart?.();
-      return hangingSession(fence, abort);
-  });
+function hangingAdapter(fence: string, abort: () => Promise<void> = async () => {}, onStart?: () => void): ProviderAdapter {
+  return scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+    onStart?.();
+    const session = hangingSession(fence);
+    custody.own(sessionResource(session.completion, { abort }));
+    return session;
+  }));
 }
 
 function acpLaunch(allocated: Awaited<ReturnType<typeof allocateAkumaDirectory>>, root: string): BodyLaunch {
@@ -468,10 +406,10 @@ function adapter(
       }>
     >;
   }>,
-): FixtureProviderAdapter {
-  const drive = async (
+): ProviderAdapter {
+  const drive = (
     call: Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
-  ) => {
+  ) => createProviderAttempt(call.signal, async (custody) => {
     const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
     const sessionId = call.session.kind === "fresh" ? "fresh" : call.session.coordinate.sessionId;
     if (sessionId !== "fresh") assert.ok(sessionId);
@@ -482,7 +420,7 @@ function adapter(
       options: call.options,
       session: sessionId,
     });
-    return {
+    const session = {
       admission: { fence: `fixture-${input.starts.length}` },
       events: {
         async *[Symbol.asyncIterator]() {
@@ -491,12 +429,11 @@ function adapter(
         },
       },
       completion: eventsFinished.then(() => input.result),
-      resource: { abort: async () => {}, forceDispose: async () => {} },
     };
-  };
-  return scenarioProvider((input) => sessionAttempt(async () => await drive(input)), {
-    resume: (input) => sessionAttempt(async () => await drive(input)),
+    custody.own(sessionResource(session.completion));
+    return session;
   });
+  return scenarioProvider(drive, { resume: drive });
 }
 
 test("birth observes durable Soul and Body once, without Turn ownership or replay", async (t) => {
@@ -524,7 +461,7 @@ test("birth observes durable Soul and Body once, without Turn ownership or repla
   const launch = claudeBodyLaunch(allocated, root, "work", { birthInitiator: "Submitter", completion: { contractId: "kei/birth" } });
   // Empty publication: birth attribution must not become an opening Turn's owner.
   const { initialBody: _body, ...empty } = launch;
-  await runAkumaBody(empty, undefined, { spawn: noBodyLaunch });
+  await driveAkumaBody(empty, undefined, { spawn: noBodyLaunch });
   const observations = readFileSync(output, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   assert.equal(observations.length, 1);
   assert.deepEqual(observations[0].signal, {
@@ -537,27 +474,27 @@ test("birth observes durable Soul and Body once, without Turn ownership or repla
   assert.equal(observations[0].turn, null);
   assert.equal((await readHeart(allocated.paths)).latestBody?.end, "exited");
   assert.match(readFileSync(allocated.paths.log, "utf8"), /plugin birth failed: plugin birth signal: birth observer failure/u);
-  await runAkumaBody(empty, undefined, { spawn: noBodyLaunch }); // Even a stale launch carrying the seed is not another birth.
-  await runAkumaBody({ paths: allocated.paths }, undefined, { spawn: noBodyLaunch }); // Ordinary wake also stays silent.
+  await driveAkumaBody(empty, undefined, { spawn: noBodyLaunch }); // Even a stale launch carrying the seed is not another birth.
+  await driveAkumaBody({ paths: allocated.paths }, undefined, { spawn: noBodyLaunch }); // Ordinary wake also stays silent.
   assert.equal(readFileSync(output, "utf8").trim().split("\n").length, 1);
 
   const sealed = await allocatedHeart(world, "claude", "b1700002");
   const leash = (await HeldAkumaLeash.try(sealed.paths))!;
   await leash.sealIfUnborn(sealed.paths, { evidence: "sealed", at: new Date().toISOString() });
   leash.release();
-  await runAkumaBody(claudeBodyLaunch(sealed, root, "ignored"), undefined, { spawn: noBodyLaunch });
+  await driveAkumaBody(claudeBodyLaunch(sealed, root, "ignored"), undefined, { spawn: noBodyLaunch });
   assert.equal((await readHeart(sealed.paths)).soul, null);
   assert.equal(readFileSync(output, "utf8").trim().split("\n").length, 1);
 
   const interrupted = await allocatedHeart(world, "claude", "b1700003");
   const failedLaunch = { ...empty, paths: interrupted.paths, seed: { ...empty.seed!, id: interrupted.id } };
   const record = t.mock.method(HeldAkumaLeash.prototype, "recordBody", async () => { throw new Error("lost before Body"); });
-  await assert.rejects(runAkumaBody(failedLaunch, undefined, { spawn: noBodyLaunch }), /lost before Body/u);
+  await assert.rejects(driveAkumaBody(failedLaunch, undefined, { spawn: noBodyLaunch }), /lost before Body/u);
   record.mock.restore();
   const lost = await readHeart(interrupted.paths);
   assert.equal(lost.soul?.id, interrupted.id);
   assert.equal(lost.latestBody, null);
-  await runAkumaBody(failedLaunch, undefined, { spawn: noBodyLaunch });
+  await driveAkumaBody(failedLaunch, undefined, { spawn: noBodyLaunch });
   assert.equal(readFileSync(output, "utf8").trim().split("\n").length, 1);
 });
 
@@ -748,10 +685,10 @@ test("turn-started plugins observe one start per Turn of one Body before each ou
     let started = false;
     let refused = false;
     let first = true;
-    const session = async () => {
+    const session = (input: Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0]) => createProviderAttempt(input.signal, async (custody) => {
       const wasFirst = first;
       first = false;
-      return {
+      const session = {
         admission: { fence: "started-turn" },
         events: {
           async *[Symbol.asyncIterator]() {
@@ -767,9 +704,10 @@ test("turn-started plugins observe one start per Turn of one Body before each ou
           refused = true;
           return { kind: "turn-ended" as const };
         },
-        resource: { abort: async () => {} },
       };
-    };
+      custody.own(sessionResource(session.completion));
+      return session;
+    });
     const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "build it", { initiator: "Alice" }), scenarioProvider(session, { resume: session }), { spawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:00.000Z",
     });
@@ -860,7 +798,7 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
       claudeBodyLaunch(allocated, root, "fourth", { initiator: "Carol" }),
       {
         admitOptions: (options) => ({ kind: "admitted", options }),
-        async start() {
+        start() {
           throw new Error("start must not be reached before a Turn exists");
         },
       },
@@ -891,9 +829,9 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
     let observed = false;
     const tellObserved = () => { observed = true; };
     let sessionStarted = false;
-    const live: FixtureProviderAdapter = scenarioProvider(async () => {
+    const live: ProviderAdapter = scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
         sessionStarted = true;
-        return {
+        const session = {
           admission: { fence: "initial-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
@@ -917,9 +855,10 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
             tellObserved();
             return { kind: "accepted" as const, fence: "live-fence" };
           },
-          resource: { abort: async () => {} },
         };
-    });
+        custody.own(sessionResource(session.completion));
+        return session;
+    }));
     const launch = claudeBodyLaunch(allocated, root, "work", { initiator: "Alice" });
     const leash = (await HeldAkumaLeash.try(allocated.paths))!;
     try {
@@ -976,8 +915,8 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
     let observed = false;
     const tellObserved = () => { observed = true; };
     let sessionStarted = false;
-    const live: FixtureProviderAdapter = scenarioProvider(() => {
-        return sessionAttempt(async () => ({
+    const live: ProviderAdapter = scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+        const session = {
           admission: { fence: "initial-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
@@ -995,9 +934,10 @@ test("a receipt-free live acknowledgement settles the tell in the current Body",
             tellObserved();
             return { kind: "accepted" as const, fence: "turn-1:tell-live" };
           },
-          resource: { abort: async () => {}, forceDispose: async () => {} },
-        }));
-    });
+        };
+        custody.own(sessionResource(session.completion));
+        return session;
+    }));
     body = driveAkumaBody(
       {
         paths: allocated.paths,
@@ -1086,7 +1026,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;
-    const body = runAkumaBody({
+    const body = driveAkumaBody({
       paths: allocated.paths,
       seed: { id: allocated.id, akumaName: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
       initialBody: "work",
@@ -1168,7 +1108,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
       getAgentDir: () => "/agent",
       SessionManager: { create: () => manager, open: () => manager },
     } as unknown as PiSdk;
-    const body = runAkumaBody({
+    const body = driveAkumaBody({
       paths: allocated.paths,
       seed: { id: allocated.id, akumaName: "pi", provider: { name: "pi", kind: "pi" }, options: {}, origin: { kind: "direct" }, cwd: root },
       initialBody: "work",
@@ -1311,9 +1251,9 @@ test("successor Body record before admission failure yields Heart undelivered fo
         const completed = new Promise<Awaited<LiveBodyLaunch["completed"]>>((resolve) => {
           void driveAkumaBody(
             launch,
-            scenarioProvider(async () => {
+            scenarioProvider((input) => createProviderAttempt(input.signal, async () => {
                 throw new Error("native admission refused after body record");
-            }),
+            })),
             { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:02.000Z" },
           ).finally(() => resolve({ diagnostic: "native admission refused after body record" }));
         });
@@ -1463,8 +1403,8 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
     const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      scenarioProvider(async () => {
-          return {
+      scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+          const session = {
             admission: { fence: "launch" },
             events: {
               async *[Symbol.asyncIterator]() {
@@ -1478,14 +1418,15 @@ test("receipt persistence failure aborts the Session and terminates the Body", a
               },
             },
             completion: new Promise<TurnResult>(() => {}),
-            resource: {
-              abort: async () => {
-                aborted = true;
-                releaseEvents();
-              },
-            },
           };
-      }),
+          custody.own(sessionResource(session.completion, {
+            abort: async () => {
+              aborted = true;
+              releaseEvents();
+            },
+          }));
+          return session;
+      })),
       { spawn: noBodyLaunch,
         now: () => "2026-08-08T00:00:00.000Z",
       },
@@ -1596,13 +1537,13 @@ test("pause aborts stalled provider setup and records clean Body settlement", as
     const { promise: started, resolve: setupStarted } = promiseBarrier<void>();
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      scenarioProvider(async (input) => {
+      scenarioProvider((input) => createProviderAttempt(input.signal, async () => {
           setupStarted();
           await new Promise<void>((_resolve, reject) => {
             input.signal.addEventListener("abort", () => reject(input.signal.reason), { once: true });
           });
           throw new Error("unreachable setup continuation");
-      }),
+      })),
       { spawn: noBodyLaunch,
         now: () => "2026-08-08T00:00:00.000Z",
       },
@@ -1761,7 +1702,7 @@ test("kill after a handoff launch starts fences successor admission but permits 
         assert.deepEqual((await readOpenPendingTellDisposition(allocated.paths))?.tellIds, ["pending"]);
         spawn();
         await released;
-        assert.equal(await runAkumaBody(launch, bodyAdapter(successor), { spawn: noBodyLaunch, now }), "held");
+        assert.equal(await driveAkumaBody(launch, successor, { spawn: noBodyLaunch, now }), "held");
         return {
           completed: Promise.resolve({ diagnostic: "fixture leash held", held: true }),
           async cancel() {},
@@ -1804,19 +1745,21 @@ test("public kill supervises an answered Turn until Attempt closure proof", asyn
     const { promise: eventsEnded, resolve: markEventsEnded } = promiseBarrier<void>();
     const { promise: answerSettled, resolve: markAnswerSettled } = promiseBarrier<void>();
     const answer: TurnResult = { kind: "answered", answer: "answer", historyId: "answer-history" };
-    const running = scenarioProvider(async () => ({
-      admission: { fence: "answer-before-close" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "answer-before-close" } };
-          markEventsEnded();
+    const running = scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+      const session = {
+        admission: { fence: "answer-before-close" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "answer-before-close" } };
+            markEventsEnded();
+          },
         },
-      },
-      completion: Promise.resolve(answer).then((result) => {
-        markAnswerSettled();
-        return result;
-      }),
-      resource: {
+        completion: Promise.resolve(answer).then((result) => {
+          markAnswerSettled();
+          return result;
+        }),
+      };
+      custody.own({
         closed,
         abort: async () => {
           aborted += 1;
@@ -1825,7 +1768,8 @@ test("public kill supervises an answered Turn until Attempt closure proof", asyn
           forced += 1;
           releaseClosed();
         },
-      },
+      });
+      return session;
     }));
     body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, { spawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:00.000Z",
@@ -1861,28 +1805,31 @@ test("interrupt supervises an answered Turn until Attempt closure proof", async 
     const allocated = await allocatedHeart(root, "claude", "c0ffee09");
     const { promise: eventsEnded, resolve: markEventsEnded } = promiseBarrier<void>();
     const { promise: answerSettled, resolve: markAnswerSettled } = promiseBarrier<void>();
-    const running = scenarioProvider(async () => ({
-      admission: { fence: "interrupt-before-close" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "interrupt-before-close" } };
-          markEventsEnded();
+    const running = scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+      const session = {
+        admission: { fence: "interrupt-before-close" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "interrupt-before-close" } };
+            markEventsEnded();
+          },
         },
-      },
-      completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "answer", historyId: "answer-history" }).then(
-        (result) => {
-          markAnswerSettled();
-          return result;
-        },
-      ),
-      resource: {
+        completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "answer", historyId: "answer-history" }).then(
+          (result) => {
+            markAnswerSettled();
+            return result;
+          },
+        ),
+      };
+      custody.own({
         closed,
         abort: async () => {
           aborted += 1;
           releaseClosed();
         },
         forceDispose: async () => {},
-      },
+      });
+      return session;
     }));
     body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, { spawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:00.000Z",
@@ -1925,26 +1872,25 @@ test("ordinary wake recovers an interrupt admitted before its caller disappears"
   try {
     const allocated = await allocatedHeart(root, "claude", "c0ffee10");
     const { promise: eventsEnded, resolve: markEventsEnded } = promiseBarrier<void>();
-    const oldProvider = scenarioProvider(async () => ({
-      admission: { fence: "old-body" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "old-body" } };
-          markEventsEnded();
+    const oldProvider = scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+      const session = {
+        admission: { fence: "old-body" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "old-body" } };
+            markEventsEnded();
+          },
         },
-      },
-      completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "old answer", historyId: "old-answer" }),
-      tell: async () => {
-        oldLiveTells += 1;
-        return { kind: "accepted" as const, fence: "old-body" };
-      },
-      resource: {
-        closed,
-        abort: async () => releaseClosed(),
-        forceDispose: async () => releaseClosed(),
-      },
+        completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "old answer", historyId: "old-answer" }),
+        tell: async () => {
+          oldLiveTells += 1;
+          return { kind: "accepted" as const, fence: "old-body" };
+        },
+      };
+      custody.own({ closed, abort: async () => releaseClosed(), forceDispose: async () => releaseClosed() });
+      return session;
     }));
-    body = runAkumaBody(claudeBodyLaunch(allocated, root, "work"), bodyAdapter(oldProvider), { spawn: noBodyLaunch,
+    body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), oldProvider, { spawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:00.000Z",
     });
     await waitUntilLatestBody(allocated.paths, body);
@@ -1963,13 +1909,13 @@ test("ordinary wake recovers an interrupt admitted before its caller disappears"
 
     const delivered: Readonly<{ id: string; text: string }>[] = [];
     const nextProvider = scenarioProvider(
-      async () => {
+      (input) => createProviderAttempt(input.signal, async () => {
         throw new Error("an existing session should be resumed");
-      },
+      }),
       {
-        resume: async (input) => {
+        resume: (input) => createProviderAttempt(input.signal, async (custody) => {
           delivered.push(...input.launchTells);
-          return {
+          const session = {
             admission: { fence: "successor-body" },
             events: {
               async *[Symbol.asyncIterator]() {
@@ -1977,12 +1923,13 @@ test("ordinary wake recovers an interrupt admitted before its caller disappears"
               },
             },
             completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "recovered", historyId: "recovered" }),
-            resource: { closed: Promise.resolve(), abort: async () => {}, forceDispose: async () => {} },
           };
-        },
+          custody.own({ closed: Promise.resolve(), forceDispose: async () => {} });
+          return session;
+        }),
       },
     );
-    await runAkumaBody({ paths: allocated.paths }, bodyAdapter(nextProvider), { spawn: noBodyLaunch,
+    await driveAkumaBody({ paths: allocated.paths }, nextProvider, { spawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:02.000Z",
     });
 
@@ -2007,8 +1954,8 @@ test("pause aborts the current drive and records the body as put down", async ()
     let forced = false;
     const { promise: started, resolve: markStarted } = promiseBarrier<void>();
     const { promise: completion, resolve: settle } = promiseBarrier<TurnResult>();
-    const running: FixtureProviderAdapter = scenarioProvider(async () => {
-        return {
+    const running: ProviderAdapter = scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+        const session = {
           admission: { fence: "pause-fixture-turn" },
           events: {
             async *[Symbol.asyncIterator]() {
@@ -2020,18 +1967,19 @@ test("pause aborts the current drive and records the body as put down", async ()
             },
           },
           completion,
-          resource: {
-            abort: async () => {
-              throw new Error("graceful disposal failed");
-            },
-            forceDispose: async () => {
-              forced = true;
-              aborted = true;
-              settle({ kind: "failed", diagnostic: "paused" });
-            },
-          },
         };
-    });
+        custody.own(sessionResource(completion, {
+          abort: async () => {
+            throw new Error("graceful disposal failed");
+          },
+          forceDispose: async () => {
+            forced = true;
+            aborted = true;
+            settle({ kind: "failed", diagnostic: "paused" });
+          },
+        }));
+        return session;
+    }));
     const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), running, { spawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:00.000Z",
     });
@@ -2056,8 +2004,8 @@ test("forced disposal failure records hung and broke-off before the Body returns
     const { promise: started, resolve: markStarted } = promiseBarrier<void>();
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      scenarioProvider(async () => {
-          return {
+      scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+          const session = {
             admission: { fence: "hung-fixture-turn" },
             events: {
               async *[Symbol.asyncIterator]() {
@@ -2066,16 +2014,17 @@ test("forced disposal failure records hung and broke-off before the Body returns
               },
             },
             completion: new Promise<TurnResult>(() => {}),
-            resource: {
-              abort: async () => {
-                throw new Error("graceful disposal failed");
-              },
-              forceDispose: async () => {
-                throw new Error("forced disposal failed");
-              },
-            },
           };
-      }),
+          custody.own(sessionResource(session.completion, {
+            abort: async () => {
+              throw new Error("graceful disposal failed");
+            },
+            forceDispose: async () => {
+              throw new Error("forced disposal failed");
+            },
+          }));
+          return session;
+      })),
       { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
     );
     await started;
@@ -2152,9 +2101,9 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
     let sessionStarted = false;
     const body = driveAkumaBody(
       claudeBodyLaunch(allocated, root, "work"),
-      scenarioProvider(async () => {
+      scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
           sessionStarted = true;
-          return {
+          const session = {
             admission: { fence: "violating-tell-turn" },
             events: {
               async *[Symbol.asyncIterator]() {
@@ -2168,14 +2117,15 @@ test("a stalled Tell is fenced by Body cancellation before leash release", async
               tellReturned();
               return { kind: "turn-ended" as const };
             },
-            resource: {
-              abort: async () => {
-                aborted = true;
-                settle({ kind: "failed", diagnostic: "paused" });
-              },
-            },
           };
-      }),
+          custody.own(sessionResource(completion, {
+            abort: async () => {
+              aborted = true;
+              settle({ kind: "failed", diagnostic: "paused" });
+            },
+          }));
+          return session;
+      })),
       {
           now: () => new Date().toISOString(),
         async spawn() {
@@ -2241,8 +2191,8 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns cancel w
     });
     await driveAkumaBody(
       { paths: allocated.paths },
-      scenarioProvider(async () => {
-          return {
+      scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
+          const session = {
             admission: { fence: "bad-json" },
             events: {
               async *[Symbol.asyncIterator]() {
@@ -2251,7 +2201,9 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns cancel w
             },
             completion: Promise.resolve({ kind: "answered" as const, answer: "not-json", historyId: "history-bad" }),
           };
-      }),
+          custody.own(sessionResource(session.completion));
+          return session;
+      })),
       { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:02.000Z" },
     );
     const tell = await readTell(allocated.paths, "schema-bad");
@@ -2267,11 +2219,15 @@ test("schema Turn malformed JSON is invalid-output and open bound Turns cancel w
     const { promise: resumeStarted, resolve: resumed } = promiseBarrier<void>();
     const resumableHanging = {
       ...hangingAdapter("g4-open"),
-      async resume() {
-        resumed();
-        return hangingSession("g4-open");
+      resume(input: Parameters<NonNullable<ProviderAdapter["resume"]>>[0]) {
+        return createProviderAttempt(input.signal, async (custody) => {
+          resumed();
+          const session = hangingSession("g4-open");
+          custody.own(sessionResource(session.completion));
+          return session;
+        });
       },
-    } satisfies FixtureProviderAdapter;
+    } satisfies ProviderAdapter;
     const hanging = driveAkumaBody({ paths: allocated.paths }, resumableHanging, { spawn: noBodyLaunch,
       now: () => "2026-08-08T00:00:04.000Z",
     });
@@ -2431,11 +2387,11 @@ test("the model a Turn proved it ran survives narration overflow into Soul and t
     const allocated = await allocatedHeart(root, "claude", "1a2b3c99");
     const launch = claudeBodyLaunch(allocated, root, "first");
     const starts: ProviderOptions[] = [];
-    const drive = async (
+    const drive = (
       call:
         | Parameters<ProviderAdapter["start"]>[0]
         | Parameters<NonNullable<ProviderAdapter["resume"]>>[0],
-    ): Promise<FixtureSession> => {
+    ) => createProviderAttempt(call.signal, async (custody) => {
       starts.push(call.options);
       // A fast native adapter fills the channel before the Body's durable
       // writers consume anything, which is the overflow a slow consumer sees.
@@ -2445,14 +2401,15 @@ test("the model a Turn proved it ran survives narration overflow into Soul and t
       for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 8; index += 1)
         events.emit({ type: "assistant", text: `narration-${index}` });
       events.end();
-      return {
+      const session = {
         admission: { fence: `overflow-${starts.length}` },
         events,
         completion: Promise.resolve<TurnResult>({ kind: "answered", answer: "done" }),
-        resource: { abort: async () => {}, forceDispose: async () => {} },
       };
-    };
-    const provider: FixtureProviderAdapter = scenarioProvider(drive, { resume: drive });
+      custody.own(sessionResource(session.completion));
+      return session;
+    });
+    const provider: ProviderAdapter = scenarioProvider(drive, { resume: drive });
 
     await driveAkumaBody(
       { ...launch, seed: { ...launch.seed!, options: { model: "claude-requested" } } },

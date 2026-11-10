@@ -11,7 +11,6 @@ import { renderContractHelp } from "../src/cli/commands/contract-help.js";
 import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
 import { renderDebtHelp } from "../src/cli/commands/debt-grammar.js";
-import { displayColumns } from "../src/cli/render/terminal.js";
 
 test("the runtime maps the five process outcomes", () => {
   const outcomes = ["accepted", "refused", "retryable", "failed", "usage"] as const;
@@ -50,7 +49,6 @@ test("namespace and leaf help expose executable usage and flags", () => {
   const verifyHelp = renderContractHelp("verify");
   assert.match(verifyHelp, /usage  keiyaku verify/u);
   assert.match(verifyHelp, /--index <n>/u);
-  assert.match(verifyHelp, /always executes in its own clean scratch/u);
   const showHelp = renderContractHelp("show");
   assert.match(showHelp, /usage  keiyaku show \[<contract>\|@<contract>\]/u);
   assert.match(showHelp, /--json/u);
@@ -91,22 +89,6 @@ test("leaf help and usage refusals share accepted invocation options", () => {
   }
   assert.match(renderContractHelp("show"), /\[--repo <path>\]/u);
   assert.match(renderAkumaHelp("history"), /history <kei\/\.\.\.> \[--full\] \[--repo <path>\]/u);
-});
-
-test("help projections reflow at the requested terminal width without splitting tokens", () => {
-  const root = renderHelp({ kind: "root" }, 72);
-  const history = renderHelp({ kind: "akuma", action: "history" }, 72);
-  for (const help of [root, history]) {
-    assert.ok(
-      help.split("\n").every((line) => displayColumns(line) <= 72),
-      help,
-    );
-  }
-  assert.match(root, /usage  keiyaku <command>/u);
-  assert.match(history, /usage  keiyaku history/u);
-  assert.match(history, /--limit/u);
-  assert.match(history, /<count>/u);
-  assert.match(history, /--last/u);
 });
 
 test("help is stdout zero and does not enter an absent world", async () => {

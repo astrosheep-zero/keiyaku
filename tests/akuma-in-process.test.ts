@@ -11,6 +11,7 @@ import { projectFailure, spawnFailureReceipt } from "../src/library/outcome.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import type { BodyLauncher, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
+import { createProviderAttempt } from "../src/akuma/provider.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory, waitForCondition } from "./support/process.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
@@ -389,9 +390,12 @@ test("owned in-process cancellation retires only its own prepared Body", async (
   await Promise.all([initializeHeart(first.paths), initializeHeart(second.paths)]);
   const started = [deferred<void>(), deferred<void>()];
   const finished = [deferred<void>(), deferred<void>()];
-  const adapter = fixtureAdapter(async (input) => {
+  const adapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
     const index = input.body === "first" ? 0 : 1;
+    const abort = async () => { finished[index]!.resolve(); };
+    custody.own({ closed: finished[index]!.promise, abort, forceDispose: abort });
     return {
+      admission: { fence: `in-process-${index}` },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: String(index) } };
@@ -400,13 +404,8 @@ test("owned in-process cancellation retires only its own prepared Body", async (
         },
       },
       completion: finished[index]!.promise.then(() => ({ kind: "answered" as const, answer: input.body })),
-      resource: {
-        abort: async () => {
-          finished[index]!.resolve();
-        },
-      },
     };
-  });
+  }));
   const launches: LiveBodyLaunch[] = [];
   const spawn: BodyLauncher = async (launch) =>
     await launchInProcessBody(

@@ -33,7 +33,7 @@ import { createLiveStatusReader, defaultWaitComplete } from "../src/akuma/akuma-
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { DatabaseSync } from "node:sqlite";
 import { insertActivityFact, finishBodyFact } from "../src/akuma/heart/rows.js";
-import { type ProviderAdapter } from "../src/akuma/provider.js";
+import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { executeAskAkuma } from "../src/akuma/akuma-selection-execution.js";
 import {
   deferred,
@@ -224,16 +224,18 @@ async function withWaitedTellFixture<T>(run: (fixture: WaitedTellFixture) => Pro
 }
 
 function gatedAnswer(gate: Promise<string>, started?: () => void): ProviderAdapter {
-  return fixtureAdapter(async () => ({
-    admission: { fence: "waited-fixture" },
-    events: {
-      async *[Symbol.asyncIterator]() {
-        yield { type: "session" as const, coordinate: { sessionId: "waited-fixture" } };
-        started?.();
+  return fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
+    custody.own({ closed: gate.then(() => undefined), forceDispose: async () => {} });
+    return {
+      admission: { fence: "waited-fixture" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "waited-fixture" } };
+          started?.();
+        },
       },
-    },
-    completion: gate.then((answer) => ({ kind: "answered" as const, answer, historyId: "waited-fixture" })),
-    resource: { abort: async () => {} },
+      completion: gate.then((answer) => ({ kind: "answered" as const, answer, historyId: "waited-fixture" })),
+    };
   }));
 }
 
@@ -463,15 +465,17 @@ test("schema ask decodes JSON and typed failures stay distinct", async () => {
     const mismatch = await born("a1000004", answering('{"ok":1}'));
     assert.deepEqual((await mismatch.akuma.ask("structured", { schema })).kind, "invalid-output");
 
-    const failing: ProviderAdapter = fixtureAdapter(async () => ({
-      admission: { fence: "api-fail" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "api-fail" } };
+    const failing: ProviderAdapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
+      custody.own({ closed: Promise.resolve(), forceDispose: async () => {} });
+      return {
+        admission: { fence: "api-fail" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "api-fail" } };
+          },
         },
-      },
-      completion: Promise.resolve({ kind: "failed" as const, diagnostic: "provider broke" }),
-      resource: { abort: async () => {} },
+        completion: Promise.resolve({ kind: "failed" as const, diagnostic: "provider broke" }),
+      };
     }));
     const failed = await born("a1000005", failing);
     const failedAsk = await failed.akuma.ask("structured", { schema });
@@ -581,20 +585,19 @@ test("idle after kill names the killed life", async () => {
     const held = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const hanging: ProviderAdapter = fixtureAdapter(async () => ({
-      admission: { fence: "api-hang" },
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "api-idle-kill" } };
-          await held;
+    const hanging: ProviderAdapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
+      const abort = async () => { release?.(); };
+      custody.own({ closed: held, abort, forceDispose: abort });
+      return {
+        admission: { fence: "api-hang" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "api-idle-kill" } };
+            await held;
+          },
         },
-      },
-      completion: held.then(() => ({ kind: "answered" as const, answer: "late", historyId: "hang" })),
-      resource: {
-        abort: async () => {
-          release?.();
-        },
-      },
+        completion: held.then(() => ({ kind: "answered" as const, answer: "late", historyId: "hang" })),
+      };
     }));
     await recordTell(allocated.paths, {
       kind: "tell",

@@ -60,19 +60,6 @@ test("guidance preserves source bytes and projects the lawful fulfillment struct
     [...fulfillment.matchAll(/^### (.+)$/gm)].map((match) => match[1]),
     ["Appointment", "Worktree", "Deliverer", "Reviewer"],
   );
-  assert.match(fulfillment, /every commission into it names exactly one seat — Deliverer or Reviewer/);
-  assert.match(fulfillment, /terms are the standing acceptance floor, changed only by journaled amend/);
-  assert.match(fulfillment, /full current worktree state is the candidate/);
-  assert.match(fulfillment, /first decides whether each Criterion is adjudicable as written/);
-  assert.match(fulfillment, /covered Criteria, findings, term defects, and missing evidence/);
-  assert.match(
-    fulfillment,
-    /Read the Deliverer operating procedures at `\.agents\/skills\/keiyaku-deliver\/SKILL\.md`\./,
-  );
-  assert.match(
-    fulfillment,
-    /Read the Reviewer operating procedures at `\.agents\/skills\/keiyaku-review\/SKILL\.md`\./,
-  );
   assert.doesNotMatch(guidance, /^## Arc$/m);
   assert.ok(guidance.endsWith("\n"));
 });

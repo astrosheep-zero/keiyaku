@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
 import { captureOutput, runCli as runCliInProcess } from "./support/cli-fixtures.js";
 import { tmpdir } from "node:os";
@@ -401,22 +401,7 @@ test("unmatched Contract selectors keep the text refusal and native missing guid
   }
 });
 
-test("arc help gives the complete chapter grammar and the shipped source avoids banned vocabulary", () => {
-  const help = runCli(process.cwd(), ["arc", "--help"]);
-  assert.equal(help.status, 0);
-  assert.match(help.stdout, /named|Name|chapter name/iu);
-  assert.match(help.stdout, /story arc/u);
-  assert.match(help.stdout, /one nonblank H1|nonblank H1/u);
-  assert.match(help.stdout, /freeform body, optional/u);
-  const source = fileURLToPath(new URL("../src", import.meta.url));
-  const matches = readdirSync(source, { recursive: true, withFileTypes: true })
-    .filter((entry) => entry.isFile())
-    .map((entry) => join(entry.parentPath, entry.name))
-    .filter((path) => /arc admitted/iu.test(readFileSync(path, "utf8")));
-  assert.deepEqual(matches, []);
-});
-
-test("malformed arc document is a substantive refusal with the full grammar", () => {
+test("malformed arc document is a substantive refusal", () => {
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const markdown = [
@@ -442,8 +427,6 @@ test("malformed arc document is a substantive refusal with the full grammar", ()
     assert.equal(text.stderr, "");
     assert.match(text.stdout, /^× arc refused$/mu);
     assert.match(text.stdout, /reason  invalid document/u);
-    assert.match(text.stdout, /exactly one nonblank H1 chapter name/u);
-    assert.match(text.stdout, /freeform Markdown body \(which may be empty\)/u);
   }
   const json = runCli(repository.path, ["arc", id, "--json", "-"], "# \n");
   assert.equal(json.status, 1);

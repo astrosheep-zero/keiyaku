@@ -449,8 +449,9 @@ test("a failed Heart refresh releases the observation's free leash claim", async
   }
 });
 
-const provider: ProviderAdapter = fixtureAdapter(async () => {
+const provider: ProviderAdapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
   const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
+  custody.own({ closed: eventsFinished, forceDispose: async () => {} });
   return {
     admission: { fence: "public-fixture-turn" },
     events: {
@@ -465,16 +466,16 @@ const provider: ProviderAdapter = fixtureAdapter(async () => {
       answer: "public answer",
       historyId: "public-history",
     })),
-    resource: { abort: async () => {} },
   };
-});
+}));
 
 test("turn owner folds a rejected completion while the event stream remains open", async () => {
   const root = await World.at(mkdtempSync(join(tmpdir(), "keiyaku-akuma-completion-rejection-")));
   const deferred = configureDeferredBodyEndPlugin(root);
   writeFileSync(deferred.release, "release\n");
   const { promise: completion, reject: rejectCompletion } = promiseBarrier<never>();
-  const rejecting: ProviderAdapter = fixtureAdapter(async () => {
+  const rejecting: ProviderAdapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
+    custody.own({ closed: completion.then(() => undefined, () => undefined), forceDispose: async () => {} });
     queueMicrotask(() => rejectCompletion(new Error("completion rejected")));
     return {
       admission: { fence: "completion-rejection" },
@@ -484,9 +485,8 @@ test("turn owner folds a rejected completion while the event stream remains open
         },
       },
       completion,
-      resource: { abort: async () => {} },
     };
-  });
+  }));
   let driving: ReturnType<typeof driveAkumaBody> | undefined;
   try {
     const world = await World.at(root);
@@ -1268,8 +1268,9 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   const root = temporaryDirectory(context, "keiyaku-akuma-no-fork-point-");
   const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "f0a10006" });
   await initializeHeart(allocated.paths);
-  const noPointProvider: ProviderAdapter = fixtureAdapter(async () => {
+  const noPointProvider: ProviderAdapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
     const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
+    custody.own({ closed: eventsFinished, forceDispose: async () => {} });
     return {
       admission: { fence: "no-point-turn" },
       events: {
@@ -1282,9 +1283,8 @@ test("an answered Turn without a fork point remains visible and keeps its answer
         kind: "answered" as const,
         answer: "complete without fork",
       })),
-      resource: { abort: async () => {} },
     };
-  });
+  }));
   await driveAkumaBody(
     {
       paths: allocated.paths,
@@ -2265,24 +2265,25 @@ test("kill gives the Body a grace window to abort its owned provider session", a
   let aborted = false;
   const { promise: completion, resolve: settle } = promiseBarrier<{ kind: "failed"; diagnostic: string }>();
   const { promise: started, resolve: markStarted } = promiseBarrier<void>();
-  const running: ProviderAdapter = fixtureAdapter(async () => ({
-    admission: { fence: "kill-fixture-turn" },
-    events: {
-      async *[Symbol.asyncIterator]() {
-        markStarted();
-        while (!aborted) {
-          yield { type: "note" as const, text: "Working" };
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
+  const running: ProviderAdapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
+    const abort = async () => {
+      aborted = true;
+      settle({ kind: "failed", diagnostic: "stopped" });
+    };
+    custody.own({ closed: completion.then(() => undefined), abort, forceDispose: abort });
+    return {
+      admission: { fence: "kill-fixture-turn" },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          markStarted();
+          while (!aborted) {
+            yield { type: "note" as const, text: "Working" };
+            await new Promise((resolve) => setTimeout(resolve, 10));
+          }
+        },
       },
-    },
-    completion,
-    resource: {
-      abort: async () => {
-        aborted = true;
-        settle({ kind: "failed", diagnostic: "stopped" });
-      },
-    },
+      completion,
+    };
   }));
   const launch: BodyLaunch = {
     paths: allocated.paths,

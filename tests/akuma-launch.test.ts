@@ -13,8 +13,8 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch, BodyLauncher } from "../src/akuma/body-launch.js";
 import { Schema } from "../src/akuma/schema.js";
-import { fixtureAdapter, fixtureAttempt } from "./support/akuma-tell.js";
-import type { DriveInput, ProviderAdapter } from "../src/akuma/provider.js";
+import { fixtureAdapter } from "./support/akuma-tell.js";
+import { createProviderAttempt, type DriveInput, type ProviderAdapter } from "../src/akuma/provider.js";
 import { deferred } from "./support/process.js";
 import { World } from "../src/world.js";
 
@@ -27,11 +27,14 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
   const bodies: Promise<unknown>[] = [];
   const submissions: string[] = [];
   let nestedId: string | undefined;
-  const adapter = fixtureAdapter(async (input) => {
+  const adapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
     const text = input.launchTells[0]!.text;
     submissions.push(text);
     const answer = deferred<string>();
+    const abort = async () => { answer.resolve("canceled"); };
+    custody.own({ closed: answer.promise.then(() => undefined), abort, forceDispose: abort });
     return {
+      admission: { fence: `launch-${text}` },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: `session-${text}` } };
@@ -58,13 +61,8 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
         },
       },
       completion: answer.promise.then((value) => ({ kind: "answered" as const, answer: value })),
-      resource: {
-        abort: async () => {
-          answer.resolve("canceled");
-        },
-      },
     };
-  });
+  }));
   const spawn: BodyLauncher = async (launch) => {
     launches.push(launch);
     const body = driveAkumaBody(launch, adapter, { spawn, world });
@@ -117,11 +115,14 @@ test("the composed launcher also owns ordinary wake and authorized succession", 
   const bodies: Promise<unknown>[] = [];
   const inputs: string[] = [];
   const drive = (input: DriveInput) =>
-    fixtureAttempt(input, async () => {
+    createProviderAttempt(input.signal, async (custody) => {
       const text = input.launchTells[0]!.text;
       inputs.push(text);
       const finished = text === "first" ? retired.promise : Promise.resolve();
+      const abort = async () => { retired.resolve(); };
+      custody.own({ closed: finished, abort, forceDispose: abort });
       return {
+        admission: { fence: `succession-${text}` },
         events: {
           async *[Symbol.asyncIterator]() {
             yield { type: "session" as const, coordinate: { sessionId: "succession-session" } };
@@ -130,11 +131,6 @@ test("the composed launcher also owns ordinary wake and authorized succession", 
           },
         },
         completion: finished.then(() => ({ kind: "answered" as const, answer: text })),
-        resource: {
-          abort: async () => {
-            retired.resolve();
-          },
-        },
       };
     });
   const adapter: ProviderAdapter = {

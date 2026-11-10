@@ -13,6 +13,7 @@ import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { readAkumaTimeline } from "../src/akuma/akuma.js";
 import { beginTurn, endTurn, finishBodyIfIdle, readTell, recordTell } from "../src/akuma/heart/index.js";
+import { createProviderAttempt } from "../src/akuma/provider.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { bornBody } from "./support/akuma-fixtures.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
@@ -111,25 +112,25 @@ test(
       received = resolve;
     });
     const steers: string[] = [];
-    const adapter = fixtureAdapter(async () => ({
-      events: {
-        async *[Symbol.asyncIterator]() {
-          yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
-          started();
-          await released;
+    const adapter = fixtureAdapter(input => createProviderAttempt(input.signal, async (custody) => {
+      const abort = async () => { release(); };
+      custody.own({ closed: released, abort, forceDispose: abort });
+      return {
+        admission: { fence: "live-turn" },
+        events: {
+          async *[Symbol.asyncIterator]() {
+            yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
+            started();
+            await released;
+          },
         },
-      },
-      completion: released.then(() => ({ kind: "answered" as const, answer: "done", historyId: "answer" })),
-      async tell(input) {
-        steers.push(input.id);
-        if (steers.length === 2) received();
-        return { kind: "accepted" as const, fence: input.id };
-      },
-      resource: {
-        abort: async () => {
-          release();
+        completion: released.then(() => ({ kind: "answered" as const, answer: "done", historyId: "answer" })),
+        async tell(input) {
+          steers.push(input.id);
+          if (steers.length === 2) received();
+          return { kind: "accepted" as const, fence: input.id };
         },
-      },
+      };
     }));
     const runtime = { spawn: noBodyLaunch, now: () => AT };
     const opening = harnessOwner({ channel: "pi", session: "opening" });
@@ -190,24 +191,23 @@ test(
     const closed = deferred<void>();
     const canceledBody = driveAkumaBody(
       { paths: canceled.allocated.paths, initialBody: "cancel me", initiator: opening },
-      fixtureAdapter(async () => ({
-        events: {
-          async *[Symbol.asyncIterator]() {
-            canceledStarted.resolve();
-            await closed.promise;
+      fixtureAdapter(input => createProviderAttempt(input.signal, async (custody) => {
+        const abort = async () => { closed.resolve(); };
+        custody.own({ closed: closed.promise, abort, forceDispose: abort });
+        return {
+          admission: { fence: "canceled-turn" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              canceledStarted.resolve();
+              await closed.promise;
+            },
           },
-        },
-        completion: new Promise<never>(() => {}),
-        async tell(input) {
-          bound.resolve();
-          return { kind: "accepted" as const, fence: input.id };
-        },
-        resource: {
-          closed: closed.promise,
-          abort: async () => {
-            closed.resolve();
+          completion: new Promise<never>(() => {}),
+          async tell(input) {
+            bound.resolve();
+            return { kind: "accepted" as const, fence: input.id };
           },
-        },
+        };
       })),
       runtime,
     );

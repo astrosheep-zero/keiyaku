@@ -7,41 +7,10 @@ import { HeldAkumaLeash, initializeHeart } from "../../src/akuma/heart/index.js"
 import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
 import {
   createProviderAttempt,
-  type DriveInput,
   type ProviderAdapter,
-  type Session,
 } from "../../src/akuma/provider.js";
 import { World, type WorldRoot } from "../../src/world.js";
 import { noBodyLaunch } from "./akuma-fixtures.js";
-
-type FixtureResource = Readonly<{
-  closed?: Promise<void>;
-  abort?: () => Promise<void>;
-  forceDispose?: () => Promise<void>;
-}>;
-
-type FixtureSession = Omit<Session, "admission"> &
-  Readonly<{ admission?: Session["admission"]; resource?: FixtureResource }>;
-
-export function fixtureAttempt(
-  input: Readonly<{ signal: AbortSignal }>,
-  establish: () => Promise<FixtureSession>,
-  fence = "tell-fixture-turn",
-) {
-  return createProviderAttempt(input.signal, async (custody) => {
-    const fixture = await establish();
-    const { admission, resource, ...session } = fixture;
-    custody.own({
-      closed: resource?.closed ?? fixture.completion.then(() => undefined, () => undefined),
-      ...(resource?.abort === undefined ? {} : { abort: resource.abort }),
-      forceDispose: resource?.forceDispose ?? resource?.abort ?? (async () => undefined),
-    });
-    return {
-      ...session,
-      admission: admission ?? { fence },
-    };
-  });
-}
 
 export function answering(answer: string): ProviderAdapter {
   return {
@@ -49,16 +18,18 @@ export function answering(answer: string): ProviderAdapter {
       return { kind: "admitted", options };
     },
     start(input) {
-      return fixtureAttempt(input, async () => ({
-        admission: { fence: "tell-answer" },
-        events: {
-          async *[Symbol.asyncIterator]() {
-            yield { type: "session" as const, coordinate: { sessionId: "tell-session" } };
+      return createProviderAttempt(input.signal, async (custody) => {
+        custody.own({ closed: Promise.resolve(), forceDispose: async () => {} });
+        return {
+          admission: { fence: "tell-answer" },
+          events: {
+            async *[Symbol.asyncIterator]() {
+              yield { type: "session" as const, coordinate: { sessionId: "tell-session" } };
+            },
           },
-        },
-        completion: Promise.resolve({ kind: "answered" as const, answer, historyId: "tell-history" }),
-        resource: { abort: async () => {} },
-      }));
+          completion: Promise.resolve({ kind: "answered" as const, answer, historyId: "tell-history" }),
+        };
+      });
     },
   };
 }
@@ -118,10 +89,7 @@ export async function bornWorld(root: string, suffix: string, spawn: BodyLaunche
   return { world, allocated, akuma: akumaWithLauncher(world, allocated.id, spawn) };
 }
 
-/** A fresh admitting adapter; session custody still uses the real ProviderAttempt. */
-export function fixtureAdapter(establish: (input: DriveInput) => Promise<FixtureSession>): ProviderAdapter {
-  return {
-    admitOptions: (options) => ({ kind: "admitted", options }),
-    start: (input) => fixtureAttempt(input, () => establish(input)),
-  };
+/** Add option admission to a native provider start. */
+export function fixtureAdapter(start: ProviderAdapter["start"]): ProviderAdapter {
+  return { admitOptions: (options) => ({ kind: "admitted", options }), start };
 }

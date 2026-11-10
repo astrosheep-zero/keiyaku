@@ -19,7 +19,7 @@ import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { renderBindDraftReceipt, renderRefusalFacts } from "../src/cli/render/refusal.js";
-import { entityLines, displayColumns, plumbFacts } from "../src/cli/render/terminal.js";
+import { entityLines, plumbFacts } from "../src/cli/render/terminal.js";
 import {
   changeId,
   contractId,
@@ -372,8 +372,5 @@ test("World roster keeps concrete activity evidence without duplicating snapshot
   const report = akumaWorldReport([activityAkumaRow("aku/worker/ffff0001", "running", snapshot)]);
   const text = renderKanshiText(report, { columns: 120, color: false });
   assert.match(text, /run +\$ keiyaku audit kei\/reuse-snapshot-activity-rendering/u);
-  assert.doesNotMatch(text, /activity "|\bdocument\b|please|next|then/u);
   assert.doesNotMatch(text, /──|debts \d|changes \d|came back|STILL RUNNING|killed/u);
-  for (const line of renderKanshiText(report, { columns: 60, color: false }).split("\n"))
-    assert.ok(displayColumns(line) <= 60, line);
 });

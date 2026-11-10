@@ -879,9 +879,12 @@ test("wait ignores a Dispatch published during polling", { timeout: 15_000 }, as
   });
   const started = promiseBarrier<void>();
   const finish = promiseBarrier<void>();
-  const adapter = fixtureAdapter(async () => {
+  const adapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
+    const abort = async () => { finish.resolve(); };
+    custody.own({ closed: finish.promise, abort, forceDispose: abort });
     started.resolve();
     return {
+      admission: { fence: "waiting-turn" },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: "waiting" } };
@@ -892,13 +895,8 @@ test("wait ignores a Dispatch published during polling", { timeout: 15_000 }, as
         answer: "done",
         historyId: "waiting-history",
       })),
-      resource: {
-        abort: async () => {
-          finish.resolve();
-        },
-      },
     };
-  });
+  }));
   const bodies: Promise<unknown>[] = [];
   const spawn = fixtureLauncher(
     bodies,

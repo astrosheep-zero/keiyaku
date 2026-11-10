@@ -223,9 +223,11 @@ test("spawn and fork results describe real creation and refusal", async (context
   mkdirSync(join(home, "akumas"), { recursive: true });
   writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   const bodies: Promise<unknown>[] = [];
-  const adapter = fixtureAdapter(async () => {
+  const adapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
     const finished = deferred<void>();
+    custody.own({ closed: finished.promise, forceDispose: async () => {} });
     return {
+      admission: { fence: "source-turn" },
       events: {
         async *[Symbol.asyncIterator]() {
           yield { type: "session" as const, coordinate: { sessionId: "source-session" } };
@@ -237,9 +239,8 @@ test("spawn and fork results describe real creation and refusal", async (context
         answer: "done",
         historyId: "native-history",
       })),
-      resource: { abort: async () => {} },
     };
-  });
+  }));
   const launcher: BodyLauncher = (launch) =>
     fixtureLauncher(bodies, new Map([[launch.paths.directory, { adapter, now: "2026-08-10T00:00:00.000Z" }]]))(launch);
   const akumas = akumasWithLauncher(fixture.world, launcher);
