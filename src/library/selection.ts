@@ -158,10 +158,7 @@ async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): 
   const composed = (await placementDischarged(repo)(contract))
     ? { ...status, timeline: withoutReportedChanges(status.timeline) }
     : status;
-  const changes = composed.timeline.reportedChanges.map(({ path, diffstat }) => ({
-    path,
-    ...(diffstat === undefined ? {} : { diffstat }),
-  }));
+  const changes = composed.timeline.reportedChanges;
   return {
     kind: "akuma",
     id: status.id,
@@ -170,6 +167,7 @@ async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): 
     provider: status.provider,
     ...(status.model === undefined ? {} : { model: status.model }),
     timeline: projectStatusTimeline(composed.timeline),
+    ...(status.lastActivityAt === undefined ? {} : { lastActivityAt: status.lastActivityAt }),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
     ...(contract.kind === "none" ? {} : { contract }),
     ...(createdDebts.kind === "failed"
@@ -179,6 +177,9 @@ async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): 
         : { createdDebts: createdDebts.rows }),
     ...(changes.length === 0 ? {} : { changes }),
     ...(composed.timeline.reportedChangesOmitted === 0 ? {} : { moreChanges: true }),
+    ...(composed.timeline.reportedChangesOutside === undefined
+      ? {}
+      : { outsideChanges: composed.timeline.reportedChangesOutside }),
   };
 }
 

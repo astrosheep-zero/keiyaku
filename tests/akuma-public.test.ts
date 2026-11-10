@@ -547,7 +547,7 @@ type MutableProvider = {
 
 function snapshot(
   ledger: TurnLedger,
-  budget?: Readonly<{ tail: number; voice?: number }>,
+  budget?: Readonly<{ tail: number }>,
   aperture: "monitoring" | "receipt" = "receipt",
 ): ActivitySnapshot {
   return selectSnapshot(ledger, { aperture, ...(budget === undefined ? {} : { budget }) }).snapshot;
@@ -696,11 +696,11 @@ test("open snapshots retain one current-Turn opening input outside the ordinary 
     activityFact(10, 4, "2026-08-10T00:00:10.000Z", { type: "thought", text: "five" }),
     activityFact(11, 4, "2026-08-10T00:00:11.000Z", { type: "note", text: "six" }),
   ]);
-  const zero = selectSnapshot(callLedger, { aperture: "receipt", budget: { tail: 0, voice: 0 } });
+  const zero = selectSnapshot(callLedger, { aperture: "receipt", budget: { tail: 0 } });
   assert.equal(zero.snapshot.kind, "open");
   if (zero.snapshot.kind === "open") {
     assert.equal(zero.snapshot.openingSequence, 5);
-    assert.deepEqual(snapshotSequences(zero.snapshot), [5, 6, "gap:2", 9, "gap:2"]);
+    assert.deepEqual(snapshotSequences(zero.snapshot), [5, "gap:3", 9, "gap:2"]);
   }
   assert.equal(zero.ordinaryCount, 0);
 
@@ -711,10 +711,10 @@ test("open snapshots retain one current-Turn opening input outside the ordinary 
     assert.equal(snapshotSequences(defaultBudget.snapshot).filter((sequence) => sequence === 5).length, 1);
     assert.equal(snapshotSequences(defaultBudget.snapshot).includes(2), false);
   }
-  assert.equal(defaultBudget.ordinaryCount, 4);
+  assert.equal(defaultBudget.ordinaryCount, 3);
 });
 
-test("open snapshots protect settled says but select file changes as ordinary tools", () => {
+test("open snapshots protect the latest say but select file changes as ordinary tools", () => {
   const completedTool = (sequence: number, id: string, call: ToolCall) =>
     activityFact(sequence, 1, `2026-08-10T00:00:${String(sequence).padStart(2, "0")}.000Z`, {
       type: "tool",
@@ -737,18 +737,18 @@ test("open snapshots protect settled says but select file changes as ordinary to
       changes: [{ op: "update", path: "src/two.ts", diffstat: { added: 4, removed: 2 } }],
     }),
   ]);
-  const zero = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0, voice: 0 } });
+  const zero = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0 } });
 
   assert.equal(zero.snapshot.kind, "open");
   if (zero.snapshot.kind === "open") {
-    assert.deepEqual(snapshotSequences(zero.snapshot), [2, "gap:1", 4, "gap:2", 7, "gap:1"]);
+    assert.deepEqual(snapshotSequences(zero.snapshot), [2, "gap:4", 7, "gap:1"]);
   }
   assert.equal(zero.ordinaryCount, 0);
 
-  const selected = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 1, voice: 0 } });
+  const selected = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 1 } });
   assert.equal(selected.snapshot.kind, "open");
   if (selected.snapshot.kind === "open") {
-    assert.deepEqual(snapshotSequences(selected.snapshot), [2, "gap:1", 4, "gap:2", 7, 8]);
+    assert.deepEqual(snapshotSequences(selected.snapshot), [2, "gap:4", 7, 8]);
     const edit = selected.snapshot.entries.find((entry) => entry.kind === "row" && entry.row.sequence === 8);
     assert.equal(edit?.kind, "row");
     if (edit?.kind === "row" && edit.row.kind === "tool" && edit.row.call.kind === "fileChange") {
@@ -801,7 +801,7 @@ test("open snapshots select the retained launch Tell only without a current-Turn
     },
     activityFact(8, 4, "2026-08-10T00:00:08.000Z", { type: "note", text: "still working" }),
   ];
-  const launch = selectSnapshot(projectTurns(facts), { aperture: "receipt", budget: { tail: 0, voice: 0 } });
+  const launch = selectSnapshot(projectTurns(facts), { aperture: "receipt", budget: { tail: 0 } });
   assert.equal(launch.snapshot.kind, "open");
   if (launch.snapshot.kind === "open") {
     assert.equal(launch.snapshot.openingSequence, 1);
@@ -835,14 +835,14 @@ test("open snapshots select the retained launch Tell only without a current-Turn
       { kind: "turn-start" as const, sequence: 2, bodySequence: 1, startedAt: "2026-08-10T00:00:02.000Z" },
       { kind: "call" as const, sequence: 3, turnSequence: 2, at: "2026-08-10T00:00:03.000Z", body: "call wins" },
     ]),
-    { aperture: "receipt", budget: { tail: 0, voice: 0 } },
+    { aperture: "receipt", budget: { tail: 0 } },
   ).snapshot;
   assert.equal(callWins.kind, "open");
   if (callWins.kind === "open") assert.equal(callWins.openingSequence, 3);
 
   const liveOnly = selectSnapshot(
     projectTurns(facts.filter((fact) => fact.kind !== "tell" || fact.id === "other-turn" || fact.id === "live")),
-    { aperture: "receipt", budget: { tail: 0, voice: 0 } },
+    { aperture: "receipt", budget: { tail: 0 } },
   ).snapshot;
   assert.equal(liveOnly.kind, "open");
   if (liveOnly.kind === "open") assert.equal(liveOnly.openingSequence, undefined);
@@ -895,14 +895,14 @@ test("opening input composes with existing actionable and receipt pins without a
       ],
     },
   ]);
-  const monitoring = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0, voice: 0 } });
+  const monitoring = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 0 } });
   assert.equal(monitoring.snapshot.kind, "open");
   if (monitoring.snapshot.kind === "open") {
     assert.equal(monitoring.snapshot.openingSequence, 1);
     assert.deepEqual(snapshotSequences(monitoring.snapshot), [1, 3, "gap:1", 5, 6, "gap:1"]);
   }
   assert.equal(monitoring.ordinaryCount, 0);
-  const budgeted = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 1, voice: 0 } });
+  const budgeted = selectSnapshot(ledger, { aperture: "monitoring", budget: { tail: 1 } });
   assert.equal(budgeted.snapshot.kind, "open");
   if (budgeted.snapshot.kind === "open")
     assert.deepEqual(snapshotSequences(budgeted.snapshot), [1, 3, "gap:1", 5, 6, 7]);
@@ -910,7 +910,7 @@ test("opening input composes with existing actionable and receipt pins without a
   const receipt = selectSnapshot(ledger, {
     aperture: "receipt",
     admittedTellId: "receipt",
-    budget: { tail: 0, voice: 0 },
+    budget: { tail: 0 },
   }).snapshot;
   assert.equal(receipt.kind, "open");
   if (receipt.kind === "open") {
@@ -1174,7 +1174,7 @@ test("reported file changes keep the newest five independently of ordinary omiss
     activityFact(7, 1, "2026-08-10T00:00:07.000Z", { type: "note" as const, text: "ordinary two" }),
     activityFact(8, 1, "2026-08-10T00:00:08.000Z", { type: "note" as const, text: "ordinary three" }),
   ]);
-  const view = snapshot(ledger, { tail: 0, voice: 0 });
+  const view = snapshot(ledger, { tail: 0 });
   assert.equal(view.kind, "open");
   assert.deepEqual(
     view.reportedChanges.map((change) => change.path),

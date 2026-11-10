@@ -18,6 +18,7 @@ import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-to
 import { dispositionText } from "./debt.js";
 import { debtDispositionMark } from "./marks.js";
 import {
+  ageText,
   DEFAULT_CLI_COLUMNS,
   diagnosticLines,
   displayColumns,
@@ -949,12 +950,13 @@ type CreatedDebtRow = Extract<NonNullable<AkumaObservation["createdDebts"]>, rea
 
 function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
   const changes = view.changes ?? [];
-  if (changes.length === 0 && view.moreChanges !== true) return [];
+  if (changes.length === 0 && view.moreChanges !== true && view.outsideChanges === undefined) return [];
   const width = changes.reduce((max, change) => Math.max(max, renderDiffstat(change.diffstat).length), 0);
   return [
     "changes",
     ...changes.map((change) => `  ${renderDiffstat(change.diffstat).padEnd(width)}  ${safeText(change.path)}`),
     ...(view.moreChanges === true ? [`  ${OMISSION} more files`] : []),
+    ...(view.outsideChanges === undefined ? [] : [`  ${view.outsideChanges} outside worktree`]),
   ];
 }
 
@@ -985,36 +987,22 @@ type SnapshotCoreOptions = Readonly<{
 }>;
 
 function selectedStatusActivity(snapshot: CompactTimeline, context: TextRenderContext): readonly string[] {
-  const rendered = (snapshot.entries ?? []).map((entry) => {
-    if (entry.kind === "gap") return { exempt: true, omitted: true, lines: [] };
-    const exempt =
-      entry.kind === "answered" ||
-      entry.kind === "failed" ||
-      entry.kind === "canceled" ||
-      entry.kind === "pending-tell" ||
-      (entry.kind === "tool" && (typeof entry.state === "string" || entry.state.status === "error"));
+  let omitted = false;
+  let marked = false;
+  return (snapshot.entries ?? []).flatMap((entry) => {
+    if (entry.kind === "gap") {
+      omitted = true;
+      return [];
+    }
     const row: PresentationRow =
       entry.kind === "answered" || entry.kind === "failed" || entry.kind === "canceled"
         ? { kind: "outcome", outcome: entry }
         : entry;
-    return { exempt, omitted: false, lines: renderRow(row, context) };
-  });
-  // Allocate the budget backwards without changing the order of the resulting lines.
-  let remaining = 3;
-  for (let i = rendered.length - 1; i >= 0; i -= 1) {
-    const item = rendered[i]!;
-    if (item.exempt) continue;
-    const take = Math.min(remaining, item.lines.length);
-    remaining -= take;
-    item.omitted = take < item.lines.length;
-    item.lines = take === 0 ? [] : item.lines.slice(-take);
-  }
-  let marked = false;
-  return rendered.flatMap((item) => {
-    const marker = item.omitted && !marked ? [omissionMarker("earlier activity omitted", context.columns)] : [];
-    if (item.omitted) marked = true;
-    if (item.lines.length > 0) marked = false;
-    return [...marker, ...item.lines];
+    const lines = renderRow(row, context);
+    if (lines.length === 0) return [];
+    const marker = omitted && !marked ? [omissionMarker("earlier activity in history", context.columns)] : [];
+    if (omitted) marked = true;
+    return [...marker, ...lines];
   });
 }
 
@@ -1024,7 +1012,14 @@ function snapshotCore(
   options: SnapshotCoreOptions,
 ): Readonly<{ activity: readonly string[]; head: readonly string[]; facts: readonly string[] }> {
   const activity = selectedStatusActivity(view.timeline, context);
-  const contextFacts = [safeText(view.cwd)];
+  const contextFacts = [
+    safeText(view.cwd),
+    ...(view.lastActivityAt === undefined
+      ? []
+      : [
+          `${view.life} · last activity ${ageText(view.lastActivityAt, new Date(context.now ?? Date.now()).toISOString())} ago`,
+        ]),
+  ];
   const facts = [
     ...contractFacts(view.contract ?? { kind: "none" }, context.columns - SUBORDINATE_INDENT.length),
     ...(options.facts ?? []),

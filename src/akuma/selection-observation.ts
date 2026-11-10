@@ -24,6 +24,7 @@ export const akumaObservationSchema = z
     provider: z.string(),
     model: z.string().exactOptional(),
     timeline: compactTimelineSchema,
+    lastActivityAt: z.string().exactOptional(),
     strandedReason: z.literal("resume-unsupported").exactOptional(),
     contract: z.union([dispatchAssociationSchema.options[1], dispatchAssociationSchema.options[2]]).exactOptional(),
     createdDebts: z
@@ -42,6 +43,7 @@ export const akumaObservationSchema = z
       .readonly()
       .exactOptional(),
     moreChanges: z.literal(true).exactOptional(),
+    outsideChanges: z.number().int().positive().exactOptional(),
   })
   .readonly();
 // A wait reports the settled outcome, not the timeline row that carries its event coordinates.

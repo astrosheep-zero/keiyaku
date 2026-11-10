@@ -207,6 +207,7 @@ const reportedFileChangeSchema = z
 const reportedChangeFields = {
   reportedChanges: z.array(reportedFileChangeSchema).readonly(),
   reportedChangesOmitted: countSchema,
+  reportedChangesOutside: countSchema.exactOptional(),
 };
 const openActivitySnapshotSchema = z
   .object({
@@ -656,4 +657,4 @@ export function projectTurns(
   return finishLedger(state, retained);
 }
 
-export { ordinarySnapshotBudget, selectHistory, selectSnapshot, withoutReportedChanges } from "./projection-read.js";
+export { DEFAULT_TAIL, selectHistory, selectSnapshot, withoutReportedChanges } from "./projection-read.js";

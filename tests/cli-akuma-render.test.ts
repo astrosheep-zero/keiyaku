@@ -124,51 +124,6 @@ test("status panel puts static coordinates above the timeline and dynamic facts 
   assert.equal(lines.filter((line) => line.startsWith("!")).length, 0, "a diagnostic never becomes a bare static fact");
 });
 
-test("selected status keeps the last three rendered activity lines, not three events", () => {
-  const id = "aku/worker/abcd1234";
-  const say = (sequence: number, text: string): OpenSnapshotRow => ({
-    kind: "said",
-    sequence,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text,
-  });
-  const render = (rows: readonly OpenSnapshotRow[]) =>
-    snapshotText(observation(running(id, rows)), { columns: 40, color: false });
-  assert.doesNotMatch(render([]), /omitted/u);
-  assert.doesNotMatch(render([say(1, "only")]), /omitted/u);
-  const text = render([say(1, "old one\nold two"), say(2, "new 👩‍💻\nnew two")]);
-  assert.match(text, /earlier activity omitted/u);
-  assert.doesNotMatch(text, /old one/u);
-  assert.match(text, /old two\n▎ new 👩‍💻\n▎ new two/u);
-  assert.match(text, /● running/u);
-});
-
-test("selected status merges gaps and budgeted-away speech into one omission run", () => {
-  const view: AkumaObservation = {
-    ...observation(running("aku/worker/abcd1234", [])),
-    timeline: {
-      kind: "open",
-      entries: [
-        ...Array.from({ length: 30 }, (_, index) => [
-          { kind: "gap" as const },
-          { kind: "said" as const, text: `old ${index}` },
-        ]).flat(),
-        { kind: "said", text: "last one" },
-        { kind: "said", text: "last two" },
-        { kind: "said", text: "last three" },
-      ],
-    },
-  };
-  const lines = snapshotText(view, { columns: 40, color: false }).split("\n");
-  assert.deepEqual(lines.slice(3, -1), [
-    "   ···    earlier activity omitted",
-    "▎ last one",
-    "▎ last two",
-    "▎ last three",
-  ]);
-});
-
 test("speech uses the rail without a label or quotes and wraps at a grapheme boundary", () => {
   const row: ActivityRow = {
     kind: "said",

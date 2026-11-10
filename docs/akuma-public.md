@@ -45,15 +45,19 @@ is unnamed returns the model to unknown. Descriptive birth origin, caller,
 provider environment, opaque configuration and system prompts remain outside
 this actionable status. A standalone handle may retain its frozen birth
 observation; composed addressed status answers current work without repeating it.
-A status snapshot shows current actionable work: active tools, settled narration
-and admitted input for open work, pending tells, and otherwise the latest
-outcome. It omits historical event coordinates and thoughts from selected detail;
+A status snapshot shows current actionable work: active tools, the latest settled
+narration and admitted input for open work, pending tells, and otherwise the
+latest outcome. Its latest retained activity time is observation evidence for
+every life state, absent when no row remains and never inferred from a Turn
+opening. It omits historical event coordinates and thoughts from selected detail;
 exact history retains them. Bounded ordinary detail can become typed gaps, but
-active work and actionable tells remain visible. Reported changes are a read-time summary of successful file-change
-activity on that same frontier, grouped by path and bounded to the five most
-recently changed files. Repeated edits to one path become one summary with
-accumulated known diffstat; omitted counts refer
-to files, not events. They are never a file ledger or fact.
+active work, tool failures and actionable tells remain visible. Reported changes
+are a read-time summary of successful file-change activity on that same frontier,
+grouped by path. When the execution directory is available, the summary bounds
+its own changes to the five most recently changed files and counts outside files
+separately; an unavailable directory preserves the unpartitioned summary.
+Repeated edits to one path become one summary with accumulated known diffstat;
+omitted counts refer to files, not events. They are never a file ledger or fact.
 
 A live observing command may receive, beside that bounded status and only for
 its still-open callback, the complete retained semantic frontier from the same
@@ -68,7 +72,7 @@ Status and history are frozen projections, so they never assert liveness.
 
 For an open Turn, the public timeline projector retains its opening input (the
 retained call, or else the earliest retained settled Tell delivered at launch)
-and every settled say in that Turn independently of the ordinary-detail budget,
+and its latest settled say independently of the ordinary-detail budget,
 alongside bounded provider activity, explicit reports, and settled delivered
 Tells in durable sequence order. A settled tool row carries its observed result
 text and any per-file patch content, while the reported-change summary carries

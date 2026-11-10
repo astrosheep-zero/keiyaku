@@ -115,6 +115,7 @@ export const akumaStatusSchema = z
     cwd: z.string().exactOptional(),
     provider: z.string().exactOptional(),
     model: z.string().exactOptional(),
+    lastActivityAt: z.string().exactOptional(),
     timeline: activitySnapshotSchema,
     strandedReason: z.literal("resume-unsupported").exactOptional(),
   })

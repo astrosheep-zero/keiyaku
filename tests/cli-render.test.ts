@@ -2545,11 +2545,11 @@ test("status renders selected activity evidence while preserving history and com
   assert.ok("command" in statusInvocation);
   const statusText = snapshotText(observation(status), DEFAULT_CONTEXT);
   assert.doesNotMatch(statusText, /internal thought/u);
-  assert.doesNotMatch(statusText, /\$ c[1-6]\b/u);
-  for (const command of ["c7", "c8", "c9"]) assert.match(statusText, new RegExp(`\\$ ${command}\\b`, "u"));
+  for (const command of ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"])
+    assert.match(statusText, new RegExp(`\\$ ${command}\\b`, "u"));
   assert.match(statusText, /\?  run +\$ c9/u, "the active final tool remains visible as unsettled");
   assert.doesNotMatch(statusText, /●  run/u, "status never asserts live activity");
-  assert.match(statusText, /earlier activity omitted/u);
+  assert.doesNotMatch(statusText, /earlier activity/u, "the owner selected every row");
   assert.ok(statusText.indexOf("$ c7") < statusText.indexOf("after"));
   assert.ok(statusText.indexOf("after") < statusText.indexOf("$ c8"));
 

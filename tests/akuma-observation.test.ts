@@ -1,4 +1,10 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { Akumas } from "../src/library/akumas.js";
+import { akumaObservationSchema } from "../src/akuma/selection-observation.js";
+import { snapshotText, DEFAULT_CONTEXT } from "../src/cli/render/akuma-activity.js";
+import { World } from "../src/world.js";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
@@ -27,6 +33,64 @@ import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/e
 async function fixture() {
   return await soulFixture("keiyaku-akuma-observation-");
 }
+
+test("chatty status keeps latest intent, observed activity age, current tools and worktree changes", async () => {
+  const value = await fixture();
+  const { paths, id } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const api = Akumas.of(await World.at(value.root));
+    const empty = await api.status({ akuma: id });
+    assert.equal(empty.lastActivityAt, undefined);
+    assert.doesNotMatch(snapshotText(empty, DEFAULT_CONTEXT), /last activity/u);
+    const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
+    assert.equal((await api.status({ akuma: id })).lastActivityAt, undefined, "a Turn opening alone is not activity");
+    const at = "2026-08-08T00:00:01.000Z";
+    const append = (event: Parameters<typeof appendActivity>[1]["event"]) =>
+      appendActivity(paths, { turnSequence: turn.sequence, at, event });
+    await append({ type: "tool", phase: "started", id: "active", name: "Bash",
+      call: { kind: "run", command: "watch current work" } });
+    for (let index = 0; index < 32; index += 1) {
+      await append({ type: "assistant", text: `intent ${index}` });
+      await append({ type: "tool", phase: "completed", id: `tool-${index}`, name: "Bash",
+        call: { kind: "run", command: `step ${index}` }, result: { status: "ok" } });
+    }
+    const inside = Array.from({ length: 6 }, (_, index) => join(value.root, `source-${index}.ts`));
+    const outside = Array.from({ length: 3 }, (_, index) => join(tmpdir(), `scratch-${index}.ts`));
+    await append({ type: "tool", phase: "completed", id: "changes", name: "Edit",
+      call: { kind: "fileChange", changes: [...inside, ...outside].map(path => ({ op: "update", path })) },
+      result: { status: "ok" } });
+    for (const path of ["recent-one.ts", "recent-two.ts", "recent-three.ts"])
+      await append({ type: "tool", phase: "completed", id: path, name: "Read",
+        call: { kind: "read", path }, result: { status: "ok" } });
+    const view = await api.status({ akuma: id });
+    const json = akumaObservationSchema.parse(JSON.parse(JSON.stringify(view)));
+    assert.equal(json.lastActivityAt, at);
+    assert.deepEqual(json.changes?.map(change => change.path), inside.slice(1));
+    assert.equal(json.moreChanges, true);
+    assert.equal(json.outsideChanges, outside.length);
+    const text = snapshotText(view, { ...DEFAULT_CONTEXT, now: Date.parse(at) + 19_000 });
+    assert.match(text, /running · last activity \S+ ago/u);
+    assert.ok(text.indexOf("last activity") < text.indexOf("intent 31"));
+    assert.deepEqual([...text.matchAll(/▎ intent \d+/gu)].map(match => match[0]), ["▎ intent 31"]);
+    assert.equal(text.match(/earlier activity in history/gu)?.length, 1);
+    for (const content of ["watch current work", "recent-one.ts", "recent-two.ts", "recent-three.ts", "3 outside worktree"])
+      assert.ok(text.includes(content), content);
+    for (const path of outside) assert.ok(!text.includes(path));
+    await endTurn(paths, { turnSequence: turn.sequence, completedAt: at,
+      outcome: { kind: "answered", answer: "done", session: { sessionId: "status-trunk" } } });
+    await finishBodyIfIdle(paths, { sequence: body.sequence, at });
+    leash.release();
+    const asleep = await api.status({ akuma: id });
+    assert.equal(asleep.life, "asleep");
+    assert.match(snapshotText(asleep, DEFAULT_CONTEXT), /asleep · last activity \S+ ago/u);
+  } finally {
+    leash.release();
+    value.close();
+  }
+});
 
 test("status reports the one current model and follows confirmed native changes", async () => {
   const value = await fixture();

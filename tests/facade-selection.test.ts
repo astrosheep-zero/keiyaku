@@ -760,7 +760,7 @@ test("wait reselects an unchanged later Heart when an earlier member releases th
   const root = fixtureRoot(t, "keiyaku-live-wait-budget-");
   const members: (Awaited<ReturnType<typeof bornDirectAkuma>> & { turn: Awaited<ReturnType<typeof beginTurn>> })[] = [];
   const at = "2026-10-01T00:00:00.000Z";
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 11; index += 1) {
     const born = await bornDirectAkuma({
       root,
       akumaName: "worker",
@@ -778,7 +778,7 @@ test("wait reselects an unchanged later Heart when an earlier member releases th
       });
     members.push({ ...born, turn });
   }
-  const later = members[5]!;
+  const later = members.at(-1)!;
   const reader = createLiveStatusReader(later.paths, later.id);
   const input = { aperture: "monitoring" as const };
   const zero = await reader.read({ ...input, ordinaryBudget: 0 });
@@ -823,7 +823,7 @@ test("wait reselects an unchanged later Heart when an earlier member releases th
     (error) => error === reason,
   );
   await closing;
-  assert.deepEqual(selectedCounts, [0, 6, 6]);
+  assert.deepEqual(selectedCounts, [0, 3, 3]);
 });
 
 test("one and ten selected identities wait without reading Dispatch associations", async (t) => {

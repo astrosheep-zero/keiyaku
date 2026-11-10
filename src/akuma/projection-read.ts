@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import type {
   ActivityRow,
   ActivitySnapshot,
@@ -13,20 +14,21 @@ import type {
   UnsettledToolRow,
 } from "./projection.js";
 
-const DEFAULT_TAIL = 3;
-const DEFAULT_VOICE = 3;
+export const DEFAULT_TAIL = 3;
 const REPORTED_CHANGE_LIMIT = 5;
 
 type ReportedChangeSummary = Readonly<{
   reportedChanges: readonly ReportedFileChange[];
   reportedChangesOmitted: number;
+  reportedChangesOutside?: number;
 }>;
 
 const EMPTY_REPORTED: ReportedChangeSummary = { reportedChanges: [], reportedChangesOmitted: 0 };
 
 /** Present the same snapshot without its reported-change summary. */
 export function withoutReportedChanges(snapshot: ActivitySnapshot): ActivitySnapshot {
-  return { ...snapshot, reportedChanges: [], reportedChangesOmitted: 0 };
+  const { reportedChangesOutside: _outside, ...rest } = snapshot;
+  return { ...rest, reportedChanges: [], reportedChangesOmitted: 0 };
 }
 
 import type { HistoryCursor, HistoryPage } from "./projection.js";
@@ -57,15 +59,6 @@ function assembleEntries<Row extends SnapshotRow>(
   }
   flushGap();
   return result;
-}
-
-const DEFAULT_ORDINARY = DEFAULT_TAIL + DEFAULT_VOICE;
-
-export function ordinarySnapshotBudget(
-  ordinaryBudget: number = DEFAULT_ORDINARY,
-): Readonly<{ tail: number; voice: number }> {
-  const tail = Math.min(DEFAULT_TAIL, Math.max(0, ordinaryBudget));
-  return { tail, voice: Math.min(DEFAULT_VOICE, Math.max(0, ordinaryBudget) - tail) };
 }
 
 type SuccessfulFileChangeRow = CompletedToolRow &
@@ -124,27 +117,33 @@ function aggregateReportedChanges(changes: readonly ReportedFileChange[]): reado
     );
 }
 
-function summarizeReportedChanges(rows: readonly (OpenTurnRow | UnsettledToolRow)[]): ReportedChangeSummary {
+function summarizeReportedChanges(
+  rows: readonly (OpenTurnRow | UnsettledToolRow)[],
+  executionDir?: string,
+): ReportedChangeSummary {
   const files = aggregateReportedChanges(flattenReportedChanges(rows));
+  const inside = files.filter((change) => {
+    if (executionDir === undefined) return true;
+    const path = relative(executionDir, resolve(executionDir, change.path));
+    return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+  });
+  const outside = files.length - inside.length;
   return {
-    reportedChanges: files.slice(-REPORTED_CHANGE_LIMIT),
-    reportedChangesOmitted: Math.max(0, files.length - REPORTED_CHANGE_LIMIT),
+    reportedChanges: inside.slice(-REPORTED_CHANGE_LIMIT),
+    reportedChangesOmitted: Math.max(0, inside.length - REPORTED_CHANGE_LIMIT),
+    ...(outside === 0 ? {} : { reportedChangesOutside: outside }),
   };
 }
-function frontierReportedChanges(ledger: TurnLedger): ReportedChangeSummary {
-  if (ledger.openTurn !== undefined) return summarizeReportedChanges(ledger.openTurn.rows);
+function frontierReportedChanges(ledger: TurnLedger, executionDir?: string): ReportedChangeSummary {
+  if (ledger.openTurn !== undefined) return summarizeReportedChanges(ledger.openTurn.rows, executionDir);
   const closed = ledger.turns.findLast((turn): turn is ClosedTurn => turn.kind === "closed");
-  return closed === undefined ? EMPTY_REPORTED : summarizeReportedChanges(closed.rows);
+  return closed === undefined ? EMPTY_REPORTED : summarizeReportedChanges(closed.rows, executionDir);
 }
 function isPendingTell(row: ActivityRow): row is TellRow {
   return row.kind === "tell" && row.state === "pending";
 }
-function isActiveTool(row: ActivityRow): boolean {
-  return row.kind === "tool" && row.state === "active";
-}
-
-function isProtectedCurrentTurnActivity(row: ActivityRow): boolean {
-  return row.kind === "said";
+function isProtectedTool(row: ActivityRow): boolean {
+  return row.kind === "tool" && (typeof row.state === "string" || row.state.status === "error");
 }
 
 function isSettledTellDeliveredTo(row: ActivityRow, turnSequence: number): row is TellRow {
@@ -179,11 +178,12 @@ export function selectSnapshot(
   ledger: TurnLedger,
   input: Readonly<{
     aperture: "monitoring" | "receipt";
-    budget?: Readonly<{ tail: number; voice?: number }>;
+    budget?: Readonly<{ tail: number }>;
+    executionDir?: string;
     admittedTellId?: string;
   }>,
 ): Readonly<{ snapshot: ActivitySnapshot; ordinaryCount: number }> {
-  const budget = input.budget ?? { tail: DEFAULT_TAIL, voice: DEFAULT_VOICE };
+  const tailCount = Math.min(DEFAULT_TAIL, Math.max(0, input.budget?.tail ?? DEFAULT_TAIL));
   if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell"))
     return { snapshot: { kind: "unborn", entries: [], ...EMPTY_REPORTED }, ordinaryCount: 0 };
   const pending = ledger.rows.filter(isPendingTell);
@@ -197,26 +197,20 @@ export function selectSnapshot(
         ? []
         : [admittedTell]
       : pending;
-  const reported = frontierReportedChanges(ledger);
+  const reported = frontierReportedChanges(ledger, input.executionDir);
   if (ledger.openTurn !== undefined) {
     const window = currentTurnWindow(ledger);
     const opening = openingInput(ledger);
+    const latestSaid = window.findLast((row) => row.kind === "said");
     const pinSet = new Set<ActivityRow>([
-      ...window.filter(isActiveTool),
-      ...window.filter(isProtectedCurrentTurnActivity),
+      ...window.filter(isProtectedTool),
+      ...(latestSaid === undefined ? [] : [latestSaid]),
       ...pins,
       ...(opening === undefined ? [] : [opening]),
     ]);
     const ordinary = window.filter((row) => !pinSet.has(row));
-    const tailCount = Math.max(0, budget.tail);
     const tail = tailCount === 0 ? [] : ordinary.slice(-tailCount);
-    const tailSet = new Set(tail);
-    const voiceCount = Math.max(0, budget.voice ?? DEFAULT_VOICE);
-    const voiceCandidates = ordinary.filter(
-      (row) => !tailSet.has(row) && (row.kind === "said" || row.kind === "thought"),
-    );
-    const voice = voiceCount === 0 ? [] : voiceCandidates.slice(-voiceCount);
-    const selected = new Set<ActivityRow>([...pinSet, ...tail, ...voice]);
+    const selected = new Set<ActivityRow>([...pinSet, ...tail]);
     return {
       snapshot: {
         kind: "open",
@@ -225,7 +219,7 @@ export function selectSnapshot(
         ...(opening === undefined ? {} : { openingSequence: opening.sequence }),
         ...reported,
       },
-      ordinaryCount: tail.length + voice.length,
+      ordinaryCount: tail.length,
     };
   }
   return {

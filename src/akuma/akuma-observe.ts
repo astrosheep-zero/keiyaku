@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { projectAkumaBirth } from "./caller.js";
 import {
   readStatusFacts,
@@ -16,7 +17,7 @@ import {
 } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
 import {
-  ordinarySnapshotBudget,
+  DEFAULT_TAIL,
   projectTurns,
   selectHistory,
   selectSnapshot,
@@ -130,10 +131,13 @@ type StatusObservationInput = Readonly<{
   admittedTellId?: string;
 }>;
 
-function snapshotSelection(input: StatusObservationInput) {
+function snapshotSelection(input: StatusObservationInput, executionDir?: string) {
+  if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
+    throw new TypeError("ordinary budget must be a nonnegative safe integer");
   return {
     aperture: input.aperture,
-    budget: ordinarySnapshotBudget(input.ordinaryBudget),
+    budget: { tail: Math.min(DEFAULT_TAIL, input.ordinaryBudget ?? DEFAULT_TAIL) },
+    ...(executionDir === undefined ? {} : { executionDir }),
     ...(input.admittedTellId === undefined ? {} : { admittedTellId: input.admittedTellId }),
   };
 }
@@ -170,11 +174,6 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
     },
     async read(input: StatusObservationInput, signal?: AbortSignal): Promise<LiveStatusObservation> {
       try {
-        if (
-          input.ordinaryBudget !== undefined &&
-          (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0)
-        )
-          throw new TypeError("ordinary budget must be a nonnegative safe integer");
         const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => reader.life(signal));
         const resumeUnsupported =
           currentLife === "stranded" &&
@@ -182,16 +181,17 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
           (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
         const facts = await reader.read(input, signal);
         const ledger = memo?.facts === facts ? memo.ledger : projectTurns(facts);
-        const options = snapshotSelection(input);
+        const options = snapshotSelection(input, await realpath(soul.cwd).catch(() => undefined));
         const selected =
           memo?.ledger === ledger &&
           memo.options.aperture === options.aperture &&
           memo.options.admittedTellId === options.admittedTellId &&
           memo.options.budget.tail === options.budget.tail &&
-          memo.options.budget.voice === options.budget.voice
+          memo.options.executionDir === options.executionDir
             ? memo.selected
             : selectSnapshot(ledger, options);
         memo = { facts, ledger, options, selected };
+        const lastActivityAt = ledger.rows.findLast((row) => row.kind !== "turn")?.at;
         return {
           status: {
             id: soul.id,
@@ -205,6 +205,7 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
             ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
             ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
             timeline: selected.snapshot,
+            ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
           },
           ordinarySelected: selected.ordinaryCount,
           rows: ledger.rows,
