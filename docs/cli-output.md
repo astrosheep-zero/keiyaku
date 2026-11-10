@@ -132,9 +132,18 @@ Debt-facing presentation. Contract, Git, and Akuma renderers receive their
 facts from their respective public results. Activity summaries retain the
 concrete work observed rather than substituting a broad category; a tool row
 names the actual tool observed with a bounded argument preview, and a partial
-capture truncates visibly. Gate evidence keeps its compact visual state beside
-each gate and requirement's identity across status, board, history, preview,
-receipts, and JSON; current declarations may be labeled by current one-based
+capture truncates visibly. Rendering does not interpret foreign command or
+parameter dialects: retained commands and paths use the shared bounded
+payload discipline. Tool rows preserve a nonempty work preview and the semantic
+trailer of read ranges, diffstats, durations, and exit/error status within the
+terminal width. Result messages, including row counts, are bounded diagnostic
+previews, and partial captures remain visibly truncated. Increasing width never
+reduces the body allowance. Only a cut inline diagnostic expands into a complete
+continuation block in selected Akuma detail and history, preferring word
+boundaries; world and compact observations retain one line per tool.
+Gate evidence keeps its compact visual
+state beside each gate and requirement's identity across status, board, history,
+preview, receipts, and JSON; current declarations may be labeled by current one-based
 position while removed historical requirements retain stable identity. A raw
 caller answer remains raw when that operation promises answer bytes. Recording
 review testimony and completing placement remain distinct facts; absence of

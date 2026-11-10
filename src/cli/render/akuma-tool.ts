@@ -1,7 +1,6 @@
 import type { ActivityRow } from "../../akuma/projection.js";
 import type { StatusPreview } from "../../akuma/status-projection.js";
-import { normalizeToolCommand } from "./akuma-tool-command.js";
-import { displayColumns, truncateDisplayText } from "./terminal.js";
+import { displayColumns } from "./terminal.js";
 
 type ToolRow = Extract<ActivityRow | StatusPreview, { kind: "tool" }>;
 
@@ -13,31 +12,17 @@ function toolName(row: ToolRow): string {
   return "name" in row ? row.name : row.call.kind;
 }
 
-/** The bounded body of a generic tool row, including its terminal diagnostic. */
+/** The bounded argument body of a generic tool row. */
 export function toolContent(row: ToolRow, columns: number): string {
   const input = toolInput(row);
-  const diagnostic = toolDiagnostic(row);
-  const width = Math.max(0, columns - displayColumns(diagnostic));
   let text: string;
-  if (input === undefined) {
-    text = "";
-  } else {
-    const common = commonOtherText(row);
-    if (common !== undefined) text = common;
-    else if (input.json === "{}") text = "";
-    else if (input.truncated) text = `${input.json}…`;
-    else {
-      const value = jsonObject(input.json);
-      text = value === undefined ? input.json : objectFieldsText(value, width);
-    }
+  if (input === undefined || input.json === "{}") text = "";
+  else if (input.truncated) text = `${input.json}…`;
+  else {
+    const value = jsonObject(input.json);
+    text = value === undefined ? input.json : objectFieldsText(value, columns);
   }
-  return `${truncateDisplayText(text, width)}${diagnostic}`;
-}
-
-/** The trailing failure, duration, or message clause one settled tool row carries, otherwise the empty string. */
-export function toolDiagnostic(row: ToolRow): string {
-  const suffix = result(row);
-  return suffix === undefined ? "" : ` — ${suffix}`;
+  return text;
 }
 
 function jsonObject(json: string): Readonly<Record<string, unknown>> | undefined {
@@ -68,18 +53,15 @@ function objectFieldsText(value: Readonly<Record<string, unknown>>, columns: num
   }
   const first = fields[0]!;
   if (fields.length > 1 && displayColumns(first) <= columns) return `${first}…`;
-  return truncateDisplayText(full, columns);
+  return full;
 }
 
 export type ToolRepr = Readonly<{
   label: string;
   text: string;
-  overflow?: "command";
-  suffix?: string;
-  pathPreview?: Readonly<{ before: string; path: string; detail: string; diagnostic?: string }>;
+  suffix: string;
+  diagnostic: string;
 }>;
-
-type ToolCore = Omit<ToolRepr, "suffix">;
 
 function oneLine(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
@@ -94,20 +76,19 @@ function duration(milliseconds: number): string {
   return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
 }
 
-function result(row: ToolRow): string | undefined {
-  if (row.state === "active" || row.state === "unsettled") return undefined;
+function result(row: ToolRow): Pick<ToolRepr, "suffix" | "diagnostic"> {
+  if (typeof row.state === "string") return { suffix: "", diagnostic: "" };
   const exitCode = "exitCode" in row.state ? row.state.exitCode : undefined;
   const durationMs = "durationMs" in row ? row.durationMs : undefined;
   const disposition = exitCode !== undefined ? (exitCode === 0 ? "ok" : `exit ${exitCode}`) : row.state.status;
   const parts = [
     ...(row.call.kind === "run" && durationMs !== undefined ? [duration(durationMs)] : []),
     ...(disposition === "ok" ? [] : [disposition]),
-    ...(row.state.message === undefined ? [] : [oneLine(row.state.message)]),
   ];
-  return parts.length === 0 ? undefined : parts.join(" · ");
+  return { suffix: parts.length === 0 ? "" : ` — ${parts.join(" · ")}`, diagnostic: row.state.message ?? "" };
 }
 
-function readText(call: Extract<ToolRow["call"], { kind: "read" }>): ToolCore {
+function readText(call: Extract<ToolRow["call"], { kind: "read" }>): ToolRepr {
   const path = oneLine(call.path);
   const detail =
     call.offset !== undefined && call.limit !== undefined
@@ -117,7 +98,7 @@ function readText(call: Extract<ToolRow["call"], { kind: "read" }>): ToolCore {
         : call.limit !== undefined
           ? ` · ${call.limit} ${call.limit === 1 ? "line" : "lines"}`
           : "";
-  return { label: "read", text: `${path}${detail}`, pathPreview: { before: "", path, detail } };
+  return { label: "read", text: path, suffix: detail, diagnostic: "" };
 }
 
 function searchLabel(scope: Extract<ToolRow["call"], { kind: "search" }>["scope"]): string {
@@ -134,54 +115,14 @@ function searchText(call: Extract<ToolRow["call"], { kind: "search" }>): string 
   ].join(" · ");
 }
 
-function inputObject(row: ToolRow): Readonly<Record<string, unknown>> | undefined {
-  const input = toolInput(row);
-  if (row.call.kind !== "other" || input?.truncated === true) return undefined;
-  return jsonObject(input?.json ?? "");
-}
-
-function suppliedSlice(value: Readonly<Record<string, unknown>>): string {
-  const offset = typeof value.offset_chars === "number" ? `from ${value.offset_chars}` : "";
-  const limit = typeof value.limit_chars === "number" ? `${value.limit_chars} chars` : "";
-  return [offset, limit].filter(Boolean).join(" · ");
-}
-
-function commonOtherText(row: ToolRow): string | undefined {
-  const input = inputObject(row);
-  if (input === undefined) return undefined;
-  if (toolName(row) === "get_context_remaining") return undefined;
-  if (toolName(row) === "notes_read") {
-    const address =
-      typeof input.address === "string" ? input.address : typeof input.path === "string" ? input.path : undefined;
-    return [address, suppliedSlice(input)]
-      .filter((value): value is string => value !== undefined && value !== "")
-      .join(" · ");
-  }
-  if (toolName(row) === "history_read") {
-    const item = typeof input.item_id === "string" ? input.item_id : undefined;
-    const window = typeof input.window_id === "string" ? input.window_id : undefined;
-    return [item, window, suppliedSlice(input)]
-      .filter((value): value is string => value !== undefined && value !== "")
-      .join(" · ");
-  }
-  if (toolName(row) === "history_list") {
-    const role = typeof input.role === "string" ? `role ${input.role}` : undefined;
-    const order =
-      input.recent_first === true ? "newest first" : input.recent_first === false ? "oldest first" : undefined;
-    const limit = typeof input.limit === "number" ? `${input.limit} rows` : undefined;
-    return [role, order, limit].filter((value): value is string => value !== undefined).join(" · ");
-  }
-  return undefined;
-}
-
 /** The one diffstat renderer: unknown stays unknown, known renders compact additions and removals. */
 export function renderDiffstat(diffstat: Readonly<{ added: number; removed: number }> | undefined): string {
   return diffstat === undefined ? "~" : `+${diffstat.added} -${diffstat.removed}`;
 }
 
-function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, state: ToolRow["state"]): ToolCore {
+function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, state: ToolRow["state"]): ToolRepr {
   const first = call.changes[0];
-  if (first === undefined) return { label: "edit", text: "files" };
+  if (first === undefined) return { label: "edit", text: "files", suffix: "", diagnostic: "" };
   const label =
     call.changes.length === 1 ? (first.op === "add" ? "write" : first.op === "delete" ? "delete" : "edit") : "edit";
   const before = call.changes.length === 1 ? "" : `${call.changes.length} files · `;
@@ -189,7 +130,7 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, stat
   const complete = call.changes.every((change) => change.diffstat !== undefined);
   if (!complete && (state === "active" || state === "unsettled")) {
     const detail = call.changes.length === 1 ? "" : " ...";
-    return { label, text: `${before}${path}${detail}`, pathPreview: { before, path, detail } };
+    return { label, text: `${before}${path}`, suffix: detail, diagnostic: "" };
   }
   const totals = complete
     ? call.changes.reduce(
@@ -201,43 +142,33 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, stat
       )
     : undefined;
   const detail = `${call.changes.length === 1 ? "" : " ..."} — ${renderDiffstat(totals)}`;
-  return { label, text: `${before}${path}${detail}`, pathPreview: { before, path, detail } };
+  return { label, text: `${before}${path}`, suffix: detail, diagnostic: "" };
 }
 
 /** One provider-neutral core owns every tool-kind label and non-generic body. */
-function toolCore(row: ToolRow): ToolCore {
+function toolCore(row: ToolRow): ToolRepr {
   switch (row.call.kind) {
     case "run":
       return {
         label: "run",
-        text: `$ ${oneLine(normalizeToolCommand(row.call.command))}`,
-        overflow: "command",
+        text: `$ ${oneLine(row.call.command)}`,
+        suffix: "",
+        diagnostic: "",
       };
     case "read":
       return readText(row.call);
     case "search":
-      return { label: searchLabel(row.call.scope), text: searchText(row.call) };
+      return { label: searchLabel(row.call.scope), text: searchText(row.call), suffix: "", diagnostic: "" };
     case "fileChange":
       return fileChange(row.call, row.state);
     case "other":
-      return { label: toolName(row), text: "" };
+      return { label: toolName(row), text: "", suffix: "", diagnostic: "" };
   }
 }
 
 /** Pure provider-neutral tool presentation; it performs no activity selection. */
 export function toolRepr(row: ToolRow): ToolRepr {
   const core = toolCore(row);
-  if (row.call.kind === "other") return core;
-  const suffix = result(row);
-  if (suffix === undefined) return core;
-  if (core.overflow === "command") return { ...core, suffix: ` — ${suffix}` };
-  if (core.pathPreview !== undefined) {
-    const diagnostic = ` — ${suffix}`;
-    return {
-      ...core,
-      text: `${core.text}${diagnostic}`,
-      pathPreview: { ...core.pathPreview, diagnostic },
-    };
-  }
-  return { ...core, text: `${core.text} — ${suffix}` };
+  const { suffix, diagnostic } = result(row);
+  return { ...core, suffix: `${core.suffix}${suffix}`, diagnostic };
 }

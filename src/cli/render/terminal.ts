@@ -127,19 +127,6 @@ export function padToDisplay(text: string, width: number): string {
   return remaining > 0 ? `${text}${" ".repeat(remaining)}` : text;
 }
 
-export function truncateMiddleDisplayText(value: string, maximum: number): string {
-  const clean = safeText(value);
-  if (displayColumns(clean) <= maximum) return clean;
-  if (maximum <= 0) return "";
-  if (maximum === 1) return "…";
-  const available = maximum - 1;
-  const headColumns = Math.ceil(available / 2);
-  const tailColumns = available - headColumns;
-  const head = takeDisplayColumns(clean, headColumns).text.replace(/…+$/u, "");
-  const tail = takeDisplayColumnsFromEnd(clean, tailColumns).text.replace(/^…+/u, "");
-  return `${head}…${tail}`;
-}
-
 export function renderBoundedTextBlock(
   value: string,
   input: Readonly<{ first: string; continuation: string; columns: number; lines?: number; truncated?: boolean }>,
@@ -193,9 +180,56 @@ type BoundedPayload = Readonly<{
   truncated: boolean;
   /** Keep source line breaks and indentation; single-line previews fold whitespace instead. */
   preserveLines?: true;
+  /** A single-line action keeps its trailer before bounding diagnostic detail. */
+  trailer?: Readonly<{ text: string; diagnostic: string; complete: boolean }>;
 }>;
 
 export function renderBoundedPayload(input: BoundedPayload): readonly string[] {
+  if (input.trailer !== undefined) {
+    const columns = Math.max(0, input.columns);
+    const omissionWidth = displayColumns("…");
+    const suffix = truncateDisplayText(input.trailer.text, Math.max(0, columns - omissionWidth));
+    const diagnostic = safeText(input.trailer.diagnostic).replace(/\s+/gu, " ").trim();
+    const extra = diagnostic === "" ? "" : `${suffix === "" ? " — " : " · "}${diagnostic}`;
+    const extraWidth = displayColumns(extra);
+    const [firstBody] = GRAPHEMES.segment(input.text || "…");
+    const bodyMinimum = displayColumns(firstBody!.segment) + omissionWidth;
+    // Reserve one body grapheme plus its omission and any diagnostic omission before clipping the prefix.
+    // All budgets are nonnegative; sharing spare cells monotonically keeps wider rows from reducing the body allowance.
+    const minimumPayload = bodyMinimum + (extra === "" ? 0 : omissionWidth);
+    const prefixWidth = Math.min(
+      displayColumns(input.first),
+      Math.max(0, columns - displayColumns(suffix) - minimumPayload),
+    );
+    const labelWidth = Math.max(0, prefixWidth - displayColumns(" "));
+    const first =
+      prefixWidth === 0 ? "" : `${padToDisplay(truncateDisplayText(input.first.trimEnd(), labelWidth), labelWidth)} `;
+    const continuation = takeDisplayColumns(input.continuation, prefixWidth).text;
+    const available = Math.max(0, columns - displayColumns(first + suffix));
+    const diagnosticReserve = Math.min(extraWidth, Math.floor(available / 2), Math.max(0, available - bodyMinimum));
+    const body = renderFoldedPayload({
+      ...input,
+      first,
+      text: input.text || "…",
+      columns: columns - displayColumns(suffix) - diagnosticReserve,
+      maxLines: 1,
+    })[0]!;
+    const diagnosticWidth = Math.max(0, columns - displayColumns(body + suffix));
+    return [
+      `${body}${suffix}${truncateDisplayText(extra, diagnosticWidth)}`,
+      ...(input.trailer.complete && extraWidth > diagnosticWidth
+        ? renderPreservedPayload({
+            ...input,
+            text: diagnostic,
+            first: continuation,
+            continuation,
+            columns,
+            maxLines: Number.MAX_SAFE_INTEGER,
+            truncated: false,
+          })
+        : []),
+    ];
+  }
   return input.preserveLines === true ? renderPreservedPayload(input) : renderFoldedPayload(input);
 }
 
@@ -258,7 +292,7 @@ function wrapFragment(rest: string, budget: number): Readonly<{ body: string; re
   const taken = takeDisplayColumns(rest, budget);
   if (taken.rest.length === 0) return { body: taken.text, remaining: "" };
   const split = taken.text.lastIndexOf(" ");
-  if (split <= 0 || split < Math.floor(taken.text.length / 2)) return { body: taken.text, remaining: taken.rest };
+  if (split <= 0) return { body: taken.text, remaining: taken.rest };
   return { body: taken.text.slice(0, split), remaining: `${taken.text.slice(split + 1)}${taken.rest}` };
 }
 

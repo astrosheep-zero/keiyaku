@@ -26,10 +26,8 @@ import {
   renderBoundedPayload,
   renderBoundedTextBlock,
   safeText,
-  takeDisplayColumns,
   takeDisplayColumnsFromEnd,
   truncateDisplayText,
-  truncateMiddleDisplayText,
   type TextRenderContext,
 } from "./terminal.js";
 
@@ -146,13 +144,9 @@ function toolMargin(row: Extract<PresentationRow, { kind: "tool" }>, live: boole
   return row.state.status === "ok" ? ACTION_MARGIN : "!  ";
 }
 
-function rowText(
-  row: PresentationRow,
-  tool?: ToolRepr,
-): Readonly<{
+function rowText(row: Exclude<PresentationRow, { kind: "tool" }>): Readonly<{
   text: string;
   lines: number;
-  suffix?: string;
 }> {
   if (
     row.kind === "report" ||
@@ -172,15 +166,7 @@ function rowText(
     return row.outcome.kind === "answered"
       ? { text: row.outcome.answer, lines: 3 }
       : { text: row.outcome.kind === "canceled" ? "canceled" : row.outcome.diagnostic, lines: 2 };
-  if (row.kind === "turn") return { text: "", lines: 1 };
-  if (row.kind !== "tool") return { text: "", lines: 1 };
-  if (row.call.kind === "other") return { text: "", lines: 1 };
-  const repr = tool!;
-  return {
-    text: repr.text,
-    lines: 1,
-    ...(repr.suffix === undefined ? {} : { suffix: repr.suffix }),
-  };
+  return { text: "", lines: 1 };
 }
 
 /**
@@ -195,7 +181,10 @@ function actionPrefix(
   const available = Math.max(0, columns - displayColumns(margin) - 1);
   const width = Math.min(Math.max(ACTION_VERB_WIDTH, displayColumns(verb)), available);
   const label = truncateDisplayText(verb, width);
-  return { first: `${margin}${padToDisplay(label, width)} `, continuation: `${margin}${" ".repeat(width + 1)}` };
+  return {
+    first: `${margin}${padToDisplay(label, width)} `,
+    continuation: " ".repeat(displayColumns(margin) + width + 1),
+  };
 }
 
 /** One row's rendered view: the shared prefix family and the two compact callers. */
@@ -206,8 +195,10 @@ type RowView = Readonly<{
   compact?: true;
   /** World-board answer previews keep the conclusion at the tail. */
   tailAnswer?: true;
-  /** History is expanded and folds a long command into one line. */
+  /** History expands narrative payloads. */
   history?: true;
+  /** Only selected detail and history expand complete diagnostics. */
+  detail?: true;
 }>;
 
 function rowPrefix(
@@ -231,81 +222,8 @@ function rowPrefix(
   return { first: TOP_INPUT, continuation: TOP_CONTINUATION };
 }
 
-function pathTail(path: string, maximum: number): string {
-  if (displayColumns(path) <= maximum) return path;
-  if (maximum <= 1) return maximum === 1 ? "…" : "";
-  const separator = path.includes("\\") && !path.includes("/") ? "\\" : "/";
-  const parts = path.split(/[\\/]/u);
-  const basename = parts.pop() ?? path;
-  let tail = basename;
-  const marker = `…${separator}`;
-  for (const parent of parts.reverse()) {
-    if (parent.length === 0) continue;
-    const candidate = `${parent}${separator}${tail}`;
-    if (displayColumns(`${marker}${candidate}`) > maximum) break;
-    tail = candidate;
-  }
-  if (displayColumns(`${marker}${tail}`) <= maximum) return `${marker}${tail}`;
-  return `…${takeDisplayColumnsFromEnd(path, maximum - 1).text}`;
-}
-
-function renderPathPreview(
-  first: string,
-  text: string,
-  pathPreview: NonNullable<ToolRepr["pathPreview"]>,
-  columns: number,
-): string {
-  const available = Math.max(0, columns - displayColumns(first));
-  if (displayColumns(text) <= available) return `${first}${text}`;
-  const before = pathPreview.before;
-  const detail = pathPreview.detail;
-  const diagnostic = pathPreview.diagnostic ?? "";
-  const descriptorWidth = displayColumns(before) + displayColumns(detail);
-  let renderedDetail = detail;
-  if (descriptorWidth >= available) {
-    const detailBudget = Math.max(0, available - displayColumns(before) - 1);
-    renderedDetail = truncateDisplayText(detail, detailBudget);
-  }
-  const pathWidth = Math.max(0, available - displayColumns(before) - displayColumns(renderedDetail));
-  const renderedPath = pathTail(pathPreview.path, pathWidth);
-  const base = `${before}${renderedPath}${renderedDetail}`;
-  const remainder = Math.max(0, available - displayColumns(base));
-  const renderedDiagnostic = remainder > 0 ? truncateDisplayText(diagnostic, remainder) : "";
-  return `${first}${base}${renderedDiagnostic}`;
-}
-
-function renderRunCommand(
-  first: string,
-  continuation: string,
-  text: string,
-  suffix: string,
-  columns: number,
-): readonly string[] {
-  const firstBudget = Math.max(0, columns - displayColumns(first));
-  const secondBudget = Math.max(0, columns - displayColumns(continuation));
-  if (displayColumns(`${text}${suffix}`) <= firstBudget) return [`${first}${text}${suffix}`];
-  const command = text.startsWith("$ ") ? text.slice(2) : text;
-  const firstPart = takeDisplayColumns(command, Math.max(0, firstBudget - 2));
-  const restWidth = displayColumns(firstPart.rest) + displayColumns(suffix);
-  if (restWidth <= secondBudget) {
-    return [`${first}$ ${firstPart.text}`, `${continuation}${firstPart.rest}${suffix}`];
-  }
-  const suffixBudget = Math.min(displayColumns(suffix), Math.max(0, secondBudget - 8));
-  const keptSuffix = suffixBudget > 0 ? truncateDisplayText(suffix, suffixBudget) : "";
-  const tailBudget = Math.max(0, secondBudget - displayColumns(keptSuffix) - 1);
-  const headBudget = Math.max(0, firstBudget - 3);
-  const head = takeDisplayColumns(command, headBudget).text;
-  const tail = takeDisplayColumnsFromEnd(command, tailBudget).text;
-  return [`${first}$ ${head}…`, `${continuation}…${tail}${keptSuffix}`];
-}
-
 function omissionMarker(text: string, columns: number): string {
   return `${actionPrefix(ACTION_MARGIN, OMISSION, columns).first}${text}`;
-}
-
-function rowBody(row: PresentationRow, text: string, columns: number): string {
-  if (row.kind !== "tool" || row.call.kind !== "other") return text;
-  return toolContent(row, columns);
 }
 
 function tailAnswerPreview(first: string, text: string, columns: number): readonly string[] {
@@ -317,46 +235,45 @@ function tailAnswerPreview(first: string, text: string, columns: number): readon
   return [`${first}${preview}`];
 }
 
-function renderCommandOverflow(
-  first: string,
-  continuation: string,
-  value: ReturnType<typeof rowText>,
-  columns: number,
-  view: RowView,
-): readonly string[] {
-  const suffix = value.suffix ?? "";
-  if (view.compact !== true && view.history !== true)
-    return renderRunCommand(first, continuation, value.text, suffix, columns);
-  const remaining = columns - displayColumns(first);
-  const withSuffix = remaining - displayColumns(suffix);
-  const showSuffix = suffix.length > 0 && withSuffix >= 6;
-  return [
-    `${first}${truncateMiddleDisplayText(value.text, Math.max(0, showSuffix ? withSuffix : remaining))}${showSuffix ? suffix : ""}`,
-  ];
-}
-
 /** Every selected timeline row renders through here: one prefix family per row class. */
 function renderRow(row: PresentationRow, context: TextRenderContext, view: RowView = {}): readonly string[] {
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
-  const value = rowText(row, tool);
   const { first, continuation } = rowPrefix(row, tool, context.columns, view);
+  const value = row.kind === "tool" ? undefined : rowText(row);
+  const text =
+    row.kind === "tool"
+      ? row.call.kind === "other"
+        ? toolContent(row, Math.max(0, context.columns - displayColumns(first)))
+        : tool!.text
+      : value!.text;
   const compact = view.compact === true;
-  if (tool?.overflow === "command") return renderCommandOverflow(first, continuation, value, context.columns, view);
-  if (tool?.pathPreview !== undefined) return [renderPathPreview(first, value.text, tool.pathPreview, context.columns)];
   if (view.tailAnswer === true && row.kind === "outcome" && row.outcome.kind === "answered")
-    return tailAnswerPreview(first, value.text, context.columns);
-  const available = context.columns - displayColumns(first) - displayColumns(value.suffix ?? "");
+    return tailAnswerPreview(first, text, context.columns);
   const singleLine =
-    compact || row.kind === "call" || row.kind === "tell" || row.kind === "pending-tell" || row.kind === "turn";
+    compact ||
+    tool !== undefined ||
+    row.kind === "call" ||
+    row.kind === "tell" ||
+    row.kind === "pending-tell" ||
+    row.kind === "turn";
   return renderBoundedPayload({
-    text: rowBody(row, value.text, available),
+    text,
     first,
     continuation,
     columns: context.columns,
-    maxLines: singleLine ? 1 : view.history === true ? Number.MAX_SAFE_INTEGER : value.lines,
+    maxLines: singleLine ? 1 : view.history === true ? Number.MAX_SAFE_INTEGER : value!.lines,
     quote: "",
     truncated: "truncated" in row && row.truncated === true,
-    ...(singleLine || row.kind === "tool" ? {} : { preserveLines: true as const }),
+    ...(singleLine ? {} : { preserveLines: true as const }),
+    ...(tool === undefined
+      ? {}
+      : {
+          trailer: {
+            text: tool.suffix,
+            diagnostic: tool.diagnostic,
+            complete: view.detail === true || view.history === true,
+          },
+        }),
   });
 }
 
@@ -940,7 +857,7 @@ function selectedStatusActivity(snapshot: CompactTimeline, context: TextRenderCo
       entry.kind === "answered" || entry.kind === "failed" || entry.kind === "canceled"
         ? { kind: "outcome", outcome: entry }
         : entry;
-    const lines = renderRow(row, context);
+    const lines = renderRow(row, context, { detail: true });
     if (lines.length === 0) return [];
     const marker = omitted && !marked ? [omissionMarker("earlier activity in history", context.columns)] : [];
     if (omitted) marked = true;

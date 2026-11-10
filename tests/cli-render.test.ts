@@ -2052,7 +2052,7 @@ test("World roster keeps the latest concrete tool work", () => {
     },
     {
       name: "bash",
-      call: { kind: "run", command: "npm test -- tests/cli-render.test.ts" },
+      call: { kind: "run", command: "bash -lc 'npm test -- tests/cli-render.test.ts'" },
     },
   ];
   const snapshot = openAkumaSnapshot(
@@ -2062,7 +2062,7 @@ test("World roster keeps the latest concrete tool work", () => {
     columns: 120,
     color: false,
   });
-  assert.match(roster.at(-1)!, /run +\$ npm test -- tests\/cli-render\.test\.ts/u);
+  assert.match(roster.at(-1)!, /run +\$ bash -lc 'npm test -- tests\/cli-render\.test\.ts'/u);
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
@@ -2082,70 +2082,60 @@ test("World answer previews keep the conclusion, while detail keeps its opening"
   assert.doesNotMatch(detail, /^✓ …/mu);
 });
 
-test("long read and edit previews keep path tails with range and diffstat detail", () => {
-  const longRead = "/worktrees/one/very/deep/project/architecture/reader/ReadMeber.ts";
-  const longEdit = "/worktrees/one/very/deep/project/architecture/changes/ChangedFile.ts";
-  const rows = [
-    snapshotRow(completedTool(1, "read", { kind: "read", path: longRead, offset: 20, limit: 3 })),
-    snapshotRow(
-      completedTool(2, "edit", {
-        kind: "fileChange",
-        changes: [{ op: "update", path: longEdit, diffstat: { added: 5, removed: 2 } }],
-      }),
-    ),
-  ];
-
-  for (const columns of [100, 48]) {
-    const lines = rows.flatMap((entry) =>
-      entry.kind === "row" ? activityRowLines(entry.row, { columns, color: false }) : [],
-    );
-    const readPath = columns === 100 ? longRead : "…/reader/ReadMeber.ts";
-    const editPath = columns === 100 ? longEdit : "…/changes/ChangedFile.ts";
-    assert.ok(
-      lines.some((line) => line.includes(`${readPath} · L20-22`)),
-      lines.join("\\n"),
-    );
-    assert.ok(
-      lines.some((line) => line.includes(`${editPath} — +5 -2`)),
-      lines.join("\\n"),
-    );
-    for (const line of lines) assert.ok(displayColumns(line) <= columns, `${columns} columns: ${line}`);
+test("failed tool detail and history retain word-wrapped diagnostics beneath a bounded command row", () => {
+  const diagnostic = "hook failed; retained diagnostic words; log /work/recovery/log.txt";
+  const row = completedTool(1, "bash", { kind: "run", command: `bash -lc 'npm test ${"long-file ".repeat(30)}'` },
+    { status: "error", exitCode: 7, message: diagnostic });
+  const context = { columns: 48, color: false };
+  const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "running",
+    timeline: openAkumaSnapshot([snapshotRow(row)]) });
+  const views = [snapshotText(observation(status), context), nativeHistoryText(
+    { kind: "akuma", akumaId: status.id, events: [row] }, {}, context)];
+  for (const text of views) {
+    const lines = text.split("\n");
+    assert.ok(lines.every((line) => displayColumns(line) <= context.columns), text);
+    assert.ok(lines.slice(lines.findIndex((line) => line.includes("run")) + 1).join(" ").replace(/\s+/gu, " ").includes(diagnostic));
+    assert.match(text, /run\s+\$[^…\n]+… — (?:error|exit 7)/u, "the command and failure status survive together");
   }
-
-  const short = activityRowLines(
-    completedTool(1, "read", { kind: "read", path: "src/short.ts", offset: 2, limit: 2 }),
-    { columns: 100, color: false },
-  );
-  assert.ok(short.some((line) => line.includes("src/short.ts · L2-3")));
-  assert.ok(short.every((line) => !line.includes("…")));
+  const short = completedTool(2, "bash", { kind: "run", command: "npm test" }, { status: "error", message: "hook failed" });
+  const shortStatus = akumaStatusSchema.parse({ ...status, timeline: openAkumaSnapshot([snapshotRow(short)]) });
+  for (const text of [snapshotText(observation(shortStatus), context), nativeHistoryText(
+    { kind: "akuma", akumaId: status.id, events: [short] }, {}, context)])
+    assert.equal(text.split("hook failed").length - 1, 1, "a complete inline diagnostic is not repeated");
 });
 
-test("settled file changes retain exact stats or show unknown stats", () => {
-  const snapshot = openAkumaSnapshot([
-    snapshotRow(
-      completedTool(1, "edit", {
-        kind: "fileChange",
-        changes: [{ op: "update", path: "src/exact.ts", diffstat: { added: 2, removed: 1 } }],
-      }),
-    ),
-    snapshotRow(completedTool(2, "write", { kind: "fileChange", changes: [{ op: "add", path: "src/unknown.ts" }] })),
-    snapshotRow(
-      completedTool(3, "edit", {
-        kind: "fileChange",
-        changes: [
-          { op: "update", path: "src/known.ts", diffstat: { added: 3, removed: 2 } },
-          { op: "update", path: "src/unknown.ts" },
-        ],
-      }),
-    ),
-  ]);
-  const lines = snapshot.entries.flatMap((entry) =>
-    entry.kind === "row" ? activityRowLines(entry.row, { columns: 120, color: false }) : [],
-  );
-
-  assert.ok(lines.some((line) => line.includes("src/exact.ts — +2 -1")));
-  assert.ok(lines.some((line) => line.includes("src/unknown.ts — ~")));
-  assert.ok(lines.some((line) => line.includes("2 files · src/known.ts ... — ~")));
+test("compact and world tool rows keep trailers, bounded diagnostics and partial-capture marks", () => {
+  const path = `/work/${"long-directory/".repeat(12)}file.ts`;
+  const message = "diagnostic word ".repeat(1000);
+  const context = { columns: 48, color: false };
+  const cases = [
+    [completedTool(1, "read", { kind: "read", path, offset: 20, limit: 3 }), "· L20-22"],
+    [completedTool(2, "edit", { kind: "fileChange", changes: [{ op: "update", path, diffstat: { added: 5, removed: 2 } }] }), "— +5 -2"],
+    [{ ...completedTool(3, "bash", { kind: "run", command: `npm test ${path}` }), durationMs: 12_000 }, "— 12s"],
+    [completedTool(4, "query", { kind: "other", input: preview({ path }) }, { status: "ok", message: "12 rows" }), "12 rows"],
+    [completedTool(5, "bash", { kind: "run", command: "npm test" }, { status: "ok", message }), "…"],
+    [completedTool(6, "bash", { kind: "run", command: "npm test" }, { status: "error", message }), "error"],
+    [{ ...completedTool(7, "future_tool", { kind: "other", input: preview({ a: 1 }) }), truncated: true }, '{"a":1}…'],
+  ] as const;
+  for (const [row, trailer] of cases) {
+    const compact = activityRowLines(row, context, { compact: true });
+    const board = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running",
+      openAkumaSnapshot([snapshotRow(row)]))]), context);
+    assert.equal(compact.length, 1);
+    const baseline = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running",
+      openAkumaSnapshot([snapshotRow(completedTool(row.sequence, row.name, row.call))]))]), context);
+    assert.equal(board.length, baseline.length, "diagnostic size never adds world-board lines");
+    for (const lines of [compact, board]) {
+      assert.ok(lines.every((line) => displayColumns(line) <= context.columns), lines.join("\n"));
+      assert.ok(lines.join("\n").includes(trailer), lines.join("\n"));
+      if (typeof row.state === "object" && row.state.message === message)
+        assert.match(lines.join("\n"), /diagnostic[^\n]*…$/mu, "a long diagnostic keeps its bounded preview and omission");
+    }
+  }
+  const boundary = completedTool(8, "bash", { kind: "run", command: `npm test ${path}` },
+    { status: "error", exitCode: 7, message: "hook failed; log /work/a.log" });
+  const bodyAt = (columns: number) => activityRowLines(boundary, { ...context, columns }, { compact: true })[0]!.match(/\$.*?(?= — exit 7)/u)![0];
+  assert.ok(displayColumns(bodyAt(52)) >= displayColumns(bodyAt(51)), "fitting a diagnostic never steals body space");
 });
 
 test("World roster keeps the honest fallback for unknown tool calls", () => {
@@ -2157,7 +2147,7 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(roster, /^ {5}custom-tool$/mu);
+  assert.match(roster, /^ {5}custom-tool …$/mu);
 });
 
 test("the output law names the current mark vocabulary and retires the one-check sentence", () => {
@@ -2201,19 +2191,12 @@ test("a settled successful tool spends no mark while voice and input rows keep t
   assert.equal((text.match(/✓/gu) ?? []).length, 0, "settled work adds no completion to running status");
 });
 
-test("generic tool rows preserve semantic and common summaries", () => {
+test("generic tool rows preserve observed JSON arguments", () => {
   const lines = genericLines(
     [
       [1, "future_tool", preview({ alpha: 1, beta: "x", gamma: { delta: [true, null] } })],
-      [2, "mystery", preview({})],
-      [3, "silent"],
-      [4, "notes_read", preview({ address: "project/notes.md", offset_chars: 12, limit_chars: 400 })],
-      [5, "notes_read", preview({ path: "legacy.md" })],
-      [6, "history_read", preview({ item_id: "item-9", window_id: "win-2", offset_chars: 0, limit_chars: 50 })],
-      [7, "history_list", preview({ role: "assistant", recent_first: false, limit: 20 })],
-      [8, "history_list", preview({ role: "user" })],
-      [9, "get_context_remaining", preview({})],
-      [10, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
+      [2, "silent"],
+      [3, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
     ],
     200,
   );
@@ -2223,19 +2206,8 @@ test("generic tool rows preserve semantic and common summaries", () => {
     /future_tool\s+\{"alpha":1,"beta":"x","gamma":\{"delta":\[true,null\]\}\}/u,
     "nested compact JSON keeps types and order",
   );
-  assert.match(text, /notes_read\s+project\/notes\.md · from 12 · 400 chars/u);
-  assert.match(text, /notes_read\s+legacy\.md/u, "legacy path remains an admissible notes_read address");
-  assert.match(text, /history_read\s+item-9 · win-2 · from 0 · 50 chars/u);
-  assert.match(text, /history_list\s+role assistant · oldest first · 20 rows/u);
   assert.match(text, /future_tool\s+\{"alpha":1,"beta":"long…/u, "a truncated capture keeps its explicit ellipsis");
-  assert.doesNotMatch(text, /(?:^|\s)use(?:\s|$)/u, "a generic row never renders the retired use verb");
-  assert.match(text, /history_list\s+role user(?:\s|$)/u, "absent list options stay absent, never defaulted");
-  assert.doesNotMatch(text, /newest first · 20 rows/u);
-  for (const name of ["mystery", "silent", "get_context_remaining"])
-    assert.ok(
-      lines.some((line) => new RegExp(`^ {3}${name}$`, "u").test(line)),
-      `${name} with empty or absent arguments renders no summary`,
-    );
+  assert.match(text, /^ {3}silent …$/mu, "an unavailable body keeps a visible placeholder");
 });
 
 test("generic tool rows preserve whole-field and indivisible-value omission", () => {
@@ -2292,7 +2264,7 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
   ].flatMap((row) => activityRowLines(row, { columns: 200, color: false }));
   for (const [pattern, message] of [
     [/\{"alpha":1\} — error · refused$/u, "argument evidence and its failure stay together"],
-    [/future_tool\s+— exit 7$/u, "an empty argument object never swallows failure evidence"],
+    [/future_tool\s+… — exit 7$/u, "an empty argument object never swallows failure evidence"],
   ] as const)
     assert.ok(
       lines.some((line) => pattern.test(line)),
@@ -2303,7 +2275,7 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
     completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" }),
     { columns: 120, color: false },
   ).join("\n");
-  assert.match(legacy, /mystery\s+— error · refused$/mu);
+  assert.match(legacy, /mystery\s+… — error · refused$/mu);
   assert.equal((legacy.match(/refused/gu) ?? []).length, 1, "a name-only failure states its diagnostic once");
 });
 
