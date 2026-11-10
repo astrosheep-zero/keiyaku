@@ -55,7 +55,6 @@ import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { Akuma as NativeAkuma } from "../src/akuma/index.js";
 import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
-import { Schema } from "../src/akuma/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import {
   debtAuthorityFile,
@@ -163,10 +162,7 @@ test(
     const root = fixtureRoot(t, "keiyaku-facade-ask-");
     const source = await bornWorld(root, "00000009");
     await moveAlias({ world: root, alias: parseAkumaAlias("@worker"), akumaId: source.allocated.id });
-    const schema = Schema.json(
-      { type: "object", properties: { ok: { type: "boolean" } } },
-      (value) => value as { ok: boolean },
-    );
+    const schema = { type: "object", properties: { ok: { type: "boolean" } } };
     const bodies: Promise<unknown>[] = [];
     const spawn = fixtureLauncher(
       bodies,
@@ -187,8 +183,7 @@ test(
       assert.equal((await readTell(source.allocated.paths, result.tellId))?.body, "continue");
       assert.equal(result.kind, "answered");
       if (result.kind !== "answered") throw new Error("expected answer");
-      const typed: { ok: boolean } | undefined = result.answer;
-      assert.equal(typed?.ok, true);
+      assert.deepEqual(result.answer, { ok: true });
       await assert.rejects(
         Akumas.of(root).tell({ akuma: "@worker", body: "no schema", schema } as never),
         /use Akumas.ask/u,
@@ -206,7 +201,7 @@ test("facade ask refuses path selection and invalid timeout before addressing", 
     /does not accept path/u,
   );
   await assert.rejects(
-    () => Akumas.of(root).ask({ akuma: "aku/worker/00000001", body: "x", timeoutMs: -1 }),
+    () => Akumas.of(root).ask({ akuma: "aku/worker/00000001", body: "x", schema: {}, timeoutMs: -1 }),
     /timeoutMs must be a nonnegative finite millisecond duration/u,
   );
   await assert.rejects(
@@ -262,15 +257,9 @@ test(
     };
     try {
       const api = akumasWithLauncher(world, spawn);
-      const schema = Schema.json({ type: "object" }, () => {
-        const rows = trace();
-        assert.deepEqual(rows.slice(0, 1), acquired);
-        assert.equal(rows.length, 2, "exact observation runs while the resource is held");
-        assert.deepEqual(rows[1]?.slice(0, 2), ["observe", source.allocated.id]);
-        throw new Error("invalid answer");
-      });
+      const schema = { type: "object" };
       const result = await api.ask({ akuma: source.allocated.id, body: "work", schema, signal: t.signal });
-      assert.equal(result.kind, "invalid-output");
+      assert.equal(result.kind, "answered");
       const tell = await readTell(source.allocated.paths, result.tellId);
       assert.ok(tell?.binding);
       assert.deepEqual(trace(), [

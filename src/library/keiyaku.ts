@@ -1,7 +1,6 @@
 /** @architectureCompositionRoot */
 import { isAbsolute, resolve } from "node:path";
 import { ZodError } from "zod";
-import { Schema } from "../akuma/schema.js";
 import {
   verbs,
   type VerbName,
@@ -9,12 +8,10 @@ import {
   type VerbOutput,
   type VerbRun,
   type VerbRunFor,
-  type AskRun,
 } from "./keiyaku-verbs.js";
 import type { AskProgress } from "../akuma/akuma-selection-execution.js";
 import type { SpawnProgress } from "./akuma-creation.js";
 import type { TellResult } from "../akuma/call-initial-tell.js";
-import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { World, WorldError, type WorldRoot } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
@@ -113,7 +110,7 @@ type SpawnInvocation = Omit<
       }>;
   }>;
 type TellInvocation = Omit<AkumaTellInput, "body" | "repo" | "initiator"> & Readonly<{ prompt: string }>;
-type AskInvocation<T> = Omit<AkumaAskInput<T>, "body" | "repo" | "initiator"> & Readonly<{ prompt: string }>;
+type AskInvocation = Omit<AkumaAskInput, "body" | "repo" | "initiator"> & Readonly<{ prompt: string }>;
 type ForkInvocation = Omit<ForkInput, "repo" | "caller" | "initiator">;
 type KillInvocation = Omit<AkumaKillInput, "repo">;
 type HistoryInvocation = Omit<AkumaHistoryInput, "akuma" | "repo"> & Readonly<{ selector: string; full?: boolean }>;
@@ -144,8 +141,6 @@ export class Keiyaku {
     return new Keiyaku(input);
   }
 
-  async run<T>(name: "ask", input: VerbInput<"ask">, run: AskRun<T>): Promise<AkumaAskResult<T>>;
-  async run<K extends VerbName>(name: K, input: VerbInput<K>, run?: VerbRunFor<K>): Promise<VerbOutput<K>>;
   async run<K extends VerbName>(name: K, input: VerbInput<K>, run?: VerbRunFor<K>): Promise<VerbOutput<K>> {
     let parsed: unknown;
     try {
@@ -244,12 +239,9 @@ export class Keiyaku {
     const observe = run?.observe;
     switch (request.name) {
       case "spawn": {
-        const { schema, ...input } = request.input;
-        const decode = (run as AskRun | undefined)?.decode ?? ((value: unknown) => value);
         return this.#spawn({
-          ...input,
+          ...request.input,
           ...signal,
-          ...(schema === undefined ? {} : { schema: Schema.json(schema, decode) }),
           ...(observe === undefined
             ? {}
             : {
@@ -263,14 +255,10 @@ export class Keiyaku {
       case "fork":
         return this.#fork(request.input);
       case "tell":
-        return this.#tell({ ...request.input, ...signal });
       case "ask": {
-        const { schema, ...input } = request.input;
-        const decode = (run as AskRun | undefined)?.decode ?? ((value: unknown) => value);
-        return this.#ask({
-          ...input,
+        const input: TellInvocation | AskInvocation = {
+          ...request.input,
           ...signal,
-          ...(schema === undefined ? {} : { schema: Schema.json(schema, decode) }),
           ...(observe === undefined
             ? {}
             : {
@@ -279,7 +267,8 @@ export class Keiyaku {
                   observe: (observation) => notify({ kind: "live", observation }),
                 },
               }),
-        });
+        };
+        return "schema" in input ? this.#ask(input) : this.#tell(input);
       }
       case "kill":
         return this.#kill({ ...request.input, ...signal });
@@ -345,34 +334,17 @@ export class Keiyaku {
   reconcile(input: ReconcileInput = {}) {
     return this.run("reconcile", input);
   }
-  spawn({ schema, ...input }: Omit<SpawnInvocation, "signal" | "observe">, run?: VerbRun<SpawnProgress>) {
-    return this.run<"spawn">(
-      "spawn",
-      { ...input, ...(schema === undefined ? {} : { schema: schema.jsonSchema }) },
-      {
-        ...run,
-        ...(schema === undefined ? {} : { decode: schema.decode }),
-      },
-    );
+  spawn(input: Omit<SpawnInvocation, "signal" | "observe">, run?: VerbRun<SpawnProgress>) {
+    return this.run("spawn", input, run);
   }
   fork(input: ForkInvocation) {
     return this.run("fork", input);
   }
-  tell(input: Omit<TellInvocation, "signal">, run?: VerbRun) {
+  tell(input: Omit<TellInvocation, "signal" | "observe">, run?: VerbRun<AskProgress>) {
     return this.run("tell", input, run);
   }
-  ask<T = string>(
-    { schema, ...input }: Omit<AskInvocation<T>, "signal" | "observe">,
-    run?: VerbRun<AskProgress>,
-  ): Promise<AkumaAskResult<T>> {
-    return this.run(
-      "ask",
-      { ...input, ...(schema === undefined ? {} : { schema: schema.jsonSchema }) },
-      {
-        ...run,
-        ...(schema === undefined ? {} : { decode: schema.decode }),
-      },
-    );
+  ask(input: Omit<AskInvocation, "signal" | "observe">, run?: VerbRun<AskProgress>) {
+    return this.run("ask", input, run);
   }
   kill(input: Omit<KillInvocation, "signal">, run?: VerbRun) {
     return this.run("kill", input, run);
@@ -666,7 +638,7 @@ export class Keiyaku {
     });
   }
 
-  async #ask<T = string>({ prompt, ...input }: AskInvocation<T>) {
+  async #ask({ prompt, ...input }: AskInvocation) {
     if (prompt.trim() === "") throw new KeiyakuUsageError("ask requires a nonblank prompt");
     const { at, akumas } = await this.#akumas();
     const initiator = deliveryOwner(this.#input.environment);

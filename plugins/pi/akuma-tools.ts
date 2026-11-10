@@ -4,7 +4,6 @@ import {
   AkumaHost,
   Akumas,
   Repo,
-  Schema,
   World,
   listArchetypeDefinitions,
   projectFailure,
@@ -19,7 +18,6 @@ import {
   type AkumaTellInput,
   type AkumaWaitInput,
   type ForkInput,
-  type JsonSchemaDocument,
   type WorldRoot,
 } from "@astrosheep/keiyaku";
 
@@ -150,7 +148,6 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
     bare?: boolean;
     wait?: boolean;
     timeoutMs?: number;
-    schema?: JsonSchemaDocument;
   }>(
     "akuma_spawn",
     "Spawn any configured Akuma provider. By default launch in this Pi session and return birth plus first-Tell receipt immediately. detach selects detached hosting; wait separately observes the first answer (default five-minute bound). Deadlines/abort stop observation, not admitted execution. Session shutdown retires only this session's in-process launches.",
@@ -173,7 +170,6 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
       bare,
       wait: { type: "boolean", description: "Observe first answer, independently of host choice (default false)" },
       timeoutMs,
-      schema: { type: "object", additionalProperties: true },
     },
     ["akumaName", "body"],
     async (input, akumas, ctx, signal) => {
@@ -187,7 +183,6 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
         caller: caller(ctx),
         ...(input.bare === undefined ? {} : { bare: input.bare }),
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-        ...(input.schema === undefined ? {} : { schema: Schema.json(input.schema, (value) => value) }),
         ...(signal === undefined ? {} : { signal }),
       });
       return result;
@@ -217,15 +212,14 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
   );
   register<ToolAddress<AkumaTellInput> & LaunchChoice>(
     "akuma_tell",
-    "Admit input without awaiting its answer. detach explicitly selects future wake hosting (default this Pi session); running work stays in its current host. Optional interrupt admits first, then requests current work to yield.",
-    { akuma: selector, body, interrupt, detach, repo },
+    "Admit text input, optionally awaiting its exact answer with wait. timeoutMs requires wait; omitted timeout with wait is unbounded. detach selects future wake hosting (default this Pi session). Optional interrupt admits first, then requests current work to yield.",
+    { akuma: selector, body, interrupt, detach, repo, wait: { type: "boolean" }, timeoutMs },
     ["akuma", "body"],
-    async (input, akumas, ctx, signal) =>
-      akumas.tell({ ...(await address(input, ctx)), ...(signal === undefined ? {} : { signal }) }),
+    async (input, akumas, ctx, signal) => akumas.tell({ ...(await address(input, ctx)), ...(signal === undefined ? {} : { signal }) }),
   );
-  register<ToolAddress<Omit<AkumaAskInput, "schema" | "observe">> & LaunchChoice & { schema?: JsonSchemaDocument }>(
+  register<ToolAddress<Omit<AkumaAskInput, "observe">> & LaunchChoice>(
     "akuma_ask",
-    "Admit input and observe that exact answer. timeoutMs/abort stop observation, never admitted work. detach selects future wake hosting (default this Pi session), never relocates running work. Optional JSON Schema is a provider answer contract; parsed JSON is returned without arbitrary local schema validation.",
+    "Admit input and observe its JSON answer under the required JSON Schema provider contract. timeoutMs/abort stop observation, never admitted work. detach selects future wake hosting (default this Pi session). Parsed JSON is returned without local schema validation.",
     {
       akuma: selector,
       body,
@@ -235,15 +229,8 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
       schema: { type: "object", additionalProperties: true },
       repo,
     },
-    ["akuma", "body"],
-    async (input, akumas, ctx, signal) => {
-      const { schema, ...rest } = await address(input, ctx);
-      return akumas.ask({
-        ...rest,
-        ...(signal === undefined ? {} : { signal }),
-        ...(schema === undefined ? {} : { schema: Schema.json(schema, (value) => value) }),
-      });
-    },
+    ["akuma", "body", "schema"],
+    async (input, akumas, ctx, signal) => akumas.ask({ ...(await address(input, ctx)), ...(signal === undefined ? {} : { signal }) }),
   );
   register<ToolAddress<AkumaWaitInput>>(
     "akuma_wait",

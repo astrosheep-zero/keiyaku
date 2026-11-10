@@ -77,7 +77,7 @@ test("an observing call writes its answer once without repeating cwd or the outc
     tellId: "tell/msys",
     input: { kind: "answered", answer: "final answer" },
   });
-  const raw = callRawAnswer(result, false, false);
+  const raw = callRawAnswer(result, false);
   assert.equal(raw, "final answer");
   assert.doesNotMatch(raw ?? "", /cwd/u);
 });

@@ -65,8 +65,6 @@ export type {
   VerbProgress,
   VerbRun,
   VerbRunFor,
-  AskRun,
-  SpawnRun,
   VerbDisposition,
   VerbCompletion,
 } from "./library/keiyaku-verbs.js";
@@ -82,7 +80,6 @@ export {
   AkumaDecodeError,
   AkumaNotBornError,
   AkumaProviderError,
-  Schema,
   listArchetypeDefinitions,
 } from "./akuma/index.js";
 export type {
@@ -112,8 +109,6 @@ export type {
   JsonSchema,
   JsonSchemaDocument,
   KillEvidence,
-  SchemaLike,
-  StandardSchemaV1,
 } from "./akuma/index.js";
 export type {
   ActorId,

@@ -286,15 +286,22 @@ function renderKill(input: VerbInput<"kill">, value: VerbOutput<"kill">, context
   return renderKillText(value, selectors.length === 1 ? alias(selectors[0]) : undefined, context);
 }
 
-function renderAsk(input: VerbInput<"ask">, result: VerbOutput<"ask">, context: TextRenderContext): string {
+function renderAsk(
+  input: VerbInput<"ask" | "tell">,
+  result: VerbOutput<"ask" | "tell">,
+  context: TextRenderContext,
+): string {
   const selectedAlias = alias(input.akuma);
-  return result.kind === "answered"
-    ? (askRawAnswer(result, input.schema !== undefined) ?? "")
-    : waitedTellProgress(
-        result,
-        { prompt: input.prompt, ...(selectedAlias === undefined ? {} : { alias: selectedAlias }) },
-        context,
-      );
+  if (!("kind" in result) && result.input === undefined) return tellText(result, input.prompt, selectedAlias, context);
+  return "kind" in result && result.kind === "answered"
+    ? (askRawAnswer(result) ?? "")
+    : !("kind" in result) && result.input?.kind === "answered"
+      ? result.input.answer
+      : waitedTellProgress(
+          result,
+          { prompt: input.prompt, ...(selectedAlias === undefined ? {} : { alias: selectedAlias }) },
+          context,
+        );
 }
 
 function spawnPresentation(input: VerbInput<"spawn">) {
@@ -306,9 +313,9 @@ function spawnPresentation(input: VerbInput<"spawn">) {
   };
 }
 
-/** Spawn carries its submitted schema and prompt only through the invocation input. */
+/** Spawn's optional observation carries text. */
 function renderSpawn(input: VerbInput<"spawn">, result: VerbOutput<"spawn">, context: TextRenderContext): string {
-  const raw = callRawAnswer(result, input.schema !== undefined, false);
+  const raw = callRawAnswer(result, false);
   return raw ?? renderCallText(result, false, context, spawnPresentation(input));
 }
 
@@ -371,12 +378,9 @@ export function renderVerb<K extends VerbName>(
       return renderSpawn(input as VerbInput<"spawn">, value as VerbOutput<"spawn">, context);
     case "fork":
       return renderForkText(value as VerbOutput<"fork">, input as VerbInput<"fork">);
-    case "tell": {
-      const tellInput = input as VerbInput<"tell">;
-      return tellText(value as VerbOutput<"tell">, tellInput.prompt, alias(tellInput.akuma), context);
-    }
+    case "tell":
     case "ask":
-      return renderAsk(input as VerbInput<"ask">, value as VerbOutput<"ask">, context);
+      return renderAsk(input as VerbInput<"ask" | "tell">, value as VerbOutput<"ask" | "tell">, context);
     case "kill":
       return renderKill(input as VerbInput<"kill">, value as VerbOutput<"kill">, context);
     case "wait":

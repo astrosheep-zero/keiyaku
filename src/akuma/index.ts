@@ -21,6 +21,5 @@ export type { AkumaStatus } from "./akuma.js";
 export type { KillEvidence } from "./heart/index.js";
 export type { AkumaId } from "./identity.js";
 export type { ActivityHistory, ActivityRow } from "./projection.js";
-export { Schema } from "./schema.js";
-export type { JsonSchema, JsonSchemaDocument, SchemaLike, StandardSchemaV1 } from "./schema.js";
+export type { JsonSchema, JsonSchemaDocument } from "./schema.js";
 export type { AkumaAskObservation, AkumaAskResult, AkumaTellResult } from "./selection-observation.js";

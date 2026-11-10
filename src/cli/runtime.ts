@@ -258,7 +258,8 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
           : await acquireContractRequest(command, runtime)
         : command;
     if (request.name === "spawn") return await runSpawn(request, runtime);
-    if (request.name === "ask") return await runAsk(request, runtime);
+    if (request.name === "ask" || (request.name === "tell" && request.input.wait === true))
+      return await runAsk(request, runtime);
     if (request.name === "history" && !request.input.selector.startsWith("kei/"))
       return await runAkumaHistory(request, runtime);
     return await runContractRequest(request, runtime);

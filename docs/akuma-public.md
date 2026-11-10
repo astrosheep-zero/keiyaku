@@ -4,7 +4,7 @@ This chapter owns the small `Akuma` root product surface and its lifecycle
 evidence. Exact TypeScript shapes, field budgets, and rendering belong to
 declarations, help, and executable specifications.
 
-The public caller path is `Akuma.birth`, synchronous `Akuma.select`, then `Akuma.tell` or `Akuma.ask`. Birth submits no prompt; selection performs no read. A selected Akuma exposes its identity, status, admission-only Tell, and input-bound AskResult with optional schema decoding, along with the lifecycle-only idle, history, and kill observations.
+The public caller path is `Akuma.birth`, synchronous `Akuma.select`, then `Akuma.tell` or `Akuma.ask`. Birth submits no prompt; selection performs no read. A selected Akuma exposes its identity, status, Tell admission with optional text answer observation, and structured Ask, along with the lifecycle-only idle, history, and kill observations.
 `Akumas` owns World selection, Alias and Contract selector resolution, Dispatch
 and DebtHolder association, and plural selection around this product;
 those concerns do not become single-Akuma handle methods. `Akuma` remains
@@ -142,13 +142,7 @@ operation that reads Heart, leash, or filesystem state is asynchronous. The
 surface contains no owner, born, Turn, spawn, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
-A Tell is the admitted message, and `tell` returns its admission receipt without
-awaiting an answer. The receipt identifies the resolved Akuma and admitted input
-once, omitting repeated input and routine successful mechanics while retaining
-actionable wake and interruption evidence. `ask` admits a Tell and observes the
-answer to that exact admission; both faces use these same verbs and one native
-answer judgment. A decoded undefined answer remains explicit and distinct from
-both an absent answer and a null answer. Its observation distinguishes answered, failed, invalid-output, unanswered, and deadline. The decoded answer flows through the answered arm; provider failure and schema decode failure remain distinct observations, not thrown answer failures. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A spawn composes prompt-free birth with optional first ordinary Tell admission; bounded spawn observation awaits that first ask without changing admission. Schema belongs to ask, not tell. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy and recovery semantics.
+A Tell is the admitted message. `tell` returns its admission receipt and may explicitly observe the text answer to that exact admission. The receipt identifies the resolved Akuma and admitted input once, omitting repeated input and routine successful mechanics while retaining actionable wake and interruption evidence. `ask` admits a Tell under a required JSON Schema document and observes its parsed JSON answer. Only Ask distinguishes invalid output from execution failure; a text observer of invalid schema output sees the same failure diagnostic as the timeline. Both observations distinguish an answer, failure, absence of an answer, and a deadline. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A spawn composes prompt-free birth with optional first ordinary Tell admission; bounded spawn observation awaits that first text answer without changing admission. Schema belongs only to ask. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy and recovery semantics.
 Wait observes status until its Akuma-owned completion judgment or a caller
 deadline. Running execution keeps observation open. Normally sleeping execution
 completes only without pending Tell, preserving ordinary successor handoff.
@@ -192,16 +186,10 @@ provider outcome. Observation neither retries nor changes Tell facts. Without
 invocation-owned wake evidence, sleeping execution with pending input retains
 the conservative handoff wait rather than guessing that launch has failed.
 
-Schema on an ask carries a provider answer contract. The contract may be
-the package's own schema value or any Standard Schema v1 value; a vendor value
-is normalized at admission, and decoding stays a caller-side operation over the
-exact answer. The contract remains inside simple JSON shape vocabulary: a
-projected document that steps outside it refuses at submission, naming the
-offending keyword, so a fragile or unrepresentable constraint surfaces before
-provider work rather than as a mysterious answer. A caller who owns an arbitrary
-JSON Schema and its decoder signs that waiver explicitly and is not subject to
-the refusal. Schema construction only makes a shape machine-usable; it never
-makes the answer true.
+Schema on an ask carries a provider answer contract as a JSON Schema document.
+Admission canonicalizes and bounds the document before provider work. Ask parses
+the exact JSON answer without caller-side transformation or schema-conformance
+validation. A machine-usable shape never makes the answer true.
 
 Lifecycle observation must not manufacture an unclean end by combining old
 running evidence with a Body's later leash release. A free-seat judgment uses

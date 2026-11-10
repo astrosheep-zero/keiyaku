@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import test, { after, type TestContext } from "node:test";
-import { Akuma, Akumas, Schema, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
+import { Akuma, Akumas, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { readAkumaTimeline } from "../src/akuma/akuma.js";
@@ -620,7 +620,7 @@ test("a deadline without an established outcome releases deferral without consum
 });
 
 for (const route of ["ask", "standalone-ask"] as const) {
-  test(`${route} observes and decodes before its delayed real notice is inserted`, { timeout: 15_000 }, async (t) => {
+  test(`${route} observes parsed JSON before its delayed real notice is inserted`, { timeout: 15_000 }, async (t) => {
     const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-square-ask-"), "0b500019");
     const observed = await squareObserver(t, source.world);
     const bodies: Promise<unknown>[] = [];
@@ -649,9 +649,7 @@ for (const route of ["ask", "standalone-ask"] as const) {
       },
     );
     try {
-      const schema = Schema.json({ type: "object" }, () => {
-        throw new Error("decoder refused");
-      });
+      const schema = { type: "object" };
       const result =
         route === "standalone-ask"
           ? await akumaWithLauncher(source.world, source.allocated.id, spawn).ask("work", {
@@ -666,14 +664,14 @@ for (const route of ["ask", "standalone-ask"] as const) {
               initiator: observed.owner,
               signal: t.signal,
             });
-      assert.equal(result.kind, "invalid-output");
+      assert.equal(result.kind, "answered");
       await sending;
       release();
       await settleFixtureBodies(bodies);
       assert.deepEqual(
         await observed.cards(),
         [],
-        "exact early ACK survives schema decoding failure and scope release",
+        "exact early ACK survives scope release",
       );
     } finally {
       release();
@@ -683,7 +681,7 @@ for (const route of ["ask", "standalone-ask"] as const) {
 }
 
 test(
-  "ask retains the observed outcome through schema and plugin failure using its host sink",
+  "ask retains the observed outcome through plugin failure using its host sink",
   { timeout: 15_000 },
   async (t) => {
     const source = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-ask-"), "0b500008");
@@ -700,15 +698,13 @@ test(
       ]),
     );
     try {
-      const schema = Schema.json({ type: "object" }, () => {
-        throw new Error("decode refused");
-      });
+      const schema = { type: "object" };
       const result = await akumaWithLauncher(source.world, source.allocated.id, spawn, {
         reportDiagnostic: (message) => {
           diagnostics.push(message);
         },
       }).ask("work", { schema, signal: t.signal });
-      assert.equal(result.kind, "invalid-output");
+      assert.equal(result.kind, "answered");
       const tell = await readTell(source.allocated.paths, result.tellId);
       assert.ok(tell?.binding);
       assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
@@ -717,7 +713,7 @@ test(
           diagnostics.push(message);
         },
       }).ask({ akuma: peer.allocated.id, body: "work", schema, signal: t.signal });
-      assert.equal(pluralResult.kind, "invalid-output");
+      assert.equal(pluralResult.kind, "answered");
       const peerTell = await readTell(peer.allocated.paths, pluralResult.tellId);
       assert.ok(peerTell?.binding);
       assert.deepEqual(peerRecorded.signals(), [signal(peer.allocated.id, peerTell.binding.turnSequence)]);

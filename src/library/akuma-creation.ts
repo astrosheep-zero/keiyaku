@@ -2,12 +2,7 @@
 import { z } from "zod";
 import { contractIdSchema } from "../git/identity.js";
 import { tellResultSchema } from "../akuma/call-initial-tell.js";
-import {
-  akumaAskObservationSchema,
-  publicWakeSchema,
-  compactTellResult,
-  type AkumaAskObservation,
-} from "../akuma/selection-observation.js";
+import { akumaTextObservationSchema, publicWakeSchema, compactTellResult } from "../akuma/selection-observation.js";
 import { akumaIdSchema } from "../akuma/identity.js";
 import { forkFailureSchemas } from "../akuma/akuma-owner.js";
 import { randomUUID } from "node:crypto";
@@ -23,7 +18,6 @@ import { discardPreparedCall } from "../akuma/publication.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import {
-  decodeAskObservation,
   liveStatusObservationSchema,
   observeAdmittedAskAkuma,
   type AskObserver,
@@ -32,7 +26,6 @@ import type { AkumaStatus } from "../akuma/akuma.js";
 import type { TellResult } from "../akuma/body.js";
 import { bareOption, canonicalBirthCwd } from "../akuma/call-input.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "../akuma/identity.js";
-import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import { moveAlias } from "../alias/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { publishDispatch, readDispatch } from "../dispatch/index.js";
@@ -83,7 +76,7 @@ export const spawnResultSchema = z
     ...publicationFields,
     tellId: z.string().exactOptional(),
     wake: publicWakeSchema.exactOptional(),
-    input: akumaAskObservationSchema.exactOptional(),
+    input: akumaTextObservationSchema.exactOptional(),
     failure: integrationFailureSchema
       .unwrap()
       .extend({ attemptedTellId: z.string().exactOptional() })
@@ -107,10 +100,7 @@ export const forkResultSchema = z.union([
   forkFailureSchemas.upstream.unwrap().extend(parentFields).readonly(),
 ]);
 export type SpawnWaitHead = z.output<typeof spawnWaitHeadSchema>;
-export type SpawnResult<T = unknown> = Omit<z.output<typeof spawnResultSchema>, "input"> &
-  Readonly<{
-    input?: AkumaAskObservation<T>;
-  }>;
+export type SpawnResult = z.output<typeof spawnResultSchema>;
 export type ForkResult = z.output<typeof forkResultSchema>;
 
 export const spawnProgressSchema = z.union([
@@ -143,7 +133,6 @@ export type SpawnInput = Readonly<{
   alias?: AkumaAlias;
   writableDirectories?: readonly string[];
   bare?: boolean;
-  schema?: Schema<unknown>;
   initiator?: string;
   caller?: AkumaCaller;
   signal?: AbortSignal;
@@ -219,7 +208,6 @@ function validateCallBodyOptions(
   values: Record<string, unknown>,
   mode: "wait" | "detach",
 ): void {
-  if (body === undefined && values.schema !== undefined) throw new TypeError("schema requires body");
   if (body === undefined && (mode === "wait" || values.timeoutMs !== undefined))
     throw new TypeError("wait and timeoutMs require body");
 }
@@ -343,7 +331,6 @@ const CALL_INPUT_KEYS = [
   "alias",
   "writableDirectories",
   "bare",
-  "schema",
   "initiator",
   "caller",
   "signal",
@@ -366,7 +353,6 @@ type ParsedCallInput = Readonly<{
   caller?: AkumaCaller;
   initiator?: string;
   initialTell?: InitialCallTell;
-  schema?: Schema<unknown>;
   observe?: SpawnWaitObserver;
 }>;
 
@@ -389,8 +375,6 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
   const alias: AkumaAlias | undefined =
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = callSeat(values.contract);
-  const schema = values.schema as Schema<unknown> | undefined;
-  const schemaJson = schema === undefined ? undefined : schemaJsonText(schema);
   const observe = values.observe as AskObserver | undefined;
   const initialTell =
     body === undefined
@@ -398,7 +382,6 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
       : {
           tellId: randomUUID(),
           body,
-          ...(schemaJson === undefined ? {} : { schemaJson }),
           ...(initiator === undefined ? {} : { initiator }),
         };
   return {
@@ -419,7 +402,6 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
     ...(caller === undefined ? {} : { caller }),
     ...(initiator === undefined ? {} : { initiator }),
     ...(initialTell === undefined ? {} : { initialTell }),
-    ...(schema === undefined ? {} : { schema }),
     ...(observe === undefined ? {} : { observe }),
   };
 }
@@ -461,7 +443,6 @@ async function observeCall(
     result: SpawnResult;
     head: SpawnWaitHead;
     initialTell: NonNullable<ParsedCallInput["initialTell"]>;
-    schema?: Schema<unknown>;
     receipt: TellResult;
     timeoutMs: number;
     settings?: Settings;
@@ -495,9 +476,11 @@ async function observeCall(
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       onObserve,
     });
-    const decoded = input.schema === undefined ? observed : decodeAskObservation(observed, input.schema);
-    const { akumaId: _id, tellId: _tell, wake: _wake, interrupt: _interrupt, ...outcome } = decoded;
-    return { ...input.result, input: outcome };
+    const { akumaId: _id, tellId: _tell, wake: _wake, interrupt: _interrupt, ...outcome } = observed;
+    return {
+      ...input.result,
+      input: outcome.kind === "invalid-output" ? { kind: "failed", diagnostic: outcome.diagnostic } : outcome,
+    };
   } catch (error) {
     if (input.signal?.aborted) throw withSpawnFailureReceipt(error, input.result);
     return failedCall(input.result, error);
@@ -548,7 +531,6 @@ async function settleCall(
       result,
       head,
       initialTell: parsed.initialTell,
-      ...(parsed.schema === undefined ? {} : { schema: parsed.schema }),
       receipt,
       timeoutMs: parsed.timeoutMs,
       ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),

@@ -3,7 +3,7 @@ import type { AkumaPromptSource } from "./akuma-grammar.js";
 import type { PendingRequest, VerbRequest } from "../parse.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { readFile } from "node:fs/promises";
-import { Schema, type JsonSchemaDocument } from "../../akuma/index.js";
+import { canonicalDocument } from "../../akuma/schema.js";
 import { classifyVerb } from "../../library/keiyaku-verbs.js";
 import type { AskProgress } from "../../akuma/akuma-selection-execution.js";
 import type { SpawnProgress } from "../../library/akuma-creation.js";
@@ -14,10 +14,10 @@ import { askRawAnswer, callObservationStream, callRawAnswer, historyRawAnswer } 
 import { askProgressStream, callObservationHead, renderFailedCallObservation } from "../render/akuma.js";
 import { renderVerb } from "../render/verbs.js";
 
-async function schemaFromFile(path: string): Promise<JsonSchemaDocument> {
+async function schemaFromFile(path: string) {
   try {
     const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
-    return Schema.json(parsed as JsonSchemaDocument, (value) => value).jsonSchema;
+    return canonicalDocument(parsed).json;
   } catch (error) {
     throw new CliUsageError(
       `cannot read JSON Schema file ${path}: ${error instanceof Error ? error.message : String(error)}`,
@@ -46,20 +46,19 @@ export async function acquireAkumaRequest(
   runtime: CliRuntime,
 ): Promise<VerbRequest<"spawn" | "tell" | "ask">> {
   const prompt =
-    request.acquire.prompt === undefined
-      ? undefined
-      : await promptBody(request.name === "ask" ? "tell" : request.name, request.acquire.prompt, runtime);
+    request.acquire.prompt === undefined ? undefined : await promptBody(request.name, request.acquire.prompt, runtime);
   if (request.name === "tell")
     return { name: "tell", input: { ...request.input, prompt: prompt! }, output: request.output };
-  const schema = request.acquire.schema === undefined ? undefined : await schemaFromFile(request.acquire.schema);
-  const acquired = { ...(schema === undefined ? {} : { schema }) };
   return request.name === "ask"
-    ? { name: "ask", input: { ...request.input, ...acquired, prompt: prompt! }, output: request.output }
+    ? {
+        name: "ask",
+        input: { ...request.input, schema: await schemaFromFile(request.acquire.schema), prompt: prompt! },
+        output: request.output,
+      }
     : {
         name: "spawn",
         input: {
           ...request.input,
-          ...acquired,
           ...(prompt === undefined ? {} : { prompt }),
           ...(workdir === undefined ? {} : { workdir }),
         },
@@ -74,7 +73,6 @@ function emitAnswer(body: string, exact: boolean): void {
 
 export async function runSpawn(request: VerbRequest<"spawn">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
-  const hasSchema = input.schema !== undefined;
   let stream: ReturnType<typeof callObservationStream> | undefined;
   const driver = new ActivityDriver(process.stderr);
   const observing = input.mode === "wait" && output === "text";
@@ -94,7 +92,6 @@ export async function runSpawn(request: VerbRequest<"spawn">, runtime: CliRuntim
     const result = await runtime.facet.run("spawn", input, {
       signal: runtime.signal,
       ...(observe === undefined ? {} : { observe }),
-      ...(hasSchema ? { decode: (value: unknown) => value } : {}),
     });
     let streamed = stream !== undefined;
     if (stream !== undefined) driver.conclude(stream.conclude(result));
@@ -111,10 +108,10 @@ export async function runSpawn(request: VerbRequest<"spawn">, runtime: CliRuntim
     const completion = { kind: "returned" as const, value: result };
     if (output === "json") writeJson(result);
     else if (streamed) {
-      const raw = callRawAnswer(result, hasSchema, true);
+      const raw = callRawAnswer(result, true);
       emitAnswer(raw ?? "", raw !== undefined);
     } else {
-      const raw = callRawAnswer(result, hasSchema, false);
+      const raw = callRawAnswer(result, false);
       emitAnswer(renderVerb("spawn", input, completion, displayContext()), raw !== undefined);
     }
     return classifyVerb("spawn", input, completion);
@@ -123,9 +120,8 @@ export async function runSpawn(request: VerbRequest<"spawn">, runtime: CliRuntim
   }
 }
 
-export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): Promise<CliOutcome> {
+export async function runAsk(request: VerbRequest<"ask" | "tell">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
-  const hasSchema = input.schema !== undefined;
   const progress =
     output === "text" ? askProgressStream(undefined, inputAlias(input.akuma), resultContext()) : undefined;
   const driver = new ActivityDriver(process.stderr);
@@ -137,16 +133,23 @@ export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): 
           else driver.settle(progress.observe(event.observation), progress.frame());
         };
   try {
-    const result = await runtime.facet.run<"ask">("ask", input, {
+    const run = {
       signal: runtime.signal,
       ...(observe === undefined ? {} : { observe }),
-      ...(hasSchema ? { decode: (value: unknown) => value } : {}),
-    });
+    };
+    const result =
+      request.name === "ask"
+        ? await runtime.facet.run("ask", request.input, run)
+        : await runtime.facet.run("tell", request.input, run);
     if (progress !== undefined) driver.conclude(progress.conclude(result).join("\n"));
     const completion = { kind: "returned" as const, value: result };
     if (output === "json") writeJson(result);
-    else emitAnswer(askRawAnswer(result, hasSchema) ?? "", true);
-    return classifyVerb("ask", input, completion);
+    else
+      emitAnswer(
+        "kind" in result ? (askRawAnswer(result) ?? "") : result.input?.kind === "answered" ? result.input.answer : "",
+        true,
+      );
+    return classifyVerb(request.name, input, completion);
   } finally {
     driver.close(progress?.flush() ?? []);
   }

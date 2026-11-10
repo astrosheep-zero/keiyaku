@@ -287,13 +287,14 @@ test(
       integration: "pi",
       id: host.session.sessionId,
     });
-    const answer = await native("akuma_ask", {
+    const answer = await native("akuma_tell", {
       akuma: fork.childAkumaId,
+      wait: true,
       body: command("printf fork-answer"),
       timeoutMs: 20_000,
     });
-    assert.equal(answer.kind, "answered");
-    assert.equal(answer.answer, "fork-answer", JSON.stringify(answer));
+    assert.equal(answer.input.kind, "answered");
+    assert.equal(answer.input.answer, "fork-answer", JSON.stringify(answer));
     const structured = await native("akuma_ask", {
       akuma: id,
       body: JSON.stringify({ answer: { ok: true } }),
@@ -309,7 +310,8 @@ test(
 
     // The provider-owned Pi session invokes the real local SDK through a nested
     // native tool, and its bash child invokes the same local owners through CLI.
-    const nested = await native("akuma_ask", {
+    const nested = await native("akuma_tell", {
+      wait: true,
       akuma: id,
       body: JSON.stringify({
         tool: "nested-fixture",
@@ -317,13 +319,14 @@ test(
       }),
       timeoutMs: 20_000,
     });
-    const nestedBirth = JSON.parse(nested.answer);
+    const nestedBirth = JSON.parse(nested.input.answer);
     assert.equal(nestedBirth.input.kind, "answered");
     assert.equal(nestedBirth.input.answer, "ack:nested child");
     assert.deepEqual((await Akuma.select(world, nestedBirth.akumaId).status()).birth.caller, {
       kind: "external", integration: "pi", id: events(world).find(event => event.event === "session_start" && event.session !== host.session.sessionId)?.session,
     });
-    const local = await native("akuma_ask", {
+    const local = await native("akuma_tell", {
+      wait: true,
       akuma: id,
       body: command(
         [
@@ -345,7 +348,7 @@ test(
       ),
       timeoutMs: 30_000,
     });
-    const localBirth = JSON.parse(local.answer);
+    const localBirth = JSON.parse(local.input.answer);
     assert.equal(localBirth.input.kind, "answered");
     assert.equal(localBirth.input.answer, "ack:local child");
     assert.deepEqual((await Akuma.select(world, localBirth.akumaId).status()).birth.caller, {
@@ -398,7 +401,7 @@ test(
     // must not kill it just because it originally called this AkumaId.
     const foreignScope = AkumaHost.inProcess();
     const foreign = Akuma.select(world, id, foreignScope);
-    const asking = foreign.ask(command(holding(world, "foreign")), { signal: t.signal });
+    const asking = foreign.tell(command(holding(world, "foreign")), { wait: true, signal: t.signal });
     try {
       await waitForCondition("all shutdown witnesses active", () =>
         ["detached", "scoped", "foreign"].every((name) => existsSync(join(world, `${name}.ready`))),

@@ -83,8 +83,7 @@ function classifySpawn(result: SpawnResult): VerbDisposition {
     result.dispatchFailure !== undefined ||
     (result.alias !== undefined && result.alias.kind !== "moved") ||
     result.wake?.kind === "failed" ||
-    result.input?.kind === "failed" ||
-    result.input?.kind === "invalid-output"
+    result.input?.kind === "failed"
     ? "failed"
     : "accepted";
 }
@@ -169,8 +168,10 @@ export function classifyVerb<K extends VerbName>(
       return classifySpawn(value as SpawnResult);
     case "fork":
       return classifyFork(value as ForkResult);
-    case "tell":
-      return (value as AkumaTellResult).wake?.kind === "failed" ? "failed" : "accepted";
+    case "tell": {
+      const result = value as AkumaTellResult;
+      return result.wake?.kind === "failed" || result.input?.kind === "failed" ? "failed" : "accepted";
+    }
     case "ask": {
       const reason = (value as AkumaAskResult).kind;
       return reason === "failed" || reason === "invalid-output" ? "failed" : "accepted";

@@ -10,7 +10,6 @@ import { AkumaOwner } from "./akuma-owner.js";
 import type { AkumaStatus } from "./akuma.js";
 import { tellWakeRuntime, type TellResult } from "./body.js";
 import type { BodyLauncher } from "./body-launch.js";
-import type { Schema } from "./schema.js";
 import {
   compactTellResult,
   type AkumaAskObservation,
@@ -47,6 +46,8 @@ type TellExecutionInput = Readonly<{
   initiator?: string;
   signal?: AbortSignal;
   interrupt?: boolean;
+  wait?: boolean;
+  timeoutMs?: number;
   onObserve?: AskObserver;
   outcomeObserved?: OutcomeObserver;
 }>;
@@ -54,6 +55,17 @@ type TellExecutionInput = Readonly<{
 type AskExecutionInput = TellExecutionInput & Readonly<{ timeoutMs?: number; schemaJson?: string }>;
 
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
+  if (input.wait === true) {
+    const { akumaId, tellId, wake, interrupt, ...observation } = await executeAskAkuma(input);
+    return {
+      akumaId,
+      tellId,
+      ...(wake === undefined ? {} : { wake }),
+      ...(interrupt === undefined ? {} : { interrupt }),
+      input:
+        observation.kind === "invalid-output" ? { kind: "failed", diagnostic: observation.diagnostic } : observation,
+    };
+  }
   input.signal?.throwIfAborted();
   const owner = new AkumaOwner(input.id, input.path);
   let tell;
@@ -79,7 +91,9 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   return { ...compact, ...(interrupt === undefined ? {} : { interrupt }) };
 }
 
-function askObservation(observed: Awaited<ReturnType<AkumaOwner["tellOutcome"]>>): AkumaAskObservation {
+function askObservation(
+  observed: Awaited<ReturnType<AkumaOwner["tellOutcome"]>>,
+): AkumaAskObservation & { answer?: string } {
   if (observed.outcome === null) return observed.reason === "deadline" ? { kind: "deadline" } : { kind: "unanswered" };
   if (observed.outcome.kind === "canceled") return { kind: "unanswered" };
   if (observed.outcome.kind === "answered")
@@ -90,37 +104,6 @@ function askObservation(observed: Awaited<ReturnType<AkumaOwner["tellOutcome"]>>
     diagnostic: observed.outcome.diagnostic,
     answer: observed.outcome.answer,
   };
-}
-
-export function decodeAskObservation<T>(observation: AkumaAskResult, schema: Schema<T>): AkumaAskResult<T>;
-export function decodeAskObservation<T>(observation: AkumaAskObservation, schema: Schema<T>): AkumaAskObservation<T>;
-export function decodeAskObservation<T>(observation: AkumaAskObservation, schema: Schema<T>): AkumaAskObservation<T> {
-  if (observation.kind !== "answered") return observation;
-  const { answer: _answer, answerUndefined: _undefined, ...receipt } = observation;
-  let value = observation.answer;
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value);
-    } catch (error) {
-      return {
-        ...receipt,
-        kind: "invalid-output",
-        diagnostic: error instanceof Error ? error.message : "Answer is not valid JSON",
-        answer: typeof observation.answer === "string" ? observation.answer : String(observation.answer),
-      };
-    }
-  }
-  try {
-    const answer = schema.decode(value);
-    return { ...receipt, kind: "answered", ...(answer === undefined ? { answerUndefined: true } : { answer }) };
-  } catch (error) {
-    return {
-      ...receipt,
-      kind: "invalid-output",
-      diagnostic: error instanceof Error ? error.message : "Answer failed schema decode",
-      answer: typeof observation.answer === "string" ? observation.answer : String(observation.answer),
-    };
-  }
 }
 
 export async function observeAdmittedAskAkuma(
@@ -142,7 +125,7 @@ export async function observeAdmittedAskAkuma(
     onObserve?: AskObserver;
     outcomeObserved?: OutcomeObserver;
   }>,
-): Promise<AkumaAskResult> {
+): Promise<AkumaAskResult & { answer?: string }> {
   const owner = new AkumaOwner(input.id, input.path, input.outcomeObserved);
   const tell = input.receipt ?? (await owner.admittedReceipt(input.tellId));
   await input.onObserve?.admitted?.(tell, input.id);
@@ -190,7 +173,10 @@ export async function observeAdmittedAskAkuma(
  * operation so ordinary and interrupted admission each read as one flow; both
  * share `observeAdmittedAskAkuma`.
  */
-async function executeInterruptAskAkuma(input: AskExecutionInput, owner: AkumaOwner): Promise<AkumaAskResult> {
+async function executeInterruptAskAkuma(
+  input: AskExecutionInput,
+  owner: AkumaOwner,
+): Promise<AkumaAskResult & { answer?: string }> {
   const admission = await owner.admitInterrupt(input.body, {
     ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
     ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
@@ -229,7 +215,7 @@ async function executeInterruptAskAkuma(input: AskExecutionInput, owner: AkumaOw
   }
 }
 
-export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAskResult> {
+export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAskResult & { answer?: string }> {
   input.signal?.throwIfAborted();
   const owner = new AkumaOwner(input.id, input.path);
   if (input.interrupt === true) return await executeInterruptAskAkuma(input, owner);

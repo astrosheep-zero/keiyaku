@@ -112,10 +112,10 @@ class AkumasHandle {
   }
 
   tell(input: AkumaTellInput): Promise<AkumaTellResult> {
-    return tellAkuma(this.withWorld(input, "Akumas.tell input"), this.#spawn);
+    return tellAkuma(this.withWorld(input, "Akumas.tell input"), this.#spawn, this.#reportDiagnostic);
   }
 
-  ask<T = string>(input: AkumaAskInput<T>): Promise<AkumaAskResult<T>> {
+  ask(input: AkumaAskInput): Promise<AkumaAskResult> {
     return askAkuma(this.withWorld(input, "Akumas.ask input"), this.#spawn, this.#reportDiagnostic);
   }
 

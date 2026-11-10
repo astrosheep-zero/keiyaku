@@ -11,7 +11,6 @@ import { bareOption, canonicalBirthCwd, writableDirectoriesOption } from "./call
 import { validateAkumaName } from "../identity/normalize.js";
 import { type AllocatedAkuma } from "./identity.js";
 import { PreparedCallAdmissionError, prepareCall, publishPreparedCall, type PreparedCall } from "./publication.js";
-import type { Schema } from "./schema.js";
 
 export type AkumaCallInput = Readonly<{
   akumaName: string;
@@ -19,7 +18,6 @@ export type AkumaCallInput = Readonly<{
   cwd?: string;
   writableDirectories?: readonly string[];
   bare?: boolean;
-  schema?: Schema<unknown>;
   initiator?: string;
   caller?: AkumaCaller;
   signal?: AbortSignal;
@@ -43,7 +41,7 @@ export type AdmittedAkumaCall = Readonly<{
   failure?: unknown;
 }>;
 
-type AkumaCallLaunchInput = Omit<AkumaCallInput, "body" | "schema"> &
+type AkumaCallLaunchInput = Omit<AkumaCallInput, "body"> &
   Readonly<{ initialTell?: InitialCallTell; contractId?: string }>;
 
 async function callExecution(

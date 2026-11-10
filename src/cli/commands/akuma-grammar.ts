@@ -47,15 +47,14 @@ const AKUMA_COMMAND_SPECS = {
       "add-dir": "repeat",
       bare: "boolean",
       json: "boolean",
-      schema: "value",
     },
     usage:
-      "spawn <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--add-dir <path>]... [--bare] [--schema <file>] [--wait <duration>] [<prompt> | -]",
+      "spawn <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--add-dir <path>]... [--bare] [--wait <duration>] [<prompt> | -]",
     purpose: "Spawn a new Akuma into the world.",
     details: [
       "Use keiyaku ls aku/ to list available Akuma names.",
       "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
-      "--schema and --wait require a prompt.",
+      "--wait requires a prompt.",
       "--bare omits Keiyaku's runtime instruction section for this birth and its later execution; personality, tools, permissions, and report remain unchanged.",
       "Generic ACP needs --bare: it has no verified native runtime-instruction channel. Existing sessions without the section are not retrofitted; ordinary resume retains existing native instructions.",
       "By default, spawn returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
@@ -63,7 +62,6 @@ const AKUMA_COMMAND_SPECS = {
       "--workdir selects where the Akuma works; relative paths resolve from the invocation directory selected by -C/--cwd, or the process cwd when omitted. Without --workdir, the invocation directory is used.",
       "--add-dir explicitly grants another existing writable directory to Codex native workspace-write tools; repeat for multiple roots. Relative paths resolve from the invocation directory. Other sandbox modes, permission profiles, and providers refuse nonempty grants instead of broadening policy. Existing network policy and writable roots are preserved; the repo and Home are never granted automatically.",
       "--alias <name> gives the new Akuma the selector @name instead of aku/<id>; an existing @name is reassigned to this Akuma.",
-      SCHEMA_DETAILS,
       "With --wait, completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
   },
@@ -84,17 +82,24 @@ const AKUMA_COMMAND_SPECS = {
   tell: {
     arity: 1,
     stdin: true,
-    flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
-    usage: "tell <aku/...|@name> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)",
+    flags: { interrupt: "boolean", wait: "value", json: "boolean" },
+    usage: "tell <aku/...|@name> [--interrupt] [--wait <duration>] (<prompt> | -)",
     purpose: "Tell an Akuma something, optionally observing its answer.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt admits the Tell and asks current work to yield; the Tell remains admitted even if yielding cannot be confirmed.",
-      SCHEMA_DETAILS,
       "--wait bounds how long to block for the answer; the Tell stays admitted past the deadline.",
-      "Without --wait or --schema, returns after Tell admission. --schema alone observes without a deadline.",
+      "Without --wait, returns after Tell admission.",
       "With observation, completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
+  },
+  ask: {
+    arity: 1,
+    stdin: true,
+    flags: { schema: "value", wait: "value", interrupt: "boolean", json: "boolean" },
+    usage: "ask <aku/...|@name> --schema <file> [--wait <duration>] [--interrupt] (<prompt> | -)",
+    purpose: "Ask an Akuma for a JSON answer.",
+    details: `${SCHEMA_DETAILS}\n--wait is an observation deadline; omitted is unbounded. --interrupt admits input with a request for current work to yield. Give the prompt as one argument, or - for stdin.`,
   },
   history: {
     arity: 1,
@@ -281,7 +286,7 @@ function parseAkumaHistory(
 }
 
 function parseAddressed(
-  action: Exclude<AkumaAction, "spawn" | "tell" | "report">,
+  action: Exclude<AkumaAction, "spawn" | "tell" | "ask" | "report">,
   rawSelectors: readonly string[],
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
@@ -301,7 +306,7 @@ function parseAddressed(
 }
 
 function parsePrompted(
-  action: "spawn" | "tell",
+  action: "spawn" | "tell" | "ask",
   positionals: readonly string[],
   stdin: boolean,
   fail: (message: string) => never,
@@ -324,26 +329,31 @@ function parsePrompted(
 }
 
 function parseTell(
+  action: "tell" | "ask",
   flags: Readonly<Record<string, FlagValue>>,
   subject: string,
   prompt: AkumaPromptSource,
-  output: "text" | "json",
   fail: (message: string) => never,
 ): Extract<PendingRequest, { name: "tell" | "ask" }> {
-  const input = { akuma: subject, ...(flags.interrupt === true ? { interrupt: true } : {}) };
-  if (flags.wait === undefined && flags.schema === undefined)
-    return { name: "tell", input, acquire: { prompt }, output };
-  const schema =
-    flags.schema === undefined ? undefined : stringFlag(flags.schema, "tell --schema requires a file", fail);
-  return {
-    name: "ask",
-    input: {
-      ...input,
-      ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
-    },
-    acquire: { prompt, ...(schema === undefined ? {} : { schema }) },
-    output,
+  const output = flags.json === true ? "json" : "text";
+  const input = {
+    akuma: subject,
+    ...(flags.interrupt === true ? { interrupt: true } : {}),
+    ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
   };
+  return action === "tell"
+    ? {
+        name: action,
+        input: { ...input, ...(flags.wait === undefined ? {} : { wait: true }) },
+        acquire: { prompt },
+        output,
+      }
+    : {
+        name: action,
+        input,
+        acquire: { prompt, schema: stringFlag(flags.schema, "ask requires --schema <file>", fail) },
+        output,
+      };
 }
 
 function parseSpawn(
@@ -364,9 +374,6 @@ function parseSpawn(
   }
   const mode = flags.wait === undefined ? ("detach" as const) : ("wait" as const);
   const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
-  const schema =
-    flags.schema === undefined ? undefined : stringFlag(flags.schema, "spawn --schema requires a file", fail);
-  if (prompt === undefined && schema !== undefined) fail("spawn --schema requires a prompt");
   if (prompt === undefined && flags.wait !== undefined) fail("spawn --wait requires a prompt");
   return {
     name: "spawn",
@@ -379,7 +386,7 @@ function parseSpawn(
       ...(flags["add-dir"] === undefined ? {} : { writableDirectories: flags["add-dir"] as readonly string[] }),
       ...(flags.bare === true ? { bare: true } : {}),
     },
-    acquire: { ...(schema === undefined ? {} : { schema }), ...(prompt === undefined ? {} : { prompt }) },
+    acquire: { ...(prompt === undefined ? {} : { prompt }) },
     output,
   };
 }
@@ -408,11 +415,11 @@ export function parseAkumaCommand(argv: readonly string[]): AkumaParseResult {
   const { flags, positionals, stdin } = scanArgs(argv, scanSpec(action, spec), fail);
   const output = flags.json === true ? ("json" as const) : ("text" as const);
   if (action === "report") return parseReport(positionals, stdin !== undefined, output, fail);
-  if (action === "spawn" || action === "tell") {
+  if (action === "spawn" || action === "tell" || action === "ask") {
     const parsed = parsePrompted(action, positionals, stdin !== undefined, fail);
     return action === "spawn"
       ? parseSpawn(flags, parsed.subject, parsed.prompt, output, fail)
-      : parseTell(flags, parsed.subject, parsed.prompt!, output, fail);
+      : parseTell(action, flags, parsed.subject, parsed.prompt!, fail);
   }
   if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {
     if (positionals.length === 0)

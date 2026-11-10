@@ -2,7 +2,7 @@
 import { z } from "zod";
 export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
 import { akumaCallerSchema } from "../akuma/caller.js";
-import { askProgressSchema, type AskProgress } from "../akuma/akuma-selection-execution.js";
+import { askProgressSchema } from "../akuma/akuma-selection-execution.js";
 import { akumaReportResultSchema } from "../akuma/akuma-instance.js";
 import { akumaListSchema } from "../akuma/akuma.js";
 import { archetypeCatalogSchema } from "../akuma/archetype.js";
@@ -16,7 +16,7 @@ import { regionResultSchema } from "../kanshi/report.js";
 import { settingsSchema } from "../settings.js";
 import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
-import { spawnProgressSchema, spawnResultSchema, forkResultSchema, type SpawnProgress } from "./akuma-creation.js";
+import { spawnProgressSchema, spawnResultSchema, forkResultSchema } from "./akuma-creation.js";
 import {
   bindOutcomeSchema,
   amendOutcomeSchema,
@@ -58,8 +58,6 @@ export type VerbEntry = Readonly<{
   effect: "read" | "write" | "destroy";
 }>;
 export type VerbRun<E = never> = Readonly<{ signal?: AbortSignal; observe?: (event: E) => void | PromiseLike<void> }>;
-export type AskRun<T = unknown> = VerbRun<AskProgress> & Readonly<{ decode?: (value: unknown) => T }>;
-export type SpawnRun = VerbRun<SpawnProgress> & Readonly<{ decode?: (value: unknown) => unknown }>;
 
 const text = z.string();
 const nonblank = text.regex(/\S/u, "Must not be blank");
@@ -245,7 +243,6 @@ export const verbs = Object.freeze({
         timeoutMs: timeout,
         writableDirectories: strings.exactOptional(),
         bare: optBool,
-        schema: jsonDocument.exactOptional(),
       })
       .readonly(),
     output: spawnResultSchema,
@@ -260,8 +257,11 @@ export const verbs = Object.freeze({
   },
   tell: {
     description: "Send an Akuma a prompt.",
-    input: z.strictObject({ akuma: text, prompt: text, interrupt: optBool }).readonly(),
+    input: z
+      .strictObject({ akuma: text, prompt: text, interrupt: optBool, wait: optBool, timeoutMs: timeout })
+      .readonly(),
     output: akumaTellResultSchema,
+    progress: askProgressSchema,
     effect: "write",
   },
   ask: {
@@ -271,7 +271,7 @@ export const verbs = Object.freeze({
         akuma: text,
         prompt: text,
         timeoutMs: timeout,
-        schema: jsonDocument.exactOptional(),
+        schema: jsonDocument,
         interrupt: optBool,
       })
       .readonly(),
@@ -493,8 +493,4 @@ export type VerbOutput<K extends VerbName> = VerbOutputs[K];
 export type VerbProgress<K extends VerbName> = (typeof verbs)[K] extends { readonly progress: z.ZodType<infer E> }
   ? E
   : never;
-export type VerbRunFor<K extends VerbName> = K extends "ask"
-  ? AskRun<unknown>
-  : K extends "spawn"
-    ? SpawnRun
-    : VerbRun<VerbProgress<K>>;
+export type VerbRunFor<K extends VerbName> = VerbRun<VerbProgress<K>>;

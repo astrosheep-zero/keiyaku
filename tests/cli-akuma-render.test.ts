@@ -422,7 +422,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   const id = parseAkumaId("aku/worker/deadbeef").id;
   const context = { columns: 80, color: false };
   const answer = { akumaId: id, tellId: "tell-id", kind: "answered" as const, answer: "exact answer" };
-  assert.equal(askRawAnswer(answer, undefined), "exact answer");
+  assert.equal(askRawAnswer(answer), JSON.stringify("exact answer"));
   const tell = { akumaId: id, tellId: "tell-id" };
   const standalone = tellText(tell, "continue", undefined, context);
   assert.equal(standalone, "✓ told aku/worker/deadbeef — continue", "verdict, subject, and input on one line");
@@ -458,7 +458,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   );
   assert.deepEqual(JSON.parse(JSON.stringify(answer)), answer);
 
-  assert.equal(askRawAnswer({ ...answer, answer: "decoded scalar" }, true), '"decoded scalar"');
+  assert.equal(askRawAnswer({ ...answer, answer: "decoded scalar" }), '"decoded scalar"');
 });
 
 test("call and bounded Tell share one input frame and pinned conclusion", () => {
@@ -560,7 +560,7 @@ test("ask activity starts at admission and includes a later settlement of an old
   assert.equal(transcript.match(/old tool/gu)?.length, 1);
   assert.ok(transcript.indexOf("new question") < transcript.indexOf("new activity"));
   assert.match(transcript, /✓ answered\n\n$/u);
-  assert.equal(askRawAnswer(answer, undefined), "exact\nanswer");
+  assert.equal(askRawAnswer(answer), JSON.stringify("exact\nanswer"));
 });
 
 test("ask seed marks eligible omissions before a newer Turn opening in timeline order", () => {
@@ -779,7 +779,7 @@ function createdDebtRow(): Extract<NonNullable<AkumaObservation["createdDebts"]>
 
 test("Akuma outcomes distinguish admission from failed execution", () => {
   const spawn = { akumaName: "worker" };
-  const input = { akuma: SPECIMEN_ID, prompt: "go" };
+  const input = { akuma: SPECIMEN_ID, prompt: "go", schema: {} };
   assert.equal(classifyVerb("spawn", spawn, { kind: "returned", value: spawned() }), "accepted");
   assert.equal(classifyVerb("tell", input, { kind: "returned", value: compactTell() }), "accepted");
   assert.equal(
@@ -814,17 +814,17 @@ test("Akuma outcomes distinguish admission from failed execution", () => {
   );
 });
 
-test("shared ask rendering preserves answer bytes and non-answer conclusions", () => {
-  const input = { akuma: SPECIMEN_ID, prompt: "go" };
+test("shared ask rendering serializes JSON answers and retains non-answer conclusions", () => {
+  const input = { akuma: SPECIMEN_ID, prompt: "go", schema: {} };
   const context = { columns: 100, color: false };
-  const render = (observation: NonNullable<VerbOutput<"spawn">["input"]>) =>
+  const render = (observation: import("../src/index.js").AkumaAskObservation) =>
     renderVerb(
       "ask",
       input,
       { kind: "returned", value: { akumaId: SPECIMEN_ID, tellId: "tell/specimen", ...observation } },
       context,
     );
-  assert.equal(render({ kind: "answered", answer: "exact\nanswer" }), "exact\nanswer");
+  assert.equal(render({ kind: "answered", answer: "exact\nanswer" }), JSON.stringify("exact\nanswer"));
   assert.match(render({ kind: "failed", diagnostic: "provider stopped" }), /provider stopped/u);
   assert.match(render({ kind: "invalid-output", diagnostic: "schema mismatch", answer: "wrong" }), /schema mismatch/u);
   const deadline = render({ kind: "deadline" });

@@ -257,7 +257,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     assert.equal(result._meta?.["keiyaku/disposition"], classifyVerb("ask", { akuma: allocated.id, prompt: "structured", schema, timeoutMs: 30_000 }, { kind: "returned", value: answer }));
     assert.equal((await Akuma.select(world, allocated.id).idle({ timeoutMs: 30_000 })).reason, "completed");
     for (const [prompt, extra, expectedKind, expectedAnswer, expectedText] of [
-      ["empty", {}, "answered", "", ""],
+      ["empty", { schema: { type: "string" } }, "invalid-output", "", undefined],
       ["null", { schema: { type: "null" } }, "answered", null, "null"],
       ["invalid", { schema }, "invalid-output", "not-json", undefined],
     ] as const) {

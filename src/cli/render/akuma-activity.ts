@@ -943,24 +943,17 @@ export function killResultText(id: string, evidence: KillEvidence, alias?: strin
   }).join("\n");
 }
 
-function answerBytes(answer: unknown, structured: boolean): string | undefined {
-  return !structured && typeof answer === "string" ? answer : JSON.stringify(answer);
-}
-
 /** Presentation-only state for one akuma invocation; it never reaches JSON. */
 type AkumaPresentation = Readonly<{
   alias?: string;
 }>;
 
-export function askRawAnswer(result: AkumaAskResult, structured: boolean | undefined): string | undefined {
-  if (result.kind !== "answered") return "";
-  return result.answerUndefined === true ? "undefined" : answerBytes(result.answer, structured === true);
+export function askRawAnswer(result: AkumaAskResult): string | undefined {
+  return result.kind === "answered" ? JSON.stringify(result.answer) : "";
 }
 
-export function callRawAnswer(result: SpawnResult, structured: boolean, streamed: boolean): string | undefined {
-  const input = result.input;
-  if (input?.kind !== "answered") return streamed ? "" : undefined;
-  return "answerUndefined" in input ? "undefined" : answerBytes(input.answer, structured);
+export function callRawAnswer(result: SpawnResult, streamed: boolean): string | undefined {
+  return result.input?.kind === "answered" ? result.input.answer : streamed ? "" : undefined;
 }
 
 export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {

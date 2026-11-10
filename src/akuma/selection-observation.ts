@@ -102,21 +102,27 @@ const interruptSchema = z.union([
   ...settledInterruptSchema.options,
   z.strictObject({ kind: z.literal("pending"), bodySequence: bodyPositionSchema }).readonly(),
 ]);
+export const akumaTextObservationSchema = z.union([
+  z.strictObject({ kind: z.literal("answered"), answer: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("failed"), diagnostic: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("unanswered") }).readonly(),
+  z.strictObject({ kind: z.literal("deadline") }).readonly(),
+]);
 export const akumaTellResultSchema = z
   .strictObject({
     akumaId: akumaIdSchema,
     tellId: z.string(),
     wake: publicWakeSchema.exactOptional(),
-    interrupt: settledInterruptSchema.exactOptional(),
+    interrupt: interruptSchema.exactOptional(),
+    input: akumaTextObservationSchema.exactOptional(),
   })
   .readonly();
 export const akumaAskObservationSchema = z.union([
   z.strictObject({ kind: z.literal("answered"), answer: z.json() }).readonly(),
-  z.strictObject({ kind: z.literal("answered"), answerUndefined: z.literal(true) }).readonly(),
-  z.strictObject({ kind: z.literal("failed"), diagnostic: z.string() }).readonly(),
+  akumaTextObservationSchema.options[1],
   z.strictObject({ kind: z.literal("invalid-output"), diagnostic: z.string(), answer: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("unanswered") }).readonly(),
-  z.strictObject({ kind: z.literal("deadline") }).readonly(),
+  akumaTextObservationSchema.options[2],
+  akumaTextObservationSchema.options[3],
 ]);
 const askSubject = { akumaId: akumaIdSchema, tellId: z.string(), interrupt: interruptSchema.exactOptional() };
 const settledAskSubject = { ...askSubject, wake: failedWakeSchema.exactOptional() };
@@ -125,9 +131,8 @@ export const akumaAskResultSchema = z.union([
   akumaAskObservationSchema.options[0].unwrap().extend(settledAskSubject).readonly(),
   akumaAskObservationSchema.options[1].unwrap().extend(settledAskSubject).readonly(),
   akumaAskObservationSchema.options[2].unwrap().extend(settledAskSubject).readonly(),
-  akumaAskObservationSchema.options[3].unwrap().extend(settledAskSubject).readonly(),
+  akumaAskObservationSchema.options[3].unwrap().extend(pendingAskSubject).readonly(),
   akumaAskObservationSchema.options[4].unwrap().extend(pendingAskSubject).readonly(),
-  akumaAskObservationSchema.options[5].unwrap().extend(pendingAskSubject).readonly(),
 ]);
 
 export type AkumaObservation = z.output<typeof akumaObservationSchema>;
@@ -136,21 +141,8 @@ export type AkumaWaitItem = z.output<typeof akumaWaitItemSchema>;
 export type AkumaWaitResult = z.output<typeof akumaWaitResultSchema>;
 export type AkumaKillResult = z.output<typeof akumaKillResultSchema>;
 export type AkumaTellResult = z.output<typeof akumaTellResultSchema>;
-export type AkumaAskObservation<T = unknown> =
-  | Readonly<{ kind: "answered"; answer: T; answerUndefined?: never }>
-  | Readonly<{ kind: "answered"; answerUndefined: true; answer?: never }>
-  | Readonly<{ kind: "failed"; diagnostic: string }>
-  | Readonly<{ kind: "invalid-output"; diagnostic: string; answer: string }>
-  | Readonly<{ kind: "unanswered" }>
-  | Readonly<{ kind: "deadline" }>;
-type AskSubject = Readonly<{ akumaId: AkumaId; tellId: string; interrupt?: z.output<typeof interruptSchema> }>;
-export type AkumaAskResult<T = unknown> = AskSubject &
-  (
-    | (Exclude<AkumaAskObservation<T>, { kind: "unanswered" | "deadline" }> &
-        Readonly<{ wake?: z.output<typeof failedWakeSchema> }>)
-    | (Extract<AkumaAskObservation<T>, { kind: "unanswered" | "deadline" }> &
-        Readonly<{ wake?: z.output<typeof publicWakeSchema> }>)
-  );
+export type AkumaAskObservation = z.output<typeof akumaAskObservationSchema>;
+export type AkumaAskResult = z.output<typeof akumaAskResultSchema>;
 
 /** Project this invocation's already observed admission, never reread it. */
 export function compactTellResult(

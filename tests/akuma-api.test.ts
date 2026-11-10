@@ -6,8 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { z } from "zod";
-import { Akuma, AkumaProviderError, Schema, type AkumaIdleResult } from "../src/akuma/index.js";
+import { Akuma, AkumaProviderError, type AkumaIdleResult } from "../src/akuma/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { driveAkumaBody, tellWakeRuntime, type TellWakeRuntime } from "../src/akuma/body.js";
 import {
@@ -42,19 +41,9 @@ import {
   waitForCondition,
   waitForPidReceiptExit,
 } from "./support/process.js";
-import { schemaJsonText } from "../src/akuma/schema.js";
+import { canonicalDocument } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
 import { debtAuthorityFile } from "./support/debt.js";
-
-function freezeWalk(value: unknown): void {
-  if (typeof value !== "object" || value === null) return;
-  assert.ok(Object.isFrozen(value));
-  if (Array.isArray(value)) {
-    for (const entry of value) freezeWalk(entry);
-    return;
-  }
-  for (const entry of Object.values(value)) freezeWalk(entry);
-}
 
 /**
  * Bounds the seed-Tell binding wait and ends it on a dead outcome: a settled driving pump, a missing
@@ -77,31 +66,6 @@ async function waitForSeedBinding(paths: Parameters<typeof readTell>[0], driven:
   );
 }
 
-test("Schema.zod and JsonSchema freeze a canonical bounded document", () => {
-  const fromZod = Schema.zod(z.object({ ok: z.boolean() }).strict());
-  const again = Schema.zod(z.object({ ok: z.boolean() }).strict());
-  const fromJson = Schema.json(
-    { required: ["ok"], type: "object", properties: { ok: { type: "boolean" } } },
-    (value) => value as { ok: boolean },
-  );
-  const shuffled = Schema.json(
-    { properties: { ok: { type: "boolean" } }, required: ["ok"], type: "object" },
-    (value) => value as { ok: boolean },
-  );
-  freezeWalk(fromZod);
-  freezeWalk(fromZod.jsonSchema);
-  freezeWalk(fromJson.jsonSchema);
-  assert.deepEqual(fromJson.jsonSchema, shuffled.jsonSchema);
-  assert.equal(typeof fromJson.decode, "function");
-  assert.deepEqual(fromZod.jsonSchema, again.jsonSchema);
-  assert.deepEqual(fromJson.decode({ ok: false }), { ok: false });
-  const custom = Schema.json({ type: "string" }, (value) => String(value).toUpperCase());
-  assert.equal(custom.decode("ok"), "OK");
-  assert.throws(() => Schema.zod(z.bigint()), /represented in JSON Schema/u);
-  assert.throws(() => Schema.json({ type: "object", extra: "x".repeat(70_000) }, (value) => value), /byte/u);
-  assert.throws(() => Schema.json({ type: "object", description: "é".repeat(40_000) }, (value) => value), /byte/u);
-});
-
 test("public ./akuma barrel exposes only the contracted names", async () => {
   const exported = await import("../src/akuma/index.js");
   assert.deepEqual(
@@ -113,7 +77,6 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
       "AkumaDecodeError",
       "AkumaNotBornError",
       "AkumaProviderError",
-      "Schema",
       "listArchetypeDefinitions",
     ].sort(),
   );
@@ -130,10 +93,9 @@ test("package root exposes the same public Akuma values without private mechanis
   for (const name of ["AkumaOwner", "HeldAkumaLeash", "driveAkumaBody", "readHeart"]) {
     assert.equal(name in root, false, name);
   }
-  const schema: import("../src/index.js").Schema<{ ok: boolean }> = root.Schema.zod(z.object({ ok: z.boolean() }));
-  const options: import("../src/index.js").AkumaAskOptions<{ ok: boolean }> = { schema };
+  const schema: import("../src/index.js").JsonSchemaDocument = { type: "object" };
+  const options: import("../src/index.js").AkumaAskOptions = { schema };
   assert.strictEqual(options.schema, schema);
-  assert.deepEqual(schema.decode({ ok: true }), { ok: true });
 });
 
 test("Akuma.birth has no prompt and select is synchronous", async (context) => {
@@ -175,10 +137,8 @@ test("standalone Akuma operations never read optional Alias or Debt authority", 
     assert.equal((await selected.status()).id, value.allocated.id);
     assert.equal(Array.isArray((await selected.history()).rows), true);
     assert.equal((await selected.idle({ timeoutMs: 0 })).status.id, value.allocated.id);
-    const asked = await selected.ask("standalone", { timeoutMs: 5_000 });
-    assert.equal(asked.kind, "answered");
-    if (asked.kind !== "answered") throw new Error("expected answer");
-    assert.equal(asked.answer, "standalone answer");
+    const asked = await selected.tell("standalone", { wait: true, timeoutMs: 5_000 });
+    assert.deepEqual(asked.input, { kind: "answered", answer: "standalone answer" });
     assert.ok(["killed", "already-stopped", "already-killed"].includes(await selected.kill()));
   });
 });
@@ -428,7 +388,7 @@ test("terminal Tell delivery reports answered and explicit unanswered results", 
   });
 });
 
-test("standalone tell admits without awaiting while ask defaults to unbounded observation", async () => {
+test("standalone tell admits and optionally observes its text answer", async () => {
   await withWaitedTellFixture(async ({ born, settle }) => {
     const first = await born("a1000020", answering("first answer"));
     const admitted = await first.akuma.tell("send only");
@@ -436,16 +396,14 @@ test("standalone tell admits without awaiting while ask defaults to unbounded ob
     assert.equal((await readTell(first.allocated.paths, admitted.tellId))?.body, "send only");
     await settle();
     const second = await born("a1000021", answering("second answer"));
-    const asked = await second.akuma.ask("await answer");
-    assert.equal(asked.kind, "answered");
-    if (asked.kind !== "answered") throw new Error("expected answer");
-    assert.equal(asked.answer, "second answer");
+    const asked = await second.akuma.tell("await answer", { wait: true });
+    assert.deepEqual(asked.input, { kind: "answered", answer: "second answer" });
   });
 });
 
 test("schema ask decodes JSON and typed failures stay distinct", async () => {
   await withWaitedTellFixture(async ({ born, settle }) => {
-    const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
+    const schema = { type: "object", properties: { ok: { type: "boolean" } }, additionalProperties: false };
     const decoded = await born("a1000002", answering('{"ok":true}'));
     const value = await decoded.akuma.ask("structured", { schema });
     await settle();
@@ -456,14 +414,16 @@ test("schema ask decodes JSON and typed failures stay distinct", async () => {
     assert.equal(fact?.kind, "tell");
     if (fact?.kind === "tell") {
       const recorded = await readTell(decoded.allocated.paths, fact.tellId);
-      assert.equal(recorded?.schemaJson, schemaJsonText(schema));
+      assert.equal(recorded?.schemaJson, canonicalDocument(schema).jsonText);
     }
 
     const invalid = await born("a1000003", answering("not-json"));
     assert.deepEqual((await invalid.akuma.ask("structured", { schema })).kind, "invalid-output");
 
     const mismatch = await born("a1000004", answering('{"ok":1}'));
-    assert.deepEqual((await mismatch.akuma.ask("structured", { schema })).kind, "invalid-output");
+    const unvalidated = await mismatch.akuma.ask("structured", { schema });
+    assert.equal(unvalidated.kind, "answered");
+    if (unvalidated.kind === "answered") assert.deepEqual(unvalidated.answer, { ok: 1 });
 
     const failing: ProviderAdapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
       custody.own({ closed: Promise.resolve(), forceDispose: async () => {} });
@@ -487,9 +447,9 @@ test("schema ask decodes JSON and typed failures stay distinct", async () => {
 test("tell refuses schema before admission; ask checks options before addressing", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-api-routing-");
   const akuma = Akuma.select(await World.at(root), "aku/claude/a1000006");
-  const schema = Schema.zod(z.object({ ok: z.boolean() }).strict());
+  const schema = { type: "object" };
   await assert.rejects(akuma.tell("structured", { schema } as never), /use ask/u);
-  await assert.rejects(akuma.ask("structured", { timeoutMs: -1 }), /timeoutMs/u);
+  await assert.rejects(akuma.ask("structured", { schema, timeoutMs: -1 }), /timeoutMs/u);
   const controller = new AbortController();
   const reason = new Error("cancel before admission");
   controller.abort(reason);

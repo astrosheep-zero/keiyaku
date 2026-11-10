@@ -131,7 +131,7 @@ test(
     host.hosting = "detached"; // Both public constructions captured the original choice.
     assert.ok(first instanceof Akuma);
     const before = { ...process.env };
-    const firstAsk = first.ask(prompt(holdingCommand(world, "first")), { signal: t.signal });
+    const firstAsk = first.tell(prompt(holdingCommand(world, "first")), { wait: true, signal: t.signal });
     const second = await api.spawn({
       akumaName: "worker",
       cwd: world,
@@ -147,7 +147,7 @@ test(
         () => existsSync(join(world, "first.ready")) && existsSync(join(world, "second.ready")),
       );
       assert.equal(await first.kill({ signal: t.signal }), "killed");
-      assert.equal((await firstAsk).kind, "unanswered");
+      assert.equal((await firstAsk).input?.kind, "unanswered");
       assert.equal((await api.status({ akuma: second.akumaId })).life, "running");
       await api.tell({ akuma: second.akumaId, body: "keep going", signal: t.signal });
       writeFileSync(join(world, "second.release"), "release");
@@ -165,12 +165,12 @@ test(
       assert.equal(identity.world, world);
       assert.notEqual(identity.native, "outer-session");
       assert.equal(identity.external, undefined);
-      const selectedAnswer = await secondHandle.ask(prompt("printf selected-answer"), {
+      const selectedAnswer = await secondHandle.tell(prompt("printf selected-answer"), {
+        wait: true,
         timeoutMs: 20_000,
         signal: t.signal,
       });
-      assert.equal(selectedAnswer.kind, "answered");
-      if (selectedAnswer.kind === "answered") assert.equal(selectedAnswer.answer, "selected-answer");
+      assert.deepEqual(selectedAnswer.input, { kind: "answered", answer: "selected-answer" });
       const events = nativeEvents(world);
       assert.equal(new Set(events.map((event) => event.pid)).size, 1);
       assert.ok(events.every((event) => event.pid === process.pid));
@@ -220,9 +220,9 @@ console.log(JSON.stringify({
     const first = JSON.parse(String(firstInput.answer));
     assert.equal(first.current.kind, "recorded");
     const handle = Akuma.select(world, called.akumaId, host);
-    const next = await handle.ask(reporting("wake report"), { timeoutMs: 20_000, signal: t.signal });
-    if (next.kind !== "answered") assert.fail(JSON.stringify(next));
-    const resumed = JSON.parse(String(next.answer));
+    const next = await handle.tell(reporting("wake report"), { wait: true, timeoutMs: 20_000, signal: t.signal });
+    if (next.input?.kind !== "answered") assert.fail(JSON.stringify(next));
+    const resumed = JSON.parse(next.input.answer);
     const reportSequence = (reportId: string) => Number(reportId.slice("report/".length));
     assert.ok(reportSequence(resumed.current.reportId) > reportSequence(first.current.reportId));
     assert.equal(resumed.current.kind, "recorded");
@@ -237,9 +237,9 @@ console.log(JSON.stringify({
       assert.ok(instructions.includes('Use `keiyaku report "..."`'));
     }
     const bare = await Akuma.birth("worker", { root: world, cwd: world, host, bare: true });
-    const bareAnswer = await bare.ask(reporting("bare report"), { timeoutMs: 20_000, signal: t.signal });
-    if (bareAnswer.kind !== "answered") assert.fail(JSON.stringify(bareAnswer));
-    assert.equal(JSON.parse(String(bareAnswer.answer)).current.kind, "recorded");
+    const bareAnswer = await bare.tell(reporting("bare report"), { wait: true, timeoutMs: 20_000, signal: t.signal });
+    if (bareAnswer.input?.kind !== "answered") assert.fail(JSON.stringify(bareAnswer));
+    assert.equal(JSON.parse(bareAnswer.input.answer).current.kind, "recorded");
     assert.equal((await readHeart(pathsForAkumaId(world, bare.id))).soul?.bare, true);
     assert.equal(runtime().at(-1)!.prompt.includes("<keiyaku>"), false);
     assert.ok(runtime().at(-1)!.prompt.includes("Fixture."), "bare preserves personality");
@@ -281,13 +281,14 @@ const waited = run("wait", child.akumaId, "--timeout", "20s");
 console.log(JSON.stringify({ who, debt, review, child, waited }));
 `,
     );
-    const answer = await parent.ask(prompt([process.execPath, script].map(quote).join(" ")), {
+    const answer = await parent.tell(prompt([process.execPath, script].map(quote).join(" ")), {
+      wait: true,
       timeoutMs: 40_000,
       signal: t.signal,
     });
-    assert.equal(answer.kind, "answered", JSON.stringify(answer));
-    if (answer.kind !== "answered") return;
-    const result = JSON.parse(String(answer.answer));
+    assert.equal(answer.input?.kind, "answered", JSON.stringify(answer));
+    if (answer.input?.kind !== "answered") return;
+    const result = JSON.parse(answer.input.answer);
     assert.equal(result.debt.kind, "accepted");
     assert.equal(result.review.kind, "accepted");
     assert.equal(result.child.input, undefined);
@@ -312,7 +313,7 @@ test(
   async (t) => {
     const world = await nativeWorld(t);
     const akuma = await Akuma.birth("worker", { root: world, cwd: world, host: { hosting: "in-process" } });
-    const asking = akuma.ask(prompt("stall"), { signal: t.signal });
+    const asking = akuma.tell(prompt("stall"), { wait: true, signal: t.signal });
     try {
       await waitForCondition(
         "noncooperative native tool to start",
@@ -328,7 +329,7 @@ test(
         nativeEvents(world).some((event) => event.event === "stall-finished"),
         false,
       );
-      assert.equal((await asking).kind, "failed");
+      assert.equal((await asking).input?.kind, "failed");
     } finally {
       writeFileSync(join(world, "stall.release"), "release");
       await waitForCondition("native tool's actual retirement", () =>

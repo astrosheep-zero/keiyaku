@@ -150,11 +150,11 @@ type Acquisitions = {
   arc: { input: Omit<VerbInput<"arc">, "markdown">; acquire: { markdown: true } };
   review: { input: Omit<VerbInput<"review">, "summary">; acquire: { summary: true } };
   spawn: {
-    input: Omit<VerbInput<"spawn">, "prompt" | "schema">;
-    acquire: { prompt?: AkumaPromptSource; schema?: string };
+    input: Omit<VerbInput<"spawn">, "prompt">;
+    acquire: { prompt?: AkumaPromptSource };
   };
   tell: { input: Omit<VerbInput<"tell">, "prompt">; acquire: { prompt: AkumaPromptSource } };
-  ask: { input: Omit<VerbInput<"ask">, "prompt" | "schema">; acquire: { prompt: AkumaPromptSource; schema?: string } };
+  ask: { input: Omit<VerbInput<"ask">, "prompt" | "schema">; acquire: { prompt: AkumaPromptSource; schema: string } };
 };
 export type PendingRequest = {
   [K in keyof Acquisitions]: RequestOutput & Readonly<{ name: K }> & Readonly<Acquisitions[K]>;
@@ -173,11 +173,9 @@ export function commandName(command: ParsedCommand) {
   return "name" in command
     ? command.name === "deliver.preview"
       ? "deliver"
-      : command.name === "ask"
-        ? "tell"
-        : command.name === "debt.show"
-          ? "show"
-          : command.name
+      : command.name === "debt.show"
+        ? "show"
+        : command.name
     : command.command;
 }
 

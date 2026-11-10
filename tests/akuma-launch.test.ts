@@ -12,13 +12,12 @@ import { pathToFileURL } from "node:url";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch, BodyLauncher } from "../src/akuma/body-launch.js";
-import { Schema } from "../src/akuma/schema.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { createProviderAttempt, type DriveInput, type ProviderAdapter } from "../src/akuma/provider.js";
 import { deferred } from "./support/process.js";
 import { World } from "../src/world.js";
 
-test("one composed launcher reaches birth, first Tell, and nested birth plus schema Tell", async (context) => {
+test("one composed launcher reaches birth, first Tell, and nested birth plus structured ask", async (context) => {
   const world = await World.at(temporaryDirectory(context, "keiyaku-launch-propagation-"));
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
@@ -41,8 +40,7 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
           if (text === "parent") {
             const child = await akumasWithLauncher(world, spawn).spawn({
               akumaName: "worker",
-              body: "child",
-              schema: Schema.json({ type: "object" }, (value) => value),
+
               caller: {
                 kind: "akuma",
                 world,
@@ -51,8 +49,10 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
               signal: context.signal,
             });
             nestedId = child.akumaId;
-            assert.equal(child.input, undefined);
-            assert.equal(typeof child.tellId, "string", "nested call lost its Tell receipt");
+            await akumasWithLauncher(world, spawn).wait({ akuma: [child.akumaId], signal: context.signal });
+            const result = await akumasWithLauncher(world, spawn).ask({ akuma: child.akumaId, body: "child", schema: { type: "object" }, signal: context.signal });
+            assert.equal(result.kind, "answered");
+            if (result.kind === "answered") assert.deepEqual(result.answer, { ok: true });
             answer.resolve("parent answer");
           } else {
             assert.equal(input.schemaJson, '{"type":"object"}');
@@ -152,10 +152,10 @@ test("the composed launcher also owns ordinary wake and authorized succession", 
     const api = akumasWithLauncher(world, spawn);
     const result = await api.spawn({ akumaName: "worker", body: "first", signal: context.signal });
     await started.promise;
-    const next = await api.ask({ akuma: result.akumaId, body: "second", signal: context.signal });
-    assert.equal(next.kind, "answered");
-    if (next.kind !== "answered") throw new Error("expected answer");
-    assert.equal(next.answer, "second");
+    const next = await api.tell({ akuma: result.akumaId, body: "second", wait: true, signal: context.signal });
+    assert.equal(next.input?.kind, "answered");
+    if (next.input?.kind !== "answered") throw new Error("expected answer");
+    assert.equal(next.input.answer, "second");
     await Promise.all(bodies);
     assert.deepEqual(inputs, ["first", "second"]);
     const handoffs = launches.filter((launch) => launch.handoffFromBodySequence !== undefined);

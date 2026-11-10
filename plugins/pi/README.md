@@ -35,12 +35,12 @@ data. No native tool shells out to the CLI.
 
 | Tool | Parameters |
 | --- | --- |
-| `akuma_spawn` | `akuma` definition name, `body`; optional `workdir`, `writableDirectories`, `detach`, `bare`, `wait`, `timeoutMs`, `schema` |
+| `akuma_spawn` | `akuma` definition name, `body`; optional `workdir`, `writableDirectories`, `detach`, `bare`, `wait`, `timeoutMs` |
 | `akuma_status` | `akuma`; optional `repo` |
 | `akuma_list` | optional `akumaName`, `limit` |
 | `akuma_definitions` | optional `limit` |
-| `akuma_tell` | `akuma`, `body`; optional `interrupt`, `detach`, `repo` |
-| `akuma_ask` | `akuma`, `body`; optional `interrupt`, `detach`, `schema`, `timeoutMs`, `repo` |
+| `akuma_tell` | `akuma`, `body`; optional `interrupt`, `detach`, `repo`, `wait`, `timeoutMs` |
+| `akuma_ask` | `akuma`, `body`, `schema`; optional `interrupt`, `detach`, `timeoutMs`, `repo` |
 | `akuma_wait` | `akuma` array; optional `completion` (`any` or `all`), `timeoutMs`, `repo` |
 | `akuma_history` | `akuma`; optional `id`, `last`, `before`, `since`, `limit`, `repo` |
 | `akuma_fork` | `akuma`, `at`; optional `detach`, `bare`, `repo` |
@@ -81,10 +81,12 @@ World-local aliases; Wait/Kill also accept globs and Contract selectors (the
 latter need `repo`). History `id` and Fork `at` are exact returned `turn/n`
 identities. Exact history cannot combine with paging or `last`.
 
-Ask/Wait are unbounded unless `timeoutMs` is supplied. Deadline or tool abort
-ends observation, not admitted work. Optional `schema` supplies a provider JSON
-answer contract; the result is JSON-decoded, not locally validated against
-arbitrary JSON Schema. Schema input to busy work retains the SDK refusal.
+Ask/Wait are unbounded unless `timeoutMs` is supplied. Tell observes its exact
+text answer with `wait: true`; its optional `timeoutMs` requires that choice.
+Deadline or tool abort ends observation, not admitted work. Ask requires a JSON
+Schema document as the provider answer contract and returns parsed JSON without
+local schema validation. Tell and spawn carry text only. Schema input to busy
+work retains the SDK refusal.
 
 ## Lifetime
 

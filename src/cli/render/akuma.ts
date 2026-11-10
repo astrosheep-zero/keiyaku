@@ -1,7 +1,7 @@
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/body.js";
 import type { AkumaId } from "../../akuma/identity.js";
-import type { AkumaAskResult, AkumaKillResult } from "../../akuma/selection-observation.js";
+import type { AkumaAskResult, AkumaTellResult, AkumaKillResult } from "../../akuma/selection-observation.js";
 import type { ForkResult, SpawnResult, SpawnWaitHead } from "../../library/akuma-creation.js";
 import {
   actionReceipt,
@@ -21,7 +21,7 @@ type AskProgress = Readonly<{
   observe: (observation: LiveStatusObservation) => readonly string[];
   frame: () => readonly string[];
   flush: () => readonly string[];
-  conclude: (result: AkumaAskResult) => readonly string[];
+  conclude: (result: AkumaAskResult | AkumaTellResult) => readonly string[];
 }>;
 
 export function askProgressStream(
@@ -52,14 +52,17 @@ export function askProgressStream(
     frame: () => stream.frame(),
     flush: () => stream.flush(),
     conclude: (result) => [
-      stream.conclude({ kind: "observed", observation: result }),
+      stream.conclude({
+        kind: "observed",
+        observation: "kind" in result ? result : (result.input ?? { kind: "unanswered" }),
+      }),
       ...subordinateLines(tellControlLines(result, context)),
     ],
   };
 }
 
 export function waitedTellProgress(
-  result: AkumaAskResult,
+  result: AkumaAskResult | AkumaTellResult,
   input: Readonly<{ prompt: string; alias?: string }>,
   context: TextRenderContext,
 ): string {
@@ -76,7 +79,10 @@ export function waitedTellProgress(
   const admitted = stream.admitted({ rows: [tellAdmissionRow(input.prompt, context, result.wake)] });
   return [
     ...admitted,
-    stream.conclude({ kind: "observed", observation: result }),
+    stream.conclude({
+      kind: "observed",
+      observation: "kind" in result ? result : (result.input ?? { kind: "unanswered" }),
+    }),
     ...subordinateLines(tellControlLines(result, context)),
   ].join("\n");
 }

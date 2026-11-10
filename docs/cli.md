@@ -59,7 +59,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
 | debt | Delegate to the separate Debt command surface. | Debt owns Debt judgment and result semantics. |
 | wait | Route Contract journal change waits and Akuma completion waits to their respective owners; refuse mixed families before observation. | Return the selected owner's native observation. |
-| spawn, fork, tell, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, answers, and recovery. |
+| spawn, fork, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, answers, and recovery. |
 
 Bind target selection, including the omitted-target default and fork
 inheritance, is owned by [public-api.md](public-api.md); the edge only adapts
@@ -126,14 +126,14 @@ identity, a conflicting or invalid selector, and any Contract, Debt, or
 Akuma-name catalogue query refuse at the usage boundary rather than returning a
 misleading empty list.
 
-The spawn and observing tell edges may acquire a JSON Schema from a
-caller-selected file; the file is decoded once at the edge and passed to the
-public Akuma surface. Schema acquisition failures are usage or input failures.
-Tell normally returns admission; explicitly requested answer observation uses
-the Akuma owner's input-bound answer operation and preserves its result,
-deadline, schema, interruption, and cancellation semantics.
+The ask edge acquires a required JSON Schema from a caller-selected file and
+passes its document to the public Akuma surface. Schema acquisition failures are
+usage or input failures. Ask returns parsed JSON; tell and spawn admit text only.
+Tell normally returns admission and may explicitly observe its exact text
+answer. Deadlines bound observation only, preserving the owner's interruption
+and cancellation semantics.
 
-Spawn, fork, and tell select the submitting process's opaque host Owner at
+Spawn, fork, tell, and ask select the submitting process's opaque host Owner at
 the invocation facet and pass it unchanged as optional initiator attribution.
 A nonblank explicit integration Owner wins; otherwise one unambiguous native
 host coordinate supplies attribution, with the external host fallback used only

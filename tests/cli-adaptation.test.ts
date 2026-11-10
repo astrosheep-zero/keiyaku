@@ -123,7 +123,7 @@ test("retired status guidance is a usage refusal before World or guidance acquis
   assert.equal(read.mock.callCount(), 0);
 });
 
-test("tell observes the admitted answer from stdin with a deadline or a schema", { timeout: 60_000 }, async (t) => {
+test("CLI ask returns JSON and invalid-output while tell observes text", { timeout: 60_000 }, async (t) => {
   const root = temporaryDirectory(t, "keiyaku-cli-tell-");
   const home = temporaryDirectory(t, "keiyaku-cli-tell-home-");
   const world = await World.at(root);
@@ -148,11 +148,21 @@ test("tell observes the admitted answer from stdin with a deadline or a schema",
     assert.equal(text.exit, 0, text.stderr);
     assert.equal(text.stdout, answer);
     const decoded = await cliJson<{ kind: string; answer: unknown }>(
-      ["-C", root, "tell", born.id, "--schema", schema, "-"], runtime,
+      ["-C", root, "ask", born.id, "--schema", schema, "-"], runtime,
     );
     assert.equal(decoded.exit, 0, decoded.stderr);
     assert.equal(decoded.value.kind, "answered");
     assert.deepEqual(decoded.value.answer, { ok: true });
+    const printed = await runCli(["-C", root, "ask", born.id, "--schema", schema, "prompt"], runtime);
+    assert.equal(printed.exit, 0, printed.stderr);
+    assert.deepEqual(JSON.parse(printed.stdout), { ok: true });
+    writeFileSync(agent, readFileSync(agent, "utf8").replace(`text: ${JSON.stringify(answer)}`, 'text: "not-json"'));
+    const invalid = await cliJson<{ kind: string; answer: unknown }>(
+      ["-C", root, "ask", born.id, "--schema", schema, "prompt"], runtime,
+    );
+    assert.equal(invalid.exit, 3, invalid.stderr);
+    assert.equal(invalid.value.kind, "invalid-output");
+    assert.equal(invalid.value.answer, "not-json");
     operationFailed = false;
   } finally {
     try {

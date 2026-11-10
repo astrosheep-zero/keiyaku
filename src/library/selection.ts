@@ -8,7 +8,6 @@ import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.
 import { AkumaOwner } from "../akuma/akuma-owner.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import {
-  decodeAskObservation,
   executeAskAkuma,
   executeKillAkuma,
   executeTellAkuma,
@@ -18,7 +17,7 @@ import { executeWaitAkuma } from "../akuma/akuma-wait.js";
 import { type AkumaStatus } from "../akuma/akuma.js";
 import { parseExactHistorySelector } from "../akuma/identity.js";
 import { type ActivityHistory } from "../akuma/projection.js";
-import { schemaJsonText, type Schema } from "../akuma/schema.js";
+import { canonicalDocument, type JsonSchemaDocument } from "../akuma/schema.js";
 import type {
   AkumaAskResult,
   AkumaKillResult,
@@ -45,17 +44,16 @@ export type AkumaWaitInput = AkumaSetAddressInput &
   }>;
 
 export type AkumaTellInput = AkumaAddressInput &
-  Readonly<{ body: string; interrupt?: boolean; initiator?: string; signal?: AbortSignal }>;
-export type AkumaAskInput<T = string> = AkumaAddressInput &
   Readonly<{
     body: string;
+    wait?: boolean;
     timeoutMs?: number;
-    schema?: Schema<T>;
+    observe?: AskObserver;
     interrupt?: boolean;
     initiator?: string;
     signal?: AbortSignal;
-    observe?: AskObserver;
   }>;
+export type AkumaAskInput = Omit<AkumaTellInput, "wait"> & Readonly<{ schema: JsonSchemaDocument }>;
 export type {
   AkumaAskResult,
   AkumaKillResult,
@@ -323,28 +321,48 @@ export async function killAkuma(
 export async function tellAkuma(
   input: AkumaTellInput & Readonly<{ path: WorldRoot }>,
   spawn: BodyLauncher,
+  reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
 ): Promise<AkumaTellResult> {
   const values = requireInput(input, "Akumas.tell input");
   for (const key of Object.keys(values)) {
     if (key === "schema") throw new TypeError("Akumas.tell does not accept schema; use Akumas.ask");
-    if (!["path", "akuma", "body", "repo", "interrupt", "initiator", "signal"].includes(key)) {
+    if (
+      !["path", "akuma", "body", "repo", "interrupt", "initiator", "signal", "wait", "timeoutMs", "observe"].includes(
+        key,
+      )
+    ) {
       throw new TypeError(`Akumas.tell input has unknown field: ${key}`);
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
     throw new TypeError("interrupt must be a boolean");
+  if (values.wait !== undefined && typeof values.wait !== "boolean") throw new TypeError("wait must be a boolean");
+  if (values.timeoutMs !== undefined && values.wait !== true) throw new TypeError("timeoutMs requires wait");
+  const timeoutMs = timeout(values.timeoutMs);
   const callerSignal = signal(values.signal);
   const addressed = await addressAkuma(directAddress(values));
-  return await executeTellAkuma({
+  const execution = {
     spawn,
     path: addressed.path,
     id: addressed.id,
     body: input.body,
+    ...(input.wait === undefined ? {} : { wait: input.wait }),
+    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(input.observe === undefined ? {} : { onObserve: input.observe }),
+    outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
     ...(input.interrupt === true ? { interrupt: true } : {}),
     ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-  });
+  };
+  return input.wait === true
+    ? await withAkumaWaitDeferrals(
+        { world: addressed.path, reportDiagnostic },
+        { akumaIds: [addressed.id] },
+        callerSignal,
+        async () => await executeTellAkuma(execution),
+      )
+    : await executeTellAkuma(execution);
 }
 
 function validateAskInput(
@@ -373,13 +391,14 @@ function validateAskInput(
     throw new TypeError("interrupt must be a boolean");
 }
 
-export async function askAkuma<T = string>(
-  input: AkumaAskInput<T> & Readonly<{ path: WorldRoot }>,
+export async function askAkuma(
+  input: AkumaAskInput & Readonly<{ path: WorldRoot }>,
   spawn: BodyLauncher,
   reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
-): Promise<AkumaAskResult<T>> {
+): Promise<AkumaAskResult> {
   const values = requireInput(input, "Akumas.ask input");
   validateAskInput(values);
+  const schema = canonicalDocument(input.schema);
   const callerSignal = signal(values.signal);
   const addressed = await addressAkuma(directAddress(values));
   return await withAkumaWaitDeferrals(
@@ -394,13 +413,13 @@ export async function askAkuma<T = string>(
         outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
         body: input.body,
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-        ...(input.schema === undefined ? {} : { schemaJson: schemaJsonText(input.schema) }),
+        schemaJson: schema.jsonText,
         ...(input.interrupt === true ? { interrupt: true } : {}),
         ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
         ...(input.observe === undefined ? {} : { onObserve: input.observe }),
         ...(callerSignal === undefined ? {} : { signal: callerSignal }),
       });
-      return (input.schema === undefined ? result : decodeAskObservation(result, input.schema)) as AkumaAskResult<T>;
+      return result.kind === "answered" ? { ...result, answer: JSON.parse(result.answer) } : result;
     },
   );
 }

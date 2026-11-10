@@ -70,8 +70,9 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   await settleFixtureBodies(bodies);
   let admitted = false;
   assertWireRoundTrip(
-    root.akumaAskResultSchema,
-    await akumas.ask({
+    root.akumaTellResultSchema,
+    await akumas.tell({
+      wait: true,
       akuma: id,
       body: "answer",
       timeoutMs: 5000,
@@ -183,9 +184,9 @@ test("recorded and refused reports retain their wire evidence", async (context) 
     const wait = await api.wait({ akuma: [born.allocated.id], timeoutMs: 0 });
     assert.equal(wait.reason, "deadline");
     assertWireRoundTrip(root.akumaWaitResultSchema, wait);
-    const ask = await api.ask({ akuma: born.allocated.id, body: "queued", timeoutMs: 0 });
-    assert.equal(ask.kind, "deadline");
-    assertWireRoundTrip(root.akumaAskResultSchema, ask);
+    const ask = await api.tell({ akuma: born.allocated.id, body: "queued", wait: true, timeoutMs: 0 });
+    assert.equal(ask.input?.kind, "deadline");
+    assertWireRoundTrip(root.akumaTellResultSchema, ask);
     const report = await akuma.report("working");
     assert.equal(report.kind, "recorded");
     assertWireRoundTrip(root.akumaReportResultSchema, report);
@@ -204,11 +205,12 @@ test("a fresh direct ask returns an answered wire result", async (context) => {
   const bodies: Promise<unknown>[] = [];
   const launcher = fixtureLauncher(
     bodies,
-    new Map([[fixture.allocated.paths.directory, { adapter: answering("answer"), now: "2026-08-10T00:00:00.000Z" }]]),
+    new Map([[fixture.allocated.paths.directory, { adapter: answering('{"ok":true}'), now: "2026-08-10T00:00:00.000Z" }]]),
   );
   const ask = await akumasWithLauncher(fixture.world, launcher).ask({
     akuma: fixture.allocated.id,
     body: "question",
+    schema: { type: "object" },
     timeoutMs: 5000,
   });
   assert.equal(ask.kind, "answered");

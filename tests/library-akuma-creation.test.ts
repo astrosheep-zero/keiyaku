@@ -22,7 +22,7 @@ import {
   recordTell,
 } from "../src/akuma/heart/index.js";
 import { parseAkumaId, pathsForAkumaId } from "../src/akuma/identity.js";
-import { Akuma as PublicAkuma, Schema } from "../src/akuma/index.js";
+import { Akuma as PublicAkuma } from "../src/akuma/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import type { SpawnResult } from "../src/library/akumas.js";
@@ -117,13 +117,6 @@ async function directCallFixture(options: Readonly<{ holdAnswer?: boolean }> = {
       if (answerReleasePath !== undefined) writeFileSync(answerReleasePath, "release\n");
     },
   };
-}
-
-function okSchema() {
-  return Schema.json(
-    { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
-    (value) => value as { ok: boolean },
-  );
 }
 
 test("prompt-free bare Akumas.spawn reports born without admitting a Tell", async (t) => {
@@ -230,21 +223,17 @@ test("explicit writable directories refuse invalid public grants before allocati
   assert.equal((await Akumas.of(world).list()).rows, undefined);
 });
 
-test("prompt-free Akumas.spawn refuses schema and wait options", async () => {
+test("prompt-free Akumas.spawn refuses wait options", async () => {
   const { world, configured } = await directCallFixture();
-  await assert.rejects(
-    () => Akumas.of(world).spawn({ akumaName: "worker", ...configured.placement, schema: okSchema() }),
-    /schema requires body/u,
-  );
+
   await assert.rejects(
     () => Akumas.of(world).spawn({ akumaName: "worker", ...configured.placement, mode: "wait" }),
     /wait and timeoutMs require body/u,
   );
 });
 
-test("local schema Akumas.spawn waits for its held empty Body before admitting its Tell", async (t) => {
+test("local Akumas.spawn waits for its held empty Body before admitting its Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
   mkdirSync(emptyPublicationBarrier);
@@ -260,7 +249,6 @@ test("local schema Akumas.spawn waits for its held empty Body before admitting i
       cwd: world,
       ...configured.placement,
       mode: "wait",
-      schema,
     });
     void pending.catch(() => undefined);
     let result: Awaited<typeof pending>;
@@ -282,7 +270,7 @@ test("local schema Akumas.spawn waits for its held empty Body before admitting i
       await pending.catch(() => undefined);
     }
     akumaId = result.akumaId;
-    assert.deepEqual(result.input, { kind: "answered", answer: { ok: true } });
+    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
     const history = await PublicAkuma.select(world, result.akumaId).history();
     const tells = history.rows.filter((row) => row.kind === "tell");
     assert.equal(tells.length, 1);
@@ -314,12 +302,11 @@ test("local schema Akumas.spawn waits for its held empty Body before admitting i
   }
 });
 
-test("local schema Akumas.spawn starts its zero observation budget after birth", async (t) => {
+test("local Akumas.spawn starts its zero observation budget after birth", async (t) => {
   // An already-answered Tell legitimately wins at the deadline edge. Hold the
   // provider answer until the zero-budget observation has returned instead of
   // racing a real child process against the first observation.
   const { raw, world, configured, releaseAnswer } = await directCallFixture({ holdAnswer: true });
-  const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
   mkdirSync(emptyPublicationBarrier);
@@ -347,7 +334,6 @@ test("local schema Akumas.spawn starts its zero observation budget after birth",
       cwd: world,
       ...configured.placement,
       mode: "wait",
-      schema,
       timeoutMs: 0,
     });
     void pending.catch(() => undefined);
@@ -670,10 +656,8 @@ test("native birth retains its captured host callback for the resulting handle",
     host.reportDiagnostic = () => {
       throw new Error("mutated callback must not run");
     };
-    const result = await child.ask("answer", { signal: t.signal });
-    assert.equal(result.kind, "answered");
-    if (result.kind !== "answered") throw new Error("expected answer");
-    assert.equal(result.answer, '{"ok":true}');
+    const result = await child.tell("answer", { wait: true, signal: t.signal });
+    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
     await child.history();
     assert.deepEqual(diagnostics, [
       "plugin fail signal: birth observer failed",
@@ -692,9 +676,8 @@ test("native birth retains its captured host callback for the resulting handle",
   }
 });
 
-test("schema Akumas.spawn preserves its child when initial Tell admission fails", async (t) => {
+test("Akumas.spawn preserves its child when initial Tell admission fails", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const schema = okSchema();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
@@ -715,7 +698,6 @@ test("schema Akumas.spawn preserves its child when initial Tell admission fails"
       cwd: world,
       ...configured.placement,
       mode: "detach",
-      schema,
     });
     akumaId = result.akumaId;
     assert.equal(result.failure?.kind, "infrastructure");

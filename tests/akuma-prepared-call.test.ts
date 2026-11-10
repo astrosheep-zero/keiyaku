@@ -4,7 +4,6 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLauncher, ChildBodyLaunch } from "../src/akuma/body-launch.js";
-import { Schema } from "../src/akuma/schema.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { projectFailure, spawnFailureReceipt } from "../src/library/outcome.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
@@ -186,16 +185,12 @@ test(
       return { completed: Promise.resolve({ diagnostic: "fixture finished" }), cancel: async () => {}, release() {} };
     };
     const api = akumasWithLauncher(world, spawn);
-    const schema = Schema.json({ type: "object" }, (value) => {
-      assert.deepEqual(trace().slice(-1)[0]?.slice(0, 1), ["observe"], "ACK attempt precedes decode and close");
-      return value;
-    });
+
     const result = await api.spawn({
       akumaName: "worker",
       body: "work",
       mode: "wait",
       settings: selected,
-      schema,
       initiator: owner,
       signal: t.signal,
       observe: {
@@ -210,7 +205,7 @@ test(
       },
     });
     assert.equal(result.input?.kind, "answered");
-    assert.deepEqual(result.input, { kind: "answered", answer: { ok: true } });
+    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
     const input = trace()[0]?.[1] as { akumaIds: string[] };
     assert.deepEqual(input.akumaIds, [result.akumaId]);
     const tell = await readTell(pathsForAkumaId(world, result.akumaId), result.tellId!);

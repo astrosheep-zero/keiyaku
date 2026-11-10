@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { z } from "zod";
 import { type VerbName, type VerbOutput } from "../src/library/keiyaku-verbs.js";
-import { Akuma, Keiyaku, KeiyakuUsageError, Schema, World, classifyVerb } from "../src/index.js";
+import { Akuma, Keiyaku, KeiyakuUsageError, World, classifyVerb } from "../src/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { repositoryWithMain, accepted, commitCandidate, document } from "./support/library-verbs.js";
@@ -50,7 +50,7 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   assert.ok(history.events.some((event) => event.kind === "attestation"));
 });
 
-test("native ask and wire run carry their caller-owned decoders", async (t) => {
+test("native ask and wire run return parsed JSON", async (t) => {
   const jsonSchema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] };
   for (const mode of ["native", "wire"] as const) {
     const root = temporaryDirectory(t, `keiyaku-verbs-ask-${mode}-`);
@@ -73,15 +73,13 @@ test("native ask and wire run carry their caller-owned decoders", async (t) => {
     let operationFailed = true;
     try {
       const facet = Keiyaku.at({ cwd: root, environment: {}, home });
-      const decode = (value: unknown) => ({ received: value, token: new Date("2026-01-01T00:00:00.000Z") });
       const result = mode === "native"
-        ? await facet.ask({ akuma: allocated.id, prompt: "structured", schema: Schema.json(jsonSchema, decode), timeoutMs: 30_000 })
-        : await facet.run("ask", { akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeoutMs: 30_000 }, { decode });
+        ? await facet.ask({ akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeoutMs: 30_000 })
+        : await facet.run("ask", { akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeoutMs: 30_000 });
       assert.equal(result.kind, "answered");
       if (result.kind !== "answered") throw new Error("expected an answer");
-      const answer: { received: unknown; token: Date } = result.answer!;
-      assert.deepEqual(answer.received, { ok: true });
-      assert.ok(answer.token instanceof Date);
+      assert.deepEqual(result.answer, { ok: true });
+      assertWireRoundTrip(Keiyaku.verbs.ask.output, result);
       assert.equal((await Akuma.select(world, allocated.id).idle({ timeoutMs: 30_000 })).reason, "completed");
       operationFailed = false;
     } finally {
