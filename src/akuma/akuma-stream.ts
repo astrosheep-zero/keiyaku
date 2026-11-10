@@ -30,7 +30,7 @@ async function announceOutcomes(
   observed: ReadonlySet<string>,
   observe?: OutcomeObserver,
 ): Promise<ReadonlySet<string>> {
-  const outcomes = new Set(rows.flatMap((row) => (row.kind === "outcome" ? [row.outcome.historyId] : [])));
+  const outcomes = new Set(rows.flatMap((row) => (row.kind === "outcome" ? [`turn/${row.turnSequence}`] : [])));
   const fresh = [...outcomes].filter((historyId) => !observed.has(historyId));
   if (fresh.length > 0) await observe?.(id, fresh);
   return outcomes;

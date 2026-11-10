@@ -26,6 +26,8 @@ export function parseExactHistorySelector(
   return Number.isSafeInteger(sequence) ? { kind: match[1] as "turn" | "report", sequence } : null;
 }
 
+export const turnHistoryIdSchema = z.templateLiteral(["turn/", z.number().int().positive().safe()]);
+
 const pathText = z.string().refine((value) => value.trim() !== "");
 export const akumaPathsSchema = z
   .object({

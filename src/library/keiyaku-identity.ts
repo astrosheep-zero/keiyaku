@@ -2,15 +2,13 @@
 import { z } from "zod";
 import { contractIdSchema } from "../git/identity.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
-import type { AkumaStatus } from "../akuma/akuma.js";
 import { readHeart, readLatestTurnForBody } from "../akuma/heart/index.js";
-import { parseAkumaId, pathsForAkumaId } from "../akuma/identity.js";
-import type { ContractId } from "../core/facts/types.js";
+import { akumaIdSchema, parseAkumaId, pathsForAkumaId } from "../akuma/identity.js";
 import { Keis } from "./contract-composition.js";
 import { NoGitWorldError, Repo } from "./repo.js";
 import { observeNamedAddress } from "./address.js";
 import { dispatchAssociations } from "./selection.js";
-import { akumaBirthSchema, akumaCallerSchema, decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
+import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import { World, worldRootSchema, type WorldRoot } from "../world.js";
 
 /** Environment attribution is explicit invocation input, never SDK admission. */
@@ -41,91 +39,73 @@ export async function akumaCallerFromEnvironment(environment: NodeJS.ProcessEnv)
 }
 
 type WhoamiCoordinates = Readonly<{ cwd: string; repo?: Repo; world: WorldRoot | null }>;
-
-type Self = AkumaCaller | Readonly<{ kind: "none" }> | Readonly<{ kind: "invalid"; reason: string }>;
-type Contract =
-  | Readonly<{ kind: "resolved"; id: ContractId }>
-  | Readonly<{ kind: "none" | "ambiguous" }>
-  | Readonly<{ kind: "unavailable"; reason: string }>;
-type Profile =
-  | Readonly<{
-      kind: "available";
-      akumaName: string;
-      aliases: readonly string[];
-      provider: string | null;
-      model: string | null;
-      workdir: string | null;
-      birth: AkumaStatus["birth"];
-      bornAt: string | null;
-      contracts: readonly ContractId[];
-    }>
-  | Readonly<{ kind: "unavailable"; reason: string }>;
-
-export type WhoamiFacts = Readonly<{
-  world: WorldRoot | null;
-  self: Self;
-  initiator: string | null;
-  initiatorUnavailable?: string;
-  contract: Contract;
-  profile?: Profile;
-}>;
-
+const unavailableSchema = z.strictObject({ kind: z.literal("unavailable"), diagnostic: z.string() }).readonly();
+const callerSchema = z.union([
+  z.strictObject({ kind: z.literal("akuma"), world: worldRootSchema, akumaId: akumaIdSchema }).readonly(),
+  z.strictObject({ kind: z.literal("external"), id: z.string() }).readonly(),
+]);
+function callerFact(caller: AkumaCaller): z.output<typeof callerSchema> {
+  return caller.kind === "akuma" ? caller : { kind: "external", id: `${caller.integration}:${caller.id}` };
+}
 export const whoamiFactsSchema = z
   .strictObject({
-    world: worldRootSchema.nullable(),
     self: z.union([
-      akumaCallerSchema,
+      callerSchema,
       z.strictObject({ kind: z.literal("none") }).readonly(),
-      z.strictObject({ kind: z.literal("invalid"), reason: z.string() }).readonly(),
+      z.strictObject({ kind: z.literal("invalid"), diagnostic: z.string() }).readonly(),
     ]),
-    initiator: z.string().nullable(),
-    initiatorUnavailable: z.string().exactOptional(),
-    contract: z.union([
-      z.strictObject({ kind: z.literal("resolved"), id: contractIdSchema }).readonly(),
-      z.strictObject({ kind: z.enum(["none", "ambiguous"]) }).readonly(),
-      z.strictObject({ kind: z.literal("unavailable"), reason: z.string() }).readonly(),
-    ]),
-    profile: z
-      .union([
-        z
-          .strictObject({
-            kind: z.literal("available"),
-            akumaName: z.string(),
-            aliases: z.array(z.string()).readonly(),
-            provider: z.string().nullable(),
-            model: z.string().nullable(),
-            workdir: z.string().nullable(),
-            birth: akumaBirthSchema,
-            bornAt: z.string().nullable(),
-            contracts: z.array(contractIdSchema).readonly(),
-          })
-          .readonly(),
-        z.strictObject({ kind: z.literal("unavailable"), reason: z.string() }).readonly(),
-      ])
+    world: worldRootSchema.exactOptional(),
+    initiator: z.union([z.string(), unavailableSchema]).exactOptional(),
+    contextContract: z
+      .union([contractIdSchema, z.strictObject({ kind: z.literal("ambiguous") }).readonly(), unavailableSchema])
       .exactOptional(),
+    aliases: z.array(z.string()).min(1).readonly().exactOptional(),
+    workdir: z.string().exactOptional(),
+    provider: z.string().exactOptional(),
+    model: z.string().exactOptional(),
+    dispatchContract: contractIdSchema.exactOptional(),
+    birthCaller: z.union([callerSchema, z.strictObject({ kind: z.literal("unknown") }).readonly()]).exactOptional(),
+    forkOrigin: akumaIdSchema.exactOptional(),
+    profileUnavailable: z.string().exactOptional(),
   })
   .readonly();
+export type WhoamiFacts = z.output<typeof whoamiFactsSchema>;
+type Profile = Pick<
+  WhoamiFacts,
+  | "aliases"
+  | "workdir"
+  | "provider"
+  | "model"
+  | "dispatchContract"
+  | "birthCaller"
+  | "forkOrigin"
+  | "profileUnavailable"
+>;
 
 function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function selfFrom(environment: NodeJS.ProcessEnv): Promise<Self> {
+async function selfFrom(environment: NodeJS.ProcessEnv): Promise<WhoamiFacts["self"]> {
   try {
-    return (await akumaCallerFromEnvironment(environment)) ?? { kind: "none" };
+    const caller = await akumaCallerFromEnvironment(environment);
+    return caller === undefined ? { kind: "none" } : callerFact(caller);
   } catch (error) {
-    return { kind: "invalid", reason: reason(error) };
+    return { kind: "invalid", diagnostic: reason(error) };
   }
 }
 
-async function contextualContract(coordinates: WhoamiCoordinates, world: WorldRoot | null): Promise<Contract> {
-  if (world === null || coordinates.repo === undefined) return { kind: "none" };
+async function contextualContract(
+  coordinates: WhoamiCoordinates,
+  world: WorldRoot | null,
+): Promise<WhoamiFacts["contextContract"]> {
+  if (world === null || coordinates.repo === undefined) return undefined;
   try {
     const result = await Keis.of(coordinates.repo).resolve({ cwd: coordinates.cwd });
-    if (result.kind === "resolved") return result;
-    return { kind: result.refusal.kind === "ambiguous-selector" ? "ambiguous" : "none" };
+    if (result.kind === "resolved") return result.id;
+    return result.refusal.kind === "ambiguous-selector" ? { kind: "ambiguous" } : undefined;
   } catch (error) {
-    return { kind: "unavailable", reason: reason(error) };
+    return { kind: "unavailable", diagnostic: reason(error) };
   }
 }
 
@@ -147,27 +127,20 @@ async function callerRepo(
   }
 }
 
-type CurrentTurn = Readonly<{ initiator: string | null; bornAt: string | null; unavailable?: string }>;
-
-async function currentTurn(self: Extract<AkumaCaller, { kind: "akuma" }>): Promise<CurrentTurn> {
-  let bornAt: string | null = null;
+async function currentTurn(self: Extract<AkumaCaller, { kind: "akuma" }>): Promise<WhoamiFacts["initiator"]> {
   try {
     const paths = pathsForAkumaId(self.world, self.akumaId);
-    const heart = await readHeart(paths);
-    bornAt = heart.soul?.createdAt ?? null;
-    const body = heart.latestBody;
-    if (body === null || body.end !== undefined || body.hung !== undefined) return { initiator: null, bornAt };
+    const body = (await readHeart(paths)).latestBody;
+    if (body === null || body.end !== undefined || body.hung !== undefined) return undefined;
     const turn = await readLatestTurnForBody(paths, body.sequence);
-    if (turn === null || turn.end !== undefined) return { initiator: null, bornAt };
-    // Confirm that the Body was still current and open when this Turn was observed.
+    if (turn === null || turn.end !== undefined) return undefined;
+    // A later Body cannot attribute this older Turn to the current execution.
     const latest = (await readHeart(paths)).latestBody;
-    const initiator =
-      latest?.sequence === body.sequence && latest.end === undefined && latest.hung === undefined
-        ? (turn.initiator ?? null)
-        : null;
-    return { initiator, bornAt };
+    return latest?.sequence === body.sequence && latest.end === undefined && latest.hung === undefined
+      ? turn.initiator
+      : undefined;
   } catch (error) {
-    return { initiator: null, bornAt, unavailable: reason(error) };
+    return { kind: "unavailable", diagnostic: reason(error) };
   }
 }
 
@@ -175,12 +148,10 @@ async function callerProfile(
   caller: Extract<AkumaCaller, { kind: "akuma" }>,
   coordinates: WhoamiCoordinates,
   environment: NodeJS.ProcessEnv,
-  bornAt: string | null,
 ): Promise<Profile> {
   try {
     if (!(await World.established(caller.world))) throw new Error("caller World is not established");
     const id = parseAkumaId(caller.akumaId);
-    // This is the same status owner as the public read, without its plugin outcome observer.
     const [status, aliases, repo] = await Promise.all([
       new AkumaOwner(id.id, caller.world).status(),
       observeNamedAddress({ world: caller.world, repo: null }),
@@ -191,35 +162,32 @@ async function callerProfile(
     }
     const dispatch = (await dispatchAssociations(repo, [id.id])).get(id.id)!;
     if (dispatch.kind === "failed") throw new Error(dispatch.diagnostic);
+    const bindings = aliases.aliases.value
+      .filter((binding) => binding.akumaId === id.id)
+      .map((binding) => binding.alias);
     return {
-      kind: "available",
-      akumaName: id.akumaName,
-      aliases: aliases.aliases.value.filter((binding) => binding.akumaId === id.id).map((binding) => binding.alias),
-      provider: status.provider ?? null,
-      model: status.model ?? null,
-      workdir: status.cwd ?? null,
-      birth: status.birth,
-      bornAt,
-      contracts: dispatch.kind === "associated" ? [dispatch.contractId] : [],
+      ...(bindings.length === 0 ? {} : { aliases: bindings }),
+      ...(status.provider === undefined ? {} : { provider: status.provider }),
+      ...(status.model === undefined ? {} : { model: status.model }),
+      ...(status.cwd === undefined ? {} : { workdir: status.cwd }),
+      ...(dispatch.kind === "associated" ? { dispatchContract: dispatch.contractId } : {}),
+      birthCaller: status.birth.caller.kind === "unknown" ? status.birth.caller : callerFact(status.birth.caller),
+      ...(status.birth.origin.kind === "fork" ? { forkOrigin: status.birth.origin.parent } : {}),
     };
   } catch (error) {
-    return { kind: "unavailable", reason: reason(error) };
+    return { profileUnavailable: reason(error) };
   }
 }
 
 export async function whoami(coordinates: WhoamiCoordinates, environment: NodeJS.ProcessEnv): Promise<WhoamiFacts> {
   const world = coordinates.world !== null && (await World.established(coordinates.world)) ? coordinates.world : null;
-  const [self, contract] = await Promise.all([selfFrom(environment), contextualContract(coordinates, world)]);
-  const turn = self.kind === "akuma" ? await currentTurn(self) : undefined;
-  const facts: WhoamiFacts = {
-    world,
+  const [self, contextContract] = await Promise.all([selfFrom(environment), contextualContract(coordinates, world)]);
+  const initiator = self.kind === "akuma" ? await currentTurn(self) : undefined;
+  return {
     self,
-    initiator: turn?.initiator ?? null,
-    ...(turn?.unavailable === undefined ? {} : { initiatorUnavailable: turn.unavailable }),
-    contract,
-    ...(self.kind === "akuma"
-      ? { profile: await callerProfile(self, coordinates, environment, turn?.bornAt ?? null) }
-      : {}),
+    ...(world === null || (self.kind === "akuma" && self.world === world) ? {} : { world }),
+    ...(contextContract === undefined ? {} : { contextContract }),
+    ...(initiator === undefined ? {} : { initiator }),
+    ...(self.kind === "akuma" ? await callerProfile(self, coordinates, environment) : {}),
   };
-  return facts;
 }

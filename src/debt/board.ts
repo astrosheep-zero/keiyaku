@@ -6,74 +6,92 @@ import {
   type DebtState,
 } from "./document.js";
 import { debtIdSchema, parseDebtId, sameNamespace, type DebtId } from "./identity.js";
+import { nonEmptyDebtValues, nonEmptyDebtArraySchema } from "./operation-types.js";
 import { z } from "zod";
-import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
 
 export const debtRefSchema = z
   .strictObject({
     id: debtIdSchema,
-    title: z.string().nullable(),
     state: z.union([debtStateSchema, z.literal("missing")]),
   })
   .readonly();
 export type DebtRef = z.output<typeof debtRefSchema>;
-const debtRowTimestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
-export const debtRowSchema = z
-  .object({
+const debtRowTimestampSchema = z.string().refine((value) => {
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value;
+}, "expected canonical UTC ISO timestamp");
+export const debtDispositionSchema = z.enum(["ready", "blocked", "done", "drop"]);
+export type DebtDisposition = z.output<typeof debtDispositionSchema>;
+export const readyDebtRowSchema = z
+  .strictObject({
     id: debtIdSchema,
+    title: debtNonblankTextSchema,
+    priority: debtPrioritySchema,
+  })
+  .readonly();
+export type ReadyDebtRow = z.output<typeof readyDebtRowSchema>;
+export const debtSummarySchema = readyDebtRowSchema.unwrap().extend({ disposition: debtDispositionSchema }).readonly();
+export type DebtSummary = z.output<typeof debtSummarySchema>;
+const debtBlockerSchema = z.strictObject({ id: debtIdSchema, missing: z.literal(true).exactOptional() }).readonly();
+export const blockedDebtRowSchema = readyDebtRowSchema
+  .unwrap()
+  .extend({
+    blockers: nonEmptyDebtArraySchema(debtBlockerSchema),
+  })
+  .readonly();
+export type BlockedDebtRow = z.output<typeof blockedDebtRowSchema>;
+export const debtDetailSchema = z
+  .strictObject({
     title: debtNonblankTextSchema,
     state: debtStateSchema,
     priority: debtPrioritySchema,
-    disposition: z.enum(["ready", "blocked", "done", "drop"]),
+    createdAt: debtRowTimestampSchema,
     updatedAt: debtRowTimestampSchema,
-    bodyPresent: z.boolean(),
-    children: z
-      .object({ live: z.number().int().nonnegative(), total: z.number().int().nonnegative() })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export const debtRowsSchema = z.array(debtRowSchema).readonly();
-export const debtResultRowSchema = z
-  .strictObject({
-    ...debtRowSchema.shape,
-    children: debtRowSchema.shape.children.unwrap().readonly().exactOptional(),
+    body: z.string().min(1).exactOptional(),
+    note: z.string().min(1).exactOptional(),
+    createdBy: z.string().exactOptional(),
+    needs: nonEmptyDebtArraySchema(debtRefSchema).exactOptional(),
+    parent: debtRefSchema.exactOptional(),
+    supersedes: nonEmptyDebtArraySchema(debtRefSchema).exactOptional(),
+    relates: nonEmptyDebtArraySchema(debtRefSchema).exactOptional(),
   })
   .readonly();
-export type DebtDisposition = z.infer<typeof debtRowSchema>["disposition"];
-export type DebtRow = z.output<typeof debtResultRowSchema>;
-export const blockedDebtRowSchema = z
-  .strictObject({ ...debtResultRowSchema.unwrap().shape, blockers: z.array(debtRefSchema).readonly() })
-  .readonly();
-export type BlockedDebtRow = z.output<typeof blockedDebtRowSchema>;
-export type DebtDetailFacts = Readonly<{
-  debt: DebtDocument;
-  needs: readonly (DebtRef & Readonly<{ released: boolean }>)[];
-  blockers: readonly DebtRef[];
-  blocks: readonly DebtRef[];
-  parent: DebtRef | null;
-  children: readonly DebtRef[];
-  supersedes: readonly DebtRef[];
-  supersededBy: readonly DebtRef[];
-  related: readonly DebtRef[];
-}>;
-const debtTreeReferenceSchema = z
-  .strictObject({ ...debtRefSchema.unwrap().shape, priority: debtPrioritySchema.nullable() })
-  .readonly();
-export type DebtTreeNode = Readonly<{
-  debt: z.output<typeof debtTreeReferenceSchema>;
-  cycle?: true;
-  children: readonly DebtTreeNode[];
-}>;
+export type DebtDetail = z.output<typeof debtDetailSchema>;
+const debtTreeFields = {
+  title: debtNonblankTextSchema,
+  state: debtStateSchema,
+  priority: debtPrioritySchema,
+};
+export type DebtTreeNode =
+  | Readonly<{
+      kind: "node";
+      id: DebtId;
+      title: string;
+      state: DebtState;
+      priority: z.output<typeof debtPrioritySchema>;
+      children?: readonly DebtTreeNode[];
+    }>
+  | Readonly<{ kind: "cycle"; id: DebtId }>;
 export const debtTreeNodeSchema: z.ZodType<DebtTreeNode> = z.lazy(() =>
-  z
-    .strictObject({
-      debt: debtTreeReferenceSchema,
-      cycle: z.literal(true).exactOptional(),
-      children: z.array(debtTreeNodeSchema).readonly(),
-    })
-    .readonly(),
+  z.union([
+    z
+      .strictObject({
+        kind: z.literal("node"),
+        id: debtIdSchema,
+        ...debtTreeFields,
+        children: nonEmptyDebtArraySchema(debtTreeNodeSchema).exactOptional(),
+      })
+      .readonly(),
+    z.strictObject({ kind: z.literal("cycle"), id: debtIdSchema }).readonly(),
+  ]),
 );
+export const debtTreeRootSchema = z
+  .strictObject({
+    ...debtTreeFields,
+    children: nonEmptyDebtArraySchema(debtTreeNodeSchema).exactOptional(),
+  })
+  .readonly();
+export type DebtTreeRoot = z.output<typeof debtTreeRootSchema>;
 export type DebtBoard = Readonly<{ debts: ReadonlyMap<DebtId, DebtDocument> }>;
 
 /** The local ids occupied across one namespace of the current board. */
@@ -107,7 +125,7 @@ export const debtDoctorIssueSchema = z.union([
     .strictObject({
       kind: z.literal("cycle"),
       relation: z.enum(["needs", "parent", "supersedes"]),
-      debts: z.array(debtIdSchema).readonly(),
+      debts: z.array(debtIdSchema).min(2).readonly(),
     })
     .readonly(),
 ]);
@@ -119,7 +137,7 @@ const sorted = <T extends { id: string }>(values: Iterable<T>): readonly T[] =>
   [...values].sort((a, b) => Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
 export function debtRef(board: DebtBoard, id: DebtId): DebtRef {
   const debt = board.debts.get(id);
-  return debt === undefined ? { id, title: null, state: "missing" } : { id, title: debt.title, state: debt.state };
+  return debt === undefined ? { id, state: "missing" } : { id, state: debt.state };
 }
 function append(index: Map<DebtId, DebtId[]>, key: DebtId, value: DebtId): void {
   const values = index.get(key);
@@ -135,34 +153,19 @@ function freezeRefs(
 export type DebtRelationProjection = Readonly<{
   children(id: DebtId): readonly DebtRef[];
   blocks(id: DebtId): readonly DebtRef[];
-  supersededBy(id: DebtId): readonly DebtRef[];
-  related(id: DebtId): readonly DebtRef[];
 }>;
 export function createDebtRelations(board: DebtBoard): DebtRelationProjection {
   const children = new Map<DebtId, DebtId[]>();
   const blocks = new Map<DebtId, DebtId[]>();
-  const supersededBy = new Map<DebtId, DebtId[]>();
-  const incoming = new Map<DebtId, DebtId[]>();
   for (const debt of board.debts.values()) {
     if (debt.parent !== null) append(children, debt.parent, debt.id);
     for (const need of debt.needs) append(blocks, need, debt.id);
-    for (const target of debt.supersedes) append(supersededBy, target, debt.id);
-    for (const target of debt.relates) append(incoming, target, debt.id);
   }
   const childRefs = freezeRefs(board, children);
   const blockRefs = freezeRefs(board, blocks);
-  const successorRefs = freezeRefs(board, supersededBy);
-  const incomingRefs = freezeRefs(board, incoming);
   return {
     children: (id) => childRefs.get(id) ?? none,
     blocks: (id) => blockRefs.get(id) ?? none,
-    supersededBy: (id) => successorRefs.get(id) ?? none,
-    related: (id) => {
-      const debt = board.debts.get(id);
-      const ids = new Set<DebtId>(debt?.relates ?? []);
-      for (const ref of incomingRefs.get(id) ?? none) ids.add(ref.id);
-      return ids.size === 0 ? none : sorted([...ids].map((related) => debtRef(board, related)));
-    },
   };
 }
 function needReleased(board: DebtBoard, id: DebtId): boolean {
@@ -179,93 +182,69 @@ export function debtDisposition(board: DebtBoard, debt: DebtDocument): DebtDispo
 export function debtBlocked(board: DebtBoard, debt: DebtDocument): boolean {
   return debt.state === "open" && hasUnresolvedNeeds(board, debt);
 }
-export function projectOwnedDetailFacts(board: DebtBoard, id: DebtId): DebtDetailFacts | null {
+export function projectDebtDetail(board: DebtBoard, id: DebtId): DebtDetail | null {
   const debt = board.debts.get(id);
   if (debt === undefined) return null;
-  const needs = debt.needs.map((need) => ({ ...debtRef(board, need), released: needReleased(board, need) }));
+  const refs = (targets: readonly DebtId[]): readonly DebtRef[] => targets.map((target) => debtRef(board, target));
   return {
-    debt,
-    needs,
-    blockers: needs.filter((need) => !need.released).map(({ released: _released, ...ref }) => ref),
-    blocks: none,
-    parent: debt.parent === null ? null : debtRef(board, debt.parent),
-    children: none,
-    supersedes: debt.supersedes.map((target) => debtRef(board, target)),
-    supersededBy: none,
-    related: debt.relates.length === 0 ? none : sorted(debt.relates.map((target) => debtRef(board, target))),
-  };
-}
-
-export function projectDetailFacts(
-  board: DebtBoard,
-  id: DebtId,
-  relations: DebtRelationProjection,
-): DebtDetailFacts | null {
-  const owned = projectOwnedDetailFacts(board, id);
-  if (owned === null) return null;
-  return {
-    ...owned,
-    blocks: relations.blocks(id),
-    children: relations.children(id),
-    supersededBy: relations.supersededBy(id),
-    related: relations.related(id),
+    title: debt.title,
+    state: debt.state,
+    priority: debt.priority,
+    createdAt: debt.createdAt,
+    updatedAt: debt.updatedAt,
+    ...(debt.body.length === 0 ? {} : { body: debt.body }),
+    ...(debt.note.length === 0 ? {} : { note: debt.note }),
+    ...(debt.createdBy === undefined ? {} : { createdBy: debt.createdBy }),
+    ...(debt.needs.length === 0 ? {} : { needs: refs(debt.needs) }),
+    ...(debt.parent === null ? {} : { parent: debtRef(board, debt.parent) }),
+    ...(debt.supersedes.length === 0 ? {} : { supersedes: refs(debt.supersedes) }),
+    ...(debt.relates.length === 0 ? {} : { relates: refs(debt.relates) }),
   };
 }
 function inScope(debt: DebtDocument, scope: readonly string[] | null): boolean {
   return scope === null || sameNamespace(parseDebtId(debt.id).namespace, scope);
 }
-export function projectDebtRow(board: DebtBoard, relations: DebtRelationProjection, debt: DebtDocument): DebtRow {
-  const children = relations.children(debt.id);
-  const total = children.length;
-  const live = children.filter((child) => child.state !== "done" && child.state !== "drop").length;
+export function projectDebtSummary(board: DebtBoard, debt: DebtDocument): DebtSummary {
   return {
     id: debt.id,
     title: debt.title,
-    state: debt.state,
     priority: debt.priority,
     disposition: debtDisposition(board, debt),
-    updatedAt: debt.updatedAt,
-    bodyPresent: debt.body.length > 0,
-    ...(total === 0 ? {} : { children: { live, total } }),
   };
 }
 export function projectRows(
   board: DebtBoard,
-  relations: DebtRelationProjection,
   scope: readonly string[] | null,
   selection: "active" | "closed" | "all",
-): readonly DebtRow[] {
+): readonly DebtSummary[] {
   return [...board.debts.values()]
     .filter((debt) => inScope(debt, scope))
     .filter((debt) => selection === "all" || (selection === "closed") === terminal(debt.state))
-    .map((debt) => projectDebtRow(board, relations, debt))
+    .map((debt) => projectDebtSummary(board, debt))
     .sort(compareDebtRows);
 }
 
 /** The established Debt row order: priority first, then canonical identity bytes. */
-function compareDebtRows(left: DebtRow, right: DebtRow): number {
+function compareDebtRows(left: DebtSummary, right: DebtSummary): number {
   return left.priority - right.priority || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id));
 }
 
 /**
- * Rows for the identities that created work, grouped by creator. Only documents a
- * requested identity created reach row projection, and each group keeps the
- * established row order.
+ * Rows for requested creators, grouped by creator in established row order.
  */
 export function projectCreatedByRows(
   board: DebtBoard,
-  relations: DebtRelationProjection,
   createdByIds: readonly string[],
-): ReadonlyMap<string, readonly DebtRow[]> {
+): ReadonlyMap<string, readonly DebtSummary[]> {
   const requested = new Set(createdByIds);
-  const attributed: { createdBy: string; row: DebtRow }[] = [];
+  const attributed: { createdBy: string; row: DebtSummary }[] = [];
   for (const debt of board.debts.values()) {
     const createdBy = debt.createdBy;
     if (createdBy === undefined || !requested.has(createdBy)) continue;
-    attributed.push({ createdBy, row: projectDebtRow(board, relations, debt) });
+    attributed.push({ createdBy, row: projectDebtSummary(board, debt) });
   }
   attributed.sort((left, right) => compareDebtRows(left.row, right.row));
-  const grouped = new Map<string, DebtRow[]>();
+  const grouped = new Map<string, DebtSummary[]>();
   for (const { createdBy, row } of attributed) {
     const rows = grouped.get(createdBy);
     if (rows === undefined) grouped.set(createdBy, [row]);
@@ -273,54 +252,33 @@ export function projectCreatedByRows(
   }
   return grouped;
 }
-export function projectBlocked(
-  board: DebtBoard,
-  scope: readonly string[] | null,
-  relations: DebtRelationProjection,
-): readonly BlockedDebtRow[] {
-  return projectRows(board, relations, scope, "active").flatMap((row) => {
-    if (!debtBlocked(board, board.debts.get(row.id)!)) return [];
-    return [{ ...row, blockers: projectDetailFacts(board, row.id, relations)!.blockers }];
-  });
-}
-
-export function projectStatusRows(
-  board: DebtBoard,
-  relations: DebtRelationProjection,
-  scope: readonly string[] | null,
-) {
-  const blockers = new Map(projectBlocked(board, scope, relations).map((row) => [row.id, row.blockers]));
-  return projectRows(board, relations, scope, "all").map((row) => {
-    const unresolved = blockers.get(row.id);
-    return unresolved === undefined ? row : { ...row, blockers: unresolved };
+export function projectBlocked(board: DebtBoard, scope: readonly string[] | null): readonly BlockedDebtRow[] {
+  return projectRows(board, scope, "active").flatMap((row) => {
+    const debt = board.debts.get(row.id)!;
+    if (!debtBlocked(board, debt)) return [];
+    const blockers = nonEmptyDebtValues(
+      debt.needs
+        .filter((need) => !needReleased(board, need))
+        .map((id) => ({
+          id,
+          ...(board.debts.has(id) ? {} : { missing: true as const }),
+        })),
+    );
+    return blockers === undefined ? [] : [{ id: row.id, title: row.title, priority: row.priority, blockers }];
   });
 }
 
 export type DebtBoardObservation = Readonly<{
-  statusRows: ReturnType<typeof projectStatusRows>;
-  selectRecentStatus(limit?: number): BoundedList<ReturnType<typeof projectStatusRows>[number]>;
-  selectNamespace(namespace: readonly string[]): readonly DebtRow[];
-  selectCreatedBy(createdBy: string): readonly DebtRow[];
+  statusRows: readonly DebtSummary[];
+  selectNamespace(namespace: readonly string[]): readonly DebtSummary[];
+  selectCreatedBy(createdBy: string): readonly DebtSummary[];
 }>;
 
 export function projectDebtBoardObservation(board: DebtBoard): DebtBoardObservation {
-  const relations = createDebtRelations(board);
-  const rows = projectRows(board, relations, null, "all");
-  const statusRows = projectStatusRows(board, relations, null);
+  const rows = projectRows(board, null, "all");
   return {
-    statusRows,
-    selectRecentStatus: (limit) =>
-      projectBoundedList(
-        statusRows
-          .filter((row) => row.state !== "done" && row.state !== "drop")
-          .sort(
-            (left, right) =>
-              right.updatedAt.localeCompare(left.updatedAt) ||
-              Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
-          ),
-        boundedListLimit(limit),
-      ),
-    selectNamespace: (namespace) => projectRows(board, relations, namespace, "all"),
+    statusRows: rows,
+    selectNamespace: (namespace) => projectRows(board, namespace, "all"),
     selectCreatedBy: (createdBy) => rows.filter((row) => board.debts.get(row.id)?.createdBy === createdBy),
   };
 }
@@ -409,14 +367,27 @@ export function diagnoseBoard(board: DebtBoard): readonly DebtDoctorIssue[] {
   return issues;
 }
 
-export function buildTree(board: DebtBoard, root: DebtId, relations: DebtRelationProjection): DebtTreeNode | null {
-  if (!board.debts.has(root)) return null;
+export function buildTree(board: DebtBoard, root: DebtId, relations: DebtRelationProjection): DebtTreeRoot | null {
+  const rootDebt = board.debts.get(root);
+  if (rootDebt === undefined) return null;
   const walk = (id: DebtId, path: readonly DebtId[]): DebtTreeNode => {
-    const ref = debtRef(board, id);
-    const debt = board.debts.get(id);
-    const node = { debt: { ...ref, priority: debt?.priority ?? null } };
-    if (path.includes(id)) return { ...node, cycle: true, children: [] };
-    return { ...node, children: relations.children(id).map((child) => walk(child.id, [...path, id])) };
+    if (path.includes(id)) return { kind: "cycle", id };
+    const debt = board.debts.get(id)!;
+    const children = nonEmptyDebtValues(relations.children(id).map((child) => walk(child.id, [...path, id])));
+    return {
+      kind: "node",
+      id,
+      title: debt.title,
+      state: debt.state,
+      priority: debt.priority,
+      ...(children === undefined ? {} : { children }),
+    };
   };
-  return walk(root, []);
+  const children = nonEmptyDebtValues(relations.children(root).map((child) => walk(child.id, [root])));
+  return {
+    title: rootDebt.title,
+    state: rootDebt.state,
+    priority: rootDebt.priority,
+    ...(children === undefined ? {} : { children }),
+  };
 }

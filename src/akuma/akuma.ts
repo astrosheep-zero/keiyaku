@@ -1,15 +1,7 @@
-import {
-  akumaBirthSchema,
-  nativeAkumaBirthSchema,
-  akumaCallerSchema,
-  retainedCallerSchema,
-  akumaCallerKey,
-  decodeAkumaCaller,
-  type AkumaCaller,
-} from "./caller.js";
+import { akumaBirthSchema, akumaCallerKey, decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { readdir, stat } from "node:fs/promises";
 import { z } from "zod";
-import { boundedListLimit, boundedListSchema, projectBoundedList } from "../bounded-list.js";
+import { boundedListLimit, projectBoundedList } from "../bounded-list.js";
 import { akumaAliasSchema } from "../identity/selector.js";
 import type { WorldRoot } from "../world.js";
 import { rosterListRow } from "./akuma-observe.js";
@@ -33,48 +25,81 @@ import {
   rebuildAkumaLineage,
   type AkumaLineage,
 } from "./lineage-cache.js";
-import { activitySnapshotSchema, nativeActivitySnapshotSchema } from "./projection.js";
+import { activitySnapshotSchema } from "./projection.js";
 import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
 
-export const akumaListRowSchema = z
+const bornLifeSchema = z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]);
+type BornLife = z.output<typeof bornLifeSchema>;
+export const listedBornAkumaSchema = z
   .strictObject({
     id: akumaIdSchema,
-    akumaName: z.string(),
-    description: z.string().exactOptional(),
-    life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
-    lifeAt: z.string().nullable(),
-    lastActivityAt: z.string().nullable(),
-    pending: z.array(z.string()).readonly(),
-    aliases: z.array(akumaAliasSchema).readonly(),
-    caller: akumaCallerSchema.exactOptional(),
+    life: bornLifeSchema,
+    lifeAt: z.string().exactOptional(),
+    lastActivityAt: z.string().exactOptional(),
+    pending: z.number().int().positive().exactOptional(),
+    aliases: z.array(akumaAliasSchema).nonempty().readonly().exactOptional(),
+    parentAkumaId: akumaIdSchema.exactOptional(),
   })
   .readonly();
-export const unbornAkumaListRowSchema = z
+export const listedUnbornAkumaSchema = z
   .strictObject({
     id: akumaIdSchema,
     life: z.enum(["unborn", "stillborn"]),
-    aliases: z.array(akumaAliasSchema).readonly(),
-    seal: z.strictObject({ evidence: z.string(), at: z.string() }).readonly().exactOptional(),
+    aliases: z.array(akumaAliasSchema).nonempty().readonly().exactOptional(),
+    diagnostic: z.string().exactOptional(),
   })
   .readonly();
-export const akumaListSchema = boundedListSchema(z.union([akumaListRowSchema, unbornAkumaListRowSchema]), {
-  observedAt: z.string(),
-  searched: z.array(z.string()).readonly(),
-});
-
-const nativeAkumaListRowSchema = akumaListRowSchema
-  .unwrap()
-  .extend({ caller: retainedCallerSchema.exactOptional() })
+export const listedAkumaSchema = z.union([listedBornAkumaSchema, listedUnbornAkumaSchema]);
+export const akumaListSchema = z
+  .strictObject({
+    observedAt: z.string(),
+    rows: z.array(listedAkumaSchema).nonempty().readonly().exactOptional(),
+    more: z.literal(true).exactOptional(),
+  })
   .readonly();
-export type AkumaListRow = z.output<typeof nativeAkumaListRowSchema>;
-export type UnbornAkumaListRow = z.output<typeof unbornAkumaListRowSchema>;
-const nativeAkumaListSchema = boundedListSchema(z.union([nativeAkumaListRowSchema, unbornAkumaListRowSchema]), {
-  observedAt: z.string(),
-  searched: z.array(z.string()).readonly(),
-});
-export type AkumaList = z.output<typeof nativeAkumaListSchema>;
 
-export type AkumaCompleteList = Omit<AkumaList, "hasMore">;
+/** The lower owner's native roster row; public listing projects it. */
+export type AkumaRosterRow =
+  | Readonly<{
+      kind: "born";
+      id: AkumaId;
+      life: BornLife;
+      lifeAt?: string;
+      lastActivityAt?: string;
+      pending?: number;
+      caller?: AkumaCaller;
+    }>
+  | Readonly<{
+      kind: "unborn";
+      id: AkumaId;
+      life: "unborn" | "stillborn";
+      diagnostic?: string;
+    }>;
+export type ListedAkuma = z.output<typeof listedAkumaSchema>;
+export type AkumaList = z.output<typeof akumaListSchema>;
+
+function listedAkuma(row: AkumaRosterRow): ListedAkuma {
+  if (row.kind === "unborn")
+    return {
+      id: row.id,
+      life: row.life,
+      ...(row.diagnostic === undefined ? {} : { diagnostic: row.diagnostic }),
+    };
+  return {
+    id: row.id,
+    life: row.life,
+    ...(row.lifeAt === undefined ? {} : { lifeAt: row.lifeAt }),
+    ...(row.lastActivityAt === undefined ? {} : { lastActivityAt: row.lastActivityAt }),
+    ...(row.pending === undefined ? {} : { pending: row.pending }),
+    ...(row.caller?.kind === "akuma" ? { parentAkumaId: row.caller.akumaId } : {}),
+  };
+}
+/** The advanced complete roster: every recognized member and known completeness. */
+export type AkumaCompleteList = Readonly<{
+  kind: "akumas";
+  observedAt: string;
+  rows: readonly AkumaRosterRow[];
+}>;
 
 export type AkumaListInput = Readonly<{
   akumaName?: string;
@@ -95,28 +120,20 @@ export const akumaStatusSchema = z
   })
   .strict()
   .readonly();
-const nativeAkumaStatusSchema = akumaStatusSchema.unwrap().extend({
-  timeline: nativeActivitySnapshotSchema,
-  birth: nativeAkumaBirthSchema,
-  cwd: z.string().optional(),
-  provider: z.string().optional(),
-  model: z.string().optional(),
-  strandedReason: z.literal("resume-unsupported").optional(),
-});
-export type AkumaStatus = z.output<typeof nativeAkumaStatusSchema>;
-
-type AkumaListRowValue = AkumaListRow | UnbornAkumaListRow;
+export type AkumaStatus = z.output<typeof akumaStatusSchema>;
 
 /** One recognized Akuma directory under this World's run root. */
 export type KnownAkuma = Readonly<{ id: AkumaId; paths: AkumaPaths }>;
 
 type ActivityCandidate = KnownAkuma & Readonly<{ bound: number }>;
 
-function activityAt(row: AkumaListRowValue): string | null {
-  if (!("lifeAt" in row)) return null;
-  if (row.lifeAt === null) return row.lastActivityAt;
-  if (row.lastActivityAt === null) return row.lifeAt;
-  return row.lifeAt > row.lastActivityAt ? row.lifeAt : row.lastActivityAt;
+function activityAt(row: AkumaRosterRow): string | null {
+  if (row.kind === "unborn") return null;
+  const lifeAt = row.lifeAt ?? null;
+  const lastActivityAt = row.lastActivityAt ?? null;
+  if (lifeAt === null) return lastActivityAt;
+  if (lastActivityAt === null) return lifeAt;
+  return lifeAt > lastActivityAt ? lifeAt : lastActivityAt;
 }
 
 function compareActivity(left: string | null, right: string | null): number {
@@ -126,7 +143,7 @@ function compareActivity(left: string | null, right: string | null): number {
   return left > right ? -1 : 1;
 }
 
-function compareRows(left: AkumaListRowValue, right: AkumaListRowValue): number {
+function compareRows(left: AkumaRosterRow, right: AkumaRosterRow): number {
   const activity = compareActivity(activityAt(left), activityAt(right));
   if (activity !== 0) return activity;
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
@@ -185,7 +202,7 @@ async function freshnessOrdered(rows: readonly KnownAkuma[]): Promise<readonly A
 
 async function readableRows(
   rows: readonly KnownAkuma[],
-): Promise<Readonly<{ rows: readonly AkumaListRowValue[]; skipped: number; failure?: unknown }>> {
+): Promise<Readonly<{ rows: readonly AkumaRosterRow[]; skipped: number; failure?: unknown }>> {
   const loaded = await boundedMap(rows, async ({ id, paths }) => {
     try {
       return { row: await rosterListRow(paths, id) };
@@ -332,7 +349,7 @@ async function verifyCallerMember(
   }
 }
 
-type CallerPage = Readonly<{ rows: readonly AkumaListRowValue[]; skipped: number; invalid: boolean }>;
+type CallerPage = Readonly<{ rows: readonly AkumaRosterRow[]; skipped: number; invalid: boolean }>;
 
 /**
  * Read only the matching candidates needed for the requested page and its
@@ -343,9 +360,9 @@ type CallerPage = Readonly<{ rows: readonly AkumaListRowValue[]; skipped: number
 async function pageCallerRows(
   candidates: readonly ActivityCandidate[],
   limit: number,
-  admit?: (row: AkumaListRowValue) => Promise<MemberVerdict>,
+  admit?: (row: AkumaRosterRow) => Promise<MemberVerdict>,
 ): Promise<CallerPage> {
-  const rows: AkumaListRowValue[] = [];
+  const rows: AkumaRosterRow[] = [];
   let skipped = 0;
   let cursor = 0;
   while (cursor < candidates.length) {
@@ -414,7 +431,7 @@ async function readCallerPage(
     await callerCandidates(known.rows, cached, caller, path, selected),
     limit,
     // A cache-proposed identity without a born Soul cannot justify inclusion.
-    async (row) => ("lifeAt" in row ? await verifyCallerMember(verification, row.id, row.caller) : "invalid-cache"),
+    async (row) => (row.kind === "born" ? await verifyCallerMember(verification, row.id, row.caller) : "invalid-cache"),
   );
   if (!attempted.invalid) return attempted;
   // One wrong edge makes the whole disposable record untrustworthy.
@@ -423,6 +440,15 @@ async function readCallerPage(
   const repaired = await pageCallerRows(await callerCandidates(known.rows, direct, caller, path, selected), limit);
   await rebuildAkumaLineage(path, direct);
   return repaired;
+}
+
+/** One roster answer: empty rows and known completeness are both omissions. */
+function rosterResult(observedAt: string, rows: readonly AkumaRosterRow[], more: boolean): AkumaList {
+  return {
+    observedAt,
+    ...(rows.length === 0 ? {} : { rows: rows.map(listedAkuma) }),
+    ...(more ? { more: true as const } : {}),
+  };
 }
 
 /** The bounded recent-activity roster input: native membership and observed extent. */
@@ -447,17 +473,12 @@ export async function observeAkumaRoster(
   if (caller !== undefined) {
     const page = await readCallerPage(path, limit, selected, caller);
     const bounded = projectBoundedList(page.rows, limit);
-    return {
-      observedAt,
-      // A skipped or unprovable candidate leaves the extent unknowable, never empty.
-      hasMore: bounded.hasMore || page.skipped > 0,
-      rows: bounded.rows,
-      searched: [akumaRunRoot(path)],
-    };
+    return rosterResult(observedAt, bounded.rows, bounded.hasMore || page.skipped > 0);
   }
   const known = await knownAkuma(path, selected);
   const ranked = await pageCallerRows(await freshnessOrdered(known.rows), limit);
-  return { observedAt, searched: [known.runRoot], ...projectBoundedList(ranked.rows, limit) };
+  const bounded = projectBoundedList(ranked.rows, limit);
+  return rosterResult(observedAt, bounded.rows, bounded.hasMore);
 }
 
 /** The complete native roster for callers whose semantics require a frozen set. */
@@ -469,13 +490,13 @@ export async function readAkumaCompleteRoster(
   const observedAt = new Date().toISOString();
   if (selection.caller !== undefined) {
     const page = await readCallerPage(path, Number.POSITIVE_INFINITY, selection.akumaName, selection.caller);
-    return { observedAt, rows: page.rows, searched: [akumaRunRoot(path)] };
+    return { kind: "akumas", observedAt, rows: page.rows };
   }
   const known = await knownAkuma(path, selection.akumaName);
   return {
+    kind: "akumas",
     observedAt,
     rows: [...(await readableRows(known.rows)).rows].sort(compareRows),
-    searched: [known.runRoot],
   };
 }
 

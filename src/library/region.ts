@@ -6,16 +6,8 @@ import type { ContractId } from "../core/facts/types.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import { documentsOperationAt, type RepositoryScope } from "../protocol/operations.js";
 
-export type RegionObservation = Readonly<
-  { overlaps: readonly RegionOverlap[]; overlapFailure?: never } | { overlapFailure: string; overlaps?: never }
->;
-
-export type AmendRegionObservation =
-  | RegionObservation
-  | Readonly<{
-      overlaps?: never;
-      overlapFailure?: never;
-    }>;
+export type RegionObservation = Readonly<{ overlaps?: readonly RegionOverlap[]; overlapError?: string }>;
+export type AmendRegionObservation = RegionObservation;
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -35,20 +27,20 @@ export async function observeRegion(
         const pairs = regionsOverlapWithRelation(mine, decodeContractDocument(peer.documentBytes).region);
         if (pairs.length > 0)
           overlaps.push({
-            contract: peer.contract,
+            contractId: peer.contract,
             patterns: pairs.map(([minePattern, theirsPattern, relation]) => ({
               mine: minePattern,
               theirs: theirsPattern,
-              relation,
+              ...(relation === "same" ? {} : { relation }),
             })),
           });
       } catch (error) {
-        return { overlapFailure: `${peer.contract}: ${diagnostic(error)}` };
+        return { overlapError: `${peer.contract}: ${diagnostic(error)}` };
       }
     }
-    return { overlaps };
+    return overlaps.length === 0 ? {} : { overlaps };
   } catch (error) {
-    return { overlapFailure: diagnostic(error) };
+    return { overlapError: diagnostic(error) };
   }
 }
 

@@ -8,27 +8,16 @@ import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
 
 function declarations(scripts: readonly string[]): string {
-  return (
-    document() +
-    "\n## Verification\n\n" +
-    scripts.map((script) => `\`\`\`bash timeout=1m\n${script}\n\`\`\``).join("\n\n") +
-    "\n"
-  );
+  return document() + "\n## Verification\n\n" +
+    scripts.map((script) => `\`\`\`bash timeout=1m\n${script}\n\`\`\``).join("\n\n") + "\n";
 }
 
 async function fixture(scripts: readonly string[], gates = ["reviewed", "verified"]) {
   const repository = repositoryWithMain();
-  const contract = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: declarations(scripts),
-      gates,
-      target: "refs/heads/main",
-    }),
-  ).value.kei;
-  const worktree = await appointedWorktreePath(
-    await cachedRepositoryAt(repository.path),
-    present(await contract.state()).id,
-  );
+  const contract = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
+    markdown: declarations(scripts), gates, target: "refs/heads/main",
+  })).kei;
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), present(await contract.state()).id);
   commitCandidate(repository, worktree);
   return { repository, contract, worktree };
 }
@@ -36,52 +25,43 @@ async function fixture(scripts: readonly string[], gates = ["reviewed", "verifie
 test("explicit checks accumulate on the prospective snapshot and unchanged delivery consumes them", async () => {
   const { contract } = await fixture(["true", "test -f candidate.txt"]);
   const first = accepted(await contract.verify({ index: 1 }));
-  assert.deepEqual(
-    first.facts.map((fact) => fact.kind),
-    ["attestation"],
-  );
+  assert.equal(first.checks.length, 1);
+  assert.equal(first.checks[0]?.index, 1);
+  assert.equal(first.checks[0]?.kind, "terminal");
+  assert.equal(first.checks[0]?.admission, undefined);
+  assert.equal(present(await contract.state()).attestations.length, 1);
   assert.equal(present(await contract.state()).delivery, null);
-  assert.equal(first.value.checks.length, 1);
-  const preview = accepted(await contract.previewDelivery());
-  assert.equal(preview.value.candidate.kind, "ready");
-  if (preview.value.candidate.kind !== "ready") throw new Error("candidate blocked");
-  const prospectiveGate = preview.value.candidate.requirements.gates.find((gate) => gate.gate === "verified")!;
-  assert.equal(prospectiveGate.satisfied, false);
-  assert.deepEqual(
-    prospectiveGate.requirements.map((requirement) => requirement.current.kind),
-    ["attested", "missing"],
-  );
+  const preview = await contract.previewDelivery();
+  assert.ok(preview.kind === "ready");
+  assert.equal(preview.unmetGates?.length, 2);
+  assert.deepEqual(preview.unmetGates?.map(({ state }) => state), ["missing", "missing"]);
+  // Both review and the second check are unmet; the first check is not retransmitted.
+  assert.equal(preview.unmetGates?.some(({ requirement }) => requirement === first.checks[0]?.requirement), false);
   accepted(await contract.amend({ markdown: "## Replace: Objective\n\nSame candidate with revised author intent.\n" }));
   const second = accepted(await contract.verify({ index: 2 }));
-  assert.equal(second.value.snapshot, first.value.snapshot);
+  assert.equal(second.snapshot, first.snapshot);
   const delivered = accepted(await contract.deliver());
-  assert.equal(delivered.value.integration.snapshot, first.value.snapshot);
-  assert.deepEqual(
-    delivered.facts.map((fact) => fact.kind),
-    ["deliver"],
-  );
-  assert.equal(delivered.value.gates?.find((gate) => gate.gate === "verified")?.satisfied, true);
+  assert.equal(delivered.integration, first.snapshot);
+  assert.ok(delivered.placement?.kind === "gates-unsatisfied");
   const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
-  assert.ok(reviewed.value.completion);
+  assert.equal(reviewed.placement?.kind, "placed");
+  assert.equal(present(await contract.state()).terminal?.kind, "claimed");
 });
 
 test("each declaration executes in fresh scratch and terminal failure preserves later evidence and scenes", async () => {
   const { contract } = await fixture(["echo created > scratch-only", "test -f scratch-only", "exit 7", "true"]);
   const verified = accepted(await contract.verify());
-  assert.deepEqual(
-    verified.value.checks.map((check) => (check.kind === "terminal" ? check.verdict : check.kind)),
-    ["satisfied", "unsatisfied", "unsatisfied", "satisfied"],
-  );
-  assert.equal(verified.facts.length, 4);
-  const scenes = verified.value.checks.flatMap((check) =>
-    check.retainedPath === undefined ? [] : [check.retainedPath],
-  );
+  assert.deepEqual(verified.checks.map((check) => check.kind === "terminal" ? check.verdict : check.kind),
+    ["satisfied", "unsatisfied", "unsatisfied", "satisfied"]);
+  assert.equal(present(await contract.state()).attestations.length, 4);
+  const scenes = verified.checks.flatMap((check) => check.retainedPath === undefined ? [] : [check.retainedPath]);
   assert.equal(scenes.length, 2);
   assert.notEqual(scenes[0], scenes[1]);
   assert.ok(scenes.every(existsSync));
   const repeated = accepted(await contract.verify({ index: 2 }));
-  assert.equal(repeated.value.checks[0]?.kind, "terminal");
-  if (repeated.value.checks[0]?.kind === "terminal") assert.equal(repeated.value.checks[0].admission.kind, "reused");
+  assert.equal(repeated.checks[0]?.kind, "terminal");
+  if (repeated.checks[0]?.kind === "terminal") assert.equal(repeated.checks[0].admission, "reused");
+  assert.equal(present(await contract.state()).attestations.length, 4);
   assert.ok(existsSync(scenes[1]!));
   await contract.abandon();
   assert.ok(scenes.every((scene) => !existsSync(scene)));
@@ -91,22 +71,18 @@ test("verify validates selection and dirty capture before executing or admitting
   const { repository, contract, worktree } = await fixture(["true"]);
   const state = present(await contract.state());
   const invalid = await contract.verify({ index: 2 });
-  assert.equal(invalid.kind, "refused");
-  if (invalid.kind === "refused")
-    assert.deepEqual(invalid.refusal, {
-      kind: "verification-index-out-of-range",
-      contractId: state.id,
-      index: 2,
-      total: 1,
-    });
+  assert.ok(invalid.kind === "refused");
+  assert.deepEqual(invalid.reason, { kind: "verification-index-out-of-range", total: 1 });
+  assert.equal(invalid.contractId, state.id);
   await assert.rejects(() => contract.verify({ index: 0 }), /positive safe integer/u);
   writeFileSync(join(worktree, "candidate.txt"), "dirty\n");
   const before = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   const dirty = await contract.verify();
-  assert.equal(dirty.kind, "refused");
-  if (dirty.kind === "refused") assert.equal(dirty.refusal.kind, "dirty-workspace");
+  assert.ok(dirty.kind === "refused");
+  assert.equal(dirty.reason.kind, "dirty-workspace");
+  assert.equal(present(await contract.state()).attestations.length, 0);
   const checked = accepted(await contract.verify({ includeDirty: true }));
-  assert.equal(checked.value.checks[0]?.kind, "terminal");
+  assert.equal(checked.checks[0]?.kind, "terminal");
   assert.equal(repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim(), before);
   assert.equal(readFileSync(join(worktree, "candidate.txt"), "utf8"), "dirty\n");
   assert.equal(present(await contract.state()).delivery, null);
@@ -118,14 +94,11 @@ test("the last selected check completes a delivered and reviewed candidate", asy
   accepted(await contract.deliver());
   accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
   const first = accepted(await contract.verify({ index: 1 }));
-  assert.equal(first.value.completion, undefined);
+  assert.equal(first.placement?.kind, "gates-unsatisfied");
   const last = accepted(await contract.verify({ index: 2 }));
-  assert.ok(last.value.completion);
-  assert.equal(last.value.completion.integration, first.value.snapshot);
-  assert.deepEqual(
-    last.facts.map((fact) => fact.kind),
-    ["attestation", "claimed"],
-  );
+  assert.ok(last.placement?.kind === "placed");
+  assert.equal(last.placement.integration, first.snapshot);
+  assert.equal(present(await contract.state()).attestations.length, 3);
   assert.equal(present(await contract.state()).terminal?.kind, "claimed");
 });
 
@@ -137,13 +110,14 @@ test("target movement cannot retarget prior check evidence", async () => {
   repository.run(["add", "target-only.txt"]);
   repository.run(["commit", "--quiet", "-m", "advance target"]);
   const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
-  assert.equal(reviewed.value.completion, undefined);
-  assert.equal(reviewed.value.gates?.find((gate) => gate.gate === "verified")?.current.kind, "stale");
+  assert.ok(reviewed.placement?.kind === "gates-unsatisfied");
+  const gate = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
+  assert.equal(gate.current.kind, "stale");
   const next = accepted(await contract.verify({ index: 1 }));
-  assert.notEqual(next.value.snapshot, original.value.snapshot);
-  assert.equal(next.value.gates?.find((gate) => gate.gate === "verified")?.satisfied, false);
+  assert.notEqual(next.snapshot, original.snapshot);
+  assert.equal(next.placement?.kind, "gates-unsatisfied");
   const completed = accepted(await contract.verify({ index: 2 }));
-  assert.ok(completed.value.completion);
+  assert.equal(completed.placement?.kind, "placed");
 });
 
 test("verify after target movement reuses its prospective snapshot during ordinary completion", async () => {
@@ -154,38 +128,31 @@ test("verify after target movement reuses its prospective snapshot during ordina
   repository.run(["add", "target-only.txt"]);
   repository.run(["commit", "--quiet", "-m", "advance target"]);
   const verified = accepted(await contract.verify());
-  assert.ok(verified.value.completion);
-  assert.equal(verified.value.completion.integration, verified.value.snapshot);
-  assert.deepEqual(
-    verified.facts.map((fact) => fact.kind),
-    ["attestation", "reintegrated", "claimed"],
-  );
+  assert.ok(verified.placement?.kind === "placed");
+  assert.equal(verified.placement.integration, verified.snapshot);
+  assert.equal(present(await contract.state()).currentIntegration?.snapshot, verified.snapshot);
 });
 
 test("concurrent selected admissions preserve both requirements and repeated checks still execute", async () => {
   const { repository, contract } = await fixture(["true", "test -f candidate.txt"]);
   accepted(await contract.deliver());
   const results = await Promise.all([contract.verify({ index: 1 }), contract.verify({ index: 2 })]);
-  assert.ok(results.every((result) => result.kind === "accepted"));
-  const verified = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
+  const selected = results.map((result) => accepted(result).checks[0]!);
+  assert.deepEqual(selected.map(({ index }) => index), [1, 2]);
+  assert.notEqual(selected[0]?.requirement, selected[1]?.requirement);
+  const state = present(await contract.state());
+  const verified = gateReports(state).reports.find((gate) => gate.gate === "verified")!;
   assert.equal(verified.satisfied, true);
   assert.equal(verified.requirements.length, 2);
+  assert.deepEqual(selected.map(({ requirement }) => requirement), verified.requirements.map(({ requirement }) => requirement));
   const observations: string[] = [];
-  const repeated = accepted(
-    await contract.verify(
-      { index: 1 },
-      {
-        observe: (event) => {
-          if (event.kind === "verification" && event.observation.kind === "phase")
-            observations.push(event.observation.phase);
-        },
-      },
-    ),
-  );
+  const repeated = accepted(await contract.verify({ index: 1 }, { observe: (event) => {
+    if (event.kind === "verification" && event.observation.kind === "phase") observations.push(event.observation.phase);
+  } }));
   assert.ok(observations.includes("declaration"));
-  assert.deepEqual(repeated.facts, []);
-  assert.equal(repeated.value.checks[0]?.kind, "terminal");
-  if (repeated.value.checks[0]?.kind === "terminal") assert.equal(repeated.value.checks[0].admission.kind, "reused");
+  assert.equal(repeated.checks[0]?.kind, "terminal");
+  if (repeated.checks[0]?.kind === "terminal") assert.equal(repeated.checks[0].admission, "reused");
+  assert.equal(present(await contract.state()).attestations.length, state.attestations.length);
   assert.equal(repository.run(["worktree", "list", "--porcelain"]).includes("keiyaku-v4-verify-"), false);
   await contract.abandon();
 });
@@ -194,43 +161,24 @@ test("cancellation after terminal execution retains the check and stops its admi
   const { contract } = await fixture(["true", "printf second", "printf never"]);
   const controller = new AbortController();
   let thirdExecuted = false;
-  let result: Awaited<ReturnType<typeof contract.verify>> | undefined;
+  let result;
   try {
-    result = await contract.verify(
-      { signal: controller.signal },
-      {
-        observe: (event) => {
-          if (event.kind !== "verification" || event.observation.kind !== "phase") return;
-          if (event.observation.index === 3 && event.observation.phase === "declaration") thirdExecuted = true;
-          if (
-            event.observation.index === 2 &&
-            event.observation.phase === "declaration" &&
-            event.observation.state === "finished"
-          )
-            controller.abort(new Error("cancel after terminal execution"));
-        },
-      },
-    );
+    result = await contract.verify({ signal: controller.signal }, { observe: (event) => {
+      if (event.kind !== "verification" || event.observation.kind !== "phase") return;
+      if (event.observation.index === 3 && event.observation.phase === "declaration") thirdExecuted = true;
+      if (event.observation.index === 2 && event.observation.phase === "declaration" && event.observation.state === "finished")
+        controller.abort(new Error("cancel after terminal execution"));
+    } });
   } catch (error) {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "aborted");
-    result = error.outcome as typeof result;
+    assert.ok(error.outcome?.kind === "contract");
+    result = error.outcome;
   }
-  assert.ok(result && "value" in result && result.value);
-  assert.deepEqual(
-    result.value.checks.map((check) =>
-      check.kind === "terminal" ? [check.index, check.verdict, check.admission.kind] : [check.index, check.kind],
-    ),
-    [
-      [1, "satisfied", "admitted"],
-      [2, "satisfied", "stopped"],
-    ],
-  );
-  const second = result.value.checks[1]!;
-  assert.ok(second.kind === "terminal" && second.admission.kind === "stopped");
-  assert.deepEqual(second.admission.stop, { failure: "cancelled" });
-  assert.ok(result.pending.some((pending) => pending.surface === "verification" && pending.required));
-  assert.equal(result.facts.filter((fact) => fact.kind === "attestation").length, 1);
+  assert.ok(result && "checks" in result && result.checks);
+  assert.deepEqual(result.checks.map((check) => check.kind === "terminal"
+    ? [check.index, check.verdict, check.admission] : [check.index, check.kind]),
+  [[1, "satisfied", undefined], [2, "satisfied", { kind: "cancelled" }]]);
   assert.equal(present(await contract.state()).attestations.length, 1);
   assert.equal(thirdExecuted, false);
   await contract.abandon();
@@ -240,29 +188,26 @@ test("changed failure testimony admits a new attestation while identical testimo
   const { repository, contract } = await fixture(["true"]);
   const output = join(repository.path, "failure-output");
   writeFileSync(output, "first failure");
-  accepted(
-    await contract.amend({
-      markdown: `## Replace: Verification\n\n\`\`\`bash timeout=1m\ncat '${output}'; exit 1\n\`\`\`\n`,
-    }),
-  );
+  accepted(await contract.amend({ markdown: `## Replace: Verification\n\n\`\`\`bash timeout=1m\ncat '${output}'; exit 1\n\`\`\`\n` }));
   accepted(await contract.deliver());
-  const first = accepted(await contract.verify()).value.checks[0]!;
-  assert.ok(first.kind === "terminal" && first.admission.kind === "admitted");
+  const first = accepted(await contract.verify()).checks[0]!;
+  assert.ok(first.kind === "terminal" && first.admission === undefined);
+  const firstState = present(await contract.state());
   writeFileSync(output, "second failure");
   const verified = accepted(await contract.verify());
-  const second = verified.value.checks[0]!;
-  assert.ok(second.kind === "terminal" && second.admission.kind === "admitted");
-  assert.notEqual(second.admission.entry, first.admission.entry);
-  assert.match(second.summary ?? "", /second failure/u);
+  const second = verified.checks[0]!;
+  assert.ok(second.kind === "terminal" && second.verdict === "unsatisfied" && second.admission === undefined);
+  assert.match(second.summary, /second failure/u);
   const state = present(await contract.state());
   assert.equal(state.attestations.length, 2);
+  assert.notEqual(state.attestations.at(-1)?.entry, firstState.attestations.at(-1)?.entry);
   assert.equal(state.attestations.at(-1)?.data.summary, second.summary);
-  assert.equal(verified.value.gates?.find((gate) => gate.gate === "verified")?.satisfied, false);
+  assert.equal(verified.placement?.kind, "gates-unsatisfied");
   const repeated = accepted(await contract.verify());
-  const check = repeated.value.checks[0]!;
+  const check = repeated.checks[0]!;
   assert.ok(check.kind === "terminal");
-  assert.deepEqual(check.admission, { kind: "reused", entry: second.admission.entry });
-  assert.deepEqual(repeated.facts, []);
+  assert.equal(check.admission, "reused");
+  assert.equal(present(await contract.state()).attestations.length, 2);
   await contract.abandon();
 });
 
@@ -272,28 +217,14 @@ test("declaration changes preserve independent requirements while reordering pre
   accepted(await contract.verify());
   const original = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
   assert.equal(original.satisfied, true);
-  accepted(
-    await contract.amend({
-      markdown:
-        "## Replace: Verification\n\n```bash timeout=1m\ntest -f candidate.txt\n```\n\n```bash timeout=1m\ntrue\n```\n",
-    }),
-  );
+  accepted(await contract.amend({ markdown:
+    "## Replace: Verification\n\n```bash timeout=1m\ntest -f candidate.txt\n```\n\n```bash timeout=1m\ntrue\n```\n" }));
   const reordered = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
   assert.equal(reordered.satisfied, true);
-  assert.deepEqual(
-    reordered.requirements.map((requirement) => requirement.requirement),
-    original.requirements.map((requirement) => requirement.requirement).reverse(),
-  );
-  accepted(
-    await contract.amend({
-      markdown:
-        "## Replace: Verification\n\n```bash timeout=1m\ntest -f candidate.txt\n```\n\n```bash timeout=1m\necho changed\n```\n",
-    }),
-  );
+  assert.deepEqual(reordered.requirements.map(({ requirement }) => requirement), original.requirements.map(({ requirement }) => requirement).reverse());
+  accepted(await contract.amend({ markdown:
+    "## Replace: Verification\n\n```bash timeout=1m\ntest -f candidate.txt\n```\n\n```bash timeout=1m\necho changed\n```\n" }));
   const changed = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
-  assert.deepEqual(
-    changed.requirements.map((requirement) => requirement.current.kind),
-    ["attested", "missing"],
-  );
+  assert.deepEqual(changed.requirements.map(({ current }) => current.kind), ["attested", "missing"]);
   await contract.abandon();
 });

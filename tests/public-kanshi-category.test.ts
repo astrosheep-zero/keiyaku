@@ -45,40 +45,34 @@ async function worldWithAkuma(context: TestContext, count: number): Promise<Worl
 test("the package root exposes the bounded category observation with its crossing types", async () => {
   const input: KanshiCategoryInput = { world: null, category: "akuma" };
   const report: KanshiCategoryReport = await kanshiCategory(input);
-  assert.equal(report.category, "akuma");
-  if (report.category !== "akuma") return;
-  assert.equal(report.akuma.kind, "absent");
-  assert.equal(report.root, null);
+  assert.equal("category" in report, false, "the requested category is invocation context, not result payload");
+  assert.equal(report.section.kind, "absent");
 });
 
 test("category observation reuses owner rows and is the operation the CLI runs", async (context) => {
   const world = await worldWithAkuma(context, 3);
   const owner = await Akumas.of(world).list({ limit: 3 });
-  await moveAlias({ world, alias: parseAkumaAlias("@watch"), akumaId: owner.rows[0]!.id });
+  await moveAlias({ world, alias: parseAkumaAlias("@watch"), akumaId: owner.rows![0]!.id });
 
   const report = await kanshiCategory({ world, category: "akuma", limit: 2 });
-  assert.equal(report.category, "akuma");
-  if (report.category !== "akuma" || report.akuma.kind !== "present") assert.fail(JSON.stringify(report));
-  assert.equal(report.akuma.value.hasMore, true);
+  if (report.section.kind !== "present") assert.fail(JSON.stringify(report));
+  const akumas = report.section;
+  assert.equal(akumas.more, true);
   assert.deepEqual(
-    report.akuma.value.rows.map((row) => row.id),
-    owner.rows.slice(0, 2).map((row) => row.id),
+    akumas.rows!.map((row) => row.id),
+    owner.rows!.slice(0, 2).map((row) => row.id),
   );
-  assert.deepEqual(report.akuma.value.rows[0]!.aliases, ["@watch"]);
-  assert.equal(report.akuma.value.rows[0]!.contractAssociationUnavailable, undefined);
+  assert.deepEqual(akumas.rows![0]!.aliases, ["@watch"]);
+  assert.equal(akumas.rows![0]!.contract, undefined);
   assert.equal("contracts" in report, false);
   assert.equal("debts" in report, false);
 
-  const cli = await cliJson<KanshiCategoryReport>(["-C", world, "status", "aku", "--limit", "2"], { environment: {} });
+  const cli = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku", "--limit", "2"], { environment: {} });
   assert.equal(cli.exit, 0, cli.stderr);
-  const withoutObservationTime = (category: KanshiCategoryReport): KanshiCategoryReport =>
-    category.category === "akuma" && category.akuma.kind === "present"
-      ? {
-          ...category,
-          observedAt: "",
-          akuma: { ...category.akuma, value: { ...category.akuma.value, observedAt: "" } },
-        }
-      : category;
+  const withoutObservationTime = (category: KanshiCategoryReport<"akuma">): KanshiCategoryReport<"akuma"> => ({
+    ...category,
+    observedAt: "",
+  });
   assert.deepEqual(withoutObservationTime(cli.value), withoutObservationTime(report));
 
   const repository = makeGitRepository();
@@ -98,16 +92,15 @@ test("category observation reuses owner rows and is the operation the CLI runs",
       gates: ["reviewed"],
     }),
   );
-  const contract = present(await bound.value.kei.state());
+  const contract = present(await bound.kei.state());
   const contracts = await kanshiCategory({ world, repo, category: "contract", limit: 1 });
-  assert.equal(contracts.category, "contract");
-  if (contracts.category !== "contract" || contracts.contracts.kind !== "present")
-    assert.fail(JSON.stringify(contracts));
+  if (contracts.section.kind !== "present") assert.fail(JSON.stringify(contracts));
+  const rows = contracts.section.rows!;
   assert.deepEqual(
-    contracts.contracts.value.rows.map((row) => row.id),
+    rows.map((row) => row.id),
     [contract.id],
   );
-  assert.equal(contracts.contracts.value.rows[0]!.rosterUnavailable, undefined);
+  assert.equal(rows[0]!.associations, undefined);
   assert.equal("akuma" in contracts, false);
 });
 
@@ -161,14 +154,14 @@ test("failed Dispatch leaves the bounded Akuma category and Alias rows readable"
     category: "akuma",
     limit: 1,
   });
-  assert.equal(report.category, "akuma");
-  if (report.category !== "akuma" || report.akuma.kind !== "present") assert.fail(JSON.stringify(report));
+  if (report.section.kind !== "present") assert.fail(JSON.stringify(report));
+  const rows = report.section.rows!;
   assert.deepEqual(
-    report.akuma.value.rows.map((row) => row.id),
+    rows.map((row) => row.id),
     [born.id],
   );
-  assert.deepEqual(report.akuma.value.rows[0]!.aliases, ["@watch"]);
-  assert.equal(report.akuma.value.rows[0]!.contractAssociationUnavailable, true);
+  assert.deepEqual(rows[0]!.aliases, ["@watch"]);
+  assert.deepEqual(rows[0]!.contract, { kind: "unavailable" });
 });
 
 test("an empty Akuma roster keeps a failed Alias observation at the section", async (context) => {
@@ -178,13 +171,14 @@ test("an empty Akuma roster keeps a failed Alias observation at the section", as
   writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "not Alias authority\n");
 
   const report = await kanshiCategory({ world, category: "akuma" });
-  if (report.category !== "akuma" || report.akuma.kind !== "present") assert.fail(JSON.stringify(report));
-  assert.equal(report.akuma.value.aliasesUnavailable, true);
-  assert.deepEqual(report.akuma.value.rows, []);
+  if (report.section.kind !== "present") assert.fail(JSON.stringify(report));
+  assert.match(report.section.aliasesError ?? "", /invalid Alias JSON/u);
+  assert.equal(report.section.rows, undefined);
 });
 
 test("malformed category input is refused before owner observation", async () => {
-  const call = (input: unknown): Promise<KanshiCategoryReport> => kanshiCategory(input as KanshiCategoryInput);
+  const call = (input: unknown): Promise<KanshiCategoryReport> =>
+    Reflect.apply(kanshiCategory, undefined, [input]);
   await assert.rejects(call(null), TypeError);
   await assert.rejects(call([]), TypeError);
   await assert.rejects(call({ world: null, category: "people" }), TypeError);

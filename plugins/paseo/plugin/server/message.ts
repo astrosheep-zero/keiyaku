@@ -1,26 +1,8 @@
 import type { ProviderEvent, ProviderPrompt } from "@getpaseo/plugin/server/provider";
-import { z } from "zod";
-
-const sequence = z.number().int().nonnegative();
-export const tellReceiptSchema = z.object({
-  akuma: z.string(),
-  tell: z.object({
-    admission: z.object({ fact: z.literal("recorded"), tellId: z.string().min(1) }),
-    row: z.object({ kind: z.literal("tell"), sequence, at: z.string(), tellId: z.string().min(1), text: z.string(),
-      state: z.enum(["pending", "told"]), deliveries: z.array(z.object({
-        route: z.enum(["live", "launch"]), turnSequence: sequence, deliveredAt: z.string(),
-        receipt: z.enum(["unavailable", "required"]).optional(),
-      })).optional() }),
-    wake: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("told") }), z.object({ kind: z.literal("held") }),
-      z.object({ kind: z.literal("pursuing"), bodySequence: sequence }),
-      z.object({ kind: z.literal("failed"), diagnostic: z.string() }),
-    ]),
-  }),
-});
-/** One durable Tell admission and the wake it observed, however that wake settled. */
-export type TellAdmission = z.infer<typeof tellReceiptSchema>["tell"];
-export type AdmittedMessage = TellAdmission["row"];
+import type { AkumaTellResult } from "@astrosheep/keiyaku";
+/** The installed native owner validates this crossing value. */
+export type TellAdmission = AkumaTellResult;
+export type AdmittedMessage = Readonly<{ tellId: string; text: string; sequence?: number; at?: string }>;
 /** Submit one plain-text Tell and return its admission receipt. */
 export type Tell = (world: string, akuId: string, signal: AbortSignal, text: string) => Promise<TellAdmission>;
 type PromptResult = Extract<ProviderEvent, { type: "session.prompt_result" }>["result"];
@@ -49,12 +31,8 @@ export function messageText(prompt: ProviderPrompt): string {
  * durable input acceptance, never native delivery: the observed Turn is a host
  * presentation correlation, never a Heart binding.
  */
-export function tellPresentation(admitted: TellAdmission, steerTurnId?: string): { row: AdmittedMessage; result: PromptResult } {
-  const { row, wake } = admitted;
-  if (wake.kind === "failed") console.warn(`Keiyaku Tell ${row.tellId} recorded; wake failed: ${wake.diagnostic}`);
-  if (steerTurnId !== undefined) return { row, result: { type: "steer", turnId: steerTurnId } };
-  const delivery = row.deliveries?.at(-1);
-  if (delivery) return { row, result: { type: "turn", turnId: `turn/${delivery.turnSequence}` } };
-  // The host may complete its send command; no Akuma outcome is manufactured.
-  return { row, result: { type: "completed" } };
+export function tellPresentation(admitted: TellAdmission, text: string, steerTurnId?: string): { row: AdmittedMessage; result: PromptResult } {
+  const row = { tellId: admitted.tellId, text };
+  if (admitted.wake?.kind === "failed") console.warn(`Keiyaku Tell ${admitted.tellId} recorded; wake failed: ${admitted.wake.diagnostic}`);
+  return { row, result: steerTurnId === undefined ? { type: "completed" } : { type: "steer", turnId: steerTurnId } };
 }

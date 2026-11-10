@@ -1,10 +1,10 @@
 import {
   kanshi,
   kanshiCategory,
-  selectKanshi,
   type ContractId,
   type KanshiCategoryInput,
   type KanshiCategoryReport,
+  type KanshiContractReport,
   type KanshiInput,
   type KanshiRegionSelection,
   type RegionDeclaration,
@@ -15,13 +15,14 @@ const id = "kei/example" as ContractId;
 const declarations: KanshiRegionSelection = { kind: "declarations" };
 const contract: KanshiRegionSelection = { kind: "contract", contract: id };
 const path: KanshiRegionSelection = { kind: "path", patterns: ["src/**", "tests/**"] as [string, ...string[]] };
-const declaration: RegionDeclaration = { contract: id, patterns: ["src/**"] };
+const declaration: RegionDeclaration = { id, patterns: ["src/**"] };
 const overlap: RegionOverlap = {
-  contract: id,
+  contractId: id,
   patterns: [{ mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" }],
 };
-const read: RegionRead = { kind: "contract", declaration, overlaps: [overlap] };
+const read: RegionRead = { kind: "present", ...declaration, overlaps: [overlap] };
 const input: KanshiInput = { world: null, region: path };
+const selected: Promise<KanshiContractReport> = kanshi({ world: null, contract: id });
 // @ts-expect-error overlap selection was deleted
 const deletedSelection: KanshiRegionSelection = { kind: "overlap" };
 // @ts-expect-error RegionIntersection is not exported
@@ -32,11 +33,11 @@ const categoryInput: KanshiCategoryInput = { world: null, category: "akuma" };
 declare const categoryReport: KanshiCategoryReport;
 // @ts-expect-error an unknown category is not admitted at the public edge
 const unknownCategory: KanshiCategoryInput = { world: null, category: "people" };
-// @ts-expect-error the category report is a tagged union, not a loose record
-const untypedCategoryReport: KanshiCategoryReport = { category: "people", root: null, observedAt: "" };
+// @ts-expect-error an unavailable section needs its diagnostic
+const untypedCategoryReport: KanshiCategoryReport = { observedAt: "", section: { kind: "failed" } };
 void kanshi;
 void kanshiCategory;
-void selectKanshi;
+void selected;
 void categoryInput;
 void categoryReport;
 void unknownCategory;

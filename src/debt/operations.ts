@@ -1,9 +1,8 @@
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
-import { documentDiff } from "../markdown/diff.js";
 import {
   createDebtRelations,
-  projectOwnedDetailFacts,
   projectDebtBoardObservation,
+  projectDebtDetail,
   relationProblem,
   projectBlocked,
   projectRows,
@@ -11,8 +10,9 @@ import {
   occupiedLocalIds,
   type DebtBoard,
   type DebtBoardObservation,
-  type DebtDetailFacts,
-  type DebtRow,
+  type DebtDetail,
+  type DebtSummary,
+  type ReadyDebtRow,
 } from "./board.js";
 import {
   parseDebtCreationDocument,
@@ -28,33 +28,32 @@ import {
   projectQuery,
   projectQueryRows,
   queryUnderTargets,
-  type DebtPage,
   type DebtQueryExpression,
   type DebtQueryRow,
   type DebtQuerySort,
   underExpression,
 } from "./query.js";
-import { advanceDebtTimestamp, debtView } from "./view.js";
-export { debtView } from "./view.js";
+import { advanceDebtTimestamp } from "./view.js";
 export type {
   AddDebtDocumentInput,
   AddDebtInput,
-  DebtCleanupFailure,
-  SettledDebtResult,
   DebtBatchResult,
   DebtMutationResult,
-  DebtOutcome,
+  DebtReadPage,
   DebtRefusal,
   DebtRetry,
   DebtUpdateResult,
-  DebtView,
+  SettledDebtResult,
   UpdateDebtInput,
 } from "./operation-types.js";
+import { nonEmptyDebtValues } from "./operation-types.js";
 import type {
   AddDebtDocumentInput,
   AddDebtInput,
+  DebtChange,
+  DebtParentReadRefusal,
   DebtMutationResult,
-  DebtOutcome,
+  DebtReadPage,
   DebtRefusal,
   DebtRetry,
   DebtUpdateResult,
@@ -70,11 +69,8 @@ export async function nukeDebt(
   return result;
 }
 
-function refused(refusal: DebtRefusal): DebtMutationResult {
-  return { kind: "refused", refusal };
-}
-function retry(reason: DebtRetry): DebtMutationResult {
-  return { kind: "retry", reason };
+function retry(reason: DebtRetry) {
+  return { kind: "retry" as const, reason };
 }
 function currentTimestamp(): string {
   return new Date().toISOString();
@@ -116,7 +112,7 @@ async function create(
         const snapshot = await readBoard(world),
           next = addDocument(base, namespace, snapshot.board, currentTimestamp(), actor);
         const problem = relationProblem(boardWith(snapshot.board, next), null, next);
-        if (problem !== null) return refused({ kind: "invalid-graph", diagnostic: problem });
+        if (problem !== null) return { kind: "refused", reason: "invalid-graph", diagnostic: problem } as const;
         const replaced = await replaceAuthority({
           world,
           id: next.id,
@@ -124,7 +120,7 @@ async function create(
           next: serializeDebtDocument(next),
         });
         return replaced === "replaced"
-          ? ({ kind: "accepted", value: debtView(next) } as const)
+          ? ({ kind: "accepted", id: next.id } as const)
           : retry("concurrent-modification");
       },
     );
@@ -135,7 +131,7 @@ async function create(
         error.message,
       )
     )
-      return refused({ kind: "invalid-namespace-context", path: namespace.join("/") });
+      return { kind: "refused", reason: "invalid-namespace-context" };
     throw error;
   }
   return result === "busy" ? retry("busy") : result;
@@ -185,11 +181,15 @@ function appendDebtBody(current: string, addition: string): string {
   }
   return `${current}\n${addition}`;
 }
-function updateDocument(board: DebtBoard, current: DebtDocument, input: UpdateDebtInput): DebtDocument | DebtRefusal {
+function updateDocument(
+  board: DebtBoard,
+  current: DebtDocument,
+  input: UpdateDebtInput,
+): DebtDocument | Extract<DebtRefusal, { reason: "relation-owned-by-other" }> {
   for (const related of input.dropRelates ?? [])
     if (!current.relates.includes(related)) {
       const owner = relatedOwner(board, current.id, related);
-      if (owner !== null) return { kind: "relation-owned-by-other", debtId: current.id, related, declaringDebt: owner };
+      if (owner !== null) return { kind: "refused", reason: "relation-owned-by-other", related };
     }
   return {
     ...current,
@@ -205,30 +205,14 @@ function updateDocument(board: DebtBoard, current: DebtDocument, input: UpdateDe
   };
 }
 
-function updateFieldChanges(
-  current: DebtDocument,
-  next: DebtDocument,
-  input: UpdateDebtInput,
-): Extract<DebtUpdateResult, { kind: "accepted" }>["value"]["changedFields"] {
-  const changes: Array<{ field: string; action: "added" | "replaced" | "cleared" | "changed" | "appended" }> = [];
+function updateFieldChanges(current: DebtDocument, next: DebtDocument): readonly DebtChange[] {
+  const changes: DebtChange[] = [];
   for (const field of ["title", "body", "note", "priority", "needs", "parent", "supersedes", "relates"] as const) {
     const before = current[field];
     const after = next[field];
     if (Array.isArray(before) && Array.isArray(after) ? before.join("\0") === after.join("\0") : before === after)
       continue;
-    const action =
-      field === "body" && input.appendBody !== undefined && input.body === undefined
-        ? "appended"
-        : typeof before === "string" && typeof after === "string"
-          ? after.length === 0
-            ? "cleared"
-            : before.length === 0
-              ? "added"
-              : "replaced"
-          : field === "parent" && after === null
-            ? "cleared"
-            : "changed";
-    changes.push({ field, action });
+    changes.push(field);
   }
   return changes;
 }
@@ -239,13 +223,12 @@ export async function updateDebt(world: WorldRoot, id: DebtId, input: UpdateDebt
     async (): Promise<DebtUpdateResult> => {
       const snapshot = await readBoard(world),
         current = snapshot.board.debts.get(id);
-      if (current === undefined) return { kind: "refused", refusal: { kind: "debt-missing", debtId: id } };
+      if (current === undefined) return { kind: "refused", reason: "debt-missing" };
       const candidate = updateDocument(snapshot.board, current, input);
-      if ("kind" in candidate) return { kind: "refused", refusal: candidate };
+      if ("kind" in candidate) return candidate;
       const problem = relationProblem(boardWith(snapshot.board, candidate), current, candidate);
-      if (problem !== null) return { kind: "refused", refusal: { kind: "invalid-graph", diagnostic: problem } };
+      if (problem !== null) return { kind: "refused", reason: "invalid-graph", diagnostic: problem } as const;
       const predecessor = snapshot.bytes.get(id)!;
-      const before = Buffer.from(predecessor).toString("utf8");
       const changed = !Buffer.from(serializeDebtDocument(candidate)).equals(Buffer.from(predecessor));
       let next = candidate;
       if (changed) {
@@ -253,21 +236,16 @@ export async function updateDebt(world: WorldRoot, id: DebtId, input: UpdateDebt
         next = { ...candidate, updatedAt: advanceDebtTimestamp(current.updatedAt, at) };
       }
       const afterBytes = serializeDebtDocument(next);
-      const after = Buffer.from(afterBytes).toString("utf8");
       if (
-        before !== after &&
+        !Buffer.from(predecessor).equals(Buffer.from(afterBytes)) &&
         (await replaceAuthority({ world, id, expected: predecessor, next: afterBytes })) !== "replaced"
       ) {
         return { kind: "retry", reason: "concurrent-modification" };
       }
-      const label = `${id}.md`;
+      const changes = nonEmptyDebtValues(updateFieldChanges(current, next));
       return {
         kind: "accepted",
-        value: {
-          debt: debtView(next),
-          documentDiff: documentDiff(label, label, before, after),
-          changedFields: updateFieldChanges(current, next, input),
-        },
+        ...(changes === undefined ? {} : { changes }),
       };
     },
   );
@@ -282,22 +260,29 @@ function readScope(
 ): readonly string[] | null {
   return scope === "world" ? null : (namespace ?? []);
 }
+function readPage<T>(
+  bounded: Readonly<{ rows: readonly T[]; hasMore: boolean }>,
+): Extract<DebtReadPage<T>, { kind: "present" }> {
+  const rows = nonEmptyDebtValues(bounded.rows);
+  return {
+    kind: "present",
+    ...(rows === undefined ? {} : { rows }),
+    ...(bounded.hasMore ? { more: true as const } : {}),
+  };
+}
 export async function listDebts(
   world: WorldRoot,
   namespace: readonly string[] | undefined,
   selection: "active" | "closed" | "all",
   scope?: "namespace" | "world",
   limit?: number,
-): Promise<DebtOutcome<DebtPage<DebtRow>>> {
+): Promise<Extract<DebtReadPage<DebtSummary>, { kind: "present" }>> {
   const selectedLimit = boundedListLimit(limit);
   const selected = readScope(namespace, scope);
   const board = (await readBoard(world)).board;
-  return {
-    kind: "accepted",
-    value: projectBoundedList(projectRows(board, createDebtRelations(board), selected, selection), selectedLimit),
-  };
+  return readPage(projectBoundedList(projectRows(board, selected, selection), selectedLimit));
 }
-export async function readDebtDetail(world: WorldRoot, id: DebtId): Promise<DebtDetailFacts | null> {
+export async function readDebtDetail(world: WorldRoot, id: DebtId): Promise<DebtDetail | null> {
   const debt = await readDebtDocument(world, id);
   if (debt === undefined) return null;
   const selected = new Map<DebtId, DebtDocument>([[id, debt]]);
@@ -312,7 +297,7 @@ export async function readDebtDetail(world: WorldRoot, id: DebtId): Promise<Debt
     const document = await readDebtDocument(world, reference);
     if (document !== undefined) selected.set(reference, document);
   }
-  return projectOwnedDetailFacts({ debts: selected }, id);
+  return projectDebtDetail({ debts: selected }, id);
 }
 /** One board observation and predicate projection shared by the ready and blocked views. */
 async function readDebtQueryContext(
@@ -327,7 +312,7 @@ async function readDebtQueryContext(
 ) {
   const board = (await readBoard(input.world)).board;
   if (input.parent !== undefined && !board.debts.has(input.parent))
-    return { kind: "refused", refusal: { kind: "debt-missing", debtId: input.parent } } as const;
+    return { kind: "refused", reason: "debt-missing" } as const;
   const relations = createDebtRelations(board);
   const scope = readScope(input.namespace, input.scope);
   const predicate: DebtQueryExpression = {
@@ -335,18 +320,16 @@ async function readDebtQueryContext(
     predicate: { field: input.field, operator: "=", value: true },
   };
   return {
-    kind: "accepted",
-    value: {
-      limit: boundedListLimit(input.limit),
-      board,
+    kind: "ready",
+    limit: boundedListLimit(input.limit),
+    board,
+    scope,
+    relations,
+    rows: projectQueryRows(board, relations, {
       scope,
-      relations,
-      rows: projectQueryRows(board, relations, {
-        scope,
-        expression:
-          input.parent === undefined ? predicate : { kind: "and", terms: [predicate, underExpression(input.parent)] },
-      }),
-    },
+      expression:
+        input.parent === undefined ? predicate : { kind: "and", terms: [predicate, underExpression(input.parent)] },
+    }),
   } as const;
 }
 export async function readyDebts(
@@ -355,13 +338,15 @@ export async function readyDebts(
   scope?: "namespace" | "world",
   parent?: DebtId,
   limit?: number,
-): Promise<DebtOutcome<DebtPage<DebtRow>>> {
+): Promise<DebtReadPage<ReadyDebtRow, DebtParentReadRefusal>> {
   const queried = await readDebtQueryContext({ world, field: "ready", namespace, scope, parent, limit });
-  if (queried.kind !== "accepted") return queried;
-  const rows = queried.value.rows.map(
-    ({ parent: _parent, needs: _needs, blocks: _blocks, createdAt: _createdAt, ...row }) => row,
+  if (queried.kind === "refused") return queried;
+  return readPage(
+    projectBoundedList(
+      queried.rows.map(({ id, title, priority }) => ({ id, title, priority })),
+      queried.limit,
+    ),
   );
-  return { kind: "accepted", value: projectBoundedList(rows, queried.value.limit) };
 }
 export async function blockedDebts(
   world: WorldRoot,
@@ -369,18 +354,17 @@ export async function blockedDebts(
   scope?: "namespace" | "world",
   parent?: DebtId,
   limit?: number,
-): Promise<DebtOutcome<DebtPage<BlockedDebtRow>>> {
+): Promise<DebtReadPage<BlockedDebtRow, DebtParentReadRefusal>> {
   const queried = await readDebtQueryContext({ world, field: "blocked", namespace, scope, parent, limit });
-  if (queried.kind !== "accepted") return queried;
-  const { board, scope: selected, relations, limit: selectedLimit, rows } = queried.value;
+  if (queried.kind === "refused") return queried;
+  const { board, scope: selected, limit: selectedLimit, rows } = queried;
   const ids = new Set(rows.map((row) => row.id));
-  return {
-    kind: "accepted",
-    value: projectBoundedList(
-      projectBlocked(board, selected, relations).filter((row) => ids.has(row.id)),
+  return readPage(
+    projectBoundedList(
+      projectBlocked(board, selected).filter((row) => ids.has(row.id)),
       selectedLimit,
     ),
-  };
+  );
 }
 export async function queryDebts(
   input: Readonly<{
@@ -391,24 +375,23 @@ export async function queryDebts(
     sort?: DebtQuerySort;
     limit?: number;
   }>,
-): Promise<DebtOutcome<DebtPage<DebtQueryRow>>> {
+): Promise<DebtReadPage<DebtQueryRow>> {
   const selectedLimit = boundedListLimit(input.limit);
   const selected = readScope(input.namespace, input.scope);
   const board = (await readBoard(input.world)).board;
   const relations = createDebtRelations(board);
   for (const target of queryUnderTargets(input.expression))
     if (!board.debts.has(target)) {
-      return { kind: "refused", refusal: { kind: "debt-missing", debtId: target } };
+      return { kind: "refused", reason: "debt-missing", debtId: target };
     }
-  return {
-    kind: "accepted",
-    value: projectQuery(board, relations, {
+  return readPage(
+    projectQuery(board, relations, {
       scope: selected as readonly string[] | null,
       expression: input.expression,
       sort: input.sort ?? "priority",
       limit: selectedLimit,
     }),
-  };
+  );
 }
 export async function observeDebtBoard(world: WorldRoot): Promise<DebtBoardObservation> {
   return projectDebtBoardObservation((await readBoard(world)).board);

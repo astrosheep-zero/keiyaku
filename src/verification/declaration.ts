@@ -1,13 +1,6 @@
 import { createHash } from "node:crypto";
 import type { Preparation } from "../core/decide.js";
-import {
-  gate,
-  requirementId,
-  type ContractId,
-  type DocumentSegmentKey,
-  type Gate,
-  type RequirementId,
-} from "../core/facts/types.js";
+import { gate, requirementId, type DocumentSegmentKey, type Gate, type RequirementId } from "../core/facts/types.js";
 
 export type VerificationExecutor = "bash" | "zsh" | "pwsh";
 
@@ -22,10 +15,7 @@ export type VerificationDefinition = Readonly<{
   readonly declarations: readonly VerificationDeclaration[];
 }>;
 
-export type VerificationDeclarationRefusal = Readonly<{
-  kind: "verification-declaration-invalid";
-  contractId?: ContractId;
-}>;
+export type VerificationDeclarationRefusal = Readonly<{ kind: "verification-declaration-invalid" }>;
 
 export type VerificationDeclarationPreparation = Preparation<
   VerificationDefinition | null,
@@ -62,7 +52,6 @@ export function prepareVerificationDeclaration(
   input: Readonly<{
     gates: readonly Gate[];
     definition: VerificationDefinition | null;
-    contractId?: ContractId;
   }>,
 ): VerificationDeclarationPreparation {
   if (!input.gates.includes(VERIFIED)) return { kind: "prepared", data: null };
@@ -70,9 +59,6 @@ export function prepareVerificationDeclaration(
     return { kind: "prepared", data: input.definition };
   return {
     kind: "refused",
-    refusal: {
-      kind: "verification-declaration-invalid",
-      ...(input.contractId === undefined ? {} : { contractId: input.contractId }),
-    },
+    refusal: { kind: "verification-declaration-invalid" },
   };
 }

@@ -142,7 +142,7 @@ test("decision accessor rejects a missing key, while explicit null is domain abs
     attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
     observation,
   });
-  assert.deepEqual(amend, { kind: "refused", refusal: { kind: "contract-missing", contractId: id } });
+  assert.deepEqual(amend, { kind: "refused", refusal: { kind: "contract-missing" } });
 
   const bind = decideBind({
     input: {
@@ -159,7 +159,7 @@ test("decision accessor rejects a missing key, while explicit null is domain abs
     attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
     observation,
   });
-  assert.deepEqual(bind, { kind: "refused", refusal: { kind: "unknown-prerequisite", contractId: id } });
+  assert.deepEqual(bind, { kind: "refused", refusal: { kind: "unknown-prerequisite" } });
 });
 
 test("placement projects every non-claimed prerequisite from its one observation", () => {
@@ -185,7 +185,6 @@ test("placement projects every non-claimed prerequisite from its one observation
     kind: "refused",
     refusal: {
       kind: "prerequisites-unsatisfied",
-      contractId: id,
       unmet: [
         { contractId: active, state: "active" },
         { contractId: abandoned, state: "abandoned" },
@@ -239,7 +238,7 @@ test("amend refuses direct and transitive prerequisite cycles", () => {
       ]),
     });
 
-  const refusal = { kind: "refused", refusal: { kind: "cyclic-prerequisite", contractId: a } };
+  const refusal = { kind: "refused", refusal: { kind: "cyclic-prerequisite" } };
   assert.deepEqual(decide([a]), refusal);
   assert.deepEqual(decide([b]), refusal);
 });

@@ -14,7 +14,7 @@ export function createMirror(sessionId: string, emit: Emit) {
   let submissions = 0;
   let deferred: History | undefined;
   let deferredReannounce = false;
-  const displayedTells = new Map<string, number>();
+  const displayedTells = new Map<string, number | undefined>();
   const item = (value: ProviderTimelineItem, timestamp?: string) => emit({
     type: "timeline.item", sessionId, item: value, ...(timestamp === undefined ? {} : { timestamp }),
   });
@@ -29,8 +29,11 @@ export function createMirror(sessionId: string, emit: Emit) {
     emit({ type: "session.turn", sessionId, turnId: `turn/${target.sequence}`, state,
       ...(message === undefined ? {} : { error: { message } }) });
   };
-  const userMessage = (row: Extract<Row, { kind: "tell" }>, clientMessageId?: string) => {
-    if (displayedTells.has(row.tellId)) return;
+  const userMessage = (row: AdmittedMessage, clientMessageId?: string) => {
+    if (displayedTells.has(row.tellId)) {
+      if (row.sequence !== undefined) displayedTells.set(row.tellId, row.sequence);
+      return;
+    }
     displayedTells.set(row.tellId, row.sequence);
     item({ type: "user_message", id: `keiyaku:tell/${row.tellId}`, text: row.text,
       ...(clientMessageId === undefined ? {} : { clientMessageId }) }, row.at);
@@ -46,8 +49,8 @@ export function createMirror(sessionId: string, emit: Emit) {
       }
       const latest = rows.filter((row) => row.kind === "turn").sort((a, b) => a.sequence - b.sequence).at(-1);
       if (latest?.kind === "turn") {
-        turn = { sequence: latest.turnSequence,
-          closed: rows.some((row) => row.kind === "outcome" && row.turnSequence === latest.turnSequence) };
+        turn = { sequence: latest.sequence,
+          closed: rows.some((row) => row.kind === "outcome" && row.turnSequence === latest.sequence) };
         if (!turn.closed) {
           openTurns.set(turn.sequence, turn);
           emit({ type: "session.turn", sessionId, turnId: `turn/${turn.sequence}`, state: "started" });
@@ -71,9 +74,9 @@ export function createMirror(sessionId: string, emit: Emit) {
     refreshedTurnId() {
       const latest = deferred?.rows.filter((row) => row.kind === "turn").at(-1);
       if (latest?.kind !== "turn") return mirror.currentTurnId();
-      if (deferred?.rows.some((row) => row.kind === "outcome" && row.turnSequence === latest.turnSequence)) return undefined;
-      if (turn?.sequence === latest.turnSequence && turn.closed) return undefined;
-      return `turn/${latest.turnSequence}`;
+      if (deferred?.rows.some((row) => row.kind === "outcome" && row.turnSequence === latest.sequence)) return undefined;
+      if (turn?.sequence === latest.sequence && turn.closed) return undefined;
+      return `turn/${latest.sequence}`;
     },
     admit(row: AdmittedMessage, clientMessageId: string) {
       userMessage(row, clientMessageId);
@@ -122,21 +125,14 @@ export function createMirror(sessionId: string, emit: Emit) {
         } else if (row.kind === "turn") {
           // Publish retained starts even when their outcomes arrive in this read.
           // Older starts must not reopen a sealed or superseded Turn.
-          if (!turn || row.turnSequence > turn.sequence) {
-            turn = { sequence: row.turnSequence, closed: false };
+          if (!turn || row.sequence > turn.sequence) {
+            turn = { sequence: row.sequence, closed: false };
             openTurns.set(turn.sequence, turn);
             emit({ type: "session.turn", sessionId, turnId: `turn/${turn.sequence}`, state: "started" });
           }
         } else if (row.kind === "tool") {
-          // Tool identity comes from the producer, scoped to its Turn. An older
-          // CLI without it can show settled records, never guessed live pairing.
           const state = row.state;
-          const toolIdentity = row.toolId === undefined ? `record/${row.sequence}` : `${row.turnSequence}/${row.toolId}`;
-          if (typeof state === "string" && row.toolId === undefined) {
-            item({ type: "notification", id: `keiyaku:tool/${row.sequence}`, level: "info",
-              message: `${row.name}: ${state === "active" ? "start observed" : "result not witnessed"}. ${JSON.stringify(row.call)}` }, row.at);
-            continue;
-          }
+          const toolIdentity = `${row.turnSequence}/${row.toolId}`;
           const result = typeof state === "object" ? state : undefined;
           // The result's own output is the observed text; its diagnostic message is
           // only the stand-in an older producer wrote instead, so an honestly empty
@@ -193,11 +189,11 @@ export function createMirror(sessionId: string, emit: Emit) {
       covered = { high: Math.max(covered?.high ?? 0, input.highest ?? 0),
         signatures: new Map(rows.map((row) => [row.sequence, JSON.stringify(row)])) };
       if (lowest !== undefined) for (const [id, sequence] of displayedTells) {
-        if (sequence < lowest) displayedTells.delete(id);
+        if (sequence !== undefined && sequence < lowest) displayedTells.delete(id);
       }
       unhealthy = false;
       const current = turn;
-      if (reannounce && current && !current.closed && rows.some((row) => row.kind === "turn" && row.turnSequence === current.sequence))
+      if (reannounce && current && !current.closed && rows.some((row) => row.kind === "turn" && row.sequence === current.sequence))
         emit({ type: "session.turn", sessionId, turnId: `turn/${current.sequence}`, state: "started" });
     },
   };

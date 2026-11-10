@@ -58,8 +58,6 @@ test("a selected declaration timeout is terminally unsatisfied with its display 
       outcome: {
         kind: "terminal",
         verdict: "unsatisfied",
-        passed: 0,
-        total: 1,
         summary: "[2 bash timeout after 25ms]",
       },
     });
@@ -102,7 +100,7 @@ test("execution returns an unsatisfied verdict, unknown-exit, and spawn-error wi
   await inTemporaryDirectory(async (root) => {
     const failed = await executeVerification(input(root, declaration("false")));
     assert.deepEqual(failed, {
-      outcome: { kind: "terminal", verdict: "unsatisfied", passed: 0, total: 1, summary: "[1 bash exit 1]" },
+      outcome: { kind: "terminal", verdict: "unsatisfied", summary: "[1 bash exit 1]" },
     });
     const unknownExit = await executeVerification(input(root, declaration("kill -TERM $$")));
     assert.deepEqual(unknownExit, { outcome: { kind: "unknown-exit" } });
@@ -159,7 +157,7 @@ test("all observations keep the selected requirement, index and captured snapsho
       },
     });
     const result = await executeVerification(selected);
-    assert.deepEqual(result.outcome, { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 });
+    assert.deepEqual(result.outcome, { kind: "terminal", verdict: "satisfied" });
     assert.deepEqual(
       [...new Set(events.map((event) => event.phase))],
       ["materialize", "setup", "declaration", "cleanup"],
@@ -188,6 +186,6 @@ test("verbose success remains live and observer failure cannot change execution 
       }),
     );
     assert.equal(successOutput, "x".repeat(40000));
-    assert.deepEqual(result.outcome, { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 });
+    assert.deepEqual(result.outcome, { kind: "terminal", verdict: "satisfied" });
   });
 });

@@ -11,27 +11,38 @@ import { contractMarkdown } from "./support/markdown.js";
 test("amend names the missing Verification declaration required by verified", async () => {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const bound = await cliJson<Readonly<{ kind: string; contract?: string }>>(
+  const bound = await cliJson<Readonly<{ kind: string; contractId?: string }>>(
     ["-C", raw.path, "bind", "--gates", "", "-"],
     {
       environment: {},
-      readStdin: async () => contractMarkdown("Without verification", {
-        Context: "Test gate requirement.", Objective: "Name absent Verification.",
-        Design: "Keep the declaration absent.", Region: "src/**",
-        Criteria: "### Gate\nState the reason.",
-      }),
+      readStdin: async () =>
+        contractMarkdown("Without verification", {
+          Context: "Test gate requirement.",
+          Objective: "Name absent Verification.",
+          Design: "Keep the declaration absent.",
+          Region: "src/**",
+          Criteria: "### Gate\nState the reason.",
+        }),
     },
   );
   assert.equal(bound.value.kind, "accepted");
-  if (bound.value.kind !== "accepted" || bound.value.contract === undefined) return;
-  const result = await cliJson<Readonly<{ kind: string; refusal?: unknown }>>(
-    ["-C", raw.path, "amend", bound.value.contract, "--gates", "verified"],
-    { environment: {}, readStdin: async () => { throw new Error("gate-only amend must not read stdin"); } },
+  if (bound.value.kind !== "accepted" || bound.value.contractId === undefined)
+    assert.fail("bind did not return identity");
+  const result = await cliJson<Readonly<{ kind: string; reason?: unknown }>>(
+    ["-C", raw.path, "amend", bound.value.contractId, "--gates", "verified"],
+    {
+      environment: {},
+      readStdin: async () => {
+        throw new Error("gate-only amend must not read stdin");
+      },
+    },
   );
   assert.equal(result.value.kind, "refused");
-  const rendered = await runCli(["-C", raw.path, "amend", bound.value.contract, "--gates", "verified"], {
+  const rendered = await runCli(["-C", raw.path, "amend", bound.value.contractId, "--gates", "verified"], {
     environment: {},
-    readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
+    readStdin: async () => {
+      throw new Error("gate-only amend must not read stdin");
+    },
   });
   assert.match(rendered.stdout, /gate 'verified' requires a declared Verification; the Contract declares none/u);
 });
@@ -52,7 +63,7 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
   );
   const repository = await repositoryAt(raw.path);
   const bind = async (selection: string | undefined) => {
-    const result = await cliJson<Readonly<{ kind: string; contract?: string }>>(
+    const result = await cliJson<Readonly<{ kind: string; contractId?: string }>>(
       ["-C", raw.path, "bind", ...(selection === undefined ? [] : ["--gates", selection]), "-"],
       {
         environment: {},
@@ -68,8 +79,8 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
       },
     );
     assert.equal(result.value.kind, "accepted", JSON.stringify(result.value));
-    assert.notEqual(result.value.contract, undefined);
-    return result.value.contract as ContractId;
+    assert.notEqual(result.value.contractId, undefined);
+    return result.value.contractId as ContractId;
   };
   const gates = async (id: ContractId) => (await observeContract(repository, id)).state?.terms.gates;
   const mixed = await bind("reviewed,strict,custom,reviewed");
@@ -77,9 +88,11 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
 
   const amendText = await runCli(["-C", raw.path, "amend", mixed, "--gates", ""], {
     environment: {},
-    readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
+    readStdin: async () => {
+      throw new Error("gate-only amend must not read stdin");
+    },
   });
-  assert.match(amendText.stdout, /✓ amended[\s\S]*gates  none/u);
+  assert.match(amendText.stdout, /✓ amended[\s\S]*gates  changed/u);
   assert.doesNotMatch(amendText.stdout, /terms unchanged/u);
   assert.deepEqual(await gates(mixed), []);
   assert.deepEqual(await gates(await bind("")), []);
@@ -108,25 +121,27 @@ test("bind and amend reject unknown gate names without changing Contract authori
   assert.match(rejected.stdout, /Unknown gate 'reveiw'\. Known gate names: reviewed, verified/u);
   assert.equal(refs(), before);
 
-  const bound = await cliJson<Readonly<{ kind: string; contract?: ContractId }>>(
+  const bound = await cliJson<Readonly<{ kind: string; contractId?: ContractId }>>(
     ["-C", raw.path, "bind", "--gates", "reviewed", "-"],
     { environment, readStdin: markdown },
   );
   assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
-  assert.ok(bound.value.contract);
+  assert.ok(bound.value.contractId);
   const repository = await repositoryAt(raw.path);
-  const beforeAmend = await observeContract(repository, bound.value.contract);
-  writeFileSync(resolve(raw.path, ".keiyaku", "settings.json"), JSON.stringify({
-    gates: { strict: { kind: "bundle", gates: ["reviewed"] } },
-  }));
-  const amended = await runCli(
-    ["-C", raw.path, "amend", bound.value.contract, "--gates", "reviewed,reveiw"],
-    {
-      environment,
-      readStdin: async () => { throw new Error("gate-only amend must not read stdin"); },
-    },
+  const beforeAmend = await observeContract(repository, bound.value.contractId);
+  writeFileSync(
+    resolve(raw.path, ".keiyaku", "settings.json"),
+    JSON.stringify({
+      gates: { strict: { kind: "bundle", gates: ["reviewed"] } },
+    }),
   );
+  const amended = await runCli(["-C", raw.path, "amend", bound.value.contractId, "--gates", "reviewed,reveiw"], {
+    environment,
+    readStdin: async () => {
+      throw new Error("gate-only amend must not read stdin");
+    },
+  });
   assert.notEqual(amended.exit, 0);
   assert.match(amended.stderr, /Unknown gate 'reveiw'\. Known gate names: reviewed, verified, strict/u);
-  assert.deepEqual(await observeContract(repository, bound.value.contract), beforeAmend);
+  assert.deepEqual(await observeContract(repository, bound.value.contractId), beforeAmend);
 });

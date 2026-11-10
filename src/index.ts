@@ -3,19 +3,19 @@
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
-export { akumaListSchema, akumaListRowSchema, unbornAkumaListRowSchema, akumaStatusSchema } from "./akuma/akuma.js";
+export { akumaListSchema, akumaStatusSchema } from "./akuma/akuma.js";
 export { activityHistorySchema, activityRowSchema, activitySnapshotSchema, tellRowSchema } from "./akuma/projection.js";
 export { akumaCallerSchema } from "./akuma/caller.js";
 export { killEvidenceSchema } from "./akuma/heart/facts.js";
-export { tellWakeSchema, tellResultSchema } from "./akuma/call-initial-tell.js";
+export { tellWakeSchema } from "./akuma/call-initial-tell.js";
 export { akumaIdleResultSchema, akumaReportResultSchema } from "./akuma/akuma-instance.js";
 export { liveStatusObservationSchema, askProgressSchema } from "./akuma/akuma-selection-execution.js";
 export type { AskProgress } from "./akuma/akuma-selection-execution.js";
 export { archetypeCatalogSchema, archetypeCatalogRowSchema } from "./akuma/archetype.js";
 export {
   akumaObservationSchema,
-  akumaObservationStageSchema,
   akumaWaitResultSchema,
+  akumaWaitItemSchema,
   akumaKillResultSchema,
   akumaTellResultSchema,
   akumaAskResultSchema,
@@ -25,9 +25,7 @@ export { akumaHistoryResultSchema } from "./library/selection.js";
 export {
   spawnResultSchema,
   spawnProgressSchema,
-  spawnObservationSchema,
   spawnWaitHeadSchema,
-  dispatchStageSchema,
   forkResultSchema,
 } from "./library/akuma-creation.js";
 export type { SpawnProgress } from "./library/akuma-creation.js";
@@ -37,8 +35,10 @@ export { dispatchSchema, dispatchFailureSchema } from "./dispatch/index.js";
 export { AkumaHost } from "./body-host.js";
 export type { AkumaHostScope } from "./body-host.js";
 export { AuthorityCorruptionError } from "./core/facts/errors.js";
-export { Delivery, deliverySchema } from "./library/delivery.js";
+export { deliverySchema } from "./library/delivery.js";
+export type { Delivery } from "./library/delivery.js";
 export { Kei, guidanceSchema } from "./library/kei.js";
+export type { Guidance } from "./library/kei.js";
 export {
   contractResolutionSchema,
   contractSelectorRefusalSchema,
@@ -73,7 +73,7 @@ export type {
   VerbCompletion,
 } from "./library/keiyaku-verbs.js";
 export { Keis } from "./library/contract-composition.js";
-export { KeiyakuError } from "./library/outcome.js";
+export { KeiyakuError, projectFailure } from "./library/outcome.js";
 export { NoGitWorldError, Repo } from "./library/repo.js";
 export { actorId } from "./core/facts/types.js";
 export { z } from "zod";
@@ -111,7 +111,6 @@ export type {
   ArchetypeCatalog,
   ArchetypeCatalogInput,
   ArchetypeCatalogRow,
-  InterruptReceipt,
   JsonSchema,
   JsonSchemaDocument,
   KillEvidence,
@@ -135,11 +134,12 @@ export {
   kanshiCounts,
   kanshiCountsReportSchema,
   observeKanshi,
-  selectKanshi,
   selectRegion,
   regionReadSchema,
   kanshiReportSchema,
   kanshiCategoryReportSchema,
+  kanshiContractReportSchema,
+  kanshiResultSchema,
   kanshiObservationSchema,
 } from "./kanshi/index.js";
 export type { KanshiCountsInput, KanshiCountsReport } from "./kanshi/index.js";
@@ -149,13 +149,14 @@ export type {
   ContractEndpointObservation,
   ContractHolderObservation,
   ContractKanshiBoard,
-  ContractKanshiRow,
+  ContractKanshiDetail,
+  KanshiContractReport,
+  KanshiResult,
   KanshiCategoryInput,
   KanshiCategoryReport,
   KanshiInput,
   KanshiRegionSelection,
   KanshiReport,
-  KanshiSelection,
   RegionDeclaration,
   RegionRead,
   Section,
@@ -175,21 +176,17 @@ export type {
   AkumaList,
   AkumaListInput,
   AkumaObservation,
-  AkumaObservationStage,
   AkumaTellInput,
   AkumaWaitInput,
   AkumaWaitResult,
   AkumaWorldScopeRefusal,
   CreatedDebtObservation,
   DispatchAssociation,
-  DispatchStage,
   ForkInput,
   ForkResult,
   SpawnInput,
   SpawnResult,
   SpawnWaitHead,
-  TellResult,
-  TellWake,
 } from "./library/akumas.js";
 export type { ContinuationReport } from "./library/continuation.js";
 export { contractWaitMemberSchema, contractWaitResultSchema } from "./library/contract-wait.js";
@@ -228,6 +225,7 @@ export type {
   ArcInput,
   BindInput,
   ContractHistory,
+  ContractHistoryInput,
   ContractHistoryEvent,
   ContractList,
   ContractListInput,
@@ -243,10 +241,12 @@ export type {
 export { nukeKeiyaku as nuke, nukeResultSchema } from "./library/nuke.js";
 export type { NukeInput, NukeResult } from "./library/nuke.js";
 export type {
-  InvocationEffect,
+  InvocationIssue,
+  Issue,
+  ResetIssue,
   KeiyakuErrorCategory,
   PartialOutcomeEnvelope,
-  PendingSurface,
+  HandoffOutcome,
   ReconciliationLag,
   Review,
   Verify,
@@ -276,32 +276,30 @@ export type {
   PluginSignal,
   PluginSignalMap,
 } from "./plugin/public.js";
-export type { VerifyValue, VerificationCheck } from "./protocol/verify.js";
+export type { VerifyValue, VerificationCheck, VerificationStop } from "./protocol/verify.js";
+export type { Placement, Placed, RequirementProblem } from "./protocol/completion.js";
 export type { DeliveryPreviewReport } from "./protocol/delivery-preview.js";
-export type { IntegrationConflictMaterialized } from "./protocol/deliver.js";
 export { executionObservationSchema } from "./protocol/execution-observation.js";
 export { contractStateSchema, journalEntrySchema } from "./protocol/result-leaves.js";
 export type { ExecutionObservation, ExecutionObserver } from "./protocol/execution-observation.js";
-export type { PlacementStop, VerificationStop } from "./protocol/operations.js";
-export type { ExecutionCleanup, ExecutionStop } from "./protocol/progress.js";
+export type { ExecutionStop } from "./protocol/progress.js";
 export {
-  contractBoardSchema,
-  contractRowSchema,
-  contractListSchema,
+  contractSummarySchema,
+  contractDetailSchema,
+  contractCatalogueSchema,
   contractObservationSchema,
 } from "./protocol/read/status.js";
 export type {
   ContractAfterEdge,
-  ContractBoard,
   ContractCatalogue,
   ContractDependent,
-  ContractDisposition,
+  ContractSummary,
+  ContractDetail,
+  ContractDetailWorkspace,
   ContractGateCurrent,
   ContractGateReport,
   ContractObservation,
   ContractPhase,
-  ContractRow,
-  ContractWorkspaceObservation,
 } from "./protocol/read/status.js";
 export {
   SettingsError,
@@ -331,14 +329,22 @@ export {
   resolvedNamespaceContextSchema,
   debtContextResultSchema,
   debtDetailSchema,
-  debtOutcomeSchema,
-  debtViewSchema,
-  debtReadSchema,
+  debtSummarySchema,
+  debtWarningSchema,
+  debtReadPageSchema,
+  debtReadResultSchema,
+  debtShowResultSchema,
+  debtCatalogueSchema,
   debtListSchema,
+  debtReadyListSchema,
+  readyDebtRowSchema,
+  debtParentReadRefusalSchema,
+  debtLifecycleResultSchema,
+  debtTreeRootSchema,
   blockedDebtListSchema,
   debtQueryResultSchema,
   debtDoctorReportSchema,
-  debtDecompositionTreeSchema,
+  debtTreeResultSchema,
   debtMutationResultSchema,
   debtUpdateResultSchema,
   debtBatchResultSchema,

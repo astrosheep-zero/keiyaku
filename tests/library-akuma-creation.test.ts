@@ -128,10 +128,11 @@ test("prompt-free bare Akumas.spawn reports born without admitting a Tell", asyn
       writableDirectories: [world, world],
       ...configured.placement,
     });
-    assert.deepEqual(result.observation, { kind: "born" });
-    const handle = PublicAkuma.select(world, result.akuma);
+    assert.equal(result.failure, undefined);
+    assert.equal(result.tellId, undefined);
+    const handle = PublicAkuma.select(world, result.akumaId);
     assert.deepEqual((await handle.status()).birth, { origin: { kind: "direct" }, caller: { kind: "unknown" } });
-    const soul = await readSoul(pathsForAkumaId(world, result.akuma));
+    const soul = await readSoul(pathsForAkumaId(world, result.akumaId));
     assert.equal(soul?.caller, undefined);
     assert.equal(soul?.bare, true);
     assert.deepEqual(soul?.provider.config?.sandbox_workspace_write, {
@@ -180,7 +181,7 @@ test("malformed explicit callers refuse before allocation on public call and for
     Akumas.of(world).fork({ akuma: "aku/worker/1234abcd", at: "turn/1", caller }),
     /Invalid Akuma caller/u,
   );
-  assert.deepEqual((await Akumas.of(world).list()).rows, []);
+  assert.equal((await Akumas.of(world).list()).rows, undefined);
 });
 
 test("explicit writable directories refuse invalid public grants before allocation", async (t) => {
@@ -213,7 +214,7 @@ test("explicit writable directories refuse invalid public grants before allocati
     }),
     /not canonical/u,
   );
-  assert.deepEqual((await Akumas.of(world).list()).rows, []);
+  assert.equal((await Akumas.of(world).list()).rows, undefined);
 });
 
 test("prompt-free Akumas.spawn refuses schema and wait options", async () => {
@@ -267,11 +268,9 @@ test("local schema Akumas.spawn waits for its held empty Body before admitting i
       if (!existsSync(releasePath)) writeFileSync(releasePath, "release\n");
       await pending.catch(() => undefined);
     }
-    akumaId = result.akuma;
-    assert.equal(result.observation.kind, "observed");
-    if (result.observation.kind === "observed")
-      assert.deepEqual(result.observation.observation, { reason: "answered", answer: { ok: true } });
-    const history = await PublicAkuma.select(world, result.akuma).history();
+    akumaId = result.akumaId;
+    assert.deepEqual(result.input, { kind: "answered", answer: { ok: true } });
+    const history = await PublicAkuma.select(world, result.akumaId).history();
     const tells = history.rows.filter((row) => row.kind === "tell");
     assert.equal(tells.length, 1);
     assert.equal(tells[0]?.kind, "tell");
@@ -352,15 +351,12 @@ test("local schema Akumas.spawn starts its zero observation budget after birth",
     assert.equal((await readHeart(pathsForAkumaId(world, child))).latestBody?.end, undefined);
     writeFileSync(join(emptyPublicationBarrier, "release"), "release\n");
     const result = await pending;
-    akumaId = result.akuma;
-    assert.deepEqual(result.observation.kind, "observed");
-    if (result.observation.kind === "observed") {
-      assert.deepEqual(result.observation.observation, { reason: "deadline" });
-      assert.equal(result.observation.tell.row.text, "zero-budget-after-birth");
-    }
+    akumaId = result.akumaId;
+    assert.deepEqual(result.input, { kind: "deadline" });
+    assert.equal((await readTell(pathsForAkumaId(world, result.akumaId), result.tellId!))?.body, "zero-budget-after-birth");
     releaseAnswer();
-    assert.equal((await PublicAkuma.select(world, result.akuma).idle({ timeoutMs: 15_000 })).reason, "completed");
-    const history = await PublicAkuma.select(world, result.akuma).history();
+    assert.equal((await PublicAkuma.select(world, result.akumaId).idle({ timeoutMs: 15_000 })).reason, "completed");
+    const history = await PublicAkuma.select(world, result.akumaId).history();
     const tells = history.rows.filter((row) => row.kind === "tell");
     assert.equal(tells.length, 1);
     assert.equal(tells[0]?.kind === "tell" ? tells[0].text : undefined, "zero-budget-after-birth");
@@ -374,7 +370,7 @@ test("local schema Akumas.spawn starts its zero observation budget after birth",
       const releasePath = join(emptyPublicationBarrier, "release");
       if (!existsSync(releasePath)) writeFileSync(releasePath, "release\n");
       const settled = await pending?.catch(() => undefined);
-      akumaId ??= settled?.akuma;
+      akumaId ??= settled?.akumaId;
       if (akumaId !== undefined)
         await PublicAkuma.select(world, akumaId)
           .kill()
@@ -446,11 +442,9 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
       mode: "wait",
       signal: t.signal,
     });
-    child = result.akuma;
-    assert.equal(result.observation.kind, "observed");
-    assert.ok(result.observation.kind === "observed");
-    assert.deepEqual(result.observation.observation, { reason: "answered", answer: '{"ok":true}' });
-    const tell = await readTell(pathsForAkumaId(world, result.akuma), result.observation.tell.admission.tellId);
+    child = result.akumaId;
+    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
+    const tell = await readTell(pathsForAkumaId(world, result.akumaId), result.tellId!);
     assert.ok(tell?.binding);
     assert.deepEqual(
       readFileSync(output, "utf8")
@@ -460,13 +454,13 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
       [
         {
           kind: "akuma.born",
-          akumaId: result.akuma,
+          akumaId: result.akumaId,
           bodySequence: 1,
           origin: { kind: "direct" },
           caller: { kind: "external", integration: "tests", id: "submit:bounded" },
           initiator: "Submitter",
         },
-        { kind: "akuma.outcome-observed", akumaId: result.akuma, historyId: `turn/${tell.binding.turnSequence}` },
+        { kind: "akuma.outcome-observed", akumaId: result.akumaId, historyId: `turn/${tell.binding.turnSequence}` },
       ],
     );
     assert.deepEqual(
@@ -474,11 +468,11 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
       ["plugin record signal: call observer failed"],
       "remote birth diagnostics belong to the Body, not this host",
     );
-    assert.deepEqual((await PublicAkuma.select(world, result.akuma, { reportDiagnostic() {} }).status()).birth, {
+    assert.deepEqual((await PublicAkuma.select(world, result.akumaId, { reportDiagnostic() {} }).status()).birth, {
       origin: { kind: "direct" },
       caller: { kind: "external", integration: "tests", id: "submit:bounded" },
     });
-    const log = pathsForAkumaId(world, result.akuma).log;
+    const log = pathsForAkumaId(world, result.akumaId).log;
     await waitForCondition("submitting call observation diagnostic log", () =>
       readFileSync(log, "utf8").includes("plugin outcome observation failed:"),
     );
@@ -532,8 +526,9 @@ test("call without a host preserves log-only diagnostics", async (t) => {
       home: configured.home,
       settings: await settings({ root: world, home: configured.home }),
     });
-    assert.deepEqual(result.observation, { kind: "born" });
-    const log = pathsForAkumaId(world, result.akuma).log;
+    assert.equal(result.failure, undefined);
+    assert.equal(result.tellId, undefined);
+    const log = pathsForAkumaId(world, result.akumaId).log;
     await waitForCondition(
       "log-only birth diagnostic",
       () => existsSync(log) && readFileSync(log, "utf8").includes("birth-only failure"),
@@ -663,7 +658,9 @@ test("native birth retains its captured host callback for the resulting handle",
       throw new Error("mutated callback must not run");
     };
     const result = await child.ask("answer", { signal: t.signal });
-    assert.deepEqual(result.observation, { reason: "answered", answer: '{"ok":true}' });
+    assert.equal(result.kind, "answered");
+    if (result.kind !== "answered") throw new Error("expected answer");
+    assert.equal(result.answer, '{"ok":true}');
     await child.history();
     assert.deepEqual(diagnostics, [
       "plugin fail signal: birth observer failed",
@@ -707,12 +704,11 @@ test("schema Akumas.spawn preserves its child when initial Tell admission fails"
       mode: "detach",
       schema,
     });
-    akumaId = result.akuma;
-    assert.equal(result.observation.kind, "failed");
-    if (result.observation.kind === "failed")
-      assert.match(result.observation.failure.diagnostic, /did not settle cleanly/u);
+    akumaId = result.akumaId;
+    assert.equal(result.failure?.kind, "infrastructure");
+    assert.match(result.failure?.diagnostic ?? "", /did not settle cleanly/u);
     assert.equal(admissionCalls, 1);
-    const history = await PublicAkuma.select(world, result.akuma).history();
+    const history = await PublicAkuma.select(world, result.akumaId).history();
     assert.equal(history.rows.filter((row) => row.kind === "tell").length, 0);
     operationFailed = false;
   } finally {
@@ -804,12 +800,9 @@ test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn sett
         },
       },
     });
-    assert.equal(result.structured, undefined);
-    assert.deepEqual(result.observation.kind, "observed");
-    if (result.observation.kind === "observed") {
-      assert.deepEqual(result.observation.observation, { reason: "answered", answer: '{"ok":true}' });
-      assert.equal(result.observation.tell.admission.tellId, observedTellId);
-    }
+    assert.equal(result.input?.kind, "answered");
+    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.equal(result.tellId, observedTellId);
     operationFailed = false;
   } finally {
     try {
@@ -842,14 +835,15 @@ test("observing spawn displays the same canonical workdir as the native result",
       akumaName: "worker", prompt: "inspect workdir", mode: "wait", timeoutMs: 20_000,
       workdir: "linked-workdir", bare: true,
     }, { observe: (event) => { if (event.kind === "admitted") admittedCwd = event.head.cwd; } });
-    assert.equal(admittedCwd, result.execution.cwd);
-    assert.equal(result.execution.cwd, realpathSync(workdir));
+    const soul = await readSoul(pathsForAkumaId(world, result.akumaId));
+    assert.equal(admittedCwd, soul?.cwd);
+    assert.equal(soul?.cwd, realpathSync(workdir));
     const output = await runCli(
       ["-C", world, "spawn", "worker", "--bare", "--wait", "20s", "--workdir", "linked-workdir", "inspect workdir"],
       { environment },
     );
     assert.equal(output.exit, 0, output.stderr);
-    assert.equal(output.stderr.split("\n")[1], `  ${result.execution.cwd}`);
+    assert.equal(output.stderr.split("\n")[1], `  ${soul?.cwd}`);
     operationFailed = false;
   } finally {
     try {
@@ -915,7 +909,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       }),
       workspace: "worktree",
     });
-    const managedId = present(await accepted(bound).value.kei.state()).id;
+    const managedId = present(await accepted(bound).kei.state()).id;
     const appointment = await readManagedWorktreeAppointment(git, managedId);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = 'appointed'");
     if (appointment.kind !== "appointed") return;
@@ -926,21 +920,18 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       environment: { ...environment, KEIYAKU_HOME: configured.home },
       readStdin: async () => "implicit placement",
     });
-    assert.equal(implicit.value.kind, "spawned");
-    assert.deepEqual(implicit.value.execution, { cwd: invocationCwd, source: "input" });
-    assert.notEqual(implicit.value.execution.cwd, appointment.path);
-    assert.equal(implicit.value.dispatch.kind, "dispatched");
-    if (implicit.value.dispatch.kind === "dispatched")
-      assert.equal(implicit.value.dispatch.dispatch.contractId, managedId);
-    assert.equal((await readSoul(pathsForAkumaId(world, implicit.value.akuma)))?.cwd, invocationCwd);
-    assert.equal(implicit.value.observation.kind, "detached");
-    if (implicit.value.observation.kind === "detached") {
-      assert.equal(
-        (await readTell(pathsForAkumaId(world, implicit.value.akuma), implicit.value.observation.tell.admission.tellId))
-          ?.initiator,
-        submittingOwner,
-      );
-    }
+    assert.equal(implicit.value.failure, undefined);
+    const implicitSoul = await readSoul(pathsForAkumaId(world, implicit.value.akumaId));
+    assert.equal(implicitSoul?.cwd, invocationCwd);
+    assert.notEqual(implicitSoul?.cwd, appointment.path);
+    assert.deepEqual((await Akumas.of(world).status({ akuma: implicit.value.akumaId, repo })).contract, {
+      kind: "associated",
+      contractId: managedId,
+    });
+    assert.equal(
+      (await readTell(pathsForAkumaId(world, implicit.value.akumaId), implicit.value.tellId!))?.initiator,
+      submittingOwner,
+    );
 
     const explicitDir = join(raw.path, "explicit-workdir");
     mkdirSync(explicitDir);
@@ -958,10 +949,16 @@ test("Contract association never selects the Akuma execution workdir", async (t)
         },
       },
     );
-    assert.equal(explicit.value.kind, "spawned");
-    assert.deepEqual(explicit.value.execution, { cwd: realpathSync(explicitDir), source: "input" });
-    assert.equal(explicit.value.dispatch.kind, "dispatched");
-    assert.equal(explicit.value.observation.kind, "born");
+    assert.equal(explicit.value.failure, undefined);
+    assert.equal(
+      (await readSoul(pathsForAkumaId(world, explicit.value.akumaId)))?.cwd,
+      realpathSync(explicitDir),
+    );
+    assert.deepEqual((await Akumas.of(world).status({ akuma: explicit.value.akumaId, repo })).contract, {
+      kind: "associated",
+      contractId: managedId,
+    });
+    assert.equal(explicit.value.tellId, undefined);
     await waitForCondition(
       "both direct birth notifications",
       () => existsSync(births) && readFileSync(births, "utf8").trim().split("\n").length === 2,
@@ -970,12 +967,12 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.equal(directBirths.find((signal) => signal.akumaId === implicit.value.akuma)?.initiator, submittingOwner);
+    assert.equal(directBirths.find((signal) => signal.akumaId === implicit.value.akumaId)?.initiator, submittingOwner);
     assert.deepEqual(
-      directBirths.find((signal) => signal.akumaId === explicit.value.akuma),
+      directBirths.find((signal) => signal.akumaId === explicit.value.akumaId),
       {
         kind: "akuma.born",
-        akumaId: explicit.value.akuma,
+        akumaId: explicit.value.akumaId,
         bodySequence: 1,
         origin: { kind: "direct" },
         caller: { kind: "akuma", world, akumaId: "aku/delegator/abcd1234" },
@@ -988,7 +985,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
     try {
       if (bound !== undefined)
         await accepted(bound)
-          .value.kei.abandon({})
+          .kei.abandon({})
           .catch(() => undefined);
       await cleanupSpawnCapableFixtureForTest(t, {
         fixturePath: raw.path,
@@ -1095,7 +1092,7 @@ test("retired caller fields refuse before allocation", async (context) => {
     runtime.fork({ akuma: "aku/worker/1234abcd", at: "turn/1", allowed: [] } as never),
     /Akumas.fork input has unknown field: allowed/u,
   );
-  assert.deepEqual((await runtime.list()).rows, []);
+  assert.equal((await runtime.list()).rows, undefined);
 });
 
 // The initiating local call must keep its Archetype-classified refusal even though

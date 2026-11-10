@@ -80,8 +80,10 @@ report store, or source for parsing counts. A stopped producer is a typed public
 stop, distinct from a terminal unsatisfied verdict.
 
 Environment failures from configured scratch hooks preserve the hook's
-configured name and typed failure detail as their public recovery identity;
-the hook's private array position is never exposed.
+configured name and one bounded diagnosis as their public recovery identity;
+the hook's private array position is never exposed. The diagnosis distinguishes
+exit, timeout, cancellation, and unavailable execution, retaining useful output
+and a visible truncation indication when needed.
 
 An attempt can emit ephemeral observations for materialization, setup, cleanup,
 declarations, and their stdout or stderr. Check observations identify the

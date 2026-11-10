@@ -20,27 +20,28 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   assertWireRoundTrip(Keiyaku.verbs.bind.output, bound);
   // Parsing the wire form cannot preserve the native handle's methods.
   const wire = Keiyaku.verbs.bind.output.parse(JSON.parse(JSON.stringify(bound)));
-  assert.equal(typeof bound.value.kei.state, "function");
+  assert.equal(typeof bound.kei.state, "function");
   assert.equal(wire.kind, "accepted");
   if (wire.kind !== "accepted") throw new Error("expected accepted bind wire value");
-  assert.equal("state" in wire.value.kei, false);
-  assert.ok(bound.value.workspace);
-  commitCandidate(repository, bound.value.workspace.path);
+  assert.equal(Object.hasOwn(wire, "kei"), false);
+  assert.equal(wire.contractId, bound.contractId);
+  assert.ok(bound.worktreePath);
+  commitCandidate(repository, bound.worktreePath);
 
-  const showInput = { contract: bound.contract };
+  const showInput = { contract: bound.contractId };
   const guidance = await facet.run("show", showInput);
-  assert.equal(guidance, await bound.value.kei.guidance());
-  assert.ok(typeof guidance === "string" && guidance.includes("Library verbs"));
+  assert.deepEqual(guidance, await bound.kei.guidance());
+  assert.ok(guidance.kind === "present" && guidance.guidance.includes("Library verbs"));
   assert.equal(classifyVerb("show", showInput, { kind: "returned", value: guidance }), "accepted");
   assertWireRoundTrip(Keiyaku.verbs.show.output, guidance);
 
-  const reviewInput = { contract: bound.contract, verdict: "satisfied" as const, summary: "Reviewed the candidate changes" };
+  const reviewInput = { contract: bound.contractId, verdict: "satisfied" as const, summary: "Reviewed the candidate changes" };
   const reviewed = accepted(await facet.run("review", reviewInput));
   assert.equal(classifyVerb("review", reviewInput, { kind: "returned", value: reviewed }), "accepted");
   assertWireRoundTrip(Keiyaku.verbs.review.output, reviewed);
-  assert.ok(reviewed.facts.some((fact) => fact.kind === "attestation"));
-  const history = await bound.value.kei.history();
-  assert.ok(history !== null);
+  const history = await bound.kei.history();
+  assert.ok(history.kind === "contract");
+  assert.ok(history.events.some((event) => event.kind === "attestation"));
 });
 
 test("native ask and wire run carry their caller-owned decoders", async (t) => {
@@ -70,9 +71,9 @@ test("native ask and wire run carry their caller-owned decoders", async (t) => {
       const result = mode === "native"
         ? await facet.ask({ akuma: allocated.id, prompt: "structured", schema: Schema.json(jsonSchema, decode), timeoutMs: 30_000 })
         : await facet.run("ask", { akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeoutMs: 30_000 }, { decode });
-      assert.equal(result.observation.reason, "answered");
-      if (result.observation.reason !== "answered") throw new Error("expected an answer");
-      const answer: { received: unknown; token: Date } = result.observation.answer;
+      assert.equal(result.kind, "answered");
+      if (result.kind !== "answered") throw new Error("expected an answer");
+      const answer: { received: unknown; token: Date } = result.answer!;
       assert.deepEqual(answer.received, { ok: true });
       assert.ok(answer.token instanceof Date);
       assert.equal((await Akuma.select(world, allocated.id).idle({ timeoutMs: 30_000 })).reason, "completed");
@@ -114,6 +115,6 @@ test("wire validation and classification reject malformed calls before observati
   });
   assert.equal(Keiyaku.verbs.history.input.safeParse({ selector: "kei/example", limit: 1 }).success, false);
   assert.equal(Keiyaku.verbs.bind.input.safeParse({ markdown: document(), forkOf: "kei/example" }).success, false);
-  assert.equal(classifyVerb("show", {}, { kind: "returned", value: null }), "refused");
+  assert.equal(classifyVerb("show", {}, { kind: "returned", value: { kind: "missing" } }), "refused");
   assert.equal(classifyVerb("show", {}, { kind: "threw", error: new TypeError("unexpected") }), "failed");
 });

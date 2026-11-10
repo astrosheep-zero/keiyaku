@@ -22,16 +22,22 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
   const repo = await Repo.at({ path: repository.path });
   const library = Keis.of(repo);
   const bound = accepted(await library.bind({ markdown, gates: ["reviewed"] }));
-  const [row] = (await library.list({  })).rows;
-  assert.ok(row?.worktreePath);
-  const expected: ContractResolution = { kind: "resolved", id: bound.contract };
+  const [summary] = (await library.list({  })).rows!;
+  assert.ok(summary);
+  const observed = await library.observe({ id: summary.id });
+  assert.equal(observed.kind, "present");
+  if (observed.kind !== "present") throw new Error("missing bound contract");
+  const row = observed.row;
+  assert.ok(row.workspace.kind !== "unappointed" && "path" in row.workspace);
+  const worktreePath = row.workspace.path;
+  const expected: ContractResolution = { kind: "resolved", id: bound.contractId };
   const selector = `@${row.id.slice("kei/".length)}`;
   assert.deepEqual(await library.resolve({ selector }), expected);
-  assert.deepEqual(await Keis.of(await Repo.at({ path: row.worktreePath })).resolve({  }), expected);
+  assert.deepEqual(await Keis.of(await Repo.at({ path: worktreePath })).resolve({  }), expected);
   const link = join(repository.path, "context-link");
-  symlinkSync(row.worktreePath, link, "dir");
+  symlinkSync(worktreePath, link, "dir");
   assert.deepEqual(await library.resolve({ cwd: link }), expected);
-  const nested = join(row.worktreePath, "nested");
+  const nested = join(worktreePath, "nested");
   mkdirSync(nested);
   assert.deepEqual(
     await library.resolve({ cwd: nested }),
@@ -55,16 +61,18 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
   });
 
   assert.deepEqual(
-    matchContractCandidates([row, { ...row, disposition: "terminal" }, { ...row, worktreePath: null }], { selector }),
+    matchContractCandidates([row, { ...row, phase: "abandoned" }, { ...row, workspace: { kind: "unappointed" } }], {
+      selector,
+    }),
     [row],
   );
   assert.deepEqual(
     matchContractCandidates([{ ...row, phase: "claimed" }], { selector }),
-    [{ ...row, phase: "claimed" }],
-    "candidate membership uses owner disposition, not a second phase judgment",
+    [],
+    "candidate membership follows the owner's bound phase",
   );
   rmSync(link);
-  accepted(await bound.value.kei.abandon());
+  accepted(await bound.kei.abandon());
   assert.deepEqual(
     await library.resolve({ selector }),
     {

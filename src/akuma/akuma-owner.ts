@@ -25,7 +25,6 @@ import { acquireLeash } from "./control.js";
 import {
   HeldAkumaLeash,
   activitySlice,
-  projectTell,
   readForkPoint,
   readHeart,
   readInterruptCompletion,
@@ -52,29 +51,29 @@ import { projectTurns, selectExactHistory, selectHistory } from "./projection.js
 import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
 import { z } from "zod";
-import { resumeCoordinateWireSchema } from "./coordinate.js";
+import { publicSessionCoordinate, publicSessionCoordinateSchema, type PublicSessionCoordinate } from "./coordinate.js";
 
 export type InterruptReceipt = TellResult | Extract<InterruptTellAdmission, { kind: "unavailable" }>;
 
 export const forkFailureSchemas = {
-  unsupported: z.strictObject({ kind: z.literal("provider-cannot-fork"), provider: z.string() }).readonly(),
-  unknownHistory: z.strictObject({ kind: z.literal("unknown-history"), at: z.string() }).readonly(),
+  unsupported: z.strictObject({ kind: z.literal("provider-cannot-fork") }).readonly(),
+  unknownHistory: z.strictObject({ kind: z.literal("unknown-history") }).readonly(),
   failed: z.strictObject({ kind: z.literal("fork-failed"), diagnostic: z.string() }).readonly(),
   upstream: z
     .strictObject({
-      kind: z.literal("upstream-forked"),
-      childSession: resumeCoordinateWireSchema,
+      kind: z.literal("provider-forked-local-birth-failed"),
+      session: publicSessionCoordinateSchema,
       diagnostic: z.string(),
     })
     .readonly(),
 };
 
 export type ForkReceipt =
-  | Readonly<{ kind: "forked"; child: AkumaId }>
-  | Readonly<{ kind: "provider-cannot-fork"; provider: string }>
-  | Readonly<{ kind: "unknown-history"; at: string }>
+  | Readonly<{ kind: "forked"; childAkumaId: AkumaId }>
+  | Readonly<{ kind: "provider-cannot-fork" }>
+  | Readonly<{ kind: "unknown-history" }>
   | Readonly<{ kind: "fork-failed"; diagnostic: string }>
-  | Readonly<{ kind: "upstream-forked"; childSession: ResumeCoordinate; diagnostic: string }>;
+  | Readonly<{ kind: "provider-forked-local-birth-failed"; session: PublicSessionCoordinate; diagnostic: string }>;
 
 export type LastAnswer = Readonly<{ kind: "answer"; answer: string }> | Readonly<{ kind: "no-answer" }>;
 
@@ -239,7 +238,7 @@ export class AkumaOwner {
   ): Promise<ActivityHistory | ExactHistory> {
     if (input.id !== undefined) {
       const exact = await this.exactHistory(input);
-      if (exact.kind === "exact") await this.outcomeObserved?.(this.id, [exact.outcome.outcome.historyId]);
+      if (exact.kind === "exact") await this.outcomeObserved?.(this.id, [`turn/${exact.outcome.turnSequence}`]);
       return exact;
     }
     if (input.before !== undefined && input.since !== undefined) {
@@ -289,9 +288,16 @@ export class AkumaOwner {
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
       ...(options.signal === undefined ? {} : { signal: options.signal }),
       ...(predicate === defaultWaitComplete ? {} : { predicate }),
+      ...(this.outcomeObserved === undefined ? {} : { outcomeObserved: this.outcomeObserved }),
     });
-    const status = waited.observations[0]!;
-    await observeStatusOutcome(status, this.outcomeObserved);
+    const status = waited.observations[0];
+    if (status === undefined) {
+      const item = waited.results[0];
+      if (item?.kind === "missing") throw new AkumaNotBornError(this.id);
+      throw new AkumaProviderError(
+        item?.kind === "unobserved" ? item.diagnostic : "Akuma wait returned no observation",
+      );
+    }
     return { reason: waited.reason, status };
   }
 
@@ -366,13 +372,13 @@ export class AkumaOwner {
     if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
     const latestBody = (await readHeart(this.paths)).latestBody;
     return {
-      admission: { tellId, fact: "recorded" },
-      row: projectTell(tell),
+      admission: { tellId },
+      row: { sequence: tell.sequence, at: tell.recordedAt, text: tell.body },
       wake:
         tell.state === "told" || tell.binding !== undefined
           ? { kind: "told" }
           : latestBody !== null && latestBody.end === undefined && latestBody.hung === undefined
-            ? { kind: "pursuing", bodySequence: latestBody.sequence }
+            ? { kind: "pursuing" }
             : { kind: "held" },
     };
   }
@@ -490,7 +496,6 @@ export class AkumaOwner {
       interruption: {
         kind: "completed",
         bodySequence: admission.barrier.bodySequence,
-        putDown: admission.predecessorWasRunning && completion.body.end === "put-down" ? "self-aborted" : "was-idle",
       },
     };
   }
@@ -505,9 +510,9 @@ export class AkumaOwner {
     if (source === null) throw new AkumaNotBornError(this.id);
     if (source.id !== this.id) throw new Error("Akuma soul does not match its coordinate");
     const adapter = (await resolveProviderExecution(source.provider)).adapter;
-    if (adapter.fork === undefined) return { kind: "provider-cannot-fork", provider: source.provider.name };
+    if (adapter.fork === undefined) return { kind: "provider-cannot-fork" };
     const point = await readForkPoint(this.paths, input.at);
-    if (point === null) return { kind: "unknown-history", at: input.at };
+    if (point === null) return { kind: "unknown-history" };
     if (point.provider !== source.provider.name)
       throw new Error(`Akuma fork point ${input.at} has a mismatched provider`);
 
@@ -551,11 +556,11 @@ export class AkumaOwner {
             ...(input.initiator === undefined ? {} : { birthInitiator: input.initiator }),
           }),
       });
-      return { kind: "forked", child: child.id };
+      return { kind: "forked", childAkumaId: child.id };
     } catch (error) {
       return {
-        kind: "upstream-forked",
-        childSession,
+        kind: "provider-forked-local-birth-failed",
+        session: publicSessionCoordinate(childSession),
         diagnostic: diagnostic(error),
       };
     }

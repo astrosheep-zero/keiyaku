@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { akumaStatusSchema } from "./akuma.js";
-import { reportFactWireSchema } from "./heart/facts.js";
 import type { AkumaCaller } from "./caller.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
@@ -18,7 +17,6 @@ import { AkumaOwner, type InterruptReceipt } from "./akuma-owner.js";
 import { decodeAskObservation, executeAskAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
 import { type AkumaStatus } from "./akuma.js";
 import { type KillEvidence } from "./heart/index.js";
-import type { ReportFact } from "./heart/facts.js";
 import { captureAkumaHost, type AkumaHostOptions } from "../body-host.js";
 export type { AkumaHostOptions } from "../body-host.js";
 import type { BodyLauncher } from "./body-launch.js";
@@ -31,7 +29,7 @@ export const akumaIdleResultSchema = z
   .strictObject({ reason: z.enum(["completed", "deadline"]), status: akumaStatusSchema })
   .readonly();
 export const akumaReportResultSchema = z.union([
-  z.strictObject({ kind: z.literal("recorded"), report: reportFactWireSchema }).readonly(),
+  z.strictObject({ kind: z.literal("recorded"), reportId: z.string().regex(/^report\/[1-9][0-9]*$/u) }).readonly(),
   z.strictObject({ kind: z.literal("refused"), reason: z.enum(["not-born", "not-executing"]) }).readonly(),
 ]);
 
@@ -59,7 +57,7 @@ export type AkumaBirthInput = Readonly<{
 
 export type AkumaReportOptions = AkumaSignalOptions;
 export type AkumaReportResult =
-  | Readonly<{ kind: "recorded"; report: ReportFact }>
+  | Readonly<{ kind: "recorded"; reportId: string }>
   | Readonly<{ kind: "refused"; reason: "not-born" | "not-executing" }>;
 
 export type AkumaTellOptions = AkumaSignalOptions & Readonly<{ interrupt?: boolean; initiator?: string }>;
@@ -150,9 +148,7 @@ class AkumaHandle {
           ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
           ...(signal === undefined ? {} : { signal }),
         });
-        return (
-          schema === undefined ? result : { ...result, observation: decodeAskObservation(result.observation, schema) }
-        ) as AkumaAskResult<string | T>;
+        return (schema === undefined ? result : decodeAskObservation(result, schema)) as AkumaAskResult<string | T>;
       },
     );
   }
@@ -180,7 +176,7 @@ class AkumaHandle {
         ...(initiator === undefined ? {} : { initiator }),
       },
     );
-    return { kind: "recorded", report };
+    return { kind: "recorded", reportId: `report/${report.sequence}` };
   }
 
   async status(): Promise<AkumaStatus> {

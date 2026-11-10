@@ -55,11 +55,13 @@ export function repositoryWithMain(options: RepositoryWithMainOptions = {}): Tes
 export async function assertRefused(run: () => Promise<unknown>, expected: KeiyakuRefusal): Promise<void> {
   const result = await run();
   assert.ok(result !== null && typeof result === "object" && "kind" in result && result.kind === "refused");
-  assert.ok("refusal" in result);
-  assert.deepEqual(result.refusal, expected);
+  assert.ok("reason" in result);
+  assert.deepEqual(result.reason, expected);
 }
 
-export function accepted<Outcome extends { readonly kind: string }>(outcome: Outcome): Extract<Outcome, { kind: "accepted" }> {
+export function accepted<Outcome extends { readonly kind: string }>(
+  outcome: Outcome,
+): Extract<Outcome, { kind: "accepted" }> {
   assert.equal(outcome.kind, "accepted", JSON.stringify(outcome));
   return outcome as Extract<Outcome, { kind: "accepted" }>;
 }
@@ -103,7 +105,7 @@ export async function bind(repository: TestGitRepository, verification?: string)
     target: null,
     gates: verification === undefined ? ["reviewed"] : ["verified"],
   });
-  return accepted(result).value.kei;
+  return accepted(result).kei;
 }
 
 export function commitCandidate(repository: TestGitRepository, worktreePath = repository.path): void {
@@ -139,7 +141,7 @@ export async function managedCandidate(repository: TestGitRepository, gates: rea
     target: "refs/heads/main",
     gates,
   });
-  const contract = accepted(bound).value.kei;
+  const contract = accepted(bound).kei;
   const state = present(await contract.state());
   const path = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   writeFileSync(resolve(path, "delivered.txt"), "candidate\n");

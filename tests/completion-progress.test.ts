@@ -10,7 +10,7 @@ import {
 } from "../src/core/facts/types.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
-import { project } from "../src/library/outcome.js";
+import { invocationIssues, project } from "../src/library/outcome.js";
 import type { AcceptedProtocolStep } from "../src/protocol/outcome.js";
 import { contractCheckpoint, executionStop, type ContractCheckpoint } from "../src/protocol/progress.js";
 
@@ -88,16 +88,11 @@ test("physical and seat-close reports accumulate without replay duplication or i
   progress.recordAdmission(leading);
   progress.recordAdmission(next);
   progress.recordAdmission(next);
-  const lags = progress
-    .snapshot()
-    .effects.flatMap((effect) => (effect.kind === "reconciliation-lag" ? [effect.lag] : []));
+  const issues = invocationIssues(progress.snapshot().effects, leading.state.id);
+  const lags = issues.filter((issue) => issue.kind === "worktree-retained");
   assert.deepEqual(lags, [...leading.physical!.lag, ...next.physical!.lag]);
   assert.deepEqual(
-    progress
-      .snapshot()
-      .effects.filter((effect) => effect.kind === "cleanup")
-      .map((effect) => effect.issue)
-      .map((issue) => (issue.kind === "private-state-seat-close" ? issue.failure.diagnostic : null)),
+    issues.filter((issue) => issue.kind === "private-state-seat-close").map((issue) => issue.diagnostic),
     ["first", "second"],
   );
   assert.equal(leading.physical!.lag.length, 1);
@@ -144,18 +139,16 @@ test("all verification cleanup and leaks survive repeated candidates and depende
     [child, "three"],
   ] as const) {
     progress.recordVerification(id, snapshotId(snapshot), {
-      cleanup: { phase: "destroy", name: "destroy", detail: { kind: "timeout" } },
+      cleanup: { name: "destroy", diagnostic: "timeout" },
       leak: { path: `/scratch/${snapshot}`, diagnostic: "retained" },
     });
   }
-  assert.equal(progress.snapshot().effects.filter((effect) => effect.kind === "cleanup").length, 6);
+  const issues = invocationIssues(progress.snapshot().effects);
+  assert.equal(issues.length, 6);
   assert.deepEqual(
-    progress
-      .snapshot()
-      .effects.filter((effect) => effect.kind === "cleanup")
-      .map((effect) => effect.issue)
-      .filter((item) => item.kind === "worktree-leak")
-      .map((item) => [item.contractId, item.snapshot, item.leak.path]),
+    issues
+      .filter((issue) => issue.kind === "worktree-leak")
+      .map((issue) => [issue.contractId, issue.snapshot, issue.path]),
     [
       [primary, "one", "/scratch/one"],
       [primary, "two", "/scratch/two"],
@@ -168,14 +161,14 @@ test("cancellation cannot launder programming errors into operational stops", ()
   const controller = new AbortController();
   controller.abort();
   const id = contractId("kei/stop");
-  assert.equal(executionStop(id, "verification", controller.signal.reason, controller.signal).reason, "cancelled");
+  assert.equal(executionStop(id, controller.signal.reason, controller.signal).reason, "cancelled");
   for (const error of [
     new TypeError("bug"),
     new AuthorityCorruptionError("bad journal"),
     new Error("unexpected bug"),
   ]) {
     assert.throws(
-      () => executionStop(id, "verification", error, controller.signal),
+      () => executionStop(id, error, controller.signal),
       (actual) => actual === error,
     );
   }

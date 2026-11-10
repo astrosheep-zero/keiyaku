@@ -1,11 +1,11 @@
 import type { WorldRoot } from "../world.js";
 import { z } from "zod";
-import { createDebtRelations, projectCreatedByRows, debtResultRowSchema, type DebtBoard } from "./board.js";
+import { projectCreatedByRows, debtSummarySchema, type DebtBoard } from "./board.js";
 import { readBoard } from "./store.js";
 
 export const createdDebtObservationSchema = z.union([
   z
-    .object({ kind: z.literal("present"), rows: z.array(debtResultRowSchema).readonly() })
+    .object({ kind: z.literal("present"), rows: z.array(debtSummarySchema).min(1).readonly().exactOptional() })
     .strict()
     .readonly(),
   z
@@ -15,8 +15,6 @@ export const createdDebtObservationSchema = z.union([
 ]);
 
 export type CreatedDebtObservation = z.infer<typeof createdDebtObservationSchema>;
-
-export const EMPTY_CREATED_DEBT_OBSERVATION: CreatedDebtObservation = { kind: "present", rows: [] };
 
 function observationDiagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -39,6 +37,9 @@ export async function observeCreatedDebtObservations(
     const failed = { kind: "failed" as const, diagnostic: observationDiagnostic(error) };
     return createdByIds.map(() => failed);
   }
-  const rows = projectCreatedByRows(board, createDebtRelations(board), createdByIds);
-  return createdByIds.map((createdBy) => ({ kind: "present", rows: rows.get(createdBy) ?? [] }));
+  const rows = projectCreatedByRows(board, createdByIds);
+  return createdByIds.map((createdBy) => {
+    const selected = rows.get(createdBy) ?? [];
+    return { kind: "present", ...(selected.length === 0 ? {} : { rows: selected }) };
+  });
 }

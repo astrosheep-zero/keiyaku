@@ -5,7 +5,7 @@ import {
   targetContractRefusal,
   type TargetContractRefusal,
 } from "../facts/observation.js";
-import { journalEntry, targetName, type ActorId, type ContractId, type ContractState } from "../facts/types.js";
+import { journalEntry, type ActorId, type ContractId, type ContractState } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
 type PlacementInput = Readonly<{
@@ -23,18 +23,13 @@ export type PlacementRefusal =
   | TargetContractRefusal
   | Readonly<{
       kind: "contract-missing" | "delivery-missing" | "terminal";
-      contractId: ContractId;
     }>
   | Readonly<{
       kind: "gates-unsatisfied";
-      contractId: ContractId;
       unmet: readonly GateReport[];
-      /** The reference the refused placement attempted to advance, when the Contract has one. */
-      target?: string;
     }>
   | Readonly<{
       kind: "prerequisites-unsatisfied";
-      contractId: ContractId;
       unmet: readonly UnmetPrerequisite[];
     }>;
 export function unmetPrerequisites(
@@ -63,16 +58,16 @@ export function decidePlacement({
   const id = input.contractId;
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };
-  const targetRefusal = targetContractRefusal(observation, id, current.coordinates.target);
+  const targetRefusal = targetContractRefusal(observation, current.coordinates.target);
   if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   const delivery = current.delivery;
   const integration = current.currentIntegration;
   if (!delivery || !integration) {
-    return { kind: "refused", refusal: { kind: "delivery-missing", contractId: id } };
+    return { kind: "refused", refusal: { kind: "delivery-missing" } };
   }
   const unmet = unmetPrerequisites(current.terms.after, observation);
   if (unmet.length > 0) {
-    return { kind: "refused", refusal: { kind: "prerequisites-unsatisfied", contractId: id, unmet } };
+    return { kind: "refused", refusal: { kind: "prerequisites-unsatisfied", unmet } };
   }
   const gates = gateReports(current);
   if (!gates.satisfied) {
@@ -81,9 +76,7 @@ export function decidePlacement({
       kind: "refused",
       refusal: {
         kind: "gates-unsatisfied",
-        contractId: id,
         unmet: unmetGates,
-        ...(current.coordinates.target === undefined ? {} : { target: targetName(current.coordinates.target) }),
       },
     };
   }

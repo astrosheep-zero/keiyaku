@@ -17,12 +17,12 @@ test("fork bind copies the source target and does not substitute the caller bran
     target: "release",
     gates: [],
   }));
-  const sourceState = present(await source.value.kei.state());
+  const sourceState = present(await source.kei.state());
   assert.equal(sourceState.coordinates.target, "refs/heads/release");
 
   repository.run(["checkout", "-B", "caller"]);
   const fork = accepted(await Keis.of(repo).bind({ forkOf: sourceState.id }));
-  const forkState = present(await fork.value.kei.state());
+  const forkState = present(await fork.kei.state());
   assert.equal(forkState.coordinates.target, "refs/heads/release");
   assert.equal(forkState.coordinates.start, sourceState.coordinates.start);
 });
@@ -39,13 +39,13 @@ test("fork bind target:null clears the source target and a string overrides it",
       gates: [],
     }),
   );
-  const sourceState = present(await source.value.kei.state());
+  const sourceState = present(await source.kei.state());
 
   const cleared = accepted(await Keis.of(repo).bind({ forkOf: sourceState.id, target: null }));
-  assert.equal(present(await cleared.value.kei.state()).coordinates.target, undefined);
+  assert.equal(present(await cleared.kei.state()).coordinates.target, undefined);
 
   const overridden = accepted(await Keis.of(repo).bind({ forkOf: sourceState.id, target: "main" }));
-  assert.equal(present(await overridden.value.kei.state()).coordinates.target, "refs/heads/main");
+  assert.equal(present(await overridden.kei.state()).coordinates.target, "refs/heads/main");
 });
 
 test("fork bind refuses missing sources and incompatible term inputs", async () => {
@@ -53,10 +53,7 @@ test("fork bind refuses missing sources and incompatible term inputs", async () 
   const repo = await Repo.at({ path: repository.path });
   const missing = await Keis.of(repo).bind({ forkOf: "kei/missing" as never });
   assert.equal(missing.kind, "refused");
-  if (missing.kind === "refused") {
-    assert.equal(missing.refusal.kind, "fork-source-missing");
-    assert.equal(missing.refusal.contractId, "kei/missing");
-  }
+  if (missing.kind === "refused") assert.deepEqual(missing.reason, { kind: "fork-source-missing" });
   await assert.rejects(
     () => Keis.of(repo).bind({ forkOf: "kei/source" as never, gates: [] } as never),
     /Keis.bind input has unknown field: gates/u,
@@ -71,8 +68,8 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
     workspace: "worktree",
     gates: [],
   }));
-  const sourceId = (present(await source.value.kei.state())).id;
-  const result = await cliJson<Readonly<{ kind: string; operation: string }>>(["bind", "--fork-of", sourceId], {
+  const sourceId = (present(await source.kei.state())).id;
+  const result = await cliJson<Readonly<{ kind: string; contractId: string }>>(["bind", "--fork-of", sourceId], {
     cwd: repository.path,
     environment: {},
     readStdin: () => {
@@ -81,7 +78,8 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
   });
   assert.equal(result.exit, 0);
   assert.equal(result.value.kind, "accepted");
-  assert.equal(result.value.operation, "bind");
+  assert.match(result.value.contractId, /^kei\//u);
+  assert.notEqual(result.value.contractId, sourceId);
   assert.throws(() => parseArgv(["bind", "--fork-of", sourceId, "-"]), /fork bind reads no stdin/u);
   assert.throws(
     () => parseArgv(["bind", "--fork-of", sourceId, "--gates", "default"]),
@@ -105,9 +103,9 @@ test("fork admission rejects a source amend interleaved at the state transaction
     workspace: "worktree",
     gates: [],
   }));
-  const sourceState = present(await source.value.kei.state());
+  const sourceState = present(await source.kei.state());
   const oldState = repository.run(["rev-parse", GIT_REF]).trim();
-  await source.value.kei.amend({ gates: ["reviewed"] });
+  await source.kei.amend({ gates: ["reviewed"] });
   const movedState = repository.run(["rev-parse", GIT_REF]).trim();
   repository.run(["update-ref", GIT_REF, oldState, movedState]);
   const marker = `${repository.path}/fork-race.marker`;
@@ -130,9 +128,6 @@ test("fork admission rejects a source amend interleaved at the state transaction
         Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({ forkOf: sourceState.id }),
   );
   assert.equal(raced.kind, "refused");
-  if (raced.kind === "refused") {
-    assert.equal(raced.refusal.kind, "fork-source-moved");
-    assert.equal(raced.refusal.contractId, sourceState.id);
-  }
-  assert.deepEqual((present(await source.value.kei.state())).terms.gates, ["reviewed"]);
+  if (raced.kind === "refused") assert.deepEqual(raced.reason, { kind: "fork-source-moved" });
+  assert.deepEqual((present(await source.kei.state())).terms.gates, ["reviewed"]);
 });

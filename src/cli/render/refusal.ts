@@ -1,11 +1,10 @@
 import type { BindDraftReceipt } from "../draft.js";
 import { usageAcceptanceLines, type CliUsageGuide } from "../usage.js";
-import type { ContractId, IntegrationConflictMaterialized, KeiyakuRefusal } from "../../index.js";
-import { shortGitId, contractOperationName } from "./contract-observation.js";
+import type { ContractId, KeiyakuRefusal } from "../../index.js";
+import type { HandoffOutcome } from "../../library/outcome.js";
+import { contractOperationName, shortGitId } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
-  checkoutNotFollowableLines,
-  gitShortStat,
   orderRefusalFacts,
   renderOpaqueBlock,
   safeText,
@@ -23,18 +22,22 @@ function wrap(lines: string[], text: string, indent: string, columns: number): v
   lines.push(...renderOpaqueBlock(text, indent, columns));
 }
 
+function words(kind: string): string {
+  return kind.replaceAll("-", " ");
+}
+
 function collectionLines(name: string, members: readonly string[], indent: string): readonly string[] {
   if (members.length === 0) return [];
   return [`${indent}${name}`, ...members.map((member) => `${indent}  ${safeText(member)}`)];
 }
 
-function skipAddressedContract(addressed: string | undefined, contractId: string | undefined): boolean {
-  return addressed !== undefined && contractId === addressed;
+function addressedContract(addressed: string | undefined, contractId: string | undefined): string | undefined {
+  return contractId !== undefined && contractId !== addressed ? contractId : undefined;
 }
 
 function refusalIdentity(refusal: RenderableRefusal, addressed?: string): string | undefined {
-  const contractId = "contractId" in refusal ? refusal.contractId : undefined;
-  return skipAddressedContract(addressed, contractId) ? undefined : contractId;
+  const contractId = "contractId" in refusal && typeof refusal.contractId === "string" ? refusal.contractId : undefined;
+  return addressedContract(addressed, contractId);
 }
 
 const REFUSAL_WORDS: Readonly<Record<string, string>> = {
@@ -42,28 +45,16 @@ const REFUSAL_WORDS: Readonly<Record<string, string>> = {
 };
 
 function refusalWords(kind: string): string {
-  return REFUSAL_WORDS[kind] ?? kind.replaceAll("-", " ");
+  return REFUSAL_WORDS[kind] ?? words(kind);
 }
 
-function refusalHead(kind: string, identity: string | undefined, details: readonly string[]): string {
-  return [refusalWords(kind), identity, ...details].filter((part): part is string => part !== undefined).join("  ");
-}
-
-function renderDirtyRefusal(
-  refusal: DirtyWithOption,
-  indent: string,
-  columns: number,
-  identity: string | undefined,
-): readonly string[] {
+function renderDirtyRefusal(refusal: DirtyWithOption, indent: string, columns: number): readonly string[] {
   const lines: string[] = [];
-  wrap(lines, refusalHead(refusal.kind, identity, []), indent, columns);
   wrap(lines, "reason  worktree has uncommitted changes", indent, columns);
-  for (const name of ["staged", "unstaged", "untracked", "submodules"] as const) {
-    lines.push(...collectionLines(name, refusal[name], indent));
-  }
-  wrap(lines, gitShortStat(refusal.shortStat), indent, columns);
+  lines.push(...collectionLines("paths", refusal.paths ?? [], indent));
+  lines.push(...collectionLines("submodules", refusal.submodules ?? [], indent));
   if (refusal.option === undefined) {
-    if (refusal.submodules.length > 0)
+    if ((refusal.submodules ?? []).length > 0)
       wrap(lines, "reason  submodule changes cannot be captured for review", indent, columns);
   } else if (!refusal.option.available) {
     lines.push(`${indent}option  ${refusal.option.flag} · unavailable with submodule changes`);
@@ -92,13 +83,39 @@ function verificationRefusalFacts(
     return [
       `${indent}reason  Verification declaration index is out of range`,
       ...contract,
-      `${indent}index  ${refusal.index}`,
       `${indent}declarations  ${refusal.total}`,
     ];
   return undefined;
 }
 
-// eslint-disable-next-line complexity -- one closed projection preserves every refusal fact.
+function targetRefusalLines(
+  target: string | undefined,
+  indent: string,
+  identity: string | undefined,
+  contract: string | undefined,
+): readonly string[] {
+  return [
+    ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
+    ...(target === undefined ? [] : [`${indent}target  ${safeText(target)}`]),
+    ...(contract === undefined ? [] : [`${indent}detail  ${safeText(contract)}`]),
+  ];
+}
+
+function nukeRefusalFacts(
+  refusal: Extract<RenderableRefusal, { kind: "nuke-confirmation-mismatch" | "nuke-confirmation-required" }>,
+  indent: string,
+): readonly string[] {
+  const world = safeText(refusal.world);
+  return [
+    `${indent}reason  ${refusalWords(refusal.kind)}`,
+    `${indent}world  ${world}`,
+    ...(refusal.kind === "nuke-confirmation-mismatch"
+      ? [`${indent}confirmation  ${safeText(refusal.confirmation)}`]
+      : []),
+    `${indent}option  keiyaku nuke --confirm '${world.replaceAll("'", "'\"'\"'")}'`,
+  ];
+}
+
 function refusalFacts(
   refusal: RenderableRefusal,
   indent: string,
@@ -106,59 +123,66 @@ function refusalFacts(
   addressed?: string,
 ): readonly string[] {
   const identity = refusalIdentity(refusal, addressed);
-  if (refusal.kind === "nuke-confirmation-mismatch" || refusal.kind === "nuke-confirmation-required") {
-    const world = safeText(refusal.world);
-    return [
-      `${indent}reason  ${refusalWords(refusal.kind)}`,
-      `${indent}world  ${world}`,
-      ...(refusal.kind === "nuke-confirmation-mismatch"
-        ? [`${indent}confirmation  ${safeText(refusal.confirmation)}`]
-        : []),
-      `${indent}option  keiyaku nuke --confirm '${world.replaceAll("'", "'\"'\"'")}'`,
-    ];
-  }
+  const target = "targetContractId" in refusal ? refusal.targetContractId : undefined;
+  if (refusal.kind === "nuke-confirmation-mismatch" || refusal.kind === "nuke-confirmation-required")
+    return nukeRefusalFacts(refusal, indent);
   const verification = verificationRefusalFacts(refusal, indent, identity);
   if (verification !== undefined) return verification;
-  if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, identity);
-  if (refusal.kind === "unmerged-paths") {
-    return [`${indent}reason  ${refusalWords(refusal.kind)}`, ...collectionLines("paths", refusal.paths, indent)];
-  }
-  if (refusal.kind === "integration-failed") {
-    const lines = [
-      `${indent}reason  ${refusalWords(refusal.kind)}`,
-      ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
+  if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns);
+  if (refusal.kind === "dirty-submodules") {
+    return [
+      `${indent}reason  submodule changes cannot be captured for review`,
+      ...collectionLines("paths", refusal.paths, indent),
     ];
-    lines.push(`${indent}reason  ${safeText(refusal.reason)}`, `${indent}target  ${safeText(refusal.targetHead)}`);
-    if (refusal.conflictPaths !== undefined) lines.push(...collectionLines("conflicts", refusal.conflictPaths, indent));
-    if ("recovery" in refusal && refusal.recovery !== undefined) {
-      lines.push(`${indent}option  materialize  ${safeText(refusal.recovery.materialize)}`);
-      lines.push(`${indent}option  deliver  ${safeText(refusal.recovery.deliver)}`);
-    }
-    return lines;
+  }
+  if (refusal.kind === "integration-conflict") {
+    return [
+      `${indent}reason  integration conflict`,
+      ...targetRefusalLines(undefined, indent, identity, undefined),
+      `${indent}target  ${safeText(refusal.targetHead)}`,
+      ...collectionLines("conflicts", refusal.conflictPaths, indent),
+      `${indent}option  materialize  deliver --materialize-conflict --include-dirty`,
+      `${indent}option  deliver  deliver --include-dirty`,
+    ];
+  }
+  if (refusal.kind === "not-based-on-target" || refusal.kind === "unrelated-histories") {
+    return [
+      `${indent}reason  ${refusalWords(refusal.kind)}`,
+      ...targetRefusalLines(undefined, indent, identity, undefined),
+      `${indent}target  ${safeText(refusal.targetHead)}`,
+    ];
   }
   if (refusal.kind === "merge-state-present") {
     return [
       `${indent}reason  ${refusalWords(refusal.kind)}`,
-      ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
-      `${indent}workspace kind  ${refusal.workspace.kind}`,
-      `${indent}workspace  ${safeText(refusal.workspace.path)}`,
+      ...targetRefusalLines(undefined, indent, identity, undefined),
+      `${indent}worktree  ${safeText(refusal.worktreePath)}`,
     ];
   }
   if (refusal.kind === "integration-unsupported") {
     return [
       `${indent}reason  ${refusalWords(refusal.kind)}`,
-      ...(identity === undefined ? [] : [`${indent}contract  ${safeText(identity)}`]),
-      `${indent}required Git  ${safeText(refusal.requiredGit)}`,
+      ...targetRefusalLines(undefined, indent, identity, undefined),
     ];
   }
   if (refusal.kind === "checkout-not-followable") {
-    return checkoutNotFollowableLines(refusal);
+    return [
+      `${indent}reason  checkout not followable`,
+      ...targetRefusalLines(refusal.target, indent, identity, undefined),
+      `${indent}checkout  ${safeText(refusal.path)}`,
+      ...collectionLines("paths", refusal.paths, indent),
+    ];
   }
   if (refusal.kind === "target-workspace-unavailable") {
     return [
       `${indent}reason  target workspace unavailable`,
-      `${indent}contract  ${safeText(refusal.contractId)}`,
-      `${indent}detail  ${safeText(refusal.reason.replaceAll("-", " "))}`,
+      ...targetRefusalLines(target, indent, identity, words(refusal.reason)),
+    ];
+  }
+  if (refusal.kind === "target-contract-missing" || refusal.kind === "target-contract-terminal") {
+    return [
+      `${indent}reason  ${refusalWords(refusal.kind)}`,
+      ...targetRefusalLines(target, indent, identity, undefined),
     ];
   }
   const lines = [`${indent}reason  ${refusalWords(refusal.kind)}`];
@@ -218,10 +242,7 @@ export function renderRefusal(
   return draft === undefined ? output : `${output}\n${renderBindDraftReceipt(draft)}`;
 }
 
-export function renderConflictMaterialized(
-  result: IntegrationConflictMaterialized,
-  _context?: TextRenderContext,
-): string {
+export function renderConflictMaterialized(result: HandoffOutcome, _context?: TextRenderContext): string {
   const indent = "  ";
   return [
     "! integration-conflict-materialized",
@@ -231,8 +252,8 @@ export function renderConflictMaterialized(
     `${indent}saved  worktree bytes before projection`,
     `${indent}handoff base  ${shortGitId(result.handoffBase)}`,
     ...collectionLines("conflicts", result.conflictPaths, indent),
-    `${indent}workspace  ${safeText(result.workspace.path)}`,
-    `${indent}option  deliver  ${safeText(result.recovery.deliver)} · reads worktree bytes, not index`,
+    `${indent}workspace  ${safeText(result.worktreePath)}`,
+    `${indent}option  deliver  deliver --include-dirty · reads worktree bytes, not index`,
   ].join("\n");
 }
 

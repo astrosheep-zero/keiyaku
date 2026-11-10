@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { existsSync, readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 import { candidatePinRefFor, deliveryRefFor, withGitShim } from "./support/git.js";
-import { KeiyakuError, AuthorityCorruptionError, Repo, Kei, Keis } from "../src/index.js";
+import {
+  KeiyakuError,
+  AuthorityCorruptionError,
+  Repo,
+  Kei,
+  Keis,
+  classifyVerb,
+  deliveryPreviewOutcomeSchema,
+} from "../src/index.js";
 import { createKeiHandle } from "../src/library/kei.js";
+import { withOutcomeReceipt } from "../src/library/outcome.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 import { scopeForRepo } from "../src/library/repo.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
@@ -13,6 +22,34 @@ import { actorId, contractId } from "../src/core/facts/types.js";
 import { bind, commitCandidate, repositoryWithMain, present, accepted, document } from "./support/library-verbs.js";
 
 // The captured native owner uses this repository-local capability; no global/module monkeypatch.
+test("a frozen native KeiyakuError keeps its identity, category and cause while confirmed receipts merge", () => {
+  const cause = new TypeError("original frozen failure");
+  const admitted = { kind: "attestation" as const, requirement: "requirement:original", verdict: "satisfied" as const };
+  const effect = { kind: "worktree-created" as const, path: "/tmp/frozen-effect" };
+  const original = new KeiyakuError("internal", "frozen failure", {
+    cause,
+    outcome: { kind: "contract", contractId: contractId("kei/frozen-error"), admitted: [admitted], effects: [effect] },
+  });
+  Object.freeze(original);
+  const returned = withOutcomeReceipt(original, {
+    kind: "contract",
+    contractId: contractId("kei/frozen-error"),
+    effects: [effect, { kind: "worktree-removed", path: "/tmp/frozen-removal" }],
+    issues: [{ kind: "decode-channel-retirement", diagnostic: "frozen retirement" }],
+  });
+  assert.equal(returned, original);
+  assert.equal(returned.category, "internal");
+  assert.equal(returned.cause, cause);
+  assert.equal(returned.message, "frozen failure");
+  assert.deepEqual(returned.outcome, {
+    kind: "contract",
+    contractId: contractId("kei/frozen-error"),
+    admitted: [admitted],
+    effects: [effect, { kind: "worktree-removed", path: "/tmp/frozen-removal" }],
+    issues: [{ kind: "decode-channel-retirement", diagnostic: "frozen retirement" }],
+  });
+});
+
 test("native delivery propagates lower programming and corruption failures after confirmed publication", async () => {
   for (const original of [
     new TypeError("broken lower target observation"),
@@ -27,7 +64,7 @@ test("native delivery propagates lower programming and corruption failures after
         gates: [],
       }),
     );
-    const id = present(await bound.value.kei.state()).id;
+    const id = present(await bound.kei.state()).id;
     commitCandidate(repository);
     let armed = false;
     const base = scopeForRepo(repo);
@@ -46,11 +83,10 @@ test("native delivery propagates lower programming and corruption failures after
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, original instanceof AuthorityCorruptionError ? "authority-corruption" : "internal");
       assert.equal(error.cause, original);
-      assert.equal(error.outcome?.operation, "deliver");
-      assert.ok(error.outcome !== undefined && "facts" in error.outcome);
-      assert.ok(error.outcome.facts.some((fact) => fact.contract === id && fact.kind === "deliver"));
+      assert.ok(error.outcome?.kind === "contract");
+      assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "deliver"));
       assert.equal(
-        error.outcome.effects.some((effect) => effect.kind === "execution-stopped"),
+        (error.outcome.issues ?? []).some((effect) => effect.kind === "execution-stopped"),
         false,
       );
       return true;
@@ -86,12 +122,12 @@ test("native delivery never treats an aborted signal as proof that an independen
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "internal");
     assert.equal(error.cause, original);
-    assert.ok(error.outcome !== undefined && "facts" in error.outcome);
-    assert.ok(error.outcome.facts.some((fact) => fact.kind === "deliver"));
+    assert.ok(error.outcome?.kind === "contract");
+    assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "deliver"));
     return true;
   });
   assert.throws(
-    () => executionStop(contractId("kei/independent"), "verification", original, controller.signal),
+    () => executionStop(contractId("kei/independent"), original, controller.signal),
     (error) => error === original,
   );
 });
@@ -135,13 +171,13 @@ test("decode-channel teardown never replaces the original failure, including a t
   );
 });
 
-test("native delivery keeps claim and movement when the optional scope observation throws, without reading twice", async () => {
+test("native delivery keeps claim and movement when later observation throws, without reading twice", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
-  const id = present(await bound.value.kei.state()).id;
+  const id = present(await bound.kei.state()).id;
   commitCandidate(repository);
-  const original = new TypeError("broken optional diffstat observation");
+  const original = new TypeError("broken post-placement observation");
   const base = scopeForRepo(repo);
   let claimed = false;
   let armed = false;
@@ -172,10 +208,10 @@ test("native delivery keeps claim and movement when the optional scope observati
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, "internal");
       assert.equal(error.cause, original);
-      assert.ok(error.outcome?.operation === "deliver");
-      assert.ok(error.outcome.facts.some((fact) => fact.kind === "claimed"));
-      assert.ok(error.outcome.value?.completion?.integration);
-      assert.equal(error.outcome.value.completion.target, "refs/heads/main");
+      assert.ok(error.outcome?.kind === "contract");
+      assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "claimed"));
+      assert.ok(error.outcome.placement?.kind === "placed");
+      assert.equal(error.outcome.placement.target, "refs/heads/main");
       return true;
     },
   );
@@ -196,7 +232,7 @@ test("native review retains an earlier claimed sibling when a later continuation
         target: null,
         after: [primaryId],
       }),
-    ).value.kei;
+    ).kei;
   const left = await child("Earlier sibling");
   const right = await child("Later sibling");
   const childIds = [present(await left.state()).id, present(await right.state()).id].sort();
@@ -237,11 +273,11 @@ test("native review retains an earlier claimed sibling when a later continuation
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, "internal");
       assert.equal(error.cause, original);
-      assert.ok(error.outcome?.operation === "review");
-      assert.ok(error.outcome.facts.some((fact) => fact.contract === childIds[0] && fact.kind === "claimed"));
-      assert.deepEqual(error.outcome.value?.continuation?.claimed, [childIds[0]]);
+      assert.ok(error.outcome?.kind === "contract");
+      assert.ok(error.outcome.admitted?.some((fact) => fact.contractId === childIds[0] && fact.kind === "claimed"));
+      assert.deepEqual(error.outcome.continuation?.claimed, [childIds[0]]);
       assert.equal(
-        error.outcome.facts.some((fact) => fact.contract === childIds[1] && fact.kind === "claimed"),
+        error.outcome.admitted?.some((fact) => fact.contractId === childIds[1] && fact.kind === "claimed"),
         false,
       );
       return true;
@@ -259,8 +295,8 @@ test("a pre-admission custom caller abort keeps its exact reason and aborted cat
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "aborted");
     assert.equal(error.cause, reason);
-    assert.ok(error.outcome !== undefined && "facts" in error.outcome);
-    assert.deepEqual(error.outcome.facts, []);
+    assert.ok(error.outcome?.kind === "contract");
+    assert.equal(error.outcome.admitted, undefined);
     return true;
   });
 });
@@ -290,25 +326,27 @@ test("native bind and delivery JSON retain result data without process custody",
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
   const bindJson = JSON.parse(JSON.stringify(bound));
-  assert.deepEqual(bindJson.value.kei, { contract: bound.contract });
-  assert.deepEqual(bindJson.facts, bound.facts);
-  assert.deepEqual(bindJson.effects, bound.effects);
-  assert.deepEqual(bindJson.value.workspace, bound.value.workspace);
-  assert.deepEqual(Object.keys(bindJson.value).sort(), Object.keys(bound.value).sort());
-  assert.ok(bound.value.workspace?.kind === "worktree");
-  commitCandidate(repository, bound.value.workspace.path);
-  const delivered = accepted(await bound.value.kei.deliver());
+  assert.deepEqual(bindJson, {
+    kind: "accepted",
+    contractId: bound.contractId,
+    worktreePath: bound.worktreePath,
+    target: "refs/heads/main",
+  });
+  assert.ok(bound.worktreePath);
+  commitCandidate(repository, bound.worktreePath);
+  const delivered = accepted(await bound.kei.deliver());
   const json = JSON.parse(JSON.stringify(delivered));
-  assert.deepEqual(json.facts, delivered.facts);
-  assert.deepEqual(json.effects, delivered.effects);
-  assert.deepEqual(json.value.leading, delivered.value.leading);
-  assert.deepEqual(json.value.integration, delivered.value.integration);
-  assert.deepEqual(Object.keys(json.value).sort(), Object.keys(delivered.value).sort());
-  assert.ok((await delivered.value.diff())?.includes("candidate.txt"));
-  for (const mechanics of ["readDiff", "scope", "execution", "composition", "checkpoints"]) {
-    assert.equal(Object.hasOwn(json.value, mechanics), false);
-    assert.equal(Object.hasOwn(bindJson.value.kei, mechanics), false);
-  }
+  assert.deepEqual(json, {
+    kind: "accepted",
+    contractId: bound.contractId,
+    candidate: delivered.candidate,
+    integration: delivered.integration,
+    contentId: delivered.contentId,
+    placement: delivered.placement,
+  });
+  assert.equal(delivered.placement?.kind, "placed");
+  assert.equal(Object.hasOwn(bindJson, "kei"), false);
+  assert.equal(Object.hasOwn(json, "diff"), false);
 });
 
 test("native delivery retains completed Debt settlement before terminal cleanup fails", async () => {
@@ -322,7 +360,7 @@ test("native delivery retains completed Debt settlement before terminal cleanup 
   repository.run(["add", ".keiyaku/debts"]);
   repository.run(["commit", "--quiet", "-m", "Debt authority"]);
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), debt: debt.value.id, gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), debt: debt.id, gates: [] }));
   const original = new TypeError("terminal cleanup program failure");
   const base = scopeForRepo(repo);
   let armed = false;
@@ -333,28 +371,25 @@ test("native delivery retains completed Debt settlement before terminal cleanup 
       return base.gitPath;
     },
     onPrivateStateSeatClose: () => {
-      if (/^state: done$/mu.test(readFileSync(`${world}/.keiyaku/debts/${debt.value.id.slice(5)}.md`, "utf8")))
-        armed = true;
+      if (/^state: done$/mu.test(readFileSync(`${world}/.keiyaku/debts/${debt.id.slice(5)}.md`, "utf8"))) armed = true;
     },
   };
-  const native = createKeiHandle(bound.contract, scope, captureLocalContractComposition());
+  const native = createKeiHandle(bound.contractId, scope, captureLocalContractComposition());
   await assert.rejects(native.deliver(), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.cause, original);
     assert.equal(error.category, "internal");
-    assert.ok(error.outcome?.operation === "deliver");
-    assert.ok(error.outcome.facts.some((fact) => fact.kind === "claimed"));
-    assert.ok(
-      error.outcome.effects.some(
-        (effect) =>
-          effect.kind === "settlement-action" &&
-          effect.action.kind === "debt" &&
-          effect.action.debtId === debt.value.id,
-      ),
+    assert.ok(error.outcome?.kind === "contract");
+    assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "claimed"));
+    assert.deepEqual(
+      error.outcome.effects?.filter((effect) => effect.kind === "debt-settled"),
+      [{ kind: "debt-settled", debtId: debt.id }],
     );
     return true;
   });
-  assert.equal((await Debts.of(world).debt({ id: debt.value.id }).read())?.debt.state, "done");
+  const settledRead = await Debts.of(world).debt({ id: debt.id }).read();
+  assert.equal(settledRead.kind, "present");
+  if (settledRead.kind === "present") assert.equal(settledRead.state, "done");
 });
 
 test("fork source object missing from the requested map is a broken observation, not unavailable", async () => {
@@ -379,7 +414,7 @@ test("fork source object missing from the requested map is a broken observation,
   });
 });
 
-test("native Contract reads use null for lawful absence while corrupt fork terms remain exceptional", async () => {
+test("native Contract reads tag lawful absence while corrupt fork terms remain exceptional", async () => {
   const { decodeJournal, encodeEntry } = await import("../src/core/facts/codec.js");
   const { contractJournalPath } = await import("../src/git/identity.js");
   const { readGitPaths, updateGitTree, writeBlob, writeCommit, updateRefsAtomically, GIT_REF } = await import(
@@ -389,8 +424,8 @@ test("native Contract reads use null for lawful absence while corrupt fork terms
   const repo = await Repo.at({ path: repository.path });
   const missing = Keis.of(repo).kei({ id: contractId("kei/missing") });
   assert.equal(await missing.state(), null);
-  assert.equal(await missing.history(), null);
-  assert.equal(await missing.guidance(), null);
+  assert.deepEqual(await missing.history(), { kind: "contract-missing", contractId: contractId("kei/missing") });
+  assert.deepEqual(await missing.guidance(), { kind: "missing" });
   assert.equal(await missing.delivery(), null);
   const source = await bind(repository);
   const id = present(await source.state()).id;
@@ -448,25 +483,25 @@ test("native preview preserves partial observation on unexpected target-lag fail
       return base.gitPath;
     },
   };
-  const native = createKeiHandle(bound.contract, scope, captureLocalContractComposition());
-  const witnessedHead = present(await bound.value.kei.state()).head;
+  const native = createKeiHandle(bound.contractId, scope, captureLocalContractComposition());
+  const witnessedHead = present(await bound.kei.state()).head;
   await assert.rejects(native.previewDelivery(), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "internal");
     assert.equal(error.cause, original);
-    assert.ok(error.outcome?.operation === "deliver-preview");
-    assert.equal(error.outcome.contract, bound.contract);
-    assert.equal(error.outcome.head, undefined, "preview reports no admission head on failure");
-    assert.deepEqual(error.outcome.facts, []);
-    assert.deepEqual(error.outcome.effects, []);
-    assert.equal(error.outcome.value?.candidate?.kind, "ready");
-    assert.equal(error.outcome.value?.verification?.kind, "requirements");
-    assert.equal(error.outcome.value?.target?.kind, "placeable");
-    assert.equal(error.outcome.value?.targetLag, undefined);
+    assert.ok(error.outcome?.kind === "contract");
+    assert.equal(error.outcome.contractId, bound.contractId);
+    assert.equal(error.outcome.admitted, undefined);
+    assert.deepEqual(error.outcome.issues ?? [], []);
+    assert.ok(error.outcome.preview?.kind === "ready");
+    assert.ok(error.outcome.preview.candidate);
+    assert.ok(error.outcome.preview.unmetGates?.length);
+    assert.equal(error.outcome.preview.target?.kind, "placeable");
+    assert.equal(error.outcome.preview.target?.behind, undefined);
     return true;
   });
   assert.equal(injected, 1);
-  assert.equal(present(await bound.value.kei.state()).head, witnessedHead);
+  assert.equal(present(await bound.kei.state()).head, witnessedHead);
 });
 
 test("native bind retains its complete accepted value when its owned decode channel has an operational close failure", async () => {
@@ -484,15 +519,62 @@ test("native bind retains its complete accepted value when its owned decode chan
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
       const result = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
-      assert.ok(result.value.kei instanceof Kei);
-      assert.ok(result.value.workspace?.kind === "worktree");
-      assert.ok(result.facts.some((fact) => fact.kind === "bind" && fact.contract === result.contract));
-      assert.ok(
-        result.effects.some((effect) => effect.kind === "cleanup" && effect.issue.kind === "decode-channel-retirement"),
-      );
-      assert.deepEqual(result.pending, [{ surface: "cleanup", required: false }]);
+      assert.ok(result.kei instanceof Kei);
+      assert.ok(result.worktreePath);
+      const healthy = Keis.of(await Repo.at({ path: repository.path })).kei({ id: result.contractId });
+      assert.equal(present(await healthy.state()).id, result.contractId);
+      assert.ok((result.issues ?? []).some((effect) => effect.kind === "decode-channel-retirement"));
+      const preview = await result.kei.previewDelivery();
+      assert.ok(preview.kind === "ready");
+      assert.ok(preview.issues?.some((issue) => issue.kind === "decode-channel-retirement"));
+      const previewWire = JSON.parse(JSON.stringify(preview));
+      assert.deepEqual(deliveryPreviewOutcomeSchema.parse(previewWire), previewWire);
     },
   );
+});
+
+test("a no-admission cleanup failure keeps its native cause without claiming delivery", async () => {
+  const repository = repositoryWithMain();
+  const bound = accepted(
+    await Keis.of(await Repo.at({ path: repository.path })).bind({ markdown: document(), gates: ["reviewed"] }),
+  );
+  const id = bound.contractId;
+  assert.ok(bound.worktreePath);
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(join(bound.worktreePath, "dirty.txt"), "unadmitted bytes\n");
+  await withGitShim(
+    [
+      'if [ "$1 $2" = "cat-file --batch" ]; then',
+      '  "$KEIYAKU_REAL_GIT" "$@"',
+      "  exit 73",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const native = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id });
+      await assert.rejects(native.deliver(), (error: unknown) => {
+        assert.ok(error instanceof KeiyakuError);
+        assert.equal(error.category, "internal");
+        assert.ok(error.cause instanceof Error);
+        assert.equal(error.cause.name, "GitPlumbingError");
+        assert.match(error.cause.message, /did not close cleanly/u);
+        assert.ok(error.outcome?.kind === "contract");
+        assert.equal(error.outcome.contractId, id);
+        assert.equal(error.outcome.admitted, undefined);
+        const cleanup = error.outcome.issues?.filter((issue) => issue.kind === "decode-channel-retirement");
+        assert.equal(cleanup?.length, 1);
+        assert.ok(cleanup?.[0]?.kind === "decode-channel-retirement");
+        assert.match(cleanup[0].diagnostic, /did not close cleanly/u);
+        assert.equal(classifyVerb("deliver", { contract: id }, { kind: "threw", error }), "failed");
+        return true;
+      });
+    },
+  );
+  const state = present(await bound.kei.state());
+  assert.equal(state.delivery, null);
+  assert.equal(state.terminal, null);
+  assert.equal(readFileSync(join(bound.worktreePath, "dirty.txt"), "utf8"), "unadmitted bytes\n");
 });
 
 test("native delivery retains an earlier completed checkout follow when a later arm throws", async () => {
@@ -503,8 +585,8 @@ test("native delivery retains an earlier completed checkout follow when a later 
   try {
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
-    assert.ok(bound.value.workspace?.kind === "worktree");
-    commitCandidate(repository, bound.value.workspace.path);
+    assert.ok(bound.worktreePath);
+    commitCandidate(repository, bound.worktreePath);
     const base = scopeForRepo(repo);
     const original = new TypeError("later checkout program failure");
     let follows = 0;
@@ -515,30 +597,28 @@ test("native delivery retains an earlier completed checkout follow when a later 
         return base.gitPath;
       },
     };
-    const native = createKeiHandle(
-      bound.contract,
-      scope,
-      captureLocalContractComposition(),
-    );
+    const native = createKeiHandle(bound.contractId, scope, captureLocalContractComposition());
     await assert.rejects(native.deliver(), (error: unknown) => {
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.cause, original);
       assert.equal(error.category, "internal");
-      assert.ok(error.outcome?.operation === "deliver");
-      assert.ok(error.outcome.facts.some((fact) => fact.kind === "claimed"));
-      const followed = error.outcome.effects.flatMap((effect) =>
-        effect.kind === "reconciliation-effect" && effect.effect.kind === "target-checkout" ? [effect.effect] : [],
-      );
+      assert.ok(error.outcome?.kind === "contract");
+      assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "claimed"));
+      const followed = error.outcome.effects?.filter((movement) => movement.kind === "target-checkout");
       assert.deepEqual(followed, [
         {
           kind: "target-checkout",
           path: [repository.path, sibling].sort()[0],
           target: "refs/heads/main",
-          action: "followed",
         },
       ]);
+      assert.ok(error.outcome.placement?.kind === "placed");
       assert.equal(
-        error.outcome.effects.some((effect) => effect.kind === "checkout-retained"),
+        repository.run(["-C", followed![0]!.path, "rev-parse", "HEAD"]).trim(),
+        error.outcome.placement.integration,
+      );
+      assert.equal(
+        (error.outcome.issues ?? []).some((effect) => effect.kind === "target-checkout-retained"),
         false,
       );
       return true;
@@ -570,37 +650,30 @@ test("native terminal removal survives a subsequent malformed ref read, includin
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
       const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
-      assert.ok(bound.value.workspace?.kind === "worktree");
-      const path = bound.value.workspace.path;
+      assert.ok(bound.worktreePath);
+      const path = bound.worktreePath;
       commitCandidate(repository, path);
-      await assert.rejects(bound.value.kei.deliver(), (error: unknown) => {
+      await assert.rejects(bound.kei.deliver(), (error: unknown) => {
         assert.ok(error instanceof KeiyakuError);
         assert.equal(error.category, "internal");
         assert.ok(error.cause instanceof Error);
         assert.equal(error.cause.name, "Error");
         assert.match(error.cause.message, /is not a Git object ID: broken-post-removal-object-identity/u);
         assert.equal(error.message, error.cause.message);
-        assert.ok(error.outcome?.operation === "deliver");
-        assert.equal(error.outcome.contract, bound.contract);
-        assert.ok(error.outcome.facts.some((fact) => fact.kind === "deliver"));
-        assert.ok(error.outcome.facts.some((fact) => fact.kind === "claimed"));
-        const removals = error.outcome.effects.flatMap((effect) =>
-          effect.kind === "reconciliation-effect" &&
-          effect.effect.kind === "worktree" &&
-          effect.effect.action === "removed"
-            ? [effect.effect]
-            : [],
-        );
-        assert.deepEqual(removals, [{ kind: "worktree", path, action: "removed" }]);
+        assert.ok(error.outcome?.kind === "contract");
+        assert.equal(error.outcome.contractId, bound.contractId);
+        assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "deliver"));
+        assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "claimed"));
         assert.deepEqual(
-          error.outcome.effects.filter((effect) => effect.kind === "worktree-retired"),
-          [{ kind: "worktree-retired", contract: bound.contract, name: basename(path) }],
+          error.outcome.effects?.filter((effect) => effect.kind === "worktree-removed"),
+          [{ kind: "worktree-removed", path }],
         );
+        assert.ok(error.outcome.placement?.kind === "placed");
         return true;
       });
       assert.equal(existsSync(marker), true);
       assert.equal(existsSync(path), false);
-      for (const ref of [deliveryRefFor(bound.contract), candidatePinRefFor(bound.contract)])
+      for (const ref of [deliveryRefFor(bound.contractId), candidatePinRefFor(bound.contractId)])
         assert.match(repository.run(["rev-parse", "--verify", ref]).trim(), /^[0-9a-f]{40}$/u);
     },
   );
@@ -628,7 +701,7 @@ test("native delivery independently bounds stalled EOF retirement and proves the
     { KEIYAKU_EOF_MARKER: marker },
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      const native = Keis.of(repo).kei({ id: bound.contract });
+      const native = Keis.of(repo).kei({ id: bound.contractId });
       const controller = new AbortController();
       let watchdogFired = false;
       let finishedAt: number | undefined;
@@ -653,13 +726,10 @@ test("native delivery independently bounds stalled EOF retirement and proves the
         assert.equal(watchdogFired, false);
         assert.equal(controller.signal.aborted, false);
         assert.ok(finishedAt !== undefined && performance.now() - finishedAt < 10_000);
-        const cleanup = result.effects.filter(
-          (effect) => effect.kind === "cleanup" && effect.issue.kind === "decode-channel-retirement",
-        );
+        const cleanup = (result.issues ?? []).filter((effect) => effect.kind === "decode-channel-retirement");
         assert.equal(cleanup.length, 1);
-        assert.ok(cleanup[0]?.kind === "cleanup" && cleanup[0].issue.kind === "decode-channel-retirement");
-        assert.match(cleanup[0].issue.diagnostic, /retirement exceeded its EOF close bound/u);
-        assert.ok(result.pending.some((pending) => pending.surface === "cleanup" && !pending.required));
+        assert.ok(cleanup[0]?.kind === "decode-channel-retirement");
+        assert.match(cleanup[0].diagnostic, /retirement exceeded its EOF close bound/u);
         const pid = Number(readFileSync(marker, "utf8").trim());
         assert.ok(Number.isSafeInteger(pid) && pid > 0);
         assert.throws(

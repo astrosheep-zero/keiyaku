@@ -11,6 +11,7 @@ import { resolveInvocationCoordinates } from "../src/cli/coordinates.js";
 import { parseArgv as parseInvocation } from "../src/cli/parse.js";
 import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
 import { Keis, Repo } from "../src/index.js";
+import { contractId } from "../src/core/facts/types.js";
 import { World } from "../src/world.js";
 import { registeredWorktrees, repositoryAt } from "../src/git/repository.js";
 
@@ -95,7 +96,7 @@ test("CLI accepts native repository coordinate spellings through managed worktre
   const coordinates = process.platform === "win32" ? [path, path.replaceAll("\\", "/")] : [path];
 
   for (const [index, coordinate] of coordinates.entries()) {
-    const result = await cliJson<Readonly<{ kind: string; contract?: string }>>(
+    const result = await cliJson<Readonly<{ kind: string; contractId?: string }>>(
       ["-C", coordinate, "--repo", ".", "bind", "-"],
       {
         cwd: process.cwd(),
@@ -106,10 +107,14 @@ test("CLI accepts native repository coordinate spellings through managed worktre
     assert.equal(result.exit, 0);
     assert.equal(result.value.kind, "accepted");
     if (result.value.kind !== "accepted") continue;
-    const row = (await Keis.of(await Repo.at({ path })).list({  })).rows.find(
-      (candidate) => candidate.id === result.value.contract,
-    );
-    assert.notEqual(row?.worktreePath, null);
-    if (row?.worktreePath !== null && row?.worktreePath !== undefined) assert.equal(existsSync(row.worktreePath), true);
+    assert.ok(result.value.contractId !== undefined);
+    const observed = await Keis.of(await Repo.at({ path })).observe({
+      id: contractId(result.value.contractId),
+    });
+    assert.equal(observed.kind, "present");
+    if (observed.kind !== "present") continue;
+    const workspace = observed.row.workspace;
+    assert.ok(workspace.kind !== "unappointed" && "path" in workspace);
+    assert.equal(existsSync(workspace.path), true);
   }
 });

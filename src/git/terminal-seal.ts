@@ -1,17 +1,14 @@
-import { mintedSnapshotInputSchema } from "./identity.js";
 import { z } from "zod";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
 import type { GitOid } from "./repository.js";
-import { executeGit, type GitRepository } from "./process.js";
+import { type GitRepository } from "./process.js";
 import { captureWorkspaceTree } from "./workspace.js";
 
 export const unsealedBytesSchema = z
   .object({
     kind: z.literal("unsealed-bytes"),
     path: z.string().refine((value) => value.trim() !== ""),
-    paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-    head: mintedSnapshotInputSchema.exactOptional(),
   })
   .strict()
   .readonly();
@@ -98,39 +95,15 @@ export function terminalSealExpectations(
   };
 }
 
-async function changedPaths(repository: GitRepository, left: string, right: string): Promise<readonly string[]> {
-  const fields = (await executeGit(repository, ["diff", "--name-only", "-z", left, right]))
-    .toString("utf8")
-    .split("\0");
-  if (fields.at(-1) !== "") throw new Error("Git tree diff paths are not NUL terminated");
-  return fields.slice(0, -1).sort();
-}
-
 async function unsealedWorkspaceBytes(
-  repository: GitRepository,
   path: string,
   expected: TerminalSealExpectations,
   workspace: WorkspaceTree,
 ): Promise<UnsealedBytes | null> {
   const headIsSealed = expected.heads.includes(workspace.head);
-  if (workspace.changes.submodules.length > 0) {
-    return {
-      kind: "unsealed-bytes",
-      path,
-      paths: workspace.changes.submodules,
-      ...(headIsSealed ? {} : { head: workspace.head }),
-    };
-  }
+  if (workspace.changes.submodules.length > 0) return { kind: "unsealed-bytes", path };
   if (headIsSealed && expected.trees.includes(workspace.tree)) return null;
-  const alternatives: (readonly string[])[] = [];
-  for (const tree of expected.trees) alternatives.push(await changedPaths(repository, tree, workspace.tree));
-  alternatives.sort((left, right) => left.length - right.length || left.join("\0").localeCompare(right.join("\0")));
-  return {
-    kind: "unsealed-bytes",
-    path,
-    paths: alternatives[0] ?? [],
-    ...(headIsSealed ? {} : { head: workspace.head }),
-  };
+  return { kind: "unsealed-bytes", path };
 }
 
 export async function observeTerminalWorkspace(
@@ -145,6 +118,6 @@ export async function observeTerminalWorkspace(
       head: captured.head,
       submodules: captured.changes.submodules,
     },
-    unsealed: await unsealedWorkspaceBytes(repository, path, expected, captured),
+    unsealed: await unsealedWorkspaceBytes(path, expected, captured),
   };
 }

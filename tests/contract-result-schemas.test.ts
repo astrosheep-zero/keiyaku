@@ -3,10 +3,10 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import type { z } from "zod";
-import { Keis, Repo, type Kei, type ExecutionObservation } from "../src/index.js";
+import { Keis, Repo, type Kei, type BindResult, type ExecutionObservation } from "../src/index.js";
 import {
   bindOutcomeSchema,
-  contractListSchema,
+  contractCatalogueSchema,
   contractObservationSchema,
   contractResolutionSchema,
   contractWaitResultSchema,
@@ -33,8 +33,10 @@ import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 
 type Result<T extends (...args: never[]) => unknown> = Wire<Awaited<ReturnType<T>>>;
-export type Bind = Assert<Exact<z.output<typeof bindOutcomeSchema>, Result<Keis["bind"]>>>;
-export type List = Assert<Exact<z.output<typeof contractListSchema>, Result<Keis["list"]>>>;
+// The native bind capability is deliberately nonenumerable, unlike ordinary data members.
+type BindWire = Wire<Omit<Extract<BindResult, { kind: "accepted" }>, "kei"> | Exclude<BindResult, { kind: "accepted" }>>;
+export type Bind = Assert<Exact<z.output<typeof bindOutcomeSchema>, BindWire>>;
+export type List = Assert<Exact<z.output<typeof contractCatalogueSchema>, Result<Keis["list"]>>>;
 export type Observe = Assert<Exact<z.output<typeof contractObservationSchema>, Result<Keis["observe"]>>>;
 export type Resolve = Assert<Exact<z.output<typeof contractResolutionSchema>, Result<Keis["resolve"]>>>;
 export type WaitMany = Assert<Exact<z.output<typeof contractWaitResultSchema>, Result<Keis["wait"]>>>;
@@ -63,9 +65,9 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
     bindOutcomeSchema,
     await contracts.bind({ markdown: document(), after: [contractId("kei/missing")], target: null }),
   );
-  const kei = bound.value.kei;
+  const kei = bound.kei;
   const state = present(await kei.state());
-  assertWireRoundTrip(contractListSchema, await contracts.list());
+  assertWireRoundTrip(contractCatalogueSchema, await contracts.list());
   assertWireRoundTrip(contractObservationSchema, await contracts.observe({ id: state.id }));
   const missingId = contractId("kei/missing");
   const missing = contracts.kei({ id: missingId });
@@ -77,7 +79,8 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
   assertWireRoundTrip(guidanceSchema, await missing.guidance());
   assertWireRoundTrip(deliverySchema, await missing.delivery());
   const missingWait = await missing.wait({ timeoutMs: 0 });
-  assert.equal(missingWait.kind, "missing");
+  assert.equal(missingWait.kind, "contract");
+  assert.deepEqual(missingWait.contracts, [{ id: missingId, presence: "missing" }]);
   assertWireRoundTrip(contractWaitResultSchema, missingWait);
   const dispatch = await publishDispatch({
     repository: await repositoryAt(repository.path),
@@ -85,10 +88,17 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
     contractId: state.id,
   });
   assert.equal(dispatch.kind, "dispatched");
-  const history = present(await kei.history());
-  assert.ok(history.events.some((event) => event.source === "journal"));
-  assert.ok(history.events.some((event) => event.source === "dispatch"));
+  const history = await kei.history();
+  assert.ok(history.kind === "contract");
+  assert.ok(history.events.some((event) => event.kind === "bind"));
+  assert.ok(history.events.some((event) => event.kind === "dispatch"));
   assertWireRoundTrip(contractHistorySchema, history);
+  const fullHistory = await kei.history({ full: true });
+  assert.ok(fullHistory.kind === "contract");
+  const historicalBind = fullHistory.events.find((event) => event.kind === "bind");
+  assert.ok(historicalBind?.kind === "bind");
+  assert.equal(historicalBind.document, state.terms.document.bytes);
+  assertWireRoundTrip(contractHistorySchema, fullHistory);
   assertWireRoundTrip(contractResolutionSchema, await contracts.resolve({ selector: state.id }));
   assertWireRoundTrip(contractResolutionSchema, await contracts.resolve({ selector: "not-found" }));
   assertWireRoundTrip(contractStateSchema, state);
@@ -110,7 +120,8 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
   assert.equal(abandoned.kind, "accepted");
   assertWireRoundTrip(abandonOutcomeSchema, abandoned);
   const terminal = await kei.wait({ timeoutMs: 0 });
-  assert.equal(terminal.kind, "terminal");
+  assert.equal(terminal.kind, "contract");
+  assert.equal(terminal.contracts[0]?.terminal, "abandoned");
   assertWireRoundTrip(contractWaitResultSchema, terminal);
   const abandonedAgain = await kei.abandon();
   assert.equal(abandonedAgain.kind, "refused");
@@ -126,7 +137,7 @@ test("delivery, verification, review and preview carry their native wire results
   const repository = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: repository.path }));
   const bound = accepted(await contracts.bind({ markdown: document("exit 0"), target: null, gates: ["verified"] }));
-  const kei = bound.value.kei;
+  const kei = bound.kei;
   const state = present(await kei.state());
   const workspace = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
   writeFileSync(join(workspace, "candidate.txt"), "candidate\n");
@@ -140,7 +151,7 @@ test("delivery, verification, review and preview carry their native wire results
   };
 
   const preview = await kei.previewDelivery(undefined, options);
-  assert.equal(preview.kind, "accepted");
+  assert.equal(preview.kind, "ready");
   assertWireRoundTrip(deliveryPreviewOutcomeSchema, preview);
   const review = await kei.review({ verdict: "satisfied", summary: "Schema review passed" }, options);
   assert.equal(review.kind, "accepted");

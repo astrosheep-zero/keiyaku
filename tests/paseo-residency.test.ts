@@ -13,7 +13,7 @@ import type { History, Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 import type { AkumaTransport } from "../plugins/paseo/plugin/server/transport.js";
 
 const at = "2026-10-20T00:00:00.000Z";
-const turn: Row = { kind: "turn", sequence: 1, turnSequence: 1, at };
+const turn: Row = { kind: "turn", sequence: 1, bodySequence: 1, at };
 const answer: Row = { kind: "outcome", sequence: 2, turnSequence: 1, at, outcome: { kind: "answered", answer: "done" } };
 const history = (rows: Row[]): History => ({ rows, omitted: 0, hasEarlier: false, hasLater: false,
   historyLost: false, lowestRetained: rows[0]?.sequence ?? null, highest: rows.at(-1)?.sequence ?? 0 });

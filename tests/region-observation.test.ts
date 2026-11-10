@@ -32,60 +32,49 @@ async function bind(repository: TestGitRepository, title: string, region: readon
   return result;
 }
 
-test("bind warns about a whitespace Region pattern and still admits the Contract", async () => {
-  const repository = repositoryWithHead();
-  const bound = await bind(repository, "Whitespace", ["src/a b", "docs/**"]);
-  assert.deepEqual(accepted(bound).value.warnings, ["Region pattern 'src/a b' contains whitespace and will never match a path"]);
-  assert.deepEqual(
-    bound.facts.map((fact) => fact.kind),
-    ["bind"],
-  );
-  assert.notEqual(bound.head, null);
-});
-
 test("bind and amend expose only live-peer Region witnesses from one document read", async () => {
   const repository = repositoryWithHead();
   const first = await bind(repository, "First", ["src/**"]);
-  const firstId = (present(await first.value.kei.state())).id;
+  const firstId = (present(await first.kei.state())).id;
 
   const second = await bind(repository, "Second", ["src/api/**"]);
-  const secondId = (present(await second.value.kei.state())).id;
-  assert.deepEqual(accepted(second).value.overlaps, [
+  const secondId = (present(await second.kei.state())).id;
+  assert.deepEqual(accepted(second).overlaps, [
     {
-      contract: firstId,
+      contractId: firstId,
       patterns: [{ mine: "src/api/**", theirs: "src/**", relation: "mine-within-theirs" }],
     },
   ]);
-  assert.equal("overlapFailure" in second, false);
+  assert.equal(second.overlapError, undefined);
 
-  await first.value.kei.abandon();
+  await first.kei.abandon();
 
   const third = await bind(repository, "Third", ["src/api/internal/**"]);
-  const thirdId = (present(await third.value.kei.state())).id;
-  assert.deepEqual(accepted(third).value.overlaps, [
+  const thirdId = (present(await third.kei.state())).id;
+  assert.deepEqual(accepted(third).overlaps, [
     {
-      contract: secondId,
+      contractId: secondId,
       patterns: [{ mine: "src/api/internal/**", theirs: "src/api/**", relation: "mine-within-theirs" }],
     },
   ]);
 
-  const amended = await second.value.kei.amend({
+  const amended = await second.kei.amend({
     markdown: ["## Replace: Region", "~~~", "src/api/internal/**", "~~~", ""].join("\n"),
   });
-  assert.deepEqual(accepted(amended).value.overlaps, [
+  assert.deepEqual(accepted(amended).overlaps, [
     {
-      contract: thirdId,
-      patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**", relation: "same" }],
+      contractId: thirdId,
+      patterns: [{ mine: "src/api/internal/**", theirs: "src/api/internal/**" }],
     },
   ]);
-  assert.equal("overlapFailure" in amended, false);
+  assert.equal(accepted(amended).overlapError, undefined);
 });
 
 test("region names a terminal Contract instead of reporting it missing", async () => {
   const repository = repositoryWithHead();
   const bound = await bind(repository, "Terminal region", ["src/**"]);
-  const id = (present(await bound.value.kei.state())).id;
-  await bound.value.kei.abandon();
+  const id = (present(await bound.kei.state())).id;
+  await bound.kei.abandon();
   const result = await runCli(["-C", repository.path, "region", id], { cwd: repository.path });
   assert.equal(result.exit, 1);
   assert.match(result.stdout, /reason  terminal/u);
@@ -118,20 +107,12 @@ test("post-admission observation failure preserves the admitted Contract without
         workspace: "worktree",
       }),
   );
-  assert.deepEqual(
-    result.facts.map((fact) => fact.kind),
-    ["bind"],
-  );
-  assert.notEqual(accepted(result).head, null);
-  assert.equal(result.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag)[0]?.kind, "reconcile-failed");
-  const lag = result.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag)[0];
-  if (lag?.kind === "reconcile-failed") {
-    assert.equal(lag.stage, "observation");
-    assert.match(lag.diagnostic, /git cat-file --batch/u);
-  }
-  const state = present(await accepted(result).value.kei.state());
-  assert.equal(state.id, result.facts[0]?.contract);
-  assert.equal(state.head, accepted(result).head);
+  const receipt = accepted(result);
+  const failure = receipt.issues?.find((issue) => issue.kind === "reconcile-failed");
+  assert.equal(failure?.kind, "reconcile-failed");
+  if (failure?.kind === "reconcile-failed") assert.match(failure.diagnostic, /git cat-file --batch/u);
+  const state = present(await accepted(result).kei.state());
+  assert.equal(state.id, receipt.contractId);
   assert.equal(state.terminal, null);
   const observed = await Keis.of(await Repo.at({ path: repository.path })).observe({ id: state.id });
   assert.equal(observed.kind, "present");

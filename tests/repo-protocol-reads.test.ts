@@ -22,18 +22,15 @@ import { encodeEntry } from "../src/core/facts/codec.js";
 import { contractJournalPath, contractJournalPaths } from "../src/git/identity.js";
 import { bindOperation } from "../src/protocol/bind.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
-import { contractObservationOperation, contractsOperation, scopeOperation } from "../src/protocol/operations.js";
+import {
+  contractCatalogueOperation,
+  contractObservationOperation,
+  contractsOperation,
+  scopeOperation,
+} from "../src/protocol/operations.js";
 import { changeId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
 import { renderContractCatalogue } from "../src/cli/render/catalog.js";
 import { protocolContractId } from "./support/git.js";
-
-function firstJournalAt(repository: TestGitRepository, id: ContractId): string {
-  const path = contractJournalPath(id, "active");
-  const first = JSON.parse(repository.run(["show", `refs/heads/keiyaku-state:${path}`]).split("\n", 1)[0]!) as {
-    at: string;
-  };
-  return first.at;
-}
 
 function terms(title: string, after: readonly ContractId[] = []) {
   const document = decodeContractDocument(
@@ -85,7 +82,6 @@ test("public Contract rows select the source entry for every phase", async () =>
     abandoned: await bind(repository, "Phase abandoned", "worktree"),
   };
   const times = {
-    fresh: firstJournalAt(repository, ids.fresh),
     delivered: "2026-08-12T00:02:00.000Z",
     claimed: "2026-08-12T00:03:00.000Z",
     abandoned: "2026-08-12T00:04:00.000Z",
@@ -159,14 +155,14 @@ test("public Contract rows select the source entry for every phase", async () =>
   repository.run(["update-ref", "refs/heads/keiyaku-state", commit, before.commit]);
 
   const expected = [
-    [ids.fresh, "bound", times.fresh],
-    [ids.bound, "bound", firstJournalAt(repository, ids.bound)],
-    [ids.delivered, "bound", times.delivered],
-    [ids.claimed, "claimed", times.claimed],
-    [ids.abandoned, "abandoned", times.abandoned],
+    [ids.fresh, "bound"],
+    [ids.bound, "bound"],
+    [ids.delivered, "bound"],
+    [ids.claimed, "claimed"],
+    [ids.abandoned, "abandoned"],
   ] as const;
   const scope = await scopeOperation({ coordinate: repository.path });
-  for (const [id, phase, phaseAt] of expected) {
+  for (const [id, phase] of expected) {
     const observed = await withGitDecodeChannel(scope, (channel) =>
       contractObservationOperation({
         scope,
@@ -177,7 +173,6 @@ test("public Contract rows select the source entry for every phase", async () =>
     assert.equal(observed.kind, "present");
     if (observed.kind !== "present") continue;
     assert.equal(observed.row.phase, phase);
-    assert.equal(observed.row.phaseAt, phaseAt);
   }
   const board = await withGitDecodeChannel(scope, (channel) =>
     contractsOperation({
@@ -188,7 +183,10 @@ test("public Contract rows select the source entry for every phase", async () =>
   const delivered = board.rows.find((row) => row.id === ids.delivered);
   assert.equal(delivered?.phase, "bound");
   assert.equal(JSON.parse(JSON.stringify(delivered)).phase, "bound");
-  const catalog = renderContractCatalogue({ ...board, hasMore: false });
+  const catalogue = await withGitDecodeChannel(scope, (channel) =>
+    contractCatalogueOperation({ scope, channel }),
+  );
+  const catalog = renderContractCatalogue(catalogue);
   assert.match(catalog, new RegExp(`${ids.delivered} · [^\\n]+ · Phase delivered`, "u"));
 });
 
@@ -292,10 +290,9 @@ test("Contract boards preserve endpoint kinds and lexical active reverse depende
   );
   const row = board.rows.find((candidate) => candidate.id === dependent);
   assert.deepEqual(row?.after, [
-    { contractId: claimed, endpoint: { kind: "claimed" } },
-    { contractId: active, endpoint: { kind: "active", phase: "bound" } },
-    { contractId: abandoned, endpoint: { kind: "abandoned" } },
-    { contractId: missing, endpoint: { kind: "missing" } },
+    { contractId: active, state: "active" },
+    { contractId: abandoned, state: "abandoned" },
+    { contractId: missing, state: "missing" },
   ]);
   assert.deepEqual(board.rows.find((candidate) => candidate.id === active)?.dependents, [
     { contractId: alpha, phase: "bound" },
@@ -318,7 +315,8 @@ test("Contract boards preserve endpoint kinds and lexical active reverse depende
   );
   assert.equal(targeted.kind, "present");
   if (targeted.kind === "present") {
-    assert.deepEqual(targeted.row, { ...board.rows.find((candidate) => candidate.id === active), dependents: [] });
+    const { dependents: _dependents, ...detail } = board.rows.find((candidate) => candidate.id === active)!;
+    assert.deepEqual(targeted.row, detail);
   }
 });
 
@@ -340,8 +338,9 @@ test("repo reconcile leaves a refused foreign worktree untouched until recovery 
     async (channel) =>
       await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
   );
-  assert.ok(refused.kind === "completed", 'expected refused.kind = "completed"');
-  assert.equal(refused.contracts[0]?.report.lag[0]?.kind, "reconcile-failed");
+  assert.ok(refused.kind === "world");
+  const issue = refused.contracts?.[0]?.issues?.[0];
+  assert.equal(issue?.kind, "reconcile-failed");
   assert.equal(readFileSync(guidance, "utf8"), foreignBytes);
   assert.equal(readFileSync(join(path, "foreign.txt"), "utf8"), "foreign bytes\n");
   assert.equal(existsSync(join(path, ".agents")), false);
@@ -353,8 +352,8 @@ test("repo reconcile leaves a refused foreign worktree untouched until recovery 
     async (channel) =>
       await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
   );
-  assert.ok(recovered.kind === "completed", 'expected recovered.kind = "completed"');
-  assert.deepEqual(recovered.contracts[0]?.report.lag, []);
+  assert.ok(recovered.kind === "world");
+  assert.equal(recovered.contracts?.[0]?.issues, undefined);
   assert.match(readFileSync(guidance, "utf8"), new RegExp(id));
   assert.equal(readFileSync(join(foreignPath, ".keiyaku", "KEIYAKU.md"), "utf8"), foreignBytes);
   assert.equal(readFileSync(join(foreignPath, "foreign.txt"), "utf8"), "foreign bytes\n");

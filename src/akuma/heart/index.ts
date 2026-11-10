@@ -342,7 +342,6 @@ export type InterruptTellAdmission =
   | Readonly<{
       kind: "recorded";
       tell: TellFact;
-      predecessorWasRunning: boolean;
       barrier?: PauseFact;
     }>;
 
@@ -368,7 +367,6 @@ function judgeExistingTell(inputs: TellAdmissionInputs, existing: TellFact): Tel
   return {
     kind: "recorded",
     tell: existing,
-    predecessorWasRunning: body !== null && body.end === undefined,
     ...(barrier === undefined ? {} : { barrier }),
   };
 }
@@ -387,7 +385,7 @@ function judgeNewTell(inputs: TellAdmissionInputs): TellAdmission | InterruptTel
         tellId: tell.id,
         at: tell.recordedAt,
       });
-    return { ...admitted, predecessorWasRunning: body.end === undefined, barrier };
+    return { ...admitted, barrier };
   }
   const running = body !== null && body.end === undefined && body.hung === undefined;
   if (tell.schemaJson !== undefined && running) throw new AkumaBusyError();

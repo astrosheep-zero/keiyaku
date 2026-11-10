@@ -7,8 +7,7 @@ import { validateContractMarkdown } from "../../library/input.js";
 import { SettingsError } from "../../settings.js";
 import { resolveInvocationCwd } from "../coordinates.js";
 import { BindDraftError, preserveBindDraft } from "../draft.js";
-import type { ContractOutcome } from "../render/contract.js";
-import { renderRefusal, type RenderableRefusal } from "../render/refusal.js";
+import { renderBindDraftReceipt, type RenderableRefusal } from "../render/refusal.js";
 import type { CliRuntime } from "../runtime.js";
 import { type CliOutcome, displayContext, emit } from "../streams.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
@@ -54,16 +53,6 @@ async function bindDraftReceipt(world: () => Promise<string>, markdown: string) 
   }
 }
 
-function refusedInvocation(
-  answer: Extract<ContractOutcome, { kind: "refused" }>,
-): Readonly<{ operation: string; contract?: ContractId; refusal: RenderableRefusal }> {
-  return {
-    operation: answer.operation,
-    ...(answer.contract === undefined ? {} : { contract: answer.contract }),
-    refusal: answer.refusal,
-  };
-}
-
 function finishVerb<K extends VerbName>(
   name: K,
   input: VerbInput<K>,
@@ -106,7 +95,8 @@ async function runBind(
     const answer = await runtime.facet.run("bind", input);
     if (answer.kind !== "refused") return finishVerb("bind", input, answer, command.output);
     const draft = await bindDraftReceipt(runtime.draftWorld, markdown);
-    const text = () => renderRefusal(refusedInvocation(answer), draft, displayContext());
+    const text = () =>
+      `${renderVerb("bind", input, { kind: "returned", value: answer }, displayContext())}\n${renderBindDraftReceipt(draft)}`;
     return emit(command.output, answer, text, classifyVerb("bind", input, { kind: "returned", value: answer }));
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
@@ -236,7 +226,7 @@ async function runArc(
     if (!(error instanceof KeiyakuArcDocumentError)) throw error;
     const completion = { kind: "threw" as const, error };
     const refusal: RenderableRefusal = { kind: "invalid-document", diagnostic: error.message };
-    const refused = { kind: "refused", operation: "arc", contract: error.contract, refusal };
+    const refused = { kind: "refused", contractId: error.contract, reason: refusal };
     return emit(
       command.output,
       refused,
@@ -286,7 +276,7 @@ function statusRefusal(
   contract: ContractId;
   refusal: RenderableRefusal;
 }> {
-  return { operation, contract, refusal: { kind: "contract-missing", contractId: contract } };
+  return { operation, contract, refusal: { kind: "contract-missing" } };
 }
 
 async function runSettings(runtime: CliRuntime, output: "text" | "json"): Promise<CliOutcome> {
@@ -381,14 +371,7 @@ async function runRegion(
         ? { contract: command.contract }
         : {};
   const result = await runtime.facet.run("region", input);
-  const json =
-    result.kind === "missing" || "row" in result
-      ? {
-          kind: result.kind === "missing" ? "contract-missing" : "terminal",
-          contractId: result.kind === "missing" ? result.id : result.row.id,
-        }
-      : result;
-  return finishVerb("region", input, result, command.output, json);
+  return finishVerb("region", input, result, command.output);
 }
 
 type ParsedContractHistory = Readonly<{
@@ -404,8 +387,7 @@ export async function runContractHistoryCommand(
 ): Promise<CliOutcome> {
   const input = { selector: command.contract, full: command.full };
   const history = await runtime.facet.run("history", input);
-  const json = history === null ? { kind: "contract-missing", contractId: command.contract as ContractId } : history;
-  return finishVerb("history", input, history, command.output, json);
+  return finishVerb("history", input, history, command.output);
 }
 
 async function runReconcile(
@@ -417,8 +399,7 @@ async function runReconcile(
     retryHooks: command.retryHooks,
   };
   const report = await runtime.facet.run("reconcile", input);
-  const json = "kind" in report && report.kind === "missing" ? statusRefusal("reconcile", report.id).refusal : report;
-  return finishVerb("reconcile", input, report, command.output, json);
+  return finishVerb("reconcile", input, report, command.output);
 }
 
 export async function runContractCommand(command: ParsedContractCommand, runtime: CliRuntime): Promise<CliOutcome> {

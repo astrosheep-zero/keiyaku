@@ -54,7 +54,7 @@ test("a root-only caller lists the same callable definitions the CLI shows", asy
 
   const input: ArchetypeCatalogInput = { project: root, home };
   const catalog: ArchetypeCatalog = await listArchetypeDefinitions(input);
-  const rows: readonly ArchetypeCatalogRow[] = catalog.rows;
+  const rows: readonly ArchetypeCatalogRow[] = catalog.rows ?? [];
   assert.deepEqual(rows, [
     { name: "child" },
     { name: "home-only" },
@@ -63,13 +63,12 @@ test("a root-only caller lists the same callable definitions the CLI shows", asy
   ]);
   assert.deepEqual(await listArchetypeDefinitions({ project: root, home, limit: 2 }), {
     rows: [{ name: "child" }, { name: "home-only" }],
-    hasMore: true,
+    more: true,
   });
 
   // Omitted project keeps no project scope: the shared name falls back to Home.
   assert.deepEqual(await listArchetypeDefinitions({ home }), {
     rows: [{ name: "child" }, { name: "home-only" }, { name: "shared", description: "Home" }],
-    hasMore: false,
   });
 
   const cli = await cliJson<ArchetypeCatalog>(["-C", root, "ls", "aku/"], { environment: { KEIYAKU_HOME: home } });

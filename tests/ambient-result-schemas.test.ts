@@ -14,13 +14,15 @@ import {
   kanshiCounts as countsWorld,
   kanshiCountsReportSchema as countsSchema,
   debtMutationResultSchema as mutationSchema,
+  debtLifecycleResultSchema as lifecycleSchema,
   debtListSchema as listSchema,
+  debtReadyListSchema as readySchema,
   blockedDebtListSchema as blockedSchema,
   debtQueryResultSchema as querySchema,
   debtDoctorReportSchema as doctorSchema,
   debtBatchResultSchema as batchSchema,
-  debtReadSchema as readSchema,
-  debtDecompositionTreeSchema as treeSchema,
+  debtReadResultSchema as readSchema,
+  debtTreeResultSchema as treeSchema,
   debtUpdateResultSchema as updateSchema,
   settingsSchema as settingsResultSchema,
   settingsNamespaceViewSchema as namespaceSchema,
@@ -44,34 +46,38 @@ import {
   kanshi as observeWorld,
   kanshiCategory as observeCategory,
   observeKanshi as observeComposite,
-  selectKanshi as filterKanshi,
   kanshiReportSchema as reportSchema,
+  kanshiContractReportSchema as contractReportSchema,
+  kanshiResultSchema as resultSchema,
   kanshiCategoryReportSchema as categorySchema,
   kanshiObservationSchema as observationSchema,
 } from "../src/index.js";
 import type {
+  ContractId,
   Debt,
   Debts,
   World,
+  WorldRoot,
+  KanshiInput,
   settings,
-  kanshi,
   kanshiCategory,
   kanshiCounts,
   observeKanshi,
-  selectKanshi,
   selectRegion,
   nuke,
 } from "../src/index.js";
 import type { Assert, Exact, Wire } from "./support/schema-parity.js";
 import type {
   debtMutationResultSchema,
+  debtLifecycleResultSchema,
   debtListSchema,
+  debtReadyListSchema,
   blockedDebtListSchema,
   debtQueryResultSchema,
   debtDoctorReportSchema,
   debtBatchResultSchema,
-  debtReadSchema,
-  debtDecompositionTreeSchema,
+  debtReadResultSchema,
+  debtTreeResultSchema,
   debtUpdateResultSchema,
   settingsSchema,
   settingsNamespaceViewSchema,
@@ -83,33 +89,39 @@ import type {
   nukeResultSchema,
   kanshiCountsReportSchema,
   kanshiReportSchema,
+  kanshiContractReportSchema,
+  kanshiResultSchema,
   kanshiCategoryReportSchema,
   kanshiObservationSchema,
 } from "../src/index.js";
 
 // Pin each public operation to its owner-held wire schema.
+const observeContract = (world: WorldRoot | null, repo: Repo, contract: ContractId) =>
+  observeWorld({ world, repo, contract });
+const observeWorldReport = () => observeWorld({ world: null });
+const observeResult = (input: KanshiInput) => observeWorld(input);
 type Output<S extends z.ZodType> = z.output<S>;
 type Add = Assert<Exact<Output<typeof debtMutationResultSchema>, Wire<Awaited<ReturnType<Debts["add"]>>>>>;
 type AddDocument = Assert<
   Exact<Output<typeof debtMutationResultSchema>, Wire<Awaited<ReturnType<Debts["addDocument"]>>>>
 >;
 type List = Assert<Exact<Output<typeof debtListSchema>, Wire<Awaited<ReturnType<Debts["list"]>>>>>;
-type Ready = Assert<Exact<Output<typeof debtListSchema>, Wire<Awaited<ReturnType<Debts["ready"]>>>>>;
+type Ready = Assert<Exact<Output<typeof debtReadyListSchema>, Wire<Awaited<ReturnType<Debts["ready"]>>>>>;
 type Blocked = Assert<Exact<Output<typeof blockedDebtListSchema>, Wire<Awaited<ReturnType<Debts["blocked"]>>>>>;
 type Query = Assert<Exact<Output<typeof debtQueryResultSchema>, Wire<Awaited<ReturnType<Debts["query"]>>>>>;
 type Doctor = Assert<Exact<Output<typeof debtDoctorReportSchema>, Wire<Awaited<ReturnType<Debts["doctor"]>>>>>;
 type Batch = Assert<Exact<Output<typeof debtBatchResultSchema>, Wire<Awaited<ReturnType<Debts["batch"]>>>>>;
-type Read = Assert<Exact<Output<typeof debtReadSchema>, Wire<Awaited<ReturnType<Debt["read"]>>>>>;
+type Read = Assert<Exact<Output<typeof debtReadResultSchema>, Wire<Awaited<ReturnType<Debt["read"]>>>>>;
 export type DirectTree = Assert<
   Exact<import("../src/debt/board.js").DebtTreeNode, Wire<import("../src/debt/board.js").DebtTreeNode>>
 >;
-type Tree = Assert<Exact<Output<typeof debtDecompositionTreeSchema>, Wire<Awaited<ReturnType<Debt["tree"]>>>>>;
+type Tree = Assert<Exact<Output<typeof debtTreeResultSchema>, Wire<Awaited<ReturnType<Debt["tree"]>>>>>;
 type Update = Assert<Exact<Output<typeof debtUpdateResultSchema>, Wire<Awaited<ReturnType<Debt["update"]>>>>>;
-type Done = Assert<Exact<Output<typeof debtMutationResultSchema>, Wire<Awaited<ReturnType<Debt["done"]>>>>>;
-type Drop = Assert<Exact<Output<typeof debtMutationResultSchema>, Wire<Awaited<ReturnType<Debt["drop"]>>>>>;
-type Settings = Assert<Exact<Output<typeof settingsSchema>, Wire<Awaited<ReturnType<typeof settings>>>>>;
+type Done = Assert<Exact<Output<typeof debtLifecycleResultSchema>, Wire<Awaited<ReturnType<Debt["done"]>>>>>;
+type Drop = Assert<Exact<Output<typeof debtLifecycleResultSchema>, Wire<Awaited<ReturnType<Debt["drop"]>>>>>;
+type Settings = Assert<Exact<Output<typeof settingsSchema>, Omit<Awaited<ReturnType<typeof settings>>, "namespace">>>;
 type Namespace = Assert<
-  Exact<Output<typeof settingsNamespaceViewSchema>, Wire<ReturnType<Awaited<ReturnType<typeof settings>>["namespace"]>>>
+  Exact<Output<typeof settingsNamespaceViewSchema>, ReturnType<Awaited<ReturnType<typeof settings>>["namespace"]>>
 >;
 type Resolve = Assert<Exact<Output<typeof worldResolutionSchema>, Wire<Awaited<ReturnType<typeof World.resolve>>>>>;
 type Establish = Assert<
@@ -124,7 +136,9 @@ type Prove = Assert<Exact<Output<typeof worldRootSchema>, Wire<Awaited<ReturnTyp
 type Established = Assert<
   Exact<Output<typeof worldEstablishedSchema>, Wire<Awaited<ReturnType<typeof World.established>>>>
 >;
-type Kanshi = Assert<Exact<Output<typeof kanshiReportSchema>, Wire<Awaited<ReturnType<typeof kanshi>>>>>;
+type Kanshi = Assert<
+  Exact<Output<typeof kanshiReportSchema>, Wire<Awaited<ReturnType<typeof observeWorldReport>>>>
+>;
 type Category = Assert<
   Exact<Output<typeof kanshiCategoryReportSchema>, Wire<Awaited<ReturnType<typeof kanshiCategory>>>>
 >;
@@ -132,7 +146,10 @@ type Observation = Assert<
   Exact<Output<typeof kanshiObservationSchema>, Wire<Awaited<ReturnType<typeof observeKanshi>>>>
 >;
 type Counts = Assert<Exact<Output<typeof kanshiCountsReportSchema>, Wire<Awaited<ReturnType<typeof kanshiCounts>>>>>;
-type SelectKanshi = Assert<Exact<Output<typeof kanshiReportSchema>, Wire<ReturnType<typeof selectKanshi>>>>;
+type SelectContract = Assert<
+  Exact<Output<typeof kanshiContractReportSchema>, Wire<Awaited<ReturnType<typeof observeContract>>>>
+>;
+type Result = Assert<Exact<Output<typeof kanshiResultSchema>, Wire<Awaited<ReturnType<typeof observeResult>>>>>;
 type SelectRegion = Assert<Exact<Output<typeof regionReadSchema>, Wire<ReturnType<typeof selectRegion>>>>;
 type Nuke = Assert<Exact<Output<typeof nukeResultSchema>, Wire<Awaited<ReturnType<typeof nuke>>>>>;
 export type Inventory = [
@@ -161,7 +178,8 @@ export type Inventory = [
   Category,
   Observation,
   Counts,
-  SelectKanshi,
+  SelectContract,
+  Result,
   SelectRegion,
   Nuke,
 ];
@@ -211,10 +229,10 @@ test("Debt, Settings, World, region and reset schemas describe real wire results
   const refused = await debts.add({ title: "Blocked by absent debt", needs: ["debt/missing"] });
   assert.equal(refused.kind, "refused");
   assertWireRoundTrip(mutationSchema, refused);
-  const dependent = await debts.add({ title: "Dependent", needs: [first.value.id] });
+  const dependent = await debts.add({ title: "Dependent", needs: [first.id] });
   assert.equal(dependent.kind, "accepted");
   assertWireRoundTrip(mutationSchema, dependent);
-  const debt = debts.debt({ id: first.value.id });
+  const debt = debts.debt({ id: first.id });
   const missing = debts.debt({ id: "debt/missing" });
   assertWireRoundTrip(readSchema, await debt.read());
   assertWireRoundTrip(readSchema, await missing.read());
@@ -223,13 +241,13 @@ test("Debt, Settings, World, region and reset schemas describe real wire results
   assertWireRoundTrip(updateSchema, await debt.update({ note: "updated" }));
   assertWireRoundTrip(updateSchema, await missing.update({ note: "missing" }));
   assertWireRoundTrip(listSchema, await debts.list());
-  assertWireRoundTrip(listSchema, await debts.ready());
+  assertWireRoundTrip(readySchema, await debts.ready());
   assertWireRoundTrip(blockedSchema, await debts.blocked());
   assertWireRoundTrip(querySchema, await debts.query());
   assertWireRoundTrip(doctorSchema, await debts.doctor());
-  assertWireRoundTrip(mutationSchema, await debt.done());
-  assertWireRoundTrip(mutationSchema, await debt.drop());
-  assertWireRoundTrip(mutationSchema, await debts.debt({ id: second.value.id }).drop());
+  assertWireRoundTrip(lifecycleSchema, await debt.done());
+  assertWireRoundTrip(lifecycleSchema, await debt.drop());
+  assertWireRoundTrip(lifecycleSchema, await debts.debt({ id: second.id }).drop());
   assertWireRoundTrip(batchSchema, await debts.batch({ verb: "done", ids: ["debt/missing"] }));
   assertWireRoundTrip(regionSchema, selectRegionValue({ declarations: [], selection: { kind: "declarations" } }));
   assertWireRoundTrip(
@@ -275,16 +293,17 @@ test("Kanshi schemas cover live Contract, Debt, Akuma, Alias, region and absent 
   assertWireRoundTrip(reportSchema, empty);
   assertWireRoundTrip(observationSchema, await observeComposite({ world: null }));
   assertWireRoundTrip(categorySchema, await observeCategory({ world: null, category: "akuma" }));
-  const report = await observeWorld({ world, repo, region: { kind: "declarations" } });
+  const report = await observeWorld({ world, repo });
+  assertWireRoundTrip(resultSchema, report);
   assertWireRoundTrip(reportSchema, report);
-  assertWireRoundTrip(reportSchema, filterKanshi({ report, contract: bound.contract }));
+  assertWireRoundTrip(contractReportSchema, await observeContract(world, repo, bound.contractId));
   assertWireRoundTrip(observationSchema, await observeComposite({ world, repo }));
   assertWireRoundTrip(categorySchema, await observeCategory({ world, repo, category: "akuma" }));
   assertWireRoundTrip(categorySchema, await observeCategory({ world, repo, category: "contract" }));
-  const declarations = [{ contract: bound.contract, patterns: ["src/**"] }];
+  const declarations = [{ id: bound.contractId, patterns: ["src/**"] }];
   assertWireRoundTrip(
     regionSchema,
-    selectRegionValue({ declarations, selection: { kind: "contract", contract: bound.contract } }),
+    selectRegionValue({ declarations, selection: { kind: "contract", contract: bound.contractId } }),
   );
   assertWireRoundTrip(
     regionSchema,

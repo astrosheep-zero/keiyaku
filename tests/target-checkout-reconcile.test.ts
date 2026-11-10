@@ -172,12 +172,16 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     const contractId = present(await contract.state()).id;
     const placed = await Keis.of(repo).observe({ id: contractId });
     assert.ok(placed.kind === "present", 'expected placed.kind = "present"');
-    assert.deepEqual(placed.row.targetObservation, { head: delivery.integration.snapshot, drift: false });
+    assert.equal(placed.row.targetObservation, undefined);
 
     repository.run(["reset", "--hard", delivery.integration.predecessor]);
     const rewound = await Keis.of(repo).observe({ id: contractId });
     assert.ok(rewound.kind === "present", 'expected rewound.kind = "present"');
-    assert.deepEqual(rewound.row.targetObservation, { head: delivery.integration.predecessor, drift: true });
+    assert.deepEqual(rewound.row.targetObservation, {
+      kind: "moved",
+      before: delivery.integration.snapshot,
+      after: delivery.integration.predecessor,
+    });
   });
 
   test("an operational precheck failure leaves the checkout behind without disturbing the target or a foreign index lock", async () => {
@@ -187,13 +191,11 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     writeFileSync(lock, "foreign writer\n");
     try {
       const delivered = acceptedDelivery(await contract.deliver());
-      const completion = delivered.value.completion;
-      assert.ok(completion, "expected a completed placement");
-      assert.equal(delivered.value.placement, undefined);
-      assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
+      assert.equal(delivered.placement?.kind, "placed");
+      assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
       assert.deepEqual(
-        delivered.effects
-          .filter((effect) => effect.kind === "checkout-retained")
+        (delivered.issues ?? [])
+          .filter((issue) => issue.kind === "target-checkout-retained")
           .map(({ path, target }) => ({ path, target })),
         [{ path: repository.path, target: "refs/heads/main" }],
       );
@@ -217,16 +219,15 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
 
     const delivered = acceptedDelivery(await contract.deliver());
 
-    const completion = delivered.value.completion;
-    assert.ok(completion, "expected a completed placement");
-    assert.equal(delivered.value.placement, undefined);
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
-    assert.deepEqual(
-      delivered.effects
-        .filter((effect) => effect.kind === "checkout-retained")
-        .map(({ path, target }) => ({ path, target })),
-      [{ path: repository.path, target: "refs/heads/main" }],
-    );
+    assert.equal(delivered.placement?.kind, "placed");
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
+    const retained = (delivered.issues ?? []).filter((issue) => issue.kind === "target-checkout-retained");
+    assert.ok(retained.length > 0);
+    assert.equal(new Set(retained.map((issue) => issue.diagnostic)).size, retained.length);
+    for (const issue of retained) {
+      assert.equal(issue.path, repository.path);
+      assert.equal(issue.target, "refs/heads/main");
+    }
     assert.equal(repository.run(["show", ":delivered.txt"]), "staged conflict\n");
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "staged conflict\n");
   });
@@ -245,16 +246,15 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
 
     const delivered = acceptedDelivery(await contract.deliver());
 
-    const completion = delivered.value.completion;
-    assert.ok(completion, "expected a completed placement");
-    assert.equal(delivered.value.placement, undefined);
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), completion.integration);
-    assert.deepEqual(
-      delivered.effects
-        .filter((effect) => effect.kind === "checkout-retained")
-        .map(({ path, target }) => ({ path, target })),
-      [{ path: repository.path, target: "refs/heads/main" }],
-    );
+    assert.equal(delivered.placement?.kind, "placed");
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
+    const retained = (delivered.issues ?? []).filter((issue) => issue.kind === "target-checkout-retained");
+    assert.ok(retained.length > 0);
+    assert.equal(new Set(retained.map((issue) => issue.diagnostic)).size, retained.length);
+    for (const issue of retained) {
+      assert.equal(issue.path, repository.path);
+      assert.equal(issue.target, "refs/heads/main");
+    }
     assert.equal(repository.run(["ls-files", "-u", "--", "delivered.txt"]).split("\n").filter(Boolean).length, 3);
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "unresolved\n");
   });
@@ -275,11 +275,12 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
       async (gitPath) =>
         Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({ contract: candidate.id }),
     );
+    assert.ok(reconciled.kind === "contract");
 
-    assert.deepEqual(reconciled.lag, []);
+    assert.equal((reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"), false);
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
     assert.equal(repository.run(["status", "--porcelain"]), "");
-    assert.ok(reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+    assert.ok((reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
   });
 
   test("reconcile preserves ignored directory contents until target recovery can follow safely", async () => {
@@ -309,6 +310,7 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     writeFileSync(secretPath, secret);
 
     const retained = await Keis.of(repo).reconcile({ contract: candidate.id });
+    assert.ok(retained.kind === "contract");
 
     assert.deepEqual(readFileSync(secretPath), secret);
     assert.equal(readFileSync(resolve(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
@@ -316,20 +318,21 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), integration);
     assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]), journal);
     assert.equal((await observeContract(git, candidate.id)).state?.terminal?.kind, "claimed");
-    const lag = retained.lag.find((entry) => entry.kind === "target-checkout-retained");
-    assert.ok(lag);
+    const lag = (retained.issues ?? []).find((issue) => issue.kind === "target-checkout-retained");
+    assert.ok(lag?.kind === "target-checkout-retained");
     assert.equal(lag.path, repository.path);
     assert.equal(lag.target, "refs/heads/main");
     assert.match(lag.diagnostic, /ignored.*artifact/);
-    assert.ok(!retained.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+    assert.ok(!(retained.effects ?? []).some((effect) => effect.kind === "target-checkout"));
 
     rmSync(secretPath);
     const recovered = await Keis.of(repo).reconcile({ contract: candidate.id });
+    assert.ok(recovered.kind === "contract");
 
-    assert.deepEqual(recovered.lag, []);
+    assert.equal((recovered.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"), false);
     assert.equal(readFileSync(resolve(repository.path, "artifact"), "utf8"), "candidate file\n");
     assert.equal(repository.run(["status", "--porcelain"]), "");
-    assert.ok(recovered.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+    assert.ok((recovered.effects ?? []).some((effect) => effect.kind === "target-checkout"));
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), integration);
     assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]), journal);
   });
@@ -350,13 +353,14 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({
       contract: candidate.id,
     });
+    assert.ok(reconciled.kind === "contract");
 
-    assert.deepEqual(reconciled.lag, []);
+    assert.equal((reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"), false);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]), `${delivery.integration.snapshot}\n`);
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
     assert.equal(readFileSync(resolve(repository.path, "local.txt"), "utf8"), "staged local\n");
     assert.equal(repository.run(["diff", "--cached", "--", "local.txt"]), stagedPatch);
-    assert.ok(reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+    assert.ok((reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
   });
 
   test("a relevant staged change after classification fails into lag without overwriting it", async () => {
@@ -392,10 +396,11 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
           contract: candidate.id,
         }),
     );
+    assert.ok(reconciled.kind === "contract");
 
     const stage = repository.run(["ls-files", "--stage", "--", "delivered.txt"]).trim().split(/\s+/u);
-    assert.ok(reconciled.lag.some((lag) => lag.kind === "target-checkout-retained"));
-    assert.ok(!reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+    assert.ok((reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+    assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), stagedBytes);
     assert.equal(stage[1], expectedBlob);
     assert.equal(
@@ -412,10 +417,11 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({
       contract: candidate.id,
     });
+    assert.ok(reconciled.kind === "contract");
 
     assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "changed after publication\n");
-    assert.ok(reconciled.lag.some((lag) => lag.kind === "target-checkout-retained"));
-    assert.ok(!reconciled.effects.some((effect) => effect.kind === "target-checkout" && effect.action === "recovered"));
+    assert.ok((reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+    assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
   });
 
   test("checkout shape compares literal filenames, not pathspec expressions", async () => {

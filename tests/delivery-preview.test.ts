@@ -9,16 +9,16 @@ import { waitForFixtureFile } from "./support/process.js";
 import { renderRootHelp } from "../src/cli/parse.js";
 import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { contractId, gate } from "../src/core/facts/types.js";
-import { gateReports } from "../src/core/facts/gate.js";
+import { contractId, entryUlid, gate } from "../src/core/facts/types.js";
 import { verificationRequirement } from "../src/verification/declaration.js";
 import { previewDeliveryOperation } from "../src/protocol/delivery-preview.js";
-import { admitDeliveryOperation } from "../src/protocol/deliver.js";
+import { admitDeliveryOperation, prepareDelivery } from "../src/protocol/deliver.js";
+import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
-import { contractHead } from "../src/core/facts/types.js";
+import { changeId, snapshotId } from "../src/core/facts/types.js";
 import type { DeliveryPreviewOutcome } from "../src/index.js";
 import { withGitShim, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
@@ -39,7 +39,7 @@ function verificationBody(script: string | null = "exit 1"): string {
   });
 }
 
-test("a stale document derivation is refused inside its E-decision", async () => {
+test("a stale document derivation is refused by the pure decision and restarts the protocol", async () => {
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
@@ -47,7 +47,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
       workspace: "worktree",
     }),
   );
-  const state = present(await bound.value.kei.state());
+  const state = present(await bound.kei.state());
   const decoded = decodeContractDocument(state.terms.document.bytes);
   const derivation = {
     document: decoded.document.key,
@@ -56,14 +56,33 @@ test("a stale document derivation is refused inside its E-decision", async () =>
     verification: prepareVerificationDeclaration({
       gates: [gate("verified")],
       definition: verificationDefinition(decoded),
-      contractId: state.id,
     }),
   };
-  await bound.value.kei.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
+  await bound.kei.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
   const scope = await scopeOperation({ coordinate: repository.path });
-  const refusal = { kind: "document-moved", contractId: state.id };
 
   await withGitDecodeChannel(scope, async (channel) => {
+    // A pure mismatched decision refuses its own stale document.
+    const current = present((await observeContractAt(scope, channel, state.id)).state);
+    const prepared = await prepareDelivery(
+      scope,
+      { contractId: state.id, coordinates: current.coordinates },
+      { title: decoded.title, document: decoded.document.bytes },
+    );
+    assert.ok(prepared.kind === "prepared", 'expected prepared.kind = "prepared"');
+    assert.deepEqual(
+      decideDeliver({
+        input: {
+          contractId: state.id,
+          at: "2026-08-06T00:00:00Z",
+          preparation: { kind: "prepared", document: derivation.document, data: prepared.data },
+        },
+        attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5F99")] },
+        observation: new Map([[state.id, current]]),
+      }),
+      { kind: "refused", refusal: { kind: "document-moved" } },
+    );
+    // The protocol never publishes the stale preparation: the same derivation exhausts its restarts.
     assert.deepEqual(
       await admitDeliveryOperation({
         scope,
@@ -74,16 +93,7 @@ test("a stale document derivation is refused inside its E-decision", async () =>
         includeDirty: false,
         materializeConflict: false,
       }),
-      { kind: "refused", refusal },
-    );
-    assert.deepEqual(
-      await previewDeliveryOperation({
-        scope,
-        channel,
-        contractId: state.id,
-        deriveDocument: () => derivation,
-      }),
-      { kind: "refused", refusal },
+      { kind: "retry", reason: { kind: "exhausted" } },
     );
   });
 });
@@ -100,7 +110,7 @@ test("preview without Verification still returns an accepted ready candidate", a
   );
 
   const scope = await scopeOperation({ coordinate: repository.path });
-  const contractId = present(await bound.value.kei.state()).id;
+  const contractId = present(await bound.kei.state()).id;
   const observed = await withGitDecodeChannel(scope, (channel) => observeContractAt(scope, channel, contractId));
   const decoded = decodeContractDocument(observed.state!.terms.document.bytes);
   const result = await withGitDecodeChannel(scope, (channel) =>
@@ -115,7 +125,6 @@ test("preview without Verification still returns an accepted ready candidate", a
         verification: prepareVerificationDeclaration({
           gates: observed.state!.terms.gates,
           definition: verificationDefinition(decoded),
-          contractId,
         }),
       }),
     }),
@@ -123,11 +132,10 @@ test("preview without Verification still returns an accepted ready candidate", a
   assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
   assert.deepEqual(result.facts, []);
   assert.equal(result.head, observed.state!.head);
-  assert.ok(result.value.candidate.kind === "ready", 'expected result.value.candidate.kind = "ready"');
-  assert.equal(result.value.candidate.identity.method, "squash");
-  assert.equal("diff" in result.value.candidate, false);
-  assert.equal(result.value.verification.kind, "undeclared");
-  assert.equal(result.value.target.kind, "not-observed");
+  assert.ok(result.value.kind === "ready");
+  assert.equal(result.value.diff, undefined);
+  assert.equal(result.value.unmetGates, undefined);
+  assert.equal(result.value.target, undefined);
 });
 
 test("ungated preview reports undeclared without executing declarations or admitting testimony", async () => {
@@ -139,60 +147,38 @@ test("ungated preview reports undeclared without executing declarations or admit
       workspace: "worktree",
       gates: ["reviewed"],
     }),
-  ).value.kei;
-  const audited = accepted(await contract.previewDelivery());
-  assert.equal(audited.value.candidate.kind, "ready");
-  assert.deepEqual(audited.value.verification, { kind: "undeclared" });
-  assert.deepEqual(audited.facts, []);
+  ).kei;
+  const audited = await contract.previewDelivery();
+  assert.ok(audited.kind === "ready");
+  assert.equal(audited.unmetGates?.some(({ gate }) => gate === "verified"), false);
   assert.equal(existsSync(marker), false);
   assert.deepEqual(present(await contract.state()).attestations, []);
 });
 
 // Test declaration admission at its owner, without binding two complete worktrees.
-test("verified terms require a declaration at both unbound and identified boundaries", () => {
-  for (const id of [undefined, contractId("kei/verify-boundary")]) {
-    assert.deepEqual(
-      prepareVerificationDeclaration({
-        gates: [gate("verified")],
-        definition: null,
-        ...(id === undefined ? {} : { contractId: id }),
-      }),
-      {
-        kind: "refused",
-        refusal: { kind: "verification-declaration-invalid", ...(id === undefined ? {} : { contractId: id }) },
-      },
-    );
-    assert.deepEqual(
-      prepareVerificationDeclaration({
-        gates: [gate("reviewed")],
-        definition: null,
-        ...(id === undefined ? {} : { contractId: id }),
-      }),
-      {
-        kind: "prepared",
-        data: null,
-      },
-    );
-  }
+test("verified terms require a declaration while unrelated gates do not", () => {
+  assert.deepEqual(
+    prepareVerificationDeclaration({ gates: [gate("verified")], definition: null }),
+    { kind: "refused", refusal: { kind: "verification-declaration-invalid" } },
+  );
+  assert.deepEqual(
+    prepareVerificationDeclaration({ gates: [gate("reviewed")], definition: null }),
+    { kind: "prepared", data: null },
+  );
 });
 
 test("preview target lag is absent at zero and counted when the target moved", () => {
-  const report = (behind: number): Extract<DeliveryPreviewOutcome, { kind: "accepted" }> =>
-    ({
-      kind: "accepted",
-      operation: "deliver-preview",
-      contract: contractId("kei/audit-lag"),
-      head: contractHead("head"),
-      facts: [],
-      effects: [],
-      pending: [],
-      value: {
-        candidate: { kind: "blocked", refusal: { kind: "verification-declaration-invalid" } },
-        verification: { kind: "not-run" },
-        target: { kind: "placeable", ref: "refs/heads/main", head: "a".repeat(40), checkouts: [] },
-        targetLag: { kind: "counted", behind },
-      },
-    }) as unknown as Extract<DeliveryPreviewOutcome, { kind: "accepted" }>;
+  const report = (behind: number): Extract<DeliveryPreviewOutcome, { kind: "ready" }> => ({
+    kind: "ready", contractId: contractId("kei/audit-lag"),
+    candidate: snapshotId("a".repeat(40)), integration: snapshotId("b".repeat(40)),
+    contentId: changeId("c".repeat(40)), scope: {},
+    target: {
+      kind: "placeable",
+      ref: "refs/heads/main",
+      head: snapshotId("a".repeat(40)),
+      ...(behind === 0 ? {} : { behind }),
+    },
+  });
 
   const unmoved = renderDeliveryPreview(report(0), { columns: 120, color: false });
   assert.match(unmoved, /main @ aaaaaaa/u);
@@ -248,8 +234,8 @@ test("native and CLI preview preserve authority, refs, real indexes and bytes, n
       gates: ["reviewed", "verified"],
     }),
   );
-  assert.ok(bound.value.workspace?.kind === "worktree");
-  const worktree = bound.value.workspace.path;
+  assert.ok(bound.worktreePath);
+  const worktree = bound.worktreePath;
   writeFileSync(join(worktree, "candidate.txt"), "staged version\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   writeFileSync(join(worktree, "candidate.txt"), "final unstaged version\n");
@@ -262,40 +248,30 @@ test("native and CLI preview preserve authority, refs, real indexes and bytes, n
   writeFileSync(join(worktree, ".keiyaku", "settings.json"), hookSettings);
   repository.run(["-C", worktree, "add", ".keiyaku/settings.json"]);
   const configured = await settings({ root: await World.at(repository.path) });
-  const native = Keis.of(repo, { settings: configured }).kei({ id: bound.contract });
+  const native = Keis.of(repo, { settings: configured }).kei({ id: bound.contractId });
   const before = custodySnapshot(repository, worktree);
   const history = await native.history();
-  const blocked = accepted(await native.previewDelivery());
-  assert.ok(blocked.value.candidate.kind === "blocked" && blocked.value.candidate.refusal.kind === "dirty-workspace");
-  const preview = accepted(await native.previewDelivery({ includeDirty: true, showDiff: true }));
-  assert.ok(preview.value.candidate.kind === "ready");
-  assert.match(preview.value.candidate.diff ?? "", /final unstaged version/u);
-  assert.match(preview.value.candidate.diff ?? "", /untracked/u);
-  assert.doesNotMatch(preview.value.candidate.diff ?? "", /^\+staged version$/mu);
-  const missingVerification = {
-    kind: "requirements",
-    requirements: [
-      {
-        requirement: verificationRequirement(
-          decodeContractDocument(present(await native.state()).terms.document.bytes).verification[0]!,
-        ),
-        current: { kind: "missing" },
-        index: 1,
-      },
-    ],
-  };
-  assert.deepEqual(preview.value.verification, missingVerification);
-  assert.equal(preview.value.target.kind, "placeable");
-  assert.deepEqual(preview.facts, []);
-  assert.deepEqual(preview.effects, []);
-  assert.deepEqual(preview.pending, []);
+  const blocked = await native.previewDelivery();
+  assert.ok(blocked.kind === "blocked" && blocked.reason.kind === "dirty-workspace");
+  const preview = await native.previewDelivery({ includeDirty: true, showDiff: true });
+  assert.ok(preview.kind === "ready");
+  assert.ok(preview.diff?.kind === "present");
+  assert.match(preview.diff.text, /final unstaged version/u);
+  assert.match(preview.diff.text, /untracked/u);
+  assert.doesNotMatch(preview.diff.text, /^\+staged version$/mu);
+  const requirement = verificationRequirement(
+    decodeContractDocument(present(await native.state()).terms.document.bytes).verification[0]!,
+  );
+  assert.deepEqual(preview.unmetGates?.find((item) => item.gate === "verified"), {
+    gate: "verified", requirement, state: "missing",
+  });
+  assert.equal(preview.target?.kind, "placeable");
   const cli = await cliJson<DeliveryPreviewOutcome>(
-    ["-C", repository.path, "deliver", bound.contract, "--dry-run", "--include-dirty", "--show-diff"],
+    ["-C", repository.path, "deliver", bound.contractId, "--dry-run", "--include-dirty", "--show-diff"],
     { environment: {} },
   );
   assert.equal(cli.exit, 0, cli.stderr);
-  assert.equal(accepted(cli.value).operation, "deliver-preview");
-  assert.deepEqual(accepted(cli.value).value.verification, missingVerification);
+  assert.deepEqual(cli.value, preview);
   assert.deepEqual(await native.history(), history);
   assert.deepEqual(custodySnapshot(repository, worktree), before);
   assert.equal(existsSync(verificationMarker), false);
@@ -303,15 +279,12 @@ test("native and CLI preview preserve authority, refs, real indexes and bytes, n
   assert.equal("audit" in native, false);
   assert.doesNotMatch(renderRootHelp(), /^\s+audit\s/mu);
   for (const options of [["--overwrite"], ["--materialize-conflict"], ["--message", "unused"]]) {
-    await assert.rejects(runCli(["-C", repository.path, "deliver", bound.contract, "--dry-run", ...options]));
+    await assert.rejects(runCli(["-C", repository.path, "deliver", bound.contractId, "--dry-run", ...options]));
   }
-  await assert.rejects(runCli(["-C", repository.path, "audit", bound.contract]));
+  await assert.rejects(runCli(["-C", repository.path, "audit", bound.contractId]));
   assert.deepEqual(custodySnapshot(repository, worktree), before);
   const delivered = accepted(await native.deliver({ includeDirty: true }));
-  assert.deepEqual(
-    delivered.facts.map((fact) => fact.kind),
-    ["deliver"],
-  );
+  assert.equal(delivered.placement?.kind, "gates-unsatisfied");
   assert.equal(existsSync(verificationMarker), false);
   assert.equal(existsSync(hookMarker), false);
 });
@@ -323,32 +296,30 @@ test("preview reports prerequisite and gate judgments without claiming acceptanc
   const dependent = accepted(
     await Keis.of(repo).bind({
       markdown: verificationBody(),
-      after: [prerequisite.contract],
+      after: [prerequisite.contractId],
       gates: ["reviewed", "verified"],
     }),
   );
-  const before = await dependent.value.kei.history();
-  const result = accepted(await dependent.value.kei.previewDelivery());
-  assert.ok(result.value.candidate.kind === "ready");
-  assert.deepEqual(result.value.candidate.requirements, {
-    gates: gateReports(present(await dependent.value.kei.state())).reports,
-    unmetPrerequisites: [{ contractId: prerequisite.contract, state: "active" }],
-  });
+  const before = await dependent.kei.history();
+  const result = await dependent.kei.previewDelivery();
+  assert.ok(result.kind === "ready");
+  assert.deepEqual(result.unmetPrerequisites, [{ contractId: prerequisite.contractId, state: "active" }]);
+  assert.deepEqual(result.unmetGates?.map(({ gate, state }) => [gate, state]),
+    [["reviewed", "missing"], ["verified", "missing"]]);
   const text = renderDeliveryPreview(result, { columns: 160, color: false });
   assert.match(text, /deliver --dry-run/u);
   assert.match(text, /candidate  prepared/u);
-  assert.ok(text.includes(prerequisite.contract));
+  assert.ok(text.includes(prerequisite.contractId));
   assert.doesNotMatch(text, /candidate  ready|accepted|delivered/u);
-  assert.deepEqual(result.facts, []);
-  assert.deepEqual(await dependent.value.kei.history(), before);
+  assert.deepEqual(await dependent.kei.history(), before);
 });
 
 test("preview reports integration conflicts without materializing a merge or changing custody", async () => {
   const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ markdown: verificationBody(null), gates: [] }));
-  assert.ok(bound.value.workspace?.kind === "worktree");
-  const worktree = bound.value.workspace.path;
+  assert.ok(bound.worktreePath);
+  const worktree = bound.worktreePath;
   writeFileSync(join(worktree, "shared.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "shared.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
@@ -356,32 +327,27 @@ test("preview reports integration conflicts without materializing a merge or cha
   repository.run(["add", "shared.txt"]);
   repository.run(["commit", "--quiet", "-m", "target"]);
   const before = custodySnapshot(repository, worktree);
-  const history = await bound.value.kei.history();
-  const result = accepted(await bound.value.kei.previewDelivery({ showDiff: true }));
-  assert.ok(result.value.candidate.kind === "blocked");
-  assert.ok(
-    result.value.candidate.refusal.kind === "integration-failed" &&
-      result.value.candidate.refusal.reason === "conflict",
-  );
-  assert.deepEqual(result.facts, []);
-  assert.deepEqual(result.effects, []);
+  const history = await bound.kei.history();
+  const result = await bound.kei.previewDelivery({ showDiff: true });
+  assert.ok(result.kind === "blocked");
+  assert.equal(result.reason.kind, "integration-conflict");
   assert.equal(repository.run(["-C", worktree, "ls-files", "-u"]), "");
   assert.deepEqual(custodySnapshot(repository, worktree), before);
-  assert.deepEqual(await bound.value.kei.history(), history);
+  assert.deepEqual(await bound.kei.history(), history);
 });
 
 test("cancelling the target dry-run preserves native abort and partial preview instead of accepting target.failed", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ markdown: verificationBody(null), gates: [] }));
-  assert.ok(bound.value.workspace?.kind === "worktree");
-  const worktree = bound.value.workspace.path;
+  assert.ok(bound.worktreePath);
+  const worktree = bound.worktreePath;
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "candidate.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
   const barrier = join(repository.path, ".git", "target-probe-started");
   const before = custodySnapshot(repository, worktree);
-  const history = await bound.value.kei.history();
+  const history = await bound.kei.history();
   await withGitShim([
     'if [ "$3" = "read-tree" ] && [ "$4" = "--dry-run" ]; then',
     '  : > "$KEIYAKU_TEST_BARRIER"',
@@ -391,22 +357,20 @@ test("cancelling the target dry-run preserves native abort and partial preview i
   ].join("\n"), { KEIYAKU_TEST_BARRIER: barrier }, async (gitPath) => {
     const controller = new AbortController();
     const reason = new Error("stop preview in target probe");
-    const native = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id: bound.contract });
+    const native = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id: bound.contractId });
     const pending = native.previewDelivery({ signal: controller.signal });
     // Attach the rejection consumer before waiting on the in-flight process barrier.
     const rejection = assert.rejects(pending, (error: unknown) => {
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, "aborted");
       assert.equal(error.cause, reason);
-      assert.equal(error.outcome?.operation, "deliver-preview");
-      assert.ok(error.outcome?.operation === "deliver-preview");
-      assert.equal(error.outcome.value?.candidate?.kind, "ready");
-      assert.deepEqual(error.outcome.value?.verification, { kind: "undeclared" });
-      assert.equal(error.outcome.value?.target, undefined, "interrupted target observation is not a failed answer");
-      assert.deepEqual(error.outcome.facts, []);
-      assert.ok(error.outcome.effects.every((effect) =>
-        effect.kind === "cleanup" && effect.issue.kind === "decode-channel-retirement",
-      ), "only native decode-channel retirement diagnostics may accompany cancellation");
+      assert.ok(error.outcome?.kind === "contract");
+      assert.ok(error.outcome.preview?.kind === "ready");
+      assert.ok(error.outcome.preview.candidate);
+      assert.equal(error.outcome.preview.target, undefined, "interrupted target observation is not a failed answer");
+      assert.equal(error.outcome.admitted, undefined);
+      assert.ok((error.outcome.issues ?? []).every((effect) => effect.kind === "decode-channel-retirement"),
+        "only native decode-channel retirement diagnostics may accompany cancellation");
       const json = JSON.parse(JSON.stringify(projectFailure(error)));
       assert.equal(json.category, "aborted");
       assert.equal(json.causeClass, "Error");
@@ -423,7 +387,7 @@ test("cancelling the target dry-run preserves native abort and partial preview i
       await pending.catch(() => undefined);
     }
   });
-  assert.deepEqual(await bound.value.kei.history(), history);
+  assert.deepEqual(await bound.kei.history(), history);
   assert.deepEqual(custodySnapshot(repository, worktree), before);
 });
 
@@ -431,15 +395,15 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   const repository = repositoryWithMain({ files: { "delivered.txt": "base\n" } });
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ markdown: verificationBody(null), gates: [] }));
-  assert.ok(bound.value.workspace?.kind === "worktree");
-  const worktree = bound.value.workspace.path;
+  assert.ok(bound.worktreePath);
+  const worktree = bound.worktreePath;
   writeFileSync(join(worktree, "delivered.txt"), "candidate\n");
   repository.run(["-C", worktree, "add", "delivered.txt"]);
   repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
   const dirty = "target checkout uncommitted bytes\n";
   writeFileSync(join(repository.path, "delivered.txt"), dirty);
   const before = custodySnapshot(repository, worktree);
-  const history = await bound.value.kei.history();
+  const history = await bound.kei.history();
   const probes = join(repository.path, ".git", "preview-probes");
   // Count the existing probe; reporting followability must not introduce a second one.
   const preview = await withGitShim(
@@ -452,18 +416,18 @@ test("preview names overlapping dirty target checkout while normal delivery stil
     { KEIYAKU_TEST_PROBES: probes },
     async (gitPath) => {
       const native = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({
-        id: bound.contract,
+        id: bound.contractId,
       });
-      return accepted(await native.previewDelivery());
+      const result = await native.previewDelivery();
+      assert.ok(result.kind === "ready");
+      return result;
     },
   );
   assert.equal(readFileSync(probes, "utf8"), "probe\n");
-  assert.equal(preview.value.target.kind, "placeable");
-  assert.ok(preview.value.target.kind === "placeable");
-  assert.equal(preview.value.target.checkouts.length, 1);
-  const checkout = preview.value.target.checkouts[0]!;
+  assert.ok(preview.target?.kind === "placeable");
+  assert.equal(preview.target.checkouts?.length, 1);
+  const checkout = preview.target.checkouts![0]!;
   assert.equal(checkout.path, repository.path);
-  assert.ok(checkout.kind === "not-followable");
   assert.match(checkout.diagnostic, /delivered\.txt.*not uptodate|not uptodate.*delivered\.txt/su);
   const text = renderDeliveryPreview(preview, { columns: 200, color: false });
   // The receipt hard-wraps a long payload at the column boundary, even mid-word, so the human-facing text is judged
@@ -474,15 +438,13 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   assert.ok(displayed.includes("notuptodate"), `preview must render the checkout diagnostic; got:\n${text}`);
 
   assert.deepEqual(custodySnapshot(repository, worktree), before);
-  assert.deepEqual(await bound.value.kei.history(), history);
-  assert.deepEqual(preview.facts, []);
-  assert.deepEqual(preview.effects, []);
-  const delivered = accepted(await bound.value.kei.deliver());
-  assert.ok(delivered.value.completion);
-  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.value.completion.integration);
-  assert.ok(delivered.facts.some((fact) => fact.kind === "claimed"));
-  const retained = delivered.effects.find((effect) => effect.kind === "checkout-retained");
-  assert.ok(retained?.kind === "checkout-retained");
+  assert.deepEqual(await bound.kei.history(), history);
+  const delivered = accepted(await bound.kei.deliver());
+  assert.ok(delivered.placement?.kind === "placed");
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
+  assert.equal(present(await bound.kei.state()).terminal?.kind, "claimed");
+  const retained = (delivered.issues ?? []).find((effect) => effect.kind === "target-checkout-retained");
+  assert.ok(retained?.kind === "target-checkout-retained");
   assert.equal(retained.path, repository.path);
   assert.match(retained.diagnostic, /not uptodate/u);
   assert.equal(readFileSync(join(repository.path, "delivered.txt"), "utf8"), dirty);

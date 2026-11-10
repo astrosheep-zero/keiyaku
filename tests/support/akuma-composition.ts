@@ -8,7 +8,6 @@ import type { AkumaCompleteList, AkumaList, AkumaListInput } from "../../src/aku
 import { listArchetypes } from "../../src/akuma/archetype.js";
 import { admitCallInitialTell } from "../../src/akuma/call-initial-tell.js";
 import { parseAkumaId } from "../../src/akuma/identity.js";
-import { projectTell } from "../../src/akuma/heart/index.js";
 import { readAliases, type AliasBinding } from "../../src/alias/index.js";
 import type { AkumaAlias } from "../../src/identity/selector.js";
 import type { WorldRoot } from "../../src/world.js";
@@ -20,8 +19,8 @@ export function recordCallInitialTell(world: WorldRoot, now: () => string = () =
       ...input,
       now,
       wake: async (tell) => ({
-        admission: { tellId: tell.id, fact: "recorded" },
-        row: projectTell(tell),
+        admission: { tellId: tell.id },
+        row: { sequence: tell.sequence, at: tell.recordedAt, text: tell.body },
         wake: { kind: "held" },
       }),
     });
@@ -43,7 +42,14 @@ function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[])
     aliases.push(binding.alias);
     byId.set(binding.akumaId, aliases);
   }
-  return { ...roster, rows: roster.rows.map((row) => ({ ...row, aliases: byId.get(row.id) ?? [] })) };
+  if (roster.rows === undefined) return roster;
+  return {
+    ...roster,
+    rows: roster.rows.map((row) => {
+      const aliases = byId.get(row.id);
+      return aliases === undefined ? row : { ...row, aliases };
+    }),
+  };
 }
 
 /** Test composition over the one lower owner; no parallel production facade. */
@@ -69,8 +75,8 @@ export class AkumaComposition {
       ...(this.configuration.settings === undefined ? {} : { settings: this.configuration.settings }),
       mode: "detach",
     });
-    if (result.observation.kind === "failed") throw new Error(result.observation.failure.diagnostic);
-    return this.of({ id: result.akuma });
+    if (result.failure !== undefined) throw new Error(result.failure.diagnostic);
+    return this.of({ id: result.akumaId });
   }
 
   async listArchetypes(): Promise<readonly string[]> {
@@ -89,7 +95,7 @@ export class AkumaComposition {
 
   async list(input: AkumaListInput = {}): Promise<AkumaList> {
     const roster = await readAkumaRoster(this.root, input);
-    return roster.rows.length === 0 ? roster : withRosterAliases(roster, await readAliases(this.root));
+    return roster.rows === undefined ? roster : withRosterAliases(roster, await readAliases(this.root));
   }
 }
 

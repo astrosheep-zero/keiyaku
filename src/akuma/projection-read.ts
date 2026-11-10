@@ -79,9 +79,6 @@ function flattenReportedChanges(rows: readonly (OpenTurnRow | UnsettledToolRow)[
   return rows.flatMap((row) => {
     if (!isSuccessfulFileChange(row)) return [];
     return row.call.changes.map((change) => ({
-      sequence: row.sequence,
-      at: row.at,
-      op: change.op,
       path: change.path,
       ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
     }));
@@ -89,7 +86,7 @@ function flattenReportedChanges(rows: readonly (OpenTurnRow | UnsettledToolRow)[
 }
 
 type AggregatedReportedChange = {
-  latest: ReportedFileChange;
+  path: string;
   lastIndex: number;
   added: number;
   removed: number;
@@ -103,7 +100,7 @@ function aggregateReportedChanges(changes: readonly ReportedFileChange[]): reado
     const diffstat = change.diffstat;
     if (current === undefined) {
       groups.set(change.path, {
-        latest: change,
+        path: change.path,
         lastIndex: index,
         added: diffstat?.added ?? 0,
         removed: diffstat?.removed ?? 0,
@@ -111,7 +108,6 @@ function aggregateReportedChanges(changes: readonly ReportedFileChange[]): reado
       });
       return;
     }
-    current.latest = change;
     current.lastIndex = index;
     if (diffstat === undefined) current.complete = false;
     else {
@@ -121,11 +117,11 @@ function aggregateReportedChanges(changes: readonly ReportedFileChange[]): reado
   });
   return [...groups.values()]
     .sort((left, right) => left.lastIndex - right.lastIndex)
-    .map((group) => {
-      if (group.complete) return { ...group.latest, diffstat: { added: group.added, removed: group.removed } };
-      const { sequence, at, op, path } = group.latest;
-      return { sequence, at, op, path };
-    });
+    .map((group) =>
+      group.complete
+        ? { path: group.path, diffstat: { added: group.added, removed: group.removed } }
+        : { path: group.path },
+    );
 }
 
 function summarizeReportedChanges(rows: readonly (OpenTurnRow | UnsettledToolRow)[]): ReportedChangeSummary {
@@ -163,7 +159,7 @@ function currentTurnWindow(ledger: TurnLedger): readonly ActivityRow[] {
   const turn = ledger.openTurn;
   if (turn === undefined) return [];
   const turnRows = new Set<ActivityRow>(turn.rows);
-  return ledger.rows.filter((row) => turnRows.has(row) || isSettledTellDeliveredTo(row, turn.turn.turnSequence));
+  return ledger.rows.filter((row) => turnRows.has(row) || isSettledTellDeliveredTo(row, turn.turn.sequence));
 }
 
 function openingInput(ledger: TurnLedger): ActivityRow | undefined {
@@ -175,9 +171,7 @@ function openingInput(ledger: TurnLedger): ActivityRow | undefined {
     (row) =>
       row.kind === "tell" &&
       row.state === "told" &&
-      row.deliveries.some(
-        (delivery) => delivery.route === "launch" && delivery.turnSequence === turn.turn.turnSequence,
-      ),
+      row.deliveries.some((delivery) => delivery.route === "launch" && delivery.turnSequence === turn.turn.sequence),
   );
 }
 
@@ -191,7 +185,7 @@ export function selectSnapshot(
 ): Readonly<{ snapshot: ActivitySnapshot; ordinaryCount: number }> {
   const budget = input.budget ?? { tail: DEFAULT_TAIL, voice: DEFAULT_VOICE };
   if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell"))
-    return { snapshot: { kind: "unborn", entries: [], omitted: 0, ...EMPTY_REPORTED }, ordinaryCount: 0 };
+    return { snapshot: { kind: "unborn", entries: [], ...EMPTY_REPORTED }, ordinaryCount: 0 };
   const pending = ledger.rows.filter(isPendingTell);
   const admittedTell =
     input.aperture === "receipt" && input.admittedTellId !== undefined
@@ -223,13 +217,11 @@ export function selectSnapshot(
     );
     const voice = voiceCount === 0 ? [] : voiceCandidates.slice(-voiceCount);
     const selected = new Set<ActivityRow>([...pinSet, ...tail, ...voice]);
-    const omitted = window.filter((row) => !selected.has(row)).length;
     return {
       snapshot: {
         kind: "open",
         turn: ledger.openTurn.turn,
         entries: assembleEntries<OpenSnapshotRow>(ledger, window, selected),
-        omitted,
         ...(opening === undefined ? {} : { openingSequence: opening.sequence }),
         ...reported,
       },
@@ -241,7 +233,6 @@ export function selectSnapshot(
       kind: "idle",
       ...(ledger.latestOutcome === undefined ? {} : { outcome: ledger.latestOutcome }),
       entries: assembleEntries(ledger, [], new Set(pins)),
-      omitted: 0,
       ...reported,
     },
     ordinaryCount: 0,

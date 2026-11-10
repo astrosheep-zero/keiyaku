@@ -7,6 +7,7 @@ import {
   Schema,
   World,
   listArchetypeDefinitions,
+  projectFailure,
   type SpawnResult,
   type AkumaHostScope,
   type AkumaCaller,
@@ -112,6 +113,7 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
         if (owned.closed) throw new Error("Keiyaku Pi session is shutting down");
         const { detach: detached, ...input } = raw as Input & LaunchChoice;
         let result: object;
+        let failed = false;
         try {
           result = await run(
             input as Input,
@@ -121,23 +123,15 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
             world,
           );
         } catch (error) {
-          // SDK exceptions can retain a leading birth. Do not turn that known
-          // identity into a text-only error or pretend the birth was rolled back.
-          if (!(error instanceof Error) || !("akuma" in error) || typeof error.akuma !== "string") throw error;
-          result = { akuma: error.akuma, failure: { diagnostic: error.message } };
-          const text = JSON.stringify(result);
-          return {
-            content: [{ type: "text", text }],
-            details: result,
-            structuredContent: JSON.parse(text),
-            isError: true,
-          };
+          result = projectFailure(error);
+          failed = true;
         }
         const text = JSON.stringify(result);
         return {
           content: [{ type: "text", text }],
           details: result,
           structuredContent: JSON.parse(text),
+          ...(failed ? { isError: true } : {}),
         };
       },
     });

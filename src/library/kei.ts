@@ -1,9 +1,10 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { renderContractGuidance } from "../contract-guidance.js";
-import type { ContractId, ContractState } from "../core/facts/types.js";
+import type { ContractId, ContractState, ContractTerms, JournalEntry } from "../core/facts/types.js";
+import { parseToAST } from "../markdown/parse.js";
+import { indexDocument, indexedHeadings, sectionContent } from "../markdown/query.js";
 import { readDispatchesAt } from "../dispatch/index.js";
-import { mintSnapshotId } from "../git/identity.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../git/read-observation.js";
 import {
@@ -12,8 +13,8 @@ import {
   stateOperation,
   type RepositoryScope,
 } from "../protocol/operations.js";
-import { readManagedWorktreeAppointment } from "../workspace-place.js";
-import { readContractValue } from "./outcome.js";
+import { readContractValue, validated } from "./outcome.js";
+import { optionalBoolean, requireInput } from "./input.js";
 import { ContractExecution } from "./contract-execution.js";
 import type {
   AbandonOutcome,
@@ -32,12 +33,13 @@ import type {
   AmendInput,
   ArcInput,
   ContractHistory,
+  ContractHistoryInput,
   ContractHistoryEvent,
   DeliverInput,
   ReviewInput,
   VerifyInput,
 } from "./contract-types.js";
-import { deliveryForContract, type Delivery } from "./delivery.js";
+import { compactDelivery, type Delivery } from "./delivery.js";
 import {
   validateContractWaitHandle,
   waitContractLocal,
@@ -45,7 +47,11 @@ import {
   type ContractWaitResult,
 } from "./contract-wait.js";
 
-export const guidanceSchema = z.string().nullable();
+export const guidanceSchema = z.union([
+  z.strictObject({ kind: z.literal("present"), guidance: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("missing") }).readonly(),
+]);
+export type Guidance = z.output<typeof guidanceSchema>;
 
 const KEIYAKU_HANDLE = Symbol("Kei handle");
 
@@ -95,7 +101,11 @@ export class Kei {
     return await waitContractLocal(validateContractWaitHandle(this.scope, this.id, input));
   }
 
-  async history(): Promise<ContractHistory | null> {
+  async history(input?: ContractHistoryInput): Promise<ContractHistory> {
+    const full = validated(() => {
+      const values = input === undefined ? {} : requireInput(input, "Contract history input", ["full"]);
+      return optionalBoolean(values.full, "full") === true;
+    });
     return await readContractValue(() =>
       withGitDecodeChannel(this.scope, (channel) =>
         withGitReadObservation(this.scope, channel, async (observation) => {
@@ -105,44 +115,41 @@ export class Kei {
           ]);
           const record = journals.journals.get(this.id);
           if (record === undefined) throw new Error(`missing requested contract observation: ${this.id}`);
-          if (record.state === null) return null;
-          const commit = observation.snapshot.commit;
-          if (commit === null) throw new Error("contract history requires a keiyaku-state snapshot");
-          const recordedAt = (event: ContractHistoryEvent): string =>
-            event.source === "journal" ? event.fact.at : event.dispatch.dispatchedAt;
-          const events = [
-            ...record.entries.map((fact) => ({ source: "journal" as const, fact })),
+          if (record.state === null) return { kind: "contract-missing", contractId: this.id };
+          let terms: ContractTerms | undefined;
+          const events: ContractHistoryEvent[] = record.entries.map((entry) => {
+            const event = historyEvent(entry, terms, full);
+            if (entry.kind === "bind") terms = entry.data.terms;
+            else if (entry.kind === "amend") terms = entry.data;
+            return event;
+          });
+          events.push(
             ...dispatches
               .filter((dispatch) => dispatch.contractId === this.id)
-              .map((dispatch) => ({ source: "dispatch" as const, dispatch })),
-          ].sort((left, right) => {
-            const leftAt = recordedAt(left);
-            const rightAt = recordedAt(right);
-            if (leftAt !== rightAt) return leftAt < rightAt ? -1 : 1;
-            if (left.source !== right.source) return left.source === "journal" ? -1 : 1;
+              .map((dispatch) => ({
+                kind: "dispatch" as const,
+                at: dispatch.dispatchedAt,
+                akumaId: dispatch.akumaId,
+              })),
+          );
+          events.sort((left, right) => {
+            if (left.at !== right.at) return left.at < right.at ? -1 : 1;
+            if ((left.kind === "dispatch") !== (right.kind === "dispatch")) return left.kind === "dispatch" ? 1 : -1;
             return 0;
           });
-          const workspace = await readManagedWorktreeAppointment(this.scope, this.id);
-          return {
-            id: this.id,
-            state: mintSnapshotId(commit),
-            ...(workspace.kind === "appointed"
-              ? { workspace: { kind: "worktree" as const, path: workspace.path } }
-              : {}),
-            events,
-          };
+          return { kind: "contract", contractId: this.id, events };
         }),
       ),
     );
   }
 
-  async guidance(): Promise<string | null> {
+  async guidance(): Promise<Guidance> {
     return await readContractValue(() =>
       withGitDecodeChannel(this.scope, async (channel) => {
         const observed = await contractObservationOperation({ scope: this.scope, channel, contractId: this.id });
-        if (observed.kind === "missing") return null;
+        if (observed.kind === "missing") return { kind: "missing" };
         const state = await stateOperation({ scope: this.scope, channel, contractId: this.id });
-        return state === null ? null : renderContractGuidance(state);
+        return state === null ? { kind: "missing" } : { kind: "present", guidance: renderContractGuidance(state) };
       }),
     );
   }
@@ -153,7 +160,7 @@ export class Kei {
         deliveryOperation({ scope: this.scope, channel, contractId: this.id }),
       ),
     );
-    return delivery === null ? null : deliveryForContract(this.scope, delivery);
+    return delivery === null ? null : compactDelivery(delivery);
   }
 
   async amend(input: AmendInput): Promise<AmendOutcome> {
@@ -182,6 +189,118 @@ export class Kei {
 
   async previewDelivery(input?: DeliveryPreviewInput, options?: MutationObservation): Promise<DeliveryPreviewOutcome> {
     return await this.operations.previewDelivery(input, options);
+  }
+}
+
+function changedHistoryTerms(before: ContractTerms | undefined, after: ContractTerms) {
+  const sections = (terms: ContractTerms): ReadonlyMap<string, string> => {
+    const document = parseToAST(terms.document.bytes);
+    return new Map(
+      indexedHeadings(indexDocument(document), { level: 2 })
+        .filter((section) => section.type === "section")
+        .map((section) => [section.title, sectionContent(document, section)]),
+    );
+  };
+  const source = before === undefined ? new Map<string, string>() : sections(before);
+  const amended = sections(after);
+  const changedSections = [...new Set([...source.keys(), ...amended.keys()])].filter(
+    (name) => source.get(name) !== amended.get(name),
+  );
+  const equal = (left: readonly string[] | undefined, right: readonly string[]): boolean =>
+    left !== undefined && left.length === right.length && left.every((value, index) => value === right[index]);
+  return {
+    ...(changedSections.length === 0 ? {} : { changedSections }),
+    ...(equal(before?.gates, after.gates) ? {} : { gates: after.gates }),
+    ...(equal(before?.after, after.after) ? {} : { after: after.after }),
+  };
+}
+
+function attestationHistory(entry: Extract<JournalEntry, { kind: "attestation" }>) {
+  const { gate, requirement, subject, verdict, summary } = entry.data;
+  return {
+    kind: "attestation" as const,
+    gate,
+    requirement,
+    verdict,
+    subject,
+    ...(summary === undefined ? {} : { summary }),
+  };
+}
+
+function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, full: boolean): ContractHistoryEvent {
+  const common = { id: entry.entry, at: entry.at, ...(entry.actor === undefined ? {} : { actor: entry.actor }) };
+  switch (entry.kind) {
+    case "bind": {
+      const { coordinates, terms: bound } = entry.data;
+      const target = coordinates.target;
+      return {
+        ...common,
+        kind: "bind",
+        start: coordinates.start,
+        ...(target === undefined
+          ? {}
+          : {
+              target:
+                typeof target === "string" ? target : { kind: "contract" as const, contractId: target.contractId },
+            }),
+        ...(full
+          ? {
+              document: bound.document.bytes,
+              gates: bound.gates,
+              after: bound.after,
+              ...(typeof target === "object" ? { targetIncarnation: target.worktree } : {}),
+            }
+          : {
+              ...(bound.gates.length === 0 ? {} : { gates: bound.gates }),
+              ...(bound.after.length === 0 ? {} : { after: bound.after }),
+            }),
+      };
+    }
+    case "amend":
+      return {
+        ...common,
+        kind: "amend",
+        ...changedHistoryTerms(terms, entry.data),
+        ...(full ? { document: entry.data.document.bytes, gates: entry.data.gates, after: entry.data.after } : {}),
+      };
+    case "deliver": {
+      const { tenderSnapshot, integration, note } = entry.data;
+      return {
+        ...common,
+        kind: "deliver",
+        candidate: tenderSnapshot,
+        integration: integration.snapshot,
+        contentId: integration.changeId,
+        predecessor: integration.predecessor,
+        ...(note === undefined ? {} : { note }),
+        ...(full ? { requireBranchesToBeUpToDate: entry.data.policy.requireBranchesToBeUpToDate } : {}),
+      };
+    }
+    case "reintegrated":
+      return {
+        ...common,
+        kind: "reintegrated",
+        predecessor: entry.data.predecessor,
+        integration: entry.data.snapshot,
+      };
+    case "attestation":
+      return { ...common, ...attestationHistory(entry) };
+    case "claimed":
+      return { ...common, kind: "claimed", deliveryId: entry.data.delivery };
+    case "arc":
+      return {
+        ...common,
+        kind: "arc",
+        chapter: entry.data.seq,
+        title: entry.data.title,
+        ...(entry.data.body.length === 0 && !full ? {} : { body: entry.data.body }),
+      };
+    case "abandoned":
+      return {
+        ...common,
+        kind: "abandoned",
+        ...(entry.data.note === undefined ? {} : { note: entry.data.note }),
+      };
   }
 }
 

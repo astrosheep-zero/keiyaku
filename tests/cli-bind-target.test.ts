@@ -10,16 +10,8 @@ import { parseArgv, renderHelp } from "../src/cli/parse.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { makeGitRepository, observeContract } from "./support/git.js";
 
-type BindValue = Readonly<{
-  kind: string;
-  contract?: string;
-  refusal?: Readonly<{ kind: string }>;
-}>;
+type BindValue = Readonly<{ kind: string; contractId?: string; reason?: Readonly<{ kind: string }> }>;
 
-/**
- * Run the real CLI bind edge over the invocation repository. `--gates ""` keeps the sentinel on
- * target selection alone: an explicit empty selection never demands a Verification declaration.
- */
 async function cliBind(path: string, extra: readonly string[] = []) {
   return await cliJson<BindValue>(["-C", path, "bind", "--gates", "", ...extra, "-"], {
     environment: {},
@@ -29,49 +21,42 @@ async function cliBind(path: string, extra: readonly string[] = []) {
 
 async function boundTarget(
   path: string,
-  contract: ContractId,
+  id: ContractId,
 ): Promise<import("../src/core/facts/types.js").ContractTarget | undefined> {
-  const observed = await observeContract(await repositoryAt(path), contract);
-  return observed.state?.coordinates.target;
+  return (await observeContract(await repositoryAt(path), id)).state?.coordinates.target;
 }
 
 test("CLI markdown bind without --target targets the attached invocation branch", async () => {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const start = raw.run(["rev-parse", "HEAD"]).trim();
-
   const bound = await cliBind(raw.path);
   assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
-  assert.ok(bound.value.contract);
-  const observed = await observeContract(await repositoryAt(raw.path), contractId(bound.value.contract));
+  assert.ok(bound.value.contractId);
+  const observed = await observeContract(await repositoryAt(raw.path), contractId(bound.value.contractId));
   assert.equal(observed.state?.coordinates.target, "refs/heads/main");
   assert.equal(observed.state?.coordinates.start, start);
 });
 
 test("CLI and SDK share the one omitted-target default", async () => {
   const raw = repositoryWithMain();
-  const fromCli = await cliBind(raw.path);
-  assert.equal(fromCli.value.kind, "accepted", JSON.stringify(fromCli.value));
-  assert.ok(fromCli.value.contract);
-
-  const fromSdk = accepted(
-    await Keis.of(await Repo.at({ path: raw.path })).bind({
-      markdown: document(),
-      workspace: "worktree",
-      gates: [],
-    }),
+  const cli = await cliBind(raw.path);
+  assert.equal(cli.value.kind, "accepted", JSON.stringify(cli.value));
+  assert.ok(cli.value.contractId);
+  const sdk = accepted(
+    await Keis.of(await Repo.at({ path: raw.path })).bind({ markdown: document(), workspace: "worktree", gates: [] }),
   );
-  const sdkState = present(await fromSdk.value.kei.state());
+  const sdkState = present(await sdk.kei.state());
   assert.equal(sdkState.coordinates.target, "refs/heads/main");
-  assert.equal(await boundTarget(raw.path, contractId(fromCli.value.contract)), sdkState.coordinates.target);
+  assert.equal(await boundTarget(raw.path, contractId(cli.value.contractId)), sdkState.coordinates.target);
 });
 
 test("CLI --no-target binds without a target on an attached HEAD", async () => {
   const raw = repositoryWithMain();
   const bound = await cliBind(raw.path, ["--no-target"]);
   assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
-  assert.ok(bound.value.contract);
-  assert.equal(await boundTarget(raw.path, contractId(bound.value.contract)), undefined);
+  assert.ok(bound.value.contractId);
+  assert.equal(await boundTarget(raw.path, contractId(bound.value.contractId)), undefined);
 });
 
 test("CLI refuses --target together with --no-target", async () => {
@@ -87,57 +72,53 @@ test("CLI markdown bind without --target on a detached HEAD stays targetless", a
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   raw.run(["checkout", "--quiet", "--detach"]);
-
   const bound = await cliBind(raw.path);
   assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
-  assert.ok(bound.value.contract);
-  assert.equal(await boundTarget(raw.path, contractId(bound.value.contract)), undefined);
+  assert.ok(bound.value.contractId);
+  assert.equal(await boundTarget(raw.path, contractId(bound.value.contractId)), undefined);
 });
 
 test("CLI markdown bind without --target on an unborn HEAD refuses unborn-head", async () => {
   const raw = makeGitRepository();
-
   const bound = await cliBind(raw.path);
   assert.equal(bound.value.kind, "refused", JSON.stringify(bound.value));
-  assert.equal(bound.value.refusal?.kind, "unborn-head");
+  assert.equal(bound.value.reason?.kind, "unborn-head");
 });
 
 test("CLI markdown bind keeps an explicit --target literal", async () => {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   raw.run(["branch", "release"]);
-
   const bound = await cliBind(raw.path, ["--target", "release"]);
   assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
-  assert.ok(bound.value.contract);
-  assert.equal(await boundTarget(raw.path, contractId(bound.value.contract)), "refs/heads/release");
-
+  assert.ok(bound.value.contractId);
+  assert.equal(await boundTarget(raw.path, contractId(bound.value.contractId)), "refs/heads/release");
   const missing = await cliBind(raw.path, ["--target", "missing"]);
   assert.equal(missing.value.kind, "refused", JSON.stringify(missing.value));
-  assert.equal(missing.value.refusal?.kind, "target-missing");
+  assert.equal(missing.value.reason?.kind, "target-missing");
 });
 
 test("CLI selects a complete Contract identity and preserves the kei-named branch escape", async () => {
   const raw = repositoryWithMain();
   const parent = await cliBind(raw.path);
   assert.equal(parent.value.kind, "accepted");
-  assert.ok(parent.value.contract);
-  const child = await cliBind(raw.path, ["--target", parent.value.contract]);
+  assert.ok(parent.value.contractId);
+  const child = await cliBind(raw.path, ["--target", parent.value.contractId]);
   assert.equal(child.value.kind, "accepted", JSON.stringify(child.value));
-  assert.ok(child.value.contract);
-  const target = await boundTarget(raw.path, contractId(child.value.contract));
+  assert.ok(child.value.contractId);
+  const target = await boundTarget(raw.path, contractId(child.value.contractId));
   assert.equal(typeof target, "object");
   if (typeof target !== "object" || target === null) throw new Error("missing typed target");
-  assert.equal(target.contractId, parent.value.contract);
-  assert.match(child.stdout, /"kind"\s*:\s*"contract"/u);
+  assert.equal(target.contractId, parent.value.contractId);
+  assert.equal(JSON.parse(child.stdout).target, parent.value.contractId);
   const malformed = await cliBind(raw.path, ["--target", "kei/"]);
   assert.equal(malformed.value.kind, "refused");
-  assert.equal(malformed.value.refusal?.kind, "invalid-target");
+  assert.equal(malformed.value.reason?.kind, "invalid-target");
   raw.run(["branch", "kei/example"]);
   const branch = await cliBind(raw.path, ["--target", "refs/heads/kei/example"]);
   assert.equal(branch.value.kind, "accepted", JSON.stringify(branch.value));
-  assert.ok(branch.value.contract);
-  assert.equal(await boundTarget(raw.path, contractId(branch.value.contract)), "refs/heads/kei/example");
+  assert.ok(branch.value.contractId);
+  assert.equal(await boundTarget(raw.path, contractId(branch.value.contractId)), "refs/heads/kei/example");
   const help = parseArgv(["bind", "--help"]);
   assert.ok("help" in help);
   assert.match(renderHelp(help.help), /active kei\/\.\.\./u);
@@ -147,16 +128,13 @@ test("an omitted target reads the explicit linked worktree coordinate, not the p
   const raw = repositoryWithMain();
   const linked = join(raw.path, "linked-worktree");
   raw.run(["worktree", "add", "--quiet", "-b", "feature", linked]);
-
   const repo = await Repo.at({ path: linked });
   assert.equal(repo.root, raw.path);
   assert.equal(repo.cwd, await realpath(linked));
-
   const bound = accepted(await Keis.of(repo).bind({ markdown: document(), workspace: "worktree", gates: [] }));
-  assert.equal(present(await bound.value.kei.state()).coordinates.target, "refs/heads/feature");
-
-  const fromCli = await cliBind(linked);
-  assert.equal(fromCli.value.kind, "accepted", JSON.stringify(fromCli.value));
-  assert.ok(fromCli.value.contract);
-  assert.equal(await boundTarget(raw.path, contractId(fromCli.value.contract)), "refs/heads/feature");
+  assert.equal(present(await bound.kei.state()).coordinates.target, "refs/heads/feature");
+  const cli = await cliBind(linked);
+  assert.equal(cli.value.kind, "accepted", JSON.stringify(cli.value));
+  assert.ok(cli.value.contractId);
+  assert.equal(await boundTarget(raw.path, contractId(cli.value.contractId)), "refs/heads/feature");
 });

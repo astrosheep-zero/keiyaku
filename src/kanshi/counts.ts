@@ -76,7 +76,12 @@ export async function kanshiCounts(input: KanshiCountsInput): Promise<KanshiCoun
     if (!established) return [absent, absent];
     return Promise.all([
       section(() => countRunningAkuma(world)),
-      section(async () => (await observeDebtBoard(world)).statusRows.filter((row) => row.state === "open").length),
+      section(
+        async () =>
+          (await observeDebtBoard(world)).statusRows.filter(
+            (row) => row.disposition === "ready" || row.disposition === "blocked",
+          ).length,
+      ),
     ]);
   };
   const [contractSection, [akuma, debts]] = await Promise.all([contracts, worldSections()]);

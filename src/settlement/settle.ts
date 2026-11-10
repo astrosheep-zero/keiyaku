@@ -91,7 +91,7 @@ function debtFailure(
 ): string {
   return result.kind === "retry"
     ? `Debt settlement requires retry: ${result.reason}`
-    : `Debt settlement refused: ${JSON.stringify(result.refusal)}`;
+    : `Debt settlement refused: ${result.reason}${"state" in result ? ` (${result.state})` : ""}`;
 }
 
 type SettleDebtsInput = Readonly<{
@@ -178,15 +178,13 @@ async function completeHeldDebt(
   }
   if (result.kind === "changed") recordAction(input, { kind: "debt", debtId, action: "done" });
   if (result.kind === "changed" && result.cleanup !== undefined) {
-    for (const detail of result.cleanup.diagnostics) {
-      recordLag(input, {
-        kind: "settlement-failed",
-        surface: "debt",
-        contractId: candidate.id,
-        debtId,
-        diagnostic: detail,
-      });
-    }
+    recordLag(input, {
+      kind: "settlement-failed",
+      surface: "debt",
+      contractId: candidate.id,
+      debtId,
+      diagnostic: result.cleanup,
+    });
   }
   if (result.kind === "changed" || result.kind === "unchanged") return true;
   recordLag(input, {

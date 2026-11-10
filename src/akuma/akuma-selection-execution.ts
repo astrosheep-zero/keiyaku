@@ -11,7 +11,13 @@ import type { AkumaStatus } from "./akuma.js";
 import { tellWakeRuntime, type TellResult } from "./body.js";
 import type { BodyLauncher } from "./body-launch.js";
 import type { Schema } from "./schema.js";
-import type { AkumaAskObservation, AkumaAskResult, AkumaKillResult, AkumaTellResult } from "./selection-observation.js";
+import {
+  compactTellResult,
+  type AkumaAskObservation,
+  type AkumaAskResult,
+  type AkumaKillResult,
+  type AkumaTellResult,
+} from "./selection-observation.js";
 
 export const liveStatusObservationSchema = z
   .strictObject({
@@ -68,42 +74,49 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
     });
   }
   input.signal?.throwIfAborted();
-  return { akuma: input.id, tell };
+  const { interrupt, ...compact } = compactTellResult(input.id, tell);
+  if (interrupt?.kind === "pending") throw new Error("Tell returned an unsettled interruption");
+  return { ...compact, ...(interrupt === undefined ? {} : { interrupt }) };
 }
 
 function askObservation(observed: Awaited<ReturnType<AkumaOwner["tellOutcome"]>>): AkumaAskObservation {
-  if (observed.outcome === null)
-    return observed.reason === "deadline" ? { reason: "deadline" } : { reason: "unanswered" };
-  if (observed.outcome.kind === "canceled") return { reason: "unanswered" };
+  if (observed.outcome === null) return observed.reason === "deadline" ? { kind: "deadline" } : { kind: "unanswered" };
+  if (observed.outcome.kind === "canceled") return { kind: "unanswered" };
   if (observed.outcome.kind === "answered")
-    return { reason: "answered", answer: observed.outcome.answerJson ?? observed.outcome.answer };
-  if (observed.outcome.kind === "failed") return { reason: "failed", diagnostic: observed.outcome.diagnostic };
+    return { kind: "answered", answer: observed.outcome.answerJson ?? observed.outcome.answer };
+  if (observed.outcome.kind === "failed") return { kind: "failed", diagnostic: observed.outcome.diagnostic };
   return {
-    reason: "invalid-output",
+    kind: "invalid-output",
     diagnostic: observed.outcome.diagnostic,
     answer: observed.outcome.answer,
   };
 }
 
+export function decodeAskObservation<T>(observation: AkumaAskResult, schema: Schema<T>): AkumaAskResult<T>;
+export function decodeAskObservation<T>(observation: AkumaAskObservation, schema: Schema<T>): AkumaAskObservation<T>;
 export function decodeAskObservation<T>(observation: AkumaAskObservation, schema: Schema<T>): AkumaAskObservation<T> {
-  if (observation.reason !== "answered") return observation;
+  if (observation.kind !== "answered") return observation;
+  const { answer: _answer, answerUndefined: _undefined, ...receipt } = observation;
   let value = observation.answer;
   if (typeof value === "string") {
     try {
       value = JSON.parse(value);
     } catch (error) {
       return {
-        reason: "invalid-output",
+        ...receipt,
+        kind: "invalid-output",
         diagnostic: error instanceof Error ? error.message : "Answer is not valid JSON",
         answer: typeof observation.answer === "string" ? observation.answer : String(observation.answer),
       };
     }
   }
   try {
-    return { reason: "answered", answer: schema.decode(value) };
+    const answer = schema.decode(value);
+    return { ...receipt, kind: "answered", ...(answer === undefined ? { answerUndefined: true } : { answer }) };
   } catch (error) {
     return {
-      reason: "invalid-output",
+      ...receipt,
+      kind: "invalid-output",
       diagnostic: error instanceof Error ? error.message : "Answer failed schema decode",
       answer: typeof observation.answer === "string" ? observation.answer : String(observation.answer),
     };
@@ -163,12 +176,12 @@ export async function observeAdmittedAskAkuma(
     ...(input.signal === undefined ? {} : { signal: input.signal }),
     ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
   });
-  return {
-    akuma: input.id,
-    tell: settled ?? tell,
-    observation: askObservation(observed),
-    completedAt: observed.completedAt,
-  };
+  const receipt = compactTellResult(input.id, settled ?? tell);
+  const observation = askObservation(observed);
+  const { wake, ...subject } = receipt;
+  return observation.kind === "unanswered" || observation.kind === "deadline"
+    ? { ...subject, ...(wake === undefined ? {} : { wake }), ...observation }
+    : { ...subject, ...(wake?.kind === "failed" ? { wake } : {}), ...observation };
 }
 
 /**
@@ -257,7 +270,7 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
   );
   input.signal?.throwIfAborted();
   return {
-    results: input.ids.map((id, index) => ({ id, evidence: evidence[index]! })),
+    results: input.ids.map((id, index) => ({ id, outcome: evidence[index]! })),
   };
 }
 

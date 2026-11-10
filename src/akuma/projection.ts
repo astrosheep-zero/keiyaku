@@ -1,10 +1,11 @@
 import {
   toolCallSchema,
   toolResultSchema,
-  toolInputSchema,
   fileChangeSchema,
   diffstatSchema,
   type AgentEvent,
+  type ToolCall,
+  type ToolResult,
 } from "./heart/activity-schema.js";
 import type { TimelineFact, TurnEndFact } from "./heart/index.js";
 import { projectTell, reportFactSchema, reportFactWireSchema, type TellDelivery, type TellRow } from "./heart/facts.js";
@@ -16,7 +17,7 @@ const sequenceSchema = z.number().int().positive();
 const timestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
 const strictDiffstatSchema = diffstatSchema.strict().readonly();
 const [runCall, readCall, searchCall, changeCall, otherCall] = toolCallSchema.options;
-const publicFileChangeSchema = fileChangeSchema
+export const publicFileChangeSchema = fileChangeSchema
   .extend({
     diffstat: strictDiffstatSchema.exactOptional(),
     patch: fileChangeSchema.shape.patch.unwrap().exactOptional(),
@@ -24,24 +25,44 @@ const publicFileChangeSchema = fileChangeSchema
   .strict()
   .readonly();
 // Public observation historically admits zero-based read positions, unlike native narration.
+export const publicRunCallSchema = runCall.strict().readonly();
+export const publicReadCallSchema = readCall
+  .extend({ offset: countSchema.exactOptional(), limit: countSchema.exactOptional() })
+  .strict()
+  .readonly();
+export const publicSearchCallSchema = searchCall
+  .extend({
+    scope: searchCall.shape.scope.unwrap().exactOptional(),
+    path: searchCall.shape.path.unwrap().exactOptional(),
+    glob: searchCall.shape.glob.unwrap().exactOptional(),
+  })
+  .strict()
+  .readonly();
+export const publicChangeCallSchema = changeCall
+  .extend({ changes: z.array(publicFileChangeSchema).readonly() })
+  .strict()
+  .readonly();
+const publicOtherCallSchema = otherCall
+  .omit({ display: true })
+  .extend({
+    input: z
+      .strictObject({
+        json: z.string(),
+        truncated: z.literal(true).exactOptional(),
+      })
+      .readonly()
+      .exactOptional(),
+  })
+  .strict()
+  .readonly();
 const publicToolCallSchema = z.union([
-  runCall.strict().readonly(),
-  readCall.extend({ offset: countSchema.exactOptional(), limit: countSchema.exactOptional() }).strict().readonly(),
-  searchCall
-    .extend({
-      scope: searchCall.shape.scope.unwrap().exactOptional(),
-      path: searchCall.shape.path.unwrap().exactOptional(),
-      glob: searchCall.shape.glob.unwrap().exactOptional(),
-    })
-    .strict()
-    .readonly(),
-  changeCall
-    .extend({ changes: z.array(publicFileChangeSchema).readonly() })
-    .strict()
-    .readonly(),
-  otherCall.extend({ input: toolInputSchema.strict().readonly().exactOptional() }).strict().readonly(),
+  publicRunCallSchema,
+  publicReadCallSchema,
+  publicSearchCallSchema,
+  publicChangeCallSchema,
+  publicOtherCallSchema,
 ]);
-const publicToolResultSchema = toolResultSchema
+export const publicToolResultSchema = toolResultSchema
   .extend({
     message: toolResultSchema.shape.message.unwrap().exactOptional(),
     output: toolResultSchema.shape.output.unwrap().exactOptional(),
@@ -55,7 +76,6 @@ const tellDeliverySchema = z
     deliveredAt: timestampSchema,
     route: z.enum(["launch", "live"]),
     turnSequence: countSchema,
-    receipt: z.enum(["unavailable", "required"]).exactOptional(),
   })
   .strict()
   .readonly() satisfies z.ZodType<TellDelivery>;
@@ -63,7 +83,6 @@ const turnRowSchema = z
   .object({
     kind: z.literal("turn"),
     sequence: countSchema,
-    turnSequence: countSchema,
     bodySequence: countSchema,
     at: timestampSchema,
   })
@@ -80,7 +99,7 @@ const callRowSchema = z
   .strict()
   .readonly();
 export const reportRowSchema = reportFactWireSchema;
-const textRowSchema = (kind: "said" | "thought" | "note") =>
+export const textRowSchema = (kind: "said" | "thought" | "note") =>
   z
     .object({
       kind: z.literal(kind),
@@ -104,22 +123,21 @@ export const tellRowSchema = z
   })
   .strict()
   .readonly() satisfies z.ZodType<TellRow>;
-const outcomeSchema = z.union([
+export const outcomeSchema = z.union([
   z
     .object({
       kind: z.literal("answered"),
-      historyId: nonblankTextSchema,
       answer: z.string(),
       foldedSaidSequence: countSchema.exactOptional(),
     })
     .strict()
     .readonly(),
   z
-    .object({ kind: z.literal("failed"), historyId: nonblankTextSchema, diagnostic: z.string() })
+    .object({ kind: z.literal("failed"), diagnostic: z.string() })
     .strict()
     .readonly(),
   z
-    .object({ kind: z.literal("canceled"), historyId: nonblankTextSchema })
+    .object({ kind: z.literal("canceled") })
     .strict()
     .readonly(),
 ]);
@@ -133,20 +151,6 @@ export const outcomeRowSchema = z
   })
   .strict()
   .readonly();
-const activeToolRowSchema = z
-  .object({
-    kind: z.literal("tool"),
-    sequence: countSchema,
-    turnSequence: countSchema,
-    at: timestampSchema,
-    name: nonblankTextSchema,
-    call: publicToolCallSchema,
-    state: z.literal("active"),
-    toolId: z.string().exactOptional(),
-    truncated: z.literal(true).exactOptional(),
-  })
-  .strict()
-  .readonly();
 const completedToolRowSchema = z
   .object({
     kind: z.literal("tool"),
@@ -157,24 +161,20 @@ const completedToolRowSchema = z
     name: nonblankTextSchema,
     call: publicToolCallSchema,
     state: publicToolResultSchema,
-    toolId: z.string().exactOptional(),
+    toolId: z.string(),
     truncated: z.literal(true).exactOptional(),
   })
   .strict()
   .readonly();
-const unsettledToolRowSchema = z
-  .object({
-    kind: z.literal("tool"),
-    sequence: countSchema,
-    turnSequence: countSchema,
-    at: timestampSchema,
-    name: nonblankTextSchema,
-    call: publicToolCallSchema,
-    state: z.literal("unsettled"),
-    toolId: z.string().exactOptional(),
-    truncated: z.literal(true).exactOptional(),
-  })
-  .strict()
+/** Tool state varies inside one kind-tagged row, not competing tool alternatives. */
+export const toolRowSchema = completedToolRowSchema
+  .unwrap()
+  .extend({ state: z.union([z.enum(["active", "unsettled"]), publicToolResultSchema]) })
+  .readonly();
+const openToolRowSchema = toolRowSchema
+  .unwrap()
+  .extend({ state: z.union([z.literal("active"), publicToolResultSchema]) })
+  .refine((row) => row.state !== "active" || row.durationMs === undefined, "active tool has no duration")
   .readonly();
 const snapshotFactRowSchema = z.union([
   reportRowSchema,
@@ -184,7 +184,7 @@ const snapshotFactRowSchema = z.union([
   textRowSchema("note"),
   tellRowSchema,
 ]);
-const openSnapshotRowSchema = z.union([snapshotFactRowSchema, activeToolRowSchema, completedToolRowSchema]);
+const openSnapshotRowSchema = z.union([snapshotFactRowSchema, openToolRowSchema]);
 const idleSnapshotRowSchema = z.union([snapshotFactRowSchema, completedToolRowSchema]);
 const snapshotEntrySchema = <Row extends z.ZodType>(row: Row) =>
   z.union([
@@ -197,15 +197,8 @@ const snapshotEntrySchema = <Row extends z.ZodType>(row: Row) =>
       .strict()
       .readonly(),
   ]);
-const nativeSnapshotEntrySchema = <Row extends z.ZodType>(row: Row) => {
-  const entry = snapshotEntrySchema(row);
-  return z.union([entry.options[0].unwrap(), entry.options[1].unwrap()]);
-};
 const reportedFileChangeSchema = z
   .object({
-    sequence: countSchema,
-    at: timestampSchema,
-    op: z.enum(["add", "update", "delete", "unspecified"]),
     path: z.string(),
     diffstat: strictDiffstatSchema.exactOptional(),
   })
@@ -220,7 +213,6 @@ const openActivitySnapshotSchema = z
     kind: z.literal("open"),
     turn: turnRowSchema,
     entries: z.array(snapshotEntrySchema(openSnapshotRowSchema)).readonly(),
-    omitted: countSchema,
     openingSequence: sequenceSchema.exactOptional(),
     ...reportedChangeFields,
   })
@@ -245,7 +237,6 @@ export const activitySnapshotSchema = z.union([
     .object({
       kind: z.literal("unborn"),
       entries: z.tuple([]).readonly(),
-      omitted: z.literal(0),
       ...reportedChangeFields,
     })
     .strict()
@@ -256,62 +247,34 @@ export const activitySnapshotSchema = z.union([
       kind: z.literal("idle"),
       outcome: outcomeRowSchema.exactOptional(),
       entries: z.array(snapshotEntrySchema(idleSnapshotRowSchema)).readonly(),
-      omitted: countSchema,
       ...reportedChangeFields,
     })
     .strict()
     .readonly(),
 ]);
 
-const nativeTurnRowSchema = turnRowSchema.unwrap();
-const nativeCallRowSchema = callRowSchema.unwrap();
-const nativeTextRowSchema = (kind: "said" | "thought" | "note") =>
-  textRowSchema(kind)
-    .unwrap()
-    .extend({ truncated: z.literal(true).optional() });
-const nativeOutcomeSchema = z.union([
-  outcomeSchema.options[0].unwrap().extend({ foldedSaidSequence: countSchema.optional() }),
-  outcomeSchema.options[1].unwrap(),
-  outcomeSchema.options[2].unwrap(),
-]);
-const nativeOutcomeRowSchema = outcomeRowSchema.unwrap().extend({ outcome: nativeOutcomeSchema });
-const nativeReportedFileChangeSchema = reportedFileChangeSchema
-  .unwrap()
-  .extend({ diffstat: diffstatSchema.strict().optional() });
-type TurnOutcome = z.output<typeof nativeOutcomeSchema>;
-export type TurnStartRow = z.output<typeof nativeTurnRowSchema>;
-type CallRow = z.output<typeof nativeCallRowSchema>;
-type SaidRow = z.output<ReturnType<typeof nativeTextRowSchema>>;
-type ThoughtRow = z.output<ReturnType<typeof nativeTextRowSchema>>;
-type NoteRow = z.output<ReturnType<typeof nativeTextRowSchema>>;
+type TurnOutcome = z.output<typeof outcomeSchema>;
+export type TurnStartRow = z.output<typeof turnRowSchema>;
+type CallRow = z.output<typeof callRowSchema>;
+type SaidRow = z.output<ReturnType<typeof textRowSchema>>;
+type ThoughtRow = z.output<ReturnType<typeof textRowSchema>>;
+type NoteRow = z.output<ReturnType<typeof textRowSchema>>;
 export type ReportRow = z.output<typeof reportFactSchema>;
 type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow | ReportRow;
 export type { TellRow } from "./heart/facts.js";
-export type OutcomeRow = z.output<typeof nativeOutcomeRowSchema>;
+export type OutcomeRow = z.output<typeof outcomeRowSchema>;
 
-function publicOutcome(turnSequence: number, outcome: TurnEndFact["outcome"]): TurnOutcome {
-  const historyId = `turn/${turnSequence}`;
-  if (outcome.kind === "answered") return { kind: "answered", historyId, answer: outcome.answer };
-  if (outcome.kind === "canceled") return { kind: "canceled", historyId };
-  return { kind: "failed", historyId, diagnostic: outcome.diagnostic };
+function publicOutcome(outcome: TurnEndFact["outcome"]): TurnOutcome {
+  if (outcome.kind === "answered") return { kind: "answered", answer: outcome.answer };
+  if (outcome.kind === "canceled") return { kind: "canceled" };
+  return { kind: "failed", diagnostic: outcome.diagnostic };
 }
 
-const nativeActiveToolRowSchema = activeToolRowSchema
-  .unwrap()
-  .extend({ call: toolCallSchema, toolId: z.string().optional(), truncated: z.literal(true).optional() });
-const nativeCompletedToolRowSchema = completedToolRowSchema.unwrap().extend({
-  call: toolCallSchema,
-  state: toolResultSchema,
-  toolId: z.string().optional(),
-  truncated: z.literal(true).optional(),
-  durationMs: z.number().optional(),
-});
-const nativeUnsettledToolRowSchema = unsettledToolRowSchema
-  .unwrap()
-  .extend({ call: toolCallSchema, toolId: z.string().optional(), truncated: z.literal(true).optional() });
-export type ActiveToolRow = z.output<typeof nativeActiveToolRowSchema>;
-export type CompletedToolRow = z.output<typeof nativeCompletedToolRowSchema>;
-export type UnsettledToolRow = z.output<typeof nativeUnsettledToolRowSchema>;
+export type ToolRow = z.output<typeof toolRowSchema>;
+type ToolRowFields = Omit<ToolRow, "state">;
+export type ActiveToolRow = ToolRowFields & Readonly<{ state: "active" }>;
+export type CompletedToolRow = z.output<typeof completedToolRowSchema>;
+export type UnsettledToolRow = ToolRowFields & Readonly<{ state: "unsettled" }>;
 
 export type OpenTurnRow = TurnNarrationRow | ActiveToolRow | CompletedToolRow;
 export type ClosedTurnRow = TurnNarrationRow | UnsettledToolRow | CompletedToolRow;
@@ -330,47 +293,15 @@ export type ClosedTurn = Readonly<{
 }>;
 
 export type ProjectedTurn = OpenTurn | ClosedTurn;
-export type ActivityRow = TurnStartRow | OpenTurnRow | ClosedTurnRow | TellRow | OutcomeRow;
-
-const nativeSnapshotFactRowSchema = z.union([
-  reportFactSchema,
-  nativeCallRowSchema,
-  nativeTextRowSchema("said"),
-  nativeTextRowSchema("thought"),
-  nativeTextRowSchema("note"),
-  tellRowSchema.unwrap(),
-]);
-const nativeOpenSnapshotRowSchema = z.union([
-  nativeSnapshotFactRowSchema,
-  nativeActiveToolRowSchema,
-  nativeCompletedToolRowSchema,
-]);
-const nativeIdleSnapshotRowSchema = z.union([nativeSnapshotFactRowSchema, nativeCompletedToolRowSchema]);
-export type OpenSnapshotRow = z.output<typeof nativeOpenSnapshotRowSchema>;
-export type IdleSnapshotRow = z.output<typeof nativeIdleSnapshotRowSchema>;
+export type ActivityRow = z.output<typeof activityRowSchema>;
+export type OpenSnapshotRow = z.output<typeof openSnapshotRowSchema>;
+export type IdleSnapshotRow = z.output<typeof idleSnapshotRowSchema>;
 export type SnapshotRow = OpenSnapshotRow | IdleSnapshotRow;
-export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> = z.infer<
-  ReturnType<typeof nativeSnapshotEntrySchema<z.ZodType<Row>>>
+export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> = z.output<
+  ReturnType<typeof snapshotEntrySchema<z.ZodType<Row>>>
 >;
-export type ReportedFileChange = z.output<typeof nativeReportedFileChangeSchema>;
-export const nativeActivitySnapshotSchema = z.union([
-  activitySnapshotSchema.options[0]
-    .unwrap()
-    .extend({ reportedChanges: z.array(nativeReportedFileChangeSchema).readonly() }),
-  z.strictObject({
-    ...openActivitySnapshotSchema.unwrap().shape,
-    turn: nativeTurnRowSchema,
-    entries: z.array(nativeSnapshotEntrySchema(nativeOpenSnapshotRowSchema)).readonly(),
-    openingSequence: sequenceSchema.optional(),
-    reportedChanges: z.array(nativeReportedFileChangeSchema).readonly(),
-  }),
-  activitySnapshotSchema.options[2].unwrap().extend({
-    entries: z.array(nativeSnapshotEntrySchema(nativeIdleSnapshotRowSchema)).readonly(),
-    outcome: nativeOutcomeRowSchema.optional(),
-    reportedChanges: z.array(nativeReportedFileChangeSchema).readonly(),
-  }),
-]);
-export type ActivitySnapshot = z.output<typeof nativeActivitySnapshotSchema>;
+export type ReportedFileChange = z.output<typeof reportedFileChangeSchema>;
+export type ActivitySnapshot = z.output<typeof activitySnapshotSchema>;
 
 export const activityRowSchema = z.union([
   turnRowSchema,
@@ -380,9 +311,7 @@ export const activityRowSchema = z.union([
   textRowSchema("thought"),
   textRowSchema("note"),
   tellRowSchema,
-  activeToolRowSchema,
-  completedToolRowSchema,
-  unsettledToolRowSchema,
+  toolRowSchema,
   outcomeRowSchema,
 ]);
 export const activityHistorySchema = z
@@ -397,24 +326,7 @@ export const activityHistorySchema = z
   })
   .readonly();
 
-const nativeActivityRowSchema = z.union([
-  nativeTurnRowSchema,
-  nativeCallRowSchema,
-  reportFactSchema,
-  nativeTextRowSchema("said"),
-  nativeTextRowSchema("thought"),
-  nativeTextRowSchema("note"),
-  tellRowSchema,
-  nativeActiveToolRowSchema,
-  nativeCompletedToolRowSchema,
-  nativeUnsettledToolRowSchema,
-  nativeOutcomeRowSchema,
-]);
-const nativeActivityHistorySchema = activityHistorySchema
-  .unwrap()
-  .extend({ rows: z.array(nativeActivityRowSchema).readonly() })
-  .readonly();
-export type ActivityHistory = z.output<typeof nativeActivityHistorySchema>;
+export type ActivityHistory = z.output<typeof activityHistorySchema>;
 
 export type ExactHistory =
   | Readonly<{ kind: "exact"; outcome: OutcomeRow }>
@@ -432,7 +344,9 @@ export function selectExactHistory(
     const report = rows.find((row): row is ReportRow => row.kind === "report" && row.sequence === selector.sequence);
     return report === undefined ? { kind: "unknown-history", id } : { kind: "exact-report", report };
   }
-  const outcome = rows.find((row): row is OutcomeRow => row.kind === "outcome" && row.outcome.historyId === id);
+  const outcome = rows.find(
+    (row): row is OutcomeRow => row.kind === "outcome" && row.turnSequence === selector.sequence,
+  );
   return outcome === undefined ? { kind: "unknown-history", id } : { kind: "exact", outcome };
 }
 
@@ -479,6 +393,57 @@ function toolKey(turnSequence: number, id: string): string {
   return `${turnSequence}:${id}`;
 }
 
+/** Private neutral tool values carry optional undefined; the published row omits absent members. */
+function publicCall(call: ToolCall): ToolRow["call"] {
+  if (call.kind === "read")
+    return {
+      kind: "read",
+      path: call.path,
+      ...(call.offset === undefined ? {} : { offset: call.offset }),
+      ...(call.limit === undefined ? {} : { limit: call.limit }),
+    };
+  if (call.kind === "search")
+    return {
+      kind: "search",
+      query: call.query,
+      ...(call.scope === undefined ? {} : { scope: call.scope }),
+      ...(call.path === undefined ? {} : { path: call.path }),
+      ...(call.glob === undefined ? {} : { glob: call.glob }),
+    };
+  if (call.kind === "fileChange")
+    return {
+      kind: "fileChange",
+      changes: call.changes.map((change) => ({
+        op: change.op,
+        path: change.path,
+        ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
+        ...(change.patch === undefined ? {} : { patch: change.patch }),
+      })),
+    };
+  if (call.kind === "other")
+    return {
+      kind: "other",
+      ...(call.input === undefined
+        ? {}
+        : {
+            input: {
+              json: call.input.json,
+              ...(call.input.truncated ? { truncated: true } : {}),
+            },
+          }),
+    };
+  return { kind: "run", command: call.command };
+}
+
+function publicResult(result: ToolResult): CompletedToolRow["state"] {
+  return {
+    status: result.status,
+    ...(result.message === undefined ? {} : { message: result.message }),
+    ...(result.output === undefined ? {} : { output: result.output }),
+    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+  };
+}
+
 function narrationRow(fact: Extract<TimelineFact, { event: unknown }>, event: AgentEvent): TurnNarrationRow | null {
   if (event.type === "assistant") {
     return {
@@ -520,7 +485,7 @@ function projectToolEvent(
       at: fact.at,
       name: event.name,
       toolId: event.id,
-      call: event.call,
+      call: publicCall(event.call),
       state: phase === "open" ? "active" : "unsettled",
       ...(event.truncated === true ? { truncated: true } : {}),
     });
@@ -536,8 +501,8 @@ function projectToolEvent(
       at: fact.at,
       name: event.name,
       toolId: event.id,
-      call: event.call,
-      state: event.result,
+      call: publicCall(event.call),
+      state: publicResult(event.result),
       ...(event.truncated === true ? { truncated: true } : {}),
     });
     return;
@@ -551,8 +516,8 @@ function projectToolEvent(
     ...(durationMs === undefined ? {} : { durationMs }),
     name: event.name,
     toolId: event.id,
-    call: event.call,
-    state: event.result,
+    call: publicCall(event.call),
+    state: publicResult(event.result),
     ...(started.truncated === true || event.truncated === true ? { truncated: true } : {}),
   };
   running.delete(key);
@@ -599,7 +564,7 @@ function finishTurn(turn: MutableTurn): ProjectedTurn {
     return { kind: "closed", turn: turn.turn, rows: rows.map(demoteActive), outcome: folded.outcome };
   }
   if (rows.some((row) => row.kind === "tool" && row.state === "unsettled")) {
-    throw new Error(`open Turn ${turn.turn.turnSequence} contains an unsettled tool`);
+    throw new Error(`open Turn ${turn.turn.sequence} contains an unsettled tool`);
   }
   return { kind: "open", turn: turn.turn, rows: rows as readonly OpenTurnRow[] };
 }
@@ -645,20 +610,19 @@ export function projectTurns(
       const turn = {
         kind: "turn" as const,
         sequence: fact.sequence,
-        turnSequence: fact.sequence,
         bodySequence: fact.bodySequence,
         at: fact.startedAt,
       };
       const projected: MutableTurn = { phase: "open", turn, rows: [], running: new Map() };
       state.turns.push(projected);
-      state.turnsBySequence.set(turn.turnSequence, projected);
+      state.turnsBySequence.set(turn.sequence, projected);
     } else if (fact.kind === "turn-end") {
       const outcome = {
         kind: "outcome" as const,
         sequence: fact.sequence,
         turnSequence: fact.turnSequence,
         at: fact.completedAt,
-        outcome: publicOutcome(fact.turnSequence, fact.outcome),
+        outcome: publicOutcome(fact.outcome),
       };
       const turn = state.turnsBySequence.get(fact.turnSequence);
       if (turn === undefined) state.orphanOutcomes.push(outcome);
@@ -683,7 +647,8 @@ export function projectTurns(
       if (turn === undefined) state.orphanRows.push(fact);
       else turn.rows.push(fact);
     } else if (fact.kind === "tell") {
-      state.tells.push(projectTell(fact));
+      const tell = projectTell(fact);
+      state.tells.push({ ...tell, deliveries: tell.deliveries.map(({ receipt: _receipt, ...delivery }) => delivery) });
     } else {
       projectActivityEvent(state, fact);
     }

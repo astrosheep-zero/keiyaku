@@ -6,16 +6,18 @@ import type {
   AkumaTellResult,
   AkumaWaitResult,
 } from "../akuma/selection-observation.js";
-import type { KanshiReport } from "../kanshi/index.js";
+import type { RegionRead } from "../kanshi/report.js";
 import type {
   BlockedDebtList,
   DebtAbsent,
   DebtBatchResult,
   DebtContextResult,
-  DebtDecompositionTree,
-  DebtDetail,
+  DebtTreeResult,
+  DebtShowResult,
+  DebtCatalogue,
   DebtDoctorReport,
   DebtList,
+  DebtReadyList,
   DebtMutationResult,
   DebtQueryResult,
   DebtUpdateResult,
@@ -23,61 +25,55 @@ import type {
 import { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
 import type { ForkResult, SpawnResult } from "./akuma-creation.js";
 import type { ContractWaitResult } from "./contract-wait.js";
+import type { StatusResult } from "./keiyaku-status.js";
 import { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import type { VerbInput, VerbName, VerbOutput } from "./keiyaku-verbs.js";
-import { reconcileLagIsFailure, type ReconcileReport, type RepoReconcileReport } from "./reconcile.js";
-import type { AkumaHistoryResult } from "./selection.js";
+import {
+  KeiyakuError,
+  contractOutcomeDisposition,
+  invocationIssueIsFailure,
+  resetIssueIsRequired,
+  spawnFailureReceipt,
+} from "./outcome.js";
 
 export type VerbDisposition = "accepted" | "refused" | "retryable" | "failed" | "usage";
 
 export type VerbCompletion<O> = Readonly<{ kind: "returned"; value: O }> | Readonly<{ kind: "threw"; error: unknown }>;
 
-function reconcileHasFailure(report: ReconcileReport | RepoReconcileReport): boolean {
-  if ("kind" in report) {
-    return (
-      report.kind === "world-observation-failed" ||
-      report.contracts.some(({ report: item }) => reconcileHasFailure(item))
-    );
-  }
-  return (
-    report.lag.some(reconcileLagIsFailure) ||
-    report.settlement.lags.length > 0 ||
-    (report.settlement.seatClose?.length ?? 0) > 0
-  );
-}
-
 type DebtNativeResult =
   | DebtMutationResult
   | DebtUpdateResult
   | DebtBatchResult
-  | DebtDetail
-  | null
-  | readonly (DebtDetail | null)[]
+  | DebtShowResult
+  | DebtCatalogue
   | DebtList
+  | DebtReadyList
   | BlockedDebtList
   | DebtQueryResult
-  | DebtDecompositionTree
+  | DebtTreeResult
   | DebtDoctorReport
   | DebtContextResult
   | DebtAbsent;
 
 function classifyDebt(result: DebtNativeResult): VerbDisposition {
-  if (result === null) return "refused";
-  if (Array.isArray(result)) return result.some((item) => item === null) ? "refused" : "accepted";
-  if ("issues" in result) return result.issues.length === 0 ? "accepted" : "failed";
   if ("items" in result) {
-    if (result.items.some((item) => item.outcome.kind === "retry")) return "retryable";
-    return result.items.some((item) => item.outcome.kind === "refused") ? "refused" : "accepted";
+    if (result.items.some((item) => item.kind === "retry")) return "retryable";
+    return result.items.some((item) => item.kind === "refused" || item.kind === "missing") ? "refused" : "accepted";
   }
-  if ("kind" in result) {
-    if (result.kind === "retry") return "retryable";
-    if (result.kind === "refused" || result.kind === "absent") return "refused";
-  }
-  return "accepted";
+  if (result.kind === "retry") return "retryable";
+  if (
+    result.kind === "refused" ||
+    result.kind === "absent" ||
+    result.kind === "missing" ||
+    result.kind === "invalid-namespace-context"
+  )
+    return "refused";
+  return "issues" in result && (result.issues?.length ?? 0) > 0 ? "failed" : "accepted";
 }
 
 function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
-  if (error instanceof Error && "executionReceipt" in error) return "failed";
+  if (spawnFailureReceipt(error) !== undefined || (error instanceof KeiyakuError && error.outcome !== undefined))
+    return "failed";
   if (error instanceof KeiyakuUsageError) return "usage";
   if (
     error instanceof AkumaAddressError ||
@@ -91,50 +87,56 @@ function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
 }
 
 function classifySpawn(result: SpawnResult): VerbDisposition {
-  if (result.dispatch.kind === "failed" || result.alias.kind === "failed" || result.observation.kind === "failed")
-    return "failed";
-  if (result.observation.kind !== "observed") return "accepted";
-  const reason = result.observation.observation.reason;
-  return reason === "failed" || reason === "invalid-output" ? "failed" : "accepted";
+  return result.failure !== undefined ||
+    result.dispatchFailure !== undefined ||
+    (result.alias !== undefined && result.alias.kind !== "moved") ||
+    result.wake?.kind === "failed" ||
+    result.input?.kind === "failed" ||
+    result.input?.kind === "invalid-output"
+    ? "failed"
+    : "accepted";
 }
 
 function classifyFork(result: ForkResult): VerbDisposition {
-  if (result.kind === "forked") return result.dispatch.kind === "failed" ? "failed" : "accepted";
-  return result.kind === "fork-failed" || result.kind === "upstream-forked" ? "failed" : "refused";
+  if (result.kind === "forked") return result.dispatchFailure === undefined ? "accepted" : "failed";
+  return result.kind === "fork-failed" || result.kind === "provider-forked-local-birth-failed" ? "failed" : "refused";
 }
 
-function classifyStatus(input: VerbInput<"status">, value: VerbOutput<"status">): VerbDisposition {
-  const selector = (input as { selector?: string }).selector;
-  if (selector?.startsWith("kei/") !== true || Array.isArray(value) || !("contracts" in value)) return "accepted";
-  const contracts = (value as KanshiReport).contracts;
-  return contracts.kind === "present" && contracts.value.rows.length === 0 ? "refused" : "accepted";
+function classifyStatus(value: StatusResult): VerbDisposition {
+  return "kind" in value && value.kind === "contract-missing" ? "refused" : "accepted";
+}
+
+function classifyRegion(value: RegionRead): VerbDisposition {
+  return value.kind === "contract-missing" || value.kind === "contract-terminal" ? "refused" : "accepted";
 }
 
 function classifyReconcile(result: VerbOutput<"reconcile">): VerbDisposition {
-  if ("kind" in result && result.kind === "missing") return "refused";
-  return reconcileHasFailure(result) ? "failed" : "accepted";
+  switch (result.kind) {
+    case "missing":
+      return "refused";
+    case "world-observation-failed":
+      return "failed";
+    case "contract":
+      return result.issues?.some(invocationIssueIsFailure) === true ? "failed" : "accepted";
+    case "world":
+      return result.contracts?.some((item) => item.issues?.some(invocationIssueIsFailure) === true) === true
+        ? "failed"
+        : "accepted";
+  }
 }
 
 function classifyWait(result: ContractWaitResult | AkumaWaitResult): VerbDisposition {
-  return "kind" in result
-    ? result.kind === "missing"
-      ? "refused"
-      : "accepted"
-    : result.unobserved.length > 0
-      ? "failed"
-      : "accepted";
+  if (result.kind === "contract") return result.reason === "missing" ? "refused" : "accepted";
+  return result.results.some((item) => item.kind !== "observed") ? "failed" : "accepted";
 }
 
 function classifyHistory(value: VerbOutput<"history">): VerbDisposition {
-  return value === null ||
-    (typeof value === "object" && "kind" in value && (value as AkumaHistoryResult).kind === "unknown-history")
-    ? "refused"
-    : "accepted";
+  return value.kind === "contract-missing" || value.kind === "akuma-unknown-history" ? "refused" : "accepted";
 }
 
 function classifyNuke(result: VerbOutput<"nuke">): VerbDisposition {
   if (result.kind === "refused") return "refused";
-  return result.pending.some((surface) => surface.required) ? "retryable" : "accepted";
+  return result.issues?.some(resetIssueIsRequired) === true ? "retryable" : "accepted";
 }
 
 /** Classify the native completion without changing or reconstructing its evidence. */
@@ -170,22 +172,23 @@ export function classifyVerb<K extends VerbName>(
     case "verify":
     case "review":
     case "abandon": {
-      const result = value as { kind: string };
-      return result.kind === "refused" ? "refused" : result.kind === "retry" ? "retryable" : "accepted";
+      return contractOutcomeDisposition(
+        value as VerbOutput<"bind" | "amend" | "arc" | "deliver" | "deliver.preview" | "verify" | "review" | "abandon">,
+      );
     }
     case "spawn":
       return classifySpawn(value as SpawnResult);
     case "fork":
       return classifyFork(value as ForkResult);
     case "tell":
-      return (value as AkumaTellResult).tell.wake.kind === "failed" ? "failed" : "accepted";
+      return (value as AkumaTellResult).wake?.kind === "failed" ? "failed" : "accepted";
     case "ask": {
-      const reason = (value as AkumaAskResult).observation.reason;
+      const reason = (value as AkumaAskResult).kind;
       return reason === "failed" || reason === "invalid-output" ? "failed" : "accepted";
     }
     case "kill":
       return (value as AkumaKillResult).results.some(
-        ({ evidence }) => evidence === "unavailable" || evidence === "hung" || evidence === "untidy",
+        ({ outcome }) => outcome === "unavailable" || outcome === "hung" || outcome === "untidy",
       )
         ? "failed"
         : "accepted";
@@ -194,13 +197,11 @@ export function classifyVerb<K extends VerbName>(
     case "history":
       return classifyHistory(value as VerbOutput<"history">);
     case "show":
-      return value === null ? "refused" : "accepted";
+      return (value as VerbOutput<"show">).kind === "missing" ? "refused" : "accepted";
     case "status":
-      return classifyStatus(input as VerbInput<"status">, value as VerbOutput<"status">);
-    case "region": {
-      const result = value as { kind: string };
-      return result.kind === "missing" || "row" in result ? "refused" : "accepted";
-    }
+      return classifyStatus(value as StatusResult);
+    case "region":
+      return classifyRegion(value as RegionRead);
     case "reconcile":
       return classifyReconcile(value as VerbOutput<"reconcile">);
     case "nuke":

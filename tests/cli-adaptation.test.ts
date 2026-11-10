@@ -28,26 +28,31 @@ test("show reads native bytes once for explicit and contextual Contract selectio
       }),
     }),
   );
-  const row = (await library.list({  })).rows.find((entry) => entry.id === bound.contract)!;
-  assert.ok(row.worktreePath);
+  const row = (await library.list({})).rows?.find((entry) => entry.id === bound.contractId);
+  assert.ok(row !== undefined);
+  const observed = await library.observe({ id: row.id });
+  assert.equal(observed.kind, "present");
+  if (observed.kind !== "present" || observed.row.workspace.kind === "unappointed") assert.fail("missing workspace");
+  const worktreePath = observed.row.workspace.path;
   const expected = await library.kei({ id: row.id }).guidance();
-  assert.equal(typeof expected, "string");
+  assert.equal(expected.kind, "present");
+  if (expected.kind !== "present") assert.fail("missing native guidance");
   const read = t.mock.method(Kei.prototype, "guidance");
   for (const [cwd, selector] of [
     [repository.path, row.id],
     [repository.path, `@${row.id.slice("kei/".length)}`],
-    [row.worktreePath, undefined],
+    [worktreePath, undefined],
   ] as const) {
     const argv = ["-C", cwd, "show", ...(selector === undefined ? [] : [selector])];
     let before = read.mock.callCount();
     const text = await runCli(argv, { environment: {} });
     assert.equal(text.exit, 0, text.stderr);
-    assert.equal(text.stdout, expected!.endsWith("\n") ? expected : `${expected}\n`);
+    assert.equal(text.stdout, expected.guidance.endsWith("\n") ? expected.guidance : `${expected.guidance}\n`);
     assert.equal(read.mock.callCount(), before + 1);
     before = read.mock.callCount();
     const json = await cliJson(argv, { environment: {} });
     assert.equal(json.exit, 0, json.stderr);
-    assert.equal(json.value, expected);
+    assert.deepEqual(json.value, expected);
     assert.equal(read.mock.callCount(), before + 1);
   }
   const before = read.mock.callCount();
@@ -60,7 +65,7 @@ test("show reads native bytes once for explicit and contextual Contract selectio
     assert.equal(read.mock.callCount(), before);
     assert.doesNotMatch(ordinary.stdout, /# Guidance read/u);
   }
-  const child = join(row.worktreePath, "nested");
+  const child = join(worktreePath, "nested");
   mkdirSync(child);
   const nested = await captureOutput(() => main(["-C", child, "show"]));
   assert.equal(nested.exit, 64);
@@ -78,7 +83,7 @@ test("show preserves native absence and selection refusals with command-specific
   assert.equal(text.stdout, "× show refused\n  contract  kei/missing\n  reason  contract missing\n");
   const json = await cliJson(["-C", repository.path, "show", "kei/missing"], { environment: {} });
   assert.equal(json.exit, 1);
-  assert.equal(json.value, null);
+  assert.deepEqual(json.value, { kind: "missing" });
   assert.equal(read.mock.callCount(), 2);
   for (const [args, reason] of [
     [[], /required outside a managed worktree/u],

@@ -1,95 +1,60 @@
 import { z } from "zod";
-import type { DeliverData, SnapshotId } from "../core/facts/types.js";
-import { completionEvidenceShape } from "../protocol/completion.js";
-import type { CompletionEvidence } from "../protocol/completion.js";
-import { deliverLeadingSchema } from "../protocol/deliver.js";
-import { candidateContentChangeSchema, deliverDataSchema } from "../protocol/operations.js";
-import { deliveryDiffOperation, type RepositoryScope } from "../protocol/operations.js";
+import type { ChangeId, DeliverData } from "../core/facts/types.js";
+import { snapshotIdSchema, changeIdSchema } from "../git/identity.js";
+import {
+  compactPlacement,
+  placedSchema,
+  placementStopSchema,
+  type CompletionEvidence,
+} from "../protocol/completion.js";
+import type { DeliverLeading } from "../protocol/deliver.js";
 import { continuationReportSchema, type ContinuationReport } from "./continuation.js";
 
-const deliveryFields = {
-  ...deliverDataSchema.unwrap().shape,
-  ...completionEvidenceShape,
-  contentChange: candidateContentChangeSchema.exactOptional(),
-  continuation: continuationReportSchema.exactOptional(),
-};
-export const deliverySchema = z
-  .strictObject({ ...deliveryFields, leading: deliverLeadingSchema.exactOptional() })
-  .readonly()
-  .nullable();
-export const deliveredValueSchema = z.strictObject({ ...deliveryFields, leading: deliverLeadingSchema }).readonly();
+export const deliverPlacementSchema = z.union([
+  placedSchema.unwrap().omit({ integration: true }).readonly(),
+  placementStopSchema,
+]);
+export const deliveredValueSchema = z
+  .strictObject({
+    candidate: snapshotIdSchema,
+    integration: snapshotIdSchema,
+    contentId: changeIdSchema,
+    admission: z.literal("reused").exactOptional(),
+    placement: deliverPlacementSchema.exactOptional(),
+    previousContentId: changeIdSchema.exactOptional(),
+    continuation: continuationReportSchema.exactOptional(),
+  })
+  .readonly();
+export const deliverySchema = deliveredValueSchema.nullable();
+export type DeliveryValue = z.output<typeof deliveredValueSchema>;
+export type Delivery = DeliveryValue;
 
-export type DeliveryValue = DeliverData &
+/** Protocol custody only; ordinary public delivery results never expose this carrier. */
+export type RawDeliveryValue = DeliverData &
   CompletionEvidence &
   Readonly<{
-    leading: z.infer<typeof deliverLeadingSchema>;
-    contentChange?: z.infer<typeof candidateContentChangeSchema> | undefined;
-    continuation?: ContinuationReport | undefined;
+    leading: DeliverLeading;
+    previousContentId?: ChangeId;
+    continuation?: ContinuationReport;
   }>;
-
-class DeliveryHandle {
-  declare readonly leading?: DeliveryValue["leading"];
-  declare readonly contentChange?: DeliveryValue["contentChange"];
-  declare readonly completion?: DeliveryValue["completion"];
-  declare readonly gates?: DeliveryValue["gates"];
-  declare readonly placement?: DeliveryValue["placement"];
-  declare readonly continuation?: DeliveryValue["continuation"];
-  declare readonly tenderSnapshot: SnapshotId;
-  declare readonly note?: string;
-  declare readonly integration: DeliveryValue["integration"];
-  declare readonly method: DeliveryValue["method"];
-  declare readonly policy: DeliveryValue["policy"];
-
-  constructor(
-    identity: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
-    private readonly readDiff: () => Promise<string | null>,
-    outcomes: Partial<
-      Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "gates" | "placement" | "continuation">
-    > = {},
-  ) {
-    this.tenderSnapshot = identity.tenderSnapshot;
-    this.integration = identity.integration;
-    this.method = identity.method;
-    this.policy = identity.policy;
-    Object.assign(this, outcomes);
-    Object.defineProperty(this, "readDiff", { value: readDiff, enumerable: false });
-    Object.freeze(this);
-  }
-
-  diff(): Promise<string | null> {
-    return this.readDiff();
-  }
-}
-
-export type Delivery = DeliveryHandle;
-type HandleType<T extends object> = Readonly<{
-  prototype: T;
-  [Symbol.hasInstance](value: unknown): boolean;
-}>;
-
-export const Delivery: HandleType<DeliveryHandle> = Object.freeze({
-  prototype: DeliveryHandle.prototype,
-  [Symbol.hasInstance]: (value: unknown) => value instanceof DeliveryHandle,
-});
-
-export function deliveryForContract(scope: RepositoryScope, delivery: DeliveryValue): Delivery & DeliveryValue;
-export function deliveryForContract(
-  scope: RepositoryScope,
-  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy">,
-): Delivery;
-export function deliveryForContract(
-  scope: RepositoryScope,
-  delivery: Pick<DeliveryValue, "tenderSnapshot" | "integration" | "method" | "policy"> &
-    Partial<Pick<DeliveryValue, "leading" | "contentChange" | "completion" | "gates" | "placement" | "continuation">>,
-): Delivery {
-  return new DeliveryHandle(
-    delivery,
-    () =>
-      deliveryDiffOperation({
-        scope,
-        integrationPredecessor: delivery.integration.predecessor,
-        integrationSnapshot: delivery.integration.snapshot,
-      }),
-    delivery,
-  );
+export function compactDelivery(
+  delivery: DeliverData &
+    CompletionEvidence &
+    Partial<Pick<RawDeliveryValue, "leading" | "previousContentId" | "continuation">>,
+): DeliveryValue {
+  const observed = compactPlacement(delivery);
+  const placement =
+    observed?.kind === "placed" ? (({ integration: _integration, ...rest }) => rest)(observed) : observed;
+  const continuation = delivery.continuation;
+  return {
+    candidate: delivery.tenderSnapshot,
+    integration: delivery.completion?.integration ?? delivery.integration.snapshot,
+    contentId: delivery.integration.changeId,
+    ...(delivery.leading?.kind === "already-admitted" ? { admission: "reused" as const } : {}),
+    ...(placement === undefined ? {} : { placement }),
+    ...(delivery.previousContentId === undefined ? {} : { previousContentId: delivery.previousContentId }),
+    ...(continuation === undefined || (continuation.claimed === undefined && continuation.stopped === undefined)
+      ? {}
+      : { continuation }),
+  };
 }

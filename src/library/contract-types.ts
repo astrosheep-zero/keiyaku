@@ -1,33 +1,127 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
-import { worktreeWorkspaceSchema } from "../git/workspace.js";
-import { dispatchSchema } from "../dispatch/index.js";
-import { journalEntrySchema } from "../protocol/result-leaves.js";
+import { entryUlidSchema, gateSchema, requirementIdSchema, verdictSchema } from "../protocol/result-leaves.js";
 import type { ActorId, AttestationData, ContractId } from "../core/facts/types.js";
-import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
+import type { ContractCatalogue } from "../protocol/read/status.js";
 import type { Settings } from "../settings.js";
 import type { DebtId } from "../debt/identity.js";
+
+import { akumaIdSchema } from "../akuma/identity.js";
 
 /** Public gate words remain ordinary strings; private policy interprets them. */
 export type Gate = string;
 
-export const contractHistoryEventSchema = z.union([
-  z.strictObject({ source: z.literal("journal"), fact: journalEntrySchema }).readonly(),
-  z.strictObject({ source: z.literal("dispatch"), dispatch: dispatchSchema }).readonly(),
+const historyCommon = {
+  id: entryUlidSchema,
+  at: z.string(),
+  actor: z.string().exactOptional(),
+};
+const historyTarget = z.union([
+  z.string(),
+  z.strictObject({ kind: z.literal("contract"), contractId: contractIdSchema }).readonly(),
 ]);
-export const contractHistorySchema = z
-  .strictObject({
-    id: contractIdSchema,
-    state: snapshotIdSchema,
-    workspace: worktreeWorkspaceSchema.exactOptional(),
-    events: z.array(contractHistoryEventSchema).readonly(),
-  })
-  .readonly()
-  .nullable();
+const historyGates = z.array(gateSchema).readonly().exactOptional();
+const historyAfter = z.array(contractIdSchema).readonly().exactOptional();
+export const contractHistoryEventSchema = z.union([
+  z
+    .strictObject({
+      ...historyCommon,
+      kind: z.literal("bind"),
+      start: snapshotIdSchema,
+      target: historyTarget.exactOptional(),
+      gates: historyGates,
+      after: historyAfter,
+      document: z.string().exactOptional(),
+      targetIncarnation: z.strictObject({ id: z.string(), identity: z.string() }).readonly().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...historyCommon,
+      kind: z.literal("amend"),
+      changedSections: z.array(z.string()).readonly().exactOptional(),
+      gates: historyGates,
+      after: historyAfter,
+      document: z.string().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...historyCommon,
+      kind: z.literal("deliver"),
+      candidate: snapshotIdSchema,
+      integration: snapshotIdSchema,
+      contentId: z.string(),
+      predecessor: snapshotIdSchema,
+      note: z.string().exactOptional(),
+      requireBranchesToBeUpToDate: z.boolean().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...historyCommon,
+      kind: z.literal("reintegrated"),
+      predecessor: snapshotIdSchema,
+      integration: snapshotIdSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...historyCommon,
+      kind: z.literal("attestation"),
+      gate: gateSchema,
+      requirement: requirementIdSchema,
+      verdict: verdictSchema,
+      subject: z.string(),
+      summary: z.string().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...historyCommon,
+      kind: z.literal("claimed"),
+      deliveryId: entryUlidSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...historyCommon,
+      kind: z.literal("arc"),
+      chapter: z.number().int().positive(),
+      title: z.string(),
+      body: z.string().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...historyCommon,
+      kind: z.literal("abandoned"),
+      note: z.string().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("dispatch"),
+      at: z.string(),
+      akumaId: akumaIdSchema,
+    })
+    .readonly(),
+]);
+export const contractHistorySchema = z.union([
+  z
+    .strictObject({
+      kind: z.literal("contract"),
+      contractId: contractIdSchema,
+      events: z.array(contractHistoryEventSchema).readonly(),
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("contract-missing"), contractId: contractIdSchema }).readonly(),
+]);
 
 export type ContractHistoryEvent = z.output<typeof contractHistoryEventSchema>;
-export type ContractHistory = NonNullable<z.output<typeof contractHistorySchema>>;
+export type ContractHistory = z.output<typeof contractHistorySchema>;
+export type ContractHistoryInput = Readonly<{ full?: boolean }>;
 
 type MarkdownBindInput = Readonly<{
   markdown: string;
@@ -62,7 +156,7 @@ export type AmendInput = ActorOptions &
   }>;
 export type ArcInput = ActorOptions & Readonly<{ markdown: string }>;
 export type ContractListInput = Readonly<{ limit?: number }>;
-export type ContractList = Omit<ContractBoard, "rows"> & Readonly<{ rows: readonly ContractRow[]; hasMore: boolean }>;
+export type ContractList = ContractCatalogue;
 export type ContractObservationInput = Readonly<{ id: ContractId }>;
 export type ContractResolveInput = Readonly<{ selector?: string; cwd?: string }>;
 export const contractSelectorRefusalSchema = z.union([

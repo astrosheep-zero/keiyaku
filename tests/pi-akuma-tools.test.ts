@@ -197,7 +197,8 @@ test(
       wait: true,
       timeoutMs: 20_000,
     });
-    assert.equal(nonPi.observation.observation.answer, "acp-answer", JSON.stringify(nonPi));
+    assert.equal(nonPi.input?.kind, "answered", JSON.stringify(nonPi));
+    assert.equal(nonPi.input.answer, "acp-answer", JSON.stringify(nonPi));
     const unsupported = await host.invoke("akuma_spawn", {
       akumaName: "worker", body: "must not start", writableDirectories: [world],
     }, true);
@@ -218,23 +219,26 @@ test(
     });
 
     const called = await native("akuma_spawn", { akumaName: "worker", body: command(holding(world, "first")) });
-    assert.equal(called.kind, "spawned");
-    assert.equal(called.observation.kind, "detached", "return without answer observation is independent of hosting");
-    const id = called.akuma;
+    assert.equal(typeof called.tellId, "string", "the spawn receipt names the initial Tell it admitted");
+    assert.equal(called.input, undefined, "return without answer observation is independent of hosting");
+    const id = called.akumaId;
     await waitForCondition("native child bash", () => existsSync(join(world, "first.ready")));
     const status = await native("akuma_status", { akuma: id });
-    assert.equal(status.status.life, "running");
+    assert.equal(status.life, "running");
     const report = await Akuma.select(world, id).report("Pi exact report\n");
     assert.equal(report.kind, "recorded");
     if (report.kind !== "recorded") assert.fail("report refused");
-    const exactReport = await native("akuma_history", { akuma: id, id: `report/${report.report.sequence}` });
-    assert.equal(exactReport.kind, "exact-report");
-    assert.deepEqual(exactReport.report, report.report);
-    assert.deepEqual(status.status.birth.caller, { kind: "external", integration: "pi", id: host.session.sessionId });
+    const exactReport = await native("akuma_history", { akuma: id, id: report.reportId });
+    assert.equal(exactReport.kind, "akuma-report");
+    assert.equal(`report/${exactReport.sequence}`, report.reportId);
+    assert.equal(exactReport.text, "Pi exact report\n");
+    assert.deepEqual((await Akuma.select(world, id).status()).birth.caller, {
+      kind: "external", integration: "pi", id: host.session.sessionId,
+    });
     assert.equal((await native("akuma_list", { limit: 1 })).rows[0].id, id);
     assert.ok((await native("akuma_definitions", {})).rows.some((row: { name: string }) => row.name === "worker"));
     assert.equal((await native("akuma_wait", { akuma: [id], completion: "all", timeoutMs: 0 })).reason, "deadline");
-    assert.equal((await api.status({ akuma: id })).status.life, "running");
+    assert.equal((await api.status({ akuma: id })).life, "running");
     let waitStarted!: () => void;
     const started = new Promise<void>((resolve) => {
       waitStarted = resolve;
@@ -248,7 +252,7 @@ test(
     await canceledWait;
     offWait();
     assert.equal(
-      (await api.status({ akuma: id })).status.life,
+      (await api.status({ akuma: id })).life,
       "running",
       "aborting a native wait only ends observation",
     );
@@ -259,7 +263,8 @@ test(
     );
     assert.match(JSON.stringify(busy), /busy|running/iu);
     const tell = await native("akuma_tell", { akuma: id, body: "additional live input", detach: true });
-    assert.equal(tell.tell.admission.fact, "recorded");
+    assert.equal(tell.akumaId, id);
+    assert.equal(typeof tell.tellId, "string", "the native Tell receipt is one flat admission, not a history row");
     writeFileSync(join(world, "first.release"), "release");
     assert.equal((await native("akuma_wait", { akuma: [id], timeoutMs: 20_000 })).reason, "completed");
     assert.ok(
@@ -267,33 +272,36 @@ test(
       "live detached choice must not move the running Body",
     );
     const history = await native("akuma_history", { akuma: id });
-    const at = history.history.rows.find((row: any) => row.kind === "outcome" && row.outcome.kind === "answered")
-      .outcome.historyId;
-    assert.equal((await native("akuma_history", { akuma: id, id: at })).kind, "exact");
+    assert.equal(history.kind, "akuma");
+    assert.equal(history.akumaId, id);
+    const at = `turn/${history.events.find((row: any) => row.kind === "outcome" && row.outcome.kind === "answered")
+      .turnSequence}`;
+    assert.equal((await native("akuma_history", { akuma: id, id: at })).kind, "akuma-exact");
     assert.equal(typeof (await native("akuma_history", { akuma: id, last: true })).answer, "string");
-    assert.equal((await native("akuma_history", { akuma: id, since: 1, limit: 1 })).kind, "history");
+    assert.equal((await native("akuma_history", { akuma: id, since: 1, limit: 1 })).kind, "akuma");
     assert.equal((await native("akuma_fork", { akuma: id, at: "turn/99999" })).kind, "unknown-history");
     const fork = await native("akuma_fork", { akuma: id, at });
     assert.equal(fork.kind, "forked");
-    assert.deepEqual((await api.status({ akuma: fork.child })).status.birth.caller, {
+    assert.deepEqual((await Akuma.select(world, fork.childAkumaId).status()).birth.caller, {
       kind: "external",
       integration: "pi",
       id: host.session.sessionId,
     });
     const answer = await native("akuma_ask", {
-      akuma: fork.child,
+      akuma: fork.childAkumaId,
       body: command("printf fork-answer"),
       timeoutMs: 20_000,
     });
-    assert.equal(answer.observation.answer, "fork-answer", JSON.stringify(answer));
+    assert.equal(answer.kind, "answered");
+    assert.equal(answer.answer, "fork-answer", JSON.stringify(answer));
     const structured = await native("akuma_ask", {
       akuma: id,
       body: JSON.stringify({ answer: { ok: true } }),
       schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
       timeoutMs: 20_000,
     });
-    assert.deepEqual(structured.observation, { reason: "answered", answer: { ok: true } });
-    await native("akuma_wait", { akuma: [id, fork.child], completion: "all", timeoutMs: 20_000 });
+    assert.deepEqual({ kind: structured.kind, answer: structured.answer }, { kind: "answered", answer: { ok: true } });
+    await native("akuma_wait", { akuma: [id, fork.childAkumaId], completion: "all", timeoutMs: 20_000 });
     assert.ok(
       events(world).every((event) => event.pid === process.pid),
       "ordinary native wake/fork must stay in the selected in-process host",
@@ -309,10 +317,10 @@ test(
       }),
       timeoutMs: 20_000,
     });
-    const nestedBirth = JSON.parse(nested.observation.answer);
-    assert.equal(nestedBirth.kind, "spawned");
-    assert.equal(nestedBirth.observation.observation.answer, "ack:nested child");
-    assert.deepEqual((await api.status({ akuma: nestedBirth.akuma })).status.birth.caller, {
+    const nestedBirth = JSON.parse(nested.answer);
+    assert.equal(nestedBirth.input.kind, "answered");
+    assert.equal(nestedBirth.input.answer, "ack:nested child");
+    assert.deepEqual((await Akuma.select(world, nestedBirth.akumaId).status()).birth.caller, {
       kind: "external", integration: "pi", id: events(world).find(event => event.event === "session_start" && event.session !== host.session.sessionId)?.session,
     });
     const local = await native("akuma_ask", {
@@ -337,13 +345,13 @@ test(
       ),
       timeoutMs: 30_000,
     });
-    const localBirth = JSON.parse(local.observation.answer);
-    assert.equal(localBirth.kind, "spawned");
-    assert.equal(localBirth.observation.observation.answer, "ack:local child");
-    assert.deepEqual((await api.status({ akuma: localBirth.akuma })).status.birth.caller, {
+    const localBirth = JSON.parse(local.answer);
+    assert.equal(localBirth.input.kind, "answered");
+    assert.equal(localBirth.input.answer, "ack:local child");
+    assert.deepEqual((await Akuma.select(world, localBirth.akumaId).status()).birth.caller, {
       kind: "akuma", akumaId: id, world,
     });
-    assert.equal((await api.list()).rows.length, 5);
+    assert.equal((await api.list()).rows?.length, 5);
 
     // Tool schema validation is real Pi validation, before any owner mutation.
     await host.invoke("akuma_spawn", { akumaName: "worker", body: "x", detach: "yes" }, true);
@@ -355,10 +363,10 @@ test(
       wait: true,
       timeoutMs: 0,
     });
-    assert.equal(deadlineCall.observation.observation.reason, "deadline");
+    assert.equal(deadlineCall.input.kind, "deadline");
     await waitForCondition("deadline work remains active", () => existsSync(join(world, "deadline.ready")));
-    const killed = await native("akuma_kill", { akuma: [deadlineCall.akuma] });
-    assert.equal(killed.results[0].evidence, "killed");
+    const killed = await native("akuma_kill", { akuma: [deadlineCall.akumaId] });
+    assert.equal(killed.results[0].outcome, "killed");
 
     const aborting = host.invoke(
       "akuma_spawn",
@@ -368,13 +376,17 @@ test(
     await waitForCondition("call observation ready for abort", () => existsSync(join(world, "aborted.ready")));
     await host.session.abort();
     const aborted = await aborting;
+    assert.equal(aborted.structuredContent.kind, "failed");
+    assert.equal(aborted.structuredContent.category, "aborted");
+    assert.equal(aborted.structuredContent.causeClass, "AbortError");
+    assert.equal(typeof aborted.structuredContent.diagnostic, "string");
     assert.equal(
-      typeof aborted.structuredContent.akuma,
+      typeof aborted.structuredContent.spawn.akumaId,
       "string",
       "aborted observation keeps its leading birth in structured error data",
     );
-    assert.equal((await api.status({ akuma: aborted.structuredContent.akuma })).status.life, "running");
-    await native("akuma_kill", { akuma: [aborted.structuredContent.akuma] });
+    assert.equal((await api.status({ akuma: aborted.structuredContent.spawn.akumaId })).life, "running");
+    await native("akuma_kill", { akuma: [aborted.structuredContent.spawn.akumaId] });
 
     const detached = await native("akuma_spawn", {
       akumaName: "worker",
@@ -393,11 +405,11 @@ test(
       );
       await host.close();
       assert.equal(
-        (await api.status({ akuma: scoped.akuma })).status.life,
+        (await api.status({ akuma: scoped.akumaId })).life,
         "stranded",
         "scope retirement is an exact put-down, not an identity-wide kill witness",
       );
-      assert.equal((await api.status({ akuma: detached.akuma })).status.life, "running");
+      assert.equal((await api.status({ akuma: detached.akumaId })).life, "running");
       assert.equal((await foreign.status()).life, "running");
       const scopedSession = events(world)
         .filter((event) => event.event === "session_start" && event.pid === process.pid)
@@ -410,7 +422,7 @@ test(
     } finally {
       for (const name of ["first", "deadline", "aborted", "detached", "scoped", "foreign"])
         writeFileSync(join(world, `${name}.release`), "release");
-      await api.kill({ akuma: [detached.akuma, scoped.akuma] }).catch(() => undefined);
+      await api.kill({ akuma: [detached.akumaId, scoped.akumaId] }).catch(() => undefined);
       await foreignScope.close();
       await asking.catch(() => undefined);
     }

@@ -46,7 +46,7 @@ function document(title: string): string {
 async function debt(path: string, title: string, state: "open" | "done" | "drop" = "open") {
   const result = await Debts.of(await World.at(path)).add({ title, state });
   assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
-  return result.value.id;
+  return result.id;
 }
 
 function debtPath(id: string): string {
@@ -63,8 +63,9 @@ async function debtState(path: string, id: string) {
   const detail = await Debts.of(await World.at(path))
     .debt({ id })
     .read();
-  assert.ok(detail);
-  return detail.debt.state;
+  assert.equal(detail.kind, "present");
+  if (detail.kind !== "present") throw new Error("missing Debt detail");
+  return detail.state;
 }
 
 async function holders(world: ReturnType<typeof repository>) {
@@ -104,14 +105,14 @@ test("placement keeps post-bind Debt edits and changes only state to done", asyn
   writeFileSync(authority, `${before}Manual edit after bind.\n`);
   writeFileSync(`${world.path}/edited.txt`, "edited\n");
 
-  const delivered = acceptedDelivery(await bound.value.kei.deliver({ includeDirty: true }));
+  const delivered = acceptedDelivery(await bound.kei.deliver({ includeDirty: true }));
 
   const after = readFileSync(authority, "utf8");
   assert.match(after, /Manual edit after bind\./u);
   assert.match(after, /^state: done$/mu);
   assert.match(after, new RegExp(`^createdAt: ${before.match(/createdAt: (.+)$/mu)![1]}$`, "mu"));
   assert.equal(await debtState(world.path, debtId), "done");
-  assert.deepEqual(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag), []);
+  assert.deepEqual((delivered.issues ?? []).filter((issue) => issue.kind === "settlement-failed"), []);
 });
 
 test("reconcile replay of an owed completion is an idempotent no-op the second time", async () => {
@@ -125,27 +126,31 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
     gates: [],
   }));
   writeFileSync(`${world.path}/replay.txt`, "replay\n");
-  const delivered = acceptedDelivery(await bound.value.kei.deliver({ includeDirty: true }));
+  const delivered = acceptedDelivery(await bound.kei.deliver({ includeDirty: true }));
 
-  assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "debt");
-  assert.equal((present(await bound.value.kei.state())).terminal?.kind, "claimed");
+  const owed = (delivered.issues ?? []).find((issue) => issue.kind === "settlement-failed");
+  assert.equal(owed?.kind, "settlement-failed");
+  if (owed?.kind === "settlement-failed") assert.match(owed.diagnostic, /^debt: /u);
+  assert.equal((present(await bound.kei.state())).terminal?.kind, "claimed");
   assert.equal(await debtState(world.path, debtId), "drop");
   assert.deepEqual(await holders(world), [
-    { version: 1, debtId, contractId: (present(await bound.value.kei.state())).id, disposition: "held" },
+    { version: 1, debtId, contractId: (present(await bound.kei.state())).id, disposition: "held" },
   ]);
   replaceDebtState(world.path, debtId, "drop", "open");
 
-  const first = await Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id });
-  assert.deepEqual(first.settlement.actions, [{ kind: "debt", debtId, action: "done" }]);
-  assert.deepEqual(first.settlement.lags, []);
+  const first = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
+  assert.ok(first.kind === "contract");
+  assert.equal(first.issues, undefined);
+  assert.deepEqual(first.effects, [{ kind: "debt-settled", debtId }]);
   assert.equal(await debtState(world.path, debtId), "done");
   assert.deepEqual(await holders(world), [
-    { version: 1, debtId, contractId: (present(await bound.value.kei.state())).id, disposition: "released" },
+    { version: 1, debtId, contractId: (present(await bound.kei.state())).id, disposition: "released" },
   ]);
 
-  const second = await Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id });
-  assert.deepEqual(second.settlement.actions, []);
-  assert.deepEqual(second.settlement.lags, []);
+  const second = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
+  assert.ok(second.kind === "contract");
+  assert.equal(second.issues, undefined);
+  assert.equal(second.effects, undefined);
   assert.equal(await debtState(world.path, debtId), "done");
 });
 
@@ -163,10 +168,11 @@ test(
       gates: [],
     }));
     writeFileSync(join(world.path, "cleanup.txt"), "cleanup\n");
-    const delivered = acceptedDelivery(await bound.value.kei.deliver({ includeDirty: true }));
-    assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "debt");
+    const delivered = acceptedDelivery(await bound.kei.deliver({ includeDirty: true }));
+    const owed = (delivered.issues ?? []).find((issue) => issue.kind === "settlement-failed");
+    assert.equal(owed?.kind, "settlement-failed");
     assert.deepEqual(await holders(world), [
-      { version: 1, debtId, contractId: (present(await bound.value.kei.state())).id, disposition: "held" },
+      { version: 1, debtId, contractId: (present(await bound.kei.state())).id, disposition: "held" },
     ]);
     replaceDebtState(world.path, debtId, "drop", "open");
     assert.equal(await debtState(world.path, debtId), "open");
@@ -189,18 +195,17 @@ test(
       }
     };
     try {
-      const replayed = await Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id });
-      const state = present(await bound.value.kei.state());
-      assert.deepEqual(replayed.settlement.actions, [{ kind: "debt", debtId, action: "done" }]);
-      assert.deepEqual(replayed.settlement.lags, [
-        {
-          kind: "settlement-failed",
-          surface: "debt",
-          contractId: state.id,
-          debtId,
-          diagnostic: "cannot release SQLite lock: debt lock release failed",
-        },
-      ]);
+      const replayed = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
+      assert.ok(replayed.kind === "contract");
+      const state = present(await bound.kei.state());
+      assert.equal(replayed.issues?.length, 1);
+      const failure = replayed.issues?.[0];
+      assert.equal(failure?.kind, "settlement-failed");
+      if (failure?.kind === "settlement-failed") {
+        assert.equal(failure.debtId, debtId);
+        assert.match(failure.diagnostic, /^debt: .*cannot release SQLite lock: debt lock release failed$/u);
+      }
+      assert.deepEqual(replayed.effects, [{ kind: "debt-settled", debtId }]);
       assert.equal(await debtState(world.path, debtId), "done");
       assert.deepEqual(await holders(world), [{ version: 1, debtId, contractId: state.id, disposition: "released" }]);
     } finally {
@@ -220,14 +225,15 @@ test("Settlement exact-read-backs an unknown DebtHolder release after external s
     gates: [],
   }));
   writeFileSync(`${world.path}/unknown-holder.txt`, "candidate\n");
-  const delivered = acceptedDelivery(await bound.value.kei.deliver({ includeDirty: true }));
-  assert.equal(delivered.effects.filter((effect) => effect.kind === "settlement-lag").map((effect) => effect.lag)[0]?.surface, "debt");
+  const delivered = acceptedDelivery(await bound.kei.deliver({ includeDirty: true }));
+  const owed = (delivered.issues ?? []).find((issue) => issue.kind === "settlement-failed");
+  assert.equal(owed?.kind, "settlement-failed");
   assert.deepEqual(await holders(world), [
-    { version: 1, debtId, contractId: (present(await bound.value.kei.state())).id, disposition: "held" },
+    { version: 1, debtId, contractId: (present(await bound.kei.state())).id, disposition: "held" },
   ]);
   replaceDebtState(world.path, debtId, "drop", "open");
   assert.equal(await debtState(world.path, debtId), "open");
-  const state = present(await bound.value.kei.state());
+  const state = present(await bound.kei.state());
 
   const git = await cachedRepositoryAt(world.path);
   const held = await acquireSqliteTransactionLock({ path: privateStatePublicationSeatPath(git), mode: "immediate" });

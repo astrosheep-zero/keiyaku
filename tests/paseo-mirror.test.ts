@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ProviderEventSchema, type ProviderEvent } from "@getpaseo/plugin/server/provider";
-import { historySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { createHistorySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { activityHistorySchema } from "../src/akuma/projection.js";
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
 
+const historySchema = createHistorySchema(activityHistorySchema);
 const at = "2026-10-15T00:00:00.000Z";
 /**
  * One complete bounded window, exactly as the stream reports each frame. The
@@ -14,13 +16,12 @@ function window(rows: Row[]): History {
   return historySchema.parse({ rows, omitted: 0, hasEarlier: false, hasLater: false, historyLost: false,
     lowestRetained: rows[0]?.sequence ?? null, highest: Math.max(0, ...rows.map((row) => row.sequence)) });
 }
-const turn = (sequence: number, turnSequence = sequence): Row => ({ kind: "turn", sequence, turnSequence, at });
+const turn = (sequence: number): Row => ({ kind: "turn", sequence, bodySequence: sequence, at });
 const failed = (sequence: number, turnSequence: number): Row => ({ kind: "outcome", sequence, turnSequence, at,
   outcome: { kind: "failed", diagnostic: "turn failed" } });
 const read = { kind: "read", path: "same.ts", offset: 2, limit: 4 } as const;
-const tool = (sequence: number, state: Extract<Row, { kind: "tool" }>["state"], toolId?: string, turnSequence = 1): Row =>
-  ({ kind: "tool", sequence, turnSequence, at, name: "read", call: read, state,
-    ...(toolId === undefined ? {} : { toolId }) });
+const tool = (sequence: number, state: Extract<Row, { kind: "tool" }>["state"], toolId: string, turnSequence = 1): Row =>
+  ({ kind: "tool", sequence, turnSequence, at, name: "read", call: read, state, toolId });
 
 function collect(): Readonly<{ events: ProviderEvent[]; mirror: ReturnType<typeof createMirror> }> {
   const events: ProviderEvent[] = [];
@@ -28,6 +29,26 @@ function collect(): Readonly<{ events: ProviderEvent[]; mirror: ReturnType<typeo
   return { events, mirror };
 }
 const items = (events: ProviderEvent[]) => events.flatMap((event) => event.type === "timeline.item" ? [event.item] : []);
+
+test("an admitted Tell keeps its unknown sequence until the producer witnesses the row", () => {
+  const { events, mirror } = collect();
+  mirror.admit({ tellId: "tell/pending", text: "new input" }, "client");
+  assert.deepEqual(items(events), [
+    { type: "user_message", id: "keiyaku:tell/tell/pending", text: "new input", clientMessageId: "client" },
+  ], "the optimistic row carries the caller's own text and no invented timestamp");
+  // A bounded window whose lowest sequence is above the (unknown) admission
+  // must not prune it by pretending its sequence is zero.
+  mirror.publish(window([turn(10), failed(11, 10)]));
+  mirror.publish(window([turn(20)]));
+  assert.equal(items(events).filter((item) => item.type === "user_message").length, 1);
+  // The producer's own row is the witness that resolves identity: it dedupes
+  // instead of repeating the optimistic message.
+  mirror.publish(window([{ kind: "tell", sequence: 21, at, tellId: "tell/pending", text: "new input", state: "pending", deliveries: [] },
+    turn(22)]));
+  assert.deepEqual(items(events).filter((item) => item.type === "user_message").map((item) => item.id),
+    ["keiyaku:tell/tell/pending"]);
+  assert.equal(items(events).filter((item) => item.type === "user_message").length, 1);
+});
 
 test("actual producer ids keep identical overlapping tool calls distinct across completion order and Turn scope", () => {
   const { events, mirror } = collect();
@@ -50,24 +71,9 @@ test("actual producer ids keep identical overlapping tool calls distinct across 
   assert.deepEqual(calls[3]?.detail, { type: "read", filePath: "same.ts", offset: 2, limit: 4, content: "same content" });
 });
 
-test("a producer without tool identity reports observation instead of guessing a pairing", () => {
-  const { events, mirror } = collect();
-  mirror.publish(window([turn(1), tool(2, "active"), tool(3, { status: "ok", message: "settled" })]));
-  assert.deepEqual(items(events), [
-    { type: "notification", id: "keiyaku:tool/2", level: "info",
-      message: 'read: start observed. {"kind":"read","path":"same.ts","offset":2,"limit":4}' },
-    { type: "tool_call", id: "keiyaku:tool/record/3", callId: "tool/record/3", name: "read", status: "completed",
-      detail: { type: "read", filePath: "same.ts", offset: 2, limit: 4, content: "settled" },
-      metadata: { turnSequence: 1, sequence: 3, call: read, state: { status: "ok", message: "settled" } },
-      error: null },
-  ]);
-  assert.deepEqual(items(events).map((_, index) => events.filter((event) => event.type === "timeline.item")[index]?.timestamp),
-    [at, at], "a record without producer identity keeps the producer's own timestamp");
-});
-
 test("generic invocation previews, truncation, exact results and thought output survive the decoder", () => {
   const { events, mirror } = collect();
-  const invocation = { kind: "other" as const, display: "fetch", input: { json: '{"url":"https://example.com"}', truncated: true } };
+  const invocation = { kind: "other", input: { json: '{"url":"https://example.com"}', truncated: true } } as const;
   mirror.publish(window([turn(1),
     { kind: "thought", sequence: 2, turnSequence: 1, at, text: "checking source", truncated: true },
     { kind: "tool", sequence: 3, turnSequence: 1, at, name: "fetch", toolId: "fetch", call: invocation,

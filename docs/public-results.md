@@ -1,217 +1,169 @@
 # Public Results
 
-This chapter owns the structural boundary for all public operation results and
-progress observations, and the conceptual public answers to Contract mutation,
-non-admission, delivery preview, and post-admission work. Exact TypeScript unions, fields,
-and literal codes belong to the exported declarations and executable
-specifications.
+This chapter owns the structural boundary for public operation results and
+progress observations, and the meaning of Contract admission, non-admission,
+delivery preview, and post-admission work. Exact declarations and literal codes
+belong to the producing owners and executable specifications.
 
 ## Structural Boundary
 
-Every public operation result and observer progress event has one structural
-schema, owned beside its type by the producing owner, not a facet, adapter, or
-test. Thrown errors are not results. Schemas describe the JSON wire form:
-round-tripping a native value through JSON and its schema preserves that value's
-JSON form. Handles are represented by their JSON form; capability members such as
-methods and process custody are absent from the wire, never re-encoded or
-reconstructed, and type parity is against that wire projection of the native
-type. JSON Schema represents the input
-side of transformations. Object schemas are strict and readonly, with exact
-optional fields. Types are derived from their owner schemas where that owner
-already uses Zod; otherwise type-level tests establish exact parity.
+Every described verb returns an object with one structural schema beside its
+producing native owner, not a transport adapter or test. Heterogeneous object answers
+and nested observations identify their alternatives explicitly. Missing
+authority, unavailable observation, unrequested detail, and known emptiness are
+different answers; an omitted optional collection means known empty, not a
+failed or skipped observation. An omitted catalogue remainder means the
+observation is known complete.
 
-These schemas are published for consumers, not enforced on the operation,
-facet, or CLI hot path. Core does not depend on Zod; the nearest schema-using
-owner that projects a core fact owns its schema. Shared schemas live below all
-consumers, without import cycles. Root-exported schemas use the value's name
-with a Schema suffix.
+The owner emits its decision in that form. Private custody may retain independent
+facts required by admission, recovery, or another owner; it does not retain a
+parallel result merely for presentation to discard later.
 
-Unknown caller values are structurally validated once at their Library
-boundary. Nested evidence retains its native structural owner within the
-operation answer and its invocation envelope;
-schema validation proves structure only and never decides legality, finality,
-pending work, or recovery. A local owner value is not re-decoded merely because
-it is later projected.
+Thrown errors are not ordinary results. Schemas describe the JSON wire form:
+round-tripping a native result through JSON and its owner schema preserves that
+form. Native Contract capabilities retain their process-local custody
+without serializing it or reconstructing capabilities from JSON. Schema parity
+is against their wire projection.
 
-## Leading Outcome
+Schemas are published for consumers, not enforced again on trusted local
+results. Core does not depend on a schema implementation. The nearest
+schema-using owner projecting a core fact owns its declaration; shared
+declarations live below their consumers without cycles. Caller values are
+validated once at their Library boundary. Structural validation grants no
+product capability and never judges legality, admission, finality, or recovery.
 
-Library alone projects protocol work into public answers. A successful mutation
-reports every fact admitted by that invocation, the addressed Contract's
-resulting head, its operation value, and any post-admission lags. The answer is
-invocation-scoped, not Contract state, a durable receipt, an effects log, or a
-result retained on a handle. An accepted delivery also carries
-its witnessed leading provenance: whether this invocation admitted the
-candidate or continues a candidate already admitted before this attempt. Fresh
-provenance comes only from the confirmed admission of this invocation; continued
-provenance comes only from the historical entry observed in custody during this
-attempt, and that historical entry never appears among the invocation's newly
-admitted facts. A replacement reports the candidate-content-change explanation
-with its previous and current content identities, witnessed in the admission
-attempt rather than recovered from later Contract state. A missing or
-disagreeing provenance
-is an integrity failure, not a reason to infer from newer state. Text names the
-candidate and integration result, patch-id as `content identity (not commit)`,
-keeps ContractHead and journal blob custody private, and leaves typed fields unchanged.
+## Invocation Answers
 
-Every mutation has one operation-owned answer, projected after independently
-awaited retirement of its owned resources. Non-admission is returned data; only
-delivery can return a no-fact conflict handoff. Acceptance requires the complete
-operation value and addressed admission evidence. Bind retains its native Contract
-ability, delivery retains its native diff ability, and their JSON representation
-keeps result data without exposing process custody or reconstructing capabilities
-from raw coordinates.
+An operation returns its smallest complete decision-relevant answer, not its
+input, journal record, effects log, or current Contract state. Accepted mutations
+retain the resolved Contract identity and the operation's confirmed conclusion.
+They omit ordinary successful mechanics and empty defaults. Detailed terms and
+historical evidence belong to explicitly requested reads, not every mutation.
+The journal, Heart, and Debt documents remain unchanged authorities; compact
+answers add no persistent receipt, cache, or lifecycle state.
 
-Physical effects, required stops, settlement, and retained residue have one
-invocation-wide carrier. Candidate conclusions stay in the operation value.
-Pending work is judged once by the final projection from those conclusions and
-owner classifications, not by a second caller finality judgment or a separately
-reconstructed summary. Optional resource residue stays observable without
-becoming
-mandatory replay or undoing admission. Recovery evidence is transient Git custody,
-not a new Contract fact or retention promise.
+The caller already knows the operation and supplied context. A renderer may
+receive that context explicitly; it never scrapes stored facts to recover an
+input echo or invents a second outcome. Amendment reports actual changed
+sections and independently changed obligations and prerequisites, rather than
+returning the entire replacement document. Arc reports its admitted chapter
+identity; its supplied title remains invocation context. Binding preserves its
+native Contract capability. Delivery returns the captured identities; explicitly
+requested preview is the sole presentation diff surface.
 
-Refusal and retry reasons belong to their addressed operation. Neither can claim
-safe retry when publication is unknown. A later operational stop preserves known
-leading evidence, while an unexpected programming failure or corruption remains
-exceptional with the same operation envelope at its actual, possibly incomplete,
-failure point. The exceptional value never pretends that an unfinished preview or
-completion finished.
+Classification belongs to the owner judgment. Invocation adapters consume it
+without rereading authority or reconstructing required work from an incomplete
+receipt. Acceptance, refusal, retryable stop, operational failure, and caller
+usage remain distinct. Optional retained residue stays observable without
+becoming required work or reversing admission. Structured recovery describes
+semantic capabilities and coordinates; only leaf CLI presentation supplies
+command grammar.
 
-The addressed operation is explicit. Consumers never infer it from coincidental
-members of its value, and no later authority scan reconstructs which facts an
-invocation owns.
+A normal refusal or retry is returned only before the leading act has confirmed
+an effect. Later stops remain on the accepted answer or thrown exception.
+An exceptional receipt retains the native category and cause together with the
+known admitted work, resource creation, movement, and issues at its actual
+failure point. Ephemeral recovery snapshots survive accepted cleanup because a
+later read cannot recover their unpinned identities.
+A later successful read is not a substitute for evidence an invocation already
+confirmed. Cancellation requests a stop; it cannot erase publication or skip
+independently awaited retirement.
 
 ## Contract Outcomes
 
 Delivery and review admit their leading facts and consume existing requirement
 evidence during placement or dependent continuation. They never execute
-Verification, and missing or stale testimony is pending evidence, not a runtime
-stop or an execution-reuse event. Satisfied review can still find no delivery
-to place; a placement stop cannot undo an admitted delivery or review.
+Verification. Missing or stale testimony is unmet evidence, not an execution
+stop. Satisfied review can find no delivery to place, and a later placement stop
+cannot undo admitted delivery, review, or verification testimony.
 
-Explicit verify reports every selected check's execution and terminal verdict
-or operational stop, its requirement and current declaration position, the exact
-captured snapshot, and whether testimony was admitted or an identical admission
-was reused. Admission reuse never implies execution was skipped. No gate-level
-aggregate attestation is produced. Normal failures and timeouts affect only
-their requirements; operational stops admit no testimony for the affected check.
-Earlier admissions, later completed checks, and all cleanup residue remain
-visible. Its ordinary completion judgment can place only an already-delivered
-Contract when every prerequisite and gate passes. A selected satisfied check
-establishes only its own requirement's verdict; generic judgment decides whether
-the whole gate is satisfied.
+Delivery identifies the captured candidate, integration, and content identity.
+Ordinary fresh admission is implicit; continued admission is explicitly
+identified from the historical entry witnessed in this invocation's custody.
+That reuse is never represented as a newly admitted fact. A changed candidate
+retains the content-change explanation witnessed during admission, not inferred
+from a later read. Missing or disagreeing provenance remains an integrity
+failure.
 
-A typed trailing stop after a confirmed admission keeps the witnessed provenance
-alongside that stop. Recovery names an existing
-delivery fact as already admitted, reports only this invocation's facts, and does
-not disguise later workspace bytes as a candidate. Successful placement is
-represented once as completion; callers do not rebuild it from facts or folded
-state. A completed placement also carries the movement it made - the reference it
-advanced and the head it advanced from - so a receipt states the target's
-movement instead of deriving it from journal facts or folded state. A
-Contract-addressed movement names the destination Contract, while typed state
-retains its immutable destination identity; it never presents that movement as
-a branch update.
+Placement has one adjudicated conclusion: placed, a semantic stop, or an
+operational stop. Successful placement retains the destination and before and
+after movement. A Contract destination is named as a Contract, not a branch or private
+reference. Known movement survives later presentation failure. Unmet gates and
+prerequisites retain their ordered actionable identities and distinguish
+missing, stale, and unsatisfied testimony; already satisfied evidence need not
+be repeated. Consumers never recompute currentness or eligibility.
 
-Known completion and movement precede optional presentation observation. Failure
-to observe that presentation never reruns completion or erases witnessed movement.
+Explicit verify reports the captured snapshot once and accounts for every
+selected check that ran or stopped. Each check keeps its declaration position,
+stable requirement when needed to avoid ambiguity, verdict or operational
+stop, admission reuse or stop, and retained diagnostic path. Admission reuse
+never implies skipped execution. No aggregate gate testimony is produced.
+Earlier admissions, later completed checks, and cleanup residue remain visible.
+A selected success alone does not establish whole-gate satisfaction. Ordinary
+completion can place only an already-delivered Contract whose current
+prerequisites and gates pass.
 
-Current requirement reports distinguish missing, stale, satisfied, and
-unsatisfied evidence independently. They retain the generic gate judgment
-without inventing a producer run or liveness state. Current declarations may
-use their one-based display positions; historical requirements removed from the
-document retain stable identity rather than a fabricated current position.
+A continuation reports every dependent actually attempted, identifying claimed
+dependents alongside independent semantic, physical, or operational stops.
+Ordinary continuation does not repeat each child's complete movement receipt;
+that detail remains available from the addressed child. Exceptional invocation
+evidence preserves consequential movements already confirmed before failure.
+Discovery failure and cancellation retain earlier confirmed effects. Dependent
+ownership is explicit and never substitutes a dependent's identity for the
+addressed Contract.
 
-A normal integration conflict is a non-admission refusal. Explicit conflict
-materialization instead returns a handoff result with no admitted fact,
-candidate identity, verification, or placement. Dirty bytes may be included in
-that handoff only with explicit dirty-capture authorization; the handoff
-preserves those bytes as its base before projecting the judged conflict.
-Workspace dirtiness without that authorization, unmerged state, missing target or
-workspace, unsupported integration, and target movement remain typed public
-conditions rather than hidden retry policy. Target movement never masquerades as
-claim or already-applied placement.
+A normal integration conflict refuses without admission. Explicit conflict
+materialization instead hands off the appointed worktree, captured handoff
+base, target head, conflict paths, and actionable issues. It admits no delivery,
+Verification, or placement. Dirty bytes require explicit capture authorization;
+Git's private-index custody preserves the caller's real index and worktree
+bytes. Recovery describes resolution of the final worktree bytes with dirty
+capture, without requiring staging. Review may report observed unmerged paths
+without making them a blanket refusal. A stale gate may explain changed
+candidate content; target movement alone is not that explanation.
 
-A materialized handoff returns the captured handoff base, the target head and
-conflict paths, plus the recovery projection. The continuation is explicitly
-`deliver --include-dirty` with staging `not-required`: callers resolve the
-appointed worktree by editing its final bytes, while Git custody and
-private-index capture preserve the real index, including `UU`. Materialization
-admits no delivery fact. Review results likewise expose
-captured `unmergedPaths` as evidence without turning them into a blanket
-refusal. A stale gate may explain that candidate content changed during
-reintegration; target movement alone is not that reason.
-
-A materialized handoff is itself a complete no-fact delivery outcome. Its
-recovery evidence does not create Git custody or cleanup authority. Recorded
-delivery continues to retain its journal-fact evidence.
-
-Unmet prerequisites and gates retain the lifecycle decision's ordered,
-adjudicated explanation. Consumers render that result and never recompute
-dependency state, gate currentness, staleness, or terminality. Region overlap is
-a successful, non-authoritative planning observation: it neither grants nor
-denies write authority, and failure to collect it does not undo binding or
-amendment.
-
-A continuation reports every dependent it actually attempted: completion or a
-specific semantic, physical, or operational stop. A stopped dependent does not
-hide successful siblings or replace the addressed Contract's head. Discovery
-failure and cancellation retain all earlier confirmed admissions.
+Region overlap is advisory planning evidence. Known absence of overlaps and an
+unavailable overlap observation are distinct. Neither overlap nor observation
+failure grants write authority, denies admission, or changes lifecycle legality.
 
 ## Delivery Preview And Observation
 
-Delivery preview returns one already-adjudicated observation of a prospective
-candidate, standing Verification evidence, and target followability. Acceptance
-means the observation completed, never that a delivery occurred or will succeed;
-it carries no new facts or product effects. Preparation refusals and integration
-conflicts remain explicit candidate observations. Candidate preparation is not
-acceptance readiness: prerequisites and gates retain their own current judgment,
-and an unsatisfied standing verdict is never satisfaction.
+Preview is a read, never admission or a promise of placement readiness. It
+observes a prospective candidate, existing requirement evidence, and independently
+observed target followability. Preparation refusals remain explicit. Candidate
+preparation does not establish prerequisite or gate satisfaction, and an
+unavailable or unobserved target never becomes implicitly followable.
 
-Preview never executes declarations or hooks and never publishes testimony,
-admits a candidate, places it, reconciles, settles, or continues dependents.
-Standing evidence is evaluated independently for every prospective requirement
-by generic currentness against the prospective integration. Missing or stale
-evidence remains unmet; existing unsatisfied evidence remains visible without
-rerunning it. Target followability is observed independently of that evidence and
-separately from ref
-placeability; known checkout non-followability remains visible without denying
-ref movement. Cancellation interrupts preview with its native exceptional category
-and partial observations, never a successful target-failure observation. Candidate diffs and
-scope are requested presentation data, including an empty diff, not journal,
-gate, or cache authority. Real delivery observes afresh and retains its normal
-execution and admission behavior.
+Preview never executes declarations or hooks, admits facts, places, reconciles,
+settles, or continues dependents. Retirement of its owned observation may report
+an issue without erasing the observed preview or changing it into admission. Standing evidence is judged independently for
+every prospective requirement by generic currentness. Requested diff and scope,
+including a genuinely empty diff, are presentation data rather than journal,
+gate, or cache authority. Real delivery observes afresh. Cancellation retains
+its native exceptional category and partial observations instead of becoming a
+successful observation of target failure.
 
-Read-only workspace and board observations are owned by
-[public-api.md](public-api.md), not duplicated here. Nuke confirmation refusals
-and accepted reset answers remain public result concepts; reset and
-preservation semantics are owned by [world.md](world.md).
+Board and workspace reads are owned by [public-api.md](public-api.md), reset
+semantics by [world.md](world.md), and reconciliation by
+[git-reconciliation.md](git-reconciliation.md).
 
-## Cleanup Boundary
+## Retirement And Failure Evidence
 
-Verification scratch cleanup, intentional failed-scene retention, or worktree
-removal failure can report physical residue after admission. The invocation
-reports retained diagnostic paths without adding a journal fact. Verification
-scenes keep their Contract and requirement identity, captured snapshot, and
-current declaration position when known. Such reports
-stay on the invocation result, do not change its exit meaning, and never become
-cleanup authority or reconciliation input.
+Resource retirement belongs to the invocation, independently of the current
+candidate. Scratch cleanup, intentional failed-scene retention, and worktree
+removal problems keep their diagnostic paths and known owner, candidate, and
+requirement coordinates without repeating enclosing ownership. A process failure
+keeps one bounded diagnosis that distinguishes exit, timeout, cancellation, and
+truncated output. They add no journal fact and supply no cleanup or
+reconciliation authority. Optional residue does not change the exit judgment;
+a required operational stop remains actionable.
 
-Ephemeral execution observations are separate from this final result boundary.
-They can expose a confirmed leading fact before later work settles, but neither
-missing observation nor a reported gap changes admission, cancellation,
-Verification stop or cleanup residue. A stopped process's
-captured output remains part of its typed stop rather than an implied terminal
-verdict.
+Resource problems accumulate across attempts and dependents. Newer candidate
+conclusions cannot overwrite an earlier resource problem. A failure during
+retirement keeps every previously confirmed admission and effect, including when
+an earlier exceptional receipt was already attached to the native cause.
 
-Cleanup belongs to the whole invocation, independently of the current candidate.
-All retained resources and failed cleanup attempts keep their known owner and
-candidate coordinates, including requirement identity for check-owned scenes.
-A newer verification can replace candidate conclusions,
-but cannot overwrite an earlier resource problem or discard a dependent's
-cleanup report. Cleanup reporting has one public carrier; operation values do
-not repeat it as another source of truth.
-
-Every confirmed conclusion and completed owner effect is retained before later
-work can fail. The final exceptional envelope includes later retirement residue
-even when an earlier exceptional envelope was already attached to the cause.
+Ephemeral progress is separate from the final answer. It may expose confirmed
+admission before trailing work settles, but observer failure, gaps, or absence
+cannot affect execution, custody, cancellation, admission, or cleanup. Only the
+final owner answer adjudicates the invocation's conclusion.

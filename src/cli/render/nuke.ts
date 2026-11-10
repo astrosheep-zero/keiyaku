@@ -1,23 +1,28 @@
 import type { NukeResult } from "../../index.js";
-import { renderRefusal } from "./refusal.js";
+import { renderStructuredRefusal } from "./refusal.js";
 
-export function renderNukeText(result: NukeResult): string {
-  const seatClose =
-    result.effects.length > 0
-      ? result.effects.flatMap((effect) => [`  lag  ${effect.kind}`, `  reason  ${effect.diagnostic}`])
-      : [];
+export function renderNukeText(result: NukeResult, input: Readonly<{ confirm?: string }> = {}): string {
   if (result.kind === "accepted") {
+    const issues = (result.issues ?? []).flatMap((issue) => [`  lag  ${issue.kind}`, `  reason  ${issue.diagnostic}`]);
     return [
-      `✓ nuke  ${result.world}`,
-      `  refs removed  ${result.value.removed.refs}`,
-      `  worktrees removed  ${result.value.removed.worktrees}`,
-      `  debt stores removed  ${result.value.removed.debts}`,
+      `✓ nuke${input.confirm === undefined ? "" : `  ${input.confirm}`}`,
+      ...(result.refsRemoved === undefined ? [] : [`  refs removed  ${result.refsRemoved}`]),
+      ...(result.worktreesRemoved === undefined ? [] : [`  worktrees removed  ${result.worktreesRemoved}`]),
+      ...(result.debtsRemoved === undefined ? [] : [`  debt stores removed  ${result.debtsRemoved}`]),
       "  locks  may remain · SQLite coordination files cannot be removed safely while concurrent writers may still hold them",
-      ...seatClose,
+      ...issues,
     ].join("\n");
   }
   if (result.kind === "refused") {
-    return renderRefusal({ operation: "nuke", refusal: result.refusal });
+    return renderStructuredRefusal(
+      "nuke",
+      input.confirm === undefined ? "confirmation required" : "confirmation mismatch",
+      [
+        `world  ${result.world}`,
+        ...(input.confirm === undefined ? [] : [`confirmation  ${input.confirm}`]),
+        `option  keiyaku nuke --confirm '${result.world.replaceAll("'", "'\"'\"'")}'`,
+      ],
+    );
   }
   return "";
 }

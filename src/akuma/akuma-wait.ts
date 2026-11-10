@@ -7,10 +7,12 @@ import {
   waitForObservation,
   type LiveStatusObservation,
   type WaitReason,
+  type OutcomeObserver,
 } from "./akuma-observe.js";
 import { pathsForAkumaId } from "./identity.js";
 import type { AkumaStatus } from "./akuma.js";
-import type { AkumaUnobserved } from "./selection-observation.js";
+import type { AkumaUnobserved, AkumaWaitItem, AkumaWaitOutcome } from "./selection-observation.js";
+import type { OutcomeRow } from "./projection.js";
 
 type WaitExecutionInput = Readonly<{
   path: WorldRoot;
@@ -20,19 +22,20 @@ type WaitExecutionInput = Readonly<{
   signal?: AbortSignal;
   /** Internal custom completion judge over the full final observation where supplied. */
   predicate?: (status: AkumaStatus) => boolean;
+  outcomeObserved?: OutcomeObserver;
 }>;
 
 /** One wait's association-free native evidence; upper composition attaches cross-product context. */
 export type NativeWaitResult = Readonly<{
-  mode: "any" | "all";
   reason: WaitReason;
   observations: readonly AkumaStatus[];
-  unobserved: readonly AkumaUnobserved[];
+  results: readonly AkumaWaitItem[];
 }>;
 
 type WaitRound = Readonly<{
   observations: readonly LiveStatusObservation[];
   unobserved: readonly AkumaUnobserved[];
+  missing: readonly AkumaStatus["id"][];
 }>;
 
 const SHARED_ORDINARY_BUDGET = 30;
@@ -45,13 +48,10 @@ async function observeWaitRound(
   const read = (id: AkumaStatus["id"], ordinaryBudget?: number) =>
     readerFor(id).read({ aperture: "monitoring", ...(ordinaryBudget === undefined ? {} : { ordinaryBudget }) }, signal);
   signal?.throwIfAborted();
-  if (ids.length <= 1) {
-    const observations = await Promise.all(ids.map(async (id) => await read(id)));
-    return { observations, unobserved: [] };
-  }
   let remaining = SHARED_ORDINARY_BUDGET;
   const observations: LiveStatusObservation[] = [];
   const unobserved: AkumaUnobserved[] = [];
+  const missing: AkumaStatus["id"][] = [];
   for (const id of ids) {
     signal?.throwIfAborted();
     try {
@@ -59,11 +59,12 @@ async function observeWaitRound(
       observations.push(observed);
       remaining -= observed.ordinarySelected;
     } catch (error) {
-      if (error instanceof AkumaNotBornError) throw error;
-      unobserved.push({ id, diagnostic: diagnostic(error) });
+      signal?.throwIfAborted();
+      if (error instanceof AkumaNotBornError) missing.push(id);
+      else unobserved.push({ id, diagnostic: diagnostic(error) });
     }
   }
-  return { observations, unobserved };
+  return { observations, unobserved, missing };
 }
 
 function roundComplete(
@@ -72,14 +73,42 @@ function roundComplete(
   predicate?: (status: AkumaStatus) => boolean,
 ): boolean {
   const judge = predicate ?? defaultWaitComplete;
-  const settled = round.observations.map((observation) => judge(observation.status));
+  const settled = [
+    ...round.observations.map((observation) => judge(observation.status)),
+    ...round.missing.map(() => true),
+  ];
   return (
     settled.length > 0 &&
     (completion === "any" ? settled.some(Boolean) : round.unobserved.length === 0 && settled.every(Boolean))
   );
 }
 
-/** Wait observes completion and returns final status snapshots, never a live stream. */
+function waitOutcome(row: OutcomeRow): AkumaWaitOutcome {
+  const historyId = `turn/${row.turnSequence}` as const;
+  const outcome = row.outcome;
+  return outcome.kind === "answered"
+    ? { kind: "answered", historyId, answer: outcome.answer }
+    : outcome.kind === "failed"
+      ? { kind: "failed", historyId, diagnostic: outcome.diagnostic }
+      : { kind: "canceled", historyId };
+}
+
+function completionItem({ status, rows }: LiveStatusObservation): AkumaWaitItem {
+  const pending = status.timeline.entries.some(
+    (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
+  );
+  const outcome = rows.findLast((row): row is OutcomeRow => row.kind === "outcome");
+  return {
+    kind: "observed",
+    id: status.id,
+    life: status.life,
+    ...(pending ? { pending: true } : {}),
+    ...(outcome === undefined ? {} : { outcome: waitOutcome(outcome) }),
+    ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
+  };
+}
+
+/** Compact final native evidence, retaining full statuses privately for owner composition. */
 export async function executeWaitAkuma(input: WaitExecutionInput): Promise<NativeWaitResult> {
   const readers = new Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>();
   const readerFor = (id: AkumaStatus["id"]) => {
@@ -99,18 +128,31 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Nativ
         ? {
             probe: async () =>
               await readWaitComplete(input.path, input.ids, input.completion, input.signal, (id) =>
-                readerFor(id).complete(input.signal),
+                readerFor(id)
+                  .complete(input.signal)
+                  .catch((error: unknown) => {
+                    if (error instanceof AkumaNotBornError) return true;
+                    throw error;
+                  }),
               ),
           }
         : {}),
       observe: async () => await observeWaitRound(input.ids, readerFor, input.signal),
       complete: (round) => roundComplete(round, input.completion, input.predicate),
     });
+    for (const { status, rows } of waited.value.observations) {
+      const outcome = rows.findLast((row): row is OutcomeRow => row.kind === "outcome");
+      if (outcome !== undefined) await input.outcomeObserved?.(status.id, [`turn/${outcome.turnSequence}`]);
+    }
+    const items = new Map<AkumaStatus["id"], AkumaWaitItem>(
+      waited.value.observations.map((observation) => [observation.status.id, completionItem(observation)]),
+    );
+    for (const item of waited.value.unobserved) items.set(item.id, { kind: "unobserved", ...item });
+    for (const id of waited.value.missing) items.set(id, { kind: "missing", id });
     return {
-      mode: input.completion,
       reason: waited.reason,
       observations: waited.value.observations.map((observation) => observation.status),
-      unobserved: waited.value.unobserved,
+      results: input.ids.map((id) => items.get(id)!),
     };
   } finally {
     for (const reader of readers.values()) reader.clear();

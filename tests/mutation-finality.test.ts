@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { DeliveryPreviewReport } from "../src/index.js";
+import type { Review } from "../src/library/outcome.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project, KeiyakuError } from "../src/library/outcome.js";
+import { reconcileException } from "../src/library/reconcile.js";
 import { concatenatePrivateStateSeatClose } from "../src/git/private-state-seat.js";
 import {
   contractId,
   documentKey,
-  requirementId,
   snapshotId,
   type ContractHead,
   type ContractState,
@@ -15,59 +16,66 @@ import {
 const id = contractId("kei/mutation-finality-test");
 function outcome(
   progress: InvocationAccumulator,
-  value: unknown = undefined,
-  operation: "review" | "deliver-preview" | "amend" = "review",
+  value: Review = {},
+  operation: "review" | "amend" = "review",
 ) {
   const result = project(operation, progress.snapshot(), {
     kind: "accepted",
     contract: id,
-    head: "head" as ContractHead,
     value,
   });
   assert.equal(result.kind, "returned");
   assert.ok(result.kind === "returned");
+  assert.ok(result.outcome.kind === "accepted");
   return result.outcome;
 }
 
 function previewReport(): DeliveryPreviewReport {
-  return {
-    candidate: {
-      kind: "blocked",
-      refusal: { kind: "target-missing", contractId: contractId("kei/mutation-finality-test") },
-    },
-    verification: {
-      kind: "requirements",
-      requirements: [{ requirement: requirementId("check"), current: { kind: "missing" } }],
-    },
-    target: { kind: "not-observed" },
-  };
+  return { kind: "blocked", contractId: id, reason: { kind: "target-missing" } };
 }
 
-test("preview with required verification completes observation without pending work", () => {
-  assert.deepEqual(outcome(new InvocationAccumulator(), previewReport(), "deliver-preview").pending, []);
+test("blocked preview is a completed read, not an admitted mutation", () => {
+  const result = project("deliver-preview", new InvocationAccumulator().snapshot(), {
+    kind: "accepted", contract: id, value: previewReport(),
+  });
+  assert.ok(result.kind === "returned");
+  assert.deepEqual(result.outcome, previewReport());
 });
 
-test("mutation lag scopes identify the affected pending action", () => {
+test("mutation issues flatten independently owned reconciliation lags without presentation scopes", () => {
   const progress = new InvocationAccumulator();
   progress.recordReconciliation(id, {
     lag: [
       { kind: "worktree-retained", path: "/tmp/terminal" },
-      { kind: "unsealed-bytes", path: "/tmp/scratch", paths: [] },
+      { kind: "unsealed-bytes", path: "/tmp/scratch" },
       {
         kind: "worktree-follow-retained",
         path: "/tmp/dependent",
-        tender: snapshotId("tender"),
-        head: snapshotId("head"),
         reason: "head-moved",
       },
       { kind: "target-checkout-retained", path: "/tmp/main", target: "refs/heads/main", diagnostic: "dirty" },
-      { kind: "reconcile-failed", stage: "effect", diagnostic: "busy" },
+      { kind: "reconcile-failed", diagnostic: "busy" },
     ],
   });
-  assert.deepEqual(outcome(progress).pending, [
-    { surface: "continuation", required: true },
-    { surface: "placement", required: true },
-    { surface: "reconciliation", required: true },
+  assert.deepEqual(outcome(progress).issues, [
+    { kind: "worktree-retained", path: "/tmp/terminal" },
+    { kind: "unsealed-bytes", path: "/tmp/scratch" },
+    { kind: "worktree-follow-retained", path: "/tmp/dependent", reason: "head-moved" },
+    { kind: "target-checkout-retained", path: "/tmp/main", target: "refs/heads/main", diagnostic: "dirty" },
+    { kind: "reconcile-failed", diagnostic: "busy" },
+  ]);
+});
+
+test("diagnosed worktree retention absorbs only its identical plain duplicate", () => {
+  const other = contractId("kei/different-owner");
+  const progress = new InvocationAccumulator();
+  progress.recordReconciliation(id, {
+    lag: [{ kind: "worktree-retained", path: "/tmp/shared-worktree", diagnostic: "primary removal failure" }],
+  });
+  progress.recordReconciliation(other, { lag: [{ kind: "worktree-retained", path: "/tmp/shared-worktree" }] });
+  assert.deepEqual(outcome(progress).issues?.filter((issue) => issue.kind === "worktree-retained"), [
+    { kind: "worktree-retained", path: "/tmp/shared-worktree", diagnostic: "primary removal failure" },
+    { kind: "worktree-retained", contractId: other, path: "/tmp/shared-worktree" },
   ]);
 });
 
@@ -115,14 +123,52 @@ test("merged admissions concatenate every confirmed seat-close lag in order", ()
   const merged = seatClose === undefined ? next : { ...next, seatClose };
   const progress = new InvocationAccumulator();
   progress.recordResidue(state.id, merged);
-  assert.deepEqual(outcome(progress, undefined, "amend").pending, [{ surface: "cleanup", required: false }]);
+  assert.deepEqual(
+    outcome(progress, undefined, "amend").issues?.flatMap((issue) =>
+      issue.kind === "private-state-seat-close" ? [issue.diagnostic] : []),
+    [first.diagnostic, second.diagnostic],
+  );
   assert.deepEqual(
     progress
       .snapshot()
-      .effects.filter((effect) => effect.kind === "cleanup")
+      .effects.filter((effect) => effect.kind === "issue")
       .map((effect) => effect.issue),
-    [first, second].map((failure) => ({ kind: "private-state-seat-close", contractId: state.id, failure })),
+    [first, second].map((failure) => ({ kind: "private-state-seat-close", diagnostic: failure.diagnostic })),
   );
+});
+
+test("accepted receipts retain ephemeral recovery snapshots in their operation-local shape", () => {
+  const progress = new InvocationAccumulator();
+  const snapshot = snapshotId("recovery-snapshot");
+  progress.recordPhysical(id, {
+    effects: [{ kind: "recovery-snapshot", snapshot }],
+    lag: [],
+  });
+  assert.deepEqual(outcome(progress).recoverySnapshots, [{ snapshot }]);
+  assert.deepEqual(outcome(progress, undefined, "amend").recoverySnapshots, [snapshot]);
+});
+
+test("selected reconcile keeps confirmed worktree creation and ref movement on a later native failure", () => {
+  const progress = new InvocationAccumulator();
+  progress.recordPhysical(id, { effects: [
+    { kind: "worktree", action: "created", path: "/tmp/new-contract-worktree" },
+    { kind: "ref", name: "refs/keiyaku/candidate/test", before: "before", after: "after" },
+  ], lag: [] });
+  const original = new TypeError("later selected reconciliation failure");
+  assert.throws(() => reconcileException(original, progress, id), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuError);
+    assert.equal(error.category, "internal");
+    assert.equal(error.cause, original);
+    assert.ok(error.outcome?.kind === "contract");
+    assert.equal(error.outcome.contractId, id);
+    assert.deepEqual(error.outcome.effects, [
+      { kind: "worktree-created", path: "/tmp/new-contract-worktree" },
+      { kind: "ref", name: "refs/keiyaku/candidate/test", before: "before", after: "after" },
+    ]);
+    assert.equal(error.outcome.admitted, undefined);
+    assert.equal(error.outcome.issues, undefined);
+    return true;
+  });
 });
 
 test("mutation nuke confirmed seat-close failure remains a typed outcome", async () => {
@@ -154,13 +200,10 @@ test("mutation nuke confirmed seat-close failure remains a typed outcome", async
     const publicResult = await nukeKeiyaku({ world, confirm: world }, { onPrivateStateSeatClose: close });
     assert.equal(publicResult.kind, "accepted");
     assert.ok(publicResult.kind === "accepted");
-    assert.equal(publicResult.value.removed.refs, 1);
-    assert.deepEqual(publicResult.pending, [{ surface: "reset", required: false }]);
-    assert.deepEqual(publicResult.effects, [
+    assert.equal(publicResult.refsRemoved, 1);
+    assert.deepEqual((publicResult.issues ?? []), [
       {
         kind: "reset-residue",
-        world,
-        owner: "git",
         diagnostic: "nuke seat close failed after publication",
       },
     ]);
@@ -169,16 +212,16 @@ test("mutation nuke confirmed seat-close failure remains a typed outcome", async
   }
 });
 
-test("public refusal and retry are returned no-fact envelopes", () => {
+test("public refusal and retry are compact operation stops", () => {
   for (const projection of [
-    { kind: "refused" as const, contract: id, refusal: { kind: "target-missing" as const, contractId: id } },
+    { kind: "refused" as const, contract: id, refusal: { kind: "target-missing" as const } },
     { kind: "retry" as const, contract: id, reason: { kind: "exhausted" as const } },
   ]) {
     const result = project("deliver", new InvocationAccumulator().snapshot(), projection);
     assert.ok(result.kind === "returned");
     assert.equal(result.outcome.kind, projection.kind);
-    assert.deepEqual(result.outcome.facts, []);
-    assert.deepEqual(result.outcome.pending, []);
+    assert.deepEqual(result.outcome, { kind: projection.kind, contractId: id,
+      reason: projection.kind === "refused" ? projection.refusal : "exhausted" });
   }
 });
 
@@ -186,11 +229,8 @@ test("the local failure projector never decodes partial owner evidence or masks 
   const progress = new InvocationAccumulator();
   const native = new TypeError("later programming failure");
   // Owner conclusions can be genuinely incomplete; strict wire decoding is not a local failure gate.
-  const verification = {
-    kind: "requirements" as const,
-    requirements: [{ requirement: requirementId("check"), current: { kind: "missing" as const } }],
-  };
-  progress.recordDeliveryPreview(id, { verification });
+  const scope = {};
+  progress.recordDeliveryPreview(id, { scope });
   const first = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: native });
   assert.ok(first.kind === "failed");
   assert.equal(first.error.cause, native);
@@ -203,9 +243,12 @@ test("the local failure projector never decodes partial owner evidence or masks 
   assert.equal(final.error.cause, native);
   assert.equal(final.error.category, "internal");
   assert.equal(final.error.message, native.message);
-  assert.ok(final.error.outcome?.operation === "deliver-preview");
-  assert.deepEqual(final.error.outcome.facts, []);
-  assert.equal(final.error.outcome?.effects.length, 1);
-  assert.deepEqual(first.error.outcome?.effects, []);
-  assert.deepEqual(final.error.outcome?.value, { verification });
+  assert.ok(final.error.outcome?.kind === "contract");
+  assert.equal(final.error.outcome.contractId, id);
+  assert.equal(final.error.outcome.admitted, undefined);
+  assert.equal(final.error.outcome.issues?.length, 1);
+  assert.ok(first.error.outcome?.kind === "contract");
+  assert.equal(final.error, first.error);
+  assert.deepEqual(first.error.outcome, final.error.outcome);
+  assert.deepEqual(final.error.outcome.preview, { scope });
 });

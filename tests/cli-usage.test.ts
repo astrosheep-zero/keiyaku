@@ -14,7 +14,7 @@ import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
-import type { ReconcileReport } from "../src/library/reconcile.js";
+import type { ReconcileCompletion } from "../src/library/reconcile.js";
 import { contractId } from "../src/core/facts/types.js";
 import type { WorldRoot } from "../src/world.js";
 
@@ -102,12 +102,12 @@ test("debt query defaults to active rows and opts into terminal rows", () => {
     assert.equal(added.status, 0, added.stderr);
     const closed = runCli(root, ["debt", "add", "Closed", "--json"]);
     assert.equal(closed.status, 0, closed.stderr);
-    const id = JSON.parse(closed.stdout).value.id as string;
+    const id = JSON.parse(closed.stdout).id as string;
     assert.equal(runCli(root, ["debt", "done", id]).status, 0);
     const query = (flags: readonly string[]) => {
       const result = runCli(root, ["debt", "query", "--world", "--where", "priority >= 0", ...flags, "--json"]);
       assert.equal(result.status, 0, result.stderr);
-      return (JSON.parse(result.stdout).value.rows as readonly { id: string }[]).map((row) => row.id);
+      return (JSON.parse(result.stdout).rows as readonly { id: string }[]).map((row) => row.id);
     };
     assert.equal(query([]).length, 1);
     assert.deepEqual(query(["--closed"]), [id]);
@@ -124,7 +124,7 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   // per-argument limit while creating the fixture.
   const added = runCli(root, ["debt", "add", "-", "--json"], `---\ntitle: Title\n---\n\n${"x".repeat(500_000)}`);
   assert.equal(added.status, 0, added.stderr ?? added.error?.message);
-  const id = JSON.parse(added.stdout).value.id as string;
+  const id = JSON.parse(added.stdout).id as string;
   const child = spawn(process.execPath, [builtCli(), "debt", "show", id, "--json"], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
@@ -158,77 +158,65 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   assert.equal(stderr, "");
 });
 
-test("worktree hook failure reports failure at the CLI boundary", async () => {
-  const report: ReconcileReport = {
-    effects: [],
-    lag: [
-      {
-        kind: "worktree-hook-failed",
-        phase: "create",
-        path: "/tmp/wt",
-        command: 0,
-        name: "prepare",
-        failure: { kind: "exit", code: 7, stdout: "", stderr: "hook failed", truncated: false },
-      },
-    ],
-    settlement: { actions: [], lags: [] },
-  };
-  assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
-});
-
-test("target checkout retention reports failure at the CLI boundary", async () => {
-  const report: ReconcileReport = {
-    effects: [],
-    lag: [
-      {
-        kind: "target-checkout-retained",
-        target: "refs/heads/main",
-        path: "/repo/file",
-        diagnostic: "checkout failed",
-      },
-    ],
-    settlement: { actions: [], lags: [] },
-  };
-  assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
-});
-
-test("private-state seat-close failure reports failure at the CLI boundary", async () => {
-  const report: ReconcileReport = {
-    effects: [],
-    lag: [],
-    settlement: {
-      actions: [],
-      lags: [],
-      seatClose: [{ kind: "private-state-seat-close-failed", diagnostic: "could not close publication seat" }],
-    },
-  };
-  assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
-});
-
-test("reconcile failure reports failure at the CLI boundary", async () => {
-  const report: ReconcileReport = {
-    effects: [],
-    lag: [{ kind: "contract-file-failed", worktree: "/tmp/wt", path: "KEIYAKU.md", diagnostic: "write failed" }],
-    settlement: {
-      actions: [],
-      lags: [
+test("native reconcile reports preserve hook, checkout, seat and settlement failure classification", () => {
+  const id = contractId("kei/example");
+  const reports: ReconcileCompletion[] = [
+    {
+      kind: "contract",
+      contractId: id,
+      issues: [
         {
-          kind: "settlement-failed",
-          surface: "debt" as const,
-          contractId: contractId("kei/example"),
-          diagnostic: "debt failed",
+          kind: "worktree-hook-failed",
+          contractId: id,
+          phase: "create",
+          path: "/tmp/wt",
+          name: "prepare",
+          diagnostic: "hook failed",
         },
       ],
     },
-  };
-  assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
+    {
+      kind: "contract",
+      contractId: id,
+      issues: [
+        {
+          kind: "target-checkout-retained",
+          contractId: id,
+          target: "refs/heads/main",
+          path: "/repo/file",
+          diagnostic: "checkout failed",
+        },
+      ],
+    },
+    {
+      kind: "contract",
+      contractId: id,
+      issues: [
+        {
+          kind: "private-state-seat-close",
+          contractId: id,
+          diagnostic: "could not close publication seat",
+        },
+      ],
+    },
+    {
+      kind: "contract",
+      contractId: id,
+      issues: [
+        { kind: "contract-file-failed", contractId: id, path: "KEIYAKU.md", diagnostic: "write failed" },
+        { kind: "settlement-failed", contractId: id, diagnostic: "debt failed" },
+      ],
+    },
+  ];
+  for (const report of reports)
+    assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
 });
 
 test("debt show preserves a multi-line body end to end", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-debt-"));
   const added = runCli(root, ["debt", "add", "Title", "--body", "first\nsecond", "--json"]);
   assert.equal(added.status, 0);
-  const id = JSON.parse(added.stdout).value.id as string;
+  const id = JSON.parse(added.stdout).id as string;
   const shown = runCli(root, ["debt", "show", id]);
   assert.equal(shown.status, 0);
   assert.match(shown.stdout, /body\n  first\n  second/u);
@@ -262,9 +250,9 @@ test("audit show-diff preserves an actual candidate diff", () => {
     encoding: "utf8",
   });
   assert.equal(bound.status, 0, bound.stderr);
-  const contract = JSON.parse(bound.stdout).contract as string;
-  const binding = JSON.parse(bound.stdout) as { readonly value: { readonly workspace: { readonly path: string } } };
-  writeFileSync(join(binding.value.workspace.path, "candidate.txt"), "candidate\n");
+  const binding = JSON.parse(bound.stdout) as { readonly contractId: string; readonly worktreePath: string };
+  const contract = binding.contractId;
+  writeFileSync(join(binding.worktreePath, "candidate.txt"), "candidate\n");
   const audited = spawnSync(
     process.execPath,
     [builtCli(), "-C", repository.path, "deliver", contract, "--dry-run", "--include-dirty", "--show-diff"],
@@ -378,7 +366,7 @@ test("invalid args keep diagnostic with deepest leaf usage", () => {
   );
 });
 
-test("unmatched Contract selectors keep the text refusal and preserve the native missing-guidance null in JSON", () => {
+test("unmatched Contract selectors keep the text refusal and native missing guidance object", () => {
   const repo = makeGitRepository();
   const run = (args: string[]) =>
     spawnSync(
@@ -407,7 +395,7 @@ test("unmatched Contract selectors keep the text refusal and preserve the native
     const json = run(["--json"]);
     assert.equal(json.status, 1);
     assert.equal(json.stderr, "");
-    assert.equal(json.stdout.trim(), "null");
+    assert.deepEqual(JSON.parse(json.stdout), { kind: "missing" });
   } finally {
     rmSync(repo.path, { recursive: true, force: true });
   }
@@ -447,7 +435,7 @@ test("malformed arc document is a substantive refusal with the full grammar", ()
   ].join("\n");
   const bound = runCli(repository.path, ["bind", "--gates", "", "--json", "-"], markdown);
   assert.equal(bound.status, 0, bound.stdout + bound.stderr);
-  const id = JSON.parse(bound.stdout).contract as string;
+  const id = JSON.parse(bound.stdout).contractId as string;
   for (const document of ["", "#  \n", "## Missing name\n"]) {
     const text = runCli(repository.path, ["arc", id, "-"], document);
     assert.equal(text.status, 1, text.stdout + text.stderr);
@@ -459,7 +447,7 @@ test("malformed arc document is a substantive refusal with the full grammar", ()
   }
   const json = runCli(repository.path, ["arc", id, "--json", "-"], "# \n");
   assert.equal(json.status, 1);
-  assert.equal(JSON.parse(json.stdout).refusal.kind, "invalid-document");
+  assert.equal(JSON.parse(json.stdout).reason.kind, "invalid-document");
   rmSync(repository.path, { recursive: true, force: true });
 });
 
@@ -480,12 +468,12 @@ test("malformed bind JSON keeps the draft coordinate in the refusal", () => {
   assert.equal(result.stderr, "");
   const body = JSON.parse(result.stdout) as {
     kind: string;
-    refusal: { kind: string; diagnostic: string };
+    reason: { kind: string; diagnostic: string };
     draft?: { path?: string; warning?: string };
   };
   assert.equal(body.kind, "refused");
-  assert.equal(body.refusal.kind, "invalid-document");
-  assert.match(body.refusal.diagnostic, /contract document/u);
+  assert.equal(body.reason.kind, "invalid-document");
+  assert.match(body.reason.diagnostic, /contract document/u);
   assert.ok(body.draft?.path !== undefined || body.draft?.warning !== undefined);
   rmSync(cwd, { recursive: true, force: true });
 });
@@ -543,10 +531,17 @@ test("a worldless lifecycle request refuses every requested Debt in its native s
     assert.match(single.stdout, /^  debt  debt\/alpha$/mu);
     const plural = runCli(cwd, ["debt", "done", "debt/alpha", "debt/beta", "--json"]);
     assert.equal(plural.status, 1);
-    assert.deepEqual(
-      (JSON.parse(plural.stdout).items as readonly { id: string }[]).map((item) => item.id),
-      ["debt/alpha", "debt/beta"],
-    );
+    assert.deepEqual(JSON.parse(plural.stdout), {
+      items: [
+        { kind: "refused", reason: "debt-missing" },
+        { kind: "refused", reason: "debt-missing" },
+      ],
+    });
+    const pluralText = runCli(cwd, ["debt", "done", "debt/alpha", "debt/beta"]);
+    assert.equal(pluralText.status, 1);
+    assert.match(pluralText.stdout, /^  debt  debt\/alpha$/mu);
+    assert.match(pluralText.stdout, /^  debt  debt\/beta$/mu);
+    assert.ok(pluralText.stdout.indexOf("debt/alpha") < pluralText.stdout.indexOf("debt/beta"));
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

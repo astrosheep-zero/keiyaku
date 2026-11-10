@@ -16,7 +16,6 @@ import {
   heartExists,
   isHeartAbsent,
   probeLeash,
-  projectTell,
   readHeart,
   readLatestTurnForBody,
   readOpenBoundTurns,
@@ -647,7 +646,7 @@ async function settledWake(
   const heart = await readHeart(paths);
   if (tellId !== undefined && !heart.pending.some((tell) => tell.id === tellId)) return { kind: "told" };
   if (heart.latestBody !== null && heart.latestBody.sequence > after) {
-    return { kind: "pursuing", bodySequence: heart.latestBody.sequence };
+    return { kind: "pursuing" };
   }
   return null;
 }
@@ -713,8 +712,8 @@ export async function wakeRecordedTell(
   const tell = await readTell(paths, tellId);
   if (tell === null) throw new Error(`recorded Tell ${tellId} is missing from Heart`);
   return {
-    admission: { tellId, fact: "recorded" },
-    row: projectTell(tell),
+    admission: { tellId },
+    row: { sequence: tell.sequence, at: tell.recordedAt, text: tell.body },
     wake,
   };
 }

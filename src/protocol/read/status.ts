@@ -1,12 +1,7 @@
 import { z } from "zod";
-import { boundedListSchema } from "../../bounded-list.js";
 import { contractIdSchema, snapshotIdSchema } from "../../git/identity.js";
-import {
-  contractWorkspaceObservationSchema,
-  contractTargetLagSchema,
-  worktreeWorkspaceSchema,
-} from "../../git/workspace.js";
-import { contractTargetSchema, deliverDataSchema, gateCurrentSchema } from "../result-leaves.js";
+import { type ContractTargetLag as GitContractTargetLag } from "../../git/workspace.js";
+import { gateSchema } from "../result-leaves.js";
 import {
   observeActiveContractWorld,
   observeContractsForAdmissionInObservationAt,
@@ -14,103 +9,210 @@ import {
   withContractReadObservationAt,
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
-import {
-  observeTargetLag,
-  observeWorkspace,
-  readConflictHandoffs,
-  conflictRecovery,
-  worktreePath,
-} from "../../git/workspace.js";
+import { observeTargetLag, observeWorkspace, worktreePath } from "../../git/workspace.js";
 import { appointmentFor, readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
-import type {
-  ConflictHandoff,
-  ContractTargetLag as GitContractTargetLag,
-  ContractWorkspaceObservation,
-  HandoffReceiptCoordinate,
-} from "../../git/workspace.js";
+import type { ContractWorkspaceObservation, HandoffReceiptCoordinate } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
 import type { GitDecodeChannel, GitReadObservation } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import { verificationRequirement } from "../../verification/declaration.js";
-import { type ContractId, type ContractState, type JournalEntry } from "../../core/facts/types.js";
+import { type ContractId, type ContractState, type JournalEntry, type SnapshotId } from "../../core/facts/types.js";
 import { projectBoundedList } from "../../bounded-list.js";
+import { observeCurrentPhysicalIssue } from "./observation.js";
 
 const phaseSchema = z.enum(["bound", "claimed", "abandoned"]);
+export type ContractPhase = z.output<typeof phaseSchema>;
+
+const summaryGateSchema = z
+  .strictObject({
+    name: gateSchema,
+    verdict: z.enum(["missing", "stale", "satisfied", "unsatisfied"]),
+  })
+  .readonly();
+export type ContractSummaryGate = z.output<typeof summaryGateSchema>;
+
+export const contractSummaryAssociationSchema = z.union([
+  z.strictObject({ kind: z.literal("debt"), debtId: z.string().min(1) }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("akuma"),
+      akumaId: z.string().min(1),
+      aliases: z.array(z.string().min(1)).min(1).readonly().exactOptional(),
+      aliasesUnavailable: z.literal(true).exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("unavailable"),
+      source: z.enum(["holder", "roster"]),
+      diagnostic: z.string(),
+    })
+    .readonly(),
+]);
+export type ContractSummaryAssociation = z.output<typeof contractSummaryAssociationSchema>;
+
+export const contractAttentionSchema = z.union([
+  z.strictObject({ kind: z.literal("workspace-unavailable"), path: z.string().min(1) }).readonly(),
+  z.strictObject({ kind: z.literal("workspace-unappointed") }).readonly(),
+  z.strictObject({ kind: z.literal("workspace-failed"), path: z.string().min(1), diagnostic: z.string() }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("merge-in-progress"),
+      path: z.string().min(1),
+      conflicts: z.number().int().positive().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("target-behind"),
+      behind: z.number().int().positive(),
+      subject: z.string().min(1).exactOptional(),
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("target-unknown"), subject: z.string().min(1).exactOptional() }).readonly(),
+]);
+export type ContractAttention = z.output<typeof contractAttentionSchema>;
+
+export const contractSummarySchema = z
+  .strictObject({
+    id: contractIdSchema,
+    title: z.string().min(1).exactOptional(),
+    phaseAt: z.string(),
+    delivered: z.literal(true).exactOptional(),
+    gates: z.array(summaryGateSchema).min(1).readonly().exactOptional(),
+    attention: z.array(contractAttentionSchema).min(1).readonly().exactOptional(),
+  })
+  .readonly();
+export type ContractSummary = z.output<typeof contractSummarySchema>;
+
+export const contractCatalogueSchema = z
+  .strictObject({
+    observedAt: z.string(),
+    rows: z.array(contractSummarySchema).min(1).readonly().exactOptional(),
+    more: z.literal(true).exactOptional(),
+  })
+  .readonly();
+export type ContractCatalogue = z.output<typeof contractCatalogueSchema>;
+
+const detailCurrentSchema = z.union([
+  z.strictObject({ kind: z.literal("missing") }).readonly(),
+  z.strictObject({ kind: z.literal("stale") }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("attested"),
+      verdict: z.enum(["satisfied", "unsatisfied"]),
+      summary: z.string().exactOptional(),
+    })
+    .readonly(),
+]);
 const rowRequirementSchema = z
   .strictObject({
-    requirement: z.string(),
-    current: gateCurrentSchema,
-    index: z.number().exactOptional(),
+    requirement: z.string().exactOptional(),
+    current: detailCurrentSchema,
+    index: z.number().int().positive().exactOptional(),
   })
   .readonly();
 const rowGateSchema = z
   .strictObject({
     gate: z.string(),
-    current: gateCurrentSchema,
-    satisfied: z.boolean(),
     requirements: z.array(rowRequirementSchema).readonly(),
   })
   .readonly();
-const endpointSchema = z.union([
-  z.strictObject({ kind: z.literal("claimed") }).readonly(),
-  z.strictObject({ kind: z.literal("active"), phase: phaseSchema }).readonly(),
-  z.strictObject({ kind: z.literal("abandoned") }).readonly(),
-  z.strictObject({ kind: z.literal("missing") }).readonly(),
-]);
-export const contractRowSchema = z
+const workspaceCountsSchema = z
   .strictObject({
-    id: contractIdSchema,
-    title: z.string().nullable(),
-    phase: phaseSchema,
-    phaseAt: z.string(),
-    lastJournalAt: z.string(),
-    disposition: z.enum(["active", "terminal"]),
-    workspace: z.literal("worktree"),
-    worktreePath: z.string().nullable(),
-    workspaceObservation: contractWorkspaceObservationSchema,
-    target: contractTargetSchema.nullable(),
-    targetLag: z.union([
-      contractTargetLagSchema,
-      z.strictObject({ kind: z.literal("counted"), behind: z.number(), subject: worktreeWorkspaceSchema }).readonly(),
-      z.strictObject({ kind: z.literal("unknown"), subject: worktreeWorkspaceSchema }).readonly(),
-    ]),
-    delivery: deliverDataSchema.nullable(),
-    abandonNote: z.string().exactOptional(),
-    targetObservation: z.strictObject({ head: snapshotIdSchema.nullable(), drift: z.boolean() }).readonly().nullable(),
-    gates: z.strictObject({ reports: z.array(rowGateSchema).readonly(), satisfied: z.boolean() }).readonly(),
-    after: z.array(z.strictObject({ contractId: contractIdSchema, endpoint: endpointSchema }).readonly()).readonly(),
-    dependents: z.array(z.strictObject({ contractId: contractIdSchema, phase: phaseSchema }).readonly()).readonly(),
+    staged: z.number().int().positive().exactOptional(),
+    unstaged: z.number().int().positive().exactOptional(),
+    untracked: z.number().int().positive().exactOptional(),
+    submodules: z.number().int().positive().exactOptional(),
   })
   .readonly();
-const boardFields = { root: z.string(), state: snapshotIdSchema.nullable(), observedAt: z.string() };
-export const contractBoardSchema = z
-  .strictObject({ ...boardFields, rows: z.array(contractRowSchema).readonly() })
+export const contractDetailWorkspaceSchema = z.union([
+  z
+    .strictObject({
+      kind: z.literal("present"),
+      path: z.string().min(1),
+      counts: workspaceCountsSchema.exactOptional(),
+      merge: z.array(z.string()).readonly().exactOptional(),
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("unavailable"), path: z.string().min(1) }).readonly(),
+  z.strictObject({ kind: z.literal("unappointed") }).readonly(),
+]);
+export type ContractDetailWorkspace = z.output<typeof contractDetailWorkspaceSchema>;
+
+export const contractDetailTargetLagSchema = z.union([
+  z
+    .strictObject({
+      kind: z.literal("counted"),
+      behind: z.number().int().positive().exactOptional(),
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("unknown") }).readonly(),
+]);
+export type ContractDetailTargetLag = z.output<typeof contractDetailTargetLagSchema>;
+
+export const contractDetailTargetObservationSchema = z.union([
+  z.strictObject({ kind: z.literal("moved"), before: snapshotIdSchema, after: snapshotIdSchema }).readonly(),
+  z.strictObject({ kind: z.literal("unknown") }).readonly(),
+]);
+export type ContractDetailTargetObservation = z.output<typeof contractDetailTargetObservationSchema>;
+
+export const contractDetailSchema = z
+  .strictObject({
+    id: contractIdSchema,
+    title: z.string().min(1).exactOptional(),
+    phase: phaseSchema,
+    workspace: contractDetailWorkspaceSchema,
+    target: z.string().exactOptional(),
+    targetLag: contractDetailTargetLagSchema.exactOptional(),
+    delivery: z.strictObject({ candidate: snapshotIdSchema, integration: snapshotIdSchema }).readonly().exactOptional(),
+    targetObservation: contractDetailTargetObservationSchema.exactOptional(),
+    gates: z.array(rowGateSchema).min(1).readonly().exactOptional(),
+    after: z
+      .array(
+        z.strictObject({ contractId: contractIdSchema, state: z.enum(["active", "abandoned", "missing"]) }).readonly(),
+      )
+      .min(1)
+      .readonly()
+      .exactOptional(),
+    issue: z
+      .union([
+        z.strictObject({ kind: z.literal("target-checkout-retained") }).readonly(),
+        z.strictObject({ kind: z.literal("unavailable"), diagnostic: z.string() }).readonly(),
+      ])
+      .exactOptional(),
+    abandonNote: z.string().exactOptional(),
+  })
   .readonly();
-export const contractListSchema = boundedListSchema(contractRowSchema, boardFields);
+export type ContractDetail = z.output<typeof contractDetailSchema>;
+
+const dependentSchema = z.strictObject({ contractId: contractIdSchema, phase: phaseSchema }).readonly();
+export const contractBoardSchema = z
+  .strictObject({
+    rows: z
+      .array(
+        contractDetailSchema
+          .unwrap()
+          .extend({
+            dependents: z.array(dependentSchema).min(1).readonly().exactOptional(),
+          })
+          .readonly(),
+      )
+      .readonly(),
+  })
+  .readonly();
 export const contractObservationSchema = z.union([
   z.strictObject({ kind: z.literal("missing"), id: contractIdSchema }).readonly(),
-  z.strictObject({ kind: z.literal("present"), row: contractRowSchema }).readonly(),
+  z.strictObject({ kind: z.literal("present"), row: contractDetailSchema }).readonly(),
 ]);
 
-export type ContractPhase = "bound" | "claimed" | "abandoned";
-export type ContractDisposition = "active" | "terminal";
-
-export type ContractGateCurrent = GateCurrent;
-
+export type ContractGateCurrent = z.output<typeof detailCurrentSchema>;
 export type ContractGateReport = z.output<typeof rowGateSchema>;
-
-export type ContractTargetLag =
-  | GitContractTargetLag
-  | Readonly<{ kind: "counted"; behind: number; subject: Readonly<{ kind: "worktree"; path: string }> }>
-  | Readonly<{ kind: "unknown"; subject: Readonly<{ kind: "worktree"; path: string }> }>;
+export type ContractTargetLag = ContractDetailTargetLag;
 export type { ContractWorkspaceObservation };
-
-type AfterEndpointObservation = z.output<typeof endpointSchema>;
-export type ContractAfterEdge = ContractRow["after"][number];
-export type ContractDependent = ContractRow["dependents"][number];
-export type ContractRow = z.output<typeof contractRowSchema>;
+export type ContractAfterEdge = NonNullable<ContractDetail["after"]>[number];
+export type ContractDependent = z.output<typeof dependentSchema>;
 export type ContractBoard = z.output<typeof contractBoardSchema>;
-export type ContractCatalogue = z.output<typeof contractListSchema>;
 export type ContractObservation = z.output<typeof contractObservationSchema>;
 
 function documentFor(state: ContractState): ReturnType<typeof decodeContractDocument> | undefined {
@@ -122,8 +224,9 @@ function documentFor(state: ContractState): ReturnType<typeof decodeContractDocu
   }
 }
 
-function titleFor(document: ReturnType<typeof decodeContractDocument> | undefined): string | null {
-  return document?.title ?? null;
+function titleFor(document: ReturnType<typeof decodeContractDocument> | undefined): string | undefined {
+  const title = document?.title;
+  return title === undefined || title.trim() === "" ? undefined : title;
 }
 
 function phaseFor(state: ContractState): ContractPhase {
@@ -132,14 +235,36 @@ function phaseFor(state: ContractState): ContractPhase {
   return "bound";
 }
 
-export function phaseAtFor(state: Pick<ContractState, "terminal" | "delivery">, bindAt: string): string {
+function phaseAtFor(state: Pick<ContractState, "terminal" | "delivery">, bindAt: string): string {
   return state.terminal?.at ?? state.delivery?.at ?? bindAt;
 }
 
-export function lastJournalAtFor(entries: readonly Pick<JournalEntry, "at">[]): string {
+function lastJournalAtFor(entries: readonly Pick<JournalEntry, "at">[]): string {
   const last = entries.at(-1);
   if (last === undefined) throw new Error("present Contract journal is empty");
   return last.at;
+}
+
+function summaryVerdict(current: GateCurrent): ContractSummaryGate["verdict"] {
+  if (current.kind === "missing") return "missing";
+  if (current.kind === "stale") return "stale";
+  return current.verdict;
+}
+
+function summaryFor({ state, bindAt }: SelectedContractState): ContractSummary {
+  const document = documentFor(state);
+  const title = titleFor(document);
+  const gates = gateReports(state).reports.map((report) => ({
+    name: report.gate,
+    verdict: summaryVerdict(report.current),
+  }));
+  return {
+    id: state.id,
+    ...(title === undefined ? {} : { title }),
+    phaseAt: phaseAtFor(state, bindAt),
+    ...(state.delivery === null ? {} : { delivered: true }),
+    ...(gates.length === 0 ? {} : { gates }),
+  };
 }
 
 function appointedWorkspace(
@@ -153,22 +278,76 @@ function appointedWorkspace(
     : { contractId: state.id, place: appointed.place, workspace: worktreePath(repository, appointed.place) };
 }
 
+function detailCounts(
+  counts: Extract<ContractWorkspaceObservation, { kind: "clean" | "dirty" }>["counts"],
+): NonNullable<Extract<ContractDetailWorkspace, { kind: "present" }>["counts"]> {
+  return {
+    ...(counts.staged === 0 ? {} : { staged: counts.staged }),
+    ...(counts.unstaged === 0 ? {} : { unstaged: counts.unstaged }),
+    ...(counts.untracked === 0 ? {} : { untracked: counts.untracked }),
+    ...(counts.submodules === 0 ? {} : { submodules: counts.submodules }),
+  };
+}
+
+function detailWorkspace(path: string, observed: ContractWorkspaceObservation): ContractDetailWorkspace {
+  switch (observed.kind) {
+    case "clean":
+    case "dirty": {
+      const counts = detailCounts(observed.counts);
+      return {
+        kind: "present",
+        path,
+        ...(Object.keys(counts).length === 0 ? {} : { counts }),
+        ...(observed.merge === null ? {} : { merge: observed.merge.unmergedPaths }),
+      };
+    }
+    case "unavailable":
+      return { kind: "unavailable", path };
+    case "unappointed":
+      return { kind: "unappointed" };
+    case "failed":
+      throw new Error(observed.diagnostic);
+  }
+}
+
+function detailTargetLag(lag: GitContractTargetLag): ContractDetailTargetLag | undefined {
+  if (lag.kind === "none") return undefined;
+  return lag.kind === "counted"
+    ? { kind: "counted", ...(lag.behind === 0 ? {} : { behind: lag.behind }) }
+    : { kind: "unknown" };
+}
+
+function detailTargetObservation(
+  observed: Readonly<{ head: SnapshotId | null; drift: boolean }> | null,
+  state: ContractState,
+): ContractDetailTargetObservation | undefined {
+  if (observed === null) return undefined;
+  if (observed.head === null) return { kind: "unknown" };
+  const integration = state.currentIntegration;
+  const expected = state.terminal?.kind === "claimed" ? integration?.snapshot : integration?.predecessor;
+  return observed.drift && expected !== undefined
+    ? { kind: "moved", before: expected, after: observed.head }
+    : undefined;
+}
+
+type RawTargetObservation = Readonly<{ head: SnapshotId | null; drift: boolean }> | null;
+
 async function managedWorkspaceFacts(
   repository: GitRepository,
   state: ContractState,
   appointed: HandoffReceiptCoordinate | undefined,
-  targetObservation: ContractRow["targetObservation"],
-  handoff: ConflictHandoff | undefined,
+  targetObservation: RawTargetObservation,
 ): Promise<
   Readonly<{
-    workspaceObservation: ContractWorkspaceObservation;
-    targetLag: ContractTargetLag;
+    workspace: ContractDetailWorkspace;
+    targetLag: ContractDetailTargetLag | undefined;
+    lagSubject?: string;
   }>
 > {
   if (appointed === undefined) {
     return {
-      workspaceObservation: { kind: "unappointed" },
-      targetLag: state.coordinates.target === undefined ? { kind: "none" } : { kind: "unknown" },
+      workspace: { kind: "unappointed" },
+      targetLag: state.coordinates.target === undefined ? undefined : { kind: "unknown" },
     };
   }
   const path = appointed.workspace;
@@ -176,49 +355,68 @@ async function managedWorkspaceFacts(
     observeWorkspace(repository, { kind: "worktree", path }, path),
     observeTargetLag(repository, path, targetObservation?.head),
   ]);
-  const projectedWorkspaceObservation =
-    handoff !== undefined &&
-    (workspaceObservation.kind === "clean" || workspaceObservation.kind === "dirty") &&
-    workspaceObservation.merge !== null
-      ? {
-          ...workspaceObservation,
-          merge: {
-            ...workspaceObservation.merge,
-            handoffBase: handoff.base,
-            recovery: conflictRecovery,
-          },
-        }
-      : workspaceObservation;
-  return { workspaceObservation: projectedWorkspaceObservation, targetLag };
+  return {
+    workspace: detailWorkspace(path, workspaceObservation),
+    targetLag: detailTargetLag(targetLag),
+    ...(targetLag.kind === "none" || targetLag.subject === undefined ? {} : { lagSubject: targetLag.subject.path }),
+  };
+}
+
+function summaryAttention({
+  workspace,
+  targetLag,
+  lagSubject,
+}: Awaited<ReturnType<typeof managedWorkspaceFacts>>): readonly ContractAttention[] {
+  const attention: ContractAttention[] = [];
+  switch (workspace.kind) {
+    case "unavailable":
+      attention.push({ kind: "workspace-unavailable", path: workspace.path });
+      break;
+    case "unappointed":
+      attention.push({ kind: "workspace-unappointed" });
+      break;
+    case "present":
+      if (workspace.merge !== undefined) {
+        const conflicts = workspace.merge.length;
+        attention.push({ kind: "merge-in-progress", path: workspace.path, ...(conflicts === 0 ? {} : { conflicts }) });
+      }
+  }
+  if (targetLag?.kind === "unknown")
+    attention.push({ kind: "target-unknown", ...(lagSubject === undefined ? {} : { subject: lagSubject }) });
+  else if (targetLag?.behind !== undefined)
+    attention.push({
+      kind: "target-behind",
+      behind: targetLag.behind,
+      ...(lagSubject === undefined ? {} : { subject: lagSubject }),
+    });
+  return attention;
 }
 
 type ContractRowInput = Readonly<{
   repository: GitRepository;
   state: ContractState;
   bindAt: string;
-  lastJournalAt: string;
-  targetObservation: ContractRow["targetObservation"];
+  targetObservation: RawTargetObservation;
   workspace: HandoffReceiptCoordinate | undefined;
-  handoff: ConflictHandoff | undefined;
   after: readonly ContractAfterEdge[];
   dependents: readonly ContractDependent[];
+  physicalIssue: boolean;
 }>;
 
-function afterEndpoint(state: ContractState | null | undefined): AfterEndpointObservation {
-  if (state === undefined || state === null) return { kind: "missing" };
-  if (state.terminal?.kind === "claimed") return { kind: "claimed" };
-  if (state.terminal?.kind === "abandoned") return { kind: "abandoned" };
-  return { kind: "active", phase: phaseFor(state) };
+function afterEndpoint(state: ContractState | null | undefined): ContractAfterEdge["state"] | undefined {
+  if (state === undefined || state === null) return "missing";
+  if (state.terminal?.kind === "claimed") return undefined;
+  return state.terminal?.kind === "abandoned" ? "abandoned" : "active";
 }
 
 function afterEdges(
   state: ContractState,
   endpoints: ReadonlyMap<ContractId, ContractState | null>,
 ): readonly ContractAfterEdge[] {
-  return state.terms.after.map((contractId) => ({
-    contractId,
-    endpoint: afterEndpoint(endpoints.get(contractId)),
-  }));
+  return state.terms.after.flatMap((contractId) => {
+    const endpoint = afterEndpoint(endpoints.get(contractId));
+    return endpoint === undefined ? [] : [{ contractId, state: endpoint }];
+  });
 }
 
 function reverseDependents(id: ContractId, states: readonly SelectedContractState[]): readonly ContractDependent[] {
@@ -228,49 +426,70 @@ function reverseDependents(id: ContractId, states: readonly SelectedContractStat
     .sort((left, right) => left.contractId.localeCompare(right.contractId));
 }
 
-async function rowFor(input: ContractRowInput): Promise<ContractRow> {
-  const { repository, state, bindAt, lastJournalAt, targetObservation, workspace, handoff, after, dependents } = input;
-  const gates = gateReports(state);
+async function rowFor(input: ContractRowInput): Promise<ContractBoard["rows"][number]> {
+  const { repository, state, targetObservation: rawTargetObservation, workspace, after, dependents } = input;
   const document = documentFor(state);
   const indexes = new Map<string, number>();
   document?.verification.forEach((declaration, index) => {
     const requirement = verificationRequirement(declaration);
     if (!indexes.has(requirement)) indexes.set(requirement, index + 1);
   });
-  const facts = await managedWorkspaceFacts(repository, state, workspace, targetObservation, handoff);
-  return {
+  const facts = await managedWorkspaceFacts(repository, state, workspace, rawTargetObservation);
+  const gates = gateReports(state).reports.map((report) => ({
+    gate: report.gate,
+    requirements: report.requirements.map((requirement) => {
+      const index = report.gate === "verified" ? indexes.get(requirement.requirement) : undefined;
+      const current = requirement.current;
+      return {
+        ...(index !== undefined
+          ? { index }
+          : requirement.requirement === `gate:${report.gate}`
+            ? {}
+            : { requirement: requirement.requirement }),
+        current:
+          current.kind === "attested"
+            ? {
+                kind: "attested" as const,
+                verdict: current.verdict,
+                ...(current.summary === undefined ? {} : { summary: current.summary }),
+              }
+            : { kind: current.kind },
+      };
+    }),
+  }));
+  const title = titleFor(document);
+  const targetObservation = detailTargetObservation(rawTargetObservation, state);
+  const row = {
     id: state.id,
-    title: titleFor(document),
+    ...(title === undefined ? {} : { title }),
     phase: phaseFor(state),
-    phaseAt: phaseAtFor(state, bindAt),
-    lastJournalAt,
-    disposition: state.terminal === null ? "active" : "terminal",
-    workspace: state.coordinates.workspace,
-    worktreePath: workspace?.workspace ?? null,
-    workspaceObservation: facts.workspaceObservation,
-    target: state.coordinates.target ?? null,
-    targetLag: facts.targetLag,
-    delivery:
-      state.delivery === null || state.currentIntegration === null
-        ? null
-        : { ...state.delivery.data, integration: state.currentIntegration },
+    workspace: facts.workspace,
+    ...(state.coordinates.target === undefined
+      ? {}
+      : {
+          target:
+            typeof state.coordinates.target === "string"
+              ? state.coordinates.target
+              : state.coordinates.target.contractId,
+        }),
+    ...(facts.targetLag === undefined ? {} : { targetLag: facts.targetLag }),
+    ...(state.delivery === null
+      ? {}
+      : {
+          delivery: {
+            candidate: state.delivery.data.tenderSnapshot,
+            integration: (state.currentIntegration ?? state.delivery.data.integration).snapshot,
+          },
+        }),
+    ...(targetObservation === undefined ? {} : { targetObservation }),
+    ...(gates.length === 0 ? {} : { gates }),
+    ...(after.length === 0 ? {} : { after }),
+    ...(dependents.length === 0 ? {} : { dependents }),
     ...(state.terminal?.kind === "abandoned" && state.terminal.data.note !== undefined
       ? { abandonNote: state.terminal.data.note }
       : {}),
-    targetObservation,
-    gates: {
-      reports: gates.reports.map((report) => ({
-        ...report,
-        requirements: report.requirements.map((requirement) => {
-          const index = report.gate === "verified" ? indexes.get(requirement.requirement) : undefined;
-          return { ...requirement, ...(index === undefined ? {} : { index }) };
-        }),
-      })),
-      satisfied: gates.satisfied,
-    },
-    after,
-    dependents,
   };
+  return input.physicalIssue ? await selectedDetailWithIssue(repository, state, row, rawTargetObservation) : row;
 }
 
 async function afterEndpointMap(
@@ -289,31 +508,26 @@ async function hydrateRows(
   states: readonly SelectedContractState[],
   endpoints: ReadonlyMap<ContractId, ContractState | null>,
   dependentStates: readonly SelectedContractState[] = [],
-): Promise<readonly ContractRow[]> {
+  physicalIssue = false,
+): Promise<readonly ContractBoard["rows"][number][]> {
   const register = await readPlaceRegister(observation.repository);
   const selected = states.map((value) => ({
     ...value,
     workspace: appointedWorkspace(observation.repository, register, value.state),
   }));
-  const handoffs = await readConflictHandoffs(
-    observation.repository,
-    observation.readBlobs,
-    selected.flatMap(({ workspace }) => (workspace === undefined ? [] : [workspace])),
-  );
   const observeTarget = deliveryTargetObserver(observation);
   return await Promise.all(
     selected.map(
-      async ({ state, bindAt, lastJournalAt, workspace }) =>
+      async ({ state, bindAt, workspace }) =>
         await rowFor({
           repository: observation.repository,
           state,
           bindAt,
-          lastJournalAt,
           targetObservation: await observeTarget(state),
           workspace,
-          handoff: handoffs.get(state.id),
           after: afterEdges(state, endpoints),
           dependents: reverseDependents(state.id, dependentStates),
+          physicalIssue,
         }),
     ),
   );
@@ -325,7 +539,6 @@ export async function readContractBoard(
   include?: ContractId,
   detail: "board" | "selected" = "board",
 ): Promise<ContractBoard> {
-  const observedAt = new Date().toISOString();
   const observed = await observeActiveContractWorld(observation);
   const contracts = new Map(observed.contracts);
   let endpoints = new Map(observed.eligibility);
@@ -342,12 +555,7 @@ export async function readContractBoard(
   const states = selectedContractStates(contracts);
   const selected = detail === "selected" ? states.filter(({ state }) => state.id === include) : states;
   const rows = await hydrateRows(observation, selected, endpoints, states);
-  return {
-    root: observation.repository.primaryWorktree,
-    state: observed.snapshot,
-    observedAt,
-    rows,
-  };
+  return { rows };
 }
 
 type SelectedContractState = Readonly<{
@@ -379,24 +587,40 @@ function selectedContractStates(
   );
 }
 
-/** Observe a bounded recent active Contract catalogue from one immutable git observation. */
+/**
+ * Observe a bounded recent active Contract catalogue, or its complete active set
+ * when no bound is selected, from one immutable Git observation.
+ */
 export async function readContractCatalogue(
   observation: GitReadObservation,
-  limit: number,
+  limit?: number,
 ): Promise<ContractCatalogue> {
   const observedAt = new Date().toISOString();
   const observed = await observeActiveContractWorld(observation);
-  const active = selectedContractStates(observed.contracts).filter(({ state }) => state.terminal === null);
-  const selected = projectBoundedList([...active].sort(compareRecentContracts), limit);
-  const afterIds = selected.rows.flatMap(({ state }) => state.terms.after);
-  const endpoints = await afterEndpointMap(observation, new Map(observed.eligibility), afterIds);
-  const rows = await hydrateRows(observation, selected.rows, endpoints, active);
+  const active = selectedContractStates(observed.contracts)
+    .filter(({ state }) => state.terminal === null)
+    .sort(compareRecentContracts);
+  const selected = limit === undefined ? { rows: active, hasMore: false } : projectBoundedList(active, limit);
+  const register = await readPlaceRegister(observation.repository);
+  const observeTarget = deliveryTargetObserver(observation);
+  const rows = await Promise.all(
+    selected.rows.map(async (selected) => {
+      const { state } = selected;
+      const attention = summaryAttention(
+        await managedWorkspaceFacts(
+          observation.repository,
+          state,
+          appointedWorkspace(observation.repository, register, state),
+          await observeTarget(state),
+        ),
+      );
+      return { ...summaryFor(selected), ...(attention.length === 0 ? {} : { attention }) };
+    }),
+  );
   return {
-    root: observation.repository.primaryWorktree,
-    state: observed.snapshot,
     observedAt,
-    rows,
-    hasMore: selected.hasMore,
+    ...(rows.length === 0 ? {} : { rows }),
+    ...(selected.hasMore ? { more: true as const } : {}),
   };
 }
 
@@ -425,11 +649,38 @@ export async function readContractObservation(
   const state = record.state;
   if (state === null) return { kind: "missing", id };
   const endpoints = await afterEndpointMap(observation, new Map([[id, state]]), state.terms.after);
-  const rows = await hydrateRows(observation, selectedContractStates(observed.journals), endpoints);
-  return {
-    kind: "present",
-    row: rows[0]!,
-  };
+  const rows = await hydrateRows(observation, selectedContractStates(observed.journals), endpoints, [], true);
+  return { kind: "present", row: rows[0]! };
+}
+
+/** The exact selected read carries its physical issue; only that physical read can turn unavailable. */
+async function selectedDetailWithIssue(
+  repository: GitRepository,
+  state: ContractState,
+  row: ContractDetail,
+  targetObservation: RawTargetObservation,
+): Promise<ContractDetail> {
+  const delivery = state.delivery;
+  if (delivery === null) return row;
+  const integration = state.currentIntegration ?? delivery.data.integration;
+  try {
+    const issue = await observeCurrentPhysicalIssue(
+      repository,
+      {
+        phase: row.phase,
+        target: state.coordinates.target,
+        delivery: row.delivery,
+        observedHead: targetObservation?.head ?? null,
+      },
+      integration.predecessor,
+    );
+    return issue === undefined ? row : { ...row, issue };
+  } catch (error) {
+    return {
+      ...row,
+      issue: { kind: "unavailable", diagnostic: error instanceof Error ? error.message : String(error) },
+    };
+  }
 }
 
 /** Observe one Contract and its target from one fresh ref epoch. */

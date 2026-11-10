@@ -2,7 +2,6 @@
 import { captureAkumaHostDiagnostic, type AkumaHostOptions } from "../akuma/akuma-instance.js";
 import type { AkumaList, AkumaListInput } from "../akuma/akuma.js";
 import { readAkumaRoster } from "../akuma/akuma.js";
-import type { TellResult, TellWake } from "../akuma/body.js";
 import { captureAkumaHost } from "../body-host.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
@@ -13,7 +12,7 @@ import type { CreatedDebtObservation } from "../debt/created-observation.js";
 import { World, type WorldRoot } from "../world.js";
 import { sweepInactiveAkumas } from "./akuma-retention.js";
 import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
-import type { DispatchStage, ForkInput, ForkResult, SpawnInput, SpawnResult, SpawnWaitHead } from "./akuma-creation.js";
+import type { ForkInput, ForkResult, SpawnInput, SpawnResult, SpawnWaitHead } from "./akuma-creation.js";
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
 import { normalizedList, requireInput } from "./input.js";
 import {
@@ -30,7 +29,6 @@ import {
   type AkumaKillInput,
   type AkumaKillResult,
   type AkumaObservation,
-  type AkumaObservationStage,
   type AkumaTellInput,
   type AkumaTellResult,
   type AkumaWaitInput,
@@ -50,18 +48,14 @@ export type {
   AkumaList,
   AkumaListInput,
   AkumaObservation,
-  AkumaObservationStage,
   AkumaTellResult,
   AkumaWaitResult,
   AkumaWorldScopeRefusal,
   CreatedDebtObservation,
   DispatchAssociation,
-  DispatchStage,
   ForkResult,
   SpawnResult,
   SpawnWaitHead,
-  TellResult,
-  TellWake,
 };
 /** The existing native wait-observation seam, exposed type-only for CLI composition. */
 
@@ -85,7 +79,7 @@ class AkumasHandle {
   async list(input?: AkumaListInput): Promise<AkumaList> {
     const path = await World.prove(this.#world);
     const roster = await readAkumaRoster(path, input);
-    if (roster.rows.length === 0) return roster;
+    if (roster.rows === undefined) return roster;
     return withRosterAliases(roster, await readAliases(path));
   }
 
@@ -186,7 +180,14 @@ function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[])
     aliases.push(binding.alias);
     byId.set(binding.akumaId, aliases);
   }
-  return { ...roster, rows: roster.rows.map((row) => ({ ...row, aliases: byId.get(row.id) ?? [] })) };
+  if (roster.rows === undefined) return roster;
+  return {
+    ...roster,
+    rows: roster.rows.map((row) => {
+      const aliases = byId.get(row.id);
+      return aliases === undefined ? row : { ...row, aliases };
+    }),
+  };
 }
 
 /** Internal host composition for an explicitly owned launcher. */

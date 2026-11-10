@@ -83,7 +83,7 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
       markdown: contractBody("Concurrent hooks"),
     }),
   );
-  const id = present(await bound.value.kei.state()).id;
+  const id = present(await bound.kei.state()).id;
   const worktree = await appointedWorktreePath(git, id);
   const administration = await worktreeGitDirectory(git, worktree);
   const reports = await Promise.all([
@@ -92,16 +92,21 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   ]);
 
   assert.deepEqual(
-    reports.map((report) => report.lag),
-    [[], []],
+    reports.map((report) => {
+      assert.ok(report.kind === "contract");
+      return report.issues;
+    }),
+    [undefined, undefined],
   );
   assert.deepEqual(lines(log), ["create"]);
   assert.equal(repository.run(["-C", worktree, "status", "--porcelain", "--untracked-files=all"]), "");
   assert.equal(existsSync(join(administration, "keiyaku", "hooks.json")), false);
 
-  const abandoned = await bound.value.kei.abandon({});
+  const abandoned = accepted(await bound.kei.abandon({}));
   assert.deepEqual(
-    abandoned.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag),
+    (abandoned.issues ?? []).filter(
+      (effect) => effect.kind === "reconcile-failed" || effect.kind === "worktree-retained",
+    ),
     [],
   );
   assert.deepEqual(lines(log), ["create", "destroy"]);
@@ -140,19 +145,19 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
   );
   const worktree = await appointedWorktreePath(
     await repositoryAt(repository.path),
-    present(await bound.value.kei.state()).id,
+    present(await bound.kei.state()).id,
   );
   const originalHead = repository.run(["-C", worktree, "rev-parse", "HEAD"]).trim();
   writeFileSync(join(worktree, "before-destroy-hook.txt"), "initial bytes\n");
 
-  const abandoned = await bound.value.kei.abandon({});
-  const recoveries = abandoned.effects.filter(
-    (effect) => effect.kind === "reconciliation-effect" && effect.effect.kind === "recovery-snapshot",
-  );
+  const abandoned = accepted(await bound.kei.abandon({}));
+  assert.equal(abandoned.issues, undefined);
+  const recoveries = repository.run(["fsck", "--unreachable", "--no-reflogs"])
+    .split("\n").flatMap((line) => /^unreachable commit ([0-9a-f]+)$/u.exec(line)?.[1] ?? [])
+    .filter((oid) => repository.run(["show", "-s", "--format=%s", oid]).includes("ephemeral abandoned-workspace recovery"));
   assert.equal(recoveries.length, 2);
-  const effect = recoveries.at(-1);
-  assert.ok(effect?.kind === "reconciliation-effect" && effect.effect.kind === "recovery-snapshot");
-  const recovery = effect.effect.snapshot;
+  const recovery = recoveries.find((oid) => repository.run(["ls-tree", "--name-only", oid]).includes("from-destroy-hook.txt"));
+  assert.ok(recovery);
   assert.equal(existsSync(worktree), false);
   assert.equal(repository.run(["show", `${recovery}:before-destroy-hook.txt`]), "initial bytes\n");
   assert.equal(repository.run(["show", `${recovery}:from-destroy-hook.txt`]), "hook bytes\n");
@@ -191,7 +196,7 @@ test("CLI abandon carries the configured destroy hook to the native operation", 
       markdown: contractBody("CLI abandon hooks"),
     }),
   );
-  const id = present(await bound.value.kei.state()).id;
+  const id = present(await bound.kei.state()).id;
 
   const abandoned = await runCli(["-C", repository.path, "abandon", id], { environment: {} });
   assert.equal(abandoned.exit, 0, abandoned.stderr);
@@ -209,7 +214,7 @@ test("CLI arc carries the configured create hook into its reconciliation", async
       markdown: contractBody("CLI arc hooks"),
     }),
   );
-  const id = present(await bound.value.kei.state()).id;
+  const id = present(await bound.kei.state()).id;
   rmSync(await appointedWorktreePath(await repositoryAt(repository.path), id), { recursive: true, force: true });
 
   const arced = await runCli(["-C", repository.path, "arc", id, "-"], {
@@ -229,7 +234,7 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
       markdown: contractBody("Terminal wins"),
     }),
   );
-  const id = present(await bound.value.kei.state()).id;
+  const id = present(await bound.kei.state()).id;
   const worktree = await appointedWorktreePath(git, id);
   const held = await acquireSqliteTransactionLock({ path: lockPath(git, id), mode: "immediate", timeoutMs: 100 });
   const pending = Keis.of(repo).reconcile({ contract: id });
@@ -247,13 +252,14 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
   held.close();
 
   const report = await pending;
-  assert.equal(report.lag.length, 0);
+  assert.ok(report.kind === "contract");
+  assert.equal(report.issues, undefined);
   assert.equal(
-    report.effects.some((effect) => effect.kind === "worktree" && effect.action === "created"),
+    report.effects?.some((effect) => effect.kind === "worktree-created") ?? false,
     false,
   );
   assert.equal(existsSync(worktree), false);
-  assert.equal(present(await bound.value.kei.state()).terminal?.kind, "abandoned");
+  assert.equal(present(await bound.kei.state()).terminal?.kind, "abandoned");
 });
 
 test("a Hook runner outlives its killed reconcile caller and fences immediate replay", async () => {
@@ -302,7 +308,6 @@ test("a Hook runner outlives its killed reconcile caller and fences immediate re
     caller.kill("SIGKILL");
     const lag = await runCreateHooks(worktree, hooks);
     assert.equal(lag.lag, null);
-    assert.deepEqual(lag.runs, ["long"]);
     // A busy host may finish the orphan before replay starts; both completed orders are valid.
     assert.match(lines(log).join(","), /^start,(?:start,end,end|end,start,end)$/u);
   } finally {
@@ -339,7 +344,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
       markdown: contractBody("Scratch cleanup"),
     }),
   );
-  const id = present(await bound.value.kei.state()).id;
+  const id = present(await bound.kei.state()).id;
   const requirement = "scratch-custody";
   const snapshot = repository.run(["rev-parse", "HEAD"]).trim();
   const pathFile = join(mkdtempSync(join(tmpdir(), "keiyaku-orphan-path-")), "path");
@@ -374,9 +379,10 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   const active = await materializeScratchCandidate(git, mintSnapshotId(snapshot), id, requirement);
   try {
     const report = await Keis.of(repo).reconcile({ contract: id });
+    assert.ok(report.kind === "contract");
     assert.equal(
-      report.effects.some(
-        (effect) => effect.kind === "worktree" && effect.path === orphan && effect.action === "removed",
+      (report.effects ?? []).some(
+        (effect) => effect.kind === "worktree-removed" && effect.path === orphan,
       ),
       true,
     );

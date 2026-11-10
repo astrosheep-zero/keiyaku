@@ -3,6 +3,7 @@ import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { soulFixture } from "./support/akuma-fixtures.js";
+import { akumaId } from "../src/akuma/identity.js";
 import { World } from "../src/world.js";
 import { appendActivity, beginTurn, endTurn, HeldAkumaLeash } from "../src/akuma/heart/index.js";
 import test, { type TestContext } from "node:test";
@@ -21,10 +22,11 @@ import type { AkumaTransport, StatusReader } from "../plugins/paseo/plugin/serve
 import { type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 
 const at = "2026-10-15T00:00:00.000Z";
-const turn = (sequence: number, n = 1): Row => ({ kind: "turn", sequence, turnSequence: n, at });
+/** One fixture Turn: its durable sequence is the Turn identity the mirror correlates. */
+const turn = (sequence: number): Row => ({ kind: "turn", sequence, bodySequence: sequence, at });
 const tell = (sequence: number, state: "pending" | "told" = "told"): Row =>
-  ({ kind: "tell", sequence, tellId: `tell/${sequence}`, text: `input ${sequence}`, state, at });
-const answer = (sequence: number, n = 1, failed = false): Extract<Row, { kind: "outcome" }> => ({ kind: "outcome", sequence, turnSequence: n, at,
+  ({ kind: "tell", sequence, tellId: `tell/${sequence}`, text: `input ${sequence}`, state, at, deliveries: [] });
+const answer = (sequence: number, turnSequence: number, failed = false): Extract<Row, { kind: "outcome" }> => ({ kind: "outcome", sequence, turnSequence, at,
   outcome: failed ? { kind: "failed", diagnostic: "provider broke" } : { kind: "answered", answer: "hello" } });
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 function page(rows: Row[], metadata: Partial<Omit<History, "rows">> = {}): History {
@@ -132,11 +134,11 @@ const items = (events: ProviderEvent[]) => events.filter((e) => e.type === "time
 const turns = (events: ProviderEvent[]) => events.filter((e) => e.type === "session.turn");
 
 test("durable cancellation from external control finishes only its Turn and reopens terminal without error", async (t) => {
-  const canceled: Row = { kind: "outcome", sequence: 3, turnSequence: 1, at, outcome: { kind: "canceled", historyId: "turn/1" } };
+  const canceled: Row = { kind: "outcome", sequence: 3, turnSequence: 1, at, outcome: { kind: "canceled" } };
   let rows: Row[] = [turn(1)];
   const h = await harness(t, { window: async () => rows });
   await h.open();
-  rows = [turn(1), canceled, turn(4, 4)];
+  rows = [turn(1), canceled, turn(4)];
   h.push(rows);
   await tick();
   assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [
@@ -164,7 +166,7 @@ test("open, lifecycle-owned refresh, reply mapping, and persisted replay through
   await h.open();
   assert.equal(reads, 1);
   assert.deepEqual(h.connection.capabilities, ["session.persistence", "prompt.message", "prompt.steer", "session.can_stop_runtime"]);
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"]]);
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"]]);
   t.mock.timers.tick(60_000); await tick();
   assert.equal(reads, 1, "an open Turn is observed by its stream, never by a timer");
   assert.deepEqual(turns(h.events).map((e) => e.state), ["started"], "an idle observation never reannounces cached running state");
@@ -172,12 +174,12 @@ test("open, lifecycle-owned refresh, reply mapping, and persisted replay through
   assert.equal(reads, 1, "an unrelated World is never woken");
   const alias = join(h.root, "alias");
   await symlink(h.root, alias);
-  rows = [answer(3), turn(2), tell(1)];
+  rows = [answer(3, 2), turn(2), tell(1)];
   assert.deepEqual(await h.bridge.refresh({ world: alias, akuId: "aku/test/1" }), { woken: 1 });
   await tick();
   assert.equal(reads, 2, "a refresh alias-names its World and reopens the one observation");
   assert.deepEqual(items(h.events).map((e) => [e.item.id, e.item.type, e.timestamp]), [
-    ["keiyaku:tell/tell/1", "user_message", at], ["keiyaku:turn/1", "assistant_message", at],
+    ["keiyaku:tell/tell/1", "user_message", at], ["keiyaku:turn/2", "assistant_message", at],
   ]);
   assert.deepEqual(turns(h.events).map((e) => e.state), ["started", "completed"]);
   h.push(rows); await tick();
@@ -188,8 +190,8 @@ test("open, lifecycle-owned refresh, reply mapping, and persisted replay through
   await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
   h.events.length = 0;
   await h.open({ persistence: opened.persistence, config: { ...h.config, providerOptions: {} } });
-  assert.deepEqual(items(h.events).map((e) => e.item.id), ["keiyaku:tell/tell/1", "keiyaku:turn/1"], "resume replays in sequence order");
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "completed"]],
+  assert.deepEqual(items(h.events).map((e) => e.item.id), ["keiyaku:tell/tell/1", "keiyaku:turn/2"], "resume replays in sequence order");
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"], ["turn/2", "completed"]],
     "retained short turns publish their real start and terminal on replay");
 });
 
@@ -205,47 +207,48 @@ test("every open mirror vetoes runtime collection while a missing local session 
 });
 
 test("skip seeds retained history once, then publishes new activity and leaves replay unchanged", async (t) => {
-  let rows: Row[] = [turn(14, 2), tell(13, "pending"), answer(12), turn(11), tell(10)];
+  let rows: Row[] = [turn(14), tell(13, "pending"), answer(12, 11), turn(11), tell(10)];
   const h = await harness(t, { window: async () => rows });
   await h.open({ history: "skip" });
   assert.deepEqual(h.events.map((event) => event.type), ["session.opened", "session.config", "session.turn", "session.ready"],
     "opening skip emits current execution state but no retained items or window notices");
   await h.refresh(); await tick();
   assert.deepEqual(items(h.events), []);
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/2", "started"]]);
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/14", "started"]]);
   rows = rows.map((row) => row.kind === "tell" ? { ...row, state: "told" } : row);
   await h.refresh(); await tick();
   assert.deepEqual(items(h.events), [], "changed Tell signatures still retain opening Tell deduplication");
-  rows = [...rows, tell(15), answer(16, 2)];
+  rows = [...rows, tell(15), answer(16, 14)];
   await h.refresh(); await tick();
   await h.refresh(); await tick();
   assert.deepEqual(items(h.events).map((event) => [event.item.id, event.item.type]), [
-    ["keiyaku:tell/tell/15", "user_message"], ["keiyaku:turn/2", "assistant_message"],
+    ["keiyaku:tell/tell/15", "user_message"], ["keiyaku:turn/14", "assistant_message"],
   ], "new activity is published exactly once, not hidden by a permanent skip mode");
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/2", "started"], ["turn/2", "completed"]],
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/14", "started"], ["turn/14", "completed"]],
     "the observed open Turn still takes its new outcome");
   await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
   h.events.length = 0;
   await h.open({ history: "replay" });
   assert.deepEqual(items(h.events).map((event) => event.item.id), [
-    "keiyaku:tell/tell/10", "keiyaku:turn/1", "keiyaku:tell/tell/13",
-    "keiyaku:tell/tell/15", "keiyaku:turn/2",
+    "keiyaku:tell/tell/10", "keiyaku:turn/11", "keiyaku:tell/tell/13",
+    "keiyaku:tell/tell/15", "keiyaku:turn/14",
   ], "replay exposes retained history without guessing loss from sequence numbers");
   assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [
-    ["turn/1", "started"], ["turn/1", "completed"], ["turn/2", "started"], ["turn/2", "completed"],
+    ["turn/11", "started"], ["turn/11", "completed"], ["turn/14", "started"], ["turn/14", "completed"],
   ], "replay publishes ordered historical start/terminal pairs");
   assert.deepEqual(h.calls, [], "opening, refreshing and closing remain observation-only");
 });
 
 test("skip retains open and closed Turn state for Steer and Stop without historical starts", async (t) => {
-  let rows: Row[] = [tell(1), turn(2, 7)];
-  const receipt = tellReceipt("live");
+  let rows: Row[] = [tell(1), turn(2)];
+  const receipt = tellReceipt();
   const h = await harness(t, { window: async () => rows,
-    tell: async () => { rows = [...rows, receipt.row]; return receipt; },
+    tell: async () => { rows = [...rows, { kind: "tell", sequence: 3, at, tellId: receipt.tellId,
+      text: "change direction", state: "pending", deliveries: [] }]; return receipt; },
     stop: async () => stopAttempt("killed", "aku/test/1") });
   await h.open({ history: "skip" });
   await h.connection.send(promptInput());
-  assert.deepEqual(promptResults(h.events).map((event) => event.result), [{ type: "steer", turnId: "turn/7" }]);
+  assert.deepEqual(promptResults(h.events).map((event) => event.result), [{ type: "steer", turnId: "turn/2" }]);
   assert.deepEqual(items(h.events).map((event) => event.item), [
     { type: "user_message", id: "keiyaku:tell/new-tell", text: "change direction", clientMessageId: "client-1" },
   ]);
@@ -253,10 +256,10 @@ test("skip retains open and closed Turn state for Steer and Stop without histori
   await h.refresh(); await tick();
   await h.sync();
   assert.deepEqual(h.calls.map((call) => call.op), ["tell", "stop"]);
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/7", "started"], ["turn/7", "canceled"]],
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/2", "started"], ["turn/2", "canceled"]],
     "Stop captures the observed Turn and identical refresh never restarts it");
   await h.connection.send({ type: "session.close", requestId: "close", sessionId: "session" });
-  rows = [...rows, answer(4, 7)];
+  rows = [...rows, answer(4, 2)];
   h.events.length = 0;
   await h.open({ history: "skip" });
   await assert.rejects(h.connection.send(promptInput()), /No observed Paseo Turn/u);
@@ -266,7 +269,7 @@ test("skip retains open and closed Turn state for Steer and Stop without histori
 });
 
 test("post-attach sync needs a successful fresh read and never restarts an ended Turn", async (t) => {
-  let rows: Row[] = [tell(1), turn(2, 7)];
+  let rows: Row[] = [tell(1), turn(2)];
   let broken = false, reads = 0;
   const h = await harness(t, { window: async () => { reads++; if (broken) throw new Error("unavailable"); return rows; } });
   await h.open({ history: "skip" });
@@ -278,10 +281,10 @@ test("post-attach sync needs a successful fresh read and never restarts an ended
   assert.equal(items(h.events).length, 1);
   assert.match(notices(h.events)[0]!, /read surface unavailable/u);
   broken = false;
-  rows = [...rows, answer(3, 7)];
+  rows = [...rows, answer(3, 2)];
   h.events.length = 0;
   await h.sync();
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/7", "completed"]]);
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/2", "completed"]]);
   assert.deepEqual(items(h.events).map((event) => event.item.type), ["assistant_message"], "normal new output is still published");
   h.events.length = 0;
   await h.sync();
@@ -322,28 +325,28 @@ test("changed told rows, gaps, read failure recovery, Stop control and observati
   await h.refresh(); await tick(); await h.refresh(); await tick();
   assert.equal(items(h.events).filter((e) => e.item.id.startsWith("keiyaku:unreadable/")).length, 1);
   broken = false;
-  rows = [turn(9), answer(10), turn(11, 2)];
+  rows = [{ kind: "note", sequence: 9, turnSequence: 2, at, text: "retained note" }, answer(10, 2), turn(11)];
   await h.refresh(); await tick(); await h.refresh(); await tick();
   assert.equal(items(h.events).filter((e) => e.item.id === "keiyaku:window/9").length, 1);
   assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [
-    ["turn/1", "started"], ["turn/1", "completed"], ["turn/2", "started"],
+    ["turn/2", "started"], ["turn/2", "completed"], ["turn/11", "started"],
   ]);
   broken = true;
   await h.refresh(); await tick();
   assert.equal(items(h.events).filter((e) => e.item.id.startsWith("keiyaku:unreadable/")).length, 2, "recovery resets unhealthy");
   broken = false;
-  rows = [...rows, answer(12, 2, true)];
+  rows = [...rows, answer(12, 11, true)];
   await h.refresh(); await tick();
   assert.equal(turns(h.events).at(-1)?.error?.message, "provider broke");
   const tail = h.events.slice(-2);
   assert.deepEqual(tail.map((e) => e.type), ["timeline.item", "session.turn"], "answer precedes terminal");
-  rows = [...rows, turn(13, 3)];
+  rows = [...rows, turn(13)];
   await h.refresh(); await tick();
   await h.connection.send({ type: "session.interrupt", requestId: "interrupt", sessionId: "session" });
   assert.match(turns(h.events).at(-1)?.error?.message ?? "", /stopped from Paseo/u);
   assert.deepEqual(h.calls.map((call) => call.op), ["stop"]);
   await h.refresh(); await tick();
-  assert.equal(turns(h.events).filter((e) => e.turnId === "turn/3").length, 2, "sealed turn never restarts");
+  assert.equal(turns(h.events).filter((e) => e.turnId === "turn/13").length, 2, "sealed turn never restarts");
   await h.connection.send({ type: "session.archive", requestId: "archive", persistence: { version: 1, data: {} } });
   await assert.rejects(h.connection.send({ type: "session.prompt", sessionId: "session", prompt: {
     clientMessageId: "prompt", delivery: "auto", input: { type: "message", content: [{ type: "text", text: " " }] },
@@ -353,7 +356,7 @@ test("changed told rows, gaps, read failure recovery, Stop control and observati
   assert.deepEqual(await h.refresh(), { woken: 0 });
   assert.equal(reads, before);
   assert.equal(h.calls.length, 1, "observation close never stops anything");
-  assert.equal(turns(h.events).filter((e) => e.turnId === "turn/3").length, 2);
+  assert.equal(turns(h.events).filter((e) => e.turnId === "turn/13").length, 2);
   assert.deepEqual(await import("node:fs/promises").then((fs) => fs.readdir(h.root)), [], "no World writes");
   broken = true;
   await h.open();
@@ -373,18 +376,18 @@ test("Stop kills the controlled Akuma, refreshes, and ends only the observed tur
   assert.equal(reads, before + 1, "a proven stop refreshes authoritative history");
   assert.deepEqual(h.events.filter((e) => e.type === "request.completed" || e.type === "request.failed"),
     [{ type: "request.completed", requestId: "stop" }]);
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "canceled"]]);
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"], ["turn/2", "canceled"]]);
   assert.match(turns(h.events).at(-1)?.error?.message ?? "", /stopped from Paseo/u);
   assert.equal(h.events.some((e) => e.type === "session.closed"), false, "the mirror stays open for a later Tell");
-  rows = [turn(2), turn(4, 2)];
+  rows = [turn(2), turn(4)];
   await h.refresh(); await tick();
-  assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/1", "turn/1", "turn/2"], "a later turn still arrives");
-  const sealed = turns(h.events).filter((e) => e.turnId === "turn/1");
-  rows = [turn(2), answer(3), turn(4, 2)];
+  assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/2", "turn/2", "turn/4"], "a later turn still arrives");
+  const sealed = turns(h.events).filter((e) => e.turnId === "turn/2");
+  rows = [turn(2), answer(3, 2), turn(4)];
   await h.refresh(); await tick();
-  assert.deepEqual(turns(h.events).filter((e) => e.turnId === "turn/1"), sealed,
+  assert.deepEqual(turns(h.events).filter((e) => e.turnId === "turn/2"), sealed,
     "late natural output cannot reopen or re-terminate the canceled Turn");
-  assert.equal(turns(h.events).at(-1)?.turnId, "turn/2");
+  assert.equal(turns(h.events).at(-1)?.turnId, "turn/4");
 });
 
 test("an unproven Stop reports the transport's own words and never cancels the observed turn", async (t) => {
@@ -436,20 +439,20 @@ test("overlapping Stops share one kill attempt and each request receives one rec
 test("a natural completion racing the Stop keeps its own outcome and one terminal event", async (t) => {
   let rows: Row[] = [turn(2)];
   const h = await harness(t, { window: async () => rows,
-    stop: async () => { rows = [turn(2), answer(3)]; return stopAttempt("already-stopped", "aku/test/1"); } });
+    stop: async () => { rows = [turn(2), answer(3, 2)]; return stopAttempt("already-stopped", "aku/test/1"); } });
   await h.open();
   await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "completed"]]);
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"], ["turn/2", "completed"]]);
   assert.equal(h.events.filter((e) => e.type === "request.completed").length, 1);
 });
 
 test("a produced put-down failure remains the only terminal event after a proven Stop", async (t) => {
   let rows: Row[] = [turn(2)];
   const h = await harness(t, { window: async () => rows,
-    stop: async () => { rows = [turn(2), answer(4, 1, true)]; return stopAttempt("killed", "aku/test/1"); } });
+    stop: async () => { rows = [turn(2), answer(4, 2, true)]; return stopAttempt("killed", "aku/test/1"); } });
   await h.open();
   await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "failed"]]);
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"], ["turn/2", "failed"]]);
   assert.deepEqual(h.events.filter((e) => e.type === "request.completed"), [{ type: "request.completed", requestId: "stop" }]);
 });
 
@@ -459,28 +462,31 @@ test("a natural outcome held by Tell correlation is not overwritten by concurren
   const blocked = new Promise<void>((resolve) => { release = resolve; });
   const h = await harness(t, { window: async () => rows,
     stop: async () => stopAttempt("already-stopped", "aku/test/1"),
-    tell: async () => { await blocked; return tellReceipt(undefined, { kind: "held" }); } });
+    tell: async () => { await blocked; return tellReceipt({ kind: "pending" }); } });
   await h.open();
   const submitting = h.connection.send(promptInput());
-  rows = [turn(2), answer(4)];
-  await h.refresh(); await tick();
-  await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  assert.deepEqual(turns(h.events).map((e) => e.state), ["started"], "the natural outcome is still held, not canceled");
-  release(); await submitting;
-  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/1", "started"], ["turn/1", "completed"]]);
+  try {
+    rows = [turn(2), answer(4, 2)];
+    await h.refresh(); await tick();
+    await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
+    assert.deepEqual(turns(h.events).map((e) => e.state), ["started"], "the natural outcome is still held, not canceled");
+  } finally {
+    release(); await submitting;
+  }
+  assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]), [["turn/2", "started"], ["turn/2", "completed"]]);
   assert.deepEqual(h.calls.map((call) => call.op), ["tell", "stop"]);
 });
 
 test("a proven Stop settles the turn it captured even after a newer Turn replaced it", async (t) => {
   let rows: Row[] = [turn(2)];
   const h = await harness(t, { window: async () => rows,
-    stop: async () => { rows = [turn(2), turn(4, 2)]; return stopAttempt("killed", "aku/test/1"); } });
+    stop: async () => { rows = [turn(2), turn(4)]; return stopAttempt("killed", "aku/test/1"); } });
   await h.open();
   await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
   assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]),
-    [["turn/1", "started"], ["turn/2", "started"], ["turn/1", "canceled"]],
+    [["turn/2", "started"], ["turn/4", "started"], ["turn/2", "canceled"]],
     "the captured turn settles once instead of being dropped");
-  assert.equal(turns(h.events).filter((e) => e.turnId === "turn/2" && e.state === "canceled").length, 0,
+  assert.equal(turns(h.events).filter((e) => e.turnId === "turn/4" && e.state === "canceled").length, 0,
     "a newer Turn is never closed by an older Stop");
   assert.equal(h.events.filter((e) => e.type === "request.completed").length, 1);
 });
@@ -488,14 +494,14 @@ test("a proven Stop settles the turn it captured even after a newer Turn replace
 test("a captured turn still takes its own outcome after a newer Turn replaced it", async (t) => {
   let rows: Row[] = [turn(2)];
   const h = await harness(t, { window: async () => rows,
-    stop: async () => { rows = [turn(2), turn(4, 2)]; throw new Error("Akuma aku/test/1 is not born"); } });
+    stop: async () => { rows = [turn(2), turn(4)]; throw new Error("Akuma aku/test/1 is not born"); } });
   await h.open();
   await h.connection.send({ type: "session.interrupt", requestId: "stop", sessionId: "session" });
-  assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/1", "turn/2"], "a refusal leaves the turn running");
-  rows = [turn(2), answer(3, 1), turn(4, 2)];
+  assert.deepEqual(turns(h.events).map((e) => e.turnId), ["turn/2", "turn/4"], "a refusal leaves the turn running");
+  rows = [turn(2), answer(3, 2), turn(4)];
   await h.refresh(); await tick();
   assert.deepEqual(turns(h.events).map((e) => [e.turnId, e.state]),
-    [["turn/1", "started"], ["turn/2", "started"], ["turn/1", "completed"]],
+    [["turn/2", "started"], ["turn/4", "started"], ["turn/2", "completed"]],
     "the captured turn closes from its own outcome, never from the Stop");
 });
 
@@ -636,19 +642,17 @@ const promptInput = (id = "client-1", text = "change direction"): Extract<Provid
     input: { type: "message", content: [{ type: "text", text }] },
   },
 });
-function tellReceipt(route?: "live" | "launch", wake: TellAdmission["wake"] = { kind: "told" }, tellId = "new-tell"): TellAdmission {
-  return { admission: { fact: "recorded", tellId },
-    row: { kind: "tell", sequence: 3, at, tellId, text: "change direction", state: "pending",
-      deliveries: route ? [{ route, turnSequence: 7, deliveredAt: at, receipt: "required" }] : [] }, wake };
+function tellReceipt(wake?: TellAdmission["wake"], tellId = "new-tell"): TellAdmission {
+  return { akumaId: akumaId({ akumaName: "test", suffix: "00000001" }), tellId, ...(wake === undefined ? {} : { wake }) };
 }
 const promptResults = (events: ProviderEvent[]) => events.filter((event) => event.type === "session.prompt_result");
 const notices = (events: ProviderEvent[]) => items(events).flatMap((event) => event.item.type === "notification" ? [event.item.message] : []);
 
 test("live steering correlates the optimistic message before racing history and never interrupts", async (t) => {
-  let rows: Row[] = [turn(1, 7)];
+  let rows: Row[] = [turn(1)];
   let release!: () => void;
   const blocked = new Promise<void>((resolve) => { release = resolve; });
-  const receipt = tellReceipt("live");
+  const receipt = tellReceipt();
   const calls: unknown[] = [];
   const h = await harness(t, { window: async () => rows,
     tell: async (world, akuId, signal, text) => {
@@ -660,12 +664,12 @@ test("live steering correlates the optimistic message before racing history and 
     } });
   await h.open();
   const submission = h.connection.send(promptInput());
-  rows = [turn(1, 7), receipt.row, answer(4, 7)];
+  rows = [turn(1), { kind: "tell", sequence: 3, at, tellId: receipt.tellId, text: "change direction", state: "pending", deliveries: [] }, answer(4, 1)];
   await h.refresh(); await tick();
   assert.equal(items(h.events).length, 0, "a racing snapshot waits for exact Tell identity");
   release(); await submission;
   assert.deepEqual(calls, [{ world: await realpath(h.root), akuId: "aku/test/1", text: "change direction" }]);
-  assert.deepEqual(promptResults(h.events).map((event) => event.result), [{ type: "steer", turnId: "turn/7" }]);
+  assert.deepEqual(promptResults(h.events).map((event) => event.result), [{ type: "steer", turnId: "turn/1" }]);
   const user = items(h.events).filter((event) => event.item.type === "user_message");
   assert.deepEqual(user.map((event) => event.item), [{ type: "user_message", id: "keiyaku:tell/new-tell", text: "change direction", clientMessageId: "client-1" }]);
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started", "completed"]);
@@ -682,8 +686,9 @@ test("live steering correlates the optimistic message before racing history and 
 });
 
 test("pending admission and failed wake acknowledge success without inventing Akuma lifecycle or pending UI", async (t) => {
-  let receipt = tellReceipt(undefined, { kind: "held" });
-  const h = await harness(t, { window: async () => [], tell: async () => receipt });
+  let receipt = tellReceipt({ kind: "pending" });
+  let rows: Row[] = [];
+  const h = await harness(t, { window: async () => rows, tell: async () => receipt });
   await h.open();
   t.mock.method(console, "warn", () => {});
   const request = () => { const input = promptInput(); input.prompt.delivery = "auto"; return input; };
@@ -691,17 +696,20 @@ test("pending admission and failed wake acknowledge success without inventing Ak
   assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "completed" });
   assert.deepEqual(notices(h.events), []);
   assert.equal(turns(h.events).length, 0, "admission does not start or finish an Akuma Turn");
-  receipt = tellReceipt(undefined, { kind: "failed", diagnostic: "frozen directory is missing" }, "failed-wake");
+  receipt = tellReceipt({ kind: "failed", diagnostic: "frozen directory is missing" }, "failed-wake");
   const second = request(); second.prompt.clientMessageId = "client-2";
   await h.connection.send(second);
   assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "completed" });
   assert.deepEqual(notices(h.events), []);
   assert.equal(turns(h.events).length, 0);
-  receipt = tellReceipt("launch", { kind: "pursuing", bodySequence: 5 }, "launch-tell");
+  receipt = tellReceipt({ kind: "pending" }, "launch-tell");
+  rows = [turn(1)];
   const third = request(); third.prompt.clientMessageId = "client-3";
   await h.connection.send(third);
-  assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "turn", turnId: "turn/7" });
-  assert.equal(turns(h.events).length, 0, "only authoritative history can publish Turn lifecycle");
+  assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "turn", turnId: "turn/1" },
+    "only an authoritative Turn observed after admission can turn the send into Turn correlation");
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/1", "started"]],
+    "the observed Turn comes from the producer's own history, never from a removed delivery row");
 });
 
 test("unsupported input refuses before Tell admission and ambiguous failure never retries", async (t) => {
@@ -794,7 +802,7 @@ test("the real public stream carries a long open Turn into the mirror without in
     "one bounded stream window carries the whole retained work of a long open Turn");
   assert.equal(latest.historyLost, false, "projection holes and pagination are not guessed retention loss");
   assert.equal(latest.hasEarlier, false);
-  assert.ok(latest.rows.some((row) => row.kind === "turn" && row.turnSequence === started.sequence));
+  assert.ok(latest.rows.some((row) => row.kind === "turn" && row.sequence === started.sequence));
   const tool = latest.rows.find((row) => row.kind === "tool");
   assert.ok(tool?.kind === "tool");
   assert.deepEqual(tool.call, { kind: "run", command: "printf hello" });
@@ -803,23 +811,13 @@ test("the real public stream carries a long open Turn into the mirror without in
   assert.equal(tool.toolId, running.toolId, "the settled call keeps the identity the opened window reported");
   await h.refresh(); await tick();
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started"], "long ongoing work stays running");
-  // The producer's own identity reaches the mirror as the installed package
-  // reports it: with a tool identity the same call pairs across its settlement,
-  // and without one running work is only reported as observation, never paired
-  // by guesswork.
+  // The producer's own tool identity reaches the mirror, so the same call pairs
+  // across its settlement; the identity is required, never guessed.
   const calls = items(h.events).flatMap((event) => event.item.type === "tool_call" ? [[event.item.callId, event.item.status]] : []);
-  if (tool.toolId === undefined) {
-    assert.deepEqual(calls, [[`tool/record/${tool.sequence}`, "completed"]],
-      "a producer without tool identity keeps its own record scope");
-    assert.deepEqual(items(h.events).flatMap((event) => event.item.type === "notification" ? [event.item.message] : []),
-      ['bash: start observed. {"kind":"run","command":"printf hello"}'],
-      "a producer without tool identity is reported as observation, not as a pair");
-  } else {
-    assert.equal(tool.toolId, "shell", "the real public SDK preserves native identity, not just adapter fixtures");
-    assert.deepEqual(calls, [[`tool/${tool.turnSequence}/shell`, "running"], [`tool/${tool.turnSequence}/shell`, "completed"]]);
-    assert.deepEqual(items(h.events).flatMap((event) => event.item.type === "tool_call" ? [event.item.detail] : []).at(-1),
-      { type: "shell", command: "printf hello", output: "hello", exitCode: 0 });
-  }
+  assert.equal(tool.toolId, "shell", "the real public SDK preserves native identity, not just adapter fixtures");
+  assert.deepEqual(calls, [[`tool/${tool.turnSequence}/shell`, "running"], [`tool/${tool.turnSequence}/shell`, "completed"]]);
+  assert.deepEqual(items(h.events).flatMap((event) => event.item.type === "tool_call" ? [event.item.detail] : []).at(-1),
+    { type: "shell", command: "printf hello", output: "hello", exitCode: 0 });
   for (const event of h.events) ProviderEventSchema.parse(event);
   await appendActivity(value.allocated.paths, { turnSequence: started.sequence, at,
     event: { type: "assistant", text: "done" } });
@@ -849,7 +847,7 @@ test("public metadata distinguishes bounded omission and retention loss without 
   let snapshot = page([turn(2)]);
   const h = await harness(t, { window: async () => snapshot });
   await h.open();
-  snapshot = page([{ kind: "thought", sequence: 950, at, turnSequence: 1, text: "still working" }],
+  snapshot = page([{ kind: "thought", sequence: 950, at, turnSequence: 2, text: "still working" }],
     { hasEarlier: true, omitted: 700, lowestRetained: 1 });
   await h.refresh(); await tick();
   assert.match(notices(h.events).at(-1)!, /Earlier retained history.*bounded/u);
@@ -858,7 +856,7 @@ test("public metadata distinguishes bounded omission and retention loss without 
   await h.refresh(); await tick();
   assert.match(notices(h.events).at(-1)!, /outside retention/u);
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started"]);
-  snapshot = page([answer(1001)], { historyLost: true, lowestRetained: 900 });
+  snapshot = page([answer(1001, 2)], { historyLost: true, lowestRetained: 900 });
   await h.refresh(); await tick();
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started", "completed"], "real outcome wins even without retained start");
 });
@@ -872,8 +870,8 @@ test("the live observation publishes intermediate activity, keeps its display th
   t.mock.timers.tick(60_000); await tick();
   assert.equal(reads, 1, "an idle session never reads on a timer");
   rows = [...rows,
-    { kind: "tool", sequence: 3, turnSequence: 1, toolId: "running", at, name: "bash", call: { kind: "run", command: "work" }, state: "active" },
-    { kind: "said", sequence: 4, turnSequence: 1, at, text: "still working" }];
+    { kind: "tool", sequence: 3, turnSequence: 2, toolId: "running", at, name: "bash", call: { kind: "run", command: "work" }, state: "active" },
+    { kind: "said", sequence: 4, turnSequence: 2, at, text: "still working" }];
   h.push(rows); await tick();
   assert.deepEqual(items(h.events).map((event) => event.item.type), ["tool_call", "assistant_message"],
     "intermediate output arrives before any outcome signal");
@@ -887,13 +885,13 @@ test("the live observation publishes intermediate activity, keeps its display th
   assert.equal(reads, before, "a failed observation is never retried on a timer");
   // Only an explicit refresh opens a fresh observation, and it observes now.
   rows = [...rows.filter((row) => row.kind !== "said"),
-    { ...answer(5), outcome: { kind: "answered", answer: "still working", foldedSaidSequence: 4 } }];
+    { ...answer(5, 2), outcome: { kind: "answered", answer: "still working", foldedSaidSequence: 4 } }];
   await h.refresh(); await tick();
   assert.equal(reads, before + 1, "an explicit refresh opens exactly one observation");
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started", "completed"]);
   t.mock.timers.tick(60_000); await tick();
   assert.equal(reads, before + 1, "an observed terminal ends no observation the caller still holds");
-  rows = [...rows, turn(6, 2)];
+  rows = [...rows, turn(6)];
   await h.refresh(); await tick();
   assert.equal(reads, before + 2, "a real new Turn is observed by the same explicit refresh");
   assert.equal(turns(h.events).filter((event) => event.state === "started").length, 2, "only real Turn identities start");
@@ -908,7 +906,7 @@ test("session close releases the live observation and discards its in-flight rea
       await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
       retired = true;
     }
-    return reads === 1 ? [turn(2)] : [turn(2), answer(3)];
+    return reads === 1 ? [turn(2)] : [turn(2), answer(3, 2)];
   } });
   await h.open();
   assert.equal(reads, 1);
@@ -920,7 +918,7 @@ test("session close releases the live observation and discards its in-flight rea
   assert.equal(reads, 2, "close leaves no observation behind, timer or otherwise");
   assert.deepEqual(items(h.events), [], "the released read's late answer is not published");
   assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]),
-    [["turn/1", "started"], ["turn/1", "canceled"]],
+    [["turn/2", "started"], ["turn/2", "canceled"]],
     "closing the mirror cancels its own presentation and never the Akuma");
   assert.deepEqual(h.calls, [], "observation never submits execution or interrupt");
 });

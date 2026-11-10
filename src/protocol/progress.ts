@@ -1,8 +1,5 @@
-import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
+import { contractIdSchema } from "../git/identity.js";
 import { z } from "zod";
-import { worktreeLeakSchema } from "../git/scratch.js";
-import { privateStateSeatCloseLagSchema } from "../git/private-state-seat.js";
-import { hookFailureSchema } from "../git/hooks.js";
 import type { ContractHead, ContractId, ContractState, JournalEntry, SnapshotId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { GitPlumbingError } from "../git/process.js";
@@ -24,69 +21,17 @@ export function contractCheckpoint(input: ContractCheckpoint): ContractCheckpoin
 
 export const verificationCleanupFailureSchema = z
   .object({
-    phase: z.literal("destroy"),
     name: z.string().refine((value) => value.trim() !== ""),
-    detail: hookFailureSchema,
+    diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
   .strict()
   .readonly();
 export type VerificationCleanupFailure = z.infer<typeof verificationCleanupFailureSchema>;
 
-export const executionCleanupSchema = z.union([
-  z
-    .object({
-      kind: z.literal("decode-channel-retirement"),
-      contractId: contractIdSchema,
-      diagnostic: z.string().min(1),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal("verification-cleanup"),
-      contractId: contractIdSchema,
-      snapshot: snapshotIdSchema.exactOptional(),
-      requirement: z.string().min(1).exactOptional(),
-      index: z.number().int().positive().exactOptional(),
-      failure: verificationCleanupFailureSchema,
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal("worktree-leak"),
-      contractId: contractIdSchema,
-      snapshot: snapshotIdSchema.exactOptional(),
-      requirement: z.string().min(1).exactOptional(),
-      index: z.number().int().positive().exactOptional(),
-      leak: worktreeLeakSchema,
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal("private-state-seat-close"),
-      contractId: contractIdSchema,
-      failure: privateStateSeatCloseLagSchema,
-    })
-    .strict()
-    .readonly(),
-]);
-export type ExecutionCleanup = z.infer<typeof executionCleanupSchema>;
-export const executionStageSchema = z.enum([
-  "admission",
-  "verification",
-  "placement",
-  "reintegration",
-  "continuation",
-  "reconciliation",
-]);
-export type ExecutionStage = z.infer<typeof executionStageSchema>;
 export const executionStopSchema = z
   .object({
     kind: z.literal("execution-stopped"),
     contractId: contractIdSchema,
-    stage: executionStageSchema,
     reason: z.enum(["cancelled", "failed"]),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
@@ -127,12 +72,7 @@ export function isOperationalStop(error: unknown, signal?: AbortSignal): boolean
 }
 
 /** Classify operational failures only; programming errors and corrupt authority still throw. */
-export function executionStop(
-  contractId: ContractId,
-  stage: ExecutionStage,
-  error: unknown,
-  signal?: AbortSignal,
-): ExecutionStop {
+export function executionStop(contractId: ContractId, error: unknown, signal?: AbortSignal): ExecutionStop {
   const cancelled =
     signal?.aborted === true &&
     (error === signal.reason || error instanceof GitPlumbingError || error instanceof SqliteTransactionLockError);
@@ -140,7 +80,6 @@ export function executionStop(
   return {
     kind: "execution-stopped",
     contractId,
-    stage,
     reason: cancelled ? "cancelled" : "failed",
     diagnostic: error instanceof Error ? error.message : String(error),
   };
@@ -172,7 +111,7 @@ export interface ProtocolProgress {
     result: VerificationResidue,
     coordinate?: Readonly<{ requirement: string; index: number }>,
   ): void;
-  recordVerificationCheck(contractId: ContractId, check: VerificationCheck): void;
+  recordVerificationCheck(contractId: ContractId, snapshot: SnapshotId, check: VerificationCheck): void;
   recordStop(stop: ExecutionStop): void;
   recordDeliveryPreview(
     contractId: ContractId,

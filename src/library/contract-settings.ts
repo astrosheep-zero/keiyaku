@@ -36,13 +36,13 @@ export function derivedFreshness(composition: LocalContractCompositionCapture): 
   if (composition.settings === undefined) return false;
   try {
     const view = composition.settings.namespace("git");
-    if (view.kind === "failed") namespaceFailure(view);
-    for (const entry of view.entries) {
-      if (entry.name !== "requireBranchesToBeUpToDate") {
-        throw new SettingsError(`git has unknown entry: ${entry.name}`);
+    if (view.kind === "failed") namespaceFailure(composition.settings, view);
+    for (const name of Object.keys(view.entries ?? {})) {
+      if (name !== "requireBranchesToBeUpToDate") {
+        throw new SettingsError(`git has unknown entry: ${name}`);
       }
     }
-    const selected = view.entries.find((entry) => entry.name === "requireBranchesToBeUpToDate");
+    const selected = view.entries?.requireBranchesToBeUpToDate;
     if (selected === undefined) return false;
     if (typeof selected.value !== "boolean") {
       throw new SettingsError("git.requireBranchesToBeUpToDate must be a boolean");
@@ -70,8 +70,18 @@ export function gateNames(value: unknown): readonly string[] | undefined {
   });
 }
 
-function namespaceFailure(view: Extract<ReturnType<Settings["namespace"]>, { kind: "failed" }>): never {
-  throw new SettingsError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
+function namespaceFailure(
+  settings: Settings,
+  view: Extract<ReturnType<Settings["namespace"]>, { kind: "failed" }>,
+): never {
+  throw new SettingsError(
+    view.failures
+      .map((failure) => {
+        const scope = settings.scopes[failure.scope];
+        return `${failure.scope}: ${failure.diagnostic ?? (scope.kind === "failed" ? scope.diagnostic : "namespace unavailable")}`;
+      })
+      .join("; "),
+  );
 }
 
 function gateValue(value: unknown, message: string, configured: boolean): Gate {
@@ -119,13 +129,12 @@ export function derivedGates(
     // Explicit empty selection never looks up a namespace.
     if (selected.length === 0) return Object.freeze([]);
     const view = settings?.namespace("gates");
-    if (view?.kind === "failed") namespaceFailure(view);
-    const known = [
-      ...new Set(["reviewed", "verified", ...(view?.entries.map((entry) => entry.name).filter(gateWord) ?? [])]),
-    ];
+    if (view?.kind === "failed") namespaceFailure(settings!, view);
+    const entries = Object.entries(view?.entries ?? {});
+    const known = [...new Set(["reviewed", "verified", ...entries.map(([name]) => name).filter(gateWord)])];
     const expanded = new Set<Gate>();
     for (const name of selected) {
-      const entry = view?.entries.find((entry) => entry.name === name);
+      const entry = entries.find(([key]) => key === name)?.[1];
       if (entry === undefined) {
         // The implicit default bundle falls back to the built-in review gate.
         const implicit = configured && names === undefined;

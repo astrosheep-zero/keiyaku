@@ -184,13 +184,15 @@ function compareRecentDebts(left: DebtDocument, right: DebtDocument): number {
   return updated === 0 ? Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)) : updated;
 }
 
+export type OpenDebtDocument = Omit<DebtDocument, "state"> & Readonly<{ state: "open" }>;
+
 export async function readRecentDebtDocuments(
   world: WorldRoot,
-  input: Readonly<{ namespace?: readonly string[]; selection?: "all" | "active"; limit?: number }>,
-): Promise<BoundedList<DebtDocument>> {
+  input: Readonly<{ namespace?: readonly string[]; limit?: number }>,
+): Promise<BoundedList<OpenDebtDocument>> {
   const limit = boundedListLimit(input.limit);
   const directory = await debtsDirectory(world);
-  const debts: DebtDocument[] = [];
+  const debts: OpenDebtDocument[] = [];
   for (const path of await authorityFiles(directory)) {
     const metadata = await lstat(path);
     if (!metadata.isFile() || metadata.isSymbolicLink())
@@ -198,8 +200,8 @@ export async function readRecentDebtDocuments(
     const coordinate = coordinateFromPath(directory, path);
     if (input.namespace !== undefined && !sameNamespace(coordinate.namespace, input.namespace)) continue;
     const debt = parseDebtDocument(await readFile(path), coordinate);
-    if (input.selection === "active" && (debt.state === "done" || debt.state === "drop")) continue;
-    debts.push(debt);
+    if (debt.state !== "open") continue;
+    debts.push({ ...debt, state: debt.state });
   }
   return projectBoundedList(debts.sort(compareRecentDebts), limit);
 }
@@ -272,14 +274,14 @@ function errorDetail(error: unknown): string {
 function preserveCommittedResult<T>(result: T, errors: readonly unknown[]): T {
   if (typeof result === "object" && result !== null && "kind" in result) {
     const kind = (result as { kind?: unknown }).kind;
-    if (kind === "accepted" || kind === "changed" || kind === "incomplete") {
-      const previous = (result as { cleanup?: { diagnostics: readonly string[] } }).cleanup;
+    if (kind === "accepted" || kind === "changed") {
+      const key = kind === "accepted" ? "warning" : "cleanup";
+      const previous = (result as Record<string, string | undefined>)[key];
       return {
         ...(result as object),
-        cleanup: {
-          kind: "lock-release-failed",
-          diagnostics: [...(previous?.diagnostics ?? []), ...errors.map(errorDetail)],
-        },
+        [key]: [previous, `Debt lock release failed: ${errors.map(errorDetail).join("; ")}`]
+          .filter((value) => value !== undefined)
+          .join("; "),
       } as T;
     }
   }

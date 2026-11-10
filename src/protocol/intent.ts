@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { hookFailureSchema } from "../git/hooks.js";
 import { executionStop, type ProtocolProgress, type VerificationCleanupFailure } from "./progress.js";
 import type { GitDecisionObservation } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
@@ -14,16 +13,13 @@ import type {
   AttestationEntry,
   ContractId,
   DependencyKeySet,
-  EntryUlid,
   RequirementId,
   SnapshotId,
 } from "../core/facts/types.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import {
   executeVerification,
-  capturedOutput,
   type VerificationExecution,
-  type VerificationNonterminalOutcome,
   type VerificationTerminalOutcome,
 } from "../verification/execution.js";
 import { VERIFIED, type VerificationDeclaration } from "../verification/declaration.js";
@@ -125,69 +121,44 @@ type VerifyRequirementInput = Readonly<{
   progress?: ProtocolProgress;
 }>;
 
-const verificationCapturedOutputFields = {
-  stdout: z.string().min(1).exactOptional(),
-  stderr: z.string().min(1).exactOptional(),
-  truncated: z.literal(true).exactOptional(),
-};
+const verificationDiagnostic = z.string().refine((value) => value.trim() !== "");
 export const verificationRuntimeStopSchema = z.union([
   z
-    .object({ failure: z.enum(["unknown-exit", "cancelled"]), ...verificationCapturedOutputFields })
+    .object({ failure: z.enum(["unknown-exit", "cancelled"]), diagnostic: verificationDiagnostic.exactOptional() })
     .strict()
     .readonly(),
   z
-    .object({
-      failure: z.enum(["candidate-unavailable", "spawn-error"]),
-      diagnostic: z.string().refine((value) => value.trim() !== ""),
-      ...verificationCapturedOutputFields,
-    })
+    .object({ failure: z.enum(["candidate-unavailable", "spawn-error"]), diagnostic: verificationDiagnostic })
     .strict()
     .readonly(),
   z
-    .object({
-      failure: z.literal("environment-failure"),
-      diagnostic: z.string().refine((value) => value.trim() !== ""),
-      ...verificationCapturedOutputFields,
-    })
+    .object({ failure: z.literal("environment-failure"), diagnostic: verificationDiagnostic })
     .strict()
     .readonly(),
   z
     .object({
       failure: z.literal("environment-failure"),
       name: z.string().refine((value) => value.trim() !== ""),
-      detail: hookFailureSchema,
-      ...verificationCapturedOutputFields,
+      diagnostic: verificationDiagnostic,
     })
     .strict()
     .readonly(),
 ]);
 type VerificationRuntimeStop = z.infer<typeof verificationRuntimeStopSchema>;
-type VerificationReuseRefusal = Readonly<{
-  kind: "verification-reuse";
-  reuse: VerificationAttestation;
-}>;
+type VerificationReuseRefusal = Readonly<{ kind: "verification-reuse" }>;
 
-type VerificationReuseStep = Readonly<{
-  kind: "reused";
-  reuse: VerificationAttestation;
-}>;
+type VerificationReuseStep = Readonly<{ kind: "reused" }>;
 export type VerificationStep =
   | ProtocolResult<ActiveContractRefusal | VerificationReuseRefusal>
   | VerificationRuntimeStop
   | VerificationReuseStep;
 export type VerificationResult = Readonly<{
   step: VerificationStep;
-  reuse?: VerificationAttestation;
-  counts?: Readonly<{ passed: number; total: number; verdict: "satisfied" | "unsatisfied"; summary?: string }>;
+  reuse?: true;
+  counts?: Readonly<{ verdict: "satisfied" | "unsatisfied"; summary?: string }>;
   cleanup?: VerificationCleanupFailure;
   leak?: WorktreeLeak;
 }>;
-
-function runtimeStop(outcome: VerificationNonterminalOutcome): VerificationRuntimeStop {
-  return outcome.kind === "spawn-error"
-    ? { failure: outcome.kind, diagnostic: outcome.diagnostic, ...capturedOutput(outcome) }
-    : { failure: outcome.kind, ...capturedOutput(outcome) };
-}
 
 function verificationInput(
   outcome: VerificationTerminalOutcome,
@@ -211,13 +182,12 @@ function verificationInput(
   };
 }
 
-type VerificationAttestation = Readonly<{ entry: EntryUlid; verdict: "satisfied" | "unsatisfied"; summary?: string }>;
 function reusableVerificationAttestation(
   current: AttestationEntry | undefined,
   subject: DependencyKeySet,
   verdict: "satisfied" | "unsatisfied",
   summary: string | undefined,
-): VerificationAttestation | undefined {
+): true | undefined {
   if (
     current === undefined ||
     current.data.subject !== subject ||
@@ -225,11 +195,7 @@ function reusableVerificationAttestation(
     current.data.summary !== summary
   )
     return undefined;
-  return {
-    entry: current.entry,
-    verdict: current.data.verdict,
-    ...(current.data.summary === undefined ? {} : { summary: current.data.summary }),
-  };
+  return true;
 }
 
 function retainVerificationReceipt(input: VerifyRequirementInput, step: VerificationStep): void {
@@ -262,36 +228,37 @@ async function verificationStep(
                 attestation.data.subject === subject,
             );
           const reuse = reusableVerificationAttestation(current, subject, verdict, summary);
-          return reuse === undefined ? undefined : { kind: "verification-reuse", reuse };
+          return reuse === undefined ? undefined : { kind: "verification-reuse" };
         },
       },
     );
     if (admission.kind === "refused" && admission.refusal.kind === "verification-reuse") {
-      return { kind: "reused", reuse: admission.refusal.reuse };
+      return { kind: "reused" };
     }
     return admission;
   }
   if (execution.outcome.kind === "candidate-unavailable")
     return { failure: "candidate-unavailable", diagnostic: execution.outcome.diagnostic };
   if (execution.outcome.kind === "environment-failure") {
-    return "diagnostic" in execution.outcome
-      ? { failure: "environment-failure", diagnostic: execution.outcome.diagnostic }
-      : { failure: "environment-failure", name: execution.outcome.name, detail: execution.outcome.detail };
+    return {
+      failure: "environment-failure",
+      ...("name" in execution.outcome ? { name: execution.outcome.name } : {}),
+      diagnostic: execution.outcome.diagnostic,
+    };
   }
-  if (
-    execution.outcome.kind === "unknown-exit" ||
-    execution.outcome.kind === "cancelled" ||
-    execution.outcome.kind === "spawn-error"
-  )
-    return runtimeStop(execution.outcome);
+  if (execution.outcome.kind === "spawn-error")
+    return { failure: "spawn-error", diagnostic: execution.outcome.diagnostic };
+  if (execution.outcome.kind === "unknown-exit" || execution.outcome.kind === "cancelled")
+    return {
+      failure: execution.outcome.kind,
+      ...(execution.outcome.diagnostic === undefined ? {} : { diagnostic: execution.outcome.diagnostic }),
+    };
   throw new Error("Verification execution returned an invalid outcome");
 }
 
 function verificationCounts(execution: VerificationExecution): VerificationResult["counts"] {
   if (execution.outcome.kind !== "terminal") return undefined;
   return {
-    passed: execution.outcome.passed,
-    total: execution.outcome.total,
     verdict: execution.outcome.verdict,
     ...(execution.outcome.summary === undefined ? {} : { summary: execution.outcome.summary }),
   };
@@ -324,7 +291,7 @@ export async function verifyRequirement(input: VerifyRequirementInput): Promise<
   try {
     step = await verificationStep(input, execution, subject);
   } catch (error) {
-    const stop = executionStop(input.contractId, "verification", error, input.signal);
+    const stop = executionStop(input.contractId, error, input.signal);
     if (stop.reason !== "cancelled") throw error;
     input.progress?.recordStop(stop);
     step = { failure: "cancelled" };
@@ -333,7 +300,7 @@ export async function verifyRequirement(input: VerifyRequirementInput): Promise<
   retainVerificationReceipt(input, step);
   return {
     step,
-    ...("kind" in step && step.kind === "reused" ? { reuse: step.reuse } : {}),
+    ...("kind" in step && step.kind === "reused" ? { reuse: true } : {}),
     ...(counts === undefined ? {} : { counts }),
     ...(execution.cleanup === undefined ? {} : { cleanup: execution.cleanup }),
     ...(execution.leak === undefined ? {} : { leak: execution.leak }),

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { boundedListLimit } from "../bounded-list.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import type { ActiveContractRefusal } from "../core/facts/observation.js";
-import type { ActorId, ContractId, ContractState, DeliverData, DocumentKey, SnapshotId } from "../core/facts/types.js";
+import type { ActorId, ContractId, ContractState, DeliverData, DocumentKey } from "../core/facts/types.js";
 import { gateReportSchema } from "./result-leaves.js";
 export {
   deliverDataSchema,
@@ -16,20 +16,16 @@ export {
 } from "./result-leaves.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import type { IntegrationPreparationRefusal } from "../git/integration.js";
-import { integrationPreparationRefusalSchema, readDeliveryDiff } from "../git/integration.js";
+import { integrationPreparationRefusalSchema } from "../git/integration.js";
 import { observeContractAt } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { currentBranch, repositoryAt } from "../git/repository.js";
 import type { WorktreeLeak } from "../git/scratch.js";
 import { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
+export { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
 import { targetWorkspaceRefusalSchema } from "../git/target.js";
-import {
-  dirtyWorkspaceRefusalSchema,
-  unmergedPathsRefusalSchema,
-  worktreeMissingRefusalSchema,
-} from "../git/tender.js";
-import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
+import { dirtyWorkspaceRefusalSchema, worktreeMissingRefusalSchema } from "../git/tender.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
 import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
 import { forkSourceMovedRefusalSchema, targetInputRefusalSchema } from "./bind.js";
@@ -55,58 +51,53 @@ import { protocolTerminalSchema } from "./run.js";
 export { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 export { entryUlidSchema } from "./attempt.js";
 export const activeContractRefusalSchema = z
-  .object({ kind: z.enum(["contract-missing", "terminal"]), contractId: contractIdSchema })
+  .object({ kind: z.enum(["contract-missing", "terminal"]) })
   .strict()
   .readonly();
-export const bindRefusalSchema = z
-  .object({
-    kind: z.enum([
-      "contract-exists",
-      "invalid-after",
-      "unknown-prerequisite",
-      "target-contract-missing",
-      "target-contract-terminal",
-      "target-contract-self",
-    ]),
-    contractId: contractIdSchema,
-  })
-  .strict()
-  .readonly();
+export const bindRefusalSchema = z.union([
+  z
+    .object({ kind: z.enum(["contract-exists", "invalid-after", "unknown-prerequisite"]) })
+    .strict()
+    .readonly(),
+  z
+    .object({
+      kind: z.enum(["target-contract-missing", "target-contract-terminal"]),
+      targetContractId: contractIdSchema,
+    })
+    .strict()
+    .readonly(),
+]);
 export const amendRefusalSchema = z
   .object({
     kind: z.enum(["contract-missing", "terminal", "terms-moved", "unknown-prerequisite", "cyclic-prerequisite"]),
-    contractId: contractIdSchema,
   })
   .strict()
   .readonly();
-export const deliverRefusalSchema = z
-  .object({
-    kind: z.enum([
-      "contract-missing",
-      "terminal",
-      "document-moved",
-      "target-contract-missing",
-      "target-contract-terminal",
-      "target-contract-self",
-    ]),
-    contractId: contractIdSchema,
-  })
-  .strict()
-  .readonly();
+export const deliverRefusalSchema = z.union([
+  z
+    .object({ kind: z.enum(["contract-missing", "terminal"]) })
+    .strict()
+    .readonly(),
+  z
+    .object({
+      kind: z.enum(["target-contract-missing", "target-contract-terminal"]),
+      targetContractId: contractIdSchema,
+    })
+    .strict()
+    .readonly(),
+]);
 export const verificationDeclarationRefusalSchema = z
-  .object({ kind: z.literal("verification-declaration-invalid"), contractId: contractIdSchema.exactOptional() })
+  .object({ kind: z.literal("verification-declaration-invalid") })
   .strict()
   .readonly();
 export const verifyRefusalSchema = z.union([
   z
-    .object({ kind: z.literal("verification-not-selected"), contractId: contractIdSchema })
+    .object({ kind: z.literal("verification-not-selected") })
     .strict()
     .readonly(),
   z
     .object({
       kind: z.literal("verification-index-out-of-range"),
-      contractId: contractIdSchema,
-      index: z.number().int().positive(),
       total: z.number().int().nonnegative(),
     })
     .strict()
@@ -115,29 +106,26 @@ export const verifyRefusalSchema = z.union([
 export const placementRefusalSchema = z.union([
   z
     .object({
-      kind: z.enum(["target-contract-missing", "target-contract-terminal", "target-contract-self"]),
-      contractId: contractIdSchema,
+      kind: z.enum(["target-contract-missing", "target-contract-terminal"]),
+      targetContractId: contractIdSchema,
     })
     .strict()
     .readonly(),
   targetWorkspaceRefusalSchema,
   z
-    .object({ kind: z.enum(["contract-missing", "delivery-missing", "terminal"]), contractId: contractIdSchema })
+    .object({ kind: z.enum(["contract-missing", "delivery-missing", "terminal"]) })
     .strict()
     .readonly(),
   z
     .object({
       kind: z.literal("gates-unsatisfied"),
-      contractId: contractIdSchema,
       unmet: z.array(gateReportSchema).readonly(),
-      target: z.string().min(1).exactOptional(),
     })
     .strict()
     .readonly(),
   z
     .object({
       kind: z.literal("prerequisites-unsatisfied"),
-      contractId: contractIdSchema,
       unmet: z
         .array(
           z
@@ -152,23 +140,21 @@ export const placementRefusalSchema = z.union([
 ]);
 
 const mergeStatePresentRefusalSchema = z
-  .object({ kind: z.literal("merge-state-present"), contractId: contractIdSchema, workspace: worktreeWorkspaceSchema })
+  .object({ kind: z.literal("merge-state-present"), worktreePath: z.string().min(1) })
   .strict()
   .readonly();
 export const deliverConflictRefusalSchema = z
   .object({
     kind: z.literal("integration-failed"),
-    contractId: contractIdSchema,
     reason: z.literal("conflict"),
     targetHead: snapshotIdSchema,
     conflictPaths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-    recovery: conflictRecoverySchema,
   })
   .strict()
   .readonly();
 export type DeliverConflictRefusal = z.infer<typeof deliverConflictRefusalSchema>;
 const targetMissingRefusalSchema = z
-  .object({ kind: z.literal("target-missing"), contractId: contractIdSchema })
+  .object({ kind: z.literal("target-missing") })
   .strict()
   .readonly();
 export const deliveryPreparationRefusalSchema = z.union([
@@ -176,12 +162,12 @@ export const deliveryPreparationRefusalSchema = z.union([
   targetMissingRefusalSchema,
   worktreeMissingRefusalSchema,
   dirtyWorkspaceRefusalSchema,
-  unmergedPathsRefusalSchema,
   integrationPreparationRefusalSchema,
   mergeStatePresentRefusalSchema,
-  checkoutNotFollowableRefusalSchema,
 ]);
 export type DeliveryPreparationRefusal = z.infer<typeof deliveryPreparationRefusalSchema>;
+/** Preparation that can actually reach a delivery commit, without deliver materialization. */
+export type MechanicalPreparationRefusal = Exclude<DeliveryPreparationRefusal, { kind: "merge-state-present" }>;
 export const intentRefusalSchema = z.union([
   activeContractRefusalSchema,
   amendRefusalSchema,
@@ -240,10 +226,7 @@ export type DocumentDerivation = Readonly<{
 
 type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
 export const verificationStopSchema = z.union([
-  z
-    .object({ refusal: z.union([activeContractRefusalSchema, verificationDeclarationRefusalSchema]) })
-    .strict()
-    .readonly(),
+  z.object({ refusal: activeContractRefusalSchema }).strict().readonly(),
   z.object({ retry: protocolTerminalSchema }).strict().readonly(),
   verificationRuntimeStopSchema,
 ]);
@@ -271,11 +254,9 @@ export const placementStopSchema = z.union([
   z
     .object({
       failure: z.literal("target-moved"),
-      contractId: contractIdSchema,
       target: z.string().refine((value) => value.trim() !== ""),
       integratedAt: snapshotIdSchema,
       observed: snapshotIdSchema.nullable(),
-      attempts: z.number().int(),
       observedTreeEqualsCandidate: z.boolean(),
     })
     .strict()
@@ -283,7 +264,6 @@ export const placementStopSchema = z.union([
   z
     .object({
       failure: z.literal("target-moved"),
-      contractId: contractIdSchema,
       target: z.string().refine((value) => value.trim() !== ""),
       expected: snapshotIdSchema,
       observed: snapshotIdSchema.nullable(),
@@ -344,8 +324,8 @@ export function placementStop(
   if (result.kind === "accepted") return undefined;
   if (result.kind === "placement-failed") return { failure: "target-placement-failed", diagnostic: result.diagnostic };
   if (result.kind === "target-moved") {
-    const { contractId, target, expected, observed, observedTreeEqualsCandidate } = result;
-    return { failure: "target-moved", contractId, target, expected, observed, observedTreeEqualsCandidate };
+    const { target, expected, observed, observedTreeEqualsCandidate } = result;
+    return { failure: "target-moved", target, expected, observed, observedTreeEqualsCandidate };
   }
   return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
 }
@@ -384,7 +364,7 @@ export async function contractCatalogueOperation(
     limit?: number;
   }>,
 ): Promise<ContractCatalogue> {
-  const limit = boundedListLimit(input.limit);
+  const limit = input.limit === undefined ? undefined : boundedListLimit(input.limit);
   return withGitReadObservation(input.scope, input.channel, (observation) => readContractCatalogue(observation, limit));
 }
 
@@ -416,14 +396,4 @@ export async function deliveryOperation(input: MutationOperationInput): Promise<
   return state.currentIntegration === null
     ? state.delivery.data
     : { ...state.delivery.data, integration: state.currentIntegration };
-}
-
-export async function deliveryDiffOperation(
-  input: Readonly<{
-    scope: RepositoryScope;
-    integrationPredecessor: SnapshotId;
-    integrationSnapshot: SnapshotId;
-  }>,
-): Promise<string | null> {
-  return await readDeliveryDiff(input.scope, input.integrationPredecessor, input.integrationSnapshot);
 }

@@ -1,8 +1,7 @@
-import { z } from "zod";
 import type { DebtDocument, DebtPriority, DebtState } from "./document.js";
-import { debtIdSchema, formatDebtId, parseDebtId, sameNamespace, type DebtId } from "./identity.js";
-import type { DebtBoard, DebtRelationProjection } from "./board.js";
-import { debtResultRowSchema, debtRefSchema, projectDebtRow, debtBlocked, debtDisposition, debtRef } from "./board.js";
+import { formatDebtId, parseDebtId, sameNamespace, type DebtId } from "./identity.js";
+import type { DebtBoard, DebtRelationProjection, DebtSummary } from "./board.js";
+import { debtBlocked, debtDisposition, debtSummarySchema, projectDebtSummary } from "./board.js";
 import { projectBoundedList, type BoundedList } from "../bounded-list.js";
 
 export const DEBT_RELATION_PREDICATE_FIELDS = ["under", "needs", "blocks"] as const;
@@ -25,18 +24,8 @@ export type DebtQueryExpression =
   | Readonly<{ kind: "predicate"; predicate: DebtQueryPredicate }>;
 
 export type DebtQuerySort = "priority" | "created" | "updated" | "id";
-export const debtQueryRowSchema = z
-  .strictObject({
-    ...debtResultRowSchema.unwrap().shape,
-    parent: debtIdSchema.nullable(),
-    needs: z.array(debtRefSchema).readonly(),
-    blocks: z.array(debtRefSchema).readonly(),
-    createdAt: z.string(),
-    updatedAt: z.string(),
-  })
-  .readonly();
-export type DebtQueryRow = z.output<typeof debtQueryRowSchema>;
-export type DebtPage<Row> = BoundedList<Row>;
+export const debtQueryRowSchema = debtSummarySchema;
+export type DebtQueryRow = DebtSummary;
 
 const states: readonly DebtState[] = ["open", "done", "drop"];
 const comparisons: readonly DebtQueryComparison[] = ["=", "!=", "<", "<=", ">", ">=", "~"];
@@ -320,16 +309,6 @@ function matches(
   }
   return matchesPredicate(board, relations, debt, expression.predicate, under);
 }
-function row(board: DebtBoard, relations: DebtRelationProjection, debt: DebtDocument): DebtQueryRow {
-  return {
-    ...projectDebtRow(board, relations, debt),
-    parent: debt.parent,
-    needs: debt.needs.map((need) => debtRef(board, need)),
-    blocks: relations.blocks(debt.id),
-    createdAt: debt.createdAt,
-    updatedAt: debt.updatedAt,
-  };
-}
 function sortDebts(debts: readonly DebtDocument[], sort: DebtQuerySort): readonly DebtDocument[] {
   return [...debts].sort((left, right) => {
     const tie = Buffer.compare(Buffer.from(left.id), Buffer.from(right.id));
@@ -357,7 +336,7 @@ export function projectQueryRows(
       .filter((debt) => scope === null || sameNamespace(parseDebtId(debt.id).namespace, scope))
       .filter((debt) => matches(board, relations, debt, expression, under)),
     sort,
-  ).map((debt) => row(board, relations, debt));
+  ).map((debt) => projectDebtSummary(board, debt));
 }
 
 export function projectQuery(
@@ -369,7 +348,7 @@ export function projectQuery(
     sort?: DebtQuerySort;
     limit: number;
   }>,
-): DebtPage<DebtQueryRow> {
+): BoundedList<DebtQueryRow> {
   return projectBoundedList(projectQueryRows(board, relations, input), input.limit);
 }
 

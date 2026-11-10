@@ -133,7 +133,7 @@ function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): C
     kind: "invalid-document" as const,
     diagnostic: error.original instanceof Error ? error.original.message : String(error.original),
   };
-  if (command.output === "json") writeJson({ kind: "refused", operation: "bind", refusal, draft: error.draft });
+  if (command.output === "json") writeJson({ kind: "refused", reason: refusal, draft: error.draft });
   else writeStdout(renderRefusal({ operation: "bind", refusal }, error.draft, displayContext()));
   return error.original instanceof CliUsageError ? "usage" : "refused";
 }

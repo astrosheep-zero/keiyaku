@@ -1,12 +1,6 @@
 import { z } from "zod";
 import { worktreeChangeId } from "../git/integration.js";
-import {
-  captureTender,
-  dirtyTenderDelta,
-  dirtyTenderRefusal,
-  workspaceDirtyDeltaSchema,
-  type TenderCapture,
-} from "../git/tender.js";
+import { captureTender, type TenderCapture } from "../git/tender.js";
 import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import { unmergedWorkspacePaths, worktreePath } from "../git/workspace.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
@@ -35,35 +29,32 @@ import { timestamp } from "./operations.js";
 
 const REVIEWED = gate("reviewed");
 type ReviewPreparationRefusal =
-  | Readonly<{
-      kind: "worktree-missing";
-      contractId: import("../core/facts/types.js").ContractId;
-    }>
-  | import("../git/tender.js").DirtyWorkspaceRefusal;
+  | Readonly<{ kind: "worktree-missing" }>
+  | Readonly<{ kind: "dirty-submodules"; paths: readonly string[] }>;
 type ReviewRefusal = ActiveContractRefusal | ReviewPreparationRefusal;
 type ReviewOperationInput = MutationOperationInput &
   Readonly<{
     verdict: AttestationData["verdict"];
     summary?: string;
   }>;
-type ReviewWorkspaceEvidence = NonNullable<z.output<typeof reviewAdmissionValueSchema>["workspace"]>;
+const changedPaths = z.array(z.string()).min(1).readonly();
 export const reviewAdmissionValueSchema = z
   .strictObject({
-    workspace: workspaceDirtyDeltaSchema
-      .extend({
-        shortStat: workspaceDirtyDeltaSchema.shape.shortStat.readonly(),
-        unmergedPaths: z.array(z.string()).readonly(),
+    worktreeChanges: z
+      .strictObject({
+        staged: changedPaths.exactOptional(),
+        unstaged: changedPaths.exactOptional(),
+        untracked: changedPaths.exactOptional(),
+        unmergedPaths: changedPaths.exactOptional(),
       })
       .readonly()
       .exactOptional(),
   })
   .readonly();
 export type ReviewAdmissionValue = z.output<typeof reviewAdmissionValueSchema>;
+type ReviewWorktreeChanges = NonNullable<ReviewAdmissionValue["worktreeChanges"]>;
 
-type PreparedReview = Readonly<{
-  workspace?: ReviewWorkspaceEvidence;
-  tender?: TenderCapture;
-}>;
+type PreparedReview = Readonly<{ worktreeChanges?: ReviewWorktreeChanges }>;
 
 async function captureReviewableWorktree(
   repository: RepositoryScope,
@@ -77,7 +68,7 @@ async function captureReviewableWorktree(
       data: Readonly<{
         changeId: DeliverData["integration"]["changeId"];
         tender: TenderCapture;
-        workspace?: ReviewWorkspaceEvidence;
+        worktreeChanges?: ReviewWorktreeChanges;
       }>;
     }
   | { kind: "refused"; refusal: ReviewPreparationRefusal }
@@ -90,29 +81,28 @@ async function captureReviewableWorktree(
     ...stage,
     ...(appointed === undefined ? {} : { place: appointed.place }),
   });
-  if (tender.kind === "refused") return tender;
+  if (tender.kind === "refused") return { kind: "refused", refusal: tender.refusal };
   if (tender.data.changes.submodules.length > 0) {
-    return { kind: "refused", refusal: await dirtyTenderRefusal(repository, stage.contractId, tender.data) };
+    return { kind: "refused", refusal: { kind: "dirty-submodules", paths: tender.data.changes.submodules } };
   }
-  const workspace = await dirtyTenderDelta(repository, tender.data);
+  const { staged, unstaged, untracked } = tender.data.changes;
   const workspacePath = appointed === undefined ? undefined : worktreePath(repository, appointed.place);
   const unmergedPaths = workspacePath === undefined ? [] : await unmergedWorkspacePaths(repository, workspacePath);
-  const workspaceEvidence =
-    workspace === undefined && unmergedPaths.length === 0
+  const worktreeChanges =
+    staged.length === 0 && unstaged.length === 0 && untracked.length === 0 && unmergedPaths.length === 0
       ? undefined
       : {
-          staged: workspace?.staged ?? [],
-          unstaged: workspace?.unstaged ?? [],
-          untracked: workspace?.untracked ?? [],
-          shortStat: workspace?.shortStat ?? { filesChanged: 0, insertions: 0, deletions: 0 },
-          unmergedPaths,
+          ...(staged.length === 0 ? {} : { staged }),
+          ...(unstaged.length === 0 ? {} : { unstaged }),
+          ...(untracked.length === 0 ? {} : { untracked }),
+          ...(unmergedPaths.length === 0 ? {} : { unmergedPaths }),
         };
   return {
     kind: "prepared",
     data: {
       changeId: await worktreeChangeId(repository, stage, tender.data),
       tender: tender.data,
-      ...(workspaceEvidence === undefined ? {} : { workspace: workspaceEvidence }),
+      ...(worktreeChanges === undefined ? {} : { worktreeChanges }),
     },
   };
 }
@@ -123,7 +113,7 @@ async function captureReviewableWorktree(
  */
 type ReviewArtifacts =
   | Readonly<{ kind: "refused"; refusal: ReviewPreparationRefusal }>
-  | Readonly<{ kind: "captured"; workspace?: ReviewWorkspaceEvidence; worktree: WorktreeWitness }>;
+  | Readonly<{ kind: "captured"; worktreeChanges?: ReviewWorktreeChanges; worktree: WorktreeWitness }>;
 
 type ExternalReviewPreparation =
   | Readonly<{ kind: "unavailable" }>
@@ -134,7 +124,7 @@ type AssembledReview =
   | Readonly<{
       kind: "assembled";
       preparation?: AttestationInput<ReviewRefusal>["preparation"];
-      workspace?: ReviewWorkspaceEvidence;
+      worktreeChanges?: ReviewWorktreeChanges;
     }>;
 
 function preparedReviewCapture(
@@ -191,7 +181,7 @@ async function prepareExternalReview(input: ReviewOperationInput): Promise<Exter
       ? { kind: "refused", refusal: prepared.refusal }
       : {
           kind: "captured",
-          ...(prepared.data.workspace === undefined ? {} : { workspace: prepared.data.workspace }),
+          ...(prepared.data.worktreeChanges === undefined ? {} : { worktreeChanges: prepared.data.worktreeChanges }),
           worktree: reviewWorktreeInput(prepared),
         };
   });
@@ -216,7 +206,9 @@ async function assembleReviewAttempt(
   return {
     kind: "assembled",
     preparation: preparedReviewCapture(input, state, external.artifacts.worktree.changeId),
-    ...(external.artifacts.workspace === undefined ? {} : { workspace: external.artifacts.workspace }),
+    ...(external.artifacts.worktreeChanges === undefined
+      ? {}
+      : { worktreeChanges: external.artifacts.worktreeChanges }),
   };
 }
 
@@ -243,7 +235,7 @@ async function decideAndAdmitReview(
   return {
     ...admission,
     value: {
-      ...(assembled.workspace === undefined ? {} : { workspace: assembled.workspace }),
+      ...(assembled.worktreeChanges === undefined ? {} : { worktreeChanges: assembled.worktreeChanges }),
     },
   };
 }

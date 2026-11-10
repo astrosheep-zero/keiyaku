@@ -92,7 +92,7 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
   const refusal = await facet.run("bind", { markdown, target: "missing-target" });
   assert.equal(refusal.kind, "refused");
   if (refusal.kind !== "refused") throw new Error("expected native bind refusal");
-  assert.equal(refusal.refusal.kind, "target-missing");
+  assert.equal(refusal.reason.kind, "target-missing");
   for (const output of ["text", "json"] as const) {
     const parsed = parseArgv(["bind", "-", "--target", "missing-target", ...(output === "json" ? ["--json"] : [])]);
     if (!("command" in parsed) || parsed.command.command !== "bind") throw new Error("expected bind");
@@ -101,9 +101,8 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
       environment: {},
       facet,
       readStdin: async () => markdown,
-      draftWorld: async () => (await resolveInvocationCoordinates(
-        { processCwd: root, command }, { KEIYAKU_GIT_PATH: " " },
-      )).establishWorld(),
+      draftWorld: async () =>
+        (await resolveInvocationCoordinates({ processCwd: root, command }, { KEIYAKU_GIT_PATH: " " })).establishWorld(),
       signal: new AbortController().signal,
       progress: writeExecutionProgress,
     };
@@ -112,7 +111,7 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
     if (output === "json") {
       assert.deepEqual(JSON.parse(result.stdout), refusal);
     } else {
-      const original = renderRefusal({ operation: refusal.operation, refusal: refusal.refusal });
+      const original = renderRefusal({ operation: "bind", refusal: refusal.reason });
       assert.ok(result.stdout.startsWith(`${original}\n`));
       assert.equal(result.stdout.split(original).length - 1, 1);
       assert.match(result.stdout, /draft warning/u);

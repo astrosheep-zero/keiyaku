@@ -3,7 +3,7 @@ import { isAbsolute, normalize } from "node:path";
 import { contractId } from "../core/facts/types.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import { contractsOperation, type RepositoryScope } from "../protocol/operations.js";
-import type { ContractBoard, ContractRow } from "../protocol/read/status.js";
+import type { ContractBoard, ContractDetail } from "../protocol/read/status.js";
 import type { ContractResolution, ContractResolveInput } from "./contract-types.js";
 import { requireInput } from "./input.js";
 import { readContractValue } from "./outcome.js";
@@ -11,17 +11,16 @@ import { scopeForRepo, type Repo } from "./repo.js";
 
 /** Pure Contract membership shared with mixed Address; no cross-family judgment. */
 export function matchContractCandidates(
-  rows: readonly ContractRow[],
+  rows: readonly ContractDetail[],
   selection: Readonly<{ selector: string }> | Readonly<{ cwd: string }>,
-): readonly ContractRow[] {
+): readonly ContractDetail[] {
   return rows.filter(
     (row) =>
-      row.disposition === "active" &&
-      row.workspace === "worktree" &&
-      row.worktreePath !== null &&
+      row.phase === "bound" &&
+      "path" in row.workspace &&
       ("selector" in selection
         ? `@${row.id.slice("kei/".length)}` === selection.selector
-        : normalize(row.worktreePath) === selection.cwd),
+        : normalize(row.workspace.path) === selection.cwd),
   );
 }
 
@@ -34,7 +33,7 @@ function completeBoard(scope: RepositoryScope): Promise<ContractBoard> {
  * The complete live Contract candidates a named selection judges membership
  * against. No display bound applies, so age never decides which names exist.
  */
-export async function readCompleteContractCandidates(repo: Repo): Promise<readonly ContractRow[]> {
+export async function readCompleteContractCandidates(repo: Repo): Promise<readonly ContractDetail[]> {
   return (await completeBoard(scopeForRepo(repo))).rows;
 }
 

@@ -47,10 +47,9 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
               },
               signal: context.signal,
             });
-            nestedId = child.akuma;
-            assert.equal(child.observation.kind, "detached");
-            if (child.observation.kind !== "detached") throw new Error("nested call lost its Tell receipt");
-            assert.equal(child.observation.tell.row.text, "child");
+            nestedId = child.akumaId;
+            assert.equal(child.input, undefined);
+            assert.equal(typeof child.tellId, "string", "nested call lost its Tell receipt");
             answer.resolve("parent answer");
           } else {
             assert.equal(input.schemaJson, '{"type":"object"}');
@@ -85,9 +84,8 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus sch
       mode: "wait",
       signal: context.signal,
     });
-    assert.equal(result.observation.kind, "observed");
-    if (result.observation.kind === "observed")
-      assert.deepEqual(result.observation.observation, { reason: "answered", answer: "parent answer" });
+    assert.equal(result.input?.kind, "answered");
+    assert.deepEqual(result.input, { kind: "answered", answer: "parent answer" });
     await Promise.all(bodies);
     assert.deepEqual(submissions, ["parent", "child"], "births submit no provider prompt");
     assert.equal(launches.length, 4);
@@ -158,8 +156,10 @@ test("the composed launcher also owns ordinary wake and authorized succession", 
     const api = akumasWithLauncher(world, spawn);
     const result = await api.spawn({ akumaName: "worker", body: "first", signal: context.signal });
     await started.promise;
-    const next = await api.ask({ akuma: result.akuma, body: "second", signal: context.signal });
-    assert.deepEqual(next.observation, { reason: "answered", answer: "second" });
+    const next = await api.ask({ akuma: result.akumaId, body: "second", signal: context.signal });
+    assert.equal(next.kind, "answered");
+    if (next.kind !== "answered") throw new Error("expected answer");
+    assert.equal(next.answer, "second");
     await Promise.all(bodies);
     assert.deepEqual(inputs, ["first", "second"]);
     const handoffs = launches.filter((launch) => launch.handoffFromBodySequence !== undefined);
@@ -219,20 +219,22 @@ test("detached wake retains native exit, signal, and bounded log evidence", asyn
       );
       process.env.NODE_OPTIONS = appendNodeOptionsImport(pathToFileURL(preload).href, priorOptions ?? "");
       writeFileSync(allocated.paths.log, "prior log\n");
-      const { tell: result } = await Akuma.select(world, allocated.id).tell("pending");
-      assert.equal(result.wake.kind, "failed");
-      if (result.wake.kind !== "failed" || !("child" in result.wake)) throw new Error("missing detached evidence");
-      assert.equal(result.wake.diagnostic, `pre-admission ${scenario.status}`);
+      const result = await Akuma.select(world, allocated.id).tell("pending");
+      const wake = result.wake;
+      assert.equal(wake?.kind, "failed");
+      if (wake?.kind !== "failed") throw new Error("missing detached evidence");
+      assert.equal(wake.diagnostic, `pre-admission ${scenario.status}`);
+      assert.equal(wake.logPath, allocated.paths.log, "the failed wake names its retained run-log evidence");
       const log = readFileSync(allocated.paths.log);
-      assert.deepEqual(result.wake.child, {
-        code: scenario.code,
-        signal: scenario.signal,
-        log: { path: allocated.paths.log, from: Buffer.byteLength("prior log\n"), to: log.byteLength },
-      });
+      assert.deepEqual(
+        log.subarray(Buffer.byteLength("prior log\n")),
+        Buffer.from(`[child ${scenario.status}]\n`),
+        "the log retains only the child's native exit evidence",
+      );
       assert.match(log.toString(), new RegExp(`\\[child ${scenario.status}\\]\\n$`, "u"));
       assert.deepEqual(
         (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
-        [result.admission.tellId],
+        [result.tellId],
       );
     }
   } finally {

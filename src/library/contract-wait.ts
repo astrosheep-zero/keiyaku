@@ -1,6 +1,6 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { contractHeadSchema, contractIdSchema } from "../git/identity.js";
+import { contractIdSchema } from "../git/identity.js";
 import { contractId, type ContractId, type ContractState } from "../core/facts/types.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
@@ -11,24 +11,29 @@ import { readContractValue } from "./outcome.js";
 export type ContractWaitOptions = Readonly<{ completion?: "any" | "all"; timeoutMs?: number; signal?: AbortSignal }>;
 export type ContractWaitInput = ContractWaitOptions & Readonly<{ contracts: readonly string[] }>;
 
-// An unknown presence means the deadline interrupted the initial observation.
+// Missing presence is observed present; unknown means the deadline interrupted the initial read.
 export const contractWaitMemberSchema = z
   .strictObject({
-    contract: contractIdSchema,
-    baseline: contractHeadSchema.nullable(),
-    head: contractHeadSchema.nullable(),
-    changed: z.boolean(),
-    present: z.boolean().nullable(),
-    terminal: z.enum(["claimed", "abandoned"]).nullable(),
+    id: contractIdSchema,
+    changed: z.literal(true).exactOptional(),
+    presence: z.enum(["missing", "unknown"]).exactOptional(),
+    terminal: z.enum(["claimed", "abandoned"]).exactOptional(),
   })
   .readonly();
 export const contractWaitResultSchema = z
   .strictObject({
-    kind: z.enum(["changed", "terminal", "deadline", "missing"]),
-    completion: z.enum(["any", "all"]),
+    kind: z.literal("contract"),
+    reason: z.enum(["changed", "terminal", "deadline", "missing"]),
     contracts: z.array(contractWaitMemberSchema).readonly(),
   })
   .readonly();
+type WaitObservation = Readonly<{
+  id: ContractId;
+  baseline: ContractState["head"];
+  changed: boolean;
+  present: boolean | null;
+  terminal: "claimed" | "abandoned" | null;
+}>;
 
 export type ContractWaitMember = z.output<typeof contractWaitMemberSchema>;
 export type ContractWaitResult = z.output<typeof contractWaitResultSchema>;
@@ -86,13 +91,33 @@ function validateContractWaitValues(values: Record<string, unknown>, scope: Repo
   };
 }
 
-function readiness(members: ContractWaitMember[], completion: "any" | "all"): ContractWaitResult["kind"] | undefined {
+function readiness(
+  members: readonly WaitObservation[],
+  completion: "any" | "all",
+): ContractWaitResult["reason"] | undefined {
   if (members.some((member) => member.present === false)) return "missing";
-  const satisfied = (member: ContractWaitMember): boolean =>
+  const satisfied = (member: WaitObservation): boolean =>
     member.present === true && (member.changed || member.terminal !== null);
   if (completion === "any" ? members.some(satisfied) : members.every(satisfied))
     return members.some((member) => member.changed) ? "changed" : "terminal";
   return undefined;
+}
+
+function waitResult(members: readonly WaitObservation[], reason: ContractWaitResult["reason"]): ContractWaitResult {
+  return {
+    kind: "contract",
+    reason,
+    contracts: members.map((member) => ({
+      id: member.id,
+      ...(member.changed ? { changed: true } : {}),
+      ...(member.present === null
+        ? { presence: "unknown" as const }
+        : member.present === false
+          ? { presence: "missing" as const }
+          : {}),
+      ...(member.terminal === null ? {} : { terminal: member.terminal }),
+    })),
+  };
 }
 
 export async function waitContractLocal(input: ValidatedWait): Promise<ContractWaitResult> {
@@ -122,15 +147,14 @@ export async function waitContractLocal(input: ValidatedWait): Promise<ContractW
         });
       }),
     );
-  let members: ContractWaitMember[] = ids.map((contract) => ({
-    contract,
+  let members: WaitObservation[] = ids.map((id) => ({
+    id,
     baseline: null,
-    head: null,
     changed: false,
     present: null,
     terminal: null,
   }));
-  const result = (kind: ContractWaitResult["kind"]): ContractWaitResult => ({ kind, completion, contracts: members });
+  const result = (reason: ContractWaitResult["reason"]): ContractWaitResult => waitResult(members, reason);
   try {
     const initial = await read();
     signal?.throwIfAborted();
@@ -139,7 +163,6 @@ export async function waitContractLocal(input: ValidatedWait): Promise<ContractW
       return {
         ...member,
         baseline: state?.head ?? null,
-        head: state?.head ?? null,
         present: state !== null,
         terminal: state?.terminal?.kind ?? null,
       };
@@ -155,7 +178,6 @@ export async function waitContractLocal(input: ValidatedWait): Promise<ContractW
         const head = state?.head ?? null;
         return {
           ...member,
-          head,
           present: state !== null,
           terminal: state?.terminal?.kind ?? null,
           changed: member.changed || (state !== null && head !== member.baseline),

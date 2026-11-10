@@ -12,7 +12,6 @@ export type ReintegrateInput<Failure = never> = Readonly<{
 export type ReintegrateRefusal =
   | Readonly<{
       kind: "contract-missing" | "delivery-missing" | "terminal";
-      contractId: ContractId;
     }>
   | TargetContractRefusal;
 
@@ -23,10 +22,10 @@ export function decideReintegrate<Failure>({
 }: DecideInput<ReintegrateInput<Failure>>): OfferDecision<ReintegrateRefusal | Failure> {
   const state = activeContract(observation, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
-  const targetRefusal = targetContractRefusal(observation, state.id, state.coordinates.target);
+  const targetRefusal = targetContractRefusal(observation, state.coordinates.target);
   if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   if (state.delivery === null) {
-    return { kind: "refused", refusal: { kind: "delivery-missing", contractId: input.contractId } };
+    return { kind: "refused", refusal: { kind: "delivery-missing" } };
   }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
   const reintegrated = journalEntry("reintegrated", input, attempt.entryUlids[0]!, input.preparation.data);

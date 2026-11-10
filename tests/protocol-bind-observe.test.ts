@@ -150,7 +150,7 @@ async function boundObservedContract(repository: TestGitRepository) {
       workspace: "worktree",
     }),
   );
-  const id = present(await bound.value.kei.state()).id;
+  const id = present(await bound.kei.state()).id;
   const git = await repositoryAt(repository.path);
   return { bound, id, git };
 }
@@ -507,7 +507,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     });
     assert.deepEqual(collision, {
       kind: "refused",
-      refusal: { kind: "contract-exists", contractId: id },
+      refusal: { kind: "contract-exists" },
     });
   });
 
@@ -613,7 +613,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     });
     assert.deepEqual(amended, {
       kind: "refused",
-      refusal: { kind: "unknown-prerequisite", contractId: existing.value.contractId },
+      refusal: { kind: "unknown-prerequisite" },
     });
   });
 

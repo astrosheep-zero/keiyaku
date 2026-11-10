@@ -21,7 +21,7 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { Kei, Keis, Repo, type ContractRow } from "../src/index.js";
+import { Kei, Keis, Repo, contractSummarySchema, type ContractDetail } from "../src/index.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -30,7 +30,6 @@ import {
   withGitShim,
 } from "./support/git.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { conflictRecovery } from "../src/git/workspace.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 
@@ -41,13 +40,13 @@ test("bind persists the canonical rendering, so amending one section leaves othe
   const repo = await cachedRepoAt(repository.path);
   const raw = document().replace(/\n## Objective/u, "\n\n\n## Objective");
   const bound = accepted(await Keis.of(repo).bind({ markdown: raw, workspace: "worktree" }));
-  const before = present(await bound.value.kei.state()).terms.document.bytes;
+  const before = present(await bound.kei.state()).terms.document.bytes;
   assert.equal(before, renderContractBody(decodeContractDocument(document())));
   const amended = accepted(
-    await bound.value.kei.amend({ markdown: "## Replace: Objective\n\nA sharpened objective.\n" }),
+    await bound.kei.amend({ markdown: "## Replace: Objective\n\nA sharpened objective.\n" }),
   );
-  assert.match(amended.value.documentDiff, /sharpened objective/u);
-  const after = present(await bound.value.kei.state()).terms.document.bytes;
+  assert.deepEqual(amended.changedSections, ["objective"]);
+  const after = present(await bound.kei.state()).terms.document.bytes;
   const start = before.indexOf("## Objective");
   const end = before.indexOf("## Design");
   assert.equal(after.slice(0, start), before.slice(0, start));
@@ -88,7 +87,7 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
       gates: ["reviewed"],
     }),
   );
-  const boundId = await publicContractId(bound.value.kei);
+  const boundId = await publicContractId(bound.kei);
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), boundId);
   writeFileSync(join(repository.path, "a.txt"), "target\n");
   writeFileSync(join(repository.path, "z.txt"), "target\n");
@@ -123,12 +122,6 @@ async function reviewGatedConflictCandidateFixture() {
   return { repository, repo, contract, targetHead: template.targetHead, worktree };
 }
 
-const DELIVER_CONFLICT_RECOVERY = {
-  materialize: "deliver --materialize-conflict --include-dirty",
-  deliver: "deliver --include-dirty",
-  staging: "not-required",
-} as const;
-
 function mergeHead(repository: ReturnType<typeof repositoryWithMain>, worktree: string): string | null {
   try {
     return repository.run(["-C", worktree, "rev-parse", "-q", "--verify", "MERGE_HEAD"]).trim();
@@ -150,7 +143,7 @@ async function conflictBoardFixture(count: number) {
         target: "refs/heads/main",
         gates: ["reviewed"],
       }),
-    ).value.kei;
+    ).kei;
     const id = await publicContractId(contract);
     const appointment = await readManagedWorktreeAppointment(git, id);
     assert.equal(appointment.kind, "appointed");
@@ -177,34 +170,35 @@ async function conflictBoardFixture(count: number) {
 
 // Each case owns a separate repository and scoped fault injection, never a process-wide mock.
 describe("library-contract-operations isolated repositories", { concurrency: 4 }, () => {
-  test("Contract boards batch handoff reads at one and six rows with unchanged row facts", async (context) => {
+  test("Contract catalogue retains compact physical attention while exact detail retains handoff facts", async (context) => {
     for (const count of [1, 6]) {
       const { repository, repo, contracts } = await conflictBoardFixture(count);
-      const expected: ContractRow[] = [];
+      const expected: ContractDetail[] = [];
       for (const { id } of contracts) {
         const observed = await Keis.of(repo).observe({ id });
         assert.equal(observed.kind, "present");
         if (observed.kind !== "present") throw new Error("missing fixture row");
         expected.push(observed.row);
-        assert.equal(observed.row.workspaceObservation.kind, "dirty");
-        if (observed.row.workspaceObservation.kind !== "dirty") throw new Error("missing conflict");
-        assert.deepEqual(observed.row.workspaceObservation.merge, {
-          head: repository.run(["rev-parse", "refs/heads/main"]).trim(),
-          unmergedPaths: ["shared.txt"],
-          handoffBase: repository.run(["-C", observed.row.worktreePath!, "rev-parse", "HEAD"]).trim(),
-          recovery: conflictRecovery,
-        });
-        assert.deepEqual(observed.row.targetLag, {
-          kind: "counted",
-          behind: 1,
-          subject: { kind: "worktree", path: observed.row.worktreePath },
-        });
+        assert.equal(observed.row.workspace.kind, "present");
+        if (observed.row.workspace.kind !== "present") throw new Error("missing conflict");
+        assert.deepEqual(observed.row.workspace.merge, ["shared.txt"]);
+        assert.deepEqual(observed.row.targetLag, { kind: "counted", behind: 1 });
       }
-      const reference = await Keis.of(repo).list({  });
+      const reference = await Keis.of(repo).list({});
+      const referenceRows = reference.rows!;
       assert.deepEqual(
-        reference.rows.map((row) => expected.find(({ id }) => id === row.id)),
-        reference.rows,
+        referenceRows.map(({ id }) => id).sort(),
+        expected.map(({ id }) => id).sort(),
       );
+      for (const row of referenceRows) {
+        const detail = expected.find(({ id }) => id === row.id)!;
+        assert.equal(row.title, detail.title);
+        assert.deepEqual(contractSummarySchema.parse(JSON.parse(JSON.stringify(row))), row);
+        assert.deepEqual(row.attention, [
+          { kind: "merge-in-progress", path: contracts.find(({ id }) => id === row.id)!.worktree, conflicts: 1 },
+          { kind: "target-behind", behind: 1, subject: contracts.find(({ id }) => id === row.id)!.worktree },
+        ]);
+      }
       const calls = join(repository.path, ".git", "board-calls");
       const board = await withGitShim(
         'printf "%s\\n" "$*" >> "$KEIYAKU_BOARD_CALLS"\nexec "$KEIYAKU_REAL_GIT" "$@"',
@@ -234,9 +228,9 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
               wallMs: Math.round(performance.now() - start),
             }),
           );
-          assert.equal(refBatches, 1);
-          assert.equal(blobChannels, 1);
-          assert.equal(statusWalks, count);
+          assert.equal(refBatches, 0, "the summary catalogue reads no handoff refs");
+          assert.equal(blobChannels, 1, "journal reads share one blob channel");
+          assert.equal(statusWalks, count, "only selected catalogue workspaces are observed");
           assert.equal(individualHandoffRefs, 0);
           assert.equal(individualBlobs, 0);
           return board;
@@ -244,19 +238,21 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
       );
       assert.deepEqual(board.rows, reference.rows);
       const catalogue = await Keis.of(repo).list({ limit: 1 });
-      assert.equal(catalogue.hasMore, count > 1);
-      const recent = [...expected].sort(
-        (left, right) =>
-          right.lastJournalAt.localeCompare(left.lastJournalAt) ||
-          Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
-      );
-      assert.deepEqual(catalogue.rows, recent.slice(0, 1));
+      assert.equal(catalogue.more, count > 1 ? true : undefined);
+      assert.deepEqual(catalogue.rows, referenceRows.slice(0, 1));
     }
   });
 
-  test("handoff selection preserves absent, mismatched, malformed and consumed workspace judgments", async () => {
+  test("selected workspace judgment ignores unrelated handoff receipt bytes while absent, mismatched and consumed refs stay local", async () => {
     const { repository, repo, git, contracts } = await conflictBoardFixture(6);
-    const before = await Keis.of(repo).list({  });
+    const before = await Keis.of(repo).list({});
+    const detailFor = async (id: ContractId): Promise<ContractDetail> => {
+      const exact = await Keis.of(repo).observe({ id });
+      assert.equal(exact.kind, "present");
+      if (exact.kind !== "present") throw new Error("missing fixture detail");
+      return exact.row;
+    };
+    const beforeDetails = await Promise.all(before.rows!.map((row) => detailFor(row.id)));
     const absent = contracts[1]!;
     repository.run(["update-ref", "-d", absent.ref]);
     for (const [index, field] of ["contractId", "place", "workspace"].entries()) {
@@ -268,24 +264,24 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     }
     const orphan = contracts[5]!;
     repository.run(["-C", orphan.worktree, "merge", "--quit"]);
-    const after = await Keis.of(repo).list({  });
+    const after = await Keis.of(repo).list({});
+    assert.deepEqual(after.rows, before.rows!.map(row => row.id === orphan.id
+      ? { ...row, attention: row.attention!.filter(issue => issue.kind !== "merge-in-progress") }
+      : row));
+    const afterDetails = await Promise.all(after.rows!.map((row) => detailFor(row.id)));
     assert.deepEqual(
-      after.rows,
-      before.rows.map((row) => {
-        if (row.id === contracts[0]!.id) return row;
-        const workspace = row.workspaceObservation;
-        if (workspace.kind !== "dirty" || workspace.merge === null) throw new Error("missing fixture conflict");
-        const { handoffBase: _base, recovery: _recovery, ...merge } = workspace.merge;
-        return { ...row, workspaceObservation: { ...workspace, merge: row.id === orphan.id ? null : merge } };
+      afterDetails,
+      beforeDetails.map((row) => {
+        if (row.id !== orphan.id) return row;
+        const workspace = row.workspace;
+        if (workspace.kind !== "present" || workspace.merge === undefined)
+          throw new Error("missing fixture conflict");
+        const { merge: _merge, ...withoutMerge } = workspace;
+        return { ...row, workspace: withoutMerge };
       }),
     );
-    for (const row of after.rows) {
-      const exact = await Keis.of(repo).observe({ id: row.id });
-      assert.equal(exact.kind, "present");
-      if (exact.kind === "present") assert.deepEqual(exact.row, row);
-    }
 
-    const selected = (await Keis.of(repo).list({ limit: 1 })).rows[0]!;
+    const selected = (await Keis.of(repo).list({ limit: 1 })).rows![0]!;
     const unrelated = contracts.find(({ id }) => id !== selected.id && id !== contracts[0]!.id)!;
     const corrupt = await writeBlob(git, '{"version":1}');
     repository.run(["update-ref", unrelated.ref, corrupt]);
@@ -307,20 +303,29 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
         writeFileSync(refs, "");
         const bounded = await Keis.of(traced).list({ limit: 1 });
         assert.deepEqual(bounded.rows, [selected]);
-        assert.equal(bounded.hasMore, true);
-        assert.equal(readFileSync(refs, "utf8"), `${contracts.find(({ id }) => id === selected.id)!.ref}\n`);
+        assert.equal(bounded.more, true);
+        assert.equal(readFileSync(refs, "utf8"), "", "the summary catalogue reads no handoff ref");
         assert.equal(readFileSync(calls, "utf8").includes(unrelated.worktree), false);
         writeFileSync(calls, "");
         writeFileSync(refs, "");
         const exact = await Keis.of(traced).observe({ id: selected.id });
         assert.equal(exact.kind, "present");
-        if (exact.kind === "present") assert.deepEqual(exact.row, selected);
-        assert.equal(readFileSync(refs, "utf8"), `${contracts.find(({ id }) => id === selected.id)!.ref}\n`);
+        if (exact.kind === "present")
+          assert.deepEqual(
+            exact.row,
+            afterDetails.find(({ id }) => id === selected.id),
+          );
         assert.equal(readFileSync(calls, "utf8").includes(unrelated.worktree), false);
       },
     );
-    await assert.rejects(Keis.of(repo).list({  }), /handoff receipt is malformed/u);
-    await assert.rejects(Keis.of(repo).observe({ id: unrelated.id }), /handoff receipt is malformed/u);
+    assert.deepEqual(
+      (await Keis.of(repo).list({})).rows,
+      after.rows,
+      "the summary catalogue does not read the malformed handoff receipt",
+    );
+    const malformed = await Keis.of(repo).observe({ id: unrelated.id });
+    assert.equal(malformed.kind, "present");
+    if (malformed.kind === "present") assert.equal(malformed.row.issue, undefined);
     repository.run(["update-ref", "-d", unrelated.ref]);
 
     const matching = contracts[0]!;
@@ -331,8 +336,8 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const resolved = await Keis.of(repo).observe({ id: matching.id });
     assert.equal(resolved.kind, "present");
     if (resolved.kind !== "present") throw new Error("missing resolved row");
-    assert.equal(resolved.row.workspaceObservation.kind, "dirty");
-    if (resolved.row.workspaceObservation.kind === "dirty") assert.equal(resolved.row.workspaceObservation.merge, null);
+    assert.equal(resolved.row.workspace.kind, "present");
+    if (resolved.row.workspace.kind === "present") assert.equal(resolved.row.workspace.merge, undefined);
   });
 
   test("plain deliver conflict is an executable handoff and does not mutate", async () => {
@@ -340,12 +345,9 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const git = await cachedRepositoryAt(repository.path);
     const journal = await readRef(git, GIT_REF);
     await assertRefused(() => contract.deliver(), {
-      kind: "integration-failed",
-      contractId: await publicContractId(contract),
-      reason: "conflict",
+      kind: "integration-conflict",
       targetHead,
       conflictPaths: ["a.txt", "z.txt"],
-      recovery: DELIVER_CONFLICT_RECOVERY,
     });
     const state = present(await contract.state());
     assert.equal(state.delivery, null);
@@ -449,11 +451,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
           await pending.catch(() => undefined);
         }
         const reviewed = await pending;
-        assert.deepEqual(
-          reviewed.facts.map((fact) => fact.kind),
-          ["attestation", "reintegrated", "claimed"],
-        );
-        assert.equal(accepted(reviewed).value.placement, undefined);
+        assert.equal(accepted(reviewed).placement?.kind, "placed");
         const finalState = present(await contract.state());
         assert.equal(finalState.terminal?.kind, "claimed");
         assert.equal(finalState.currentIntegration?.snapshot, repository.run(["rev-parse", "refs/heads/main"]).trim());
@@ -470,20 +468,24 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
         gates: [],
       }),
     );
-    const state = present(await bound.value.kei.state());
+    const state = present(await bound.kei.state());
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);
     writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
     repository.run(["-C", worktree, "add", "candidate.txt"]);
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
 
-    const delivered = await bound.value.kei.deliver();
+    let preparedIntegration: string | undefined;
+    const delivered = await bound.kei.deliver({}, { observe: (event) => {
+      if (event.kind !== "admitted" || event.fact.kind !== "deliver") return;
+      preparedIntegration = event.fact.data.integration.snapshot;
+      writeFileSync(join(repository.path, "target-only.txt"), "moved after candidate admission\n");
+      repository.run(["add", "target-only.txt"]);
+      repository.run(["commit", "--quiet", "-m", "advance target after admission"]);
+    } });
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
-    assert.deepEqual(delivered.value.gates, []);
-    assert.deepEqual(
-      delivered.facts.map((fact) => fact.kind),
-      ["deliver", "claimed"],
-    );
-    assert.equal(delivered.value.placement, undefined);
-    assert.equal(present(await bound.value.kei.state()).terminal?.kind, "claimed");
+    assert.ok(delivered.placement?.kind === "placed");
+    assert.notEqual(delivered.integration, preparedIntegration);
+    assert.deepEqual(present(await bound.kei.state()).attestations, []);
+    assert.equal(present(await bound.kei.state()).terminal?.kind, "claimed");
   });
 });

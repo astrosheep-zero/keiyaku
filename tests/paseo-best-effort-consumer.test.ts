@@ -19,25 +19,27 @@ import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";
 import { createRegistrationHandoff, registerRegistrationHooks } from "../plugins/paseo/plugin/server/handoff.js";
-import { projectTurns } from "../src/akuma/projection.js";
+import { activityHistorySchema, projectTurns } from "../src/akuma/projection.js";
+import { akumaId } from "../src/akuma/identity.js";
 import { activityFact, turnEndFact } from "./support/akuma-fixtures.js";
 import { expectBodySettles } from "./support/process.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
 import { projectTimelineRows } from "../node_modules/@getpaseo/server/dist/server/server/agent/timeline-projection.js";
-import { historySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { createHistorySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 import type { Tell, TellAdmission } from "../plugins/paseo/plugin/server/message.js";
 import { stopAttempt, type Stop } from "../plugins/paseo/plugin/server/stop.js";
 import type { AkumaTransport } from "../plugins/paseo/plugin/server/transport.js";
+const historySchema = createHistorySchema(activityHistorySchema);
 const logger = pino({ level: "silent" });
 const at = "2026-10-15T00:00:00.000Z";
-const turn = (n: number): Row => ({ kind: "turn", sequence: n, turnSequence: n, at });
+const AKUMA_ID = akumaId({ akumaName: "test", suffix: "be57eff0" });
+const turn = (n: number): Row => ({ kind: "turn", sequence: n, bodySequence: n, at });
 const answer = (n: number, sequence: number, text = "done"): Row => ({ kind: "outcome", sequence, turnSequence: n, at, outcome: { kind: "answered", answer: text } });
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
-function receipt(text: string, id: string, launch?: number, failed = false): TellAdmission {
-  return { admission: { fact: "recorded", tellId: id },
-    row: { kind: "tell", sequence: 1, at, tellId: id, text, state: "pending",
-      deliveries: launch === undefined ? [] : [{ route: "launch", turnSequence: launch, deliveredAt: at }] },
-    wake: failed ? { kind: "failed", diagnostic: "test wake failed" } : { kind: launch === undefined ? "held" : "told" } };
+function receipt(_text: string, id: string, launch?: number, failed = false): TellAdmission {
+  return { akumaId: AKUMA_ID, tellId: id,
+    ...(failed ? { wake: { kind: "failed" as const, diagnostic: "test wake failed" } }
+      : launch === undefined ? {} : { wake: { kind: "pending" as const } }) };
 }
 
 /** One bridge mutation as the typed transport sees it; there is no command line left to record. */
@@ -168,7 +170,7 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
     if (event.type !== "agent_state") return;
     for (const resolve of stateWaiters.get(event.agent.lifecycle) ?? []) resolve();
   }, { replayState: false });
-  const agent = await manager.createAgent({ provider: "keiyaku", cwd: root, providerOptions: { world: root, akuId: "aku/test/best-effort" } }, undefined, { workspaceId: undefined });
+  const agent = await manager.createAgent({ provider: "keiyaku", cwd: root, providerOptions: { world: root, akuId: AKUMA_ID } }, undefined, { workspaceId: undefined });
   const events: AgentStreamEvent[] = [];
   agent.session!.subscribe((event) => events.push(event));
   const drain = async () => { await tick(); await manager.flush(); };
@@ -207,8 +209,8 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
     /** Publish one change through the live observation, as the real producer does. */
     push(value: Row[]) { const frame = page(value); const deliver = waiting; waiting = undefined;
       if (deliver === undefined) queued.push(frame); else deliver(frame); },
-    async sync() { await bridge.sync({ world: root, akuId: "aku/test/best-effort" }); await drain(); },
-    async refresh() { await bridge.refresh({ world: root, akuId: "aku/test/best-effort" }); await drain(); },
+    async sync() { await bridge.sync({ world: root, akuId: AKUMA_ID }); await drain(); },
+    async refresh() { await bridge.refresh({ world: root, akuId: AKUMA_ID }); await drain(); },
     close,
     send(text: string, id: string) { return startAgentRun(manager, agent.id, text, logger, { activeTurnBehavior: "steer", replaceRunning: true, clearPendingPermissions: true, runOptions: { clientMessageId: id } }); },
   };
@@ -220,16 +222,16 @@ const page = (rows: Row[], metadata: Partial<Omit<History, "rows">> = {}): Histo
 test("a live report remains informational until its exact Turn outcome", async (t) => {
   const h = await harness(t);
   const report: Row = { kind: "report", sequence: 3, bodySequence: 1, turnSequence: 2,
-    text: "working [truncated]", truncated: true, at };
+    text: "working", at };
   h.push([turn(2)]); await h.drain();
   h.push(historySchema.shape.rows.parse([turn(2), report])); await h.drain();
   assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
   const reports = () => h.events.filter((event) => event.type === "timeline" && event.item.type === "notification"
-    && event.item.message === "Progress report: working [truncated]");
+    && event.item.message === "Progress report: working");
   assert.equal(reports().length, 1);
   const observed = reports()[0];
   assert.ok(observed?.type === "timeline" && observed.item.type === "notification");
-  assert.equal(observed.item.message, "Progress report: working [truncated]");
+  assert.equal(observed.item.message, "Progress report: working");
   h.push(historySchema.shape.rows.parse([turn(2), report])); await h.drain();
   assert.equal(reports().length, 1);
   h.push(historySchema.shape.rows.parse([turn(2), report, answer(2, 4)])); await h.drain();
@@ -300,7 +302,7 @@ for (const failed of [false, true]) test(`recorded steer succeeds with ${failed 
 
 test("installed AgentManager registration automatically recovers the missed open Turn through the real handoff hook", async t => {
   const snapshot = [
-    { kind: "tell" as const, sequence: 10, at, tellId: "old", text: "old input", state: "told" as const },
+    { kind: "tell" as const, sequence: 10, at, tellId: "old", text: "old input", state: "told" as const, deliveries: [] },
     turn(11), answer(11, 12, "old answer"), turn(13),
   ];
   const h = await harness(t, {}, snapshot, true);
@@ -377,7 +379,7 @@ test("installed AgentManager refresh keeps an idle mirror through actual GC and 
 
 test("post-create sync restores the installed consumer's running Turn without replay or execution", async (t) => {
   const snapshot = [
-    { kind: "tell" as const, sequence: 10, at, tellId: "old", text: "old input", state: "told" as const },
+    { kind: "tell" as const, sequence: 10, at, tellId: "old", text: "old input", state: "told" as const, deliveries: [] },
     turn(11), answer(11, 12, "old answer"), turn(13),
   ];
   const h = await harness(t, {}, snapshot);
@@ -521,7 +523,7 @@ test("idle admission with an already observed native start must not let command 
 test("combined best-effort Steer, explicit Stop, and later Tell preserve the same Akuma identity", async (t) => {
   let n = 0;
   const h = await harness(t, {
-    stop: async () => stopAttempt("killed", "aku/test/best-effort"),
+    stop: async () => stopAttempt("killed", AKUMA_ID),
     tell: async (_world, _akuId, _signal, text) => {
       n++;
       if (n === 1) { h.setRows([turn(2)]); return receipt(text, "initial", 2); }
@@ -534,7 +536,7 @@ test("combined best-effort Steer, explicit Stop, and later Tell preserve the sam
   assert.deepEqual(h.calls.map((call) => call.op), ["tell", "tell"]);
   assert.deepEqual(await h.manager.cancelAgentRun(h.agent.id), { status: "settled" });
   await h.send("after stop", "after-stop"); await h.manager.waitForAgentRunStart(h.agent.id);
-  assert.deepEqual(h.calls.map((call) => [call.op, call.akuId]), [["tell", "aku/test/best-effort"], ["tell", "aku/test/best-effort"], ["stop", "aku/test/best-effort"], ["tell", "aku/test/best-effort"]]);
+  assert.deepEqual(h.calls.map((call) => [call.op, call.akuId]), [["tell", AKUMA_ID], ["tell", AKUMA_ID], ["stop", AKUMA_ID], ["tell", AKUMA_ID]]);
   assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/4");
   assert.equal(h.events.filter((event) => event.type === "turn_canceled" && event.turnId === "turn/2").length, 1);
   h.setRows([turn(2), turn(4), answer(4, 5)]); await h.refresh();

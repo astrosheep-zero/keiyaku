@@ -53,7 +53,7 @@ test("tell accepts a bare zod schema and decodes by inference", async () => {
     const { allocated, akuma } = await bornWorld(root, "a2000001", spawn);
     fixtures.set(allocated.paths.directory, { adapter: answering('{"ok":true}'), now: "2026-08-10T00:00:01.000Z" });
     const decoded = await akuma.ask("direct", { schema: z.object({ ok: z.boolean() }) });
-    const typed: { ok: boolean } | undefined = decoded.observation.reason === "answered" ? decoded.observation.answer : undefined;
+    const typed: { ok: boolean } | undefined = decoded.kind === "answered" ? decoded.answer : undefined;
     assert.equal(typed?.ok, true);
     await settleFixtureBodies(bodies);
   } finally {
@@ -84,7 +84,9 @@ test("a foreign standard schema carrying a toJSONSchema method decodes", async (
     const { allocated, akuma } = await bornWorld(root, "a2000005", spawn);
     fixtures.set(allocated.paths.directory, { adapter: answering('{"ok":true}'), now: "2026-08-10T00:00:01.000Z" });
     const decoded = await akuma.ask("foreign-method", { schema: foreign });
-    assert.deepEqual(decoded.observation, { reason: "answered", answer: { ok: true } });
+    assert.equal(decoded.kind, "answered");
+    if (decoded.kind !== "answered") throw new Error("expected an answer");
+    assert.deepEqual(decoded.answer, { ok: true });
     await settleFixtureBodies(bodies);
   } finally {
     await settleFixtureBodies(bodies);

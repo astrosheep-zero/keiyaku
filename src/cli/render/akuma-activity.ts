@@ -2,14 +2,17 @@ import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaStatus } from "../../akuma/akuma.js";
 import type { KillEvidence } from "../../akuma/heart/index.js";
 import type { ActivityRow } from "../../akuma/projection.js";
+import type { CompactOutcome, CompactTimeline, StatusPreview } from "../../akuma/status-projection.js";
 import type {
   AkumaAskObservation,
   AkumaAskResult,
   AkumaTellResult,
   AkumaWaitResult,
+  AkumaWaitItem,
 } from "../../akuma/selection-observation.js";
-import type { AkumaObservation, CreatedDebtObservation, DispatchAssociation } from "../../index.js";
-import type { SpawnObservation, SpawnResult } from "../../library/akuma-creation.js";
+import type { AkumaObservation } from "../../index.js";
+import type { SpawnResult } from "../../library/akuma-creation.js";
+import type { TellResult } from "../../akuma/body.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import { dispositionText } from "./debt.js";
@@ -58,9 +61,13 @@ export function frameRule(headLines: readonly string[], columns?: number): strin
 /** Tool rows an activity view prints after each say or Tell checkpoint; the surplus folds in place. */
 const TOOL_BUDGET = 3;
 
-type StatusTimeline = AkumaObservation["status"]["timeline"];
-type StatusTimelineEntry = StatusTimeline["entries"][number];
-type RenderRow = ActivityRow | Extract<StatusTimelineEntry, { kind: "row" }>["row"];
+type StatusTimeline = AkumaStatus["timeline"];
+type RenderRow = ActivityRow;
+type PresentationRow =
+  | RenderRow
+  | StatusPreview
+  | Readonly<{ kind: "outcome"; outcome: CompactOutcome }>
+  | Readonly<{ kind: "call" | "tell" | "pending-tell"; text: string }>;
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = StatusTimeline;
 type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows: readonly ActivityRow[] }>;
@@ -70,7 +77,11 @@ function identity(id: string, alias?: string): string {
   return `${id}${alias === undefined ? "" : ` (${alias})`}`;
 }
 
-function associatedContractId(contract: DispatchAssociation): string | undefined {
+type DisplayAssociation =
+  | Readonly<{ kind: "none" }>
+  | Readonly<{ kind: "associated"; contractId: string }>
+  | Readonly<{ kind: "failed"; diagnostic: string }>;
+function associatedContractId(contract: DisplayAssociation): string | undefined {
   return contract.kind === "associated" ? contract.contractId : undefined;
 }
 
@@ -89,7 +100,7 @@ export function subordinateLines(lines: readonly string[]): readonly string[] {
  * The one observation identity line: complete Akuma identity, optional alias as a parenthetical
  * supplement, and a known associated Contract inline behind the shared separator.
  */
-function panelIdentity(id: string, alias?: string, contract?: DispatchAssociation): string {
+function panelIdentity(id: string, alias?: string, contract?: DisplayAssociation): string {
   const contractId = contract === undefined ? undefined : associatedContractId(contract);
   return `${identity(id, alias)}${contractId === undefined ? "" : `${FACT_SEPARATOR}${contractId}`}`;
 }
@@ -101,7 +112,7 @@ function panelIdentity(id: string, alias?: string, contract?: DispatchAssociatio
 export function panelHead(
   id: string,
   alias: string | undefined,
-  contract: DispatchAssociation | undefined,
+  contract: DisplayAssociation | undefined,
   context: readonly string[] = [],
 ): readonly string[] {
   return [panelIdentity(id, alias, contract), ...subordinateLines(context)];
@@ -123,19 +134,19 @@ export function actionReceipt(
   return [`${input.mark} ${input.verb} ${identity(input.id, input.alias)}`, ...subordinateLines(input.evidence ?? [])];
 }
 
-function contractFacts(contract: DispatchAssociation, columns: number): readonly string[] {
+function contractFacts(contract: DisplayAssociation, columns: number): readonly string[] {
   return contract.kind === "failed" ? diagnosticLines("contract association", contract.diagnostic, columns) : [];
 }
 
 /** The action family's one mark cell: a settled success stays blank, and live is only a frame mark. */
-function toolMargin(row: Extract<RenderRow, { kind: "tool" }>, live: boolean): string {
+function toolMargin(row: Extract<PresentationRow, { kind: "tool" }>, live: boolean): string {
   if (row.state === "active") return live ? "●  " : "?  ";
   if (row.state === "unsettled") return "?  ";
   return row.state.status === "ok" ? ACTION_MARGIN : "!  ";
 }
 
 function rowText(
-  row: RenderRow,
+  row: PresentationRow,
   tool?: ToolRepr,
 ): Readonly<{
   text: string;
@@ -148,7 +159,8 @@ function rowText(
     row.kind === "thought" ||
     row.kind === "note" ||
     row.kind === "call" ||
-    row.kind === "tell"
+    row.kind === "tell" ||
+    row.kind === "pending-tell"
   ) {
     return {
       text: row.text,
@@ -198,7 +210,7 @@ type RowView = Readonly<{
 }>;
 
 function rowPrefix(
-  row: RenderRow,
+  row: PresentationRow,
   tool: ToolRepr | undefined,
   columns: number,
   view: RowView,
@@ -213,7 +225,8 @@ function rowPrefix(
       continuation: TOP_CONTINUATION,
     };
   if (row.kind === "said") return { first: TOP_SPEAK, continuation: TOP_SPEAK };
-  if (row.kind === "tell" && row.state === "pending") return { first: TOP_PENDING, continuation: TOP_CONTINUATION };
+  if (row.kind === "pending-tell" || (row.kind === "tell" && "state" in row && row.state === "pending"))
+    return { first: TOP_PENDING, continuation: TOP_CONTINUATION };
   return { first: TOP_INPUT, continuation: TOP_CONTINUATION };
 }
 
@@ -289,7 +302,7 @@ function omissionMarker(text: string, columns: number): string {
   return `${actionPrefix(ACTION_MARGIN, OMISSION, columns).first}${text}`;
 }
 
-function rowBody(row: RenderRow, text: string, columns: number): string {
+function rowBody(row: PresentationRow, text: string, columns: number): string {
   if (row.kind !== "tool" || row.call.kind !== "other") return text;
   return toolContent(row, columns);
 }
@@ -322,7 +335,7 @@ function renderCommandOverflow(
 }
 
 /** Every selected timeline row renders through here: one prefix family per row class. */
-function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {}): readonly string[] {
+function renderRow(row: PresentationRow, context: TextRenderContext, view: RowView = {}): readonly string[] {
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   const value = rowText(row, tool);
   const { first, continuation } = rowPrefix(row, tool, context.columns, view);
@@ -332,7 +345,8 @@ function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {
   if (view.tailAnswer === true && row.kind === "outcome" && row.outcome.kind === "answered")
     return tailAnswerPreview(first, value.text, context.columns);
   const available = context.columns - displayColumns(first) - displayColumns(value.suffix ?? "");
-  const singleLine = compact || row.kind === "call" || row.kind === "tell" || row.kind === "turn";
+  const singleLine =
+    compact || row.kind === "call" || row.kind === "tell" || row.kind === "pending-tell" || row.kind === "turn";
   return renderBoundedPayload({
     text: rowBody(row, value.text, available),
     first,
@@ -343,6 +357,21 @@ function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {
     truncated: "truncated" in row && row.truncated === true,
     ...(singleLine || row.kind === "tool" ? {} : { preserveLines: true as const }),
   });
+}
+
+/** One native activity row through the shared row grammar. */
+export function activityRowLines(
+  row: ActivityRow | StatusPreview | CompactOutcome,
+  context: TextRenderContext,
+  view: Readonly<{ compact?: true; tailAnswer?: true }> = {},
+): readonly string[] {
+  return renderRow(
+    row.kind === "answered" || row.kind === "failed" || row.kind === "canceled"
+      ? { kind: "outcome", outcome: row }
+      : row,
+    context,
+    view,
+  );
 }
 
 function groupedEntries(
@@ -392,7 +421,7 @@ function currentTurnBoundary(activity: RenderedActivity): CurrentTurnBoundary | 
   if (row === undefined) return undefined;
   // The projector selects a typed opening: its call or delivered launch Tell.
   if (row.kind !== "call" && !(row.kind === "tell" && row.state === "told")) return undefined;
-  return { row, turnSequence: snapshot.turn.turnSequence };
+  return { row, turnSequence: snapshot.turn.sequence };
 }
 
 /** Open status hides internal thought narration without selecting a second activity window. */
@@ -678,8 +707,16 @@ export function activityStream(context: TextRenderContext): ActivityStream {
   });
 }
 
+function lifeConclusion(life: AkumaStatus["life"], pending: boolean): Readonly<{ mark: string; verb: string }> {
+  if (life === "running") return { mark: "●", verb: "running" };
+  if (life === "asleep") return pending ? { mark: "⧗", verb: "pending tell" } : { mark: "✓", verb: "completed" };
+  if (life === "killed") return { mark: "×", verb: "killed" };
+  if (life === "hung") return { mark: "?", verb: "hung" };
+  return { mark: "!", verb: life };
+}
+
 function conclusionMarkVerb(
-  status: AkumaObservation["status"] | undefined,
+  status: AkumaStatus | undefined,
   outcome: "answered" | "failed" | "unanswered" | "life",
 ): Readonly<{ mark: string; verb: string }> {
   if (outcome === "failed" || (status !== undefined && failedOutcomeDiagnostic(status) !== undefined))
@@ -687,15 +724,7 @@ function conclusionMarkVerb(
   if (outcome === "answered") return { mark: "✓", verb: "answered" };
   if (outcome === "unanswered") return { mark: "○", verb: "unanswered" };
   if (status === undefined) return { mark: "⧗", verb: "pending tell" };
-  if (status.life === "running") return { mark: "●", verb: "running" };
-  if (!defaultWaitComplete(status)) {
-    return { mark: "⧗", verb: "pending tell" };
-  }
-  if (status.life === "asleep") return { mark: "✓", verb: "completed" };
-  if (status.life === "killed") return { mark: "×", verb: "killed" };
-  if (status.life === "hung") return { mark: "?", verb: "hung" };
-  if (status.life === "untidy") return { mark: "!", verb: "untidy" };
-  return { mark: "!", verb: "stranded" };
+  return lifeConclusion(status.life, !defaultWaitComplete(status));
 }
 
 function durationText(durationMs: number): string {
@@ -727,16 +756,16 @@ export function inputWaitConclusion(
   input: Readonly<{ startedAt: number; completedAt?: string | null; now?: number; status?: AkumaStatus }>,
 ): readonly string[] {
   const end = input.now;
-  const complete = observation.reason !== "deadline";
+  const complete = observation.kind !== "deadline";
   const pinned = input.completedAt == null ? Number.NaN : Date.parse(input.completedAt);
   const at = complete ? (Number.isFinite(pinned) ? pinned : undefined) : end;
   const conclusion = conclusionMarkVerb(
     input.status,
-    observation.reason === "answered"
+    observation.kind === "answered"
       ? "answered"
-      : observation.reason === "failed" || observation.reason === "invalid-output"
+      : observation.kind === "failed" || observation.kind === "invalid-output"
         ? "failed"
-        : observation.reason === "unanswered"
+        : observation.kind === "unanswered"
           ? "unanswered"
           : "life",
   );
@@ -748,7 +777,7 @@ export function inputWaitConclusion(
       ...(end === undefined ? {} : { end }),
       ...conclusion,
     }),
-    ...(observation.reason === "failed" || observation.reason === "invalid-output"
+    ...(observation.kind === "failed" || observation.kind === "invalid-output"
       ? [`! ${safeText(observation.diagnostic)}`]
       : []),
   ];
@@ -758,7 +787,7 @@ export function inputWaitConclusion(
 export type ObservedCallHead = Readonly<{
   id: string;
   alias?: string;
-  contract: DispatchAssociation;
+  contract: DisplayAssociation;
   facts: readonly string[];
   /** A directory the invocation already resolved; never read here to fill the panel. */
   cwd?: string;
@@ -790,10 +819,10 @@ export type InputWaitStream = Readonly<{
 
 /**
  * The call-observation projection of one input wait: the same admitted/observe/frame/flush/opened
- * lifetime with the closing judgment translated from the native SpawnObservation.
+ * lifetime with the closing judgment from the native compact spawn result.
  */
 export type CallObservationStream = Readonly<
-  Omit<InputWaitStream, "conclude"> & { conclude: (observation: SpawnObservation) => string }
+  Omit<InputWaitStream, "conclude"> & { conclude: (result: SpawnResult) => string }
 >;
 
 function failedOutcomeDiagnostic(status: AkumaStatus): string | undefined {
@@ -883,7 +912,7 @@ export function inputWaitStream(
 export function callObservationStream(
   context: TextRenderContext,
   head: ObservedCallHead,
-  options: Readonly<{ now?: () => number; admittedAt?: string }> = {},
+  options: Readonly<{ now?: () => number; admittedAt?: string; prompt?: string }> = {},
 ): CallObservationStream {
   const stream = inputWaitStream(context, () => head, {
     cursor: "empty",
@@ -892,49 +921,40 @@ export function callObservationStream(
   });
   stream.admitted({ ...(options.admittedAt === undefined ? {} : { at: options.admittedAt }), rows: [] });
   /** Tell rows already settled on the timeline, so a failed close never replays one. */
-  const settledTells = new Set<number>();
+  const settledTells = new Set<string>();
   return {
     ...stream,
     observe: (observation) => {
-      for (const row of observation.rows)
-        if (row.kind === "tell" && row.state === "told") settledTells.add(row.sequence);
+      for (const row of observation.rows) if (row.kind === "tell" && row.state === "told") settledTells.add(row.tellId);
       return stream.observe(observation);
     },
-    conclude: (observation) => {
-      if (observation.kind === "failed") {
-        const tell = observation.tell;
+    conclude: (result) => {
+      if (result.failure !== undefined) {
         const evidence =
-          tell === undefined || settledTells.has(tell.row.sequence) ? [] : [tellAdmissionRow(tell, context)];
+          result.tellId === undefined || settledTells.has(result.tellId) || options.prompt === undefined
+            ? []
+            : [tellAdmissionRow(options.prompt, context, result.wake)];
         return stream.conclude({
           kind: "failed",
-          diagnostic: observation.failure.diagnostic,
+          diagnostic: result.failure.diagnostic,
           ...(evidence.length === 0 ? {} : { evidence }),
         });
       }
-      if (observation.kind !== "observed") return "";
-      return stream.conclude({
-        kind: "observed",
-        observation: observation.observation,
-        ...(observation.completedAt === undefined ? {} : { completedAt: observation.completedAt }),
-      });
+      return result.input === undefined ? "" : stream.conclude({ kind: "observed", observation: result.input });
     },
   };
 }
 
-type CreatedDebtRow = Extract<CreatedDebtObservation, { kind: "present" }>["rows"][number];
+type CreatedDebtRow = Extract<NonNullable<AkumaObservation["createdDebts"]>, readonly unknown[]>[number];
 
-function renderReportedChangeLines(snapshot: RenderedSnapshot): readonly string[] {
-  if (snapshot.reportedChanges.length === 0 && snapshot.reportedChangesOmitted === 0) return [];
-  const width = snapshot.reportedChanges.reduce(
-    (max, change) => Math.max(max, renderDiffstat(change.diffstat).length),
-    0,
-  );
+function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
+  const changes = view.changes ?? [];
+  if (changes.length === 0 && view.moreChanges !== true) return [];
+  const width = changes.reduce((max, change) => Math.max(max, renderDiffstat(change.diffstat).length), 0);
   return [
-    `changes ${snapshot.reportedChanges.length + snapshot.reportedChangesOmitted}`,
-    ...snapshot.reportedChanges.map(
-      (change) => `  ${renderDiffstat(change.diffstat).padEnd(width)}  ${safeText(change.path)}`,
-    ),
-    ...(snapshot.reportedChangesOmitted > 0 ? [`  ${OMISSION} ${snapshot.reportedChangesOmitted} more files`] : []),
+    "changes",
+    ...changes.map((change) => `  ${renderDiffstat(change.diffstat).padEnd(width)}  ${safeText(change.path)}`),
+    ...(view.moreChanges === true ? [`  ${OMISSION} more files`] : []),
   ];
 }
 
@@ -951,39 +971,34 @@ function renderDebtRow(row: CreatedDebtRow, columns: number): readonly string[] 
   });
 }
 
-function renderDebtContextLines(created: CreatedDebtObservation | undefined, columns: number): readonly string[] {
+function renderDebtContextLines(created: AkumaObservation["createdDebts"], columns: number): readonly string[] {
   if (created === undefined) return [];
-  if (created.kind === "failed") return diagnosticLines("created debts", created.diagnostic, columns);
-  if (created.rows.length === 0) return [];
-  return [`debts ${created.rows.length}`, ...created.rows.flatMap((row) => renderDebtRow(row, columns))];
+  if ("kind" in created) return diagnosticLines("created debts", created.diagnostic, columns);
+  return [`debts ${created.length}`, ...created.flatMap((row) => renderDebtRow(row, columns))];
 }
 
-type SnapshotView = Readonly<{
-  status: AkumaObservation["status"];
-  contract: DispatchAssociation;
-  createdDebts?: CreatedDebtObservation;
-}>;
+type SnapshotView = AkumaObservation;
 
 type SnapshotCoreOptions = Readonly<{
   alias?: string;
   facts?: readonly string[];
 }>;
 
-function selectedStatusActivity(snapshot: RenderedSnapshot, context: TextRenderContext): readonly string[] {
-  const entries = coalesceAdjacentGaps(
-    snapshot.kind === "open" ? visibleOpenSnapshotEntries(snapshot) : orderedSnapshotEntries(snapshot),
-  );
-  const rendered = entries.map((entry) => {
-    if (entry.kind === "gap")
-      return { exempt: true, lines: [omissionMarker(`${entry.count} omitted`, context.columns)] };
-    const row = entry.row;
+function selectedStatusActivity(snapshot: CompactTimeline, context: TextRenderContext): readonly string[] {
+  const rendered = (snapshot.entries ?? []).map((entry) => {
+    if (entry.kind === "gap") return { exempt: true, omitted: true, lines: [] };
     const exempt =
-      row.kind === "outcome" ||
-      (row.kind === "tell" && row.state === "pending") ||
-      (row.kind === "tool" && (row.state === "active" || row.state === "unsettled" || row.state.status === "error"));
-    return { exempt, lines: renderRow(row, context) };
+      entry.kind === "answered" ||
+      entry.kind === "failed" ||
+      entry.kind === "canceled" ||
+      entry.kind === "pending-tell" ||
+      (entry.kind === "tool" && (typeof entry.state === "string" || entry.state.status === "error"));
+    const row: PresentationRow =
+      entry.kind === "answered" || entry.kind === "failed" || entry.kind === "canceled"
+        ? { kind: "outcome", outcome: entry }
+        : entry;
+    return { exempt, omitted: false, lines: renderRow(row, context) };
   });
-  const kept = rendered.map(({ lines }) => lines);
   // Allocate the budget backwards without changing the order of the resulting lines.
   let remaining = 3;
   for (let i = rendered.length - 1; i >= 0; i -= 1) {
@@ -991,16 +1006,15 @@ function selectedStatusActivity(snapshot: RenderedSnapshot, context: TextRenderC
     if (item.exempt) continue;
     const take = Math.min(remaining, item.lines.length);
     remaining -= take;
-    kept[i] = take === 0 ? [] : item.lines.slice(-take);
+    item.omitted = take < item.lines.length;
+    item.lines = take === 0 ? [] : item.lines.slice(-take);
   }
   let marked = false;
-  return rendered.flatMap((item, index) => {
-    const lines = kept[index]!;
-    if (!item.exempt && lines.length < item.lines.length && !marked) {
-      marked = true;
-      return [omissionMarker("earlier activity omitted", context.columns), ...lines];
-    }
-    return lines;
+  return rendered.flatMap((item) => {
+    const marker = item.omitted && !marked ? [omissionMarker("earlier activity omitted", context.columns)] : [];
+    if (item.omitted) marked = true;
+    if (item.lines.length > 0) marked = false;
+    return [...marker, ...item.lines];
   });
 }
 
@@ -1009,27 +1023,31 @@ function snapshotCore(
   context: TextRenderContext,
   options: SnapshotCoreOptions,
 ): Readonly<{ activity: readonly string[]; head: readonly string[]; facts: readonly string[] }> {
-  const activity = selectedStatusActivity(view.status.timeline, context);
-  // Static coordinates belong above the content boundary; a dynamic diagnostic stays below it.
-  const contextFacts = [...(view.status.cwd === undefined ? [] : [safeText(view.status.cwd)])];
+  const activity = selectedStatusActivity(view.timeline, context);
+  const contextFacts = [safeText(view.cwd)];
   const facts = [
-    ...contractFacts(view.contract, context.columns - SUBORDINATE_INDENT.length),
+    ...contractFacts(view.contract ?? { kind: "none" }, context.columns - SUBORDINATE_INDENT.length),
     ...(options.facts ?? []),
   ];
   return {
     activity,
-    head: panelHead(view.status.id, options.alias, view.contract, contextFacts),
+    head: panelHead(view.id, options.alias, view.contract, contextFacts),
     facts,
   };
 }
 
-function snapshotConclusion(status: AkumaObservation["status"]): string {
-  const timeline = status.timeline;
-  // The outcome row (`✓` / `!`) is already the ending; a closer would be a second mark carrying no
-  // new information, so it is absent exactly then.
-  if (timeline.kind === "idle" && timeline.outcome !== undefined) return "";
-  const { mark, verb } = conclusionMarkVerb(status, "life");
-  return `${mark} ${verb}`;
+function snapshotConclusion(status: AkumaObservation): string {
+  const entries = status.timeline.entries ?? [];
+  if (
+    status.timeline.kind === "idle" &&
+    entries.some((entry) => entry.kind === "answered" || entry.kind === "failed" || entry.kind === "canceled")
+  )
+    return "";
+  const conclusion = lifeConclusion(
+    status.life,
+    entries.some((entry) => entry.kind === "pending-tell"),
+  );
+  return `${conclusion.mark} ${conclusion.verb}${status.strandedReason === undefined ? "" : ` · ${status.strandedReason}`}`;
 }
 
 export function snapshotText(
@@ -1038,13 +1056,13 @@ export function snapshotText(
   options: SnapshotCoreOptions = {},
 ): string {
   const core = snapshotCore(view, context, options);
-  const conclusion = snapshotConclusion(view.status);
+  const conclusion = snapshotConclusion(view);
   const content = [...core.activity, ...(conclusion.length === 0 ? [] : [conclusion])];
   return [
     ...core.head,
     ...(content.length === 0 ? [] : [frameRule(core.head, context.columns), ...content]),
     ...subordinateLines([
-      ...renderReportedChangeLines(view.status.timeline),
+      ...renderReportedChangeLines(view),
       ...renderDebtContextLines(view.createdDebts, context.columns - SUBORDINATE_INDENT.length),
       ...core.facts,
     ]),
@@ -1081,22 +1099,21 @@ type AkumaPresentation = Readonly<{
 }>;
 
 export function askRawAnswer(result: AkumaAskResult, structured: boolean | undefined): string | undefined {
-  if (result.observation.reason !== "answered") return "";
-  return answerBytes(result.observation.answer, structured === true);
+  if (result.kind !== "answered") return "";
+  return result.answerUndefined === true ? "undefined" : answerBytes(result.answer, structured === true);
 }
 
-export function callRawAnswer(result: SpawnResult, streamed: boolean): string | undefined {
-  const observation = result.observation;
-  if (observation.kind !== "observed" || observation.observation.reason !== "answered")
-    return streamed ? "" : undefined;
-  return answerBytes(observation.observation.answer, result.structured === true);
+export function callRawAnswer(result: SpawnResult, structured: boolean, streamed: boolean): string | undefined {
+  const input = result.input;
+  if (input?.kind !== "answered") return streamed ? "" : undefined;
+  return "answerUndefined" in input ? "undefined" : answerBytes(input.answer, structured);
 }
 
 export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {
   if (historyId === undefined) return undefined;
-  if (result.kind === "exact-report") return result.report.text;
-  if (result.kind !== "exact") return undefined;
-  const outcome = result.outcome.outcome;
+  if (result.kind === "akuma-report") return result.text;
+  if (result.kind !== "akuma-exact") return undefined;
+  const outcome = result.outcome;
   return outcome.kind === "answered" ? outcome.answer : outcome.kind === "canceled" ? "canceled" : outcome.diagnostic;
 }
 
@@ -1134,13 +1151,12 @@ function waitLine(mark: string, subject: string, summary: string, columns: numbe
  * pending input shows its current answered preview or failed diagnostic, else completion. The
  * mark reports the observed life, never continuing liveness.
  */
-function waitSummary(status: AkumaStatus): WaitState & Readonly<{ summary: string }> {
-  const pending = status.timeline.entries.some(
-    (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
-  );
-  const outcome = status.timeline.kind === "idle" ? status.timeline.outcome?.outcome : undefined;
+function waitSummary(member: Extract<AkumaWaitItem, { kind: "observed" }>): WaitState & Readonly<{ summary: string }> {
+  const pending = member.pending !== undefined;
+  const outcome = member.outcome;
+  const life = WAIT_LIFE[member.life];
   const observed =
-    WAIT_LIFE[status.life] ??
+    life ??
     (pending
       ? { mark: "⧗", state: "pending tell" }
       : outcome === undefined
@@ -1154,8 +1170,9 @@ function waitSummary(status: AkumaStatus): WaitState & Readonly<{ summary: strin
     ...observed,
     summary: [
       observed.state,
-      ...(pending && status.life !== "asleep" ? ["pending tell"] : []),
-      ...(status.strandedReason === undefined ? [] : [status.strandedReason]),
+      ...(pending && life !== undefined ? ["pending tell"] : []),
+      ...(outcome?.kind === "failed" && (life !== undefined || pending) ? [preview(outcome.diagnostic, "failed")] : []),
+      ...(member.strandedReason === undefined ? [] : [member.strandedReason]),
     ].join(FACT_SEPARATOR),
   };
 }
@@ -1166,47 +1183,50 @@ function waitSummary(status: AkumaStatus): WaitState & Readonly<{ summary: strin
  * visible only as the snapshot's own bounded summary.
  */
 export function waitText(result: AkumaWaitResult, presentation: AkumaPresentation, context: TextRenderContext): string {
-  const alias = result.observations.length === 1 && result.unobserved.length === 0 ? presentation.alias : undefined;
-  return [
-    ...result.observations.map((observation) => {
-      const { mark, summary } = waitSummary(observation.status);
-      return waitLine(mark, identity(observation.status.id, alias), summary, context.columns);
-    }),
-    ...result.unobserved.map((member) =>
-      waitLine("!", safeText(member.id), `observation failed${FACT_SEPARATOR}${member.diagnostic}`, context.columns),
-    ),
-  ].join("\n");
+  const alias = result.results.length === 1 ? presentation.alias : undefined;
+  return result.results
+    .map((member) => {
+      if (member.kind === "missing")
+        return waitLine("!", identity(member.id, alias), "Akuma not found", context.columns);
+      if (member.kind === "unobserved")
+        return waitLine(
+          "!",
+          identity(member.id, alias),
+          `observation failed${FACT_SEPARATOR}${member.diagnostic}`,
+          context.columns,
+        );
+      const { mark, summary } = waitSummary(member);
+      return waitLine(mark, identity(member.id, alias), summary, context.columns);
+    })
+    .join("\n");
 }
 
 export function historyText(
   result: AkumaHistoryResult,
-  presentation: AkumaPresentation & Readonly<{ id?: string; last?: boolean }>,
+  presentation: AkumaPresentation & Readonly<{ id?: string; last?: boolean; since?: number }>,
   context: TextRenderContext,
 ): string {
   if (presentation.id !== undefined) {
-    return (
-      historyRawAnswer(result, presentation.id) ??
-      `${result.kind === "unknown-history" ? result.historyId : "unknown"} has no matching retained history`
-    );
+    return historyRawAnswer(result, presentation.id) ?? `${presentation.id} has no matching retained history`;
   }
-  if (presentation.last === true) return result.kind === "last" ? result.answer : "no answer retained";
-  if (result.kind !== "history") throw new Error("history result lacks page");
-  const rows = groupedRows(result.history.rows, context, { history: true });
+  if (presentation.last === true) return result.kind === "akuma-last" ? result.answer : "no answer retained";
+  if (result.kind !== "akuma") throw new Error("history result lacks page");
+  const rows = groupedRows(result.events, context, { history: true });
   const paging =
-    result.history.omitted > 0
-      ? [
+    result.omitted === undefined
+      ? []
+      : [
           omissionMarker(
-            result.history.hasLater
-              ? `${result.history.omitted} later events · showing first ${result.history.rows.length}`
-              : `${result.history.omitted} earlier events · showing last ${result.history.rows.length}`,
+            presentation.since !== undefined
+              ? `${result.omitted} later events · showing first ${result.events.length}`
+              : `${result.omitted} earlier events · showing last ${result.events.length}`,
             context.columns,
           ),
-        ]
-      : [];
+        ];
   // History is an immutable timeline, so it takes the shared heading and content boundary and
   // never gains a fabricated current-state conclusion or a live mark.
   const content = [...paging, ...rows];
-  const head = panelHead(result.id, presentation.alias, result.contract);
+  const head = panelHead(result.akumaId, presentation.alias, undefined);
   return [...head, ...(content.length === 0 ? [] : [frameRule(head, context.columns), ...content])].join("\n");
 }
 
@@ -1224,10 +1244,15 @@ export function tellPayloadLines(text: string, context: TextRenderContext): read
 }
 
 /** One admitted Tell as a timeline input row inside a shared panel; the panel owns the identity. */
-export function tellAdmissionRow(tell: AkumaTellResult["tell"], context: TextRenderContext): string {
-  const lead = tell.wake.kind === "failed" ? TOP_FAILURE : tell.wake.kind === "held" ? TOP_PENDING : TOP_INPUT;
+export function tellAdmissionRow(
+  text: string,
+  context: TextRenderContext,
+  wake?: TellResult["wake"] | AkumaTellResult["wake"],
+): string {
+  const lead =
+    wake?.kind === "failed" ? TOP_FAILURE : wake?.kind === "held" || wake?.kind === "pending" ? TOP_PENDING : TOP_INPUT;
   return renderBoundedPayload({
-    text: tell.row.text,
+    text,
     first: lead,
     continuation: TOP_CONTINUATION,
     columns: context.columns,
@@ -1237,37 +1262,54 @@ export function tellAdmissionRow(tell: AkumaTellResult["tell"], context: TextRen
   })[0]!;
 }
 
+export function tellControlLines(
+  result: Pick<AkumaAskResult, "wake" | "interrupt">,
+  context: TextRenderContext,
+): readonly string[] {
+  const lines: string[] = [];
+  const wake = result.wake;
+  if (wake?.kind === "failed") {
+    lines.push(
+      ...diagnosticLines("tell delivery", wake.diagnostic, context.columns - SUBORDINATE_INDENT.length, {
+        state: "failed",
+        suffix: wake.logPath === undefined ? "" : ` · log ${wake.logPath}`,
+      }),
+    );
+  } else if (wake?.kind === "pending") lines.push("wake pending");
+  const interrupt = result.interrupt;
+  if (interrupt !== undefined)
+    lines.push(
+      `interrupt ${interrupt.kind} · body/${interrupt.bodySequence}${interrupt.kind === "unavailable" ? ` · ${interrupt.evidence}` : ""}`,
+    );
+  return lines;
+}
+
 /**
  * One Tell action receipt: the delivery verdict and complete subject stand whole on the first line
  * with the submitted payload folded onto that same line, bounded so only its preview truncates. A
  * held Tell keeps neutral vocabulary; a failed delivery keeps its concrete diagnosis and native log
  * coordinates as separate supporting facts.
  */
-export function tellText(result: AkumaTellResult, alias: string | undefined, context: TextRenderContext): string {
-  const wake = result.tell.wake;
-  const mark = wake.kind === "failed" ? "!" : wake.kind === "held" ? "⧗" : "✓";
-  const verb = wake.kind === "failed" || wake.kind === "held" ? "tell" : "told";
+export function tellText(
+  result: AkumaTellResult,
+  prompt: string,
+  alias: string | undefined,
+  context: TextRenderContext,
+): string {
+  const wake = result.wake;
+  const mark = wake?.kind === "failed" ? "!" : wake?.kind === "pending" ? "⧗" : "✓";
+  const verb = wake?.kind === "failed" || wake?.kind === "pending" ? "tell" : "told";
   const head = actionReceipt({
     mark,
     verb,
-    id: result.akuma,
+    id: result.akumaId,
     ...(alias === undefined ? {} : { alias }),
   })[0]!;
-  const preview = safeText(result.tell.row.text).replace(/\s+/gu, " ").trim();
+  const preview = safeText(prompt).replace(/\s+/gu, " ").trim();
   const prefix = `${head} — `;
   // The verdict and identity never truncate, so an over-wide identity still keeps one visible
   // ellipsis for the input it could not show.
   const room = Math.max(1, context.columns - displayColumns(prefix));
   const verdict = preview.length === 0 ? head : `${prefix}${truncateDisplayText(preview, room)}`;
-  if (wake.kind !== "failed") return verdict;
-  const child = "child" in wake ? wake.child : undefined;
-  return [
-    verdict,
-    ...subordinateLines(
-      diagnosticLines("tell delivery", wake.diagnostic, context.columns - SUBORDINATE_INDENT.length, {
-        state: "failed",
-        suffix: child === undefined ? "" : ` · log ${child.log.path} ${child.log.from}..${child.log.to}`,
-      }),
-    ),
-  ].join("\n");
+  return [verdict, ...subordinateLines(tellControlLines(result, context))].join("\n");
 }

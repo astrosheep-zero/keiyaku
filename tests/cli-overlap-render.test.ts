@@ -1,47 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contractId, documentKey, entryUlid, snapshotId } from "../src/core/facts/types.js";
+import { contractId } from "../src/core/facts/types.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
 import { acceptedReceipt } from "./support/cli-fixtures.js";
-import type { BindOutcome, Fact, RegionOverlap } from "../src/index.js";
+import type { RegionOverlap } from "../src/index.js";
 
 const contract = contractId("kei/overlap-render-owner-5062");
-type AcceptedBind = Extract<BindOutcome, { kind: "accepted" }>;
-
-/** The bind fact names the target the receipt prints; the region observation is the value under test. */
-const bindFact: Extract<Fact, { kind: "bind" }> = {
-  v: 1,
-  at: "2026-01-01T00:00:00Z",
-  contract,
-  entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
-  kind: "bind",
-  data: {
-    coordinates: { start: snapshotId("start"), target: "refs/heads/main", workspace: "worktree" },
-    terms: {
-      document: { bytes: "", key: documentKey("overlap-render") },
-      segments: [],
-      gates: [],
-      requirements: {},
-      after: [],
-    },
-  },
-};
-
-/**
- * One native accepted bind outcome. The bind value also carries the SDK's `Keiyaku` handle, which this
- * renderer never reads; the region observation is stated natively and the handle is not simulated.
- */
-function bindAccepted(overlaps: readonly RegionOverlap[]): AcceptedBind {
-  return acceptedReceipt({
-    operation: "bind",
-    contract,
-    facts: [bindFact],
-    value: { overlaps } as AcceptedBind["value"],
-  });
-}
-
 function render(overlaps: readonly RegionOverlap[], columns = 100): string {
-  return renderAccepted(bindAccepted(overlaps), { columns, color: false });
+  return renderAccepted(
+    "bind",
+    acceptedReceipt("bind", {
+      contractId: contract,
+      target: "refs/heads/main",
+      ...(overlaps.length === 0 ? {} : { overlaps }),
+    }),
+    { columns, color: false },
+  );
 }
 
 const related = contractId("kei/overlap-render-peer-31ce");
@@ -50,16 +24,16 @@ test("overlap receipt renders identical declarations once and separates Contract
   assert.equal(
     render([
       {
-        contract: related,
+        contractId: related,
         patterns: [
-          { mine: "src/cli/parse.ts", theirs: "src/cli/parse.ts", relation: "same" },
-          { mine: "src/cli/parse.ts", theirs: "src/cli/parse.ts", relation: "same" },
-          { mine: "src/cli/usage.ts", theirs: "src/cli/usage.ts", relation: "same" },
+          { mine: "src/cli/parse.ts", theirs: "src/cli/parse.ts" },
+          { mine: "src/cli/parse.ts", theirs: "src/cli/parse.ts" },
+          { mine: "src/cli/usage.ts", theirs: "src/cli/usage.ts" },
         ],
       },
       {
-        contract: contractId("kei/overlap-render-second"),
-        patterns: [{ mine: "tests/**", theirs: "tests/**", relation: "same" }],
+        contractId: contractId("kei/overlap-render-second"),
+        patterns: [{ mine: "tests/**", theirs: "tests/**" }],
       },
     ]),
     [
@@ -80,9 +54,9 @@ test("overlap receipt renders containment trees with aligned leaves and truncati
   const leaves = Array.from({ length: 7 }, (_, index) => `src/cli/render/file-${index}.ts`);
   const text = render([
     {
-      contract: related,
+      contractId: related,
       patterns: [
-        { mine: "src/cli/render/**", theirs: "src/cli/render/**", relation: "same" },
+        { mine: "src/cli/render/**", theirs: "src/cli/render/**" },
         { mine: "src/cli/parse.ts", theirs: "src/cli/**", relation: "mine-within-theirs" },
         ...leaves.map((mine) => ({ mine, theirs: "tests/**", relation: "mine-within-theirs" as const })),
       ],
@@ -111,7 +85,7 @@ test("overlap receipt renders containment trees with aligned leaves and truncati
 test("overlap receipt renders reversed containment and partial intersection", () => {
   const text = render([
     {
-      contract: related,
+      contractId: related,
       patterns: [
         { mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" },
         { mine: "src/*", theirs: "src/?.ts", relation: "intersect" },

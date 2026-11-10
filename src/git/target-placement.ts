@@ -30,10 +30,8 @@ import { captureWorkspaceTree } from "./workspace.js";
 export const checkoutNotFollowableRefusalSchema = z
   .object({
     kind: z.literal("checkout-not-followable"),
-    contractId: contractIdSchema,
     target: z.string().refine((value) => value.trim() !== ""),
     path: z.string().refine((value) => value.trim() !== ""),
-    reason: z.literal("untracked"),
     paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
   })
   .strict()
@@ -45,7 +43,6 @@ export const targetCheckoutEffectSchema = z
     kind: z.literal("target-checkout"),
     path: z.string().refine((value) => value.trim() !== ""),
     target: z.string().refine((value) => value.trim() !== ""),
-    action: z.enum(["followed", "recovered"]),
   })
   .strict()
   .readonly();
@@ -63,7 +60,7 @@ type TargetCheckoutLag = z.infer<typeof targetCheckoutLagSchema>;
 export const targetWorkspaceLagSchema = z
   .object({
     kind: z.literal("target-workspace-retained"),
-    contractId: contractIdSchema,
+    targetContractId: contractIdSchema,
     reason: targetWorkspaceRefusalSchema.unwrap().shape.reason,
   })
   .strict()
@@ -119,14 +116,8 @@ export async function observedTreeEqualsCandidate(
   return (await commitTree(repository, observed)) === (await commitTree(repository, snapshot));
 }
 
-function checkoutRefusal(
-  contractId: ContractId,
-  target: RefOperation,
-  path: string,
-  reason: CheckoutNotFollowableRefusal["reason"],
-  paths: readonly string[],
-): CheckoutNotFollowableRefusal {
-  return { kind: "checkout-not-followable", contractId, target: targetName(target.target), path, reason, paths };
+function checkoutRefusal(target: RefOperation, path: string, paths: readonly string[]): CheckoutNotFollowableRefusal {
+  return { kind: "checkout-not-followable", target: targetName(target.target), path, paths };
 }
 
 type CheckoutObservation = Readonly<{
@@ -239,10 +230,10 @@ function untrackedArgs(): readonly string[] {
 }
 
 async function untrackedRefusalWithinScopes(
-  input: Pick<CheckoutObservation, "repository" | "contractId" | "target" | "path">,
+  input: Pick<CheckoutObservation, "repository" | "target" | "path">,
   scopes: readonly PhysicalScope[],
 ): Promise<CheckoutNotFollowableRefusal | null> {
-  const { repository, contractId, target, path } = input;
+  const { repository, target, path } = input;
   const args = untrackedArgs();
   const leaves = scopes.filter((scope) => scope.kind === "leaf");
   if (leaves.length > 0) {
@@ -251,7 +242,7 @@ async function untrackedRefusalWithinScopes(
       "--",
       ...leaves.map((scope) => literalPath(scope.path)),
     ]);
-    if (collisions.length > 0) return checkoutRefusal(contractId, target, path, "untracked", collisions);
+    if (collisions.length > 0) return checkoutRefusal(target, path, collisions);
   }
 
   const directories = scopes.filter((scope) => scope.kind === "directory");
@@ -279,7 +270,7 @@ async function untrackedRefusalWithinScopes(
   );
   if (pending + decoder.end() !== "") throw new Error("unterminated untracked path");
   const first = directories.find((scope) => found.has(scope.path));
-  return first === undefined ? null : checkoutRefusal(contractId, target, path, "untracked", [first.path]);
+  return first === undefined ? null : checkoutRefusal(target, path, [first.path]);
 }
 
 /** Compare the index or a workspace tree against another tree over the given paths. */
@@ -305,14 +296,13 @@ type CheckoutPrecheck =
  */
 async function ordinaryPrecheck(
   repository: GitRepository,
-  contractId: ContractId,
   target: RefOperation,
   path: string,
   changes: TargetPlacementChanges,
 ): Promise<CheckoutPrecheck> {
   const predecessor = gitObjectIdForSnapshot(target.expectedOid);
   const candidate = gitObjectIdForSnapshot(target.newOid);
-  const observation = { repository, contractId, target, path, predecessor, candidate, changes };
+  const observation = { repository, target, path, predecessor, candidate, changes };
   try {
     await executeGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
   } catch (error) {
@@ -389,7 +379,7 @@ export async function observeTargetPlacement(
   const arms: FollowArm[] = [];
   const checkouts: TargetCheckoutObservation[] = [];
   for (const worktree of worktrees) {
-    const precheck = await ordinaryPrecheck(repository, input.contractId, target, worktree.path, changes);
+    const precheck = await ordinaryPrecheck(repository, target, worktree.path, changes);
     if (precheck.kind === "refused") return precheck;
     checkouts.push({ ...precheck, path: worktree.path });
     arms.push({ kind: "ordinary", path: worktree.path });
@@ -495,7 +485,6 @@ export async function followTargetPlacement(
         kind: "target-checkout",
         path: arm.path,
         target: targetName(prepared.target.target),
-        action: "followed",
       });
     } catch (error) {
       if (!(error instanceof GitPlumbingError)) throw error;
@@ -579,7 +568,7 @@ type CheckoutRecovery =
   | Readonly<{ kind: "retained"; diagnostic: string }>;
 
 async function recoverCheckout(
-  input: CheckoutInput & Pick<CheckoutObservation, "contractId" | "target" | "changes">,
+  input: CheckoutInput & Pick<CheckoutObservation, "target" | "changes">,
 ): Promise<CheckoutRecovery> {
   const classified = await classifyCheckout(input);
   if (classified.kind === "complete") return { kind: "complete" };
@@ -633,7 +622,11 @@ export async function recoverTargetPlacement(
     return {
       effects: [],
       lag: [
-        { kind: "target-workspace-retained", contractId: resolved.refusal.contractId, reason: resolved.refusal.reason },
+        {
+          kind: "target-workspace-retained",
+          targetContractId: resolved.refusal.contractId,
+          reason: resolved.refusal.reason,
+        },
       ],
     };
   }
@@ -665,7 +658,6 @@ export async function recoverTargetPlacement(
     try {
       const recovery = await recoverCheckout({
         repository,
-        contractId: state.id,
         target: movement,
         changes,
         path: worktree.path,
@@ -680,7 +672,7 @@ export async function recoverTargetPlacement(
         continue;
       }
       if (recovery.kind === "recovered") {
-        effects.push({ kind: "target-checkout", path: worktree.path, target: targetName(target), action: "recovered" });
+        effects.push({ kind: "target-checkout", path: worktree.path, target: targetName(target) });
       }
     } catch (error) {
       if (!(error instanceof GitPlumbingError)) throw error;

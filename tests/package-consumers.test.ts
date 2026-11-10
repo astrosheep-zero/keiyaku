@@ -54,9 +54,8 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Debt, K
   writeFileSync(
     join(directory, "native-owner-types.ts"),
     `
-import type { Gate, Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractRow, ContractGateCurrent,
-  ContractDependent, ReconcileCompletion, SettlementAction, NukeResult,
-  NukeConfirmationRefusal, NukeConfirmationRequiredRefusal, Repo, Kei,
+import type { Gate, Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractDetail, ContractGateCurrent,
+  ReconcileCompletion, SettlementAction, SettlementReport, NukeResult, Repo, Kei,
   ContractWaitInput, ContractWaitResult, KanshiCountsInput, KanshiCountsReport } from "@astrosheep/keiyaku";
 const countsInput: KanshiCountsInput = { world: null };
 const countsResult: Promise<KanshiCountsReport> = (await import("@astrosheep/keiyaku")).kanshiCounts(countsInput);
@@ -69,8 +68,9 @@ const collectionWait: Promise<ContractWaitResult> = (await import("@astrosheep/k
 void [waitResult, collectionWait];
 declare const fact: Fact;
 declare const error: KeiyakuError;
-declare const row: ContractRow;
+declare const row: ContractDetail;
 declare const repair: ReconcileCompletion;
+declare const settlement: SettlementReport;
 declare const reset: NukeResult;
 // Gate remains an ordinary string, not a brand or a closed vocabulary.
 const customGate: Gate = "security-audited";
@@ -78,14 +78,12 @@ const arbitraryGate: Gate = "validated only when consumed";
 const word: string = customGate;
 const kind: FactKind = fact.kind;
 const category: KeiyakuErrorCategory = error.category;
-const gates: readonly ContractGateCurrent[] = row.gates.reports.map(report => report.current);
-const dependents: readonly ContractDependent[] = row.dependents;
-const actions: readonly SettlementAction[] = repair.settlement.actions;
-if (reset.kind === "refused") {
-  const refused: NukeConfirmationRefusal | NukeConfirmationRequiredRefusal = reset.refusal;
-  void refused.world;
-}
-void [word, arbitraryGate, kind, category, gates, dependents, actions];
+const gates: readonly ContractGateCurrent[] = row.gates?.flatMap(report => report.requirements.map(item => item.current)) ?? [];
+const actions: readonly SettlementAction[] = settlement.actions;
+if (reset.kind === "refused") void reset.world;
+if (reset.kind === "accepted") void [reset.refsRemoved, reset.worktreesRemoved, reset.debtsRemoved, reset.issues];
+void repair.contractId;
+void [word, arbitraryGate, kind, category, gates, actions];
 `,
   );
   examples.push("native-owner-types.ts");
@@ -119,10 +117,12 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'import assert from "node:assert/strict";',
         'import { createRequire } from "node:module";',
         'import * as root from "@astrosheep/keiyaku";',
-        'import { Akuma, Akumas, Delivery, Kei, Keis, Repo, Debts, kanshi, kanshiCounts, nuke, settings } from "@astrosheep/keiyaku";',
+        'import { Akuma, Akumas, Kei, Keis, Repo, Debts, kanshi, kanshiCounts, nuke, settings } from "@astrosheep/keiyaku";',
         'assert.equal((await kanshiCounts({ world: null })).akuma.kind, "absent");',
         'const repo = await Repo.at({ path: process.cwd() });',
-        'assert.equal((await Keis.of(repo).wait({ contracts: ["kei/missing"], timeoutMs: 0 })).kind, "missing");',
+        'const missingWait = await Keis.of(repo).wait({ contracts: ["kei/missing"], timeoutMs: 0 });',
+        'assert.equal(missingWait.kind, "contract");',
+        'assert.equal(missingWait.reason, "missing");',
         'import plugin from "@astrosheep/keiyaku-plugin-square";',
         "assert.throws(() => Reflect.construct(Kei, []), TypeError);",
         'assert.equal(typeof Kei.prototype.previewDelivery, "function");',
@@ -155,7 +155,7 @@ void [word, arbitraryGate, kind, category, gates, dependents, actions];
         'assert.equal(typeof kanshi, "function");',
         'assert.equal(typeof settings, "function");',
         'assert.equal(typeof nuke, "function");',
-        "assert.throws(() => Reflect.construct(Delivery, []), TypeError);",
+        'assert.equal("Delivery" in root, false);',
         'assert.equal(plugin.manifest.id, "square");',
         'assert.equal(typeof plugin.activate, "function");',
         // Only root and plugin are package entries; every retired subpath promise is gone.

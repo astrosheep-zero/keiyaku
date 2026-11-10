@@ -7,55 +7,72 @@ export type SettingsScope = "project" | "user";
 
 export type SettingsScopeState = z.output<typeof settingsScopeStateSchema>;
 
-export type SettingsEntry = Readonly<{
-  name: string;
-  value: unknown;
-  source: SettingsScope;
-  shadows: boolean;
-}>;
-
+export type SettingsEntry = z.output<typeof settingsEntrySchema>;
 export type SettingsNamespaceFailure = z.output<typeof settingsNamespaceFailureSchema>;
-
-export type SettingsNamespaceView =
-  | Readonly<{ kind: "read"; name: string; entries: readonly SettingsEntry[] }>
-  | Readonly<{
-      kind: "failed";
-      name: string;
-      entries: readonly SettingsEntry[];
-      failures: readonly SettingsNamespaceFailure[];
-    }>;
+export type SettingsNamespaceView = z.output<typeof settingsNamespaceViewSchema>;
 
 export type Settings = Readonly<{
   scopes: Readonly<{ project: SettingsScopeState; user: SettingsScopeState }>;
-  namespaces: readonly SettingsNamespaceView[];
+  namespaces?: Readonly<Record<string, SettingsNamespaceView>>;
   namespace(name: string): SettingsNamespaceView;
 }>;
 
 export const settingsScopeStateSchema = z.union([
   z.strictObject({ kind: z.literal("absent"), path: z.string().exactOptional() }).readonly(),
   z.strictObject({ kind: z.literal("failed"), path: z.string(), diagnostic: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("read"), path: z.string(), namespaces: z.array(z.string()).readonly() }).readonly(),
+  z.strictObject({ kind: z.literal("read"), path: z.string() }).readonly(),
 ]);
+type SettingsJsonValue = z.output<ReturnType<typeof z.json>>;
+
+/** Zod's ordinary record parser discards __proto__; Settings names are opaque own keys. */
+function keyedValues<Value extends z.ZodType>(valueSchema: Value) {
+  const record = z.record(z.string(), valueSchema);
+  const schema = z.custom<Record<string, z.output<Value>>>(
+    (input) =>
+      z.core.util.isPlainObject(input) &&
+      Object.entries(input).every(([, value]) => valueSchema.safeParse(value).success),
+  );
+  schema._zod.processJSONSchema = (context, _json, params) => {
+    z.core.processSchema(record, context, params);
+    const seen = context.seen.get(schema);
+    if (seen === undefined) throw new Error("Settings keyed schema was not registered for JSON Schema traversal");
+    seen.ref = record;
+  };
+  return schema.readonly();
+}
+
+const settingsJsonValueSchema: z.ZodType<SettingsJsonValue> = z.lazy(() =>
+  z.union([
+    z.null(),
+    z.boolean(),
+    z.number(),
+    z.string(),
+    z.array(settingsJsonValueSchema),
+    keyedValues(settingsJsonValueSchema),
+  ]),
+);
+
 export const settingsEntrySchema = z
   .strictObject({
-    name: z.string(),
-    value: z.unknown().exactOptional(),
+    value: settingsJsonValueSchema,
     source: z.enum(["project", "user"]),
-    shadows: z.boolean(),
+    shadows: z.literal(true).exactOptional(),
   })
   .readonly();
 const settingsNamespaceFailureSchema = z
-  .strictObject({ scope: z.enum(["project", "user"]), diagnostic: z.string() })
+  .strictObject({ scope: z.enum(["project", "user"]), diagnostic: z.string().exactOptional() })
   .readonly();
 export const settingsNamespaceViewSchema = z.union([
   z
-    .strictObject({ kind: z.literal("read"), name: z.string(), entries: z.array(settingsEntrySchema).readonly() })
+    .strictObject({
+      kind: z.literal("read"),
+      entries: keyedValues(settingsEntrySchema).exactOptional(),
+    })
     .readonly(),
   z
     .strictObject({
       kind: z.literal("failed"),
-      name: z.string(),
-      entries: z.array(settingsEntrySchema).readonly(),
+      entries: keyedValues(settingsEntrySchema).exactOptional(),
       failures: z.array(settingsNamespaceFailureSchema).readonly(),
     })
     .readonly(),
@@ -63,7 +80,7 @@ export const settingsNamespaceViewSchema = z.union([
 export const settingsSchema = z
   .strictObject({
     scopes: z.strictObject({ project: settingsScopeStateSchema, user: settingsScopeStateSchema }).readonly(),
-    namespaces: z.array(settingsNamespaceViewSchema).readonly(),
+    namespaces: keyedValues(settingsNamespaceViewSchema).exactOptional(),
   })
   .readonly();
 
@@ -79,14 +96,14 @@ export class SettingsError extends Error {
 
 type LoadedScope = Readonly<{
   state: SettingsScopeState;
-  root?: Readonly<Record<string, unknown>>;
+  root?: Readonly<Record<string, SettingsEntry["value"]>>;
 }>;
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function freezeJson(value: unknown): unknown {
+function freezeJson<T>(value: T): T {
   if (Array.isArray(value)) {
     for (const item of value) freezeJson(item);
     return Object.freeze(value);
@@ -111,10 +128,11 @@ async function readScope(path: string): Promise<LoadedScope> {
     return { state: { kind: "failed", path, diagnostic: bounded(error) } };
   }
   try {
-    const decoded = JSON.parse(bytes) as unknown;
-    if (!object(decoded)) throw new TypeError("settings root must be an object");
-    const root = freezeJson(decoded) as Readonly<Record<string, unknown>>;
-    return { state: { kind: "read", path, namespaces: Object.freeze(Object.keys(root).sort()) }, root };
+    const decoded: SettingsEntry["value"] = JSON.parse(bytes);
+    if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded))
+      throw new TypeError("settings root must be an object");
+    const root = freezeJson(decoded);
+    return { state: { kind: "read", path }, root };
   } catch (error) {
     return { state: { kind: "failed", path, diagnostic: bounded(error) } };
   }
@@ -124,26 +142,27 @@ function namespaceEntries(
   name: string,
   scope: SettingsScope,
   loaded: LoadedScope,
-): Readonly<{ entries: readonly SettingsEntry[]; failure?: SettingsNamespaceFailure }> {
-  if (loaded.state.kind === "failed") {
-    return { entries: [], failure: { scope, diagnostic: loaded.state.diagnostic } };
-  }
+): Readonly<{ entries: Readonly<Record<string, SettingsEntry>>; failure?: SettingsNamespaceFailure }> {
+  if (loaded.state.kind === "failed") return { entries: {}, failure: { scope } };
   if (loaded.root === undefined || !Object.prototype.hasOwnProperty.call(loaded.root, name)) {
-    return { entries: [] };
+    return { entries: {} };
   }
   const value = loaded.root[name];
-  if (!object(value)) {
-    return { entries: [], failure: { scope, diagnostic: `${name} must be an object of named values` } };
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return { entries: {}, failure: { scope, diagnostic: `${name} must be an object of named values` } };
   }
   return {
-    entries: Object.keys(value)
-      .sort()
-      .map((entryName) => ({
-        name: entryName,
-        value: value[entryName],
-        source: scope,
-        shadows: false,
-      })),
+    entries: Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((entryName) => [
+          entryName,
+          Object.freeze({
+            value: value[entryName]!,
+            source: scope,
+          }),
+        ]),
+    ),
   };
 }
 
@@ -151,36 +170,45 @@ function settingsFromScopes(project: LoadedScope, user: LoadedScope): Settings {
   function resolveNamespace(name: string): SettingsNamespaceView {
     const fromUser = namespaceEntries(name, "user", user);
     const fromProject = namespaceEntries(name, "project", project);
-    const userByName = new Map(fromUser.entries.map((entry) => [entry.name, entry]));
-    const projectByName = new Map(fromProject.entries.map((entry) => [entry.name, entry]));
-    const names = [...new Set([...userByName.keys(), ...projectByName.keys()])].sort();
+    const names = [...new Set([...Object.keys(fromUser.entries), ...Object.keys(fromProject.entries)])].sort();
     const entries = Object.freeze(
-      names.map((entryName) => {
-        const higher = projectByName.get(entryName);
-        if (higher !== undefined) return Object.freeze({ ...higher, shadows: userByName.has(entryName) });
-        return userByName.get(entryName)!;
-      }),
+      Object.fromEntries(
+        names.map((entryName) => {
+          const higher = Object.hasOwn(fromProject.entries, entryName) ? fromProject.entries[entryName] : undefined;
+          const lower = Object.hasOwn(fromUser.entries, entryName) ? fromUser.entries[entryName] : undefined;
+          return [
+            entryName,
+            higher === undefined
+              ? lower!
+              : Object.freeze({
+                  ...higher,
+                  ...(lower === undefined ? {} : { shadows: true as const }),
+                }),
+          ];
+        }),
+      ),
     );
     const failures = Object.freeze(
       [fromUser.failure, fromProject.failure].filter(
         (failure): failure is SettingsNamespaceFailure => failure !== undefined,
       ),
     );
+    const resolved = Object.keys(entries).length === 0 ? {} : { entries };
     return failures.length === 0
-      ? Object.freeze({ kind: "read" as const, name, entries })
-      : Object.freeze({ kind: "failed" as const, name, entries, failures });
+      ? Object.freeze({ kind: "read" as const, ...resolved })
+      : Object.freeze({ kind: "failed" as const, ...resolved, failures });
   }
   function namespace(name: string): SettingsNamespaceView {
     if (typeof name !== "string" || name.trim().length === 0)
       throw new TypeError("settings namespace must be nonblank");
     return resolveNamespace(name);
   }
-  const names = [
-    ...new Set([user.state, project.state].flatMap((scope) => (scope.kind === "read" ? scope.namespaces : []))),
-  ].sort();
+  const names = [...new Set([user, project].flatMap((scope) => Object.keys(scope.root ?? {})))].sort();
   return Object.freeze({
     scopes: Object.freeze({ project: project.state, user: user.state }),
-    namespaces: Object.freeze(names.map(resolveNamespace)),
+    ...(names.length === 0
+      ? {}
+      : { namespaces: Object.freeze(Object.fromEntries(names.map((name) => [name, resolveNamespace(name)]))) }),
     namespace,
   });
 }

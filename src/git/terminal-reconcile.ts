@@ -91,7 +91,7 @@ async function removeTerminalWorktree(
 
 export async function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Promise<Effect> {
   const before = await readRef(repository, ref);
-  if (before === desired) return { kind: "ref", name: ref, action: "unchanged", before, after: desired };
+  if (before === desired) return { kind: "ref", name: ref, before, after: desired };
   await executeGit(repository, [
     "update-ref",
     "--no-deref",
@@ -99,14 +99,14 @@ export async function updateRef(repository: GitRepository, ref: string, desired:
     gitObjectIdForSnapshot(desired),
     before ?? "0".repeat(desired.length),
   ]);
-  return { kind: "ref", name: ref, action: before === null ? "created" : "updated", before, after: desired };
+  return { kind: "ref", name: ref, before, after: desired };
 }
 
 export async function removeRef(repository: GitRepository, ref: string): Promise<Effect> {
   const before = await readRef(repository, ref);
-  if (before === null) return { kind: "ref", name: ref, action: "unchanged", before: null, after: null };
+  if (before === null) return { kind: "ref", name: ref, before: null, after: null };
   await executeGit(repository, ["update-ref", "--no-deref", "-d", ref, before]);
-  return { kind: "ref", name: ref, action: "removed", before, after: null };
+  return { kind: "ref", name: ref, before, after: null };
 }
 
 async function removeRefWithCustody(
@@ -116,9 +116,9 @@ async function removeRefWithCustody(
   expectedCustodian: SnapshotId,
 ): Promise<Effect> {
   const before = await readRef(repository, ref);
-  if (before === null) return { kind: "ref", name: ref, action: "unchanged", before: null, after: null };
+  if (before === null) return { kind: "ref", name: ref, before: null, after: null };
   if ((await readRef(repository, custodian)) !== expectedCustodian) {
-    return { kind: "ref", name: ref, action: "unchanged", before, after: before };
+    return { kind: "ref", name: ref, before, after: before };
   }
   await executeGit(
     repository,
@@ -132,11 +132,11 @@ async function removeRefWithCustody(
       "",
     ].join("\n"),
   );
-  return { kind: "ref", name: ref, action: "removed", before, after: null };
+  return { kind: "ref", name: ref, before, after: null };
 }
 
 function retainedRefEffect(ref: string, snapshot: GitOid): Effect {
-  return { kind: "ref", name: ref, action: "unchanged", before: snapshot, after: snapshot };
+  return { kind: "ref", name: ref, before: snapshot, after: snapshot };
 }
 
 async function refRows(repository: GitRepository): Promise<readonly Readonly<{ ref: string; oid: string }>[]> {
@@ -206,18 +206,14 @@ function fromPrimaryWorktree(repository: GitRepository): GitRepository {
   return { ...repository, effectiveCwd: repository.primaryWorktree };
 }
 
-function complete(
-  effects: readonly Effect[] = [],
-  lag: readonly ReconcileLag[] = [],
-  hookRuns: readonly { phase: "create" | "destroy"; name: string }[] = [],
-): ReconcileResult {
-  return hookRuns.length === 0 ? { effects, lag } : { effects, lag, hookRuns };
+function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
+  return { effects, lag };
 }
 
 function retainTerminalWorktree(path: string, retainedLag: ReconcileLag, acc: ReconcileAccumulation): ReconcileResult {
   acc.recordEffect({ kind: "worktree", path, action: "unchanged" });
   acc.recordLag(retainedLag);
-  return complete(acc.effects, acc.lag, acc.hookRuns);
+  return complete(acc.effects, acc.lag);
 }
 
 async function terminalSealExpectations(
@@ -272,9 +268,7 @@ async function removeSealedTerminalWorktree({
       );
       const effect = {
         kind: "recovery-snapshot" as const,
-        action: "created" as const,
         snapshot,
-        retention: "ephemeral" as const,
       };
       acc.recordEffect(effect);
       return { snapshot, workspace };
@@ -290,7 +284,6 @@ async function removeSealedTerminalWorktree({
       recovery = await recordRecovery(beforeWorkspace);
     }
     const hookRun = await runDestroyHooks(path, hooks);
-    acc.hookRuns.push(...hookRun.runs.map((name) => ({ phase: "destroy" as const, name })));
     if (hookRun.lag !== null) return retainTerminalWorktree(path, hookRun.lag, acc);
     const after = await observeTerminalWorkspace(repository, path, expected);
     const afterWorkspace = after.workspace;
@@ -315,7 +308,7 @@ async function removeSealedTerminalWorktree({
   const removal = await removeTerminalWorktree(repository, topology, path);
   if (removal.retainedLag !== undefined) {
     acc.recordLag(removal.retainedLag);
-    return complete(acc.effects, acc.lag, acc.hookRuns);
+    return complete(acc.effects, acc.lag);
   }
   if (removal.effect !== undefined) acc.recordEffect(removal.effect);
   return null;
@@ -402,9 +395,9 @@ export async function reconcileTerminalManagedWorktree(
   const path = place === undefined ? undefined : worktreePath(repository, place);
   const resolveSeal = async () => await terminalSealExpectations(channel, state);
   if (path === undefined) {
-    if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag, acc.hookRuns);
+    if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
     await releaseTerminalCustody({ repository: primary, state, resolveSeal, ref, pin, acc });
-    return complete(acc.effects, acc.lag, acc.hookRuns);
+    return complete(acc.effects, acc.lag);
   }
   const expected = await resolveSeal();
   acc.recordEffect(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
@@ -431,5 +424,5 @@ export async function reconcileTerminalManagedWorktree(
   });
   if (retained !== null) return retained;
   await releaseTerminalCustody({ repository: primary, state, resolveSeal: async () => expected, ref, pin, acc });
-  return complete(acc.effects, acc.lag, acc.hookRuns);
+  return complete(acc.effects, acc.lag);
 }

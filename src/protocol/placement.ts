@@ -44,7 +44,6 @@ export type PlacementExecutionFailure = Readonly<{
 
 type TargetMovedStop = Readonly<{
   kind: "target-moved";
-  contractId: ContractId;
   target: string;
   expected: SnapshotId;
   observed: SnapshotId | null;
@@ -62,7 +61,6 @@ export async function observeIntegrationTargetMovement(
   if (observed === integration.predecessor) return undefined;
   return {
     kind: "target-moved",
-    contractId: state.id,
     target: targetName(target),
     expected: integration.predecessor,
     observed,
@@ -146,7 +144,6 @@ async function runFencedPlacement(
         if (observed !== target.expectedOid)
           return {
             kind: "target-moved" as const,
-            contractId: input.contractId,
             target: targetName(target.target),
             expected: target.expectedOid,
             observed,
@@ -180,6 +177,11 @@ async function runFencedPlacement(
     if (result.kind === "collision" && index + 1 < protocol.attempts.length) continue;
     if (result.kind !== "accepted") return result;
     if (preparedPhysical === undefined) throw new Error("accepted placement has no prepared target checkout");
+    protocol.progress?.recordCompletion(input.contractId, {
+      integration: preparedPhysical.target.newOid,
+      predecessor: preparedPhysical.target.expectedOid,
+      target: targetName(preparedPhysical.target.target),
+    });
     const physical = await followTargetPlacement(repository, preparedPhysical, (report) =>
       protocol.progress?.recordPlacementPhysical(input.contractId, report),
     );

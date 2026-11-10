@@ -34,8 +34,9 @@ target base without adding another delivery fact. Changed content replaces
 the candidate under the ordinary delivery rules. A conflict normally refuses
 without changing Contract authority; explicit conflict handoff may project it
 into the appointed workspace without treating the projection as delivery. Its
-public result names the handoff base and the recovery projection: callers
-continue with `deliver --include-dirty`, and staging is `not-required`.
+public result names the handoff base and the conflict's recovery meaning: callers
+resolve the final worktree bytes and explicitly authorize dirty capture; staging
+is not required. Literal recovery commands belong to the leaf CLI.
 Resolution operates on final worktree bytes through private-index capture while
 the real index and its `UU` state remain under the invoking local owner's custody. Dirty
 workspace bytes require explicit delivery authorization; with that

@@ -8,7 +8,7 @@ import {
 } from "../git/target.js";
 import { acquireTargetPlacementFence } from "../git/target-placement.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
-import { contractIdSchema, gitObjectIdForSnapshot } from "../git/identity.js";
+import { gitObjectIdForSnapshot } from "../git/identity.js";
 import {
   normalizeTargetBranch,
   observeBindCoordinates,
@@ -36,7 +36,7 @@ export const targetInputRefusalSchema = z.union([
 ]);
 type TargetInputRefusal = z.infer<typeof targetInputRefusalSchema>;
 export const forkSourceMovedRefusalSchema = z
-  .object({ kind: z.literal("fork-source-moved"), contractId: contractIdSchema })
+  .object({ kind: z.literal("fork-source-moved") })
   .strict()
   .readonly();
 type ForkSourceMovedRefusal = z.infer<typeof forkSourceMovedRefusalSchema>;
@@ -239,7 +239,7 @@ export async function bindOperation(
                     current.coordinates.start === input.source!.start &&
                     current.terms.document.key === input.source!.document
                     ? undefined
-                    : ({ kind: "fork-source-moved", contractId: input.source!.contractId } as const);
+                    : ({ kind: "fork-source-moved" } as const);
                 },
               }),
           ...(input.decorateOffer === undefined ? {} : { decorateOffer: input.decorateOffer }),

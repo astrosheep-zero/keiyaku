@@ -137,8 +137,8 @@ test("ask preserves the launch gap, then returns an explicit failed wake without
     } },
   });
   assert.ok(rounds >= 3);
-  assert.equal(result.observation.reason, "unanswered");
-  assert.deepEqual(result.tell.wake, { kind: "failed", diagnostic: "spawn failed" });
+  assert.equal(result.kind, "unanswered");
+  assert.deepEqual(result.wake, { kind: "failed", diagnostic: "spawn failed" });
   assert.equal((await readTell(parent.paths, "asked"))?.state, "pending");
 });
 

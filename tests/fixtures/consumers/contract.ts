@@ -2,7 +2,7 @@ import {
   Kei,
   Keis,
   actorId,
-  Delivery,
+  type Delivery,
   Repo,
   KeiyakuError,
   type ContractId,
@@ -14,9 +14,6 @@ import {
   type DeliverOutcome,
   type DeliveryPreviewInput,
   type DeliveryPreviewOutcome,
-  type DeliveryPreviewReport,
-  type InvocationEffect,
-  type PendingSurface,
   type ReviewInput,
   type PartialOutcomeEnvelope,
   type KeisOptions,
@@ -24,6 +21,8 @@ import {
   type ContractResolveInput,
   type ContractResolution,
   type ContractSelectorRefusal,
+  type Placement,
+  type VerificationCheck,
 } from "@astrosheep/keiyaku";
 
 declare const repo: Repo;
@@ -34,15 +33,17 @@ const input: BindInput = { markdown, after: [id], gates: ["reviewed"] };
 const targetlessInput: BindInput = { markdown, target: null };
 // @ts-expect-error a target is a branch name or an explicit absence, never another value
 const invalidTarget: BindInput = { markdown, target: 7 };
-const bound: Promise<BindResult> = Keis.of(repo).bind(input);
+const bound: BindResult = await Keis.of(repo).bind(input);
+if (bound.kind === "accepted") {
+  const handle: Kei = bound.kei;
+  void [handle, bound.contractId, bound.worktreePath];
+}
 const selected = Keis.of(repo).kei({ id });
 const previewInput: DeliveryPreviewInput = { includeDirty: true, showDiff: true, signal: new AbortController().signal };
 const preview: DeliveryPreviewOutcome = await selected.previewDelivery(previewInput, { observe: () => {} });
-if (preview.kind === "accepted") {
-  const report: DeliveryPreviewReport = preview.value;
-  const operation: "deliver-preview" = preview.operation;
-  void [report, operation];
-}
+if (preview.kind === "ready")
+  void [preview.candidate, preview.integration, preview.contentId, preview.scope, preview.unmetGates];
+if (preview.kind === "blocked") void preview.reason.kind;
 // @ts-expect-error standalone audit is retired
 selected.audit();
 // @ts-expect-error preview cannot accept mutation-only options
@@ -59,15 +60,25 @@ Keis.of(repo).resolve({ selector: id, execution: {} });
 const verifyInput: VerifyInput = { index: 1, includeDirty: true, signal: new AbortController().signal };
 const verified: VerifyOutcome = await selected.verify(verifyInput, { observe: () => {} });
 if (verified.kind === "accepted") {
-  verified.value.checks.forEach((check) => {
-    void [check.index, check.requirement, check.snapshot];
-    if (check.kind === "terminal") void [check.verdict, check.admission.kind];
+  void verified.snapshot;
+  verified.checks.forEach((check) => {
+    void [check.index, check.requirement];
+    if (check.kind === "terminal") {
+      void check.verdict;
+      if (typeof check.admission === "object") void check.admission.kind;
+    } else {
+      const stopped: Exclude<VerificationCheck, { kind: "terminal" }> = check;
+      void stopped.kind;
+    }
   });
-  verified.value.gates?.forEach((gate) => gate.requirements.forEach((requirement) => void requirement.current));
 }
 // @ts-expect-error Verification indexes are numbers at the public boundary
 selected.verify({ index: "1" });
-const cancellable: ReviewInput = { verdict: "satisfied", summary: "Consumer review passed", signal: new AbortController().signal };
+const cancellable: ReviewInput = {
+  verdict: "satisfied",
+  summary: "Consumer review passed",
+  signal: new AbortController().signal,
+};
 // @ts-expect-error review testimony requires a summary
 const missingReviewSummary: ReviewInput = { verdict: "satisfied" };
 void missingReviewSummary;
@@ -76,43 +87,42 @@ const reviewed: ReviewOutcome = await selected.review(cancellable, {
     void event.kind;
   },
 });
-const effects: readonly InvocationEffect[] = reviewed.effects;
-const pending: readonly PendingSurface[] = reviewed.pending;
 const failure = new KeiyakuError("internal", "failed", { cause: new TypeError("failed") });
 const receipt: PartialOutcomeEnvelope | undefined = failure.outcome;
 if (reviewed.kind === "accepted") {
-  reviewed.value.gates;
-  // @ts-expect-error cleanup belongs to the invocation, not the review value
-  reviewed.value.cleanup;
+  const placement: Placement | undefined = reviewed.placement;
+  void [placement, reviewed.issues];
 }
-if (reviewed.kind === "refused") reviewed.refusal.kind;
+if (reviewed.kind === "refused") reviewed.reason.kind;
 // @ts-expect-error only delivery can return handoff
 const reviewHandoff: ReviewOutcome = { ...reviewed, kind: "handoff" };
 declare const delivered: DeliverOutcome;
 if (delivered.kind === "accepted") {
-  delivered.value.leading.fact;
-  delivered.value.diff();
+  void [delivered.candidate, delivered.integration, delivered.contentId, delivered.admission];
 }
-if (delivered.kind === "handoff") delivered.value.handoffBase;
+if (delivered.kind === "handoff") void [delivered.handoffBase, delivered.targetHead, delivered.conflictPaths];
 
 const local: KeisOptions = { actor: actorId("consumer") };
 Keis.of(repo, local).kei({ id }).review(cancellable);
 // @ts-expect-error the execution carrier is no longer a public construction input
 Keis.of(repo, { execution: {} });
-
 const observed: ContractObservation = await Keis.of(repo).observe({ id });
-if (observed.kind === "present") observed.row.gates.reports;
+if (observed.kind === "present") observed.row.gates?.forEach(({ gate, requirements }) => void [gate, requirements]);
 const reconciled = await Keis.of(repo).reconcile({ contract: id });
-reconciled.effects;
-reconciled.settlement;
+if (reconciled.kind === "contract") void [reconciled.effects, reconciled.issues];
 const worldReconciled = await Keis.of(repo).reconcile({ retryHooks: true });
 worldReconciled.kind;
+const guidance = await selected.guidance();
+if (guidance.kind === "present") void guidance.guidance;
+const history = await selected.history({ full: true });
+if (history.kind === "contract")
+  history.events.forEach((event) => {
+    if (event.kind === "bind" || event.kind === "amend") void [event.document, event.gates, event.after];
+  });
 
 // Handles cannot be independently constructed outside their repository authority.
 // @ts-expect-error constructor is private
 new Kei();
-// @ts-expect-error constructor is private
-new Delivery();
 // @ts-expect-error Repo requires an explicit coordinate object
 Repo.at(".");
 // @ts-expect-error an omitted coordinate is never read from an ambient directory
@@ -120,30 +130,18 @@ Repo.at();
 // @ts-expect-error a selected handle cannot switch repositories during an operation
 selected.review({ ...cancellable, repo });
 // @ts-expect-error binding must contain Markdown or a fork source
-Keis.of(repo).bind({  });
-
-void bound;
-void targetlessInput;
-void invalidTarget;
-void effects;
-void pending;
-void receipt;
-void reviewHandoff;
-
+Keis.of(repo).bind({});
 // @ts-expect-error selectors require branded Contract identities
 Keis.of(repo).kei({ id: "kei/unbranded" });
 // @ts-expect-error prerequisite identities cannot be unbranded strings
 Keis.of(repo).bind({ markdown, after: ["kei/unbranded"] });
-// @ts-expect-error obsolete singular cleanup is not a public result
-reviewed.leak;
 // @ts-expect-error a Repo cannot act as an alternative construction facade
 repo.bind(input);
 // @ts-expect-error a Delivery review takes an input object
 (null as unknown as Delivery).review("satisfied");
 // @ts-expect-error abandonment takes an options object
 selected.abandon("manual");
-
 // @ts-expect-error removed subscription methods are not public
 selected.startDelivery();
-// @ts-expect-error retired result sidecars are not public
-reviewed.cleanup;
+
+void [bound, targetlessInput, invalidTarget, receipt, reviewHandoff];

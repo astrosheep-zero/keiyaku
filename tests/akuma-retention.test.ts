@@ -148,7 +148,7 @@ test("a successful call runs the maintenance pass while read-only observations n
   const recent = await oldAkuma(world, "a0000002", new Date().toISOString());
 
   const listed = await Akumas.of(world).list();
-  assert.ok(listed.rows.some((row) => row.id === old.id));
+  assert.ok(listed.rows?.some((row) => row.id === old.id));
   await Akumas.of(world).status({ akuma: old.id });
   await Akumas.of(world).history({ akuma: old.id });
   await Akumas.of(world).wait({ akuma: [old.id] });
@@ -162,7 +162,7 @@ test("a successful call runs the maintenance pass while read-only observations n
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(called.kind, "spawned");
+  assert.equal(called.failure, undefined);
   assert.equal(existsSync(old.paths.directory), false);
   assert.equal(existsSync(recent.paths.heart), true);
   assert.deepEqual(await sweepInactiveAkumas(world), [], "removal is idempotent and the recent entry survives");
@@ -186,7 +186,7 @@ test("a same-handle later call reruns maintenance after a sweep failure", async 
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(one.kind, "spawned");
+  assert.equal(one.failure, undefined);
   assert.equal(existsSync(first.paths.heart), true, "a failed sweep is retried by a later call");
 
   unlinkSync(aliasAuthority);
@@ -199,7 +199,7 @@ test("a same-handle later call reruns maintenance after a sweep failure", async 
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(two.kind, "spawned");
+  assert.equal(two.failure, undefined);
   assert.equal(existsSync(first.paths.heart), false);
   assert.equal(existsSync(second.paths.heart), false);
 });
@@ -461,7 +461,7 @@ test("one corrupt candidate is retained without failing the sweep or the ordinar
   const listed = await Akumas.of(world).list();
   assert.equal(existsSync(corrupt.paths.directory), true);
   assert.equal(existsSync(eligible.paths.heart), true, "list alone must not retire");
-  assert.ok(listed.rows.every((row) => row.id !== corrupt.id));
+  assert.ok(listed.rows?.every((row) => row.id !== corrupt.id));
 
   assert.deepEqual(await sweepInactiveAkumas(world), [eligible.id]);
   assert.equal(existsSync(corrupt.paths.directory), true);

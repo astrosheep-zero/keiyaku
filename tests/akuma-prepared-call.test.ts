@@ -6,12 +6,15 @@ import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLauncher, ChildBodyLaunch } from "../src/akuma/body-launch.js";
 import { Schema } from "../src/akuma/schema.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
+import { projectFailure, spawnFailureReceipt } from "../src/library/outcome.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
+import { classifyVerb } from "../src/index.js";
 import { settings } from "../src/settings.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering } from "./support/akuma-tell.js";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
-import { HeldAkumaLeash, projectTell, readSeal, readSoul, readTell, type TellFact } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, readSeal, readSoul, readTell } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, pathsForAkumaId, type AkumaId } from "../src/akuma/identity.js";
 import type {
   CallInitialTellAdmission,
@@ -44,16 +47,11 @@ async function birth(launch: ChildBodyLaunch, createdAt = AT): Promise<void> {
 }
 
 function tellResult(tellId: string): TellResult {
-  const fact: TellFact = {
-    kind: "tell",
-    sequence: 1,
-    id: tellId,
-    body: "",
-    recordedAt: AT,
-    state: "told",
-    deliveries: [],
+  return {
+    admission: { tellId },
+    row: { sequence: 1, at: AT, text: "" },
+    wake: { kind: "told" },
   };
-  return { admission: { fact: "recorded", tellId }, row: projectTell(fact), wake: { kind: "told" } };
 }
 
 function admittedTell(tellId: string): CallInitialTellAdmission {
@@ -211,18 +209,16 @@ test(
         },
       },
     });
-    assert.equal(result.observation.kind, "observed");
-    if (result.observation.kind === "observed")
-      assert.deepEqual(result.observation.observation, { reason: "answered", answer: { ok: true } });
+    assert.equal(result.input?.kind, "answered");
+    assert.deepEqual(result.input, { kind: "answered", answer: { ok: true } });
     const input = trace()[0]?.[1] as { akumaIds: string[] };
-    assert.deepEqual(input.akumaIds, [result.akuma]);
-    assert.ok(result.observation.kind === "observed");
-    const tell = await readTell(pathsForAkumaId(world, result.akuma), result.observation.tell.admission.tellId);
+    assert.deepEqual(input.akumaIds, [result.akumaId]);
+    const tell = await readTell(pathsForAkumaId(world, result.akumaId), result.tellId!);
     assert.ok(tell?.binding);
     assert.deepEqual(trace(), [
       ["acquire", input],
-      ["produced", result.akuma, tell.binding.turnSequence],
-      ["observe", result.akuma, `turn/${tell.binding.turnSequence}`],
+      ["produced", result.akumaId, tell.binding.turnSequence],
+      ["observe", result.akumaId, `turn/${tell.binding.turnSequence}`],
       ["close"],
     ]);
     assert.deepEqual(await cards(), [], "exact observation survives release of its temporary prefix");
@@ -297,6 +293,53 @@ test("a durably born child survives a later launch failure and returns the nativ
   assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
   assert.equal(result.failure, failure);
   assert.equal(result.tell, undefined);
+});
+
+test("native spawn failure after Soul durability preserves TypeError identity and projected birth", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-native-born-failure-"));
+  mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
+    providers: { claude: { kind: "claude-agent-sdk" } }, plugins: {},
+  }));
+  const selected = await settings({ root: world, home: join(world, "empty-home") });
+  const cause = new Error("original launcher cause");
+  const failure = Object.freeze(new TypeError("launcher failed after durable Soul", { cause }));
+  const api = akumasWithLauncher(world, async (launch) => {
+    assert.ok(launch.seed);
+    await birth({ paths: launch.paths, seed: launch.seed });
+    throw failure;
+  });
+  let confirmed: ReturnType<typeof spawnFailureReceipt>;
+  await assert.rejects(api.spawn({ akumaName: "worker", cwd: world, settings: selected }), (error: unknown) => {
+    assert.equal(error, failure);
+    assert.equal(failure.cause, cause);
+    const receipt = spawnFailureReceipt(error);
+    assert.ok(receipt);
+    confirmed = receipt;
+    assert.equal(receipt.tellId, undefined);
+    const projected = projectFailure(error);
+    assert.equal(projected.category, "internal");
+    assert.equal(projected.causeClass, "TypeError");
+    assert.deepEqual(JSON.parse(JSON.stringify(projected)).spawn, receipt);
+    const completion = { kind: "threw" as const, error };
+    const input = { akumaName: "worker", workdir: world };
+    assert.equal(classifyVerb("spawn", input, completion), "failed");
+    const text = renderVerb("spawn", input, completion, { columns: 120, color: false });
+    assert.ok(text.includes(receipt.akumaId) && text.includes(world) && text.includes(failure.message));
+    return true;
+  });
+  const confirmedBirth = confirmed;
+  if (confirmedBirth === undefined) throw new Error("expected a confirmed birth receipt");
+  assert.equal(
+    (await readSoul(pathsForAkumaId(world, confirmedBirth.akumaId)))?.cwd,
+    world,
+    "the confirmed birth keeps its frozen execution directory",
+  );
+  const [directory] = await childRuns(world);
+  assert.ok(directory);
+  assert.ok((await api.list()).rows?.some(row => row.id === confirmedBirth.akumaId && row.life !== "unborn" && row.life !== "stillborn"));
+  assert.equal(projectFailure(Object.assign(new Error("foreign"), { spawn: { akumaId: "forged" } })).spawn, undefined);
 });
 
 test("an abort after confirmed birth keeps the child and its native reason", async (context) => {

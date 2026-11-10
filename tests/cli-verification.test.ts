@@ -2,9 +2,16 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
-import { Keis, Repo, type DeliveryPreviewOutcome, type DeliverOutcome, type VerifyOutcome } from "../src/index.js";
+import {
+  Keis,
+  Repo,
+  type BindOutcome,
+  type DeliveryPreviewOutcome,
+  type DeliverOutcome,
+  type VerifyOutcome,
+} from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
-import type { ContractId } from "../src/core/facts/types.js";
+import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { appointedWorktreePath, makeGitRepository, observeContract } from "./support/git.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
@@ -29,16 +36,13 @@ async function bindCandidate(scripts: readonly string[], gates: readonly string[
   mkdirSync(resolve(raw.path, ".keiyaku"), { recursive: true });
   writeFileSync(
     resolve(raw.path, ".keiyaku", "settings.json"),
-    JSON.stringify({
-      gates: { default: { kind: "bundle", gates } },
-    }),
+    JSON.stringify({ gates: { default: { kind: "bundle", gates } } }),
   );
-  const bound = await cliJson<Readonly<{ kind: string; contract?: ContractId }>>(
-    ["-C", raw.path, "bind", "--target", "refs/heads/main", "-"],
-    { environment: {}, readStdin: async () => markdown(scripts) },
-  );
-  assert.equal(bound.value.kind, "accepted");
-  const id = bound.value.contract!;
+  const bound = await cliJson<BindOutcome>(["-C", raw.path, "bind", "--target", "refs/heads/main", "-"], {
+    environment: {},
+    readStdin: async () => markdown(scripts),
+  });
+  const id = accepted(bound.value).contractId;
   const repository = await repositoryAt(raw.path);
   const worktree = await appointedWorktreePath(repository, id);
   writeFileSync(resolve(worktree, "candidate.txt"), "candidate\n");
@@ -52,49 +56,36 @@ test("contextual verify accumulates selected checks and completes an already del
   const delivered = accepted(
     (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value,
   );
-  assert.deepEqual(
-    delivered.facts.map((fact) => fact.kind),
-    ["deliver"],
-  );
+  assert.equal(delivered.placement?.kind, "gates-unsatisfied");
   assert.equal((await observeContract(repository, id)).state?.terminal, null);
-
   const first = await cliJson<VerifyOutcome>(["-C", worktree, "verify", "--index", "1"], { environment: {} });
-  const firstValue = accepted(first.value);
+  const value = accepted(first.value);
   assert.equal(first.stderr, "", "JSON emits no text activity");
+  assert.equal(value.checks.length, 1);
+  assert.equal(value.checks[0]?.index, 1);
+  assert.equal(value.snapshot, delivered.integration);
+  assert.equal(value.placement?.kind, "gates-unsatisfied");
+  if (value.placement?.kind !== "gates-unsatisfied") assert.fail("missing unmet requirement");
   assert.deepEqual(
-    firstValue.facts.map((fact) => fact.kind),
-    ["attestation"],
+    value.placement.unmet.map((item) => item.state),
+    ["missing"],
   );
-  assert.equal(firstValue.value.checks.length, 1);
-  assert.equal(firstValue.value.checks[0]?.index, 1);
-  assert.equal(firstValue.value.snapshot, delivered.value.integration.snapshot);
-  assert.equal(firstValue.value.completion, undefined);
-  const gate = firstValue.value.gates?.find((report) => report.gate === "verified");
-  assert.equal(gate?.satisfied, false);
-  assert.deepEqual(
-    gate?.requirements.map((report) => report.current.kind),
-    ["attested", "missing"],
-  );
-  const text = renderAccepted(firstValue, { columns: 400, color: false });
+  const text = renderAccepted("verify", value, { columns: 400, color: false });
   assert.match(text, /check 1\s+executed/u);
   assert.match(text, /verdict\s+satisfied/u);
-  assert.match(text, /attestation\s+admitted/u);
   assert.match(text, /awaiting verification/u);
   const status = await runCli(["-C", raw.path, "status", id], { environment: {} });
   assert.match(status.stdout, /✓ verification 1/u);
   assert.match(status.stdout, /○ verification 2 · missing/u);
   const history = await runCli(["-C", raw.path, "history", id], { environment: {} });
-  assert.ok(history.stdout.includes(firstValue.value.checks[0]!.requirement));
-
+  assert.ok(history.stdout.includes(value.checks[0]!.requirement));
   const second = accepted(
     (await cliJson<VerifyOutcome>(["-C", worktree, "verify", "--index", "2"], { environment: {} })).value,
   );
-  assert.equal(second.value.snapshot, firstValue.value.snapshot);
-  assert.deepEqual(
-    second.facts.map((fact) => fact.kind),
-    ["attestation", "claimed"],
-  );
-  assert.equal(second.value.completion?.integration, delivered.value.integration.snapshot);
+  assert.equal(second.snapshot, value.snapshot);
+  assert.equal(second.placement?.kind, "placed");
+  if (second.placement?.kind !== "placed") assert.fail("candidate did not land");
+  assert.equal(second.placement.integration, delivered.integration);
   assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
   assert.equal(existsSync(worktree), false);
 });
@@ -106,26 +97,24 @@ test("pre-delivery verify always executes and distinguishes admission reuse from
   const verify = async () =>
     accepted((await cliJson<VerifyOutcome>(["-C", raw.path, "verify", id], { environment: {} })).value);
   const first = await verify();
-  assert.deepEqual(
-    first.facts.map((fact) => fact.kind),
-    ["attestation"],
-  );
-  assert.equal(first.value.completion, undefined);
+  assert.equal(first.checks[0]?.kind, "terminal");
+  assert.equal(first.placement?.kind, "delivery-missing");
   assert.equal((await observeContract(repository, id)).state?.delivery, null);
   const second = await verify();
   assert.equal(readFileSync(runs, "utf8"), "run\nrun\n");
-  assert.deepEqual(second.facts, []);
-  const check = second.value.checks[0]!;
-  assert.ok(check.kind === "terminal");
-  assert.equal(check.admission.kind, "reused");
+  const check = second.checks[0]!;
+  assert.equal(check.kind, "terminal");
+  if (check.kind !== "terminal") assert.fail("verification did not finish");
+  assert.equal(check.admission, "reused");
   assert.match(
-    renderAccepted(second, { columns: 400, color: false }),
+    renderAccepted("verify", second, { columns: 400, color: false }),
     /check 1\s+executed[\s\S]*attestation\s+reused/u,
   );
   const delivered = accepted(
     (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value,
   );
-  assert.equal(delivered.value.completion?.integration, first.value.snapshot);
+  assert.equal(delivered.placement?.kind, "placed");
+  assert.equal(delivered.integration, first.snapshot);
   assert.equal(readFileSync(runs, "utf8"), "run\nrun\n", "delivery consumes standing evidence");
 });
 
@@ -133,17 +122,13 @@ test("full verify exposes mixed verdicts, independent scratches, and requirement
   const { raw, id } = await bindCandidate(["echo owned > own-file; exit 1", "test ! -f own-file"]);
   const result = accepted((await cliJson<VerifyOutcome>(["-C", raw.path, "verify", id], { environment: {} })).value);
   assert.deepEqual(
-    result.value.checks.map((check) => (check.kind === "terminal" ? check.verdict : check.kind)),
+    result.checks.map((check) => (check.kind === "terminal" ? check.verdict : check.kind)),
     ["unsatisfied", "satisfied"],
   );
-  assert.deepEqual(
-    result.facts.map((fact) => fact.kind),
-    ["attestation", "attestation"],
-  );
-  const failed = result.value.checks[0]!;
+  const failed = result.checks[0]!;
   assert.ok(failed.retainedPath);
   assert.equal(readFileSync(resolve(failed.retainedPath, "own-file"), "utf8"), "owned\n");
-  const text = renderAccepted(result, { columns: 400, color: false });
+  const text = renderAccepted("verify", result, { columns: 400, color: false });
   assert.match(text, /check 1\s+executed[\s\S]*verdict\s+unsatisfied/u);
   assert.match(text, /check 2\s+executed[\s\S]*verdict\s+satisfied/u);
   assert.ok(text.includes(failed.requirement));
@@ -163,20 +148,17 @@ test("verify refuses out-of-range and unselected checks before execution or admi
   const before = await observeContract(repository, id);
   const result = await cliJson<VerifyOutcome>(["-C", raw.path, "verify", id, "--index", "2"], { environment: {} });
   assert.equal(result.exit, 1);
-  assert.ok(result.value.kind === "refused");
-  assert.deepEqual(result.value.refusal, {
+  assert.equal(result.value.kind, "refused");
+  if (result.value.kind !== "refused") assert.fail("invalid index was accepted");
+  assert.deepEqual(result.value.reason, {
     kind: "verification-index-out-of-range",
-    contractId: id,
-    index: 2,
     total: 1,
   });
   const text = await runCli(["-C", raw.path, "verify", id, "--index", "2"], { environment: {} });
   assert.match(text.stdout, /reason\s+Verification declaration index is out of range/u);
-  assert.match(text.stdout, /index\s+2/u);
   assert.match(text.stdout, /declarations\s+1/u);
   assert.equal(existsSync(marker), false);
   assert.deepEqual(await observeContract(repository, id), before);
-
   const inert = await bindCandidate([`touch '${marker}'`], []);
   const refused = await runCli(["-C", inert.raw.path, "verify", inert.id], { environment: {} });
   assert.equal(refused.exit, 1);
@@ -212,32 +194,22 @@ test("delivery, review and preview consume standing requirement evidence without
   const delivered = accepted(
     (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value,
   );
-  assert.equal(delivered.value.completion, undefined);
-  const preview = accepted(
-    (await cliJson<DeliveryPreviewOutcome>(["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} })).value,
-  );
-  assert.equal(preview.value.verification.kind, "requirements");
-  if (preview.value.verification.kind !== "requirements") throw new Error("missing requirement observation");
+  assert.equal(delivered.placement?.kind, "gates-unsatisfied");
+  const preview = (
+    await cliJson<DeliveryPreviewOutcome>(["-C", raw.path, "deliver", id, "--dry-run"], { environment: {} })
+  ).value;
+  assert.equal(preview.kind, "ready");
+  if (preview.kind !== "ready") assert.fail("preview not ready");
+  const verification = preview.unmetGates?.filter((problem) => problem.gate === "verified");
   assert.deepEqual(
-    preview.value.verification.requirements.map((report) => report.index),
-    [1, 2],
+    verification?.map((problem) => problem.state),
+    ["unsatisfied"],
   );
-  assert.deepEqual(
-    preview.value.verification.requirements.map((report) =>
-      report.current.kind === "attested" ? report.current.verdict : report.current.kind,
-    ),
-    ["unsatisfied", "satisfied"],
-  );
-  const previewText = renderAccepted(preview, { columns: 400, color: false });
-  assert.match(previewText, /verification 1\s+recorded unsatisfied/u);
-  assert.match(previewText, /verification 2\s+recorded satisfied/u);
-  assert.deepEqual(preview.facts, []);
+  const text = renderDeliveryPreview(preview, { columns: 400, color: false });
+  assert.match(text, /verification[\s\S]*unsatisfied/u);
   await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
   assert.equal(readFileSync(runs, "utf8"), beforeRuns);
   const after = (await observeContract(repository, id)).state!;
   assert.equal(after.terminal, null);
-  assert.equal(
-    after.attestations.filter((entry) => entry.data.gate === "verified").length,
-    verified.value.checks.length,
-  );
+  assert.equal(after.attestations.filter((entry) => entry.data.gate === "verified").length, verified.checks.length);
 });

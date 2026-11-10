@@ -1,115 +1,91 @@
 import { z } from "zod";
+import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "./operations.js";
 import {
-  deliverDataSchema,
-  deliveryPreparationRefusalSchema,
-  changeIdSchema,
-  contractIdSchema,
-  gateReportSchema,
-  requirementReportSchema,
-} from "./operations.js";
+  preparationReasonSchema,
+  checkoutCollisionSchema,
+  targetWorkspaceReasonSchema,
+  compactReason,
+  compactPreparationReason,
+} from "./result-reasons.js";
 import { previewTargetAnswerSchema, adjudicatePreviewTarget } from "../git/target-placement.js";
-import { verificationRequirement } from "../verification/declaration.js";
-import { deliveryDiffScopeSchema, readDeliveryDiff, readDeliveryScope } from "../git/integration.js";
+import { readDeliveryDiff, readDeliveryScope } from "../git/integration.js";
 import { observeGitForAdmissionAt } from "../git/observe.js";
-import { activeContract, documentIsCurrent, targetContractRefusal } from "../core/facts/observation.js";
+import { activeContract, targetContractRefusal } from "../core/facts/observation.js";
 import { gateReports } from "../core/facts/gate.js";
 import { unmetPrerequisites } from "../core/verbs/placement.js";
 import type { ContractState, DeliverData } from "../core/facts/types.js";
-import { observeTargetLag, contractTargetLagSchema, worktreeWorkspaceSchema } from "../git/workspace.js";
+import { observeTargetLag, contractTargetLagSchema } from "../git/workspace.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { accepted } from "./outcome.js";
 import { deliveryIntegrationSnapshots, prepareDelivery } from "./deliver.js";
+import { compactScope, compactScopeSchema, requirementProblemSchema, unmetGateProblems } from "./completion.js";
 import type {
-  DeliveryPreparationRefusal,
   DocumentDerivation,
   IntentOutcome,
+  MechanicalPreparationRefusal,
   MutationOperationInput,
   RepositoryScope,
 } from "./operations.js";
 
-export const deliveryPreviewReportSchema = z
-  .object({
-    candidate: z.union([
-      z
-        .object({ kind: z.literal("blocked"), refusal: deliveryPreparationRefusalSchema })
-        .strict()
-        .readonly(),
-      z
-        .object({
-          kind: z.literal("ready"),
-          workspace: worktreeWorkspaceSchema,
-          identity: deliverDataSchema,
-          scope: deliveryDiffScopeSchema.readonly(),
-          diff: z.string().exactOptional(),
-          requirements: z
-            .object({
-              gates: z.array(gateReportSchema).readonly(),
-              unmetPrerequisites: z
-                .array(
-                  z
-                    .object({
-                      contractId: contractIdSchema,
-                      state: z.enum(["missing", "active", "abandoned"]),
-                    })
-                    .strict()
-                    .readonly(),
-                )
-                .readonly(),
-            })
-            .strict()
-            .readonly(),
-        })
-        .strict()
-        .readonly(),
-    ]),
-    verification: z.union([
-      z
-        .object({ kind: z.literal("not-run") })
-        .strict()
-        .readonly(),
-      z
-        .object({ kind: z.literal("undeclared") })
-        .strict()
-        .readonly(),
-      z
-        .object({
-          kind: z.literal("requirements"),
-          requirements: z
-            .array(
-              requirementReportSchema
-                .unwrap()
-                .extend({
-                  index: z.number().int().positive().exactOptional(),
-                })
-                .strict()
-                .readonly(),
-            )
-            .readonly(),
-        })
-        .strict()
-        .readonly(),
-    ]),
-    target: z.union([
-      z
-        .object({ kind: z.literal("not-observed") })
-        .strict()
-        .readonly(),
-      previewTargetAnswerSchema,
-    ]),
-    targetLag: contractTargetLagSchema.exactOptional(),
-    delivery: z
-      .object({
-        changeId: changeIdSchema,
-        relation: z.enum(["identical", "differs"]),
-      })
-      .strict()
+const rawTargetOptions = previewTargetAnswerSchema.options;
+const placeableTargetSchema = z
+  .strictObject({
+    kind: z.literal("placeable"),
+    ref: z.string().min(1),
+    head: snapshotIdSchema,
+    behind: z.union([z.number().int().positive(), z.literal("unknown")]).exactOptional(),
+    checkouts: z
+      .array(z.strictObject({ path: z.string().min(1), diagnostic: z.string().min(1) }).readonly())
+      .min(1)
       .readonly()
       .exactOptional(),
   })
-  .strict()
   .readonly();
-export type DeliveryPreviewReport = z.infer<typeof deliveryPreviewReportSchema>;
-
+const refusedTargetSchema = z
+  .strictObject({
+    kind: z.literal("refused"),
+    reason: z.union([checkoutCollisionSchema, targetWorkspaceReasonSchema]),
+  })
+  .readonly();
+const targetSchema = z.union([placeableTargetSchema, rawTargetOptions[1], refusedTargetSchema, rawTargetOptions[3]]);
+const readySchema = z
+  .strictObject({
+    kind: z.literal("ready"),
+    contractId: contractIdSchema,
+    candidate: snapshotIdSchema,
+    integration: snapshotIdSchema,
+    contentId: changeIdSchema,
+    scope: compactScopeSchema,
+    diff: z
+      .union([
+        z.strictObject({ kind: z.literal("present"), text: z.string() }).readonly(),
+        z.strictObject({ kind: z.literal("unavailable") }).readonly(),
+      ])
+      .exactOptional(),
+    unmetGates: z.array(requirementProblemSchema).min(1).readonly().exactOptional(),
+    unmetPrerequisites: z
+      .array(
+        z.strictObject({ contractId: contractIdSchema, state: z.enum(["missing", "active", "abandoned"]) }).readonly(),
+      )
+      .min(1)
+      .readonly()
+      .exactOptional(),
+    target: targetSchema.exactOptional(),
+    previousContentId: changeIdSchema.exactOptional(),
+  })
+  .readonly();
+export const deliveryPreviewReportSchema = z.union([
+  readySchema,
+  z
+    .strictObject({
+      kind: z.literal("blocked"),
+      contractId: contractIdSchema,
+      reason: preparationReasonSchema,
+    })
+    .readonly(),
+]);
+export type DeliveryPreviewReport = z.output<typeof deliveryPreviewReportSchema>;
+type ReadyPreview = Extract<DeliveryPreviewReport, { kind: "ready" }>;
 type DeliveryPreviewOperationInput = MutationOperationInput &
   Readonly<{
     deriveDocument: (state: ContractState) => DocumentDerivation;
@@ -119,79 +95,109 @@ type DeliveryPreviewOperationInput = MutationOperationInput &
     signal?: AbortSignal;
   }>;
 
-function deliveryRelation(state: ContractState, candidate: DeliverData): DeliveryPreviewReport["delivery"] {
-  const recorded = state.delivery?.data.integration.changeId;
-  if (recorded === undefined) return undefined;
-  return {
-    changeId: recorded,
-    relation: recorded === candidate.integration.changeId ? "identical" : "differs",
-  };
-}
-
-function verificationAnswer(
-  prospective: ContractState,
-  declaration: DocumentDerivation["verification"]["data"],
-): DeliveryPreviewReport["verification"] {
-  if (declaration == null) return { kind: "undeclared" };
-  const verified = gateReports(prospective).reports.find((report) => report.gate === "verified");
-  if (verified === undefined) return { kind: "undeclared" };
-  return {
-    kind: "requirements",
-    requirements: verified.requirements.map((report) => {
-      const index = declaration.declarations.findIndex((item) => verificationRequirement(item) === report.requirement);
-      return { ...report, ...(index < 0 ? {} : { index: index + 1 }) };
-    }),
-  };
-}
-
-async function readyCandidate(
-  repository: RepositoryScope,
-  candidate: DeliverData,
-  workspace: z.infer<typeof worktreeWorkspaceSchema>,
-  requirements: Extract<DeliveryPreviewReport["candidate"], { kind: "ready" }>["requirements"],
-  showDiff: boolean,
-): Promise<Extract<DeliveryPreviewReport["candidate"], { kind: "ready" }>> {
-  const { predecessor, snapshot } = candidate.integration;
-  const scope = await readDeliveryScope(repository, predecessor, snapshot, showDiff);
-  const diff = showDiff ? await readDeliveryDiff(repository, predecessor, snapshot) : undefined;
-  return {
-    kind: "ready",
-    workspace,
-    identity: candidate,
-    scope,
-    requirements,
-    ...(diff === undefined || diff === null ? {} : { diff }),
-  };
+function deliveryRelation(state: ContractState, candidate: DeliverData): ReadyPreview["previousContentId"] {
+  const contentId = state.delivery?.data.integration.changeId;
+  return contentId === undefined || contentId === candidate.integration.changeId ? undefined : contentId;
 }
 
 async function targetAnswer(
   repository: RepositoryScope,
   state: ContractState,
   candidate: DeliverData,
-): Promise<DeliveryPreviewReport["target"]> {
+): Promise<ReadyPreview["target"]> {
   const target = state.coordinates.target;
-  if (target === undefined) return { kind: "not-observed" };
-  return await adjudicatePreviewTarget(repository, {
+  if (target === undefined) return undefined;
+  const answer = await adjudicatePreviewTarget(repository, {
     contractId: state.id,
     coordinates: { ...state.coordinates, target },
     predecessor: candidate.integration.predecessor,
     candidate: candidate.integration.snapshot,
   });
+  if (answer.kind === "refused") return { kind: "refused", reason: compactReason(answer.refusal) };
+  if (answer.kind !== "placeable") return answer;
+  const checkouts = answer.checkouts
+    .filter((checkout) => checkout.kind === "not-followable")
+    .map(({ path, diagnostic }) => ({ path, diagnostic }));
+  return { kind: "placeable", ref: answer.ref, head: answer.head, ...(checkouts.length === 0 ? {} : { checkouts }) };
 }
 
-function blockedPreview(refusal: DeliveryPreparationRefusal): DeliveryPreviewReport {
+function blockedPreview(contractId: ContractState["id"], reason: MechanicalPreparationRefusal): DeliveryPreviewReport {
+  return { kind: "blocked", contractId, reason: compactPreparationReason(reason) };
+}
+type PreviewRefusal =
+  | Exclude<import("../core/verbs/deliver.js").DeliverRefusal, { kind: "document-moved" }>
+  | import("../verification/declaration.js").VerificationDeclarationRefusal;
+
+function compactTargetLag(
+  lag: z.output<typeof contractTargetLagSchema> | undefined,
+): Extract<NonNullable<ReadyPreview["target"]>, { kind: "placeable" }>["behind"] {
+  if (lag === undefined || lag.kind === "none" || (lag.kind === "counted" && lag.behind === 0)) return undefined;
+  return lag.kind === "unknown" ? "unknown" : lag.behind;
+}
+
+async function observeReadyPreview(
+  input: DeliveryPreviewOperationInput,
+  observed: Readonly<{
+    state: ContractState;
+    candidate: DeliverData;
+    workspacePath: string;
+    decision: Parameters<typeof unmetPrerequisites>[1];
+  }>,
+): Promise<ReadyPreview> {
+  const { state, candidate, workspacePath, decision } = observed;
+  const identity = {
+    kind: "ready" as const,
+    contractId: state.id,
+    candidate: candidate.tenderSnapshot,
+    integration: candidate.integration.snapshot,
+    contentId: candidate.integration.changeId,
+  };
+  input.progress?.recordDeliveryPreview(state.id, identity);
+  const prospective = { ...state, currentIntegration: candidate.integration };
+  const unmetGates = unmetGateProblems(gateReports(prospective).reports);
+  const prerequisites = unmetPrerequisites(state.terms.after, decision);
+  const previousContentId = deliveryRelation(state, candidate);
+  const requirements = {
+    ...(unmetGates.length === 0 ? {} : { unmetGates }),
+    ...(prerequisites.length === 0 ? {} : { unmetPrerequisites: prerequisites }),
+    ...(previousContentId === undefined ? {} : { previousContentId }),
+  };
+  input.progress?.recordDeliveryPreview(state.id, requirements);
+  const scope = compactScope(
+    await readDeliveryScope(
+      input.scope,
+      candidate.integration.predecessor,
+      candidate.integration.snapshot,
+      input.showDiff === true,
+    ),
+  );
+  input.progress?.recordDeliveryPreview(state.id, { scope });
+  const diff =
+    input.showDiff === true
+      ? await readDeliveryDiff(input.scope, candidate.integration.predecessor, candidate.integration.snapshot)
+      : undefined;
+  const detail =
+    diff === undefined
+      ? {}
+      : { diff: diff === null ? { kind: "unavailable" as const } : { kind: "present" as const, text: diff } };
+  input.progress?.recordDeliveryPreview(state.id, detail);
+  const target = await targetAnswer(input.scope, state, candidate);
+  if (target !== undefined) input.progress?.recordDeliveryPreview(state.id, { target });
+  const lag =
+    target?.kind === "placeable" ? await observeTargetLag(input.scope, workspacePath, target.head) : undefined;
+  const targetLag = compactTargetLag(lag);
   return {
-    candidate: { kind: "blocked", refusal },
-    verification: { kind: "not-run" },
-    target: { kind: "not-observed" },
+    ...identity,
+    scope,
+    ...requirements,
+    ...detail,
+    ...(target === undefined
+      ? {}
+      : { target: target.kind === "placeable" && targetLag !== undefined ? { ...target, behind: targetLag } : target }),
   };
 }
 
-type PreviewRefusal =
-  | import("../core/verbs/deliver.js").DeliverRefusal
-  | import("../verification/declaration.js").VerificationDeclarationRefusal;
-
-// eslint-disable-next-line complexity -- Preview retains its distinct lifecycle and physical observations.
+/** A native read answer, never an admission or an invitation to run Verification. */
 export async function previewDeliveryOperation(
   input: DeliveryPreviewOperationInput,
 ): Promise<IntentOutcome<DeliveryPreviewReport, PreviewRefusal>> {
@@ -199,18 +205,14 @@ export async function previewDeliveryOperation(
   const observed = await observeGitForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = activeContract(observed.decision, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
-  const targetRefusal = targetContractRefusal(observed.decision, state.id, state.coordinates.target);
+  const targetRefusal = targetContractRefusal(observed.decision, state.coordinates.target);
   if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   const derivation = input.deriveDocument(state);
-  if (!documentIsCurrent(state, derivation.document)) {
-    return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
-  }
   if (derivation.verification.kind === "refused") return { kind: "refused", refusal: derivation.verification.refusal };
   const appointment = await readManagedWorktreeAppointment(input.scope, state.id);
   if (appointment.kind === "failed") throw new Error(appointment.diagnostic);
-  if (appointment.kind === "unappointed") {
-    return accepted(state, [], blockedPreview({ kind: "worktree-missing", contractId: state.id }));
-  }
+  if (appointment.kind === "unappointed")
+    return accepted(state, [], blockedPreview(state.id, { kind: "worktree-missing" }));
   const prepared = await prepareDelivery(
     input.scope,
     {
@@ -227,33 +229,15 @@ export async function previewDeliveryOperation(
       includeDirty: input.includeDirty ?? false,
     },
   );
-  if (prepared.kind === "refused") return accepted(state, [], blockedPreview(prepared.refusal));
-  // Supply prospective keys to the generic currentness owner, never a fabricated delivery fact.
-  const prospective = { ...state, currentIntegration: prepared.data.integration };
-  const candidate = await readyCandidate(
-    input.scope,
-    prepared.data,
-    { kind: "worktree", path: appointment.path },
-    {
-      gates: gateReports(prospective).reports,
-      unmetPrerequisites: unmetPrerequisites(state.terms.after, observed.decision),
-    },
-    input.showDiff === true,
+  if (prepared.kind === "refused") return accepted(state, [], blockedPreview(state.id, prepared.refusal));
+  return accepted(
+    state,
+    [],
+    await observeReadyPreview(input, {
+      state,
+      candidate: prepared.data,
+      workspacePath: appointment.path,
+      decision: observed.decision,
+    }),
   );
-  input.progress?.recordDeliveryPreview(state.id, { candidate });
-  const verification = verificationAnswer(prospective, derivation.verification.data);
-  const delivery = deliveryRelation(state, prepared.data);
-  input.progress?.recordDeliveryPreview(state.id, { verification, ...(delivery === undefined ? {} : { delivery }) });
-  const target = await targetAnswer(input.scope, state, prepared.data);
-  input.progress?.recordDeliveryPreview(state.id, { target });
-  const targetLag =
-    target.kind === "placeable" ? await observeTargetLag(input.scope, appointment.path, target.head) : undefined;
-  const value: DeliveryPreviewReport = {
-    candidate,
-    verification,
-    target,
-    ...(targetLag === undefined ? {} : { targetLag }),
-    ...(delivery === undefined ? {} : { delivery }),
-  };
-  return accepted(state, [], value);
 }

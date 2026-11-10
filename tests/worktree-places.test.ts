@@ -249,22 +249,23 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       workspace: "worktree",
     }));
     const git = await repositoryAt(repository.path);
-    const appointment = await readManagedWorktreeAppointment(git, (present(await bound.value.kei.state())).id);
+    const appointment = await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
-    const failed = await bound.value.kei.abandon({});
-    assert.ok(failed.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).length > 0);
+    const failed = accepted(await bound.kei.abandon({}));
+    assert.ok((failed.issues ?? []).length > 0, JSON.stringify(failed));
     assert.equal(existsSync(appointment.path), true);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.kei.state())).id), appointment);
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), appointment);
     const other = await appointManagedWorktrees(git, [OTHER]);
     assert.equal(
       other.byContract.get(OTHER)?.place,
       expectedForwardAllocation(OTHER_START_INDEX, new Set([appointment.place])),
     );
     writeFileSync(ready, "ready\n");
-    const released = await Keis.of(repo, { settings }).reconcile({ contract: (present(await bound.value.kei.state())).id, retryHooks: true });
-    assert.deepEqual(released.lag, []);
+    const released = await Keis.of(repo, { settings }).reconcile({ contract: (present(await bound.kei.state())).id, retryHooks: true });
+    assert.ok(released.kind === "contract");
+    assert.equal((released.issues ?? []).length, 0, JSON.stringify(released));
     assert.equal(existsSync(appointment.path), false);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.kei.state())).id), { kind: "unappointed" });
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), { kind: "unappointed" });
   });
 
   test("Git removal failure retains custody and a fresh reconcile retries successfully", async () => {
@@ -274,7 +275,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       workspace: "worktree",
     }));
     const git = await repositoryAt(repository.path);
-    const state = present(await bound.value.kei.state());
+    const state = present(await bound.kei.state());
     const appointment = await readManagedWorktreeAppointment(git, state.id);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
     const custody = ["for-each-ref", "refs/keiyaku/delivery", "refs/keiyaku/candidate"];
@@ -291,32 +292,21 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     ].join("\n");
 
     await withGitShim(shim, { KEIYAKU_REMOVE_MARKER: marker }, async (gitPath) => {
-      const first = await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id: state.id }).abandon();
-      const lags = first.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag);
+      const first = accepted(await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id: state.id }).abandon());
       assert.ok(
-        lags.some(
-          (lag) =>
-            lag.kind === "worktree-retained" &&
-            lag.path === appointment.path &&
-            /forced worktree removal failure/u.test(lag.diagnostic ?? ""),
+        (first.issues ?? []).some(
+          (issue) =>
+            issue.kind === "worktree-retained" &&
+            issue.path === appointment.path &&
+            /forced worktree removal failure/u.test(issue.diagnostic ?? ""),
         ),
-      );
-      // Projection observes the worktree as-is; the failed removal must not add a second claim.
-      assert.equal(
-        first.effects.filter(
-          (effect) =>
-            effect.kind === "reconciliation-effect" &&
-            effect.effect.kind === "worktree" &&
-            effect.effect.path === appointment.path &&
-            effect.effect.action === "unchanged",
-        ).length,
-        1,
       );
       assert.equal(repository.run(custody), beforeRefs);
       assert.equal(existsSync(appointment.path), true);
       assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
       const second = await Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({ contract: state.id });
-      assert.deepEqual(second.lag, []);
+      assert.ok(second.kind === "contract");
+      assert.equal((second.issues ?? []).length, 0, JSON.stringify(second));
     });
 
     assert.equal(existsSync(appointment.path), false);
@@ -331,7 +321,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       workspace: "worktree",
     }));
     const git = await repositoryAt(repository.path);
-    const state = present(await bound.value.kei.state());
+    const state = present(await bound.kei.state());
     const appointment = await readManagedWorktreeAppointment(git, state.id);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
     const custody = ["for-each-ref", "refs/keiyaku/delivery", "refs/keiyaku/candidate"];
@@ -354,22 +344,22 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
         KEIYAKU_RECREATE_PATH: appointment.path,
       },
       async (gitPath) => {
-        const retained = await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id: state.id }).abandon();
-        const lags = retained.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag);
+        const retained = accepted(await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id: state.id }).abandon());
         assert.ok(
-          lags.some(
-            (lag) =>
-              lag.kind === "worktree-retained" &&
-              lag.path === appointment.path &&
-              /worktree removal but the path remains/u.test(lag.diagnostic ?? ""),
+          (retained.issues ?? []).some(
+            (issue) =>
+              issue.kind === "worktree-retained" &&
+              issue.path === appointment.path &&
+              /worktree removal but the path remains/u.test(issue.diagnostic ?? ""),
           ),
         );
         assert.equal(lstatSync(appointment.path).isSymbolicLink(), true);
         assert.equal(repository.run(custody), beforeRefs);
         assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
         const replay = await Keis.of(repo).reconcile({ contract: state.id });
-        assert.ok(replay.lag.some((lag) => lag.kind === "worktree-retained"));
-        assert.equal(replay.effects.some((effect) => effect.kind === "worktree" && effect.action === "removed"), false);
+        assert.ok(replay.kind === "contract");
+        assert.ok((replay.issues ?? []).some((issue) => issue.kind === "worktree-retained"));
+        assert.equal((replay.effects ?? []).some((effect) => effect.kind === "worktree-removed"), false);
         assert.equal(lstatSync(appointment.path).isSymbolicLink(), true);
         assert.equal(repository.run(custody), beforeRefs);
         assert.deepEqual(await readManagedWorktreeAppointment(git, state.id), appointment);
@@ -390,25 +380,36 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const git = await repositoryAt(repository.path);
     const path = placeRegisterPath(git);
     writeFileSync(path, '{"version":1}\n');
-    await assert.rejects(() => bound.value.kei.deliver(), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
-    await assert.rejects(() => bound.value.kei.review({ verdict: "satisfied", summary: "Worktree review passed" }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
-    await assert.rejects(async () => Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
+    await assert.rejects(() => bound.kei.deliver(), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
+    await assert.rejects(() => bound.kei.review({ verdict: "satisfied", summary: "Worktree review passed" }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
+    await assert.rejects(async () => Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id }), (error: unknown) => error instanceof KeiyakuError && error.category === "authority-corruption" && error.cause instanceof AuthorityCorruptionError);
     type StatusReport = Readonly<{
-      contracts: Readonly<{ kind: string; failure?: Readonly<{ message: string }> }>;
-      debts: Readonly<{ kind: string; value?: Readonly<{ rows: readonly Readonly<{ id: string }>[] }> }>;
-      akuma: Readonly<{ kind: string }>;
+      contracts: Readonly<{ kind: string; diagnostic?: string }>;
+      debts: Readonly<{ kind: string; rows?: readonly Readonly<{ id: string }>[] }>;
+      akumas: Readonly<{ kind: string }>;
     }>;
     const status = await cliJson<StatusReport>(["-C", repository.path, "status"]);
+    // Bare World status keeps the corrupt Place local to its Contract section.
     assert.equal(status.value.contracts.kind, "failed");
-    assert.match(status.value.contracts.failure?.message ?? "", /Place file has invalid fields/u);
+    if (status.value.contracts.kind === "failed")
+      assert.match(status.value.contracts.diagnostic ?? "", /Place file has invalid fields/u);
     assert.equal(status.value.debts.kind, "present");
     if (status.value.debts.kind === "present") {
       assert.equal(
-        (status.value.debts.value?.rows ?? []).some((row) => row.id === added.value.id),
+        (status.value.debts.rows ?? []).some((row) => row.id === added.id),
         true,
       );
     }
-    assert.notEqual(status.value.akuma.kind, "failed");
+    assert.notEqual(status.value.akumas.kind, "failed");
+    type ContractStatus = Readonly<{ kind: string; diagnostic?: string }>;
+    const selected = await cliJson<ContractStatus>([
+      "-C",
+      repository.path,
+      "status",
+      present(await bound.kei.state()).id,
+    ]);
+    assert.equal(selected.value.kind, "contract-failed");
+    assert.match(selected.value.diagnostic ?? "", /Place file has invalid fields/u);
   });
 
   test("appoint write failure causes no Git ref or worktree effect", async () => {
@@ -424,12 +425,12 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
         markdown: contractBody("Unrealized"),
         workspace: "worktree",
         }));
-      assert.ok(bound.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).some((lag) => lag.kind === "contract-file-failed"));
+      assert.ok((bound.issues ?? []).some((issue) => issue.kind === "contract-file-failed"));
       assert.equal(existsSync(worktreePath(git, "atlantis")), false);
       assert.equal(repository.run(["worktree", "list", "--porcelain"]), worktrees);
       assert.doesNotMatch(repository.run(["show-ref"]), /refs\/keiyaku\/delivery\//u);
       rmSync(target, { recursive: true });
-      assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.kei.state())).id), { kind: "unappointed" });
+      assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), { kind: "unappointed" });
     } finally {
       rmSync(target, { recursive: true, force: true });
     }
@@ -443,26 +444,28 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       workspace: "worktree",
     }));
     const git = await repositoryAt(repository.path);
-    const appointment = await readManagedWorktreeAppointment(git, (present(await bound.value.kei.state())).id);
+    const appointment = await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id);
     assert.ok(appointment.kind === "appointed", "expected appointment.kind = \"appointed\"");
     const bytes = readFileSync(placeRegisterPath(git), "utf8");
     const directory = join(git.commonDirectory, "keiyaku");
     chmodSync(directory, 0o555);
     let abandoned;
     try {
-      abandoned = await bound.value.kei.abandon();
+      abandoned = accepted(await bound.kei.abandon());
     } finally {
       chmodSync(directory, 0o755);
     }
     assert.equal(existsSync(appointment.path), false);
-    assert.ok(abandoned.effects.filter((effect) => effect.kind === "reconciliation-lag").map((effect) => effect.lag).some((lag) => lag.kind === "contract-file-failed"));
+    assert.ok((abandoned.issues ?? []).some((issue) => issue.kind === "contract-file-failed"));
     assert.equal(readFileSync(placeRegisterPath(git), "utf8"), bytes);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.kei.state())).id), appointment);
-    const repaired = await Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id });
-    assert.deepEqual(repaired.lag, []);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.kei.state())).id), { kind: "unappointed" });
-    const again = await Keis.of(repo).reconcile({ contract: (present(await bound.value.kei.state())).id });
-    assert.deepEqual(again.lag, []);
-    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.value.kei.state())).id), { kind: "unappointed" });
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), appointment);
+    const repaired = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
+    assert.ok(repaired.kind === "contract");
+    assert.equal((repaired.issues ?? []).length, 0, JSON.stringify(repaired));
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), { kind: "unappointed" });
+    const again = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
+    assert.ok(again.kind === "contract");
+    assert.equal((again.issues ?? []).length, 0, JSON.stringify(again));
+    assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), { kind: "unappointed" });
   });
 });

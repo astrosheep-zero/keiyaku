@@ -53,6 +53,7 @@ export const capabilityPolicy = {
         { source: "protocol/intent.ts", symbols: ["z"] },
         { source: "protocol/operations.ts", symbols: ["z"] },
         { source: "protocol/result-leaves.ts", symbols: ["z"] },
+        { source: "protocol/result-reasons.ts", symbols: ["z"] },
         { source: "protocol/read/status.ts", symbols: ["z"] },
         { source: "protocol/read/observation.ts", symbols: ["z"] },
         { source: "protocol/progress.ts", symbols: ["z"] },

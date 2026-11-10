@@ -1,5 +1,5 @@
-import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, Section } from "../../kanshi/index.js";
-import { snapshotActivityLines } from "./akuma-activity.js";
+import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, BoardSection } from "../../kanshi/report.js";
+import { activityRowLines } from "./akuma-activity.js";
 import { akumaMark } from "./marks.js";
 import {
   ageText,
@@ -28,23 +28,28 @@ function mostRecentTimestamp(...values: readonly (string | null | undefined)[]):
 function akumaStatusTone(row: AkumaKanshiRow, observedAt: string): SemanticTone | null {
   if (row.life === "stillborn" || row.life === "hung" || row.life === "stranded") return "alert";
   if (row.life === "killed") return "dim";
-  const lifeAt = "lifeAt" in row ? row.lifeAt : null;
-  const lastActivityAt = "lastActivityAt" in row ? row.lastActivityAt : null;
+  const lifeAt = "lifeAt" in row ? row.lifeAt : undefined;
+  const lastActivityAt = "lastActivityAt" in row ? row.lastActivityAt : undefined;
   const latestAge = elapsedMilliseconds(mostRecentTimestamp(lifeAt, lastActivityAt), observedAt);
   if (row.life === "asleep") return latestAge !== null && latestAge <= RECENT_TONE_MS ? "recent" : "dim";
   if (row.life === "running" && latestAge !== null && latestAge <= RECENT_TONE_MS) return "recent";
   return null;
 }
 
-/** Bounded latest semantic entry, rendered by the same activity renderer as a targeted snapshot. */
-function latestActivityLines(
-  snapshot: NonNullable<AkumaKanshiRow["snapshot"]>,
-  context: TextRenderContext,
-): readonly string[] {
+/** The native owner's current actionable row pair, rendered by the shared activity grammar. */
+function rowPreviewLines(row: AkumaKanshiRow, context: TextRenderContext): readonly string[] {
   const bounded = { ...context, columns: Math.max(1, context.columns - ACTIVITY_INDENT.length) };
-  return snapshotActivityLines(snapshot, bounded, { latest: true, tailAnswer: true }).map(
-    (line) => `${ACTIVITY_INDENT}${line}`,
-  );
+  const activity = row.activity;
+  const preview =
+    activity === undefined
+      ? []
+      : activity.kind === "unavailable"
+        ? [`! activity unavailable · ${activity.diagnostic}`]
+        : activityRowLines(activity, bounded, { compact: true });
+  return [
+    ...preview,
+    ...(row.outcome === undefined ? [] : activityRowLines(row.outcome, bounded, { compact: true, tailAnswer: true })),
+  ].map((line) => `${ACTIVITY_INDENT}${line}`);
 }
 
 function akumaLabel(row: Pick<AkumaKanshiRow, "aliases">, aliasesUnavailable: boolean): string {
@@ -53,10 +58,60 @@ function akumaLabel(row: Pick<AkumaKanshiRow, "aliases">, aliasesUnavailable: bo
   return aliasesUnavailable ? "(aliases unavailable)" : "";
 }
 
-function endpointFact(id: string, observed: string | undefined): string {
-  // A bounded or failed Contract read leaves the disposition unknown; a parenthetical that
-  // cannot name the reason is absent, while a complete read that established absence says so.
-  return observed === "missing" ? `${id} (missing)` : id;
+function associationFact(contract: NonNullable<AkumaKanshiRow["contract"]>): string {
+  if (contract.kind === "unavailable") return "contract association unavailable";
+  return contract.contractId;
+}
+
+function akumaRowLines(
+  row: AkumaKanshiRow,
+  aliasesUnavailable: boolean,
+  observedAt: string,
+  context: TextRenderContext,
+): readonly string[] {
+  const statusTone = akumaStatusTone(row, observedAt);
+  const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
+  const lifeAt = "lifeAt" in row ? row.lifeAt : undefined;
+  const lifeAge = lifeAt === undefined ? null : formatAge(lifeAt, observedAt);
+  const life = lifeAge === null ? row.life : `${row.life} · ${lifeAge}`;
+  const lastActivityAt = "lastActivityAt" in row ? row.lastActivityAt : undefined;
+  const activityAge = lastActivityAt === undefined ? null : formatAge(lastActivityAt, observedAt);
+  const activity = activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`];
+  const key = [life, ...activity];
+  const relation = row.contract === undefined ? [] : [associationFact(row.contract)];
+  const aliases = akumaLabel(row, aliasesUnavailable);
+  const previewLines = rowPreviewLines(row, context);
+  if (context.columns > NARROW_COLUMNS) {
+    const lines = [identityLine(mark, row.id, `${aliases} · ${[...key, ...relation].join(" · ")}`.trim())];
+    return [...lines, ...previewLines];
+  }
+  const identity = aliases.length === 0 ? row.id : `${row.id} ${aliases}`;
+  return [
+    ...entityLines({
+      mark,
+      identity,
+      state: key[0]!,
+      title: "",
+      facts: [...key.slice(1), ...relation],
+      context,
+    }),
+    ...previewLines,
+  ];
+}
+
+function akumaBoardRows(
+  board: AkumaKanshiWorld,
+  rows: readonly AkumaKanshiRow[],
+  observedAt: string,
+  context: TextRenderContext,
+): readonly string[] {
+  const aliasesUnavailable = board.aliasesError !== undefined;
+  const rendered = renderSectionBlock({
+    name: "AKUMA",
+    rows: rows.map((row) => akumaRowLines(row, aliasesUnavailable, observedAt, context)),
+    hasMore: board.more === true,
+  });
+  return [`AKUMA // ${rows.length} recent`, ...rendered.slice(1)];
 }
 
 /**
@@ -67,71 +122,31 @@ function endpointFact(id: string, observed: string | undefined): string {
  * evidence.
  */
 function renderAkumaBoard(
-  section: Section<AkumaKanshiWorld>,
+  section: BoardSection<AkumaKanshiWorld>,
   observedAt: string,
   context: TextRenderContext,
   emptyRows: readonly string[],
 ): readonly string[] {
   if (section.kind === "absent") return ["AKUMA // absent"];
-  if (section.kind === "failed")
-    return ["AKUMA // unavailable", "", tone(`! ${safeText(section.failure.message)}`, "alert", context.color)];
-  const rows = section.value.rows;
-  const aliasesUnavailable = section.value.aliasesUnavailable === true;
+  if (section.kind === "failed") {
+    const failure = ["AKUMA // unavailable", "", tone(`! ${safeText(section.diagnostic)}`, "alert", context.color)];
+    return failure;
+  }
+  const board = section;
+  const rows = board.rows ?? [];
+  const aliasFailure = board.aliasesError;
   if (rows.length === 0) {
-    if (!aliasesUnavailable) return emptyRows;
+    if (aliasFailure === undefined) return emptyRows;
     return [
       ...(emptyRows.length === 0 ? [emptyCatalogue("akuma")] : emptyRows),
-      tone("! aliases unavailable", "alert", context.color),
+      tone(`! aliases unavailable · ${aliasFailure}`, "alert", context.color),
     ];
   }
-  const rowLines = rows.map((row) => {
-    const statusTone = akumaStatusTone(row, observedAt);
-    const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
-    const lifeAt = "lifeAt" in row ? row.lifeAt : null;
-    const lifeAge = formatAge(lifeAt, observedAt);
-    const life = `${row.life} · ${lifeAge}`;
-    const activityAge =
-      "lastActivityAt" in row && row.lastActivityAt !== null ? formatAge(row.lastActivityAt, observedAt) : null;
-    const activity = activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`];
-    const key =
-      row.life === "stranded" && "strandedReason" in row && row.strandedReason === "resume-unsupported"
-        ? [life, ...activity, "resume unsupported"]
-        : [life, ...activity];
-    const relation =
-      row.contract === undefined
-        ? row.contractAssociationUnavailable === true
-          ? ["contract association unavailable"]
-          : []
-        : [endpointFact(row.contract.id, row.contract.observed)];
-    const snapshot = row.snapshot;
-    const snapshotLines = snapshot === undefined ? [] : latestActivityLines(snapshot, context);
-    const aliases = akumaLabel(row, aliasesUnavailable);
-    if (context.columns > NARROW_COLUMNS) {
-      const lines = [identityLine(mark, row.id, `${aliases} · ${[...key, ...relation].join(" · ")}`.trim())];
-      return [...lines, ...snapshotLines];
-    }
-    const identity = aliases.length === 0 ? row.id : `${row.id} ${aliases}`;
-    const lines = entityLines({
-      mark,
-      identity,
-      state: key[0]!,
-      title: "",
-      facts: [...key.slice(1), ...relation],
-      context,
-    });
-    return [...lines, ...snapshotLines];
-  });
-  const rendered = renderSectionBlock({
-    name: "AKUMA",
-    rows: rowLines,
-    hasMore: section.value.hasMore,
-  });
-  const header = `AKUMA // ${rows.length} recent`;
-  return [header, ...rendered.slice(1)];
+  return akumaBoardRows(board, rows, observedAt, context);
 }
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
-  return renderAkumaBoard(report.akuma, report.observedAt, context, []);
+  return renderAkumaBoard(report.akumas, report.observedAt, context, []);
 }
 
 function formatAge(source: string | null | undefined, observedAt: string): string {
@@ -139,4 +154,4 @@ function formatAge(source: string | null | undefined, observedAt: string): strin
   return ageText(source, observedAt);
 }
 
-export { akumaLabel, endpointFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard };
+export { akumaLabel, associationFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard };

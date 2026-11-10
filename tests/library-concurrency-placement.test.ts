@@ -44,7 +44,7 @@ function crossProcessAmend(
     "  const amended = prepareAmendDocument(process.env.KEIYAKU_MARKDOWN)(decodeContractDocument(sourceTerms.document.bytes));",
     "  const document = decodeContractDocument(amended.document);",
     "  const terms = contractTerms(document, sourceTerms.gates, sourceTerms.after);",
-    "  return { source: sourceTerms, deriveAmendment: () => ({ terms, verification: documentDerivation(document, terms.gates, contractId).verification }) };",
+    "  return { source: sourceTerms, deriveAmendment: () => ({ terms, verification: documentDerivation(document, terms.gates).verification }) };",
     "})();",
     "process.stdout.write(`ready${intent === undefined ? '' : `:${intent.source.document.key}`}\\n`);",
     "if (process.env.KEIYAKU_WAIT_FOR_RELEASE === '1') await new Promise((resolve) => process.stdin.once('data', resolve));",
@@ -193,11 +193,11 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
       workspace: "worktree",
       gates: ["reviewed"],
     }));
-    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.value.kei.state())).id);
+    const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.kei.state())).id);
     writeFileSync(resolve(worktree, "candidate.txt"), "captured\n");
     repository.run(["-C", worktree, "add", "candidate.txt"]);
     repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
-    await bound.value.kei.deliver();
+    await bound.kei.deliver();
     writeFileSync(resolve(repository.path, "target.txt"), "moved\n");
     repository.run(["add", "target.txt"]);
     repository.run(["commit", "--quiet", "-m", "move target"]);
@@ -222,7 +222,7 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
       reintegrateOperation({
         channel,
         repository: capability,
-        contractId: (present(await bound.value.kei.state())).id,
+        contractId: (present(await bound.kei.state())).id,
         target: "refs/heads/release",
       }),
     );

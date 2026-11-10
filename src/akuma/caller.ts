@@ -2,7 +2,7 @@ import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import type { WorldRoot } from "../world.js";
 import { akumaIdSchema } from "./identity.js";
-import { akumaOriginSchema, akumaOriginWireSchema, type Soul } from "./heart/facts.js";
+import { akumaOriginWireSchema, type Soul } from "./heart/facts.js";
 
 // Stored attribution is a coordinate, not a live World capability or lookup.
 const callerWorldSchema = z
@@ -48,15 +48,7 @@ export const akumaBirthSchema = z
   .strict()
   .readonly();
 
-export const nativeAkumaBirthSchema = z
-  .object({
-    ...akumaBirthSchema.unwrap().shape,
-    origin: akumaOriginSchema,
-    caller: z.union([retainedCallerSchema, z.object({ kind: z.literal("unknown") }).strict()]),
-  })
-  .strict();
-
-export function projectAkumaBirth(soul: Soul): z.output<typeof nativeAkumaBirthSchema> {
+export function projectAkumaBirth(soul: Soul): z.output<typeof akumaBirthSchema> {
   return { origin: soul.origin, caller: soul.caller ?? { kind: "unknown" } };
 }
 

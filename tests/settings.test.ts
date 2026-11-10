@@ -11,7 +11,8 @@ import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { displayColumns } from "../src/cli/render/terminal.js";
-import { projectSettings, settings } from "../src/settings.js";
+import { projectSettings, settings, settingsSchema } from "../src/settings.js";
+import { z } from "zod";
 import { Keis, Repo, type ContractId } from "../src/index.js";
 import { KeiyakuError } from "../src/library/outcome.js";
 import { accepted, present } from "./support/library-verbs.js";
@@ -54,36 +55,49 @@ function contractGates(context: TestContext) {
         ...(names === undefined ? {} : { gates: names }),
       }),
     );
-    return present(await result.value.kei.state()).terms.gates;
+    return present(await result.kei.state()).terms.gates;
   };
 }
 
 test("Settings namespaces match individual resolution, including provenance and failures", async () => {
   const value = fixture();
   try {
-    writeFileSync(join(value.home, "settings.json"), JSON.stringify({
-      providers: { shared: { user: true }, userOnly: 1 },
-      broken: [],
-    }));
-    writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({
-      providers: { shared: { project: true }, projectOnly: 2 },
-    }));
+    writeFileSync(
+      join(value.home, "settings.json"),
+      JSON.stringify({
+        providers: { shared: { user: true }, userOnly: 1 },
+        broken: [],
+      }),
+    );
+    writeFileSync(
+      join(value.project, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        providers: { shared: { project: true }, projectOnly: 2 },
+      }),
+    );
     let loaded = await settings({ root: value.project, home: value.home });
-    assert.deepEqual(loaded.namespaces.map((view) => view.name), ["broken", "providers"]);
-    assert.deepEqual(loaded.namespaces, loaded.namespaces.map(({ name }) => loaded.namespace(name)));
+    assert.deepEqual(Object.keys(loaded.namespaces ?? {}), ["broken", "providers"]);
+    assert.deepEqual(
+      loaded.namespaces,
+      Object.fromEntries(Object.keys(loaded.namespaces ?? {}).map((name) => [name, loaded.namespace(name)])),
+    );
     assert.deepEqual(loaded.namespace("providers"), {
-      kind: "read", name: "providers", entries: [
-        { name: "projectOnly", value: 2, source: "project", shadows: false },
-        { name: "shared", value: { project: true }, source: "project", shadows: true },
-        { name: "userOnly", value: 1, source: "user", shadows: false },
-      ],
+      kind: "read",
+      entries: {
+        projectOnly: { value: 2, source: "project" },
+        shared: { value: { project: true }, source: "project", shadows: true },
+        userOnly: { value: 1, source: "user" },
+      },
     });
     assert.equal(loaded.namespace("broken").kind, "failed");
 
     writeFileSync(join(value.project, ".keiyaku", "settings.json"), "{");
     loaded = await settings({ root: value.project, home: value.home });
-    assert.deepEqual(loaded.namespaces, loaded.namespaces.map(({ name }) => loaded.namespace(name)));
-    const providers = loaded.namespaces.find(({ name }) => name === "providers");
+    assert.deepEqual(
+      loaded.namespaces,
+      Object.fromEntries(Object.keys(loaded.namespaces ?? {}).map((name) => [name, loaded.namespace(name)])),
+    );
+    const providers = loaded.namespaces?.providers;
     assert.equal(providers?.kind, "failed");
     if (providers?.kind === "failed") assert.equal(providers.failures[0]?.scope, "project");
   } finally {
@@ -94,35 +108,105 @@ test("Settings namespaces match individual resolution, including provenance and 
 test("opaque blank namespace names do not poison Settings construction or unrelated lookups", async () => {
   const value = fixture();
   try {
-    writeFileSync(join(value.home, "settings.json"), JSON.stringify({
-      "": { shared: "user", userOnly: 1 },
-      " ": { userOnly: true },
-      providers: { local: "available" },
-    }));
-    writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({
-      "": { shared: "project" },
-      " ": { projectOnly: true },
-    }));
+    writeFileSync(
+      join(value.home, "settings.json"),
+      JSON.stringify({
+        "": { shared: "user", userOnly: 1 },
+        " ": { userOnly: true },
+        providers: { local: "available" },
+      }),
+    );
+    writeFileSync(
+      join(value.project, ".keiyaku", "settings.json"),
+      JSON.stringify({
+        "": { shared: "project" },
+        " ": { projectOnly: true },
+      }),
+    );
     const loaded = await settings({ root: value.project, home: value.home });
-    assert.deepEqual(loaded.namespaces, [
-      { kind: "read", name: "", entries: [
-        { name: "shared", value: "project", source: "project", shadows: true },
-        { name: "userOnly", value: 1, source: "user", shadows: false },
-      ] },
-      { kind: "read", name: " ", entries: [
-        { name: "projectOnly", value: true, source: "project", shadows: false },
-        { name: "userOnly", value: true, source: "user", shadows: false },
-      ] },
-      { kind: "read", name: "providers", entries: [
-        { name: "local", value: "available", source: "user", shadows: false },
-      ] },
-    ]);
-    assert.deepEqual(loaded.namespace("providers"), loaded.namespaces[2]);
+    assert.deepEqual(loaded.namespaces, {
+      "": {
+        kind: "read",
+        entries: {
+          shared: { value: "project", source: "project", shadows: true },
+          userOnly: { value: 1, source: "user" },
+        },
+      },
+      " ": {
+        kind: "read",
+        entries: {
+          projectOnly: { value: true, source: "project" },
+          userOnly: { value: true, source: "user" },
+        },
+      },
+      providers: {
+        kind: "read",
+        entries: {
+          local: { value: "available", source: "user" },
+        },
+      },
+    });
+    assert.deepEqual(loaded.namespace("providers"), loaded.namespaces?.providers);
     assert.throws(() => loaded.namespace(""), /namespace must be nonblank/u);
     assert.throws(() => loaded.namespace(" "), /namespace must be nonblank/u);
     const project = await projectSettings(value.project);
-    assert.equal(project.namespaces[0]?.name, "");
-    assert.equal(project.namespaces[1]?.name, " ");
+    assert.deepEqual(Object.keys(project.namespaces ?? {}), ["", " "]);
+  } finally {
+    value.close();
+  }
+});
+
+test("user Settings entries named like object properties retain their values and provenance", async () => {
+  const value = fixture();
+  try {
+    const entries = Object.fromEntries([
+      ["constructor", 7],
+      ["toString", false],
+      ["__proto__", { local: true }],
+    ]);
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify(Object.fromEntries([
+      ["future", entries],
+      ["__proto__", { nested: JSON.parse('{"__proto__":null,"constructor":false,"toString":[]}') }],
+    ])));
+    writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({ future: { projectOnly: null } }));
+    const loaded = await settings({ root: value.project, home: value.home });
+    assert.deepEqual(loaded.namespace("future"), {
+      kind: "read",
+      entries: Object.fromEntries([
+        ["__proto__", { value: { local: true }, source: "user" }],
+        ["constructor", { value: 7, source: "user" }],
+        ["projectOnly", { value: null, source: "project" }],
+        ["toString", { value: false, source: "user" }],
+      ]),
+    });
+    assert.match(renderSettingsText(loaded), /entry  constructor · user/u);
+    const wire = JSON.parse(JSON.stringify(loaded));
+    assert.deepEqual(settingsSchema.parse(wire), wire, "namespace, entry, and nested JSON names survive native schema parsing");
+    const invalid = {
+      ...wire,
+      namespaces: Object.fromEntries([["__proto__", { kind: "read", entries: Object.fromEntries([
+        ["__proto__", { value: undefined, source: "user" }],
+      ]) }]]),
+    };
+    assert.equal(settingsSchema.safeParse(invalid).success, false, "prototype-named entries still validate their value");
+    for (const reused of ["ref", "inline"] as const) {
+      const schema = z.toJSONSchema(settingsSchema, { reused });
+      function checkReferences(value: unknown): void {
+        if (value === null || typeof value !== "object") return;
+        for (const [key, child] of Object.entries(value)) {
+          if (key === "$ref" && typeof child === "string") {
+            assert.ok(child.startsWith("#/"));
+            let target: unknown = schema;
+            for (const segment of child.slice(2).split("/")) {
+              assert.ok(target !== null && typeof target === "object", child);
+              target = Reflect.get(target, segment.replaceAll("~1", "/").replaceAll("~0", "~"));
+            }
+            assert.notEqual(target, undefined, child);
+          } else checkReferences(child);
+        }
+      }
+      checkReferences(schema);
+    }
   } finally {
     value.close();
   }
@@ -259,9 +343,9 @@ test("Contract audit and delivery consume captured freshness while empty Setting
         gates: ["reviewed"],
       }),
     );
-    const id = present(await bound.value.kei.state()).id;
-    assert.ok(bound.value.workspace);
-    const path = bound.value.workspace.path;
+    const id = present(await bound.kei.state()).id;
+    assert.ok(bound.worktreePath);
+    const path = bound.worktreePath;
     writeFileSync(join(path, "candidate.txt"), "candidate\n");
     repository.run(["-C", path, "add", "candidate.txt"]);
     repository.run(["-C", path, "commit", "--quiet", "-m", "candidate"]);
@@ -272,22 +356,21 @@ test("Contract audit and delivery consume captured freshness while empty Setting
     // A later edit cannot relax the composition's already captured freshness policy.
     writeProjectSettings(repository.path, {});
     const refusal = {
-      kind: "integration-failed",
-      contractId: id,
-      reason: "not-based-on-target",
+      kind: "not-based-on-target",
       targetHead: repository.run(["rev-parse", "main"]).trim(),
     };
-    const audited = accepted(await bound.value.kei.previewDelivery());
-    assert.deepEqual(audited.value.candidate, { kind: "blocked", refusal });
-    const rejected = await bound.value.kei.deliver();
+    const audited = await bound.kei.previewDelivery();
+    assert.ok(audited.kind === "blocked");
+    assert.deepEqual(audited.reason, refusal);
+    const rejected = await bound.kei.deliver();
     assert.equal(rejected.kind, "refused");
     if (rejected.kind !== "refused") throw new Error("expected strict delivery refusal");
-    assert.deepEqual(rejected.refusal, refusal);
-    assert.equal(present(await bound.value.kei.state()).delivery, null);
+    assert.deepEqual(rejected.reason, refusal);
+    assert.equal(present(await bound.kei.state()).delivery, null);
 
     const permissive = Keis.of(repo, { settings: await projectSettings(repository.path) }).kei({ id });
-    const ready = accepted(await permissive.previewDelivery());
-    assert.equal(ready.value.candidate.kind, "ready");
+    const ready = await permissive.previewDelivery();
+    assert.equal(ready.kind, "ready");
     accepted(await permissive.deliver());
     assert.deepEqual(present(await permissive.state()).delivery?.data.policy, { requireBranchesToBeUpToDate: false });
   } finally {
@@ -348,25 +431,38 @@ test("Archetype resolves builtin and configured Pi executions", async () => {
 test("Archetype inherits the provider recipe and body while child fields replace their settings", async () => {
   const value = fixture();
   try {
-    writeFileSync(join(value.home, "akumas", "base.md"),
-      "---\nprovider: codex-app-server\nmodel: base-model\neffort: high\nnetwork: disabled\ndescription: Base\n---\nBase personality.\n");
+    writeFileSync(
+      join(value.home, "akumas", "base.md"),
+      "---\nprovider: codex-app-server\nmodel: base-model\neffort: high\nnetwork: disabled\ndescription: Base\n---\nBase personality.\n",
+    );
     writeFileSync(join(value.home, "akumas", "child.md"), "---\nbase: base\nmodel: child-model\n---\n");
     const inherited = await loadNamed(value, "child");
     assert.deepEqual(inherited.provider, { name: "codex-app-server", kind: "codex-app-server" });
     assert.equal(inherited.description, "Base");
     assert.deepEqual(inherited.options, {
-      model: "child-model", effort: "high", network: "disabled",
-      systemPrompt: "Base personality.\n", systemPromptMode: "append",
+      model: "child-model",
+      effort: "high",
+      network: "disabled",
+      systemPrompt: "Base personality.\n",
+      systemPromptMode: "append",
     });
-    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ providers: { local: { kind: "codex-app-server" } } }));
-    writeFileSync(join(value.home, "akumas", "child.md"),
-      "---\nbase: base\nprovider: local\neffort: low\ndescription: Child\n---\nChild personality.\n");
+    writeFileSync(
+      join(value.home, "settings.json"),
+      JSON.stringify({ providers: { local: { kind: "codex-app-server" } } }),
+    );
+    writeFileSync(
+      join(value.home, "akumas", "child.md"),
+      "---\nbase: base\nprovider: local\neffort: low\ndescription: Child\n---\nChild personality.\n",
+    );
     const replaced = await loadNamed(value, "child");
     assert.deepEqual(replaced.provider, { name: "local", kind: "codex-app-server" });
     assert.equal(replaced.description, "Child");
     assert.deepEqual(replaced.options, {
-      model: "base-model", effort: "low", network: "disabled",
-      systemPrompt: "Child personality.\n", systemPromptMode: "append",
+      model: "base-model",
+      effort: "low",
+      network: "disabled",
+      systemPrompt: "Child personality.\n",
+      systemPromptMode: "append",
     });
   } finally {
     value.close();
@@ -620,11 +716,11 @@ test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
       text.stdout,
       /    entry  default · user\n      value  object \(2\)\n        kind  "bundle"\n        gates  list \(1\)\n          "0"  "reviewed"/u,
     );
-    const json = await cliJson<{ namespaces: readonly unknown[] }>(["-C", value.project, "settings"], {
+    const json = await cliJson<Pick<Settings, "namespaces">>(["-C", value.project, "settings"], {
       cwd: value.project,
       environment: { KEIYAKU_HOME: value.home },
     });
-    assert.deepEqual(json.value.namespaces, [observed.namespace("gates")]);
+    assert.deepEqual(json.value.namespaces, { gates: observed.namespace("gates") });
   } finally {
     value.close();
   }
@@ -680,20 +776,16 @@ test("settings CLI preserves opaque names, types, empty collections and provenan
       ].join("\n"),
     );
     assert.doesNotMatch(text.stdout, /redacted|lower|\u001b|\u200d/u);
-    const json = await cliJson<{ scopes: unknown; namespaces: readonly unknown[] }>(
-      ["-C", value.project, "settings"],
-      runtime,
-    );
+    const json = await cliJson<Pick<Settings, "scopes" | "namespaces">>(["-C", value.project, "settings"], runtime);
     assert.equal(json.exit, 0, json.stderr);
     const observed = await settings({ root: value.project, home: value.home });
     assert.deepEqual(json.value.scopes, observed.scopes);
-    assert.deepEqual(json.value.namespaces, [
-      {
+    assert.deepEqual(json.value.namespaces, {
+      future: {
         kind: "read",
-        name: "future",
-        entries: [{ name: "local", source: "project", shadows: true, value: opaque }],
+        entries: { local: { source: "project", shadows: true, value: opaque } },
       },
-    ]);
+    });
   } finally {
     value.close();
   }
@@ -713,21 +805,17 @@ test("settings CLI retains scoped failures and available opaque observations", a
     assert.match(text.stdout, /  namespace  future  failed\n    failure  project  settings root must be an object/u);
     assert.match(text.stdout, /    entry  local · user\n      value  object \(1\)\n        token  "synthetic"/u);
     assert.doesNotMatch(text.stdout, /shadows user|redacted/u);
-    const json = await cliJson<{ scopes: unknown; namespaces: readonly unknown[] }>(
-      ["-C", value.project, "settings"],
-      runtime,
-    );
+    const json = await cliJson<Pick<Settings, "scopes" | "namespaces">>(["-C", value.project, "settings"], runtime);
     assert.equal(json.exit, 0, json.stderr);
     const observed = await settings({ root: value.project, home: value.home });
     assert.deepEqual(json.value.scopes, observed.scopes);
-    assert.deepEqual(json.value.namespaces, [
-      {
+    assert.deepEqual(json.value.namespaces, {
+      future: {
         kind: "failed",
-        name: "future",
-        entries: [{ name: "local", source: "user", shadows: false, value: { token: "synthetic" } }],
-        failures: [{ scope: "project", diagnostic: "settings root must be an object" }],
+        entries: { local: { source: "user", value: { token: "synthetic" } } },
+        failures: [{ scope: "project" }],
       },
-    ]);
+    });
   } finally {
     value.close();
   }
@@ -793,7 +881,7 @@ test("omitted Settings accepts built-in gates only, empty hooks, and false fresh
         gates: ["reviewed", "reviewed"],
       }),
     );
-    assert.deepEqual(present(await selected.value.kei.state()).terms.gates, ["reviewed"]);
+    assert.deepEqual(present(await selected.kei.state()).terms.gates, ["reviewed"]);
     await assert.rejects(
       Keis.of(repo).bind({ markdown: contractDocument(), gates: ["security-audited"] }),
       (error: unknown) =>
@@ -802,13 +890,13 @@ test("omitted Settings accepts built-in gates only, empty hooks, and false fresh
         /Unknown gate 'security-audited'\. Known gate names: reviewed, verified/u.test(error.message),
     );
     const bare = accepted(await Keis.of(repo).bind({ markdown: contractDocument("Bare core") }));
-    assert.deepEqual(present(await bare.value.kei.state()).terms.gates, []);
+    assert.deepEqual(present(await bare.kei.state()).terms.gates, []);
     const empty = accepted(
       await Keis.of(repo, { settings: await projectSettings(repository.path) }).bind({
         markdown: contractDocument("Provided empty Settings"),
       }),
     );
-    assert.deepEqual(present(await empty.value.kei.state()).terms.gates, ["reviewed"]);
+    assert.deepEqual(present(await empty.kei.state()).terms.gates, ["reviewed"]);
     await assert.rejects(
       Keis.of(repo).bind({ markdown: contractDocument(), gates: ["Security"] }),
       (error: unknown) =>
@@ -834,28 +922,26 @@ test("captured Settings selects the configured default while explicit [] skips t
     const omitted = accepted(
       await Keis.of(repo, { settings: captured }).bind({ markdown: contractDocument("Omitted") }),
     );
-    assert.deepEqual(present(await omitted.value.kei.state()).terms.gates, ["reviewed"]);
+    assert.deepEqual(present(await omitted.kei.state()).terms.gates, ["reviewed"]);
     const mixed = accepted(
       await Keis.of(repo, { settings: captured }).bind({
         markdown: contractDocument("Mixed"),
         gates: ["reviewed", "strict", "reviewed"],
       }),
     );
-    assert.deepEqual(present(await mixed.value.kei.state()).terms.gates, ["reviewed", "security-audited"]);
+    assert.deepEqual(present(await mixed.kei.state()).terms.gates, ["reviewed", "security-audited"]);
     const explicit = accepted(
       await Keis.of(repo, { settings: captured }).bind({ markdown: contractDocument("Explicit"), gates: [] }),
     );
-    assert.deepEqual(present(await explicit.value.kei.state()).terms.gates, []);
+    assert.deepEqual(present(await explicit.kei.state()).terms.gates, []);
 
     // Later edits never rewrite an already admitted decision or the captured value.
     writeProjectSettings(repository.path, {
       gates: { default: { kind: "bundle", gates: ["security-audited"] } },
     });
-    assert.deepEqual(present(await omitted.value.kei.state()).terms.gates, ["reviewed"]);
-    const again = accepted(
-      await Keis.of(repo, { settings: captured }).bind({ markdown: contractDocument("Again") }),
-    );
-    assert.deepEqual(present(await again.value.kei.state()).terms.gates, ["reviewed"]);
+    assert.deepEqual(present(await omitted.kei.state()).terms.gates, ["reviewed"]);
+    const again = accepted(await Keis.of(repo, { settings: captured }).bind({ markdown: contractDocument("Again") }));
+    assert.deepEqual(present(await again.kei.state()).terms.gates, ["reviewed"]);
   } finally {
     rmSync(repository.path, { recursive: true, force: true });
   }
@@ -868,10 +954,8 @@ test("a broken gates namespace is scoped to omitted and word-selected bind or am
     const repo = await Repo.at({ path: repository.path });
     writeProjectSettings(repository.path, { gates: { default: { kind: "bundle", gates: ["reviewed"] } } });
     const good = await projectSettings(repository.path);
-    const admitted = accepted(
-      await Keis.of(repo, { settings: good }).bind({ markdown: contractDocument("Admitted") }),
-    );
-    const id = present(await admitted.value.kei.state()).id;
+    const admitted = accepted(await Keis.of(repo, { settings: good }).bind({ markdown: contractDocument("Admitted") }));
+    const id = present(await admitted.kei.state()).id;
 
     writeProjectSettings(repository.path, { gates: [] });
     const broken = await projectSettings(repository.path);
@@ -884,18 +968,17 @@ test("a broken gates namespace is scoped to omitted and word-selected bind or am
         gates: [],
       }),
     );
-    assert.deepEqual(present(await explicit.value.kei.state()).terms.gates, []);
+    assert.deepEqual(present(await explicit.kei.state()).terms.gates, []);
     // Omitted amend preserves admitted gates without lookup; fork copies the source gates.
-    const amended = accepted(await brokenHandle.amend({ markdown: contractDocument("Admitted v2") }));
-    assert.deepEqual(amended.value.changes.gates, undefined);
+    accepted(await brokenHandle.amend({ markdown: contractDocument("Admitted v2") }));
     assert.deepEqual(present(await brokenHandle.state()).terms.gates, ["reviewed"]);
     const forked = accepted(await Keis.of(repo, { settings: broken }).bind({ forkOf: id }));
-    assert.deepEqual(present(await forked.value.kei.state()).terms.gates, ["reviewed"]);
+    assert.deepEqual(present(await forked.kei.state()).terms.gates, ["reviewed"]);
     // Reads and unrelated verbs never select the namespace.
-    assert.ok(Array.isArray((await Keis.of(repo, { settings: broken }).list({  })).rows));
+    assert.ok(Array.isArray((await Keis.of(repo, { settings: broken }).list({})).rows!));
 
     const before = await brokenHandle.history();
-    const rowsBefore = (await Keis.of(repo, { settings: broken }).list({  })).rows.length;
+    const rowsBefore = (await Keis.of(repo, { settings: broken }).list({})).rows!.length;
     await assert.rejects(
       Keis.of(repo, { settings: broken }).bind({ markdown: contractDocument("Omitted broken") }),
       invalidInputFromSettings,
@@ -909,7 +992,7 @@ test("a broken gates namespace is scoped to omitted and word-selected bind or am
     );
     await assert.rejects(brokenHandle.amend({ gates: ["reviewed"] }), invalidInputFromSettings);
     assert.deepEqual(await brokenHandle.history(), before);
-    assert.equal((await Keis.of(repo, { settings: broken }).list({  })).rows.length, rowsBefore);
+    assert.equal((await Keis.of(repo, { settings: broken }).list({})).rows!.length, rowsBefore);
   } finally {
     rmSync(repository.path, { recursive: true, force: true });
   }
@@ -924,7 +1007,7 @@ test("hooks and freshness derive only at the operation that consumes them", asyn
 
     writeProjectSettings(repository.path, { worktree: { create: "not-an-array" } });
     const brokenHooks = await projectSettings(repository.path);
-    assert.ok(Array.isArray((await Keis.of(repo, { settings: brokenHooks }).list({  })).rows));
+    assert.equal((await Keis.of(repo, { settings: brokenHooks }).list({})).rows, undefined);
     await assert.rejects(
       Keis.of(repo, { settings: brokenHooks }).bind({ markdown: contractDocument("Broken hooks") }),
       invalidInputFromSettings,

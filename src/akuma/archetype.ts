@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { parseDocument } from "yaml";
-import { boundedListLimit, boundedListSchema, type BoundedList } from "../bounded-list.js";
+import { boundedListLimit } from "../bounded-list.js";
 import type { Settings } from "../settings.js";
 import { validateAkumaName } from "../identity/normalize.js";
 import {
@@ -35,7 +35,12 @@ type DecodedArchetype = Readonly<{
 export const archetypeCatalogRowSchema = z
   .strictObject({ name: z.string(), model: z.string().exactOptional(), description: z.string().exactOptional() })
   .readonly();
-export const archetypeCatalogSchema = boundedListSchema(archetypeCatalogRowSchema);
+export const archetypeCatalogSchema = z
+  .strictObject({
+    rows: z.array(archetypeCatalogRowSchema).nonempty().readonly().exactOptional(),
+    more: z.literal(true).exactOptional(),
+  })
+  .readonly();
 
 export type ArchetypeCatalogRow = Readonly<{
   name: string;
@@ -43,7 +48,7 @@ export type ArchetypeCatalogRow = Readonly<{
   description?: string;
 }>;
 
-export type ArchetypeCatalog = BoundedList<ArchetypeCatalogRow>;
+export type ArchetypeCatalog = z.output<typeof archetypeCatalogSchema>;
 
 /** One closed catalogue request: omitted project means no project scope, never ambient discovery. */
 export type ArchetypeCatalogInput = Readonly<{
@@ -408,9 +413,10 @@ export async function listArchetypeDefinitions(input: ArchetypeCatalogInput = {}
         ...(definition.description === undefined ? {} : { description: definition.description }),
       }),
     );
+  const rows = limit === undefined ? visible : visible.slice(0, limit);
   return {
-    rows: limit === undefined ? visible : visible.slice(0, limit),
-    hasMore: limit === undefined ? false : visible.length > limit,
+    ...(rows.length === 0 ? {} : { rows }),
+    ...(limit !== undefined && visible.length > limit ? { more: true as const } : {}),
   };
 }
 
@@ -470,8 +476,15 @@ const BUILTIN_EXECUTIONS = {
 function providerExecution(settings: Settings, name: string): ProviderExecution {
   const view = settings.namespace("providers");
   if (view.kind === "failed")
-    throw new TypeError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
-  const selected = view.entries.find((entry) => entry.name === name)?.value;
+    throw new TypeError(
+      view.failures
+        .map((failure) => {
+          const scope = settings.scopes[failure.scope];
+          return `${failure.scope}: ${failure.diagnostic ?? (scope.kind === "failed" ? scope.diagnostic : "providers unavailable")}`;
+        })
+        .join("; "),
+    );
+  const selected = view.entries?.[name]?.value;
   if (selected !== undefined) return configuredProvider(name, selected);
   const builtin = BUILTIN_EXECUTIONS[name as keyof typeof BUILTIN_EXECUTIONS];
   if (builtin !== undefined) return decodeProviderRecipe({ name, ...builtin });

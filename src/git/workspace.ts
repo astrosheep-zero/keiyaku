@@ -264,19 +264,18 @@ export async function unmergedWorkspacePaths(repository: GitRepository, workspac
 type WorkspaceChangeCounts = Extract<ContractWorkspaceObservation, { kind: "clean" | "dirty" }>["counts"];
 
 export const conflictRecoverySchema = z
-  .object({
-    materialize: z.literal("deliver --materialize-conflict --include-dirty"),
-    deliver: z.literal("deliver --include-dirty"),
-    staging: z.literal("not-required"),
+  .strictObject({
+    materialize: z
+      .strictObject({ kind: z.literal("deliver"), materializeConflict: z.literal(true), includeDirty: z.literal(true) })
+      .readonly(),
+    deliver: z.strictObject({ kind: z.literal("deliver"), includeDirty: z.literal(true) }).readonly(),
   })
-  .strict()
   .readonly();
 type ConflictRecovery = z.infer<typeof conflictRecoverySchema>;
 
 export const conflictRecovery: ConflictRecovery = Object.freeze({
-  materialize: "deliver --materialize-conflict --include-dirty",
-  deliver: "deliver --include-dirty",
-  staging: "not-required",
+  materialize: { kind: "deliver", materializeConflict: true, includeDirty: true },
+  deliver: { kind: "deliver", includeDirty: true },
 });
 
 export type ContractWorkspaceObservation = z.output<typeof contractWorkspaceObservationSchema>;

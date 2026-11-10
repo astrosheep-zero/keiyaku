@@ -17,10 +17,11 @@ export type NamespaceContextInput = Readonly<{
   managed?: boolean;
 }>;
 export type NamespaceContextSource = "default-root" | "contract-installed" | "local-override";
+export const namespaceContextSourceSchema = z.enum(["default-root", "contract-installed", "local-override"]);
 export const resolvedNamespaceContextSchema = z
   .strictObject({
     namespace: z.array(z.string()).readonly(),
-    source: z.enum(["default-root", "contract-installed", "local-override"]),
+    source: namespaceContextSourceSchema,
   })
   .readonly();
 export type ResolvedNamespaceContext = z.output<typeof resolvedNamespaceContextSchema>;

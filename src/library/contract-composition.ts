@@ -4,7 +4,6 @@ import { withGitDecodeChannel } from "../git/read-observation.js";
 import {
   contractCatalogueOperation,
   contractObservationOperation,
-  contractsOperation,
   type RepositoryScope,
 } from "../protocol/operations.js";
 import type { ContractObservation } from "../protocol/read/status.js";
@@ -34,9 +33,11 @@ import {
 } from "./contract-wait.js";
 import { createKeiHandle, type Kei } from "./kei.js";
 import { readContractValue } from "./outcome.js";
+import { InvocationAccumulator } from "./invocation.js";
 import {
   completeReconcile,
   completeRepoReconcile,
+  reconcileException,
   type ReconcileCompletion,
   type RepoReconcileReport,
 } from "./reconcile.js";
@@ -107,13 +108,22 @@ async function reconcileKeiyaku(
   if (values.retryHooks !== undefined && typeof values.retryHooks !== "boolean")
     throw new TypeError("retryHooks must be a boolean");
   const options = { scope, hooks: derivedHooks(composition), retryHooks: values.retryHooks ?? false };
-  if (contract === undefined) {
-    return await withGitDecodeChannel(scope, (channel) => completeRepoReconcile({ ...options, channel }));
+  const accumulator = new InvocationAccumulator();
+  const id = contract === undefined ? undefined : contractId(contract);
+  try {
+    return await withGitDecodeChannel<ReconcileCompletion | RepoReconcileReport>(
+      scope,
+      (channel) =>
+        id === undefined
+          ? completeRepoReconcile({ ...options, channel, accumulator })
+          : completeReconcile({ ...options, channel, contractId: id, accumulator }),
+      (error) => {
+        if (id !== undefined) accumulator.recordChannelRetirement(id, error);
+      },
+    );
+  } catch (error) {
+    return reconcileException(error, accumulator, id);
   }
-  const id = contractId(contract);
-  return await readContractValue(() =>
-    withGitDecodeChannel(scope, (channel) => completeReconcile({ ...options, channel, contractId: id })),
-  );
 }
 
 export async function listKeis(scope: RepositoryScope, input: ContractListInput): Promise<ContractList> {
@@ -121,17 +131,15 @@ export async function listKeis(scope: RepositoryScope, input: ContractListInput)
   for (const key of Object.keys(values)) {
     if (key !== "limit") throw new TypeError(`Keis.list input has unknown field: ${key}`);
   }
-  if (values.limit === undefined) {
-    const board = await readContractValue(() =>
-      withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel })),
+  const limit = values.limit;
+  if (limit === undefined) {
+    return readContractValue(() =>
+      withGitDecodeChannel(scope, (channel) => contractCatalogueOperation({ scope, channel })),
     );
-    return { ...board, hasMore: false };
   }
-  if (typeof values.limit !== "number") throw new TypeError("Contract list limit must be a number");
+  if (typeof limit !== "number") throw new TypeError("Contract list limit must be a number");
   return readContractValue(() =>
-    withGitDecodeChannel(scope, (channel) =>
-      contractCatalogueOperation({ scope, channel, limit: values.limit as number }),
-    ),
+    withGitDecodeChannel(scope, (channel) => contractCatalogueOperation({ scope, channel, limit })),
   );
 }
 

@@ -30,7 +30,7 @@ test("two concurrent private-state binds both publish distinct accepted contract
   );
   assert.equal(results.length, writers);
   assert.ok(results.every((result) => result.kind === "accepted"));
-  const states = await Promise.all(results.map((result) => result.value.kei.state()));
+  const states = await Promise.all(results.map((result) => result.kei.state()));
   assert.equal(new Set(states.map((state) => present(state).id)).size, writers);
   assert.ok(states.every((state) => present(state).head !== null));
 });
@@ -159,8 +159,8 @@ test("an injected Git publication error still returns publication-failed", async
         ).amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),
     );
   assert.equal(outcome.kind, "retry");
-  assert.ok(outcome.kind === "retry" && outcome.reason.kind === "publication-failed");
-  assert.match(outcome.reason.diagnostic, /forced hard publication failure/u);
+  assert.ok(outcome.kind === "retry" && outcome.reason === "publication-failed");
+  assert.match(outcome.diagnostic, /forced hard publication failure/u);
   assert.deepEqual(readFileSync(attempts, "utf8").trim().split("\n"), ["attempt"]);
 });
 

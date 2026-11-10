@@ -70,7 +70,9 @@ Debts in caller order against that observation as advanced by its own accepted
 changes. A concurrent authority change remains a retry for its addressed Debt;
 it does not make later batch members silently observe a different board.
 Batch cancellation stops at an item boundary; already completed items remain
-durable and are observed through the board.
+durable and are observed through the board. Ordinary batch answers retain each
+requested position and its independent judgment in caller order; completed
+members are not discarded when another member refuses or needs a retry.
 
 Debt owns dependency, parentage, supersession, and related-work relationships.
 They name complete Debt identities and retain their declared order. Newly
@@ -91,10 +93,14 @@ authority, so a synthetic history would be dishonest.
 ## Views
 
 Invocation listing and query default to open work; callers may explicitly select
-terminal work or all work. A targeted Debt read exposes only Debt-owned outbound relations; reverse
-relations are derived only by named board projections. Debt's board,
-readiness, blocked, query, tree, and diagnostic views are read-only
-interpretations of current Debt authority. Growing row catalogues
+terminal work or all work. Catalogues summarize current work rather than repeat
+its full document, activity testimony, or decomposition. A targeted Debt read
+retains requested author testimony and resolved Debt-owned outbound relations;
+relationship endpoints retain availability and lifecycle judgment without
+repeating their work summaries. Blocked views identify every unresolved
+prerequisite and distinguish missing endpoints. Reverse relations are derived
+only by named board projections. Debt's board, readiness, blocked, query, tree, and
+diagnostic views are read-only interpretations of current Debt authority. Growing row catalogues
 are bounded observations: they retain the selected rows and whether the same
 observation establishes another matching row, without becoming a traversal or
 counting interface. Recent package catalogue order remains canonical Debt
@@ -111,7 +117,9 @@ is not truth: comparison with the predecessor observation best-effort detects a
 manual or other non-cooperating concurrent change and returns a retryable
 conflict when observed. Portable filesystems do not provide an arbitrary-writer
 compare-and-swap guarantee between that comparison and replacement. Lock
-cleanup carries no Debt fact and cannot alter authority.
+cleanup carries no Debt fact and cannot alter authority. When cleanup fails
+after a confirmed write, the completed judgment retains a compact diagnostic;
+cleanup failure never turns committed work into a refusal or retry.
 
 Debt Markdown deliberately contains no Contract association. Settlement owns
 the optional DebtHolder relationship and its consequences; Debt contributes a

@@ -78,7 +78,7 @@ test("explicit verification prepares clean candidate scratch without importing w
       );
       const source = await appointedWorktreePath(
         await repositoryAt(raw.path),
-        present(await bound.value.kei.state()).id,
+        present(await bound.kei.state()).id,
       );
       const cleanupLog = join(raw.path, "cleanup.log");
       const setup = [
@@ -130,7 +130,7 @@ test("explicit verification prepares clean candidate scratch without importing w
       const result = await executeVerification({
         repository: await repositoryAt(raw.path),
         candidate: snapshotId(raw.run(["-C", source, "rev-parse", "HEAD"]).trim()),
-        contractId: present(await bound.value.kei.state()).id,
+        contractId: present(await bound.kei.state()).id,
         ...SELECTED,
         declaration: { executor: "bash", script: declaration },
         materializeScratchCandidate,
@@ -369,7 +369,6 @@ test("selected declarations get independent scenes with setup and cleanup for ea
       });
       assert.ok(result.outcome.kind === "terminal");
       assert.equal(result.outcome.verdict, position < 2 ? "satisfied" : "unsatisfied");
-      assert.equal(result.outcome.total, 1);
       if (result.leak?.path) retained.push(result.leak.path);
     }
     assert.equal(new Set(scenes).size, 3);
@@ -460,8 +459,6 @@ test("failed retention with no residue reports only its reason and preserves the
       assert.deepEqual(result.outcome, {
         kind: "terminal",
         verdict: "unsatisfied",
-        passed: 0,
-        total: 1,
         summary: "[1 bash exit 1]",
       });
       assert.ok(result.leak);
@@ -505,7 +502,6 @@ test("failed retained removal retires only the new scene and preserves its verdi
           },
         });
         assert.ok(result.outcome.kind === "terminal" && result.outcome.verdict === "unsatisfied");
-        assert.equal(result.outcome.total, 1);
         assert.ok(result.leak);
         assert.equal("path" in result.leak, false);
         assert.match(
@@ -548,7 +544,7 @@ test("satisfied and cancelled attempts remove only their own scenes", async () =
   };
   try {
     const satisfied = await executeVerification({ ...input, declaration: { executor: "bash", script: "true" } });
-    assert.deepEqual(satisfied, { outcome: { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 } });
+    assert.deepEqual(satisfied, { outcome: { kind: "terminal", verdict: "satisfied" } });
     assert.equal(readFileSync(join(retained.path, "scene.log"), "utf8"), "retained\n");
     const controller = new AbortController();
     const cancelled = await executeVerification({
@@ -680,7 +676,7 @@ test("explicit verification retires a partially materialized scratch after post-
           );
           const source = await appointedWorktreePath(
             await repositoryAt(raw.path),
-            present(await bound.value.kei.state()).id,
+            present(await bound.kei.state()).id,
           );
           writeFileSync(
             hook,
@@ -700,7 +696,7 @@ test("explicit verification retires a partially materialized scratch after post-
           const pending = executeVerification({
             repository: { ...(await repositoryAt(raw.path, gitPath)), signal: controller.signal },
             candidate: snapshotId(raw.run(["-C", source, "rev-parse", "HEAD"]).trim()),
-            contractId: present(await bound.value.kei.state()).id,
+            contractId: present(await bound.kei.state()).id,
             ...SELECTED,
             declaration: { executor: "bash", script: "touch declaration-ran" },
             materializeScratchCandidate,
@@ -734,7 +730,7 @@ test("explicit verification retires a partially materialized scratch after post-
             assert.equal(raw.run(["worktree", "list", "--porcelain"]).includes(scratch), removalFails);
             assert.equal(existsSync(join(source, ".git")), true);
             assert.equal(existsSync(join(scratch, "declaration-ran")), false);
-            assert.equal(present(await bound.value.kei.state()).attestations.length, 0);
+            assert.equal(present(await bound.kei.state()).attestations.length, 0);
           } finally {
             controller.abort();
             await pending.catch(() => undefined);
@@ -789,7 +785,7 @@ test("ordinary post-checkout failure removes partial scratch and permits another
     }
   }
   assert.deepEqual(await executeVerification(input), {
-    outcome: { kind: "terminal", verdict: "satisfied", passed: 1, total: 1 },
+    outcome: { kind: "terminal", verdict: "satisfied" },
   });
 });
 

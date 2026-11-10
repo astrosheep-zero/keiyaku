@@ -176,7 +176,9 @@ test("standalone Akuma operations never read optional Alias or Debt authority", 
     assert.equal(Array.isArray((await selected.history()).rows), true);
     assert.equal((await selected.idle({ timeoutMs: 0 })).status.id, value.allocated.id);
     const asked = await selected.ask("standalone", { timeoutMs: 5_000 });
-    assert.deepEqual(asked.observation, { reason: "answered", answer: "standalone answer" });
+    assert.equal(asked.kind, "answered");
+    if (asked.kind !== "answered") throw new Error("expected answer");
+    assert.equal(asked.answer, "standalone answer");
     assert.ok(["killed", "already-stopped", "already-killed"].includes(await selected.kill()));
   });
 });
@@ -245,8 +247,10 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
   await withWaitedTellFixture(async ({ born, settle }) => {
     const answered = await born("a1000010", answering("exact answer"));
     const observed = await waitTell(answered, { body: "answer this", timeoutMs: 1_000 });
-    assert.equal(observed.tell.admission.tellId, observed.tell.row.tellId);
-    assert.deepEqual(observed.observation, { reason: "answered", answer: "exact answer" });
+    assert.equal(typeof observed.tellId, "string");
+    assert.equal(observed.kind, "answered");
+    if (observed.kind !== "answered") throw new Error("expected answer");
+    assert.equal(observed.answer, "exact answer");
 
     const late = deferred<string>();
     const delayed = await born("a1000018", gatedAnswer(late.promise));
@@ -255,12 +259,12 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
     const deadline = await waitTell(delayed, { body: "late", timeoutMs: 0 });
     const elapsed = performance.now() - startedAt;
     clearTimeout(forced);
-    assert.deepEqual(deadline.observation, { reason: "deadline" });
+    assert.equal(deadline.kind, "deadline");
     assert.ok(elapsed < 200, `an expired window must not wait for delivery (waited ${elapsed}ms)`);
-    assert.equal((await readTell(delayed.allocated.paths, deadline.tell.admission.tellId))?.body, "late");
+    assert.equal((await readTell(delayed.allocated.paths, deadline.tellId))?.body, "late");
     late.resolve("too late");
     await settle();
-    assert.equal((await readTell(delayed.allocated.paths, deadline.tell.admission.tellId))?.state, "told");
+    assert.equal((await readTell(delayed.allocated.paths, deadline.tellId))?.state, "told");
 
     const started = deferred<void>();
     const finish = deferred<string>();
@@ -318,10 +322,10 @@ test("bounded interrupt Ask returns its own admitted Tell without awaiting prede
     try {
       const started = performance.now();
       const result = await waitTell(value, { body: "bounded interrupt", interrupt: true, timeoutMs: 0 });
-      assert.deepEqual(result.observation, { reason: "deadline" });
-      assert.equal(result.tell.interruption?.kind, "pending");
+      assert.equal(result.kind, "deadline");
+      assert.equal(result.interrupt?.kind, "pending");
       assert.ok(performance.now() - started < 200, "an expired Ask must not wait for predecessor settlement");
-      assert.equal((await readTell(value.allocated.paths, result.tell.admission.tellId))?.body, "bounded interrupt");
+      assert.equal((await readTell(value.allocated.paths, result.tellId))?.body, "bounded interrupt");
       assert.equal((await readHeart(value.allocated.paths)).pause?.bodySequence, body.sequence);
     } finally {
       leash.release();
@@ -359,7 +363,7 @@ test("an exact canceled Ask is unanswered even after the same pending Tell binds
           observed.push([...identities]);
         },
       });
-      assert.deepEqual(result.observation, { reason: "unanswered" });
+      assert.equal(result.kind, "unanswered");
       assert.deepEqual(observed, [[`turn/${turn.sequence}`]]);
       assert.equal((await readTurn(paths, next.sequence))?.end, undefined);
       const page = await value.akuma.history();
@@ -402,7 +406,9 @@ test("terminal Tell delivery reports answered and explicit unanswered results", 
           timeoutMs: 0,
         },
       );
-      assert.deepEqual(envelope.observation, { reason: "answered", answer: "edge answer" });
+      assert.equal(envelope.kind, "answered");
+      if (envelope.kind !== "answered") throw new Error("expected answer");
+      assert.equal(envelope.answer, "edge answer");
 
       const unanswered = await born("a1000017", answering("unused"));
       const tellId = "terminal-without-turn";
@@ -414,8 +420,8 @@ test("terminal Tell delivery reports answered and explicit unanswered results", 
         receivedAt: recordedAt,
       });
       const result = await waitTell(unanswered, { body: "gone", tellId, recordedAt, timeoutMs: 0 });
-      assert.equal(result.tell.row.state, "told");
-      assert.deepEqual(result.observation, { reason: "unanswered" });
+      assert.equal((await readTell(unanswered.allocated.paths, tellId))?.state, "told");
+      assert.equal(result.kind, "unanswered");
     }
   });
 });
@@ -424,12 +430,14 @@ test("standalone tell admits without awaiting while ask defaults to unbounded ob
   await withWaitedTellFixture(async ({ born, settle }) => {
     const first = await born("a1000020", answering("first answer"));
     const admitted = await first.akuma.tell("send only");
-    assert.equal(admitted.akuma, first.allocated.id);
-    assert.equal(admitted.tell.row.text, "send only");
+    assert.equal(admitted.akumaId, first.allocated.id);
+    assert.equal((await readTell(first.allocated.paths, admitted.tellId))?.body, "send only");
     await settle();
     const second = await born("a1000021", answering("second answer"));
     const asked = await second.akuma.ask("await answer");
-    assert.deepEqual(asked.observation, { reason: "answered", answer: "second answer" });
+    assert.equal(asked.kind, "answered");
+    if (asked.kind !== "answered") throw new Error("expected answer");
+    assert.equal(asked.answer, "second answer");
   });
 });
 
@@ -439,7 +447,9 @@ test("schema ask decodes JSON and typed failures stay distinct", async () => {
     const decoded = await born("a1000002", answering('{"ok":true}'));
     const value = await decoded.akuma.ask("structured", { schema });
     await settle();
-    assert.deepEqual(value.observation, { reason: "answered", answer: { ok: true } });
+    assert.equal(value.kind, "answered");
+    if (value.kind !== "answered") throw new Error("expected answer");
+    assert.deepEqual(value.answer, { ok: true });
     const fact = (await decoded.akuma.history()).rows.find((row) => row.kind === "tell");
     assert.equal(fact?.kind, "tell");
     if (fact?.kind === "tell") {
@@ -448,10 +458,10 @@ test("schema ask decodes JSON and typed failures stay distinct", async () => {
     }
 
     const invalid = await born("a1000003", answering("not-json"));
-    assert.deepEqual((await invalid.akuma.ask("structured", { schema })).observation.reason, "invalid-output");
+    assert.deepEqual((await invalid.akuma.ask("structured", { schema })).kind, "invalid-output");
 
     const mismatch = await born("a1000004", answering('{"ok":1}'));
-    assert.deepEqual((await mismatch.akuma.ask("structured", { schema })).observation.reason, "invalid-output");
+    assert.deepEqual((await mismatch.akuma.ask("structured", { schema })).kind, "invalid-output");
 
     const failing: ProviderAdapter = fixtureAdapter(async () => ({
       admission: { fence: "api-fail" },
@@ -464,10 +474,9 @@ test("schema ask decodes JSON and typed failures stay distinct", async () => {
       resource: { abort: async () => {} },
     }));
     const failed = await born("a1000005", failing);
-    assert.deepEqual((await failed.akuma.ask("structured", { schema })).observation, {
-      reason: "failed",
-      diagnostic: "provider broke",
-    });
+    const failedAsk = await failed.akuma.ask("structured", { schema });
+    assert.equal(failedAsk.kind, "failed");
+    assert.equal(failedAsk.diagnostic, "provider broke");
   });
 });
 

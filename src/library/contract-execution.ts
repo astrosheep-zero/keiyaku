@@ -2,10 +2,10 @@
 import { prepareAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
+import { normalizeTitle } from "../markdown/query.js";
 import { contractId, type ContractId, type ContractState } from "../core/facts/types.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
-import { documentDiff } from "../markdown/diff.js";
 import { abandonOperation } from "../protocol/abandon.js";
 import { amendOperation } from "../protocol/amend.js";
 import { arcOperation } from "../protocol/arc.js";
@@ -26,8 +26,8 @@ import {
   isOperationalStop,
   type ContractCheckpoint,
 } from "../protocol/progress.js";
-import { admitReviewOperation } from "../protocol/review.js";
-import { verifyOperation } from "../protocol/verify.js";
+import { admitReviewOperation, type ReviewAdmissionValue } from "../protocol/review.js";
+import { verifyOperation, compactVerify } from "../protocol/verify.js";
 import { releaseDebtHolder, releaseDebtHolderWithFence, debtHolderObservationSelection } from "../settlement/holder.js";
 import { continueDeliveredDependents } from "./continuation.js";
 import type {
@@ -52,7 +52,7 @@ import {
   type LocalContractCompositionCapture,
 } from "./contract-settings.js";
 import type { AbandonInput, AmendInput, ArcInput, DeliverInput, ReviewInput, VerifyInput } from "./contract-types.js";
-import { deliveryForContract, type Delivery, type DeliveryValue } from "./delivery.js";
+import { compactDelivery, type Delivery, type RawDeliveryValue } from "./delivery.js";
 import {
   actorOption,
   contractTerms,
@@ -68,6 +68,7 @@ import { InvocationAccumulator } from "./invocation.js";
 import {
   KeiyakuError,
   project,
+  compactReview,
   validated,
   type ContractVerb,
   type OutcomeProjection,
@@ -77,10 +78,18 @@ import {
   type Verify,
 } from "./outcome.js";
 import { reconcileAffectedContracts } from "./reconcile.js";
-import type { OperationRefusals } from "./refusal.js";
+import {
+  compactDeliverRefusal,
+  compactPreviewRefusal,
+  compactVerifyRefusal,
+  type OperationRefusals,
+} from "./refusal.js";
 import { observeChangedRegion } from "./region.js";
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
+type RawReview = CompletionEvidence &
+  ReviewAdmissionValue &
+  Readonly<{ continuation?: import("./continuation.js").ContinuationReport }>;
 export class ContractExecution {
   constructor(
     private readonly seat: Readonly<{
@@ -135,22 +144,25 @@ export class ContractExecution {
           deriveAmendment: (source) => {
             const current = persistedDocument(source.document.bytes);
             const amendment = amendmentPlan === undefined ? undefined : validated(() => amendmentPlan(current));
-            changedSections = amendment?.changedSections;
             const amended =
               amendment === undefined ? current : validated(() => decodeContractDocument(amendment.document));
+            changedSections =
+              amendment === undefined
+                ? undefined
+                : new Set(
+                    [...amendment.changedSections].filter(
+                      (section) => sectionValue(current, section) !== sectionValue(amended, section),
+                    ),
+                  );
             const terms = contractTerms(amended, gates ?? source.gates, prerequisites ?? source.after);
-            return { terms, verification: documentDerivation(amended, terms.gates, this.id).verification };
+            return { terms, verification: documentDerivation(amended, terms.gates).verification };
           },
         });
         if (admission.kind !== "accepted") return expected(this.id, admission);
         const changes = changedAmendTerms(admission.value.source, admission.value.terms);
-        const diff = documentDiff(
-          "before",
-          "after",
-          admission.value.source.document.bytes,
-          admission.value.terms.document.bytes,
-        );
-        accumulator.extendConclusions(this.id, { documentDiff: diff, changes });
+        const sections =
+          changedSections === undefined || changedSections.size === 0 ? {} : { changedSections: [...changedSections] };
+        accumulator.extendConclusions(this.id, { ...sections, ...changes });
         const region = await observeChangedRegion(
           scope,
           this.id,
@@ -163,12 +175,12 @@ export class ContractExecution {
           leading: admission,
           hooks,
           value: (): AmendValue => ({
-            documentDiff: diff,
-            changes,
+            ...sections,
+            ...changes,
             ...region,
           }),
         });
-        return acceptedOutcome("amend", this.id, accumulator, value);
+        return acceptedOutcome(this.id, accumulator, value);
       },
     );
   }
@@ -184,9 +196,8 @@ export class ContractExecution {
         accumulator,
         localChannel,
         scope,
-      ): Promise<OutcomeProjection<"deliver", Delivery & DeliveryValue, OperationRefusals["deliver"]>> => {
-        let leadingValue: DeliveryValue | undefined;
-        let stage: import("../protocol/progress.js").ExecutionStage = "admission";
+      ): Promise<OutcomeProjection<"deliver", Delivery, OperationRefusals["deliver"]>> => {
+        let leadingValue: RawDeliveryValue | undefined;
         try {
           values.signal?.throwIfAborted();
           const outcome = await admitDeliveryOperation({
@@ -205,21 +216,28 @@ export class ContractExecution {
           });
           if (outcome.kind === "integration-conflict-materialized")
             return { kind: "handoff", contract: this.id, value: outcome };
+          if (outcome.kind === "refused")
+            return { kind: "refused", contract: this.id, refusal: compactDeliverRefusal(outcome.refusal) };
           if (outcome.kind !== "accepted") return expected(this.id, outcome);
           leadingValue = outcome.value;
           accumulator.extendConclusions(this.id, { leading: outcome.value.leading });
-          stage = "placement";
           await advanceAndContinue(accumulator, scope, localChannel, this.id, this.composition, outcome, values.signal);
         } catch (error) {
-          retainTrailingFailure(accumulator, this.id, error, values.signal, stage);
+          retainTrailingFailure(accumulator, this.id, error, values.signal);
         }
         const base = admittedDeliveryValue(accumulator, this.id);
         requireMatchingDeliveryLeading(leadingValue, base);
         const retained = accumulator.conclusions(this.id) ?? {};
-        const value: DeliveryValue = { ...base, ...leadingValue, ...retained } as DeliveryValue;
+        const integration = accumulator.checkpoint(this.id)?.state.currentIntegration;
+        const value: RawDeliveryValue = {
+          ...base,
+          ...leadingValue,
+          ...retained,
+          ...(integration == null ? {} : { integration }),
+        };
         accumulator.recordConclusions(this.id, value);
         await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
-        return acceptedOutcome("deliver", this.id, accumulator, deliveryForContract(this.scope, value));
+        return acceptedOutcome(this.id, accumulator, compactDelivery(value));
       },
       values.signal,
       observer,
@@ -259,9 +277,10 @@ export class ContractExecution {
           ...(signal === undefined ? {} : { signal }),
           ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
         });
-        if (outcome.kind !== "accepted") return expected(this.id, outcome);
+        if (outcome.kind === "refused")
+          return { kind: "refused", contract: this.id, refusal: compactVerifyRefusal(outcome.refusal) };
         accumulator.extendConclusions(this.id, outcome.value);
-        let completion: CompletionEvidence & Pick<DeliveryValue, "continuation"> = {};
+        let completion: CompletionEvidence & Pick<RawDeliveryValue, "continuation"> = {};
         try {
           if (!signal?.aborted)
             completion = await advanceAndContinue(
@@ -279,12 +298,17 @@ export class ContractExecution {
               signal,
             );
         } catch (error) {
-          retainTrailingFailure(accumulator, this.id, error, signal, "placement");
+          retainTrailingFailure(accumulator, this.id, error, signal);
         }
-        const value: Verify = { ...outcome.value, ...completion };
-        accumulator.extendConclusions(this.id, value);
+        const raw = { ...outcome.value, ...completion };
+        accumulator.extendConclusions(this.id, raw);
         await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
-        return acceptedOutcome("verify", this.id, accumulator, value);
+        const continuation = completion.continuation;
+        const value: Verify = {
+          ...compactVerify(raw),
+          ...(continuation === undefined || Object.keys(continuation).length === 0 ? {} : { continuation }),
+        };
+        return acceptedOutcome(this.id, accumulator, value);
       },
       signal,
       observer,
@@ -314,8 +338,7 @@ export class ContractExecution {
         localChannel,
         scope,
       ): Promise<OutcomeProjection<"review", Review, OperationRefusals["review"]>> => {
-        let value: Review = {};
-        let stage: import("../protocol/progress.js").ExecutionStage = "admission";
+        let value: RawReview = {};
         try {
           signal?.throwIfAborted();
           const outcome = await admitReviewOperation({
@@ -329,10 +352,15 @@ export class ContractExecution {
             verdict,
             summary,
           });
+          if (outcome.kind === "refused")
+            return {
+              kind: "refused",
+              contract: this.id,
+              refusal: outcome.refusal,
+            };
           if (outcome.kind !== "accepted") return expected(this.id, outcome);
           value = outcome.value;
           accumulator.extendConclusions(this.id, value);
-          stage = "placement";
           if (verdict === "satisfied")
             value = {
               ...value,
@@ -347,12 +375,12 @@ export class ContractExecution {
               )),
             };
         } catch (error) {
-          retainTrailingFailure(accumulator, this.id, error, signal, stage);
+          retainTrailingFailure(accumulator, this.id, error, signal);
         }
-        const retained: Review = { ...value, ...accumulator.conclusions(this.id) };
+        const retained: RawReview = { ...value, ...accumulator.conclusions(this.id) };
         accumulator.extendConclusions(this.id, retained);
         await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
-        return acceptedOutcome("review", this.id, accumulator, retained);
+        return acceptedOutcome(this.id, accumulator, compactReview(retained));
       },
       signal,
       observer,
@@ -374,7 +402,7 @@ export class ContractExecution {
         accumulator,
         channel,
         scope,
-      ): Promise<OutcomeProjection<"abandon", void, OperationRefusals["abandon"]>> => {
+      ): Promise<OutcomeProjection<"abandon", Record<never, never>, OperationRefusals["abandon"]>> => {
         const admission = (
           await releaseDebtHolderWithFence(scope, channel, this.id, () =>
             abandonOperation({
@@ -400,7 +428,7 @@ export class ContractExecution {
           hooks,
           value: () => ({}),
         });
-        return acceptedOutcome("abandon", this.id, accumulator, undefined);
+        return acceptedOutcome(this.id, accumulator, {});
       },
     );
   }
@@ -416,7 +444,11 @@ export class ContractExecution {
     const hooks = derivedHooks(this.composition);
     return await this.local(
       "arc",
-      async (accumulator, channel, scope): Promise<OutcomeProjection<"arc", void, OperationRefusals["arc"]>> => {
+      async (
+        accumulator,
+        channel,
+        scope,
+      ): Promise<OutcomeProjection<"arc", Readonly<{ chapter: number }>, OperationRefusals["arc"]>> => {
         const admission = await arcOperation({
           scope,
           channel,
@@ -426,14 +458,14 @@ export class ContractExecution {
           progress: accumulator,
         });
         if (admission.kind !== "accepted") return expected(this.id, admission);
-        await this.conclude(accumulator, {
+        const value = await this.conclude(accumulator, {
           scope,
           channel,
           leading: admission,
           hooks,
-          value: () => ({}),
+          value: () => ({ chapter: admission.value.chapter }),
         });
-        return acceptedOutcome("arc", this.id, accumulator, undefined);
+        return acceptedOutcome(this.id, accumulator, value);
       },
     );
   }
@@ -468,9 +500,11 @@ export class ContractExecution {
           ...(signal === undefined ? {} : { signal }),
           ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
         });
+        if (admission.kind === "refused")
+          return { kind: "refused", contract: this.id, refusal: compactPreviewRefusal(admission.refusal) };
         if (admission.kind !== "accepted") return expected(this.id, admission);
         accumulator.recordDeliveryPreview(this.id, admission.value);
-        return { kind: "accepted", contract: this.id, head: admission.head, value: admission.value };
+        return { kind: "accepted", contract: this.id, value: admission.value };
       },
       signal,
       observer,
@@ -533,15 +567,32 @@ export class ContractExecution {
     return value;
   }
 }
-function changedAmendTerms(before: ContractState["terms"], after: ContractState["terms"]): AmendValue["changes"] {
+function changedAmendTerms(
+  before: ContractState["terms"],
+  after: ContractState["terms"],
+): Pick<AmendValue, "gatesChanged" | "afterChanged"> {
   return {
     ...(before.gates.length === after.gates.length && before.gates.every((gate, index) => gate === after.gates[index])
       ? {}
-      : { gates: after.gates }),
+      : { gatesChanged: true as const }),
     ...(before.after.length === after.after.length && before.after.every((id, index) => id === after.after[index])
       ? {}
-      : { after: after.after }),
+      : { afterChanged: true as const }),
   };
+}
+
+function sectionValue(document: ReturnType<typeof decodeContractDocument>, section: string): string | undefined {
+  switch (section) {
+    case "context":
+    case "objective":
+    case "design":
+    case "region":
+    case "criteria":
+    case "verification":
+      return JSON.stringify(document[section]);
+    default:
+      return JSON.stringify(document.extensions.find((extension) => normalizeTitle(extension.title) === section));
+  }
 }
 
 function persistedDocument(bytes: string): ReturnType<typeof decodeContractDocument> {
@@ -553,7 +604,7 @@ function persistedDocument(bytes: string): ReturnType<typeof decodeContractDocum
 }
 
 function derivedDocument(state: ContractState): DocumentDerivation {
-  return documentDerivation(persistedDocument(state.terms.document.bytes), state.terms.gates, state.id);
+  return documentDerivation(persistedDocument(state.terms.document.bytes), state.terms.gates);
 }
 
 function observationOptions(options: MutationObservation | undefined): ExecutionObserver | undefined {
@@ -594,11 +645,10 @@ function retainTrailingFailure(
   contractId: ContractId,
   error: unknown,
   signal: AbortSignal | undefined,
-  stage: import("../protocol/progress.js").ExecutionStage,
 ): void {
   if (accumulator.head(contractId) === undefined) throw error;
   if (!isOperationalStop(error, signal)) throw error;
-  accumulator.recordStop(executionStop(contractId, stage, error, signal));
+  accumulator.recordStop(executionStop(contractId, error, signal));
 }
 
 // eslint-disable-next-line max-params -- Keep this local operation's custody, admission, and policy witnesses explicit.
@@ -610,7 +660,7 @@ async function advanceAndContinue(
   composition: LocalContractCompositionCapture,
   outcome: AcceptedProtocolStep,
   signal: AbortSignal | undefined,
-): Promise<CompletionEvidence & Pick<DeliveryValue, "continuation">> {
+): Promise<CompletionEvidence & Pick<RawDeliveryValue, "continuation">> {
   const checkpoint: ContractCheckpoint = { state: outcome.state, journal: outcome.journal };
   const result = await completeCandidate({
     repository: scope,
@@ -636,13 +686,13 @@ async function advanceAndContinue(
 }
 
 /** An accepted delivery's leading act must be the fact this invocation admitted. */
-function requireMatchingDeliveryLeading(leading: DeliveryValue | undefined, base: DeliveryValue): void {
+function requireMatchingDeliveryLeading(leading: RawDeliveryValue | undefined, base: RawDeliveryValue): void {
   const mismatched =
     leading !== undefined && (leading.leading.kind !== base.leading.kind || leading.leading.fact !== base.leading.fact);
   if (mismatched) throw new Error("accepted delivery leading disagrees with its admitted fact");
 }
 
-function admittedDeliveryValue(accumulator: InvocationAccumulator, contractId: ContractId): DeliveryValue {
+function admittedDeliveryValue(accumulator: InvocationAccumulator, contractId: ContractId): RawDeliveryValue {
   const fact = accumulator.snapshot().facts.find((entry) => entry.contract === contractId && entry.kind === "deliver");
   if (fact?.kind === "deliver") return { ...fact.data, leading: { kind: "admitted-now", fact: fact.entry } };
   const delivery = accumulator.checkpoint(contractId)?.state.delivery;

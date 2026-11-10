@@ -1,18 +1,20 @@
 import { Writable } from "node:stream";
-import {
-  contractHead,
-  contractId,
-  type ContractHead,
-  type ContractId,
-  type JournalEntry,
-} from "../../src/core/facts/types.js";
-import type { InvocationEffect, PendingSurface } from "../../src/library/outcome.js";
+import { contractId } from "../../src/core/facts/types.js";
+import type { z } from "zod";
+import type {
+  bindOutcomeSchema,
+  amendOutcomeSchema,
+  arcOutcomeSchema,
+  abandonOutcomeSchema,
+  deliverOutcomeSchema,
+  verifyOutcomeSchema,
+  reviewOutcomeSchema,
+  deliveryPreviewOutcomeSchema,
+} from "../../src/index.js";
 import { parseArgv } from "../../src/cli/parse.js";
-import type { AcceptedContractOutcome } from "../../src/cli/render/contract.js";
 import { runCliCommand, type CliRuntimeInput } from "../../src/cli/runtime.js";
-import type { ContractList } from "../../src/library/contract-types.js";
-import type { ContractKanshiRow, KanshiReport } from "../../src/kanshi/index.js";
-import type { ContractRow } from "../../src/protocol/read/status.js";
+import type { ContractCatalogue, ContractSummary } from "../../src/index.js";
+import type { ContractKanshiDetail, KanshiContractReport, KanshiReport } from "../../src/kanshi/index.js";
 
 /** One parsed executable invocation; a help-only argv never reaches a product operation. */
 export function executable(argv: readonly string[]) {
@@ -40,36 +42,30 @@ export async function cliJson<Value = unknown>(
   try {
     return { ...result, value: JSON.parse(result.stdout) as Value };
   } catch (error) {
-    throw new Error(`cliJson could not parse stdout (exit ${result.exit}): ${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`, { cause: error });
+    throw new Error(
+      `cliJson could not parse stdout (exit ${result.exit}): ${JSON.stringify(result.stdout)} stderr=${JSON.stringify(result.stderr)}`,
+      { cause: error },
+    );
   }
 }
 
-/**
- * One native accepted Contract outcome. Every field is explicit over the owner's own shapes: the caller
- * states the operation, the addressed Contract, the native verb value and any admitted facts, tagged
- * effects or pending surfaces. Nothing is inferred from a retired sidecar grammar.
- */
-export function acceptedReceipt<Operation extends AcceptedContractOutcome["operation"]>(
-  carrier: Readonly<{
-    operation: Operation;
-    contract: ContractId;
-    value: Extract<AcceptedContractOutcome, { operation: Operation }>["value"];
-    head?: ContractHead;
-    facts?: readonly JournalEntry[];
-    effects?: readonly InvocationEffect[];
-    pending?: readonly PendingSurface[];
-  }>,
-): Extract<AcceptedContractOutcome, { operation: Operation }> {
-  return {
-    kind: "accepted",
-    operation: carrier.operation,
-    contract: carrier.contract,
-    head: carrier.head ?? contractHead("head"),
-    facts: carrier.facts ?? [],
-    effects: carrier.effects ?? [],
-    pending: carrier.pending ?? [],
-    value: carrier.value,
-  } as Extract<AcceptedContractOutcome, { operation: Operation }>;
+type AcceptedByOperation = {
+  bind: Extract<z.output<typeof bindOutcomeSchema>, { kind: "accepted" }>;
+  amend: Extract<z.output<typeof amendOutcomeSchema>, { kind: "accepted" }>;
+  arc: Extract<z.output<typeof arcOutcomeSchema>, { kind: "accepted" }>;
+  abandon: Extract<z.output<typeof abandonOutcomeSchema>, { kind: "accepted" }>;
+  deliver: Extract<z.output<typeof deliverOutcomeSchema>, { kind: "accepted" }>;
+  verify: Extract<z.output<typeof verifyOutcomeSchema>, { kind: "accepted" }>;
+  review: Extract<z.output<typeof reviewOutcomeSchema>, { kind: "accepted" }>;
+  "deliver-preview": Extract<z.output<typeof deliveryPreviewOutcomeSchema>, { kind: "ready" }>;
+};
+
+/** Operation selects the native type only; fields are the receipt, never a compatibility envelope. */
+export function acceptedReceipt<Operation extends keyof AcceptedByOperation>(
+  operation: Operation,
+  fields: Omit<AcceptedByOperation[Operation], "kind">,
+): AcceptedByOperation[Operation] {
+  return { kind: operation === "deliver-preview" ? "ready" : "accepted", ...fields } as AcceptedByOperation[Operation];
 }
 
 /**
@@ -86,17 +82,16 @@ export async function captureOutput(
   const nativeStderrDescriptor = Object.getOwnPropertyDescriptor(process, "stderr")!;
   const nativeStdout = process.stdout;
   const nativeStderr = process.stderr;
-  const sink = (capture: (text: string) => void, native: NodeJS.WriteStream): NodeJS.WriteStream => {
-    const stream = new Writable({
-      write(chunk, _encoding, callback) {
-        capture(String(chunk));
-        callback();
-      },
-    }) as Writable & { isTTY?: boolean; columns?: number };
-    stream.isTTY = native.isTTY;
-    stream.columns = native.columns;
-    return stream as unknown as NodeJS.WriteStream;
-  };
+  const sink = (capture: (text: string) => void, native: NodeJS.WriteStream) =>
+    Object.assign(
+      new Writable({
+        write(chunk, _encoding, callback) {
+          capture(String(chunk));
+          callback();
+        },
+      }),
+      { isTTY: native.isTTY, columns: native.columns },
+    );
   Object.defineProperty(process, "stdout", {
     value: sink((text) => {
       stdout += text;
@@ -120,29 +115,35 @@ export async function captureOutput(
   }
 }
 
-/** One settled Contract row; each override is the scenario delta under test. */
-export function contractRow(overrides: Partial<ContractKanshiRow> = {}): ContractKanshiRow {
+/** One catalogue Contract summary; each override is the scenario delta under test. */
+export function contractSummary(overrides: Partial<ContractSummary> = {}): ContractSummary {
   return {
     id: contractId("kei/verified-commit"),
     title: "Verified commit",
-    phase: "claimed",
     phaseAt: "2026-08-12T00:00:00.000Z",
-    lastJournalAt: "2026-08-12T00:00:00.000Z",
-    disposition: "terminal",
-    workspace: "worktree",
-    worktreePath: null,
-    workspaceObservation: { kind: "unappointed" },
-    target: "refs/heads/main",
-    targetLag: { kind: "none" },
-    delivery: null,
-    targetObservation: null,
-    gates: { satisfied: true, reports: [] },
-    after: [],
-    dependents: [],
-    holder: { kind: "none" },
-    roster: [],
     ...overrides,
   };
+}
+
+/** One selected Contract detail; every absent field stays absent, never a fabricated default. */
+export function contractDetail(overrides: Partial<ContractKanshiDetail> = {}): ContractKanshiDetail {
+  return {
+    kind: "contract",
+    id: contractId("kei/verified-commit"),
+    title: "Verified commit",
+    phase: "bound",
+    workspace: { kind: "present", path: "/tmp/wt" },
+    namespaceDebts: { kind: "absent" },
+    ...overrides,
+  };
+}
+
+/** One exact selected Contract report over an owner detail. */
+export function contractReport(
+  detail: ContractKanshiDetail,
+  overrides: Partial<ContractKanshiDetail> = {},
+): KanshiContractReport {
+  return { ...detail, ...overrides };
 }
 
 /** One Kanshi report skeleton with only the named section present. */
@@ -151,27 +152,22 @@ export function kanshiReport(
   overrides: Partial<Omit<KanshiReport, "contracts">> = {},
 ): KanshiReport {
   return {
-    root: null,
     observedAt: "2026-08-12T00:00:00.000Z",
-    branch: null,
     contracts,
     debts: { kind: "absent" },
-    akuma: { kind: "absent" },
+    akumas: { kind: "absent" },
     ...overrides,
   };
 }
 
-/** One Contract catalogue over fresh rows; scenario deltas remain explicit overrides. */
+/** One Contract catalogue over fresh summaries; scenario deltas remain explicit overrides. */
 export function contractCatalog(
-  rows: readonly ContractRow[],
-  overrides: Partial<Omit<ContractList, "rows">> = {},
-): ContractList {
+  rows: readonly ContractSummary[],
+  overrides: Partial<Omit<ContractCatalogue, "rows">> = {},
+): ContractCatalogue {
   return {
-    root: "/repo",
-    state: null,
     observedAt: "2026-08-12T00:00:00.000Z",
-    rows,
-    hasMore: false,
+    ...(rows.length === 0 ? {} : { rows }),
     ...overrides,
   };
 }

@@ -5,6 +5,7 @@ import test, { describe } from "node:test";
 import { runCli } from "./support/cli-fixtures.js";
 import { Keis, Repo } from "../src/index.js";
 import { kanshi } from "../src/kanshi/index.js";
+import type { KanshiRegionSelection, KanshiReport, RegionRead } from "../src/kanshi/index.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import { World } from "../src/world.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
@@ -38,15 +39,18 @@ async function bind(repository: ReturnType<typeof repositoryWithMain>, title: st
       gates: [],
     }),
   );
-  return { id: present(await result.value.kei.state()).id, contract: result.value.kei };
+  return { id: present(await result.kei.state()).id, contract: result.kei };
 }
 
-async function read(repository: ReturnType<typeof repositoryWithMain>, region: Parameters<typeof kanshi>[0]["region"]) {
-  return kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-    ...(region === undefined ? {} : { region }),
-  });
+function read(repository: ReturnType<typeof repositoryWithMain>): Promise<KanshiReport>;
+function read(repository: ReturnType<typeof repositoryWithMain>, region: KanshiRegionSelection): Promise<RegionRead>;
+async function read(
+  repository: ReturnType<typeof repositoryWithMain>,
+  region?: KanshiRegionSelection,
+): Promise<KanshiReport | RegionRead> {
+  const world = await World.at(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  return region === undefined ? kanshi({ world, repo }) : kanshi({ world, repo, region });
 }
 
 // Each case owns its repository, fault injector and cleanup; no process-global mocks.
@@ -57,117 +61,87 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     const second = await bind(repository, "Region second", ["src/cli/**", "tests/**"]);
     const firstIsLeft = first.id.localeCompare(second.id) < 0;
 
-    const defaultReport = await read(repository, undefined);
-    assert.equal("region" in defaultReport, false);
+    const defaultReport = await read(repository);
+    assert.ok("contracts" in defaultReport, "a bare World read answers the World board, not a Region result");
 
     const world = await read(repository, { kind: "declarations" });
-    assert.deepEqual(world.region, {
+    assert.deepEqual(world, {
       kind: "present",
-      value: {
-        kind: "declarations",
-        declarations: firstIsLeft
-          ? [
-              { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
-              { contract: second.id, patterns: ["src/cli/**", "tests/**"] },
-            ]
-          : [
-              { contract: second.id, patterns: ["src/cli/**", "tests/**"] },
-              { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
-            ],
-      },
+      declarations: firstIsLeft
+        ? [
+            { id: first.id, patterns: ["src/**", "docs/guide/**"] },
+            { id: second.id, patterns: ["src/cli/**", "tests/**"] },
+          ]
+        : [
+            { id: second.id, patterns: ["src/cli/**", "tests/**"] },
+            { id: first.id, patterns: ["src/**", "docs/guide/**"] },
+          ],
     });
 
     const own = await read(repository, { kind: "contract", contract: first.id });
-    assert.deepEqual(own.region, {
+    assert.deepEqual(own, {
       kind: "present",
-      value: {
-        kind: "contract",
-        declaration: { contract: first.id, patterns: ["src/**", "docs/guide/**"] },
-        overlaps: [
-          { contract: second.id, patterns: [{ mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" }] },
-        ],
-      },
+      id: first.id,
+      patterns: ["src/**", "docs/guide/**"],
+      overlaps: [
+        { contractId: second.id, patterns: [{ mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" }] },
+      ],
     });
 
     const path = await read(repository, { kind: "path", patterns: ["src/cli/invoke.ts"] });
-    assert.deepEqual(path.region, {
+    assert.deepEqual(path, {
       kind: "present",
-      value: {
-        kind: "path",
-        patterns: ["src/cli/invoke.ts"],
-        overlaps: firstIsLeft
+      overlaps: firstIsLeft
           ? [
               {
-                contract: first.id,
+                contractId: first.id,
                 patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/**", relation: "mine-within-theirs" }],
               },
               {
-                contract: second.id,
+                contractId: second.id,
                 patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/cli/**", relation: "mine-within-theirs" }],
               },
             ]
           : [
               {
-                contract: second.id,
+                contractId: second.id,
                 patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/cli/**", relation: "mine-within-theirs" }],
               },
               {
-                contract: first.id,
+                contractId: first.id,
                 patterns: [{ mine: "src/cli/invoke.ts", theirs: "src/**", relation: "mine-within-theirs" }],
               },
             ],
-      },
     });
   });
 
   test("Kanshi validates Region selections and query patterns", async () => {
     const repository = repositoryWithMain();
     const { id } = await bind(repository, "Literal paths", ["docs/**"]);
+    const world = await World.at(repository.path);
+    const repo = await Repo.at({ path: repository.path });
+    const invalid = (region: unknown): Promise<unknown> => Reflect.apply(kanshi, undefined, [{ world, repo, region }]);
 
     await assert.rejects(
-      async () =>
-        kanshi({
-          world: await World.at(repository.path),
-          repo: await Repo.at({ path: repository.path }),
-          region: { kind: "bogus" } as never,
-        }),
+      invalid({ kind: "bogus" }),
       (error: unknown) => error instanceof TypeError && error.message.includes("kind is invalid"),
     );
     await assert.rejects(
-      async () =>
-        kanshi({
-          world: await World.at(repository.path),
-          repo: await Repo.at({ path: repository.path }),
-          region: { kind: "path", patterns: ["docs/**"], extra: true } as never,
-        }),
+      invalid({ kind: "path", patterns: ["docs/**"], extra: true }),
       (error: unknown) => error instanceof TypeError && error.message.includes("unknown field"),
     );
     await assert.rejects(
-      async () =>
-        kanshi({
-          world: await World.at(repository.path),
-          repo: await Repo.at({ path: repository.path }),
-          region: { kind: "overlap" } as never,
-        }),
+      invalid({ kind: "overlap" }),
       (error: unknown) => error instanceof TypeError && error.message.includes("kind is invalid"),
     );
     await assert.rejects(
-      async () =>
-        kanshi({
-          world: await World.at(repository.path),
-          repo: await Repo.at({ path: repository.path }),
-          region: { kind: "path", patterns: ["docs/[draft].md"] },
-        }),
+      invalid({ kind: "path", patterns: ["docs/[draft].md"] }),
       (error: unknown) => error instanceof TypeError && error.message.includes("forbidden glob form"),
     );
     const canonical = await read(repository, { kind: "path", patterns: ["docs/"] });
-    assert.deepEqual(canonical.region, {
+    assert.deepEqual(canonical, {
       kind: "present",
-      value: {
-        kind: "path",
-        patterns: ["docs/**"],
-        overlaps: [{ contract: id, patterns: [{ mine: "docs/**", theirs: "docs/**", relation: "same" }] }],
-      },
+      overlaps: [{ contractId: id, patterns: [{ mine: "docs/**", theirs: "docs/**" }] }],
     });
   });
 
@@ -182,7 +156,7 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     const entries = decodeJournal(repository.run(["cat-file", "-p", journalOid]));
     const first = entries[0]!;
     if (first.kind !== "bind") throw new Error("test contract did not bind");
-    const malformed = {
+    const malformed: JournalEntry = {
       ...first,
       data: {
         ...first.data,
@@ -191,7 +165,7 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
           document: { ...first.data.terms.document, bytes: "# malformed" },
         },
       },
-    } as JournalEntry;
+    };
     const tree = await updateGitTree(
       git,
       snapshot.tree,
@@ -202,12 +176,19 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
       (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
       "published",
     );
-    const report = await read(repository, { kind: "declarations" });
+    const region = await read(repository, { kind: "declarations" });
+    assert.equal(region.kind, "failed");
+    if (region.kind === "failed") assert.match(region.diagnostic, /malformed|Markdown|title|document/u);
+    const report = await kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+    });
+    assert.ok("contracts" in report, "the bare World read still answers the World board");
+    if (!("contracts" in report)) return;
     assert.ok(report.contracts.kind === "present", 'expected report.contracts.kind = "present"');
-    const row = report.contracts.value.rows.find((candidate) => candidate.id === id);
-    assert.equal(row?.title, null);
-    assert.deepEqual(row?.gates, { reports: [], satisfied: true });
-    assert.equal(report.region?.kind, "failed");
+    const row = report.contracts.kind === "present" ? report.contracts.rows?.find((candidate) => candidate.id === id) : undefined;
+    assert.equal(row?.title, undefined, "an unreadable document leaves the title unknown");
+    assert.equal(row?.gates, undefined, "no declared gates leave the summary gates omitted");
     const failed = await runCli(["region"], { cwd: repository.path, environment: {} });
     assert.match(failed.stdout, /^× region\n  reason  /u);
   });

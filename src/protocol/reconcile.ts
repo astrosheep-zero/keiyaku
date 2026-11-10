@@ -1,4 +1,5 @@
-import { reconcile, reconcileBatch, reconcileObservationFailure, type ReconcileResult } from "../git/reconcile.js";
+import { reconcile, reconcileObservationFailure, type ReconcileResult } from "../git/reconcile.js";
+import type { ProtocolProgress } from "./progress.js";
 import { observeContractWorld } from "../git/observe.js";
 import { withGitReadObservation } from "../git/read-observation.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -60,27 +61,20 @@ export async function reconcileAllOperation(
     scope: RepositoryScope;
     channel: GitDecodeChannel;
     states: readonly ContractState[];
+    progress?: ProtocolProgress;
   }> &
     ReconcileOptions,
 ): Promise<RepoReconcileReport> {
-  const contracts = (
-    await reconcileBatch(
-      input.scope,
-      input.channel,
-      input.states.map((state) => state.id),
-      {
-        hooks: input.hooks,
-        retryHooks: input.retryHooks,
-        retainTerminalWorktree: input.retainTerminalWorktree ?? false,
-        ...(input.places === undefined ? {} : { places: input.places }),
-      },
-    )
-  ).map(
-    (item): RepoReconcileItem => ({
-      contractId: item.contract,
-      state: item.state,
-      report: item.result,
-    }),
-  );
+  const contracts: RepoReconcileItem[] = [];
+  for (const state of input.states) {
+    const place = input.places?.get(state.id);
+    const observed = await reconcileOperation({
+      ...input,
+      contractId: state.id,
+      retainTerminalWorktree: input.retainTerminalWorktree ?? false,
+      ...(place === undefined ? {} : { place }),
+    });
+    contracts.push({ contractId: state.id, ...observed });
+  }
   return { contracts };
 }

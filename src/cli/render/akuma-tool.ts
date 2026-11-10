@@ -1,14 +1,21 @@
-import type { ActivityRow, SnapshotRow } from "../../akuma/projection.js";
-import type { AkumaObservation } from "../../index.js";
+import type { ActivityRow } from "../../akuma/projection.js";
+import type { StatusPreview } from "../../akuma/status-projection.js";
 import { normalizeToolCommand } from "./akuma-tool-command.js";
 import { displayColumns, truncateDisplayText } from "./terminal.js";
 
-type StatusTimelineRow = Extract<AkumaObservation["status"]["timeline"]["entries"][number], { kind: "row" }>["row"];
-type ToolRow = Extract<ActivityRow | SnapshotRow | StatusTimelineRow, { kind: "tool" }>;
+type ToolRow = Extract<ActivityRow | StatusPreview, { kind: "tool" }>;
+
+function toolInput(row: ToolRow): Readonly<{ json: string; truncated?: boolean }> | undefined {
+  const input = row.call.kind === "other" ? row.call.input : undefined;
+  return typeof input === "string" ? { json: input } : input;
+}
+function toolName(row: ToolRow): string {
+  return "name" in row ? row.name : row.call.kind;
+}
 
 /** The bounded body of a generic tool row, including its terminal diagnostic. */
 export function toolContent(row: ToolRow, columns: number): string {
-  const input = row.call.kind === "other" ? row.call.input : undefined;
+  const input = toolInput(row);
   const diagnostic = toolDiagnostic(row);
   const width = Math.max(0, columns - displayColumns(diagnostic));
   let text: string;
@@ -89,14 +96,11 @@ function duration(milliseconds: number): string {
 
 function result(row: ToolRow): string | undefined {
   if (row.state === "active" || row.state === "unsettled") return undefined;
-  const disposition =
-    row.state.exitCode !== undefined
-      ? row.state.exitCode === 0
-        ? "ok"
-        : `exit ${row.state.exitCode}`
-      : row.state.status;
+  const exitCode = "exitCode" in row.state ? row.state.exitCode : undefined;
+  const durationMs = "durationMs" in row ? row.durationMs : undefined;
+  const disposition = exitCode !== undefined ? (exitCode === 0 ? "ok" : `exit ${exitCode}`) : row.state.status;
   const parts = [
-    ...(row.call.kind === "run" && row.durationMs !== undefined ? [duration(row.durationMs)] : []),
+    ...(row.call.kind === "run" && durationMs !== undefined ? [duration(durationMs)] : []),
     ...(disposition === "ok" ? [] : [disposition]),
     ...(row.state.message === undefined ? [] : [oneLine(row.state.message)]),
   ];
@@ -131,8 +135,9 @@ function searchText(call: Extract<ToolRow["call"], { kind: "search" }>): string 
 }
 
 function inputObject(row: ToolRow): Readonly<Record<string, unknown>> | undefined {
-  if (row.call.kind !== "other" || row.call.input?.truncated === true) return undefined;
-  return jsonObject(row.call.input?.json ?? "");
+  const input = toolInput(row);
+  if (row.call.kind !== "other" || input?.truncated === true) return undefined;
+  return jsonObject(input?.json ?? "");
 }
 
 function suppliedSlice(value: Readonly<Record<string, unknown>>): string {
@@ -144,22 +149,22 @@ function suppliedSlice(value: Readonly<Record<string, unknown>>): string {
 function commonOtherText(row: ToolRow): string | undefined {
   const input = inputObject(row);
   if (input === undefined) return undefined;
-  if (row.name === "get_context_remaining") return undefined;
-  if (row.name === "notes_read") {
+  if (toolName(row) === "get_context_remaining") return undefined;
+  if (toolName(row) === "notes_read") {
     const address =
       typeof input.address === "string" ? input.address : typeof input.path === "string" ? input.path : undefined;
     return [address, suppliedSlice(input)]
       .filter((value): value is string => value !== undefined && value !== "")
       .join(" · ");
   }
-  if (row.name === "history_read") {
+  if (toolName(row) === "history_read") {
     const item = typeof input.item_id === "string" ? input.item_id : undefined;
     const window = typeof input.window_id === "string" ? input.window_id : undefined;
     return [item, window, suppliedSlice(input)]
       .filter((value): value is string => value !== undefined && value !== "")
       .join(" · ");
   }
-  if (row.name === "history_list") {
+  if (toolName(row) === "history_list") {
     const role = typeof input.role === "string" ? `role ${input.role}` : undefined;
     const order =
       input.recent_first === true ? "newest first" : input.recent_first === false ? "oldest first" : undefined;
@@ -215,7 +220,7 @@ function toolCore(row: ToolRow): ToolCore {
     case "fileChange":
       return fileChange(row.call, row.state);
     case "other":
-      return { label: row.name, text: "" };
+      return { label: toolName(row), text: "" };
   }
 }
 

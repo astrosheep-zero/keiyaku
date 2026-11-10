@@ -1,91 +1,39 @@
 import { regionsOverlapWithRelation } from "../body/region.js";
-import type { KanshiReport } from "./report.js";
 import type { KanshiRegionSelection, RegionDeclaration, RegionOverlap, RegionRead } from "./report.js";
 
-export type KanshiSelection = Readonly<{ contract: string }>;
-
 function regionOverlaps(mine: readonly string[], declarations: readonly RegionDeclaration[]): readonly RegionOverlap[] {
-  const overlaps: RegionOverlap[] = [];
-  for (const declaration of declarations) {
+  return declarations.flatMap((declaration) => {
     const pairs = regionsOverlapWithRelation(mine, declaration.patterns);
-    if (pairs.length === 0) continue;
-    overlaps.push({
-      contract: declaration.contract,
-      patterns: pairs.map(([minePattern, theirsPattern, relation]) => ({
-        mine: minePattern,
-        theirs: theirsPattern,
-        relation,
-      })),
-    });
-  }
-  return overlaps;
-}
-
-export function selectKanshi(
-  input: Readonly<{
-    report: KanshiReport;
-    contract: string;
-  }>,
-): KanshiReport {
-  const { report, contract } = input;
-  return {
-    ...report,
-    contracts:
-      report.contracts.kind === "present"
-        ? {
-            kind: "present",
-            value: {
-              ...report.contracts.value,
-              rows: report.contracts.value.rows.filter((row) => row.id === contract),
-            },
-          }
-        : report.contracts,
-    debts:
-      report.debts.kind === "present"
-        ? {
-            kind: "present",
-            value: {
-              ...report.debts.value,
-              rows: report.debts.value.rows.filter((row) => row.contract?.id === contract),
-            },
-          }
-        : report.debts,
-    akuma:
-      report.akuma.kind === "present"
-        ? {
-            kind: "present",
-            value: {
-              ...report.akuma.value,
-              rows: report.akuma.value.rows.filter((row) => row.contract?.id === contract),
-            },
-          }
-        : report.akuma,
-  };
+    return pairs.length === 0
+      ? []
+      : [
+          {
+            contractId: declaration.id,
+            patterns: pairs.map(([minePattern, theirsPattern, relation]) => ({
+              mine: minePattern,
+              theirs: theirsPattern,
+              ...(relation === "same" ? {} : { relation }),
+            })),
+          },
+        ];
+  });
 }
 
 export function selectRegion(
-  input: Readonly<{
-    declarations: readonly RegionDeclaration[];
-    selection: KanshiRegionSelection;
-  }>,
+  input: Readonly<{ declarations: readonly RegionDeclaration[]; selection: KanshiRegionSelection }>,
 ): RegionRead {
   const { declarations, selection } = input;
-  if (selection.kind === "declarations") return { kind: "declarations", declarations };
+  if (selection.kind === "declarations")
+    return { kind: "present", ...(declarations.length === 0 ? {} : { declarations }) };
   if (selection.kind === "contract") {
-    const declaration = declarations.find((value) => value.contract === selection.contract);
-    if (declaration === undefined) throw new Error(`active contract not found: ${selection.contract}`);
-    return {
-      kind: "contract",
-      declaration,
-      overlaps: regionOverlaps(
-        declaration.patterns,
-        declarations.filter((value) => value.contract !== selection.contract),
-      ),
-    };
+    const declaration = declarations.find((value) => value.id === selection.contract);
+    if (declaration === undefined) return { kind: "contract-missing", id: selection.contract };
+    const overlaps = regionOverlaps(
+      declaration.patterns,
+      declarations.filter((value) => value.id !== selection.contract),
+    );
+    return { kind: "present", ...declaration, ...(overlaps.length === 0 ? {} : { overlaps }) };
   }
-  return {
-    kind: "path",
-    patterns: selection.patterns,
-    overlaps: regionOverlaps(selection.patterns, declarations),
-  };
+  const overlaps = regionOverlaps(selection.patterns, declarations);
+  return { kind: "present", ...(overlaps.length === 0 ? {} : { overlaps }) };
 }

@@ -1,9 +1,8 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { akumaIdSchema } from "../akuma/identity.js";
-import { activityHistorySchema, outcomeRowSchema, reportRowSchema } from "../akuma/projection.js";
-import { dispatchAssociationSchema } from "../akuma/dispatch-association.js";
-import { observeStatusOutcome } from "../akuma/akuma-observe.js";
+import { activityRowSchema, outcomeRowSchema, reportRowSchema } from "../akuma/projection.js";
+import { projectStatusTimeline } from "../akuma/status-projection.js";
 import { withoutReportedChanges } from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
@@ -15,10 +14,10 @@ import {
   executeTellAkuma,
   type AskObserver,
 } from "../akuma/akuma-selection-execution.js";
-import { executeWaitAkuma, type NativeWaitResult } from "../akuma/akuma-wait.js";
+import { executeWaitAkuma } from "../akuma/akuma-wait.js";
 import { type AkumaStatus } from "../akuma/akuma.js";
 import { parseExactHistorySelector } from "../akuma/identity.js";
-import { type ActivityHistory, type OutcomeRow, type ReportRow } from "../akuma/projection.js";
+import { type ActivityHistory } from "../akuma/projection.js";
 import { schemaJsonText, type Schema } from "../akuma/schema.js";
 import type {
   AkumaAskResult,
@@ -31,7 +30,7 @@ import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import { observeDispatchAssociations } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
-import { observeCreatedDebtObservations, type CreatedDebtObservation } from "../debt/created-observation.js";
+import { observeCreatedDebtObservations } from "../debt/created-observation.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
@@ -61,7 +60,6 @@ export type {
   AkumaAskResult,
   AkumaKillResult,
   AkumaObservation,
-  AkumaObservationStage,
   AkumaTellResult,
   AkumaWaitResult,
 } from "../akuma/selection-observation.js";
@@ -74,36 +72,44 @@ export type AkumaHistoryInput = AkumaAddressInput &
     limit?: number;
     last?: boolean;
   }>;
-const historyCommon = { id: akumaIdSchema, contract: dispatchAssociationSchema };
+const historyCommon = { akumaId: akumaIdSchema };
 export const akumaHistoryResultSchema = z.union([
-  z.strictObject({ kind: z.literal("history"), ...historyCommon, history: activityHistorySchema }).readonly(),
-  z.strictObject({ kind: z.literal("exact"), ...historyCommon, outcome: outcomeRowSchema }).readonly(),
-  z.strictObject({ kind: z.literal("exact-report"), ...historyCommon, report: reportRowSchema }).readonly(),
-  z.strictObject({ kind: z.literal("unknown-history"), ...historyCommon, historyId: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("last"), ...historyCommon, answer: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("no-answer"), ...historyCommon }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("akuma"),
+      ...historyCommon,
+      events: z.array(activityRowSchema).readonly(),
+      omitted: z.number().int().positive().exactOptional(),
+      retentionLost: z.literal(true).exactOptional(),
+      lowestRetainedSequence: z.number().int().positive().exactOptional(),
+      highestSequence: z.number().int().positive().exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...outcomeRowSchema.unwrap().omit({ kind: true }).shape,
+      kind: z.literal("akuma-exact"),
+      ...historyCommon,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      ...reportRowSchema.unwrap().omit({ kind: true }).shape,
+      kind: z.literal("akuma-report"),
+      ...historyCommon,
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("akuma-unknown-history"), ...historyCommon }).readonly(),
+  z.strictObject({ kind: z.literal("akuma-last"), ...historyCommon, answer: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("akuma-no-answer"), ...historyCommon }).readonly(),
 ]);
 
-export type AkumaHistoryResult =
-  | Readonly<{ kind: "history"; id: AkumaStatus["id"]; history: ActivityHistory; contract: DispatchAssociation }>
-  | Readonly<{ kind: "exact"; id: AkumaStatus["id"]; outcome: OutcomeRow; contract: DispatchAssociation }>
-  | Readonly<{ kind: "exact-report"; id: AkumaStatus["id"]; report: ReportRow; contract: DispatchAssociation }>
-  | Readonly<{
-      kind: "unknown-history";
-      id: AkumaStatus["id"];
-      historyId: string;
-      contract: DispatchAssociation;
-    }>
-  | Readonly<{ kind: "last"; id: AkumaStatus["id"]; answer: string; contract: DispatchAssociation }>
-  | Readonly<{ kind: "no-answer"; id: AkumaStatus["id"]; contract: DispatchAssociation }>;
-
-function observationDiagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
+export type AkumaHistoryResult = z.output<typeof akumaHistoryResultSchema>;
+type HistorySubject = Pick<AkumaHistoryResult, "akumaId">;
 
 function observationError(id: AkumaStatus["id"], error: unknown): Error {
   if (error instanceof AkumaNotBornError || error instanceof AkumaObservationError) return error;
-  return new AkumaObservationError(id, observationDiagnostic(error));
+  return new AkumaObservationError(id, error instanceof Error ? error.message : String(error));
 }
 
 export async function dispatchAssociations(
@@ -144,54 +150,36 @@ function placementDischarged(repo: Repo | undefined): (contract: DispatchAssocia
   };
 }
 
-async function composeObservation(
-  status: AkumaStatus,
-  contract: DispatchAssociation,
-  discharged: (contract: DispatchAssociation) => Promise<boolean>,
-): Promise<AkumaStatus> {
-  return (await discharged(contract)) ? { ...status, timeline: withoutReportedChanges(status.timeline) } : status;
-}
-
-async function createdDebtsFor(
-  path: WorldRoot,
-  statuses: readonly AkumaStatus[],
-): Promise<readonly CreatedDebtObservation[]> {
-  return await observeCreatedDebtObservations(
-    path,
-    statuses.map((status) => status.id),
-  );
-}
-
 async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
-  return (await composeAkumaAssociations([status], path, repo))[0]!;
-}
-
-/**
- * The one upper composition of association-free native status evidence into its
- * public observation shape. It reads Alias-independent Dispatch and Debt
- * associations after the lower values, never before or inside them.
- */
-async function composeAkumaAssociations(
-  statuses: readonly AkumaStatus[],
-  path: WorldRoot,
-  repo?: Repo,
-): Promise<readonly AkumaObservation[]> {
-  const created = await createdDebtsFor(path, statuses);
-  const discharged = placementDischarged(repo);
-  const contracts = await dispatchAssociations(
-    repo,
-    statuses.map((status) => status.id),
-  );
-  return await Promise.all(
-    statuses.map(async (status, index) => {
-      const contract = contracts.get(status.id)!;
-      return {
-        status: await composeObservation(status, contract, discharged),
-        contract,
-        createdDebts: created[index]!,
-      };
-    }),
-  );
+  const contract = (await dispatchAssociations(repo, [status.id])).get(status.id)!;
+  const createdDebts = (await observeCreatedDebtObservations(path, [status.id]))[0]!;
+  if (status.cwd === undefined || status.provider === undefined)
+    throw new Error(`Born Akuma ${status.id} lacks its frozen execution context`);
+  const composed = (await placementDischarged(repo)(contract))
+    ? { ...status, timeline: withoutReportedChanges(status.timeline) }
+    : status;
+  const changes = composed.timeline.reportedChanges.map(({ path, diffstat }) => ({
+    path,
+    ...(diffstat === undefined ? {} : { diffstat }),
+  }));
+  return {
+    kind: "akuma",
+    id: status.id,
+    life: status.life,
+    cwd: status.cwd,
+    provider: status.provider,
+    ...(status.model === undefined ? {} : { model: status.model }),
+    timeline: projectStatusTimeline(composed.timeline),
+    ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
+    ...(contract.kind === "none" ? {} : { contract }),
+    ...(createdDebts.kind === "failed"
+      ? { createdDebts }
+      : createdDebts.rows === undefined
+        ? {}
+        : { createdDebts: createdDebts.rows }),
+    ...(changes.length === 0 ? {} : { changes }),
+    ...(composed.timeline.reportedChangesOmitted === 0 ? {} : { moreChanges: true }),
+  };
 }
 
 function timeout(value: unknown): number | undefined {
@@ -206,24 +194,6 @@ function signal(value: unknown): AbortSignal | undefined {
   if (value === undefined) return undefined;
   if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
   return value;
-}
-
-/**
- * Compose one wait's association-free native evidence into its public
- * observation shape, attaching the same upper associations as a single-status
- * observation.
- */
-async function composeWaitResult(
-  path: WorldRoot,
-  repo: Repo | undefined,
-  result: NativeWaitResult,
-): Promise<AkumaWaitResult> {
-  return {
-    mode: result.mode,
-    reason: result.reason,
-    observations: await composeAkumaAssociations(result.observations, path, repo),
-    unobserved: result.unobserved,
-  };
 }
 
 function directAddress(values: Record<string, unknown>): Parameters<typeof addressAkuma>[0] {
@@ -275,21 +245,19 @@ async function localWait(
     completion: "any" | "all";
     timeoutMs?: number;
     signal?: AbortSignal;
-    repo?: Repo;
+    reportDiagnostic: (message: string) => void;
   }>,
 ): Promise<AkumaWaitResult> {
   try {
-    return await composeWaitResult(
-      addressed.path,
-      input.repo,
-      await executeWaitAkuma({
-        path: addressed.path,
-        ids: addressed.orderedIds,
-        completion: input.completion,
-        ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-        ...(input.signal === undefined ? {} : { signal: input.signal }),
-      }),
-    );
+    const native = await executeWaitAkuma({
+      path: addressed.path,
+      ids: addressed.orderedIds,
+      completion: input.completion,
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic: input.reportDiagnostic }),
+    });
+    return { kind: "akuma", reason: native.reason, results: native.results };
   } catch (error) {
     if (input.signal?.aborted === true || addressed.orderedIds.length !== 1) throw error;
     throw observationError(addressed.orderedIds[0]!, error);
@@ -315,22 +283,18 @@ export async function waitAkuma(
   const selected = completionMode(values.completion);
   const timeoutMs = timeout(values.timeoutMs);
   const callerSignal = signal(values.signal);
-  const repo = values.repo as Repo | undefined;
   const addressed = await addressAkumaSet(setAddress(values));
   return await withAkumaWaitDeferrals(
     { world: addressed.path, reportDiagnostic },
     { akumaIds: addressed.orderedIds },
     callerSignal,
     async () => {
-      const result = await localWait(addressed, {
+      return await localWait(addressed, {
         completion: selected,
+        reportDiagnostic,
         ...(timeoutMs === undefined ? {} : { timeoutMs }),
         ...(callerSignal === undefined ? {} : { signal: callerSignal }),
-        ...(repo === undefined ? {} : { repo }),
       });
-      const observer = outcomePluginObserver({ world: addressed.path, reportDiagnostic });
-      await Promise.all(result.observations.map(({ status }) => observeStatusOutcome(status, observer)));
-      return result;
     },
   );
 }
@@ -435,11 +399,7 @@ export async function askAkuma<T = string>(
         ...(input.observe === undefined ? {} : { onObserve: input.observe }),
         ...(callerSignal === undefined ? {} : { signal: callerSignal }),
       });
-      return (
-        input.schema === undefined
-          ? result
-          : { ...result, observation: decodeAskObservation(result.observation, input.schema) }
-      ) as AkumaAskResult<T>;
+      return (input.schema === undefined ? result : decodeAskObservation(result, input.schema)) as AkumaAskResult<T>;
     },
   );
 }
@@ -461,6 +421,19 @@ function validateHistoryInput(values: Record<string, unknown>): void {
     throw new TypeError("id cannot be combined with last, before, since, or limit");
 }
 
+function historyPage(subject: HistorySubject, page: ActivityHistory): AkumaHistoryResult {
+  return {
+    kind: "akuma",
+    ...subject,
+    events: page.rows,
+    ...(page.omitted === 0 ? {} : { omitted: page.omitted }),
+
+    ...(page.historyLost ? { retentionLost: true } : {}),
+    ...(page.lowestRetained === null ? {} : { lowestRetainedSequence: page.lowestRetained }),
+    ...(page.highest === null ? {} : { highestSequence: page.highest }),
+  };
+}
+
 export async function historyAkuma(
   input: AkumaHistoryInput & Readonly<{ path: WorldRoot }>,
   reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
@@ -474,12 +447,12 @@ export async function historyAkuma(
       addressed.path,
       outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
     );
-    const contract = (await dispatchAssociations(values.repo as Repo | undefined, [addressed.id])).get(addressed.id)!;
+    const subject: HistorySubject = { akumaId: addressed.id };
     if (values.last === true) {
       const answer = await handle.lastAnswer();
       return answer.kind === "answer"
-        ? { kind: "last", id: addressed.id, answer: answer.answer, contract }
-        : { kind: "no-answer", id: addressed.id, contract };
+        ? { kind: "akuma-last", ...subject, answer: answer.answer }
+        : { kind: "akuma-no-answer", ...subject };
     }
     const history = await handle.history({
       ...(values.id === undefined ? {} : { id: values.id as string }),
@@ -488,13 +461,18 @@ export async function historyAkuma(
       ...(values.limit === undefined ? {} : { limit: values.limit as number }),
     });
     if (values.id !== undefined) {
-      if ("kind" in history && history.kind === "exact")
-        return { kind: "exact", id: addressed.id, outcome: history.outcome, contract };
-      if ("kind" in history && history.kind === "exact-report")
-        return { kind: "exact-report", id: addressed.id, report: history.report, contract };
-      return { kind: "unknown-history", id: addressed.id, historyId: values.id as string, contract };
+      if ("kind" in history && history.kind === "exact") {
+        const { kind: _kind, ...row } = history.outcome;
+        return { kind: "akuma-exact", ...subject, ...row };
+      }
+      if ("kind" in history && history.kind === "exact-report") {
+        const { kind: _kind, ...row } = history.report;
+        return { kind: "akuma-report", ...subject, ...row };
+      }
+      return { kind: "akuma-unknown-history", ...subject };
     }
-    return { kind: "history", id: addressed.id, history: history as ActivityHistory, contract };
+    const page = history as ActivityHistory;
+    return historyPage(subject, page);
   } catch (error) {
     throw observationError(addressed.id, error);
   }

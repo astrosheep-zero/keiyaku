@@ -320,13 +320,13 @@ export function completeInterruptBarrier(
   if (latest.hung !== undefined) return { kind: "unavailable", evidence: "hung" };
   if (latest.end === undefined || !consume) return { kind: "unavailable", evidence: "untidy" };
   deletePauseControl(database);
-  return { kind: "completed", body: latest };
+  return { kind: "completed" };
 }
 
 function settledPreviousBarrier(database: DatabaseSync, expected: PauseFact): InterruptCompletion {
   const previous = bodyFact(database, expected.bodySequence);
   if (previous?.hung !== undefined) return { kind: "unavailable", evidence: "hung" };
-  if (previous?.end !== undefined) return { kind: "completed", body: previous };
+  if (previous?.end !== undefined) return { kind: "completed" };
   return { kind: "unavailable", evidence: "untidy" };
 }
 

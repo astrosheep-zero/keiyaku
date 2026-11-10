@@ -13,7 +13,7 @@ import {
   type AkumaGlob,
 } from "../identity/selector.js";
 import type { Section } from "../kanshi/index.js";
-import type { ContractRow } from "../protocol/read/status.js";
+import type { ContractDetail } from "../protocol/read/status.js";
 import { World, type WorldRoot } from "../world.js";
 import { matchContractCandidates, readCompleteContractCandidates } from "./contract-address.js";
 import { requireInput } from "./input.js";
@@ -105,7 +105,7 @@ export type NamedAddress =
 
 /** The frozen authority a named selector is adjudicated against. */
 export type NamedAddressAuthority = Readonly<{
-  contracts: Section<readonly ContractRow[]>;
+  contracts: Section<readonly ContractDetail[]>;
   aliases: Section<readonly AliasBinding[]>;
 }>;
 

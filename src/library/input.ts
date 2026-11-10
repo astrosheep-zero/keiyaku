@@ -93,11 +93,7 @@ export function contractTerms(
   };
 }
 
-export function documentDerivation(
-  document: DecodedContractDocument,
-  gates: readonly Gate[],
-  contractId?: ContractId,
-): DocumentDerivation {
+export function documentDerivation(document: DecodedContractDocument, gates: readonly Gate[]): DocumentDerivation {
   return {
     document: document.document.key,
     bytes: document.document.bytes,
@@ -105,7 +101,6 @@ export function documentDerivation(
     verification: prepareVerificationDeclaration({
       gates,
       definition: verificationDefinition(document),
-      ...(contractId === undefined ? {} : { contractId }),
     }),
   };
 }

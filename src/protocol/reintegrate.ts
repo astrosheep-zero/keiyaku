@@ -35,7 +35,7 @@ import {
 } from "./run.js";
 import { runUnderTargetPlacementFence, type PlacementExecutionFailure } from "./placement.js";
 
-type TargetMissing = Readonly<{ kind: "target-missing"; contractId: ContractId }>;
+type TargetMissing = Readonly<{ kind: "target-missing" }>;
 type ReintegrationRefusal = ReintegrateRefusal | TargetMissing | IntegrationPreparationRefusal | TargetWorkspaceRefusal;
 export type ReintegrationResult =
   | (AcceptedAdmission & Readonly<{ value: ReintegratedData }>)
@@ -91,7 +91,7 @@ async function planReintegrationArtifacts(
   if (state.delivery === null || state.currentIntegration === null) return { kind: "defer" };
   const planned = await planIntegration(
     input.repository,
-    { contractId: input.contractId, coordinates: state.coordinates },
+    { coordinates: state.coordinates },
     await persistedTender(input.repository, state.delivery.data.tenderSnapshot),
     state.delivery.data.policy.requireBranchesToBeUpToDate,
   );
@@ -130,13 +130,13 @@ function assembleReintegrationAttempt(
   const state = contractState(observation.decision, input.contractId);
   if (state === null) {
     return external.kind === "unavailable"
-      ? { kind: "unavailable", refusal: { kind: "contract-missing", contractId: input.contractId } }
+      ? { kind: "unavailable", refusal: { kind: "contract-missing" } }
       : STALE_PRIVATE_STATE_PREPARATION;
   }
   if (external.kind === "unavailable") return STALE_PRIVATE_STATE_PREPARATION;
   if (external.witness.head !== state.head) return STALE_PRIVATE_STATE_PREPARATION;
   if (state.delivery === null || state.currentIntegration === null) {
-    return { kind: "unavailable", refusal: { kind: "delivery-missing", contractId: input.contractId } };
+    return { kind: "unavailable", refusal: { kind: "delivery-missing" } };
   }
   return external.artifacts.kind === "defer" ? STALE_PRIVATE_STATE_PREPARATION : external.artifacts;
 }
@@ -155,7 +155,7 @@ async function runReintegration(
         if (assembled.kind === "stale") return assembled;
         const state = contractState(observation.decision, input.contractId);
         if (state !== null) {
-          const refusal = targetContractRefusal(observation.decision, state.id, state.coordinates.target);
+          const refusal = targetContractRefusal(observation.decision, state.coordinates.target);
           if (refusal !== undefined) return { kind: "refused", refusal };
         }
         if (typeof input.target !== "string") {

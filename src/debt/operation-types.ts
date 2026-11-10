@@ -1,84 +1,142 @@
 import { z } from "zod";
-import { debtDocumentSchema, debtStateSchema, type DebtPriority, type DebtState } from "./document.js";
+import type { DebtPriority, DebtState } from "./document.js";
 import { debtIdSchema, type DebtId } from "./identity.js";
 
-export const debtViewSchema = z
-  .strictObject({ ...debtDocumentSchema.unwrap().shape, namespace: z.array(z.string()).readonly() })
+/** Cardinality is enforced by the schema; TypeScript retains Zod's inferred array type. */
+export function nonEmptyDebtArraySchema<Row extends z.ZodType>(row: Row) {
+  return z.array(row).min(1).readonly();
+}
+/** A producer has completely observed this collection; absence means known empty. */
+export function nonEmptyDebtValues<T>(values: readonly T[]): readonly T[] | undefined {
+  return values.length === 0 ? undefined : values;
+}
+
+export const debtWarningSchema = z.string();
+export type DebtWarning = z.output<typeof debtWarningSchema>;
+export const debtRetrySchema = z.enum(["busy", "concurrent-modification"]);
+const retryResultSchema = z.strictObject({ kind: z.literal("retry"), reason: debtRetrySchema }).readonly();
+const missingRefusalSchema = z
+  .strictObject({ kind: z.literal("refused"), reason: z.literal("debt-missing") })
   .readonly();
-export const debtCleanupFailureSchema = z
-  .strictObject({ kind: z.literal("lock-release-failed"), diagnostics: z.array(z.string()).readonly() })
+const graphRefusalSchema = z
+  .strictObject({
+    kind: z.literal("refused"),
+    reason: z.literal("invalid-graph"),
+    diagnostic: z.string(),
+  })
+  .readonly();
+const contextRefusalSchema = z
+  .strictObject({
+    kind: z.literal("refused"),
+    reason: z.literal("invalid-namespace-context"),
+    path: z.string().exactOptional(),
+  })
+  .readonly();
+const ownershipRefusalSchema = z
+  .strictObject({
+    kind: z.literal("refused"),
+    reason: z.literal("relation-owned-by-other"),
+    related: debtIdSchema,
+  })
+  .readonly();
+const terminalRefusalSchema = z
+  .strictObject({
+    kind: z.literal("refused"),
+    reason: z.literal("invalid-lifecycle-transition"),
+    state: z.enum(["done", "drop"]),
+  })
   .readonly();
 export const debtRefusalSchema = z.union([
-  z.strictObject({ kind: z.literal("debt-missing"), debtId: debtIdSchema }).readonly(),
+  missingRefusalSchema,
+  graphRefusalSchema,
+  contextRefusalSchema,
+  ownershipRefusalSchema,
+  terminalRefusalSchema,
+]);
+export type DebtRefusal = z.output<typeof debtRefusalSchema>;
+export const debtReadRefusalSchema = z.union([
+  missingRefusalSchema.unwrap().extend({ debtId: debtIdSchema }).readonly(),
   z
-    .strictObject({
-      kind: z.literal("invalid-lifecycle-transition"),
-      debtId: debtIdSchema,
-      state: debtStateSchema,
-      verb: z.enum(["done", "drop"]),
-    })
-    .readonly(),
-  z.strictObject({ kind: z.literal("invalid-graph"), diagnostic: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("invalid-namespace-context"), path: z.string() }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("relation-owned-by-other"),
-      debtId: debtIdSchema,
-      related: debtIdSchema,
-      declaringDebt: debtIdSchema,
-    })
+    .strictObject({ kind: z.literal("refused"), reason: z.literal("invalid-namespace-context"), path: z.string() })
     .readonly(),
 ]);
-export const debtRetrySchema = z.enum(["busy", "concurrent-modification"]);
-export function debtOutcomeSchema<S extends z.ZodType>(value: S) {
+export type DebtReadRefusal = z.output<typeof debtReadRefusalSchema>;
+export const debtParentReadRefusalSchema = z.union([missingRefusalSchema, debtReadRefusalSchema.options[1]]);
+export type DebtParentReadRefusal = z.output<typeof debtParentReadRefusalSchema>;
+
+export function debtReadPageSchema<Row extends z.ZodType>(row: Row) {
   return z.union([
     z
-      .strictObject({ kind: z.literal("accepted"), value, cleanup: debtCleanupFailureSchema.exactOptional() })
+      .strictObject({
+        kind: z.literal("present"),
+        rows: nonEmptyDebtArraySchema(row).exactOptional(),
+        more: z.literal(true).exactOptional(),
+      })
       .readonly(),
-    z.strictObject({ kind: z.literal("refused"), refusal: debtRefusalSchema }).readonly(),
-    z.strictObject({ kind: z.literal("retry"), reason: debtRetrySchema }).readonly(),
+    z.strictObject({ kind: z.literal("absent") }).readonly(),
+    debtReadRefusalSchema,
   ]);
 }
-export const debtMutationResultSchema = debtOutcomeSchema(debtViewSchema);
-export const debtUpdateResultSchema = debtOutcomeSchema(
+export type DebtReadPage<Row, Refusal = DebtReadRefusal> =
+  | Readonly<{ kind: "present"; rows?: readonly Row[]; more?: true }>
+  | Readonly<{ kind: "absent" }>
+  | Refusal;
+
+export const debtMutationResultSchema = z.union([
+  z
+    .strictObject({ kind: z.literal("accepted"), id: debtIdSchema, warning: debtWarningSchema.exactOptional() })
+    .readonly(),
+  graphRefusalSchema,
+  contextRefusalSchema,
+  retryResultSchema,
+]);
+export const debtChangeSchema = z.enum([
+  "title",
+  "body",
+  "note",
+  "priority",
+  "needs",
+  "parent",
+  "supersedes",
+  "relates",
+]);
+export const debtUpdateResultSchema = z.union([
   z
     .strictObject({
-      debt: debtViewSchema,
-      documentDiff: z.string(),
-      changedFields: z
-        .array(
-          z
-            .strictObject({
-              field: z.string(),
-              action: z.enum(["added", "replaced", "cleared", "changed", "appended"]),
-            })
-            .readonly(),
-        )
-        .readonly(),
+      kind: z.literal("accepted"),
+      changes: nonEmptyDebtArraySchema(debtChangeSchema).exactOptional(),
+      warning: debtWarningSchema.exactOptional(),
     })
     .readonly(),
-);
+  missingRefusalSchema,
+  graphRefusalSchema,
+  ownershipRefusalSchema,
+  retryResultSchema,
+]);
+export const debtLifecycleResultSchema = z.union([
+  z.strictObject({ kind: z.literal("accepted"), warning: debtWarningSchema.exactOptional() }).readonly(),
+  missingRefusalSchema,
+  terminalRefusalSchema,
+  retryResultSchema,
+]);
 export const debtBatchResultSchema = z
   .strictObject({
-    items: z.array(z.strictObject({ id: debtIdSchema, outcome: debtMutationResultSchema }).readonly()).readonly(),
+    items: nonEmptyDebtArraySchema(debtLifecycleResultSchema),
   })
   .readonly();
 
-export type DebtView = z.output<typeof debtViewSchema>;
-export type DebtCleanupFailure = z.output<typeof debtCleanupFailureSchema>;
-export type DebtRefusal = z.output<typeof debtRefusalSchema>;
 export type DebtRetry = z.output<typeof debtRetrySchema>;
-export type DebtMutationResult = DebtOutcome<DebtView>;
+export type DebtMutationResult = z.output<typeof debtMutationResultSchema>;
+export type DebtChange = z.output<typeof debtChangeSchema>;
 export type DebtUpdateResult = z.output<typeof debtUpdateResultSchema>;
+export type DebtLifecycleResult = z.output<typeof debtLifecycleResultSchema>;
+export type DebtBatchItem = DebtLifecycleResult;
 export type DebtBatchResult = z.output<typeof debtBatchResultSchema>;
-export type DebtOutcome<A> = z.output<ReturnType<typeof debtOutcomeSchema<z.ZodType<A>>>>;
-export type DebtLifecycleVerb = Extract<DebtRefusal, { kind: "invalid-lifecycle-transition" }>["verb"];
-export type SettledDebtAction = "done";
+export type DebtLifecycleVerb = "done" | "drop";
 export type SettledDebtResult =
-  | Readonly<{ kind: "changed"; debt: DebtView; action: SettledDebtAction; cleanup?: DebtCleanupFailure }>
+  | Readonly<{ kind: "changed"; cleanup?: DebtWarning }>
   | Readonly<{ kind: "unchanged" }>
-  | Readonly<{ kind: "refused"; refusal: DebtRefusal }>
-  | Readonly<{ kind: "retry"; reason: DebtRetry }>;
+  | Extract<DebtLifecycleResult, { kind: "refused" | "retry" }>;
 export type AddDebtInput = Readonly<{
   title: string;
   namespace?: readonly string[];

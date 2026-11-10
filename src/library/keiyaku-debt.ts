@@ -7,6 +7,9 @@ import {
   type DebtQueryExpression,
   type DebtQuerySort,
   type DebtAbsent,
+  type DebtCatalogue,
+  type DebtShowResult,
+  type DebtShowItem,
 } from "../debt/index.js";
 import { addDebt, addDebtDocument } from "../debt/operations.js";
 import {
@@ -44,8 +47,7 @@ export type DebtContextInvocation = Readonly<{ namespace?: readonly string[] }>;
 
 const coordinates = (at: KeiyakuAt) => invocationCoordinates({ ...at, use: "none" });
 const absent: DebtAbsent = { kind: "absent" };
-const missing = (id: ReturnType<typeof debtId>) =>
-  ({ kind: "refused", refusal: { kind: "debt-missing", debtId: id } }) as const;
+const missing = () => ({ kind: "refused", reason: "debt-missing" }) as const;
 
 function selection(value: unknown): DebtSelection {
   if (value === undefined) return "active";
@@ -69,12 +71,14 @@ async function selectedScope(
 ): Promise<
   | { scope: "world" }
   | { namespace: readonly string[] }
-  | { kind: "refused"; refusal: { kind: "invalid-namespace-context"; path: string } }
+  | { kind: "refused"; reason: "invalid-namespace-context"; path: string }
 > {
   if (input.scope === "world") return { scope: "world" as const };
   if (input.namespace !== undefined) return { namespace: input.namespace };
   const context = await resolveDebtNamespaceContext(at.debtContext);
-  return "kind" in context ? { kind: "refused" as const, refusal: context } : { namespace: context.namespace };
+  return "kind" in context
+    ? { kind: "refused" as const, reason: context.kind, path: context.path }
+    : { namespace: context.namespace };
 }
 
 export async function debtAdd(at: KeiyakuAt, input: AddDebtInput | AddDebtDocumentInput, document: boolean) {
@@ -97,9 +101,9 @@ export async function debtUpdate(at: KeiyakuAt, input: DebtUpdateInvocation) {
       .debt({ id })
       .update(rest as UpdateDebtInput);
   updateInput(rest).signal?.throwIfAborted();
-  return missing(id);
+  return missing();
 }
-export async function debtShow(at: KeiyakuAt, input: DebtShowInvocation) {
+export async function debtShow(at: KeiyakuAt, input: DebtShowInvocation): Promise<DebtShowResult | DebtAbsent> {
   const v = record(input, "show input");
   closed(v, ["id", "ids"], "show input");
   if ((v.id === undefined) === (v.ids === undefined)) throw new TypeError("show requires id or ids");
@@ -107,9 +111,13 @@ export async function debtShow(at: KeiyakuAt, input: DebtShowInvocation) {
   if (plural && (!Array.isArray(v.ids) || v.ids.length === 0)) throw new TypeError("ids requires at least one DebtId");
   const ids = plural ? (v.ids as unknown[]).map(debtId) : [debtId(v.id)];
   const coord = await coordinates(at);
-  const results: (import("../debt/index.js").DebtDetail | null)[] = [];
-  for (const id of ids) results.push(coord.world === null ? null : await Debts.of(coord.world).debt({ id }).read());
-  return plural ? results : (results[0] ?? null);
+  if (coord.world === null) return absent;
+  const items: DebtShowItem[] = [];
+  for (const id of ids) {
+    const result = await Debts.of(coord.world).debt({ id }).read();
+    items.push(result.kind === "present" ? { ...result, kind: "found" } : result);
+  }
+  return { kind: "present", items };
 }
 export async function debtClose(at: KeiyakuAt, input: DebtCloseInvocation, verb: "done" | "drop") {
   const v = record(input, "close input");
@@ -120,16 +128,16 @@ export async function debtClose(at: KeiyakuAt, input: DebtCloseInvocation, verb:
   if (ids === undefined || ids.length === 0) throw new TypeError("ids requires at least one DebtId");
   text(v.note, "note");
   signal(v.signal)?.throwIfAborted();
-  return { items: ids.map((id) => ({ id, outcome: missing(id) })) };
+  return { items: ids.map(() => missing()) };
 }
-export async function debtList(at: KeiyakuAt, input: DebtLsInvocation) {
+export async function debtList(at: KeiyakuAt, input: DebtLsInvocation): Promise<DebtCatalogue> {
   const v = readInput(input, "list", ["of", "selection"]);
   if (v.of !== "debt") throw new TypeError("of must be debt");
   const selected = selection(v.selection),
     coord = await coordinates(at);
   if (coord.world === null) return absent;
   const scope = await selectedScope(coord, input);
-  if ("kind" in scope) return scope;
+  if ("kind" in scope) return { kind: scope.reason, path: scope.path };
   return Debts.of(coord.world).list({
     ...scope,
     selection: selected,
@@ -140,7 +148,7 @@ export function debtReady(
   at: KeiyakuAt,
   input: DebtReadyInvocation,
   blocked: false,
-): Promise<import("../debt/index.js").DebtList | typeof absent>;
+): Promise<import("../debt/index.js").DebtReadyList | typeof absent>;
 export function debtReady(
   at: KeiyakuAt,
   input: DebtReadyInvocation,
@@ -181,7 +189,7 @@ export async function debtTree(at: KeiyakuAt, input: Readonly<{ id: string }>) {
   closed(v, ["id"], "tree input");
   const id = debtId(v.id),
     coord = await coordinates(at);
-  return coord.world === null ? missing(id) : Debts.of(coord.world).debt({ id }).tree();
+  return coord.world === null ? absent : Debts.of(coord.world).debt({ id }).tree();
 }
 export async function debtDoctor(at: KeiyakuAt) {
   const coord = await coordinates(at);
@@ -202,10 +210,13 @@ export async function debtContext(at: KeiyakuAt, input: DebtContextInvocation) {
   if (v.namespace !== undefined) {
     if (coord.world === null) await coord.establishWorld();
     await installNamespaceContext(coord.debtContext.writeRoot, v.namespace as readonly string[]);
-  } else if (coord.world === null)
-    return { kind: "accepted", value: { namespace: [], source: "default-root" } } as const;
+  } else if (coord.world === null) return { kind: "present", source: "default-root" } as const;
   const resolved = await resolveDebtNamespaceContext(coord.debtContext);
-  return "kind" in resolved
-    ? ({ kind: "refused", refusal: resolved } as const)
-    : ({ kind: "accepted", value: resolved } as const);
+  if ("kind" in resolved) return { kind: "refused", path: resolved.path } as const;
+  if (resolved.source === "default-root") return { kind: "present", source: resolved.source } as const;
+  return {
+    kind: "present",
+    source: resolved.source,
+    ...(resolved.namespace.length === 0 ? {} : { namespace: resolved.namespace.join("/") }),
+  } as const;
 }

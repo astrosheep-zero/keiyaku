@@ -155,7 +155,7 @@ export function createProvider(transport: AkumaTransport, handoff?: Registration
                 const release = mirror.hold();
                 const submission = (async () => {
                   try {
-                    const admitted = tellPresentation(await transport.tell(world, target.akuId, cancellation.signal, text), steerTurnId);
+                    const admitted = tellPresentation(await transport.tell(world, target.akuId, cancellation.signal, text), text, steerTurnId);
                     // Observe once while publication is held. An idle send may have
                     // started real work even when its receipt still says pending.
                     await session.observe();

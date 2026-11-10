@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { processDiagnostic } from "../runtime/proc/diagnostic.js";
 import { runProcess, type ProcessOutcome } from "../runtime/proc/run.js";
 import { SettingsError, type Settings } from "../settings.js";
 
@@ -42,9 +43,8 @@ export const worktreeHookLagSchema = z
     kind: z.literal("worktree-hook-failed"),
     phase: z.enum(["create", "destroy"]),
     path: z.string().refine((value) => value.trim() !== ""),
-    command: z.number().int().nonnegative(),
     name: z.string().refine((value) => value.trim() !== ""),
-    failure: hookFailureSchema,
+    diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
   .strict()
   .readonly();
@@ -56,9 +56,16 @@ function record(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function namespaceFailure(view: ReturnType<Settings["namespace"]>): never {
+function namespaceFailure(settings: Settings, view: ReturnType<Settings["namespace"]>): never {
   if (view.kind !== "failed") throw new Error("settings namespace failure expected");
-  throw new SettingsError(view.failures.map((failure) => `${failure.scope}: ${failure.diagnostic}`).join("; "));
+  throw new SettingsError(
+    view.failures
+      .map((failure) => {
+        const scope = settings.scopes[failure.scope];
+        return `${failure.scope}: ${failure.diagnostic ?? (scope.kind === "failed" ? scope.diagnostic : "namespace unavailable")}`;
+      })
+      .join("; "),
+  );
 }
 
 function command(value: unknown, coordinate: string, ErrorType: typeof TypeError | typeof SettingsError): HookCommand {
@@ -105,14 +112,14 @@ function commands(
 export function worktreeHooksFrom(input: WorktreeHooksFromInput): WorktreeHooks {
   if (!record(input)) throw new TypeError("worktreeHooksFrom input must be an object");
   const view = input.settings.namespace("worktree");
-  if (view.kind === "failed") namespaceFailure(view);
-  for (const entry of view.entries) {
-    if (entry.name !== "create" && entry.name !== "destroy") {
-      throw new SettingsError(`worktree has unknown entry: ${entry.name}`);
+  if (view.kind === "failed") namespaceFailure(input.settings, view);
+  for (const name of Object.keys(view.entries ?? {})) {
+    if (name !== "create" && name !== "destroy") {
+      throw new SettingsError(`worktree has unknown entry: ${name}`);
     }
   }
   const selected = (phase: "create" | "destroy"): readonly HookCommand[] => {
-    const entry = view.entries.find((item) => item.name === phase);
+    const entry = view.entries?.[phase];
     if (entry === undefined) return Object.freeze([]);
     return commands(entry.value, `worktree.${phase}`, SettingsError);
   };
@@ -172,31 +179,35 @@ export async function runHookCommands(
   return { kind: "ok" };
 }
 
-type HookPhaseRun = Readonly<{ lag: WorktreeHookLag | null; runs: readonly string[] }>;
+type HookPhaseRun = Readonly<{ lag: WorktreeHookLag | null }>;
 
 async function runPhase(worktree: string, hooks: readonly HookCommand[], phase: HookPhase): Promise<HookPhaseRun> {
-  const runs: string[] = [];
-  for (const [command, value] of hooks.entries()) {
+  for (const value of hooks) {
     const outcome = await runProcess({ argv: value.argv, timeoutMs: value.timeoutMs, cwd: worktree });
     if (outcome.kind === "cancelled") {
       return {
-        runs,
         lag: {
           kind: "worktree-hook-failed",
           phase,
           path: worktree,
-          command,
           name: value.name,
-          failure: { kind: "unknown-exit" },
+          diagnostic: processDiagnostic({ kind: "unknown-exit" }),
         },
       };
     }
     const failure = failedOutcome(outcome);
     if (failure !== null)
-      return { runs, lag: { kind: "worktree-hook-failed", phase, path: worktree, command, name: value.name, failure } };
-    runs.push(value.name);
+      return {
+        lag: {
+          kind: "worktree-hook-failed",
+          phase,
+          path: worktree,
+          name: value.name,
+          diagnostic: processDiagnostic(failure),
+        },
+      };
   }
-  return { runs, lag: null };
+  return { lag: null };
 }
 
 export function runCreateHooks(worktree: string, hooks: WorktreeHooks): Promise<HookPhaseRun> {

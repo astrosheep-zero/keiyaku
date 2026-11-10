@@ -21,6 +21,11 @@ or an assertion of causality between producers. Kanshi does not reread a
 section while formatting it, synthesize history, probe provider state, or
 repair an inconsistency it encountered.
 
+The report preserves section failures with their bounded causes rather than
+retaining replayable partial reads. Read failure never erases independently
+observed peers, and a failed retirement cannot turn unavailable authority into
+known emptiness.
+
 Read-time association is enrichment, not a prerequisite for observing either
 product. A failed DebtHolder or Dispatch observation makes affected links
 unavailable; it does not fail readable Debt or Akuma rows or establish that no
@@ -42,17 +47,19 @@ to explain. Its judgment is phase-driven: active Contracts foreground the
 outstanding hand and acceptance evidence, while terminal Contracts foreground
 the settled outcome. The World Contract section offers the same concise judgment
 at catalogue scale. Contract evidence retains the owner's per-requirement
-currentness and verdicts without recomputing gate satisfaction or inferring a
-producer run. An association outside that aperture is unavailable rather than
-missing; Kanshi uses missing only when the Contract observation is complete
-enough to establish absence.
+currentness and verdicts without a second copy of aggregate testimony,
+recomputing currentness, or inferring a producer run. An association outside
+that aperture is unavailable rather than missing; Kanshi uses missing only
+when the Contract observation is complete enough to establish absence.
 
 For bare World status, Kanshi obtains one bounded recent Akuma observation and
-keeps that owner order. It observes detailed activity only for its first few
-returned rows and retains whether that observation reaches farther without
-manufacturing a roster total. This bounded display observation never supplies
-the frozen complete subject set required by selection, waiting, mutation, or
-other complete roster operations.
+keeps that owner order. Catalogue rows retain current actionable work and
+association. Addressed static reads retain the selected current frontier in
+owner order; historical event coordinates and tool output belong to explicit
+history or stream observation. The report retains whether the observation
+reaches farther without manufacturing a roster total. This bounded display observation
+never supplies the frozen complete subject set required by selection, waiting,
+mutation, or other complete roster operations.
 
 A requested category is a package-root observation that retains the same recent
 owner order and bounded extent as the corresponding World section. It validates
@@ -77,12 +84,10 @@ of Settlement and Dispatch. Kanshi never writes an association, infers one
 from names or directories, or uses an attachment as permission to change any
 product.
 
-The same read-time association discharges an observed Akuma snapshot's
-reported changes when the associated Contract's observed phase is accepted:
-placement has preserved the candidate in Git, so the composite report no
-longer presents placed work as pending. The discharge derives from the Contract
-owner's own phase read, writes nothing, and yields to any missing, failed, or
-unproven Contract observation, which keeps the reported changes.
+Reported changes belong to the addressed Akuma observation, not to every
+catalogue row. Placement discharge of pending work uses the Contract owner's
+observed phase without changing Heart evidence. Missing, failed, or unproven
+Contract authority cannot establish that work was placed.
 
 Callers may select a complete Contract or Akuma identity, request a
 catalogue, or ask the Region owner for declared planning regions and their
@@ -93,7 +98,13 @@ refusal, while a well-formed unmatched selector is an explicit missing result.
 
 The report preserves complete identities and the owner-provided facts needed
 to understand current availability, lifecycle, declared evidence, and
-association. Counts and ordering are observations, not persisted counters or
+association. Catalogue observations share the native owner's concise summary,
+including physical attention and unavailable observations for the selected rows;
+composition neither drops that evidence nor re-observes it. Selected detail retains
+workspace appointment even when its physical
+observation fails. Missing links, unavailable link authority, and unrequested
+detail remain distinct, including when independently observed partial links
+are still available. Counts and ordering are observations, not persisted counters or
 new status law. The report has no destructive or mutating operation.
 
 ## Presentation boundary

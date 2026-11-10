@@ -1,189 +1,167 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
-import { contractIdSchema } from "../git/identity.js";
-import { gateSchema } from "../protocol/result-leaves.js";
-import { worktreeWorkspaceSchema } from "../git/workspace.js";
-import type { ContractId, Gate } from "../core/facts/types.js";
+import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
+import { compactReason, retrySchema, type CompactReason } from "../protocol/result-reasons.js";
 import { deliveryPreviewReportSchema, type DeliveryPreviewReport } from "../protocol/delivery-preview.js";
-import { completionEvidenceShape } from "../protocol/completion.js";
-import { reviewAdmissionValueSchema } from "../protocol/review.js";
+import { placementSchema } from "../protocol/completion.js";
 import { verifyValueSchema } from "../protocol/verify.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import type { IntentOutcome, IntentRetry } from "../protocol/operations.js";
-import type { ContractWorkspaceLocation } from "../workspace-place.js";
-import { deliveredValueSchema, type Delivery, type DeliveryValue } from "./delivery.js";
+import { deliveredValueSchema, type Delivery } from "./delivery.js";
 import { continuationReportSchema } from "./continuation.js";
 import type { InvocationAccumulator } from "./invocation.js";
 import type { Kei } from "./kei.js";
 import {
-  handoffOutcomeSchema,
-  operationOutcomeSchema,
-  type ContractVerb,
-  type HandoffOutcome,
   type OperationOutcome,
-  type OutcomeProjection,
+  type HandoffOutcome,
   type Review,
   type Verify,
+  handoffOutcomeSchema,
+  operationOutcomeSchema,
+  invocationIssueSchema,
+  localIssueSchema,
+  completionIssueSchema,
+  previewIssueSchema,
 } from "./outcome.js";
-import { operationRefusalSchemas, operationRetrySchemas } from "./refusal.js";
-import type { OperationRefusals } from "./refusal.js";
-import { regionOverlapResultSchema, type AmendRegionObservation, type RegionObservation } from "./region.js";
+import { operationRefusalSchemas, type OperationRefusals } from "./refusal.js";
+import { regionOverlapResultSchema } from "./region.js";
+import type { ContractId } from "../core/facts/types.js";
 
-export type BindValue = Readonly<{
-  kei: Kei;
-  workspace?: ContractWorkspaceLocation;
-  warnings?: readonly string[];
-}> &
-  RegionObservation;
-
-export type AmendValue = Readonly<{
-  documentDiff: string;
-  changes: Readonly<{ gates?: readonly Gate[]; after?: readonly ContractId[] }>;
-}> &
-  AmendRegionObservation;
-
+const regionFields = {
+  overlaps: z.array(regionOverlapResultSchema).min(1).readonly().exactOptional(),
+  overlapError: z.string().exactOptional(),
+};
 const bindFields = {
-  kei: z.strictObject({ contract: contractIdSchema }).readonly(),
-  workspace: worktreeWorkspaceSchema.exactOptional(),
-  warnings: z.array(z.string()).readonly().exactOptional(),
+  worktreePath: z.string().min(1).exactOptional(),
+  target: z.string().min(1).exactOptional(),
+  ...regionFields,
 };
 const amendFields = {
-  documentDiff: z.string(),
-  changes: z
-    .strictObject({
-      gates: z.array(gateSchema).readonly().exactOptional(),
-      after: z.array(contractIdSchema).readonly().exactOptional(),
-    })
-    .readonly(),
+  changedSections: z.array(z.string()).min(1).readonly().exactOptional(),
+  gatesChanged: z.literal(true).exactOptional(),
+  afterChanged: z.literal(true).exactOptional(),
+  ...regionFields,
 };
-const overlaps = z.array(regionOverlapResultSchema).readonly();
-const bindValueSchema = z.union([
-  z.strictObject({ ...bindFields, overlaps }).readonly(),
-  z.strictObject({ ...bindFields, overlapFailure: z.string() }).readonly(),
+const worktreeChangesSchema = z
+  .strictObject({
+    staged: z.array(z.string()).min(1).readonly().exactOptional(),
+    unstaged: z.array(z.string()).min(1).readonly().exactOptional(),
+    untracked: z.array(z.string()).min(1).readonly().exactOptional(),
+    unmergedPaths: z.array(z.string()).min(1).readonly().exactOptional(),
+  })
+  .readonly();
+const reviewFields = {
+  placement: placementSchema.exactOptional(),
+  worktreeChanges: worktreeChangesSchema.exactOptional(),
+  continuation: continuationReportSchema.exactOptional(),
+};
+const bindValueSchema = z.strictObject(bindFields).readonly();
+const amendValueSchema = z.strictObject(amendFields).readonly();
+export type BindValue = z.output<typeof bindValueSchema> & Readonly<{ kei: Kei }>;
+export type AmendValue = z.output<typeof amendValueSchema>;
+const localRecoveries = { recoverySnapshots: z.array(snapshotIdSchema).min(1).readonly().exactOptional() };
+const bindOutcomes = operationOutcomeSchema(bindFields, operationRefusalSchemas.bind, localIssueSchema);
+export const bindOutcomeSchema = z.union([
+  bindOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
+  bindOutcomes.options[1].unwrap().omit({ contractId: true }).readonly(),
+  ...retrySchema.options,
 ]);
-const amendValueSchema = z.union([
-  z.strictObject({ ...amendFields, overlaps }).readonly(),
-  z.strictObject({ ...amendFields, overlapFailure: z.string() }).readonly(),
-  z.strictObject(amendFields).readonly(),
+const amendOutcomes = operationOutcomeSchema(amendFields, operationRefusalSchemas.amend, localIssueSchema);
+export const amendOutcomeSchema = z.union([
+  amendOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
+  amendOutcomes.options[1],
+  amendOutcomes.options[2],
+  amendOutcomes.options[3],
 ]);
-export const bindOutcomeSchema = operationOutcomeSchema(
-  "bind",
-  { value: bindValueSchema },
-  operationRefusalSchemas.bind,
-  operationRetrySchemas.bind,
-);
-export const amendOutcomeSchema = operationOutcomeSchema(
-  "amend",
-  { value: amendValueSchema },
-  operationRefusalSchemas.amend,
-  operationRetrySchemas.amend,
-);
-export type BindOutcome = OperationOutcome<"bind", BindValue, OperationRefusals["bind"]>;
-export type AmendOutcome = OperationOutcome<"amend", AmendValue, OperationRefusals["amend"]>;
 export const deliverOutcomeSchema = z.union([
-  operationOutcomeSchema(
-    "deliver",
-    { value: deliveredValueSchema },
-    operationRefusalSchemas.deliver,
-    operationRetrySchemas.deliver,
-  ),
+  operationOutcomeSchema(deliveredValueSchema.unwrap().shape, operationRefusalSchemas.deliver, completionIssueSchema),
   handoffOutcomeSchema,
 ]);
-export const verifyOutcomeSchema = operationOutcomeSchema(
-  "verify",
-  {
-    value: verifyValueSchema
-      .unwrap()
-      .extend({
-        continuation: continuationReportSchema.exactOptional(),
-      })
-      .readonly(),
-  },
+const verifyOutcomes = operationOutcomeSchema(
+  { ...verifyValueSchema.unwrap().shape, continuation: continuationReportSchema.exactOptional() },
   operationRefusalSchemas.verify,
-  operationRetrySchemas.verify,
+  invocationIssueSchema,
 );
+export const verifyOutcomeSchema = z.union([verifyOutcomes.options[0], verifyOutcomes.options[1]]);
 export const reviewOutcomeSchema = operationOutcomeSchema(
-  "review",
-  {
-    value: z
-      .strictObject({
-        ...completionEvidenceShape,
-        ...reviewAdmissionValueSchema.unwrap().shape,
-        continuation: continuationReportSchema.exactOptional(),
-      })
-      .readonly(),
-  },
+  reviewFields,
   operationRefusalSchemas.review,
-  operationRetrySchemas.review,
+  completionIssueSchema,
 );
-export type DeliverOutcome =
-  | OperationOutcome<"deliver", Delivery & DeliveryValue, OperationRefusals["deliver"]>
-  | HandoffOutcome;
+const arcOutcomes = operationOutcomeSchema(
+  { chapter: z.number().int().positive() },
+  operationRefusalSchemas.arc,
+  localIssueSchema,
+);
+export const arcOutcomeSchema = z.union([
+  arcOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
+  arcOutcomes.options[1],
+  arcOutcomes.options[2],
+  arcOutcomes.options[3],
+]);
+const abandonOutcomes = operationOutcomeSchema({}, operationRefusalSchemas.abandon, localIssueSchema);
+export const abandonOutcomeSchema = z.union([
+  abandonOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
+  abandonOutcomes.options[1],
+  abandonOutcomes.options[2],
+  abandonOutcomes.options[3],
+]);
+const previewIssues = { issues: z.array(previewIssueSchema).min(1).readonly().exactOptional() };
+export const deliveryPreviewOutcomeSchema = z.union([
+  deliveryPreviewReportSchema.options[0].unwrap().extend(previewIssues).readonly(),
+  deliveryPreviewReportSchema.options[1].unwrap().extend(previewIssues).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("refused"),
+      contractId: contractIdSchema,
+      reason: operationRefusalSchemas["deliver-preview"],
+    })
+    .readonly(),
+]);
+
+export type BindOutcome = OperationOutcome<"bind", BindValue, OperationRefusals["bind"]>;
+export type AmendOutcome = OperationOutcome<"amend", AmendValue, OperationRefusals["amend"]>;
+export type DeliverOutcome = OperationOutcome<"deliver", Delivery, OperationRefusals["deliver"]> | HandoffOutcome;
 export type VerifyOutcome = OperationOutcome<"verify", Verify, OperationRefusals["verify"]>;
 export type ReviewOutcome = OperationOutcome<"review", Review, OperationRefusals["review"]>;
-export const deliveryPreviewOutcomeSchema = operationOutcomeSchema(
-  "deliver-preview",
-  { value: deliveryPreviewReportSchema },
-  operationRefusalSchemas["deliver-preview"],
-  operationRetrySchemas["deliver-preview"],
-);
-export type DeliveryPreviewOutcome = OperationOutcome<
-  "deliver-preview",
-  DeliveryPreviewReport,
-  OperationRefusals["deliver-preview"]
->;
-export const arcOutcomeSchema = operationOutcomeSchema(
-  "arc",
-  {},
-  operationRefusalSchemas.arc,
-  operationRetrySchemas.arc,
-);
-export const abandonOutcomeSchema = operationOutcomeSchema(
-  "abandon",
-  {},
-  operationRefusalSchemas.abandon,
-  operationRetrySchemas.abandon,
-);
-export type ArcOutcome = OperationOutcome<"arc", void, OperationRefusals["arc"]>;
-export type AbandonOutcome = OperationOutcome<"abandon", void, OperationRefusals["abandon"]>;
-
+export type ArcOutcome = OperationOutcome<"arc", Readonly<{ chapter: number }>, OperationRefusals["arc"]>;
+export type AbandonOutcome = OperationOutcome<"abandon", Record<never, never>, OperationRefusals["abandon"]>;
+export type DeliveryPreviewOutcome =
+  | (DeliveryPreviewReport & Readonly<{ issues?: readonly z.output<typeof previewIssueSchema>[] }>)
+  | Readonly<{ kind: "refused"; contractId: ContractId; reason: OperationRefusals["deliver-preview"] }>;
 export type MutationObservation = Readonly<{ observe?: ExecutionObserver }>;
-
 export type DeliveryPreviewInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; signal?: AbortSignal }>;
-
 export type BindResult = BindOutcome;
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
-/** The refused/retry arms are value-agnostic, so every operation can return them unchanged. */
 type ExpectedProjection<Refusal> =
   | Readonly<{ kind: "refused"; contract?: ContractId; refusal: Refusal }>
   | Readonly<{ kind: "retry"; contract?: ContractId; reason: IntentRetry }>;
-
-export function expected<Refusal>(
+type RetryProjection = Readonly<{ kind: "retry"; contract?: ContractId; reason: IntentRetry }>;
+export function expected(
   contract: ContractId | undefined,
-  admission: Exclude<IntentOutcome<unknown, Refusal>, { kind: "accepted" }>,
-): ExpectedProjection<Refusal> {
+  admission: Readonly<{ kind: "retry"; reason: IntentRetry }>,
+): RetryProjection;
+export function expected<Refusal extends Parameters<typeof compactReason>[0]>(
+  contract: ContractId | undefined,
+  admission: Readonly<{ kind: "refused"; refusal: Refusal }> | Readonly<{ kind: "retry"; reason: IntentRetry }>,
+): ExpectedProjection<CompactReason<Refusal>>;
+export function expected<Refusal extends Parameters<typeof compactReason>[0]>(
+  contract: ContractId | undefined,
+  admission: Readonly<{ kind: "refused"; refusal: Refusal }> | Readonly<{ kind: "retry"; reason: IntentRetry }>,
+): ExpectedProjection<CompactReason<Refusal>> {
   return admission.kind === "refused"
-    ? {
-        kind: "refused",
-        ...(contract === undefined ? {} : { contract }),
-        refusal: admission.refusal,
-      }
+    ? { kind: "refused", ...(contract === undefined ? {} : { contract }), refusal: compactReason(admission.refusal) }
     : { kind: "retry", ...(contract === undefined ? {} : { contract }), reason: admission.reason };
 }
-
-export function acceptedOutcome<Operation extends ContractVerb, Value>(
-  operation: Operation,
+export function acceptedOutcome<Value>(
   contract: ContractId,
   accumulator: InvocationAccumulator,
   value: Value,
-): OutcomeProjection<Operation, Value, never> {
-  void operation;
-  const head = accumulator.head(contract);
-  if (head === undefined) throw new Error("missing leading admission receipt");
-  return { kind: "accepted", contract, head, value };
+): Readonly<{ kind: "accepted"; contract: ContractId; value: Value }> {
+  if (accumulator.head(contract) === undefined) throw new Error("missing leading admission receipt");
+  return { kind: "accepted", contract, value };
 }
-
 export function retainAdmission<Value>(
   accumulator: InvocationAccumulator,
   contract: ContractId,

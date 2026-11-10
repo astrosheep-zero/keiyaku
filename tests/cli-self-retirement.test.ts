@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
@@ -73,11 +73,11 @@ function selfRetirementFixture(context: TestContext): SelfRetirementFixture {
   assert.equal(bound.status, 0, bound.stderr);
   const binding = JSON.parse(bound.stdout) as {
     kind: string;
-    contract: string;
-    value: { workspace: { path: string } };
+    contractId: string;
+    worktreePath: string;
   };
   assert.equal(binding.kind, "accepted");
-  const worktree = binding.value.workspace.path;
+  const worktree = binding.worktreePath;
 
   cpSync(repositoryBuild, join(worktree, "build"), { recursive: true, dereference: true });
   symlinkSync(repositoryModules, join(worktree, "node_modules"), process.platform === "win32" ? "junction" : "dir");
@@ -87,7 +87,7 @@ function selfRetirementFixture(context: TestContext): SelfRetirementFixture {
   return {
     root,
     world: world.path,
-    contract: binding.contract,
+    contract: binding.contractId,
     worktree,
     cli: join(worktree, "build/src/cli/index.js"),
   };
@@ -129,7 +129,6 @@ test("a worktree-local compiled CLI reports its accepted self-retirement in text
   assert.match(reviewed.stdout, /^✓ review satisfied  kei\//mu);
   assert.equal((reviewed.stdout.match(/^✓ review satisfied /gmu) ?? []).length, 1, "one truthful final receipt");
   assert.match(reviewed.stdout, /^✓ accepted$/mu);
-  assert.match(reviewed.stdout, new RegExp(`^  worktree  ${basename(fixture.worktree)} retired$`, "mu"));
   assert.equal(existsSync(fixture.worktree), false, "terminal cleanup retired the executing worktree");
 
   const history = await runFixtureCli(repositoryCli, fixture.world, ["history", fixture.contract, "--full"]);
@@ -156,22 +155,15 @@ test("a worktree-local compiled CLI reports its accepted self-retirement in JSON
   assert.equal(reviewed.stderr, "");
   const body = JSON.parse(reviewed.stdout) as {
     kind: string;
-    operation: string;
-    contract: string;
-    effects: readonly { kind: string; name?: string }[];
-    facts: readonly { kind: string }[];
+    contractId: string;
+    placement: { kind: string; target?: string; predecessor?: string; integration: string };
   };
   assert.equal(body.kind, "accepted");
-  assert.equal(body.operation, "review");
-  assert.equal(body.contract, fixture.contract);
-  assert.deepEqual(
-    body.effects.filter((effect) => effect.kind === "worktree-retired").map((effect) => effect.name),
-    [basename(fixture.worktree)],
-  );
-  assert.deepEqual(
-    body.facts.map((fact) => fact.kind),
-    ["attestation", "claimed"],
-  );
+  assert.equal(body.contractId, fixture.contract);
+  assert.equal(body.placement.kind, "placed");
+  assert.equal(body.placement.target, "refs/heads/main");
+  assert.ok(body.placement.predecessor);
+  assert.ok(body.placement.integration);
   assert.equal(existsSync(fixture.worktree), false, "terminal cleanup retired the executing worktree");
 });
 
@@ -201,17 +193,28 @@ const executable = (argv) => {
   return parsed;
 };
 
+let admitted;
 const delivered = await Keis.of(await Repo.at({ path: world }))
   .kei({ id: contract })
-  .deliver();
-if (delivered.kind !== "accepted") throw new Error("deliver did not admit: " + delivered.kind);
+  .deliver(undefined, { observe(event) {
+    if (event.kind === "admitted" && event.fact.kind === "deliver") admitted = {
+      kind: "deliver", entry: event.fact.entry,
+      candidate: event.fact.data.tenderSnapshot,
+      integration: event.fact.data.integration.snapshot,
+      contentId: event.fact.data.integration.changeId,
+    };
+  } });
+if (delivered.kind !== "accepted" || admitted === undefined) throw new Error("deliver did not admit: " + delivered.kind);
 
 let armed = true;
 const nativeWrite = process.stdout.write.bind(process.stdout);
 process.stdout.write = (chunk, ...rest) => {
   if (armed) {
     armed = false;
-    throw withOutcomeReceipt(new TypeError("representative failure after known admission"), delivered);
+    throw withOutcomeReceipt(new TypeError("representative failure after known admission"), {
+      kind: "contract", contractId: delivered.contractId, admitted: [admitted],
+      candidate: delivered.candidate, integration: delivered.integration, contentId: delivered.contentId,
+    });
   }
   return nativeWrite(chunk, ...rest);
 };
@@ -254,18 +257,23 @@ test("a known-admission failure after retirement keeps its receipt and classific
     category: string;
     diagnostic: string;
     causeClass?: string;
-    outcome: { operation: string; contract: string; facts: readonly { kind: string }[] };
+    outcome: {
+      kind: string;
+      contractId: string;
+      admitted: readonly { kind: string; candidate: string }[];
+      candidate: string;
+    };
   };
   assert.equal(body.kind, "failed");
   assert.equal(body.category, "internal");
   assert.equal(body.diagnostic, "representative failure after known admission");
   assert.equal(body.causeClass, "TypeError");
-  assert.equal(body.outcome.operation, "deliver");
-  assert.equal(body.outcome.contract, fixture.contract);
+  assert.equal(body.outcome.kind, "contract");
+  assert.equal(body.outcome.contractId, fixture.contract);
   assert.deepEqual(
-    body.outcome.facts.map((fact) => fact.kind),
+    body.outcome.admitted.map((item) => item.kind),
     ["deliver"],
-    "the confirmed receipt keeps the facts admitted before the failure",
   );
+  assert.equal(body.outcome.admitted[0]!.candidate, body.outcome.candidate);
   assert.equal(existsSync(fixture.worktree), false);
 });

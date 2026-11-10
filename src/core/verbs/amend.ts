@@ -13,7 +13,6 @@ export type AmendInput<Failure = never> = Readonly<{
 
 export type AmendRefusal = Readonly<{
   kind: "contract-missing" | "terminal" | "terms-moved" | "unknown-prerequisite" | "cyclic-prerequisite";
-  contractId: ContractId;
 }>;
 
 export function decideAmend<Failure>({
@@ -46,16 +45,16 @@ export function decideAmend<Failure>({
     }) &&
     samePrerequisites(source.after, current.terms.after);
   if (!termsCurrent) {
-    return { kind: "refused", refusal: { kind: "terms-moved", contractId: id } };
+    return { kind: "refused", refusal: { kind: "terms-moved" } };
   }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
   const { data } = input.preparation;
   const prerequisites = prerequisiteStatus(data.after, observation);
   if (prerequisites === "unknown") {
-    return { kind: "refused", refusal: { kind: "unknown-prerequisite", contractId: id } };
+    return { kind: "refused", refusal: { kind: "unknown-prerequisite" } };
   }
   if (prerequisitesReach(id, data.after, observation)) {
-    return { kind: "refused", refusal: { kind: "cyclic-prerequisite", contractId: id } };
+    return { kind: "refused", refusal: { kind: "cyclic-prerequisite" } };
   }
   const entry = journalEntry("amend", input, attempt.entryUlids[0]!, data);
   return { kind: "offer", offer: { facts: [{ contractId: id, entries: [entry] }] } };

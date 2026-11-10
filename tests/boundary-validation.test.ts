@@ -106,7 +106,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
       workspace: "worktree",
     });
   assert.ok(refused.kind === "refused");
-  assert.deepEqual(refused.refusal, { kind: "invalid-target" });
+  assert.deepEqual(refused.reason, { kind: "invalid-target" });
 
   const bound = accepted(await Keis.of(repo).bind({
     markdown: [
@@ -134,17 +134,17 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
     workspace: "worktree",
     gates: ["reviewed"],
   }));
-  assert.ok(bound.value.kei instanceof Kei);
+  assert.ok(bound.kei instanceof Kei);
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => bound.value.kei.deliver({ actor: " " } as never)),
+    () => withGitShim("exit 99", {}, () => bound.kei.deliver({ actor: " " } as never)),
     (error: unknown) => invalidInput(error, "deliver input has unknown field: actor"),
   );
   await assert.rejects(
-    () => bound.value.kei.review({ verdict: "satisfied", summary: "Boundary review", hooks: { create: [], destroy: [] } } as never),
+    () => bound.kei.review({ verdict: "satisfied", summary: "Boundary review", hooks: { create: [], destroy: [] } } as never),
     (error: unknown) => invalidInput(error, "review input has unknown field: hooks"),
   );
   await assert.rejects(
-    () => bound.value.kei.previewDelivery({ requireBranchesToBeUpToDate: true } as never),
+    () => bound.kei.previewDelivery({ requireBranchesToBeUpToDate: true } as never),
     (error: unknown) => invalidInput(error, "delivery preview input has unknown field: requireBranchesToBeUpToDate"),
   );
 });

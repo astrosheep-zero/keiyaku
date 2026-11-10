@@ -376,16 +376,15 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
     }).snapshot;
     assert.equal(snapshot.kind, "open");
     const reported = snapshot.reportedChanges.map((change) => ({
-      op: change.op,
       path: change.path,
       ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
     }));
     assert.deepEqual(reported, [
-      { op: "update", path: "src/created.ts" },
-      { op: "update", path: "src/overwritten.ts" },
+      { path: "src/created.ts" },
+      { path: "src/overwritten.ts" },
       // A write then an edit on one path stay one summary; the write's unknown
       // diffstat leaves the aggregated group without fabricated numbers.
-      { op: "update", path: "src/mixed.ts" },
+      { path: "src/mixed.ts" },
     ]);
     assert.equal(
       reported.some((change) => change.path === "src/failed.ts"),
@@ -433,8 +432,7 @@ test("a retained unknown tool call keeps its bounded argument preview through pr
     assert.deepEqual(calls, [
       {
         kind: "other",
-        display: "future_tool",
-        input: { json: JSON.stringify(args), truncated: false },
+        input: { json: JSON.stringify(args) },
       },
     ]);
     assert.doesNotMatch(JSON.stringify(calls), /secret output/u, "a tool result body never enters the preview");

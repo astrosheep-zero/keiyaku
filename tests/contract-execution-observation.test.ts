@@ -26,8 +26,9 @@ test("synchronous and asynchronous observer failures cannot change delivery admi
     const contract = await bind(repository);
     commitCandidate(repository);
     const outcome = acceptedDelivery(await contract.deliver({}, { observe: observer }));
-    assert.ok(outcome.facts.some((fact) => fact.kind === "deliver"));
-    assert.equal(outcome.value.leading.kind, "admitted-now");
+    assert.equal(outcome.admission, undefined);
+    assert.equal(outcome.contractId, present(await contract.state()).id);
+    assert.equal(present(await contract.state()).delivery?.data.integration.snapshot, outcome.integration);
   }
 });
 
@@ -42,9 +43,9 @@ async function verificationCandidate() {
       gates: ["verified"],
     }),
   );
-  assert.ok(bound.value.workspace);
-  commitCandidate(repository, bound.value.workspace.path);
-  return bound.value.kei;
+  assert.ok(bound.worktreePath);
+  commitCandidate(repository, bound.worktreePath);
+  return bound.kei;
 }
 
 test("verify observers retain selected coordinates and cannot interrupt repeated execution or admission reuse", async () => {
@@ -61,8 +62,8 @@ test("verify observers retain selected coordinates and cannot interrupt repeated
       },
     ),
   );
-  const check = first.value.checks[0];
-  assert.ok(check?.kind === "terminal" && check.admission.kind === "admitted");
+  const check = first.checks[0];
+  assert.ok(check?.kind === "terminal" && check.admission === undefined);
   const output = observed.filter((event) => event.kind === "verification" && event.observation.kind === "output");
   assert.ok(
     output.some(
@@ -74,8 +75,8 @@ test("verify observers retain selected coordinates and cannot interrupt repeated
   );
   for (const event of observed) {
     if (event.kind !== "verification") continue;
-    assert.equal(event.snapshot, check.snapshot);
-    assert.equal(event.observation.snapshot, check.snapshot);
+    assert.equal(event.snapshot, first.snapshot);
+    assert.equal(event.observation.snapshot, first.snapshot);
     assert.equal(event.observation.requirement, check.requirement);
     assert.equal(event.observation.index, 2);
   }
@@ -94,11 +95,10 @@ test("verify observers retain selected coordinates and cannot interrupt repeated
       ),
     );
     assert.equal(executedAgain, true);
-    const again = repeated.value.checks[0];
+    const again = repeated.checks[0];
     assert.ok(again?.kind === "terminal");
     assert.equal(again.verdict, "satisfied");
-    assert.deepEqual(again.admission, { kind: "reused", entry: check.admission.entry });
-    assert.deepEqual(repeated.facts, []);
+    assert.equal(again.admission, "reused");
     assert.equal(present(await contract.state()).delivery, null);
     assert.equal(present(await contract.state()).attestations.length, 1);
   } finally {
@@ -109,13 +109,13 @@ test("verify observers retain selected coordinates and cannot interrupt repeated
 test("concurrent selected checks admit independent requirements without losing either result", async () => {
   const contract = await verificationCandidate();
   const outcomes = await Promise.all([contract.verify({ index: 1 }), contract.verify({ index: 2 })]);
-  const checks = outcomes.flatMap((outcome) => accepted(outcome).value.checks);
+  const checks = outcomes.flatMap((outcome) => accepted(outcome).checks);
   assert.equal(new Set(checks.map(({ requirement }) => requirement)).size, 2);
-  assert.equal(new Set(checks.map(({ snapshot }) => snapshot)).size, 1);
-  assert.ok(checks.every((check) => check.kind === "terminal" && check.admission.kind === "admitted"));
+  assert.equal(new Set(outcomes.map((outcome) => accepted(outcome).snapshot)).size, 1);
+  assert.ok(checks.every((check) => check.kind === "terminal" && check.admission === undefined));
   assert.equal(present(await contract.state()).attestations.length, 2);
   const delivered = accepted(await contract.deliver());
-  assert.equal(delivered.value.gates?.[0]?.satisfied, true);
+  assert.equal(delivered.placement?.kind, "placed");
   assert.equal(present(await contract.state()).terminal?.kind, "claimed");
 });
 
@@ -138,7 +138,8 @@ test("slow observers and callers that stop observing never delay or cancel deliv
       ),
     );
     assert.ok(seen > 0);
-    assert.ok(outcome.facts.some((fact) => fact.kind === "deliver"));
+    assert.equal(outcome.contractId, present(await contract.state()).id);
+    assert.ok(present(await contract.state()).delivery);
   } finally {
     barrier.resolve();
   }

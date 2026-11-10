@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { targetName, type ActorId, type ContractId } from "../core/facts/types.js";
-import { snapshotIdSchema } from "../git/identity.js";
+import { snapshotIdSchema, contractIdSchema } from "../git/identity.js";
 import { deliveryDiffScopeSchema } from "../git/integration.js";
-import { gateReportSchema } from "./result-leaves.js";
-import { gateReports, type GateReport } from "../core/facts/gate.js";
-import { readDeliveryScope } from "../git/integration.js";
+import { requirementIdSchema, gateSchema } from "./result-leaves.js";
+import type { GateReport } from "../core/facts/gate.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { admitPlacement, observeTargetPlacement, observeIntegrationTargetMovement } from "./placement.js";
@@ -16,31 +15,181 @@ import {
   isOperationalStop,
   type ContractCheckpoint,
   type ProtocolProgress,
-  type ExecutionStage,
   type ExecutionStop,
 } from "./progress.js";
 import type { PlacementStop } from "./operations.js";
-import { placementStop, placementStopSchema, timestamp } from "./operations.js";
+import { placementStop, timestamp } from "./operations.js";
+import {
+  activeReasonSchema,
+  targetLifecycleReasonSchema,
+  targetWorkspaceReasonSchema,
+  checkoutCollisionSchema,
+  integrationProblemSchema,
+  retrySchema,
+  compactRetry,
+  compactReason,
+} from "./result-reasons.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
 
-export const candidateCompletionSchema = z
+const requirementCoordinate = { gate: gateSchema, requirement: requirementIdSchema };
+export const requirementProblemSchema = z.union([
+  z.strictObject({ ...requirementCoordinate, state: z.literal("missing") }).readonly(),
+  z
+    .strictObject({ ...requirementCoordinate, state: z.literal("unsatisfied"), summary: z.string().exactOptional() })
+    .readonly(),
+  z
+    .strictObject({
+      ...requirementCoordinate,
+      state: z.literal("stale"),
+      previousContentId: z.string().min(1).exactOptional(),
+      currentContentId: z.string().min(1).exactOptional(),
+    })
+    .readonly(),
+]);
+export type RequirementProblem = z.output<typeof requirementProblemSchema>;
+
+/** Select already-adjudicated unmet requirements; never recompute currentness. */
+export function unmetGateProblems(reports: readonly GateReport[]): readonly RequirementProblem[] {
+  return reports
+    .filter((report) => !report.satisfied)
+    .flatMap((report) =>
+      report.requirements.flatMap(({ requirement, current }): RequirementProblem[] => {
+        const coordinate = { gate: report.gate, requirement };
+        if (current.kind === "missing") return [{ ...coordinate, state: "missing" }];
+        if (current.kind === "attested")
+          return current.verdict === "satisfied"
+            ? []
+            : [
+                {
+                  ...coordinate,
+                  state: "unsatisfied",
+                  ...(current.summary === undefined ? {} : { summary: current.summary }),
+                },
+              ];
+        return [
+          {
+            ...coordinate,
+            state: "stale",
+            ...(current.reason === undefined
+              ? {}
+              : {
+                  previousContentId: current.reason.previousChange,
+                  currentContentId: current.reason.currentChange,
+                }),
+          },
+        ];
+      }),
+    );
+}
+
+export const unmetPrerequisiteSchema = z
   .strictObject({
-    integration: snapshotIdSchema,
-    predecessor: snapshotIdSchema.exactOptional(),
-    target: z.string().exactOptional(),
-    scope: deliveryDiffScopeSchema.omit({ paths: true }).readonly().exactOptional(),
+    contractId: contractIdSchema,
+    state: z.enum(["missing", "active", "abandoned"]),
   })
   .readonly();
-export const completionEvidenceShape = {
-  completion: candidateCompletionSchema.exactOptional(),
-  gates: z.array(gateReportSchema).readonly().exactOptional(),
-  placement: placementStopSchema.exactOptional(),
-};
+export const placementReasonSchema = z.union([
+  activeReasonSchema,
+  targetLifecycleReasonSchema,
+  targetWorkspaceReasonSchema,
+  z.strictObject({ kind: z.enum(["delivery-missing", "target-missing"]) }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("prerequisites-unsatisfied"),
+      unmet: z.array(unmetPrerequisiteSchema).min(1).readonly(),
+    })
+    .readonly(),
+  z
+    .strictObject({ kind: z.literal("gates-unsatisfied"), unmet: z.array(requirementProblemSchema).min(1).readonly() })
+    .readonly(),
+  checkoutCollisionSchema,
+  ...integrationProblemSchema.options,
+]);
+export const placementFailureSchema = z.union([
+  retrySchema,
+  z.strictObject({ kind: z.literal("failed"), diagnostic: z.string().min(1) }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("target-content-identical"),
+      target: z.string().min(1),
+      expected: snapshotIdSchema,
+      observed: snapshotIdSchema,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("target-moved"),
+      target: z.string().min(1),
+      integration: snapshotIdSchema,
+      observed: snapshotIdSchema.nullable(),
+    })
+    .readonly(),
+]);
+export const placementStopLeaves = [
+  ...placementReasonSchema.options,
+  ...retrySchema.options,
+  placementFailureSchema.options[1],
+  placementFailureSchema.options[2],
+  placementFailureSchema.options[3],
+] as const;
+export const placementStopSchema = z.union(placementStopLeaves);
+export type CompactPlacementStop = z.output<typeof placementStopSchema>;
+export const compactScopeSchema = z
+  .strictObject({
+    filesChanged: z.number().int().positive().exactOptional(),
+    insertions: z.number().int().positive().exactOptional(),
+    deletions: z.number().int().positive().exactOptional(),
+    paths: z.array(z.string()).min(1).readonly().exactOptional(),
+  })
+  .readonly();
+export const placedSchema = z
+  .strictObject({
+    kind: z.literal("placed"),
+    integration: snapshotIdSchema,
+    target: z.string().exactOptional(),
+    predecessor: snapshotIdSchema.exactOptional(),
+  })
+  .readonly();
+export const placementSchema = z.union([placedSchema, placementStopSchema]);
+export type Placement = z.output<typeof placementSchema>;
+export type Placed = z.output<typeof placedSchema>;
+
+export function compactScope(scope: z.output<typeof deliveryDiffScopeSchema>): z.output<typeof compactScopeSchema> {
+  return {
+    ...(scope.filesChanged === 0 ? {} : { filesChanged: scope.filesChanged }),
+    ...(scope.insertions === 0 ? {} : { insertions: scope.insertions }),
+    ...(scope.deletions === 0 ? {} : { deletions: scope.deletions }),
+    ...(scope.paths === undefined || scope.paths.length === 0 ? {} : { paths: scope.paths }),
+  };
+}
+
+export function compactPlacementStop(stop: PlacementStop): CompactPlacementStop {
+  if ("refusal" in stop) {
+    const reason = stop.refusal;
+    if (reason.kind === "gates-unsatisfied") return { kind: reason.kind, unmet: unmetGateProblems(reason.unmet) };
+    if (reason.kind === "prerequisites-unsatisfied") return { kind: reason.kind, unmet: reason.unmet };
+    if (reason.kind === "checkout-not-followable") return reason;
+    return compactReason(reason);
+  }
+  if ("retry" in stop) return compactRetry(stop.retry);
+  if (stop.failure === "target-placement-failed") return { kind: "failed", diagnostic: stop.diagnostic };
+  if ("integratedAt" in stop)
+    return { kind: "target-moved", target: stop.target, integration: stop.integratedAt, observed: stop.observed };
+  if (!stop.observedTreeEqualsCandidate || stop.observed === null)
+    throw new Error("unexhausted returned target movement requires identical content");
+  return { kind: "target-content-identical", target: stop.target, expected: stop.expected, observed: stop.observed };
+}
+
+export function compactPlacement(evidence: CompletionEvidence): Placement | undefined {
+  if (evidence.completion !== undefined) return { kind: "placed", ...evidence.completion };
+  return evidence.placement === undefined ? undefined : compactPlacementStop(evidence.placement);
+}
+
+export const candidateCompletionSchema = placedSchema.unwrap().omit({ kind: true }).readonly();
 export type CandidateCompletion = z.output<typeof candidateCompletionSchema>;
 export type CompletionEvidence = Readonly<{
   completion?: CandidateCompletion;
-  gates?: readonly GateReport[];
   placement?: PlacementStop;
 }>;
 export type CompletionInput = Readonly<{
@@ -70,7 +219,6 @@ type CompletionCursor = {
   checkpoint: ContractCheckpoint;
   evidence: CompletionEvidence;
   completion?: CandidateCompletion;
-  stage: ExecutionStage;
 };
 
 function reintegrationStop(result: Exclude<ReintegrationResult, { kind: "accepted" }>): PlacementStop {
@@ -110,26 +258,14 @@ async function completedResult(
   if (integration === undefined) throw new Error("accepted placement requires its integration snapshot");
   const target = state.coordinates.target;
   const predecessor = state.currentIntegration?.predecessor;
-  // Movement and the completion base are known before this optional observation; a failed scope
-  // read must never erase an already-claimed candidate.
-  cursor.completion = {
-    integration,
-    ...(predecessor === undefined || target === undefined ? {} : { predecessor, target: targetName(target) }),
-  };
-  input.progress.recordCompletion(state.id, cursor.completion);
-  cursor.evidence = { gates: gateReports(state).reports };
-  input.progress.recordCandidate(state.id, { ...cursor.evidence, completion: cursor.completion });
-  const scope =
-    predecessor === undefined ? undefined : await readDeliveryScope(input.repository, predecessor, integration, false);
   const completion: CandidateCompletion = {
     integration,
     ...(predecessor === undefined || target === undefined ? {} : { predecessor, target: targetName(target) }),
-    ...(scope === undefined
-      ? {}
-      : { scope: { filesChanged: scope.filesChanged, insertions: scope.insertions, deletions: scope.deletions } }),
   };
   cursor.completion = completion;
   input.progress.recordCompletion(state.id, completion);
+  cursor.evidence = {};
+  input.progress.recordCandidate(state.id, { ...cursor.evidence, completion });
   return {
     kind: "completed",
     checkpoint: cursor.checkpoint,
@@ -141,15 +277,11 @@ function stoppedResult(
   cursor: CompletionCursor,
   stop: PlacementStop | ExecutionStop,
 ): Extract<CompletionResult, { kind: "stopped" }> {
-  const evidence =
-    "kind" in stop && stop.kind === "execution-stopped"
-      ? cursor.evidence
-      : { ...cursor.evidence, placement: stop as PlacementStop };
+  const evidence = "kind" in stop ? cursor.evidence : { ...cursor.evidence, placement: stop };
   return { kind: "stopped", checkpoint: cursor.checkpoint, evidence, stop };
 }
 
 async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionCursor) {
-  cursor.stage = "placement";
   input.signal?.throwIfAborted();
   input.progress.observe({
     kind: "stage",
@@ -198,7 +330,7 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
   const target = cursor.checkpoint.state.coordinates.target;
   for (let cycles = 0; ; cycles += 1) {
     input.signal?.throwIfAborted();
-    cursor.evidence = { gates: gateReports(cursor.checkpoint.state).reports };
+    cursor.evidence = {};
     input.progress.recordCandidate(cursor.checkpoint.state.id, cursor.evidence);
     let placement: Awaited<ReturnType<typeof placeCurrentCandidate>> | undefined =
       await observeIntegrationTargetMovement(input.repository, cursor.checkpoint.state);
@@ -206,7 +338,7 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
       const targetStop = await observeCandidateTarget(input, cursor);
       if (targetStop !== undefined) return stoppedResult(cursor, targetStop);
       placement = await placeCurrentCandidate(input, cursor);
-      cursor.evidence = { gates: gateReports(cursor.checkpoint.state).reports };
+      cursor.evidence = {};
       input.progress.recordCandidate(cursor.checkpoint.state.id, cursor.evidence);
     }
     if (placement.kind === "accepted") return await completedResult(input, cursor);
@@ -218,15 +350,12 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
     if (cycles === MAX_REINTEGRATION_CYCLES) {
       return stoppedResult(cursor, {
         failure: "target-moved",
-        contractId: cursor.checkpoint.state.id,
         target: targetName(target),
         integratedAt: cursor.checkpoint.state.currentIntegration!.snapshot,
         observed: placement.observed,
-        attempts: cycles,
         observedTreeEqualsCandidate: placement.observedTreeEqualsCandidate,
       });
     }
-    cursor.stage = "reintegration";
     input.signal?.throwIfAborted();
     const reintegrated = await reintegrateOperation({
       channel: input.channel,
@@ -244,13 +373,16 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
 
 /** Advance one contract. The trigger owns the leading act; this node owns no other contract. */
 export async function completeCandidate(input: CompletionInput): Promise<CompletionResult> {
-  const cursor: CompletionCursor = { checkpoint: input.checkpoint, evidence: {}, stage: "placement" };
+  const cursor: CompletionCursor = {
+    checkpoint: input.checkpoint,
+    evidence: {},
+  };
   try {
     return await advanceCandidate(input, cursor);
   } catch (error) {
     if (!isOperationalStop(error, input.signal)) throw error;
     const contractId: ContractId = input.checkpoint.state.id;
-    const stop = executionStop(contractId, cursor.stage, error, input.signal);
+    const stop = executionStop(contractId, error, input.signal);
     input.progress.recordStop(stop);
     const admitted = input.progress.checkpoint(contractId);
     if (admitted !== undefined) cursor.checkpoint = admitted;

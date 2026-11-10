@@ -608,7 +608,8 @@ test("Tell lets a successor Body win when its child exit races Heart observation
         },
       },
     });
-    assert.deepEqual(result.wake, { kind: "pursuing", bodySequence: winnerSequence });
+    assert.deepEqual(result.wake, { kind: "pursuing" });
+    assert.equal((await readHeart(value.allocated.paths)).latestBody?.sequence, winnerSequence);
   } finally {
     value.close();
   }

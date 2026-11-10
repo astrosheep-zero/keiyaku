@@ -4,7 +4,13 @@ import { withGitReadObservation, type GitDecodeChannel } from "../git/read-obser
 import { reconcileDependentWorktree } from "../git/reconcile.js";
 import type { ReconcileResult } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
-import { completeCandidate, type CompletionResult } from "../protocol/completion.js";
+import {
+  completeCandidate,
+  compactPlacementStop,
+  placementStopSchema,
+  placementStopLeaves,
+  type CompletionResult,
+} from "../protocol/completion.js";
 import {
   contractCheckpoint,
   isOperationalStop,
@@ -13,34 +19,35 @@ import {
   type ProtocolProgress,
 } from "../protocol/progress.js";
 import { observeContractAt } from "../git/observe.js";
-import { gitReconcileLagSchema } from "../git/reconcile.js";
 import type { RepositoryScope } from "../protocol/operations.js";
-import { executionStopSchema } from "../protocol/progress.js";
-import { contractIdSchema, placementStopSchema } from "../protocol/operations.js";
+import { contractIdSchema } from "../protocol/operations.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
 
+import { executionIssueSchema } from "../protocol/result-reasons.js";
 const continuationStopSchema = z.union([
   placementStopSchema,
-  executionStopSchema,
-  z
-    .object({ kind: z.literal("already-terminal") })
-    .strict()
-    .readonly(),
-  z
-    .object({ kind: z.literal("physical-lag"), lags: z.array(gitReconcileLagSchema).readonly() })
-    .strict()
-    .readonly(),
+  executionIssueSchema,
+  z.strictObject({ kind: z.enum(["already-terminal", "physical-lag"]) }).readonly(),
 ]);
-export type ContinuationStop = z.infer<typeof continuationStopSchema>;
+export type ContinuationStop = z.output<typeof continuationStopSchema>;
 export const continuationReportSchema = z
-  .object({
-    claimed: z.array(contractIdSchema).readonly(),
+  .strictObject({
+    claimed: z.array(contractIdSchema).min(1).readonly().exactOptional(),
     stopped: z
-      .array(z.object({ contractId: contractIdSchema, stop: continuationStopSchema }).strict().readonly())
-      .readonly(),
+      .array(
+        z.union(
+          [
+            ...placementStopLeaves,
+            executionIssueSchema,
+            z.strictObject({ kind: z.enum(["already-terminal", "physical-lag"]) }).readonly(),
+          ].map((schema) => schema.unwrap().extend({ contractId: contractIdSchema }).readonly()),
+        ),
+      )
+      .min(1)
+      .readonly()
+      .exactOptional(),
   })
-  .strict()
   .readonly();
 export type ContinuationReport = z.infer<typeof continuationReportSchema>;
 
@@ -80,7 +87,9 @@ type ContinuationInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-type ContinuedCandidate = CompletionResult | Readonly<{ kind: "stopped-before-node"; stop: ContinuationStop }>;
+type ContinuedCandidate =
+  | CompletionResult
+  | Readonly<{ kind: "stopped-before-node"; stop: ContinuationStop | ExecutionStop }>;
 
 async function continueCandidate(
   input: ContinuationInput,
@@ -90,7 +99,10 @@ async function continueCandidate(
   input.signal?.throwIfAborted();
   const observed = await observeContractAt(input.scope, input.channel, id);
   if (observed.state === null)
-    return { kind: "stopped-before-node", stop: { refusal: { kind: "contract-missing", contractId: id } } };
+    return {
+      kind: "stopped-before-node",
+      stop: { kind: "contract-missing" },
+    };
   const appointment = appointmentFor(await readPlaceRegister(input.scope), id);
   if (appointment !== undefined) {
     const physical = await reconcileDependentWorktree(
@@ -100,8 +112,7 @@ async function continueCandidate(
       predecessor,
     );
     input.progress.recordPhysical(id, physical);
-    if (physical.lag.length > 0)
-      return { kind: "stopped-before-node", stop: { kind: "physical-lag", lags: physical.lag } };
+    if (physical.lag.length > 0) return { kind: "stopped-before-node", stop: { kind: "physical-lag" } };
   }
   return await completeCandidate({
     repository: input.scope,
@@ -122,7 +133,7 @@ async function attemptDependent(
     return await continueCandidate(input, id, predecessor);
   } catch (error) {
     if (!isOperationalStop(error, input.signal)) throw error;
-    const stop = executionStop(id, "continuation", error, input.signal);
+    const stop = executionStop(id, error, input.signal);
     input.progress.recordStop(stop);
     return { kind: "stopped-before-node", stop };
   }
@@ -132,9 +143,12 @@ async function attemptDependent(
 export async function continueDeliveredDependents(input: ContinuationInput): Promise<ContinuationReport | undefined> {
   const primary = input.completed.checkpoint.state.id;
   const claimed: ContractId[] = [];
-  const stopped: ContinuationReport["stopped"][number][] = [];
-  const retain = (): void =>
-    input.progress.recordContinuation(primary, { claimed: [...claimed], stopped: [...stopped] });
+  const stopped: NonNullable<ContinuationReport["stopped"]>[number][] = [];
+  const report = (): ContinuationReport => ({
+    ...(claimed.length === 0 ? {} : { claimed: [...claimed] }),
+    ...(stopped.length === 0 ? {} : { stopped: [...stopped] }),
+  });
+  const retain = (): void => input.progress.recordContinuation(primary, report());
   // The primary candidate's own conclusions are retained by completion before this walk discovers
   // anything; every sibling attempt is retained here before the next one is awaited.
   retain();
@@ -168,21 +182,26 @@ export async function continueDeliveredDependents(input: ContinuationInput): Pro
           queue.push({ contractId: id, target: result.evidence.completion.integration });
         } else {
           const stop = result.stop;
-          stopped.push({
-            contractId: id,
-            stop: "refusal" in stop && stop.refusal.kind === "terminal" ? { kind: "already-terminal" } : stop,
-          });
+          const compact: ContinuationStop =
+            "refusal" in stop && stop.refusal.kind === "terminal"
+              ? { kind: "already-terminal" }
+              : "refusal" in stop || "retry" in stop || "failure" in stop
+                ? compactPlacementStop(stop)
+                : stop.kind === "execution-stopped"
+                  ? { kind: stop.kind, reason: stop.reason, diagnostic: stop.diagnostic }
+                  : stop;
+          stopped.push({ contractId: id, ...compact });
           retain();
         }
       }
     }
-    return attempted.size === 0 ? undefined : { claimed, stopped };
+    return attempted.size === 0 ? undefined : report();
   } catch (error) {
     if (!isOperationalStop(error, input.signal)) throw error;
-    const stop = executionStop(primary, "continuation", error, input.signal);
+    const stop = executionStop(primary, error, input.signal);
     input.progress.recordStop(stop);
-    stopped.push({ contractId: primary, stop });
+    stopped.push({ contractId: primary, kind: stop.kind, reason: stop.reason, diagnostic: stop.diagnostic });
     retain();
-    return { claimed, stopped };
+    return report();
   }
 }

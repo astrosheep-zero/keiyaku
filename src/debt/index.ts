@@ -1,20 +1,54 @@
 import { z } from "zod";
-import { boundedListSchema } from "../bounded-list.js";
 import {
   debtRefSchema,
-  debtResultRowSchema,
   blockedDebtRowSchema,
+  readyDebtRowSchema,
+  debtTreeRootSchema,
   debtTreeNodeSchema,
   debtDoctorIssueSchema,
+  debtSummarySchema,
+  debtDispositionSchema,
+  debtDetailSchema,
+  buildTree,
+  createDebtRelations,
+  diagnoseBoard,
+  type BlockedDebtRow,
+  type DebtDetail,
+  type DebtDoctorIssue,
+  type DebtRef,
+  type DebtSummary,
+  type DebtTreeNode,
+  type DebtTreeRoot,
+  type ReadyDebtRow,
 } from "./board.js";
 import {
-  debtViewSchema,
-  debtOutcomeSchema,
+  debtWarningSchema,
+  debtRefusalSchema,
+  debtRetrySchema,
+  debtReadRefusalSchema,
+  debtReadPageSchema,
+  debtParentReadRefusalSchema,
+  nonEmptyDebtValues,
+  nonEmptyDebtArraySchema,
+  debtLifecycleResultSchema,
   debtMutationResultSchema,
   debtUpdateResultSchema,
   debtBatchResultSchema,
+  debtChangeSchema,
+  type DebtWarning,
+  type DebtRefusal,
+  type DebtRetry,
+  type DebtReadRefusal,
+  type DebtReadPage,
+  type DebtMutationResult,
+  type DebtLifecycleResult,
+  type DebtParentReadRefusal,
+  type DebtUpdateResult,
+  type DebtBatchResult,
+  type DebtBatchItem,
+  type DebtChange,
 } from "./operation-types.js";
-import { debtQueryRowSchema } from "./query.js";
+import { debtQueryRowSchema, type DebtQueryRow } from "./query.js";
 import type { WorldRoot } from "../world.js";
 import {
   resolvedNamespaceContextSchema,
@@ -23,19 +57,8 @@ import {
 } from "./context.js";
 import type { DebtLifecycleVerb } from "./operation-types.js";
 export type { WorldRoot } from "../world.js";
-import {
-  buildTree,
-  createDebtRelations,
-  diagnoseBoard,
-  type BlockedDebtRow,
-  type DebtDetailFacts,
-  type DebtDoctorIssue,
-  type DebtRef,
-  type DebtRow,
-  type DebtTreeNode,
-} from "./board.js";
 import { DebtAuthorityCorruptionError, type DebtPriority, type DebtState } from "./document.js";
-import type { DebtId } from "./identity.js";
+import { type DebtId } from "./identity.js";
 import {
   addDebt,
   addDebtDocument,
@@ -46,18 +69,9 @@ import {
   queryDebts,
   readDebtDetail,
   readyDebts,
-  debtView,
   updateDebt,
   type AddDebtDocumentInput,
   type AddDebtInput,
-  type DebtBatchResult,
-  type DebtCleanupFailure,
-  type DebtMutationResult,
-  type DebtOutcome,
-  type DebtRefusal,
-  type DebtRetry,
-  type DebtUpdateResult,
-  type DebtView,
   type UpdateDebtInput,
 } from "./operations.js";
 import { boundedListLimit } from "../bounded-list.js";
@@ -79,68 +93,125 @@ import {
   normalizeDebtQuery,
   debtQuerySelection,
   DEBT_RELATION_PREDICATE_FIELDS,
-  type DebtPage,
   type DebtQueryExpression,
   type DebtQueryPredicate,
-  type DebtQueryRow,
   type DebtQuerySort,
   type DebtRelationPredicateField,
 } from "./query.js";
 
 export const debtAbsentSchema = z.strictObject({ kind: z.literal("absent") }).readonly();
 export type DebtAbsent = z.output<typeof debtAbsentSchema>;
-export type DebtDetail = Omit<DebtDetailFacts, "debt"> & Readonly<{ debt: DebtView }>;
-export type DebtList = DebtOutcome<DebtPage<DebtRow>>;
-export type BlockedDebtList = DebtOutcome<DebtPage<BlockedDebtRow>>;
-export type DebtQueryResult = DebtOutcome<DebtPage<DebtQueryRow>>;
-export type DebtContextSource = NamespaceContextSource;
-export type { ResolvedNamespaceContext };
-export const debtContextResultSchema = debtOutcomeSchema(resolvedNamespaceContextSchema);
-export { resolvedNamespaceContextSchema };
-export type DebtContextResult = z.output<typeof debtContextResultSchema>;
-export type DebtDoctorReport = Readonly<{ issues: readonly DebtDoctorIssue[] }>;
-export const debtDetailSchema = z
+export const debtReadResultSchema = z.union([
+  z.strictObject({ kind: z.literal("present"), ...debtDetailSchema.unwrap().shape }).readonly(),
+  z.strictObject({ kind: z.literal("missing") }).readonly(),
+]);
+export type DebtReadResult = z.output<typeof debtReadResultSchema>;
+export const debtShowItemSchema = z.union([
+  z.strictObject({ kind: z.literal("found"), ...debtDetailSchema.unwrap().shape }).readonly(),
+  z.strictObject({ kind: z.literal("missing") }).readonly(),
+]);
+export type DebtShowItem = z.output<typeof debtShowItemSchema>;
+export const debtShowResultSchema = z
+  .strictObject({ kind: z.literal("present"), items: nonEmptyDebtArraySchema(debtShowItemSchema) })
+  .readonly();
+export type DebtShowResult = z.output<typeof debtShowResultSchema>;
+export const debtTreeResultSchema = z.union([
+  z.strictObject({ kind: z.literal("present"), ...debtTreeRootSchema.unwrap().shape }).readonly(),
+  z.strictObject({ kind: z.literal("missing") }).readonly(),
+]);
+export type DebtTreeResult = z.output<typeof debtTreeResultSchema>;
+export const debtDoctorReportSchema = z
   .strictObject({
-    debt: debtViewSchema,
-    needs: z.array(z.strictObject({ ...debtRefSchema.unwrap().shape, released: z.boolean() }).readonly()).readonly(),
-    blockers: z.array(debtRefSchema).readonly(),
-    blocks: z.array(debtRefSchema).readonly(),
-    parent: debtRefSchema.nullable(),
-    children: z.array(debtRefSchema).readonly(),
-    supersedes: z.array(debtRefSchema).readonly(),
-    supersededBy: z.array(debtRefSchema).readonly(),
-    related: z.array(debtRefSchema).readonly(),
+    kind: z.literal("present"),
+    issues: nonEmptyDebtArraySchema(debtDoctorIssueSchema).exactOptional(),
   })
   .readonly();
-export const debtReadSchema = debtDetailSchema.nullable();
-export const debtListSchema = debtOutcomeSchema(boundedListSchema(debtResultRowSchema));
-export const blockedDebtListSchema = debtOutcomeSchema(boundedListSchema(blockedDebtRowSchema));
-export const debtQueryResultSchema = debtOutcomeSchema(boundedListSchema(debtQueryRowSchema));
-export const debtDoctorReportSchema = z.strictObject({ issues: z.array(debtDoctorIssueSchema).readonly() }).readonly();
-export const debtDecompositionTreeSchema = debtOutcomeSchema(debtTreeNodeSchema);
-export { debtOutcomeSchema, debtViewSchema, debtMutationResultSchema, debtUpdateResultSchema, debtBatchResultSchema };
-export type DebtDecompositionTree = DebtOutcome<DebtTreeNode>;
+export type DebtDoctorReport = z.output<typeof debtDoctorReportSchema>;
+export const debtContextRefusalSchema = z.strictObject({ kind: z.literal("refused"), path: z.string() }).readonly();
+export type DebtContextRefusal = z.output<typeof debtContextRefusalSchema>;
+export const debtContextResultSchema = z.union([
+  z.strictObject({ kind: z.literal("present"), source: z.literal("default-root") }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("present"),
+      source: z.enum(["contract-installed", "local-override"]),
+      namespace: z.string().min(1).exactOptional(),
+    })
+    .readonly(),
+  debtContextRefusalSchema,
+]);
+export type DebtContextResult = z.output<typeof debtContextResultSchema>;
+export const debtListSchema = debtReadPageSchema(debtSummarySchema).options[0];
+export const debtReadyListSchema = z.union([
+  debtReadPageSchema(readyDebtRowSchema).options[0],
+  debtAbsentSchema,
+  debtParentReadRefusalSchema,
+]);
+export const blockedDebtListSchema = z.union([
+  debtReadPageSchema(blockedDebtRowSchema).options[0],
+  debtAbsentSchema,
+  debtParentReadRefusalSchema,
+]);
+export const debtQueryResultSchema = debtReadPageSchema(debtQueryRowSchema);
+export const debtCatalogueSchema = z.union([
+  debtListSchema,
+  debtAbsentSchema,
+  z.strictObject({ kind: z.literal("invalid-namespace-context"), path: z.string() }).readonly(),
+]);
+export type DebtCatalogue = z.output<typeof debtCatalogueSchema>;
+export type DebtList = z.output<typeof debtListSchema>;
+export type DebtReadyList = DebtReadPage<ReadyDebtRow, DebtParentReadRefusal>;
+export type BlockedDebtList = DebtReadPage<BlockedDebtRow, DebtParentReadRefusal>;
+export type DebtQueryResult = DebtReadPage<DebtQueryRow>;
+export type DebtContextSource = NamespaceContextSource;
+export type { ResolvedNamespaceContext };
+export { resolvedNamespaceContextSchema };
+export { debtWarningSchema, debtRefusalSchema, debtRetrySchema, debtReadRefusalSchema, debtReadPageSchema };
+export {
+  debtLifecycleResultSchema,
+  debtParentReadRefusalSchema,
+  readyDebtRowSchema,
+  debtTreeRootSchema,
+  debtMutationResultSchema,
+  debtUpdateResultSchema,
+  debtBatchResultSchema,
+  debtChangeSchema,
+  debtDetailSchema,
+  debtSummarySchema,
+  debtDispositionSchema,
+  blockedDebtRowSchema,
+  debtRefSchema,
+  debtQueryRowSchema,
+  debtTreeNodeSchema,
+  debtDoctorIssueSchema,
+};
 export type {
   AddDebtDocumentInput,
   AddDebtInput,
   BlockedDebtRow,
+  DebtBatchItem,
   DebtBatchResult,
-  DebtCleanupFailure,
+  DebtChange,
+  DebtDetail,
   DebtDoctorIssue,
   DebtId,
   DebtMutationResult,
-  DebtOutcome,
   DebtPriority,
+  DebtReadPage,
+  DebtReadRefusal,
   DebtRef,
   DebtRefusal,
   DebtRetry,
-  DebtRow,
   DebtState,
+  DebtSummary,
   DebtTreeNode,
+  DebtTreeRoot,
+  ReadyDebtRow,
+  DebtLifecycleResult,
+  DebtParentReadRefusal,
   DebtUpdateResult,
-  DebtView,
+  DebtWarning,
   UpdateDebtInput,
-  DebtPage,
   DebtQueryExpression,
   DebtQueryPredicate,
   DebtQueryRow,
@@ -148,7 +219,7 @@ export type {
   DebtRelationPredicateField,
 };
 export { DebtAuthorityCorruptionError, DEBT_RELATION_PREDICATE_FIELDS };
-export { observeRecentDebtStatus, type RecentDebtStatusRow } from "./catalog.js";
+export { observeRecentDebtStatus, type RecentDebtSummary } from "./catalog.js";
 export { boundedListLimit as debtRowViewLimit } from "../bounded-list.js";
 
 class DebtHandle {
@@ -156,31 +227,29 @@ class DebtHandle {
     readonly id: DebtId,
     private readonly world: WorldRoot,
   ) {}
-  async read(): Promise<DebtDetail | null> {
-    const facts = await readDebtDetail(this.world, this.id);
-    return facts === null ? null : { ...facts, debt: debtView(facts.debt) };
+  async read(): Promise<DebtReadResult> {
+    const debt = await readDebtDetail(this.world, this.id);
+    return debt === null ? { kind: "missing" } : { kind: "present", ...debt };
   }
-  async tree(): Promise<DebtDecompositionTree> {
+  async tree(): Promise<DebtTreeResult> {
     if (arguments.length > 0) throw new TypeError("tree accepts no input");
     const board = (await readBoard(this.world)).board;
-    const node = buildTree(board, this.id, createDebtRelations(board));
-    return node === null
-      ? { kind: "refused", refusal: { kind: "debt-missing", debtId: this.id } }
-      : { kind: "accepted", value: node };
+    const tree = buildTree(board, this.id, createDebtRelations(board));
+    return tree === null ? { kind: "missing" } : { kind: "present", ...tree };
   }
   update(input: UpdateDebtInput): Promise<DebtUpdateResult> {
     return updateDebt(this.world, this.id, updateInput(input));
   }
-  private lifecycle(verb: DebtLifecycleVerb, input: unknown): Promise<DebtMutationResult> {
+  private lifecycle(verb: DebtLifecycleVerb, input: unknown): Promise<DebtLifecycleResult> {
     const value = record(input ?? {}, `${verb} input`);
     closed(value, ["note", "signal"], `${verb} input`);
     const note = text(value.note, "note");
     return lifecycleDebt(this.world, this.id, verb, signal(value.signal), note);
   }
-  done(input?: { note?: string; signal?: AbortSignal }): Promise<DebtMutationResult> {
+  done(input?: { note?: string; signal?: AbortSignal }): Promise<DebtLifecycleResult> {
     return this.lifecycle("done", input);
   }
-  drop(input?: { note?: string; signal?: AbortSignal }): Promise<DebtMutationResult> {
+  drop(input?: { note?: string; signal?: AbortSignal }): Promise<DebtLifecycleResult> {
     return this.lifecycle("drop", input);
   }
 }
@@ -232,7 +301,7 @@ class DebtsHandle {
       parent?: string;
       limit?: number;
     }> = {},
-  ): Promise<DebtList> {
+  ): Promise<DebtReadyList> {
     const v = record(input, "ready input");
     closed(v, ["scope", "namespace", "parent", "limit"], "ready input");
     if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
@@ -295,7 +364,8 @@ class DebtsHandle {
     });
   }
   async doctor(): Promise<DebtDoctorReport> {
-    return { issues: diagnoseBoard((await readBoard(this.world)).board) };
+    const issues = nonEmptyDebtValues(diagnoseBoard((await readBoard(this.world)).board));
+    return { kind: "present", ...(issues === undefined ? {} : { issues }) };
   }
   batch(
     input: Readonly<{

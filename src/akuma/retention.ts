@@ -59,8 +59,8 @@ export async function retentionCandidateBound(paths: KnownAkuma["paths"], now: n
  */
 export async function readRetentionCandidate(entry: KnownAkuma, now: number): Promise<KnownAkuma | null> {
   const row = await rosterListRow(entry.paths, entry.id);
-  if (!("lifeAt" in row) || row.life === "running" || row.pending.length > 0) return null;
-  return isStale(now, latestRetentionActivity(row.lifeAt, row.lastActivityAt)) ? entry : null;
+  if (row.kind !== "born" || row.life === "running" || row.pending !== undefined) return null;
+  return isStale(now, latestRetentionActivity(row.lifeAt ?? null, row.lastActivityAt ?? null)) ? entry : null;
 }
 
 function currentStoppedActivity(snapshot: Awaited<ReturnType<typeof readHeart>>): number | null {

@@ -70,6 +70,7 @@ export async function nukeKeiyaku(input: NukeInput, gitOptions?: NukeGitOptions)
       await Promise.all([
         runOwner("akuma", deleteAkuma),
         runOwner("git", async () => {
+          accumulator.recordResetAttempt("git");
           const result = await nukeGit(world, "git", gitOptions, (counts) => accumulator.recordResetRemoved(counts));
           if (result.closeLag !== undefined)
             accumulator.recordReset({
@@ -80,6 +81,7 @@ export async function nukeKeiyaku(input: NukeInput, gitOptions?: NukeGitOptions)
             });
         }),
         runOwner("debt", async () => {
+          accumulator.recordResetAttempt("debt");
           await nukeDebt(world, { onRemoved: (debts) => accumulator.recordResetRemoved({ debts }) });
         }),
       ]);

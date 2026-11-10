@@ -29,19 +29,9 @@ const GENERATED_PATHS = [
   ".keiyaku/KEIYAKU.md",
   ...SEAT_SKILLS.flatMap(([seat]) => [`.agents/skills/${seat}/.gitignore`, `.agents/skills/${seat}/SKILL.md`]),
 ];
-export const contractFileEffectSchema = z
-  .object({
-    kind: z.literal("contract-file"),
-    path: z.string().refine((value) => value.trim() !== ""),
-    action: z.enum(["created", "updated", "unchanged", "removed"]),
-  })
-  .strict()
-  .readonly();
-export type ContractFileEffect = z.infer<typeof contractFileEffectSchema>;
 export const contractFileLagSchema = z
   .object({
     kind: z.literal("contract-file-failed"),
-    worktree: z.string().refine((value) => value.trim() !== ""),
     path: z.string().refine((value) => value.trim() !== ""),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
@@ -50,7 +40,6 @@ export const contractFileLagSchema = z
 export type ContractFileLag = z.infer<typeof contractFileLagSchema>;
 
 export type ContractWorktreeResult = Readonly<{
-  effects: readonly ContractFileEffect[];
   lag: readonly ContractFileLag[];
 }>;
 
@@ -82,11 +71,12 @@ async function repair(
   relativePath: string,
   bytes: string,
   tracked: ReadonlySet<string>,
-): Promise<ContractFileEffect> {
+): Promise<void> {
   const path = join(worktree, relativePath);
   if (tracked.has(relativePath)) throw new Error(`generated path is tracked by Git: ${path}`);
   if (relativePath !== ".keiyaku/KEIYAKU.md") {
-    return { kind: "contract-file", path, action: await repairDerivedFile(path, bytes) };
+    await repairDerivedFile(path, bytes);
+    return;
   }
   try {
     const stat = await lstat(path).catch((error: NodeJS.ErrnoException) => {
@@ -96,8 +86,7 @@ async function repair(
     if (stat?.isFile() && !stat.isSymbolicLink() && !(await readFile(path)).equals(Buffer.from(bytes))) {
       await chmod(path, stat.mode | 0o200);
     }
-    const action = await repairDerivedFile(path, bytes);
-    return { kind: "contract-file", path, action };
+    await repairDerivedFile(path, bytes);
   } finally {
     try {
       const stat = await lstat(path);
@@ -121,18 +110,16 @@ async function materializeSeatSkill(
   seat: string,
   bytes: string,
   tracked: ReadonlySet<string>,
-): Promise<readonly ContractFileEffect[]> {
+): Promise<void> {
   const leaf = `.agents/skills/${seat}`;
   const skill = `${leaf}/SKILL.md`;
   const skillPath = join(worktree, skill);
   const skillExists = await lstat(skillPath).catch((error: NodeJS.ErrnoException) =>
     error.code === "ENOENT" ? false : Promise.reject(error),
   );
-  if (!(await isKeiyakuSeatLeaf(worktree, seat)) && skillExists) return [];
-  return [
-    await repair(worktree, `${leaf}/.gitignore`, SEAT_IGNORE_BYTES, tracked),
-    await repair(worktree, skill, bytes, tracked),
-  ];
+  if (!(await isKeiyakuSeatLeaf(worktree, seat)) && skillExists) return;
+  await repair(worktree, `${leaf}/.gitignore`, SEAT_IGNORE_BYTES, tracked);
+  await repair(worktree, skill, bytes, tracked);
 }
 
 async function materialize(
@@ -141,13 +128,10 @@ async function materialize(
   guidance: string,
   namespace: readonly string[],
 ): Promise<ContractWorktreeResult> {
-  const effects: ContractFileEffect[] = [];
-  const failed = (target: string, path: string, error: unknown): ContractWorktreeResult => ({
-    effects,
+  const failed = (path: string, error: unknown): ContractWorktreeResult => ({
     lag: [
       {
         kind: "contract-file-failed",
-        worktree: target,
         path,
         diagnostic: error instanceof Error ? error.message : String(error),
       },
@@ -161,9 +145,9 @@ async function materialize(
       primaryWorktree,
       worktree === primaryWorktree ? GENERATED_PATHS : PRIMARY_GENERATED_PATHS,
     );
-    effects.push(await repair(primaryWorktree, ".keiyaku/.gitignore", PRIMARY_IGNORE_BYTES, tracked));
+    await repair(primaryWorktree, ".keiyaku/.gitignore", PRIMARY_IGNORE_BYTES, tracked);
   } catch (error) {
-    return failed(primaryWorktree, join(primaryWorktree, ".keiyaku", ".gitignore"), error);
+    return failed(join(primaryWorktree, ".keiyaku", ".gitignore"), error);
   }
   const stat = await lstat(worktree).catch((error: NodeJS.ErrnoException) => {
     if (error.code === "ENOENT") return undefined;
@@ -171,11 +155,9 @@ async function materialize(
   });
   if (stat === undefined || !stat.isDirectory()) {
     return {
-      effects,
       lag: [
         {
           kind: "contract-file-failed",
-          worktree,
           path: generatedPath(worktree, "KEIYAKU.md"),
           diagnostic: "Contract worktree is unavailable",
         },
@@ -185,13 +167,13 @@ async function materialize(
   try {
     await repairNamespaceContext(worktree, namespace);
   } catch (error) {
-    return failed(worktree, join(worktree, ".keiyaku", "namespace", "current"), error);
+    return failed(join(worktree, ".keiyaku", "namespace", "current"), error);
   }
   if (worktree !== primaryWorktree) {
     try {
       tracked = await readTrackedPaths(repository, worktree, GENERATED_PATHS);
     } catch (error) {
-      return failed(worktree, join(worktree, ".keiyaku", ".gitignore"), error);
+      return failed(join(worktree, ".keiyaku", ".gitignore"), error);
     }
   }
   for (const [relativePath, bytes] of [
@@ -199,19 +181,19 @@ async function materialize(
     [".keiyaku/KEIYAKU.md", guidance],
   ] as const) {
     try {
-      effects.push(await repair(worktree, relativePath, bytes, tracked));
+      await repair(worktree, relativePath, bytes, tracked);
     } catch (error) {
-      return failed(worktree, join(worktree, relativePath), error);
+      return failed(join(worktree, relativePath), error);
     }
   }
   for (const [seat, bytes] of SEAT_SKILLS) {
     try {
-      effects.push(...(await materializeSeatSkill(worktree, seat, bytes, tracked)));
+      await materializeSeatSkill(worktree, seat, bytes, tracked);
     } catch (error) {
-      return failed(worktree, join(worktree, ".agents", "skills", seat), error);
+      return failed(join(worktree, ".agents", "skills", seat), error);
     }
   }
-  return { effects, lag: [] };
+  return { lag: [] };
 }
 
 export async function projectContractWorktree(
@@ -220,15 +202,13 @@ export async function projectContractWorktree(
   register?: PlaceRegister,
   _onConflict?: (diagnostic: string) => never,
 ): Promise<ContractWorktreeResult> {
-  if (state === null || state.terminal) return { effects: [], lag: [] };
+  if (state === null || state.terminal) return { lag: [] };
   const appointed = register === undefined ? undefined : appointmentFor(register, state.id);
   if (appointed === undefined) {
     return {
-      effects: [],
       lag: [
         {
           kind: "contract-file-failed",
-          worktree: repository.primaryWorktree,
           path: placeRegisterPath(repository),
           diagnostic: "managed Contract is unappointed",
         },

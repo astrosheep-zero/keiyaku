@@ -1,12 +1,11 @@
-import { contractIdSchema } from "./identity.js";
 import { z } from "zod";
 import { access } from "node:fs/promises";
 import type { Preparation } from "../core/decide.js";
 import type { ActorId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { decodeGitNumstat, registeredWorktreePaths } from "./repository.js";
+import { registeredWorktreePaths } from "./repository.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
-import { captureWorkspaceTree, unmergedWorkspacePaths, workspaceMergeHead, worktreePath } from "./workspace.js";
+import { captureWorkspaceTree, workspaceMergeHead, worktreePath } from "./workspace.js";
 
 type TenderCaptureCoordinates = Readonly<{
   contractId: ContractId;
@@ -14,51 +13,24 @@ type TenderCaptureCoordinates = Readonly<{
   place?: string;
   workspacePath?: string;
   captureMergeState?: boolean;
-  /** Opt-in real-index UU refusal. Omit or false when authorized capture must read current worktree bytes. */
-  rejectUnmerged?: boolean;
 }>;
 
 export const worktreeMissingRefusalSchema = z
-  .object({ kind: z.literal("worktree-missing"), contractId: contractIdSchema })
+  .object({ kind: z.literal("worktree-missing") })
   .strict()
   .readonly();
 type WorktreeMissingRefusal = z.infer<typeof worktreeMissingRefusalSchema>;
-export const unmergedPathsRefusalSchema = z
-  .object({
-    kind: z.literal("unmerged-paths"),
-    contractId: contractIdSchema,
-    paths: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-  })
-  .strict()
-  .readonly();
-type TenderCaptureRefusal = WorktreeMissingRefusal | z.infer<typeof unmergedPathsRefusalSchema>;
-export const workspaceDirtyDeltaSchema = z
-  .object({
-    staged: z.array(z.string()).readonly(),
-    unstaged: z.array(z.string()).readonly(),
-    untracked: z.array(z.string()).readonly(),
-    shortStat: z
-      .object({ filesChanged: z.number().int(), insertions: z.number().int(), deletions: z.number().int() })
-      .strict(),
-  })
-  .strict();
-type WorkspaceDirtyDelta = z.infer<typeof workspaceDirtyDeltaSchema>;
 export const dirtyWorkspaceRefusalSchema = z
   .object({
     kind: z.literal("dirty-workspace"),
-    contractId: contractIdSchema,
-    staged: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-    unstaged: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-    untracked: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-    submodules: z.array(z.string().refine((value) => value.trim() !== "")).readonly(),
-    shortStat: z
-      .object({
-        filesChanged: z.number().int().nonnegative(),
-        insertions: z.number().int().nonnegative(),
-        deletions: z.number().int().nonnegative(),
-      })
-      .strict()
-      .readonly(),
+    paths: z
+      .array(z.string().refine((value) => value.trim() !== ""))
+      .readonly()
+      .exactOptional(),
+    submodules: z
+      .array(z.string().refine((value) => value.trim() !== ""))
+      .readonly()
+      .exactOptional(),
   })
   .strict()
   .readonly();
@@ -86,26 +58,13 @@ function workspaceFor(repository: GitRepository, input: TenderCaptureCoordinates
 }
 
 /** Capture the complete workspace tree through Git's private index mechanics. */
-export function captureTender(
-  repository: GitRepository,
-  input: TenderCaptureCoordinates & Readonly<{ rejectUnmerged: true }>,
-): Promise<Preparation<TenderCapture, TenderCaptureRefusal>>;
-export function captureTender(
-  repository: GitRepository,
-  input: TenderCaptureCoordinates,
-): Promise<Preparation<TenderCapture, WorktreeMissingRefusal>>;
 export async function captureTender(
   repository: GitRepository,
   input: TenderCaptureCoordinates,
-): Promise<Preparation<TenderCapture, TenderCaptureRefusal>> {
+): Promise<Preparation<TenderCapture, WorktreeMissingRefusal>> {
   const workspace = workspaceFor(repository, input);
   if (workspace === undefined || !(await workspaceExists(repository, workspace))) {
-    return { kind: "refused", refusal: { kind: "worktree-missing", contractId: input.contractId } };
-  }
-  if (input.rejectUnmerged === true) {
-    const paths = await unmergedWorkspacePaths(repository, workspace);
-    if (paths.length > 0)
-      return { kind: "refused", refusal: { kind: "unmerged-paths", contractId: input.contractId, paths } };
+    return { kind: "refused", refusal: { kind: "worktree-missing" } };
   }
   const captured = await captureWorkspaceTree(repository, workspace);
   const mergeHead = input.captureMergeState === true ? await workspaceMergeHead(repository, workspace) : undefined;
@@ -115,35 +74,13 @@ export async function captureTender(
   };
 }
 
-async function dirtyShortStat(
-  repository: GitRepository,
-  tender: TenderCapture,
-): Promise<WorkspaceDirtyDelta["shortStat"]> {
-  return decodeGitNumstat(
-    await executeGit(repository, ["diff", "--numstat", "-z", gitObjectIdForSnapshot(tender.head), tender.tree]),
-  );
-}
-
-export async function dirtyTenderRefusal(
-  repository: GitRepository,
-  contractId: ContractId,
-  tender: TenderCapture,
-): Promise<DirtyWorkspaceRefusal> {
+export function dirtyTenderRefusal(tender: TenderCapture): DirtyWorkspaceRefusal {
+  const paths = [...new Set([...tender.changes.staged, ...tender.changes.unstaged, ...tender.changes.untracked])];
   return {
     kind: "dirty-workspace",
-    contractId,
-    ...tender.changes,
-    shortStat: await dirtyShortStat(repository, tender),
+    ...(paths.length === 0 ? {} : { paths }),
+    ...(tender.changes.submodules.length === 0 ? {} : { submodules: tender.changes.submodules }),
   };
-}
-
-export async function dirtyTenderDelta(
-  repository: GitRepository,
-  tender: TenderCapture,
-): Promise<WorkspaceDirtyDelta | undefined> {
-  if (!tender.dirty) return undefined;
-  const { staged, unstaged, untracked } = tender.changes;
-  return { staged, unstaged, untracked, shortStat: await dirtyShortStat(repository, tender) };
 }
 
 type GitCommitIdentity = Readonly<{ name: string; email: string }>;

@@ -87,7 +87,7 @@ async function runSpawn(
   const observe = observing
     ? (event: SpawnProgress): void => {
         if (event.kind === "admitted") {
-          stream = callObservationStream(resultContext(), callObservationHead({ akuma: event.id, ...event.head }), {
+          stream = callObservationStream(resultContext(), callObservationHead({ akumaId: event.id, ...event.head }), {
             admittedAt: event.tell.row.at,
           });
           driver.redraw(stream.frame());
@@ -103,16 +103,20 @@ async function runSpawn(
       ...(schema === undefined ? {} : { decode: schema.decode }),
     });
     let streamed = stream !== undefined;
-    if (stream !== undefined) driver.conclude(stream.conclude(result.observation));
-    else if (observing && result.observation.kind === "failed") {
-      writeStderr(renderFailedCallObservation(result, resultContext()));
+    if (stream !== undefined) driver.conclude(stream.conclude(result));
+    else if (observing && result.failure !== undefined) {
+      writeStderr(renderFailedCallObservation(result, resultContext(), body === undefined ? {} : { prompt: body }));
       streamed = true;
     }
     const completion = { kind: "returned" as const, value: result };
     if (command.output === "json") writeJson(result);
-    else if (streamed) emitAnswer(callRawAnswer(result, true) ?? "", callRawAnswer(result, true) !== undefined);
+    else if (streamed)
+      emitAnswer(
+        callRawAnswer(result, schema !== undefined, true) ?? "",
+        callRawAnswer(result, schema !== undefined, true) !== undefined,
+      );
     else {
-      const raw = callRawAnswer(result, false);
+      const raw = callRawAnswer(result, schema !== undefined, false);
       emitAnswer(renderVerb("spawn", wire, completion, displayContext()), raw !== undefined);
     }
     return classifyVerb("spawn", wire, completion);
@@ -211,11 +215,12 @@ async function runHistory(
     last: command.last,
   };
   const result = await input.runtime.facet.run("history", wire, { signal: input.runtime.signal });
-  if (result === null || !("kind" in result)) throw new Error("Akuma history returned a non-Akuma result");
+  if (result.kind === "contract" || result.kind === "contract-missing")
+    throw new Error("Akuma history returned a non-Akuma result");
   const completion = { kind: "returned" as const, value: result };
   if (command.output === "json") writeJson(result);
   else {
-    const raw = historyRawAnswer(result, command.id) !== undefined || (command.last && result.kind === "last");
+    const raw = historyRawAnswer(result, command.id) !== undefined || (command.last && result.kind === "akuma-last");
     emitAnswer(renderVerb("history", wire, completion, displayContext()), raw);
   }
   return classifyVerb("history", wire, completion);

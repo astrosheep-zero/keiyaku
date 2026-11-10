@@ -21,8 +21,8 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   assert.deepEqual([empty.akuma, empty.contracts, empty.debts], Array(3).fill({ kind: "present", value: 0 }));
   const debts = Debts.of(world);
   for (let i = 0; i < 12; i++) accepted(await debts.add({ title: `Open ${i}`, namespace: i % 2 ? ["nested"] : [] }));
-  const done = accepted(await debts.add({ title: "Done" })).value.id;
-  const drop = accepted(await debts.add({ title: "Drop" })).value.id;
+  const done = accepted(await debts.add({ title: "Done" })).id;
+  const drop = accepted(await debts.add({ title: "Drop" })).id;
   accepted(await debts.debt({ id: done }).done());
   accepted(await debts.debt({ id: drop }).drop());
   for (let i = 0; i < 12; i++) {
@@ -33,7 +33,7 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   const terminal = accepted(await Keis.of(repo).bind({ target: "main", markdown: contractMarkdown("Terminal", {
     Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
   }), gates: [] }));
-  await terminal.value.kei.abandon();
+  await terminal.kei.abandon();
   for (let i = 1; i <= 12; i++) {
     const running = await bornDirectAkuma({ root: world, akumaName: "worker", draw: i.toString(16).padStart(8, "0"), createdAt: "2026-08-09T00:00:00.000Z" });
     context.after(() => running.leash.release());

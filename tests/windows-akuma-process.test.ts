@@ -225,12 +225,13 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.kind === "answered", true);
     const history = await handle.history();
     assert.ok("rows" in history);
-    const outcome = history.rows.find((row) => row.kind === "outcome")?.outcome;
+    const outcomeRow = history.rows.find((row) => row.kind === "outcome");
+    const outcome = outcomeRow?.outcome;
     assert.equal(outcome?.kind, "answered");
-    if (outcome?.kind === "answered") {
+    if (outcome?.kind === "answered" && outcomeRow !== undefined) {
       assert.equal(outcome.answer, "fixture answer");
-      assert.match(outcome.historyId, /^turn\/[1-9][0-9]*$/u);
-      const exact = await handle.history({ id: outcome.historyId });
+      const historyId = `turn/${outcomeRow.turnSequence}`;
+      const exact = await handle.history({ id: historyId });
       if (!("kind" in exact)) throw new Error("expected exact history result");
       assert.equal(exact.kind, "exact");
       if (exact.kind === "exact") assert.deepEqual(exact.outcome.outcome, outcome);

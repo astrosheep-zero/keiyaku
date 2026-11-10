@@ -13,11 +13,12 @@ import {
 } from "./keiyaku-verbs.js";
 import type { AskProgress } from "../akuma/akuma-selection-execution.js";
 import type { SpawnProgress } from "./akuma-creation.js";
+import type { TellResult } from "../akuma/call-initial-tell.js";
 import type { AkumaAskResult } from "../akuma/selection-observation.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { World, WorldError, type WorldRoot } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
-import { kanshi, selectRegion } from "../kanshi/index.js";
+import { kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
 import {
   Akumas,
   type SpawnInput,
@@ -27,7 +28,6 @@ import {
   type AkumaKillInput,
   type AkumaHistoryInput,
   type SpawnWaitHead,
-  type TellResult,
 } from "./akumas.js";
 import type { ContractWaitInput } from "./contract-wait.js";
 import { deliveryOwner, resolveActor } from "./keiyaku-attribution.js";
@@ -51,12 +51,12 @@ import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } fro
 import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
 import { statusAt, type StatusInput } from "./keiyaku-status.js";
-import type { ContractList } from "./contract-types.js";
+import type { ContractCatalogue } from "../protocol/read/status.js";
 import type { AkumaList } from "../akuma/akuma.js";
 import { listArchetypeDefinitions, type ArchetypeCatalog } from "../akuma/archetype.js";
 import type { AkumaCaller } from "../akuma/caller.js";
 import type { AkumaId } from "../akuma/identity.js";
-import type { AddDebtInput, AddDebtDocumentInput, DebtDetail } from "../debt/index.js";
+import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
 import type {
   DebtLsInvocation,
@@ -120,7 +120,7 @@ type TellInvocation = Omit<AkumaTellInput, "body" | "repo" | "initiator"> & Read
 type AskInvocation<T> = Omit<AkumaAskInput<T>, "body" | "repo" | "initiator"> & Readonly<{ prompt: string }>;
 type ForkInvocation = Omit<ForkInput, "repo" | "caller" | "initiator">;
 type KillInvocation = Omit<AkumaKillInput, "repo">;
-type HistoryInvocation = Omit<AkumaHistoryInput, "akuma" | "repo"> & Readonly<{ selector: string }>;
+type HistoryInvocation = Omit<AkumaHistoryInput, "akuma" | "repo"> & Readonly<{ selector: string; full?: boolean }>;
 type WaitInvocation = Omit<ContractWaitInput, "contracts"> & Readonly<{ selectors: readonly string[] }>;
 
 /** Invocation composition captures caller coordinates, never ambient process state. */
@@ -292,11 +292,8 @@ export class Keiyaku {
         return this.#kill({ ...request.input, ...signal });
       case "wait":
         return this.#wait({ ...request.input, ...signal });
-      case "history": {
-        const { selector } = request.input;
-        if ("full" in request.input) return this.#history({ selector });
+      case "history":
         return this.#history(request.input);
-      }
       case "report":
         return this.#report({ ...request.input, ...signal });
     }
@@ -402,7 +399,7 @@ export class Keiyaku {
   report(input: Readonly<{ text: string }>, run?: VerbRun) {
     return this.run("report", input, run);
   }
-  ls(input: KeiInput): Promise<ContractList>;
+  ls(input: KeiInput): Promise<ContractCatalogue>;
   ls(input: AkumaInput): Promise<AkumaList>;
   ls(input: NameInput): Promise<ArchetypeCatalog>;
   ls(input: DebtLsInvocation): ReturnType<typeof debt.debtList>;
@@ -418,8 +415,6 @@ export class Keiyaku {
   debtUpdate({ signal, ...input }: DebtUpdateInvocation) {
     return this.run("debt.update", input, signal === undefined ? {} : { signal });
   }
-  debtShow(input: Readonly<{ id: string; ids?: never }>): Promise<DebtDetail | null>;
-  debtShow(input: Readonly<{ ids: readonly string[]; id?: never }>): Promise<readonly (DebtDetail | null)[]>;
   debtShow(input: DebtShowInvocation) {
     return this.run("debt.show", input);
   }
@@ -600,8 +595,6 @@ export class Keiyaku {
     const { cwd, library } = await this.#keis();
     if (input.contract === undefined) return await library.reconcile(input);
     const id = await this.#resolve(library, input.contract, cwd);
-    const observed = await library.observe({ id });
-    if (observed.kind === "missing") return observed;
     return await library.reconcile({ ...input, contract: id });
   }
 
@@ -725,12 +718,14 @@ export class Keiyaku {
     return await akumas.wait({ akuma: selectors, ...input, ...(at.repo === undefined ? {} : { repo: at.repo }) });
   }
 
-  async #history({ selector, ...input }: HistoryInvocation) {
+  async #history({ selector, full, ...input }: HistoryInvocation) {
     if (selector.startsWith("kei/")) {
       const at = await this.#coordinates("required");
       if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
       const library = Keis.of(at.repo);
-      return await library.kei({ id: this.#fullId(library, selector) }).history();
+      return await library
+        .kei({ id: this.#fullId(library, selector) })
+        .history(full === undefined ? undefined : { full });
     }
     const { at, akumas } = await this.#akumas();
     return await akumas.history({ akuma: selector, ...input, ...(at.repo === undefined ? {} : { repo: at.repo }) });
@@ -777,7 +772,7 @@ export class Keiyaku {
 
   async #ls(
     input: KeiInput | AkumaInput | NameInput | DebtLsInvocation,
-  ): Promise<ContractList | AkumaList | ArchetypeCatalog | Awaited<ReturnType<typeof debt.debtList>>> {
+  ): Promise<ContractCatalogue | AkumaList | ArchetypeCatalog | Awaited<ReturnType<typeof debt.debtList>>> {
     if (input.of === "debt") return debt.debtList(this.#input, input);
     const at = await this.#coordinates(input.of === "kei" ? "required" : "none");
     const limit = input.limit === undefined ? {} : { limit: input.limit };
@@ -809,28 +804,20 @@ export class Keiyaku {
     const at = await this.#coordinates("required");
     if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
     const repo = at.repo;
+    let selected: KanshiRegionSelection;
     if (input.paths !== undefined) {
-      // Kanshi validates the caller's pattern list, including the nonempty requirement.
-      const patterns = input.paths as readonly [string, ...string[]];
-      const report = await kanshi({ world: at.world, repo, region: { kind: "path", patterns } });
-      return report.region ?? { kind: "absent" as const };
+      const [first, ...rest] = input.paths;
+      if (first === undefined) throw new TypeError("Region query requires one or more path patterns");
+      selected = { kind: "path", patterns: [first, ...rest] };
+    } else {
+      selected =
+        input.contract === undefined
+          ? { kind: "declarations" }
+          : { kind: "contract", contract: await this.#resolve(Keis.of(repo), input.contract, at.cwd) };
     }
-    const library = Keis.of(repo);
-    const contract = input.contract === undefined ? undefined : await this.#resolve(library, input.contract, at.cwd);
-    const report = await kanshi({ world: at.world, repo, region: { kind: "declarations" } });
-    if (contract === undefined) return report.region ?? { kind: "absent" as const };
-    const observed = await library.observe({ id: contract });
-    if (observed.kind === "missing" || observed.row.phase === "claimed" || observed.row.phase === "abandoned")
-      return observed;
-    if (report.region?.kind !== "present" || report.region.value.kind !== "declarations")
-      return report.region ?? { kind: "absent" as const };
-    return {
-      kind: "present" as const,
-      value: selectRegion({
-        declarations: report.region.value.declarations,
-        selection: { kind: "contract", contract },
-      }),
-    };
+    const result = await kanshi({ world: at.world, repo, region: selected });
+    if (result.kind === "absent") throw new Error("Region observation with a Repo cannot be absent");
+    return result;
   }
 
   async #whoami() {

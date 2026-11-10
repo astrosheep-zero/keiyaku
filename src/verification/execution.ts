@@ -1,9 +1,10 @@
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
-import { runHookCommands, worktreeHooksFrom, type HookCommand, type HookFailure } from "../git/hooks.js";
+import { runHookCommands, worktreeHooksFrom, type HookCommand } from "../git/hooks.js";
 import { ScratchMaterializationError, type MaterializedScratchCandidate, type WorktreeLeak } from "../git/scratch.js";
 import type { GitRepository } from "../git/process.js";
 import type { Settings } from "../settings.js";
 import { runProcess, type ProcessOutcome } from "../runtime/proc/run.js";
+import { processDiagnostic as executionDiagnostic } from "../runtime/proc/diagnostic.js";
 import type { VerificationObservation } from "./observation.js";
 import type { VerificationDeclaration } from "./declaration.js";
 
@@ -13,27 +14,22 @@ const SUMMARY_BYTES = 32 * 1024;
 export type VerificationTerminalOutcome = Readonly<{
   kind: "terminal";
   verdict: VerificationVerdict;
-  passed: number;
-  total: number;
   summary?: string;
 }>;
 
 type CapturedOutput = Readonly<{ stdout?: string; stderr?: string; truncated?: boolean }>;
-export type VerificationNonterminalOutcome = CapturedOutput &
-  (
-    | Readonly<{ kind: "unknown-exit" }>
-    | Readonly<{ kind: "cancelled" }>
-    | Readonly<{ kind: "spawn-error"; diagnostic: string }>
-  );
+export type VerificationNonterminalOutcome = Readonly<
+  | { kind: "unknown-exit"; diagnostic?: string }
+  | { kind: "cancelled"; diagnostic?: string }
+  | { kind: "spawn-error"; diagnostic: string }
+>;
 
-export function capturedOutput(
-  value: CapturedOutput,
-): Readonly<{ stdout?: string; stderr?: string; truncated?: true }> {
-  return {
-    ...(value.stdout ? { stdout: value.stdout } : {}),
-    ...(value.stderr ? { stderr: value.stderr } : {}),
-    ...(value.truncated === true ? { truncated: true } : {}),
-  };
+function hasCapturedOutput(output: CapturedOutput): boolean {
+  return (
+    (output.stdout !== undefined && output.stdout.length > 0) ||
+    (output.stderr !== undefined && output.stderr.length > 0) ||
+    output.truncated === true
+  );
 }
 
 export type VerificationExecutionStop =
@@ -45,12 +41,12 @@ export type VerificationExecutionStop =
   | Readonly<{
       kind: "environment-failure";
       name: string;
-      detail: HookFailure;
+      diagnostic: string;
     }>;
 
 export type VerificationExecution = Readonly<{
   outcome: VerificationTerminalOutcome | VerificationExecutionStop;
-  cleanup?: Readonly<{ phase: "destroy"; name: string; detail: HookFailure }>;
+  cleanup?: Readonly<{ name: string; diagnostic: string }>;
   leak?: WorktreeLeak;
 }>;
 
@@ -165,9 +161,10 @@ async function observedHooks(
 function nonterminalOutcome(
   outcome: Exclude<ProcessOutcome, Readonly<{ kind: "terminal" }> | Readonly<{ kind: "timeout" }>>,
 ): VerificationNonterminalOutcome {
-  return outcome.kind === "spawn-error"
-    ? { kind: outcome.kind, diagnostic: outcome.diagnostic, ...capturedOutput(outcome) }
-    : { kind: outcome.kind, ...capturedOutput(outcome) };
+  if (outcome.kind === "spawn-error") return { kind: outcome.kind, diagnostic: executionDiagnostic(outcome) };
+  return hasCapturedOutput(outcome)
+    ? { kind: outcome.kind, diagnostic: executionDiagnostic(outcome) }
+    : { kind: outcome.kind };
 }
 
 async function executeDeclaration(
@@ -206,8 +203,6 @@ async function executeDeclaration(
   return {
     kind: "terminal",
     verdict: satisfied ? "satisfied" : "unsatisfied",
-    passed: satisfied ? 1 : 0,
-    total: 1,
     ...(summary === undefined ? {} : { summary }),
   };
 }
@@ -236,7 +231,13 @@ async function materializeScratch(
     return {
       outcome: input.signal?.aborted
         ? { kind: "cancelled" }
-        : { kind: "candidate-unavailable", diagnostic: error instanceof Error ? error.message : String(error) },
+        : {
+            kind: "candidate-unavailable",
+            diagnostic: executionDiagnostic({
+              kind: "candidate-unavailable",
+              diagnostic: error instanceof Error ? error.message : String(error),
+            }),
+          },
       ...(error instanceof ScratchMaterializationError ? { leak: error.leak } : {}),
     };
   }
@@ -263,10 +264,20 @@ async function runScratch(
       environment: process.env,
     });
     if (readiness.kind === "cancelled")
-      return { outcome: { kind: "cancelled", ...capturedOutput(readiness) }, destroy: hooks.destroy };
+      return {
+        outcome: {
+          kind: "cancelled",
+          ...(hasCapturedOutput(readiness) ? { diagnostic: executionDiagnostic(readiness) } : {}),
+        },
+        destroy: hooks.destroy,
+      };
     if (readiness.kind === "failed")
       return {
-        outcome: { kind: "environment-failure", name: readiness.name, detail: readiness.failure },
+        outcome: {
+          kind: "environment-failure",
+          name: readiness.name,
+          diagnostic: executionDiagnostic(readiness.failure),
+        },
         destroy: hooks.destroy,
       };
     return {
@@ -277,7 +288,13 @@ async function runScratch(
     return {
       outcome: input.signal?.aborted
         ? { kind: "cancelled" }
-        : { kind: "environment-failure", diagnostic: error instanceof Error ? error.message : String(error) },
+        : {
+            kind: "environment-failure",
+            diagnostic: executionDiagnostic({
+              kind: "environment-failure",
+              diagnostic: error instanceof Error ? error.message : String(error),
+            }),
+          },
     };
   }
 }
@@ -299,7 +316,7 @@ async function retireScratch(
       environment: process.env,
     });
     if (result.kind === "cancelled") throw new Error("scratch destroy cancelled without a signal");
-    if (result.kind === "failed") cleanup = { phase: "destroy", name: result.name, detail: result.failure };
+    if (result.kind === "failed") cleanup = { name: result.name, diagnostic: executionDiagnostic(result.failure) };
   }
   const retain = outcome.kind === "terminal" ? outcome.verdict === "unsatisfied" : outcome.kind !== "cancelled";
   const leak = await scratch.dispose(retain);

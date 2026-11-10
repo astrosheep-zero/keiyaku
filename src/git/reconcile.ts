@@ -1,4 +1,4 @@
-import { snapshotIdSchema, mintedSnapshotInputSchema } from "./identity.js";
+import { snapshotIdSchema } from "./identity.js";
 import { z } from "zod";
 import { targetCheckoutEffectSchema, targetCheckoutLagSchema, targetWorkspaceLagSchema } from "./target-placement.js";
 import { worktreeHookLagSchema } from "./hooks.js";
@@ -60,9 +60,7 @@ export const reconcileEffectSchema = z.union([
   z
     .object({
       kind: z.literal("recovery-snapshot"),
-      action: z.literal("created"),
       snapshot: snapshotIdSchema,
-      retention: z.literal("ephemeral"),
     })
     .strict()
     .readonly(),
@@ -73,7 +71,6 @@ export const reconcileEffectSchema = z.union([
       name: z.string().refine((value) => value.trim() !== ""),
       before: z.string().min(1).nullable(),
       after: z.string().min(1).nullable(),
-      action: z.enum(["created", "updated", "removed", "unchanged"]),
     })
     .strict()
     .readonly(),
@@ -93,7 +90,6 @@ type ReconcileEffectsInput = ReconcileInput;
 const reconcileFailureSchema = z
   .object({
     kind: z.literal("reconcile-failed"),
-    stage: z.enum(["observation", "effect"]),
     diagnostic: z.string().refine((value) => value.trim() !== ""),
   })
   .strict()
@@ -115,13 +111,7 @@ export const gitReconcileLagSchema = z.union([
     .object({
       kind: z.literal("worktree-follow-retained"),
       path: z.string().refine((value) => value.trim() !== ""),
-      tender: mintedSnapshotInputSchema,
-      head: mintedSnapshotInputSchema,
-      reason: z.enum(["head-moved", "head-attached", "operation-in-progress", "unsupported-parent-shape"]),
-      paths: z
-        .array(z.string().refine((value) => value.trim() !== ""))
-        .readonly()
-        .exactOptional(),
+      reason: z.enum(["head-moved", "head-attached", "operation-in-progress"]),
     })
     .strict()
     .readonly(),
@@ -135,7 +125,6 @@ export type ReconcileLag = z.infer<typeof gitReconcileLagSchema>;
 export type ReconcileResult = Readonly<{
   effects: readonly Effect[];
   lag: readonly ReconcileLag[];
-  hookRuns?: readonly { phase: "create" | "destroy"; name: string }[];
 }>;
 type ReconcileBatchItem = Readonly<{
   contract: ContractId;
@@ -150,7 +139,6 @@ export type WorktreeTopology = Readonly<{ paths: Set<string> }>;
 export type ReconcileAccumulation = Readonly<{
   effects: Effect[];
   lag: ReconcileLag[];
-  hookRuns: { phase: "create" | "destroy"; name: string }[];
   recordEffect(...effects: readonly Effect[]): void;
   recordLag(...lag: readonly ReconcileLag[]): void;
 }>;
@@ -165,7 +153,6 @@ function candidatePinRefFor(contract: ContractId): string {
 function missingPlaceLag(repository: GitRepository): ReconcileFailure {
   return {
     kind: "reconcile-failed",
-    stage: "effect",
     diagnostic: `managed Contract is unappointed: ${join(repository.commonDirectory, "keiyaku", "places.json")}`,
   };
 }
@@ -177,12 +164,8 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function complete(
-  effects: readonly Effect[] = [],
-  lag: readonly ReconcileLag[] = [],
-  hookRuns: readonly { phase: "create" | "destroy"; name: string }[] = [],
-): ReconcileResult {
-  return hookRuns.length === 0 ? { effects, lag } : { effects, lag, hookRuns };
+function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
+  return { effects, lag };
 }
 /** Append owner observations and publish those same objects before the next await. */
 function reconcileAccumulation(onPhysical: ReconcileInput["onPhysical"]): ReconcileAccumulation {
@@ -191,7 +174,6 @@ function reconcileAccumulation(onPhysical: ReconcileInput["onPhysical"]): Reconc
   return {
     effects,
     lag,
-    hookRuns: [],
     recordEffect(...observed) {
       effects.push(...observed);
       if (observed.length > 0) onPhysical?.({ effects: observed, lag: [] });
@@ -203,12 +185,7 @@ function reconcileAccumulation(onPhysical: ReconcileInput["onPhysical"]): Reconc
   };
 }
 
-function failed(
-  stage: ReconcileFailure["stage"],
-  error: unknown,
-  effects: readonly Effect[] = [],
-  lag: readonly ReconcileLag[] = [],
-): ReconcileResult {
+function failed(error: unknown, effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
   if (
     !(
       error instanceof WorktreeCustodyError ||
@@ -224,7 +201,7 @@ function failed(
     )
   )
     throw error;
-  return { effects, lag: [...lag, { kind: "reconcile-failed", stage, diagnostic: diagnostic(error) }] };
+  return { effects, lag: [...lag, { kind: "reconcile-failed", diagnostic: diagnostic(error) }] };
 }
 
 function reconcileLockPath(repository: GitRepository, contract: ContractId): string {
@@ -244,7 +221,7 @@ async function worktree(
   topology: WorktreeTopology,
   path: string,
   desired: SnapshotId,
-): Promise<Effect> {
+): Promise<Extract<Effect, { kind: "worktree" }>> {
   const registered = topology.paths.has(path);
   if (registered && (await pathExists(path))) return { kind: "worktree", path, action: "unchanged" };
   if (registered) {
@@ -288,7 +265,7 @@ async function reconcileTargetCheckouts(
   try {
     held = await acquireTargetPlacementFence(repository, targetName(state.coordinates.target));
   } catch (error) {
-    return failed("effect", error);
+    return failed(error);
   }
   let result: ReconcileResult | undefined;
   let exceptional: { error: unknown } | undefined;
@@ -297,7 +274,7 @@ async function reconcileTargetCheckouts(
     result = complete(recovered.effects, recovered.lag);
   } catch (error) {
     try {
-      result = failed("effect", error);
+      result = failed(error);
     } catch (unexpected) {
       exceptional = { error: unexpected };
     }
@@ -310,7 +287,7 @@ async function reconcileTargetCheckouts(
   }
   if (exceptional !== undefined) throw exceptional.error;
   if (result === undefined) throw new Error("target checkout reconcile produced no result");
-  if (releaseFailure !== undefined) result = failed("effect", releaseFailure, result.effects, result.lag);
+  if (releaseFailure !== undefined) result = failed(releaseFailure, result.effects, result.lag);
   return result;
 }
 
@@ -320,7 +297,7 @@ async function reconcileActiveManagedWorktree(
   topology: WorktreeTopology,
   acc: ReconcileAccumulation,
 ): Promise<ReconcileResult> {
-  const { effects, lag, hookRuns } = acc;
+  const { effects, lag } = acc;
   if (place === undefined) {
     acc.recordLag(missingPlaceLag(repository));
     return complete(effects, lag);
@@ -355,16 +332,14 @@ async function reconcileActiveManagedWorktree(
   if (state.delivery !== null && handoff.kind === "retained") {
     acc.recordLag({
       kind: "reconcile-failed",
-      stage: "effect",
       diagnostic: `conflict handoff retirement retained: ${handoff.reason}`,
     });
   }
   if (projection.action === "created" || retryHooks) {
     const hookRun = await runCreateHooks(path, hooks);
-    hookRuns.push(...hookRun.runs.map((name) => ({ phase: "create" as const, name })));
     if (hookRun.lag !== null) acc.recordLag(hookRun.lag);
   }
-  return complete(effects, lag, hookRuns);
+  return complete(effects, lag);
 }
 
 async function terminalHandoffRetained(
@@ -385,7 +360,6 @@ async function terminalHandoffRetained(
   if (handoff.kind === "active") {
     acc.recordLag({
       kind: "reconcile-failed",
-      stage: "effect",
       diagnostic: "conflict handoff retirement retained: active",
     });
     return true;
@@ -393,7 +367,6 @@ async function terminalHandoffRetained(
   if (handoff.kind !== "retained") return false;
   acc.recordLag({
     kind: "reconcile-failed",
-    stage: "effect",
     diagnostic: `conflict handoff retirement retained: ${handoff.reason}`,
   });
   return true;
@@ -406,21 +379,21 @@ async function reconcileWithTopology(
 ): Promise<ReconcileResult> {
   const { repository } = input;
   const acc = reconcileAccumulation(input.onPhysical);
-  const { effects, lag, hookRuns } = acc;
+  const { effects, lag } = acc;
   try {
     await removeCollectableScratch(repository, topology, acc, state?.terminal ? state.id : undefined);
     if (!state) return complete(effects, lag);
     if (state.terminal) {
-      if (await terminalHandoffRetained(input, state, topology, acc)) return complete(effects, lag, hookRuns);
+      if (await terminalHandoffRetained(input, state, topology, acc)) return complete(effects, lag);
       return await reconcileTerminalManagedWorktree(input, state, topology, acc, {
         ref: deliveryRefFor(state.id),
         pin: candidatePinRefFor(state.id),
       });
     }
     const result = await reconcileActiveManagedWorktree(input, state, topology, acc);
-    return hookRuns.length === 0 ? result : { ...result, hookRuns };
+    return result;
   } catch (error) {
-    return failed("effect", error, effects, lag);
+    return failed(error, effects, lag);
   }
 }
 
@@ -435,7 +408,7 @@ function releaseFailure(
     const prior = observation?.result;
     return {
       state: observation?.state ?? null,
-      result: failed("effect", error, prior?.effects, prior?.lag),
+      result: failed(error, prior?.effects, prior?.lag),
     };
   }
 }
@@ -489,7 +462,7 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
       mode: "immediate",
     });
   } catch (error) {
-    return { state: null, result: failed("observation", error) };
+    return { state: null, result: failed(error) };
   }
 
   const cursor: ReconcileCursor = { before: null };
@@ -502,7 +475,7 @@ export async function reconcile(input: ReconcileInput): Promise<GitReconcileObse
       const prior = cursor.observation?.result ?? cursor.outgoing;
       cursor.observation = {
         state: cursor.observation?.state ?? cursor.before,
-        result: failed(cursor.outgoing === undefined ? "observation" : "effect", error, prior?.effects, prior?.lag),
+        result: failed(error, prior?.effects, prior?.lag),
       };
     } catch (unexpected) {
       exceptional = { error: unexpected };
@@ -530,7 +503,7 @@ export async function reconcileDependentWorktree(
   try {
     held = await acquireSqliteTransactionLock({ path: reconcileLockPath(repository, contractId), mode: "immediate" });
   } catch (error) {
-    return failed("effect", error);
+    return failed(error);
   }
   let result: ReconcileResult;
   try {
@@ -554,10 +527,7 @@ export async function reconcileDependentWorktree(
             {
               kind: "worktree-follow-retained",
               path,
-              tender: target,
-              head: follow.head,
               reason: follow.reason,
-              ...(follow.paths.length === 0 ? {} : { paths: follow.paths }),
             },
           ],
         };
@@ -566,22 +536,22 @@ export async function reconcileDependentWorktree(
       incoming.close();
     }
   } catch (error) {
-    result = failed("effect", error, [{ kind: "worktree", path, action: "unchanged" }]);
+    result = failed(error, [{ kind: "worktree", path, action: "unchanged" }]);
   }
   try {
     held.close();
   } catch (error) {
-    result = failed("effect", error, result.effects, result.lag);
+    result = failed(error, result.effects, result.lag);
   }
   return result;
 }
 
 export function reconcileObservationFailure(error: unknown): ReconcileResult {
-  return failed("observation", error);
+  return failed(error);
 }
 
 export function reconcileEffectFailure(error: unknown, prior?: ReconcileResult): ReconcileResult {
-  return failed("effect", error, prior?.effects, prior?.lag);
+  return failed(error, prior?.effects, prior?.lag);
 }
 
 type ReconcileBatchOptions = Readonly<{

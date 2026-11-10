@@ -10,11 +10,40 @@ import { deferred as promiseBarrier } from "./support/process.js";
 import { debtAuthorityFile, debtDocument, writeDebtAuthority } from "./support/debt.js";
 import { DebtAuthorityCorruptionError } from "../src/debt/document.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { Debts } from "../src/debt/index.js";
+import { Debts, observeRecentDebtStatus } from "../src/debt/index.js";
 import { nukeDebt } from "../src/debt/operations.js";
 import { parseDebtId, type DebtId } from "../src/debt/identity.js";
 import { readBoard } from "../src/debt/store.js";
 import { World } from "../src/world.js";
+
+test("recent Debt catalogues exclude terminal work before bounding and judge its released prerequisites", async (t) => {
+  const root = await world();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  for (const document of [
+    debtDocument({ id: "debt/done", title: "Completed", state: "done", updatedAt: "2026-08-20T00:00:00.000Z" }),
+    debtDocument({ id: "debt/drop", title: "Dropped", state: "drop", updatedAt: "2026-08-19T00:00:00.000Z" }),
+    debtDocument({
+      id: "debt/blocked",
+      title: "Blocked",
+      needs: ["debt/missing"],
+      updatedAt: "2026-08-18T00:00:00.000Z",
+    }),
+    debtDocument({ id: "debt/ready", title: "Ready", needs: ["debt/done", "debt/drop"] }),
+  ])
+    writeDebtAuthority(root, document);
+
+  assert.deepEqual(await observeRecentDebtStatus(root, { limit: 1 }), {
+    rows: [{ id: "debt/blocked", title: "Blocked", priority: 2, disposition: "blocked" }],
+    hasMore: true,
+  });
+  assert.deepEqual(await observeRecentDebtStatus(root), {
+    rows: [
+      { id: "debt/blocked", title: "Blocked", priority: 2, disposition: "blocked" },
+      { id: "debt/ready", title: "Ready", priority: 2, disposition: "ready" },
+    ],
+    hasMore: false,
+  });
+});
 
 test("an unmigrated board is not silently presented as an empty Debt ledger", async () => {
   const root = await world();
@@ -42,16 +71,17 @@ test("offline board upgrade preserves testimony, identities and prerequisites wi
     execFileSync(process.execPath, ["scripts/migrate-task-board.mjs", root]);
     const debts = Debts.of(root);
     const detail = await debts.debt({ id: "debt/task/second" }).read();
-    assert.ok(detail);
-    assert.equal(detail.debt.state, "open");
-    assert.deepEqual(detail.debt.needs, ["debt/task/first"]);
-    assert.equal(detail.debt.title, "Keep task in the title");
-    assert.equal(detail.debt.note, "task/test is testimony");
-    assert.equal(detail.debt.body, "Keep task/test in the body.\n");
+    assert.equal(detail.kind, "present");
+    if (detail.kind !== "present") return;
+    assert.equal(detail.state, "open");
+    assert.deepEqual(detail.needs, [{ id: "debt/task/first", state: "open" }]);
+    assert.equal(detail.title, "Keep task in the title");
+    assert.equal(detail.note, "task/test is testimony");
+    assert.equal(detail.body, "Keep task/test in the body.\n");
     assert.equal(readFileSync(join(root, ".keiyaku", "tasks.pre-debt", "task", "second.md"), "utf8"), second);
     assert.equal(existsSync(join(root, ".keiyaku", "tasks")), false);
-    assert.equal((await debts.doctor()).issues.length, 0);
-    assert.deepEqual((await debts.ready({ scope: "world" })).kind, "accepted");
+    assert.deepEqual(await debts.doctor(), { kind: "present" });
+    assert.equal((await debts.ready({ scope: "world" })).kind, "present");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -82,7 +112,10 @@ test("complete Debt reads bound in-flight I/O and retain canonical board and byt
   const firstWave = promiseBarrier<void>();
   const released = promiseBarrier<void>();
   const originalRead = fsPromises.readFile;
-  let active = 0, maximum = 0, started = 0, completed = 0;
+  let active = 0,
+    maximum = 0,
+    started = 0,
+    completed = 0;
   const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
     if (!String(args[0]).startsWith(join(root, ".keiyaku", "debts"))) return originalRead(...args);
     active += 1;
@@ -134,7 +167,8 @@ test("complete Debt reads drain before reporting the first canonical authority f
       const released = promiseBarrier<void>();
       const othersFinished = promiseBarrier<void>();
       const originalRead = fsPromises.readFile;
-      let completed = 0, settled = false;
+      let completed = 0,
+        settled = false;
       const mock = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof readFile>) => {
         const path = String(args[0]);
         if (!path.startsWith(join(root, ".keiyaku", "debts"))) return originalRead(...args);
@@ -152,8 +186,14 @@ test("complete Debt reads drain before reporting the first canonical authority f
       });
       syncBuiltinESMExports();
       const pending = readBoard(root).then(
-        () => { settled = true; assert.fail("expected authority failure"); },
-        (error: unknown) => { settled = true; return error; },
+        () => {
+          settled = true;
+          assert.fail("expected authority failure");
+        },
+        (error: unknown) => {
+          settled = true;
+          return error;
+        },
       );
       try {
         await othersFinished.promise;
@@ -189,14 +229,14 @@ test("Debt nuke lock contention is busy and does not delete unlocked files", asy
     assert.equal(locked.kind, "accepted");
     assert.equal(otherDebt.kind, "accepted");
     if (locked.kind !== "accepted" || otherDebt.kind !== "accepted") return;
-    const owned = debtAuthorityFile(root, locked.value.id);
-    const other = debtAuthorityFile(root, otherDebt.value.id);
+    const owned = debtAuthorityFile(root, locked.id);
+    const other = debtAuthorityFile(root, otherDebt.id);
     const foreign = join(root, ".keiyaku", "debts", "Not-Valid.md");
     writeFileSync(foreign, "invalid coordinate\n");
     const ownedBytes = readFileSync(owned);
     const otherBytes = readFileSync(other);
     const held = await acquireSqliteTransactionLock({
-      path: join(root, ".keiyaku", "locks", "debt", `${parseDebtId(locked.value.id).localId}.sqlite`),
+      path: join(root, ".keiyaku", "locks", "debt", `${parseDebtId(locked.id).localId}.sqlite`),
       mode: "immediate",
       timeoutMs: 100,
     });
@@ -218,8 +258,8 @@ test("Debt nuke re-enumerates after the allocation lock so a Debt created while 
   try {
     const debts = Debts.of(root);
     const ownedDebt = await debts.add({ title: "Already owned" });
-    assert.ok(ownedDebt.kind === "accepted", "expected ownedDebt.kind = \"accepted\"");
-    const existing = debtAuthorityFile(root, ownedDebt.value.id);
+    assert.ok(ownedDebt.kind === "accepted", 'expected ownedDebt.kind = "accepted"');
+    const existing = debtAuthorityFile(root, ownedDebt.id);
     const created = join(root, ".keiyaku", "debts", "created-while-waiting.md");
     const held = await acquireSqliteTransactionLock({
       path: join(root, ".keiyaku", "locks", "debt-allocation.sqlite"),
@@ -260,18 +300,20 @@ test("nested Debt authority remains discoverable after a fresh World observation
   try {
     const first = Debts.of(root);
     const added = await first.add({ title: "Nested durable", namespace: ["deep", "inside"] });
-    assert.ok(added.kind === "accepted", "expected added.kind = \"accepted\"");
+    assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
 
     const second = Debts.of(await World.at(root));
-    const read = await second.debt({ id: added.value.id }).read();
-    assert.equal(read?.debt.title, "Nested durable");
+    const read = await second.debt({ id: added.id }).read();
+    assert.equal(read.kind, "present");
+    if (read.kind !== "present") return;
+    assert.equal(read.title, "Nested durable");
     const listed = await second.list({ namespace: ["deep", "inside"] });
-    assert.equal(listed.kind, "accepted");
-    if (listed.kind === "accepted")
-      assert.deepEqual(
-        listed.value.rows.map((row) => row.id),
-        [added.value.id],
-      );
+    assert.equal(listed.kind, "present");
+    if (listed.kind !== "present") return;
+    assert.deepEqual(
+      listed.rows?.map((row) => row.id),
+      [added.id],
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

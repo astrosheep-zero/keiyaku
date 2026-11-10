@@ -1,99 +1,64 @@
-import { targetName } from "../../core/facts/types.js";
 import type {
-  AbandonOutcome,
-  AmendOutcome,
-  ArcOutcome,
-  DeliveryPreviewOutcome,
-  BindOutcome,
-  DeliverOutcome,
-  Fact,
-  KeiyakuRetryReason,
-  ReconciliationLag,
+  z,
+  abandonOutcomeSchema,
+  amendOutcomeSchema,
+  arcOutcomeSchema,
+  bindOutcomeSchema,
+  deliverOutcomeSchema,
+  reviewOutcomeSchema,
+  verifyOutcomeSchema,
+  ContractId,
+  InvocationIssue,
   RegionOverlap,
-  ReviewOutcome,
-  VerifyOutcome,
-  SettlementLag,
 } from "../../index.js";
 import {
-  effectCleanup,
-  effectExecutionStops,
-  effectLags,
-  effectRecoverySnapshot,
-  effectRetainedCheckouts,
-  effectRetainedWorktrees,
-  effectRetiredWorktrees,
-  effectSettlementLags,
-} from "./effects.js";
-import { renderDeliveryPreview } from "./delivery-preview.js";
-import {
-  appendHookPayload,
-  executionCleanupLines,
-  executionStopLines,
   gatesAwaitLines,
-  hookFailureSummary,
-  outcomeLines,
-  standingGateLines,
   placementLines,
   receiptPayload,
   receiptRow,
+  recoverySnapshotLines,
   stopLines,
   titleLines,
+  verificationCheckLines,
+  outcomeLines,
 } from "./receipt.js";
-import { abbreviateGitIds, displayGitId, lifecycleWord } from "./contract-observation.js";
-import { renderDiffstat } from "./akuma-tool.js";
-import { DEFAULT_CLI_COLUMNS, renderOpaqueBlock, safeText, tone, type TextRenderContext } from "./terminal.js";
+import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
+import {
+  DEFAULT_CLI_COLUMNS,
+  quotedText,
+  renderOpaqueBlock,
+  safeText,
+  tone,
+  type TextRenderContext,
+} from "./terminal.js";
 
-const HANG = "  ";
-
-type Accepted<O> = Extract<O, { kind: "accepted" }>;
-
-export type ContractOutcome =
-  | BindOutcome
-  | AmendOutcome
-  | DeliverOutcome
-  | ReviewOutcome
-  | VerifyOutcome
-  | DeliveryPreviewOutcome
-  | ArcOutcome
-  | AbandonOutcome;
+type BindOutcome = z.output<typeof bindOutcomeSchema>;
+type AmendOutcome = z.output<typeof amendOutcomeSchema>;
+type ArcOutcome = z.output<typeof arcOutcomeSchema>;
+type AbandonOutcome = z.output<typeof abandonOutcomeSchema>;
+type DeliverOutcome = z.output<typeof deliverOutcomeSchema>;
+type ReviewOutcome = z.output<typeof reviewOutcomeSchema>;
+type VerifyOutcome = z.output<typeof verifyOutcomeSchema>;
+type ContractAnswers = {
+  bind: BindOutcome;
+  amend: AmendOutcome;
+  arc: ArcOutcome;
+  abandon: AbandonOutcome;
+  deliver: DeliverOutcome;
+  review: ReviewOutcome;
+  verify: VerifyOutcome;
+};
+export type ContractMutationName = "bind" | "amend" | "deliver" | "verify" | "review" | "arc" | "abandon";
+export type ContractOutcome = ContractAnswers[ContractMutationName];
 export type AcceptedContractOutcome = Extract<ContractOutcome, { kind: "accepted" }>;
-type RetryContractOutcome = Extract<ContractOutcome, { kind: "retry" }>;
+type AcceptedOf<K extends ContractMutationName> = Extract<ContractAnswers[K], { kind: "accepted" }>;
+type PresentationInput = Readonly<{ verdict?: "satisfied" | "unsatisfied"; note?: string; message?: string }>;
+type ContractReceipt = Readonly<{ contractId?: ContractId; issues?: readonly InvocationIssue[] }>;
 
-function attestationVerdict(facts: readonly Fact[]): "satisfied" | "unsatisfied" {
-  const attestation = facts.findLast(
-    (fact): fact is Extract<Fact, { kind: "attestation" }> =>
-      fact.kind === "attestation" && fact.data.gate === "reviewed",
-  );
-  if (attestation === undefined) throw new Error("accepted review is missing its reviewed attestation");
-  return attestation.data.verdict;
+function words(kind: string): string {
+  return kind.replaceAll("-", " ");
 }
 
-function bindTarget(facts: readonly Fact[]): string | null {
-  const target = facts.findLast((fact) => fact.kind === "bind")?.data.coordinates.target;
-  return target === undefined ? null : targetName(target);
-}
-
-function arcChapter(facts: readonly Fact[]): Readonly<{ seq: number; title: string }> {
-  const arc = facts.findLast((fact) => fact.kind === "arc");
-  if (arc === undefined) throw new Error("accepted arc is missing its arc fact");
-  return { seq: arc.data.seq, title: arc.data.title };
-}
-
-function abandonedNote(facts: readonly Fact[]): string | undefined {
-  return facts.findLast((fact) => fact.kind === "abandoned")?.data.note;
-}
-
-function retryLines(detail: KeiyakuRetryReason, indent: string, columns: number): readonly string[] {
-  if (detail.kind === "publication-failed") {
-    return [...renderOpaqueBlock("publication-failed", indent, columns), ...["reason", "", detail.diagnostic, ""]];
-  }
-  return renderOpaqueBlock(detail.kind, indent, columns);
-}
-
-/**
- * The one word for a checkout git could not carry to the landed head: `behind` is git's own name for
- * that state, and the raw result kind never prints on a receipt.
- */
 function checkoutBehindRows(path: string, target: string, columns: number): readonly string[] {
   const lines: string[] = [];
   receiptRow(
@@ -106,535 +71,457 @@ function checkoutBehindRows(path: string, target: string, columns: number): read
   return lines;
 }
 
-function lagRows(
-  lag: Extract<
-    ReconciliationLag,
-    { kind: "worktree-hook-failed" | "contract-file-failed" | "reconcile-failed" | "target-workspace-retained" }
-  >,
-  columns: number,
-): readonly string[] {
+function cleanupResourceRows(issue: InvocationIssue, columns: number): readonly string[] {
   const lines: string[] = [];
-  if (lag.kind === "worktree-hook-failed") {
-    receiptRow(
-      lines,
-      "!",
-      "lag",
-      [
-        {
-          text: `worktree-hook-failed ${lag.phase} ${lag.path} command ${lag.command} name ${lag.name} ${hookFailureSummary(lag.failure)}`,
-          opaque: true,
-        },
-      ],
-      columns,
-    );
-    appendHookPayload(lines, lag.failure);
-  } else if (lag.kind === "contract-file-failed") {
-    receiptRow(
-      lines,
-      "!",
-      "lag",
-      [{ text: `contract-file-failed ${lag.worktree} ${lag.path}`, opaque: true }],
-      columns,
-    );
-    receiptPayload(lines, "reason", lag.diagnostic);
-  } else if (lag.kind === "target-workspace-retained") {
-    receiptRow(
-      lines,
-      "!",
-      "target workspace unavailable",
-      [{ text: lag.contractId, opaque: true }, { text: lag.reason.replaceAll("-", " ") }],
-      columns,
-    );
-  } else {
-    receiptRow(lines, "!", "lag", [{ text: `reconcile-failed ${lag.stage}`, opaque: true }], columns);
-    receiptPayload(lines, "reason", lag.diagnostic);
-  }
+  if ("snapshot" in issue && issue.snapshot !== undefined)
+    receiptRow(lines, " ", "cleanup snapshot", [{ text: issue.snapshot, opaque: true }], columns);
+  if ("requirement" in issue && issue.requirement !== undefined)
+    receiptRow(lines, " ", "cleanup requirement", [{ text: issue.requirement, opaque: true }], columns);
+  if ("index" in issue && issue.index !== undefined)
+    receiptRow(lines, " ", "cleanup check", [{ text: String(issue.index) }], columns);
   return lines;
 }
 
-function settlementLagRows(lag: SettlementLag, columns: number): readonly string[] {
+type RetainedIssue = Extract<
+  InvocationIssue,
+  {
+    kind:
+      | "worktree-retained"
+      | "worktree-follow-retained"
+      | "unsealed-bytes"
+      | "target-checkout-retained"
+      | "target-workspace-retained"
+      | "worktree-hook-failed"
+      | "reconcile-failed"
+      | "contract-file-failed";
+  }
+>;
+
+function retainedIssueRows(issue: RetainedIssue, columns: number): readonly string[] {
   const lines: string[] = [];
-  receiptRow(lines, "!", "settlement", [{ text: lag.surface.replaceAll("-", " ") }], columns);
-  if (lag.debtId !== undefined) receiptRow(lines, " ", "debt", [{ text: lag.debtId, opaque: true }], columns);
-  if (lag.path !== undefined) receiptRow(lines, " ", "path", [{ text: lag.path, opaque: true }], columns);
-  receiptPayload(lines, "reason", lag.diagnostic);
+  switch (issue.kind) {
+    case "worktree-retained":
+      receiptRow(lines, "!", "lag", [{ text: "worktree retained" }, { text: issue.path, opaque: true }], columns);
+      if (issue.diagnostic !== undefined) receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+    case "worktree-follow-retained":
+      receiptRow(
+        lines,
+        " ",
+        "worktree follow kept at",
+        [{ text: issue.path, opaque: true }, { text: `· ${words(issue.reason)}` }],
+        columns,
+      );
+      return lines;
+    case "unsealed-bytes":
+      receiptRow(lines, " ", "unsealed bytes kept at", [{ text: issue.path, opaque: true }], columns);
+      return lines;
+    case "target-checkout-retained":
+      lines.push(...checkoutBehindRows(issue.path, issue.target, columns));
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+    case "target-workspace-retained":
+      receiptRow(
+        lines,
+        "!",
+        "target workspace unavailable",
+        [{ text: issue.targetContractId, opaque: true }, { text: words(issue.reason) }],
+        columns,
+      );
+      return lines;
+    case "worktree-hook-failed":
+      receiptRow(
+        lines,
+        "!",
+        "lag",
+        [{ text: `worktree-hook-failed ${issue.phase} ${issue.path} name ${issue.name}`, opaque: true }],
+        columns,
+      );
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+    case "reconcile-failed":
+      receiptRow(lines, "!", "lag", [{ text: "reconcile-failed", opaque: true }], columns);
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+    case "contract-file-failed":
+      receiptRow(lines, "!", "lag", [{ text: `contract-file-failed ${issue.path}`, opaque: true }], columns);
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+  }
+}
+
+type ResidualIssue = Extract<
+  InvocationIssue,
+  {
+    kind:
+      | "decode-channel-retirement"
+      | "verification-cleanup"
+      | "worktree-leak"
+      | "private-state-seat-close"
+      | "execution-stopped"
+      | "settlement-failed";
+  }
+>;
+
+function residualIssueRows(issue: ResidualIssue, columns: number): readonly string[] {
+  const lines: string[] = [];
+  switch (issue.kind) {
+    case "decode-channel-retirement":
+      receiptPayload(lines, "cleanup", issue.diagnostic);
+      return lines;
+    case "verification-cleanup":
+      lines.push(...cleanupResourceRows(issue, columns));
+      receiptRow(lines, "!", "cleanup", [{ text: `name ${quotedText(issue.name)}` }], columns);
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+    case "worktree-leak":
+      lines.push(...cleanupResourceRows(issue, columns));
+      if (issue.path === undefined) receiptRow(lines, " ", "verification scratch not retained", [], columns);
+      else receiptRow(lines, " ", "verification scratch kept at", [{ text: issue.path, opaque: true }], columns);
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+    case "private-state-seat-close":
+      receiptRow(lines, "!", "lag", [{ text: "private-state-seat-close-failed", opaque: true }], columns);
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+    case "execution-stopped":
+      receiptRow(
+        lines,
+        "!",
+        "execution",
+        [{ text: issue.reason }, ...(issue.contractId === undefined ? [] : [{ text: issue.contractId, opaque: true }])],
+        columns,
+      );
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+    case "settlement-failed":
+      receiptRow(
+        lines,
+        "!",
+        "settlement",
+        issue.debtId === undefined ? [] : [{ text: issue.debtId, opaque: true }],
+        columns,
+      );
+      receiptPayload(lines, "reason", issue.diagnostic);
+      return lines;
+  }
+}
+
+function issueRows(issue: InvocationIssue, columns: number): readonly string[] {
+  switch (issue.kind) {
+    case "worktree-retained":
+    case "worktree-follow-retained":
+    case "unsealed-bytes":
+    case "target-checkout-retained":
+    case "target-workspace-retained":
+    case "worktree-hook-failed":
+    case "reconcile-failed":
+    case "contract-file-failed":
+      return retainedIssueRows(issue, columns);
+    default:
+      return residualIssueRows(issue, columns);
+  }
+}
+
+type IssuePresentation = Readonly<{ mode?: "receipt" | "terminal" | "exception"; follow?: boolean }>;
+
+/** Successful retention stays typed-only unless the operation is terminal or removal failed. */
+function issueIsPresented(issue: InvocationIssue, presentation: IssuePresentation): boolean {
+  const mode = presentation.mode ?? "exception";
+  if (mode === "exception") return true;
+  if (issue.kind === "worktree-follow-retained" || issue.kind === "unsealed-bytes") return false;
+  if (issue.kind === "target-checkout-retained") return presentation.follow === true;
+  if (issue.kind === "worktree-retained") return mode === "terminal" || issue.diagnostic !== undefined;
+  return true;
+}
+
+/** Flat issues inherit the primary owner; a distinct owner is named once before its issue. */
+export function contractIssueLines(
+  result: ContractReceipt,
+  columns: number,
+  presentation: IssuePresentation = {},
+): readonly string[] {
+  const lines: string[] = [];
+  for (const issue of result.issues ?? []) {
+    if (!issueIsPresented(issue, presentation)) continue;
+    if (issue.contractId !== undefined && issue.contractId !== result.contractId)
+      receiptRow(lines, "!", "issue owner", [{ text: issue.contractId, opaque: true }], columns);
+    lines.push(...issueRows(issue, columns));
+  }
   return lines;
 }
 
 type OverlapPattern = RegionOverlap["patterns"][number];
-
-type OverlapGroup = Readonly<{
-  identical: readonly string[];
-  contained: readonly Readonly<{ container: string; leaves: readonly string[] }>[];
-  intersections: readonly Readonly<{ mine: string; theirs: string }>[];
-}>;
-
-function overlapGroup(patterns: readonly OverlapPattern[]): OverlapGroup {
-  const identical: string[] = [];
-  const identicalSeen = new Set<string>();
-  const contained = new Map<string, { container: string; leaves: string[] }>();
-  const intersections: Array<{ mine: string; theirs: string }> = [];
-  const intersectionSeen = new Set<string>();
-
+function groupPatterns(patterns: readonly OverlapPattern[]) {
+  const identical = new Set<string>();
+  const contained = new Map<string, Set<string>>();
+  const intersections = new Map<string, OverlapPattern>();
   for (const pattern of patterns) {
-    if (pattern.relation === "same" || (pattern.relation === undefined && pattern.mine === pattern.theirs)) {
-      if (!identicalSeen.has(pattern.mine)) {
-        identicalSeen.add(pattern.mine);
-        identical.push(pattern.mine);
-      }
-      continue;
-    }
-    if (pattern.relation === "mine-within-theirs" || pattern.relation === "theirs-within-mine") {
+    if (pattern.relation === undefined && pattern.mine === pattern.theirs) identical.add(pattern.mine);
+    else if (pattern.relation === "mine-within-theirs" || pattern.relation === "theirs-within-mine") {
       const container = pattern.relation === "mine-within-theirs" ? pattern.theirs : pattern.mine;
       const leaf = pattern.relation === "mine-within-theirs" ? pattern.mine : pattern.theirs;
-      const entry = contained.get(container) ?? { container, leaves: [] };
-      if (!entry.leaves.includes(leaf)) entry.leaves.push(leaf);
-      contained.set(container, entry);
-      continue;
-    }
-    const key = `${pattern.mine}\u0000${pattern.theirs}`;
-    if (!intersectionSeen.has(key)) {
-      intersectionSeen.add(key);
-      intersections.push({ mine: pattern.mine, theirs: pattern.theirs });
-    }
+      const leaves = contained.get(container) ?? new Set<string>();
+      leaves.add(leaf);
+      contained.set(container, leaves);
+    } else intersections.set(`${pattern.mine}\u0000${pattern.theirs}`, pattern);
   }
-
-  return { identical, contained: [...contained.values()], intersections };
+  return { identical, contained, intersections };
 }
 
 function overlapRows(overlaps: readonly RegionOverlap[], color: boolean): readonly string[] {
   const groups = new Map<string, OverlapPattern[]>();
-  for (const overlap of overlaps) {
-    const patterns = groups.get(overlap.contract) ?? [];
-    patterns.push(...overlap.patterns);
-    groups.set(overlap.contract, patterns);
-  }
+  for (const overlap of overlaps)
+    groups.set(overlap.contractId, [...(groups.get(overlap.contractId) ?? []), ...overlap.patterns]);
   if (groups.size === 0) return [];
-
   const lines = [""];
-  let groupIndex = 0;
+  let index = 0;
   for (const [contract, patterns] of groups) {
-    if (groupIndex++ > 0) lines.push("");
+    if (index++ > 0) lines.push("");
     const identity = safeText(contract);
     lines.push(`  overlap  ${color ? `\u001b[1m${identity}\u001b[0m` : identity}`);
-    const group = overlapGroup(patterns);
+    const { identical, contained, intersections } = groupPatterns(patterns);
     const relation = (symbol: string) => tone(symbol, "dim", color);
-    const bounded = group.identical.slice(0, 6);
-    for (const pattern of bounded) lines.push(`    ${relation("≡")}  ${safeText(pattern)}`);
-    if (group.identical.length > 6) lines.push(`    ${relation("≡")}  … (${group.identical.length - 6} more)`);
-    for (const { container, leaves } of group.contained) {
-      for (const leaf of leaves.slice(0, 6))
+    for (const pattern of [...identical].slice(0, 6)) lines.push(`    ${relation("≡")}  ${safeText(pattern)}`);
+    if (identical.size > 6) lines.push(`    ${relation("≡")}  … (${identical.size - 6} more)`);
+    for (const [container, leaves] of contained) {
+      for (const leaf of [...leaves].slice(0, 6))
         lines.push(`    ${safeText(leaf)}  ${relation("⊂")}  ${safeText(container)}`);
-      if (leaves.length > 6) lines.push(`    … (${leaves.length - 6} more)  ${relation("⊂")}  ${safeText(container)}`);
+      if (leaves.size > 6) lines.push(`    … (${leaves.size - 6} more)  ${relation("⊂")}  ${safeText(container)}`);
     }
-    for (const { mine, theirs } of group.intersections)
+    for (const { mine, theirs } of intersections.values())
       lines.push(`    ${relation("∩")}  ${safeText(mine)} · ${safeText(theirs)}`);
   }
   return lines;
 }
 
-function acceptedLagRows(result: AcceptedContractOutcome, columns: number): readonly string[] {
-  const obligations: string[] = [];
-  // A checkout this invocation's own follow could not carry is loud; the same arm's reconciliation lag
-  // is pre-existing residue and stays in the typed result only.
-  for (const checkout of effectRetainedCheckouts(result.effects) ?? []) {
-    obligations.push(...checkoutBehindRows(checkout.path, checkout.target, columns));
-  }
-  for (const { contract, lag } of effectLags(result.effects)) {
-    if (
-      lag.kind === "worktree-retained" ||
-      lag.kind === "worktree-follow-retained" ||
-      lag.kind === "unsealed-bytes" ||
-      lag.kind === "target-checkout-retained"
-    )
-      continue;
-    if (contract !== result.contract)
-      receiptRow(obligations, "!", "lag owner", [{ text: contract, opaque: true }], columns);
-    obligations.push(...lagRows(lag, columns));
-  }
-  for (const { contract, lag } of effectSettlementLags(result.effects)) {
-    if (contract !== result.contract)
-      receiptRow(obligations, "!", "settlement owner", [{ text: contract, opaque: true }], columns);
-    obligations.push(...settlementLagRows(lag, columns));
-  }
-  obligations.push(...executionCleanupLines(effectCleanup(result.effects), columns, result.contract));
-  obligations.push(...executionStopLines(effectExecutionStops(result.effects), columns));
-  return obligations;
-}
-
-function acceptedDeviations(
-  result: Accepted<BindOutcome> | Accepted<AmendOutcome>,
+function deviations(
+  result: Readonly<{ overlaps?: readonly RegionOverlap[]; overlapError?: string }>,
   columns: number,
   color: boolean,
 ): readonly string[] {
-  const deviations: string[] = [];
-  if (result.value.overlaps !== undefined) deviations.push(...overlapRows(result.value.overlaps, color));
-  if (result.value.overlapFailure !== undefined) {
-    receiptRow(deviations, "!", "overlap", [{ text: "unavailable" }], columns);
-    receiptPayload(deviations, "reason", result.value.overlapFailure);
-  }
-  return deviations;
-}
-
-/** Evidence handles stay in JSON and history; ordinary receipt text carries only outstanding obligations. */
-function recordBlock(result: AcceptedContractOutcome, columns: number): readonly string[] {
-  const rows: string[] = [];
-  const recoverySnapshot = effectRecoverySnapshot(result.effects);
-  if (recoverySnapshot !== undefined)
-    receiptRow(rows, " ", "recovery snapshot", [{ text: recoverySnapshot, opaque: true }], columns);
-  rows.push(...acceptedLagRows(result, columns));
-  return rows;
-}
-
-/** A terminal command names the worktree it retired, or the retained worktree it failed to remove. */
-function worktreeRetirementLines(result: AcceptedContractOutcome, columns: number): readonly string[] {
   const lines: string[] = [];
-  for (const { contract, name } of effectRetiredWorktrees(result.effects)) {
-    if (contract === result.contract) receiptRow(lines, " ", "worktree", [{ text: `${name} retired` }], columns);
-    else
-      receiptRow(
-        lines,
-        "!",
-        "worktree owner",
-        [
-          { text: contract, opaque: true },
-          { text: `${name} retired`, opaque: true },
-        ],
-        columns,
-      );
-  }
-  for (const { contract, path } of effectRetainedWorktrees(result.effects)) {
-    if (contract === result.contract)
-      receiptRow(lines, "!", "lag", [{ text: "worktree retained" }, { text: path, opaque: true }], columns);
-    else
-      receiptRow(
-        lines,
-        "!",
-        "worktree owner",
-        [
-          { text: contract, opaque: true },
-          { text: `retained ${path}`, opaque: true },
-        ],
-        columns,
-      );
+  if (result.overlaps !== undefined) lines.push(...overlapRows(result.overlaps, color));
+  if (result.overlapError !== undefined) {
+    receiptRow(lines, "!", "overlap", [{ text: "unavailable" }], columns);
+    receiptPayload(lines, "reason", result.overlapError);
   }
   return lines;
 }
 
-/** The landed diff's shape, rendered by the one diffstat rule the akuma surfaces already own. */
-function landedChangesLines(
-  scope: Readonly<{ filesChanged: number; insertions: number; deletions: number }> | undefined,
-  columns: number,
-): readonly string[] {
-  if (scope === undefined) return [];
-  const files = `${scope.filesChanged} ${scope.filesChanged === 1 ? "file" : "files"}`;
-  const lines: string[] = [];
-  receiptRow(
-    lines,
-    " ",
-    "changes",
-    [{ text: `${files} · ${renderDiffstat({ added: scope.insertions, removed: scope.deletions })}` }],
-    columns,
+function bind(result: AcceptedOf<"bind">, columns: number, color: boolean): string {
+  const lines = titleLines("✓", "bound", result.contractId, columns);
+  if (result.worktreePath !== undefined)
+    receiptRow(lines, " ", "worktree", [{ text: result.worktreePath, opaque: true }], columns);
+  if (result.target === undefined) receiptRow(lines, " ", "no target", [], columns);
+  else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
+  lines.push(
+    ...deviations(result, columns, color),
+    ...contractIssueLines(result, columns, { mode: "receipt" }),
+    ...recoverySnapshotLines(result.recoverySnapshots, columns, result.contractId),
   );
-  return lines;
+  return lines.join("\n");
 }
 
-/** One Git movement grammar for completion, independent of which operation triggered it. */
-function completedPlacementLines(
-  result: Accepted<DeliverOutcome> | Accepted<ReviewOutcome> | Accepted<VerifyOutcome>,
+function amend(result: AcceptedOf<"amend">, columns: number, color: boolean): string {
+  const lines = titleLines("✓", "amended", result.contractId, columns);
+  if (result.changedSections === undefined && result.gatesChanged === undefined && result.afterChanged === undefined)
+    receiptRow(lines, " ", "terms", [{ text: "unchanged" }], columns);
+  if (result.changedSections !== undefined)
+    receiptRow(lines, " ", "changed sections", [{ text: result.changedSections.join(" · ") }], columns);
+  if (result.gatesChanged === true) receiptRow(lines, " ", "gates", [{ text: "changed" }], columns);
+  if (result.afterChanged === true) receiptRow(lines, " ", "after", [{ text: "changed" }], columns);
+  lines.push(
+    ...deviations(result, columns, color),
+    ...contractIssueLines(result, columns, { mode: "receipt" }),
+    ...recoverySnapshotLines(result.recoverySnapshots, columns, result.contractId),
+  );
+  return lines.join("\n");
+}
+
+function placedIntegration(
+  placement: Readonly<{ target?: string; predecessor?: string; integration?: string }>,
+  fallback: string | undefined,
+): string | undefined {
+  return placement.integration ?? fallback;
+}
+
+function placedMovementLines(
+  placement: Readonly<{ target?: string; predecessor?: string }>,
+  integration: string,
   columns: number,
 ): readonly string[] {
-  const completion = result.value.completion;
-  if (completion === undefined) return [];
-  const abbreviations = abbreviateGitIds([
-    completion.predecessor ?? "",
-    completion.integration,
-    ...(result.operation === "deliver"
-      ? [result.value.tenderSnapshot ?? "", result.value.integration?.changeId ?? ""]
-      : []),
-  ]);
+  if (placement.target === undefined) return [];
+  const ids = abbreviateGitIds([placement.predecessor ?? "", integration]);
   const lines: string[] = [];
-  if (completion.predecessor !== undefined && completion.target !== undefined) {
-    receiptRow(
-      lines,
-      " ",
-      "target",
-      [
-        {
-          text: `${displayGitId(completion.predecessor, abbreviations)}..${displayGitId(completion.integration, abbreviations)}`,
-        },
-        { text: completion.target, opaque: true },
-      ],
-      columns,
-    );
-  }
-  lines.push(...landedChangesLines(completion.scope, columns));
-  // Placement admission always admits the claim entry beside the movement, so a completed placement is accepted.
-  receiptRow(lines, "✓", lifecycleWord("claimed"), [], columns);
+  const movement =
+    placement.predecessor === undefined
+      ? displayGitId(integration, ids)
+      : `${displayGitId(placement.predecessor, ids)}..${displayGitId(integration, ids)}`;
+  receiptRow(lines, " ", "target", [{ text: movement }, { text: placement.target, opaque: true }], columns);
+  receiptRow(lines, "✓", "accepted", [], columns);
   return lines;
 }
 
-function movementLines(result: Accepted<DeliverOutcome>, columns: number): readonly string[] {
-  const count = result.facts.filter((fact) => fact.kind === "reintegrated").length;
-  if (count === 0) return [];
-  const lines: string[] = [];
-  receiptRow(lines, "!", "target", [{ text: `moved · re-integrated x${count}` }], columns);
-  return lines;
-}
+type CompletionAccepted = AcceptedOf<"deliver"> | AcceptedOf<"review"> | AcceptedOf<"verify">;
 
-function continuationLines(
-  result: Accepted<DeliverOutcome> | Accepted<ReviewOutcome> | Accepted<VerifyOutcome>,
-  columns: number,
-): readonly string[] {
-  const report = result.value.continuation;
-  if (report === undefined) return [];
+function continuationLines(continuation: CompletionAccepted["continuation"], columns: number): readonly string[] {
+  if (continuation === undefined) return [];
   const lines: string[] = [];
-  for (const contractId of report.claimed) {
+  for (const contractId of continuation.claimed ?? [])
     receiptRow(lines, "✓", "dependent", [{ text: "complete" }, { text: contractId, opaque: true }], columns);
-  }
-  for (const { contractId, stop } of report.stopped) {
-    if ("kind" in stop && stop.kind === "already-terminal")
-      receiptRow(lines, "!", contractId, [{ text: "already terminal" }], columns);
-    else if ("kind" in stop && stop.kind === "execution-stopped") lines.push(...executionStopLines([stop], columns));
-    else if ("kind" in stop && stop.kind === "physical-lag") {
+  for (const stop of continuation.stopped ?? []) {
+    if (stop.kind === "already-terminal")
+      receiptRow(lines, "!", stop.contractId, [{ text: "already terminal" }], columns);
+    else if (stop.kind === "physical-lag")
       receiptRow(
         lines,
         "!",
         "dependent",
-        [{ text: contractId, opaque: true }, { text: "physical follow stopped" }],
+        [{ text: stop.contractId, opaque: true }, { text: "physical follow stopped" }],
         columns,
       );
-    } else lines.push(...stopLines(stop, columns, contractId, contractId));
+    else lines.push(...stopLines(stop, columns, stop.contractId, stop.contractId));
   }
   return lines;
 }
 
-function renderAcceptedBind(result: Accepted<BindOutcome>, columns: number, color: boolean): string {
-  const lines = titleLines("✓", "bound", result.contract, columns);
-  if (result.value.workspace !== undefined)
-    receiptRow(lines, " ", "worktree", [{ text: result.value.workspace.path, opaque: true }], columns);
-  const target = bindTarget(result.facts);
-  if (target === null) receiptRow(lines, " ", "no target", [], columns);
-  else receiptRow(lines, " ", "target", [{ text: target, opaque: true }], columns);
-  for (const warning of result.value.warnings ?? [])
-    receiptRow(lines, "!", "region warning", [{ text: warning }], columns);
-  lines.push(...acceptedDeviations(result, columns, color), ...recordBlock(result, columns));
-  return lines.join("\n");
+function completionPlacementLines(result: CompletionAccepted, columns: number): readonly string[] {
+  const placement = result.placement;
+  if (placement === undefined) return [];
+  if (placement.kind !== "placed") return placementLines(placement, columns, result.contractId);
+  const fallback = "integration" in result ? result.integration : undefined;
+  const integration = placedIntegration(placement, fallback);
+  if (integration === undefined) return [];
+  return placedMovementLines(placement, integration, columns);
 }
 
-function termsDiffText(diff: string): string {
-  return diff.replace(/^={3,}\r?\n/u, "").replace(/^((?:---|\+\+\+) [^\r\n]*)[ \t]+$/gmu, "$1");
+function trailingPlacementLines(result: CompletionAccepted, columns: number): readonly string[] {
+  const placement = result.placement;
+  return [
+    ...completionPlacementLines(result, columns),
+    ...continuationLines(result.continuation, columns),
+    ...recoverySnapshotLines(result.recoverySnapshots, columns, result.contractId),
+    ...contractIssueLines(result, columns, { mode: "receipt", follow: placement !== undefined }),
+    ...gatesAwaitLines(placement?.kind === "placed" ? undefined : placement),
+  ];
 }
 
-function renderAcceptedAmend(result: Accepted<AmendOutcome>, columns: number, color: boolean): string {
-  const documentChanged = result.value.documentDiff.length > 0;
-  const changed =
-    documentChanged || result.value.changes.gates !== undefined || result.value.changes.after !== undefined;
-  const lines = titleLines("✓", "amended", result.contract, columns);
-  if (!changed) receiptRow(lines, " ", "terms", [{ text: "unchanged" }], columns);
-  if (result.value.changes.gates !== undefined)
-    receiptRow(lines, " ", "gates", [{ text: result.value.changes.gates.join(" · ") || "none" }], columns);
-  if (result.value.changes.after !== undefined)
-    receiptRow(lines, " ", "after", [{ text: result.value.changes.after.join(" · ") || "none" }], columns);
-  if (documentChanged) receiptPayload(lines, "terms diff", termsDiffText(result.value.documentDiff));
-  lines.push(...acceptedDeviations(result, columns, color), ...recordBlock(result, columns));
-  return lines.join("\n");
-}
-
-function deliverIdentityLines(
-  result: Accepted<DeliverOutcome>,
-  abbreviations: ReadonlyMap<string, string>,
-  columns: number,
-  kept: boolean,
-): readonly string[] {
-  const lines: string[] = [];
-  if (result.value.leading !== undefined && result.value.leading.kind === "already-admitted")
-    receiptRow(lines, " ", "leading", [{ text: result.value.leading.kind.replaceAll("-", " ") }], columns);
-  if (result.value.tenderSnapshot !== undefined)
-    receiptRow(
-      lines,
-      " ",
-      "candidate",
-      [{ text: `${displayGitId(result.value.tenderSnapshot, abbreviations)}${kept ? " · kept" : ""}`, opaque: true }],
-      columns,
-    );
-  if (result.value.integration !== undefined && !/^0{40}$/u.test(result.value.integration.changeId))
-    receiptRow(
-      lines,
-      " ",
-      "content identity",
-      [{ text: displayGitId(result.value.integration.changeId, abbreviations), opaque: true }],
-      columns,
-    );
-  if (result.value.contentChange !== undefined)
-    receiptRow(
-      lines,
-      " ",
-      "candidate-content-changed",
-      [
-        { text: `previous ${displayGitId(result.value.contentChange.previousChange, abbreviations)}`, opaque: true },
-        { text: `current ${displayGitId(result.value.contentChange.currentChange, abbreviations)}`, opaque: true },
-      ],
-      columns,
-    );
-  if (result.value.note !== undefined) receiptPayload(lines, "note", result.value.note);
-  const reusedIntegration = result.value.leading.reusedIntegration;
-  if (reusedIntegration !== undefined)
-    receiptRow(
-      lines,
-      " ",
-      "integration",
-      [{ text: `${displayGitId(reusedIntegration, abbreviations)} reused · commit message kept from first delivery` }],
-      columns,
-    );
-  return lines;
-}
-
-function deliveryIdentityAbbreviations(value: Accepted<DeliverOutcome>["value"]): ReadonlyMap<string, string> {
-  return abbreviateGitIds([
-    value.tenderSnapshot ?? "",
-    value.integration?.changeId ?? "",
-    value.integration.snapshot,
-    value.contentChange?.previousChange ?? "",
-    value.contentChange?.currentChange ?? "",
-    value.completion?.predecessor ?? "",
-    value.completion?.integration ?? "",
+function deliver(result: AcceptedOf<"deliver">, columns: number, input: PresentationInput): string {
+  const lines = titleLines("✓", "delivered", result.contractId, columns);
+  const placement = result.placement;
+  const ids = abbreviateGitIds([
+    result.candidate,
+    result.integration,
+    result.contentId,
+    result.previousContentId ?? "",
+    placement?.kind === "placed" ? (placement.predecessor ?? "") : "",
+    placement?.kind === "placed" ? (placedIntegration(placement, result.integration) ?? "") : "",
   ]);
-}
-
-function renderAcceptedDeliver(result: Accepted<DeliverOutcome>, columns: number): string {
-  const complete = result.value.completion !== undefined;
-  const lines = titleLines("✓", "delivered", result.contract, columns);
-  const abbreviations = deliveryIdentityAbbreviations(result.value);
-  lines.push(...deliverIdentityLines(result, abbreviations, columns, !complete));
-  if ((result.value.gates?.length ?? 0) > 0)
-    receiptRow(
-      lines,
-      " ",
-      "integration result",
-      [{ text: displayGitId(result.value.integration.snapshot, abbreviations) }],
-      columns,
-    );
-  lines.push(...standingGateLines(result.value.gates, columns));
-  if (complete) lines.push(...completedPlacementLines(result, columns));
-  else lines.push(...movementLines(result, columns));
-  if (!complete && result.value.placement !== undefined)
-    lines.push(...placementLines(result.value.placement, columns, result.contract));
-  lines.push(
-    ...continuationLines(result, columns),
-    ...recordBlock(result, columns),
-    ...worktreeRetirementLines(result, columns),
-    ...gatesAwaitLines(result.value.placement),
-  );
-  return lines.join("\n");
-}
-
-function renderAcceptedReview(result: Accepted<ReviewOutcome>, columns: number): string {
-  const lines = titleLines("✓", `review ${attestationVerdict(result.facts)}`, result.contract, columns);
-  lines.push(...standingGateLines(result.value.gates, columns));
-  lines.push(...completedPlacementLines(result, columns));
-  if (result.value.placement !== undefined) {
-    lines.push(...placementLines(result.value.placement, columns, result.contract));
-  }
-  lines.push(...continuationLines(result, columns));
-  lines.push(...recordBlock(result, columns));
-  lines.push(...worktreeRetirementLines(result, columns));
-  lines.push(...gatesAwaitLines(result.value.placement));
-  return lines.join("\n");
-}
-
-function renderAcceptedVerify(result: Accepted<VerifyOutcome>, columns: number): string {
-  const lines = titleLines("✓", "verify", result.contract, columns);
-  const abbreviations = abbreviateGitIds([
-    result.value.snapshot,
-    ...result.value.checks.map((check) => check.snapshot),
-    result.value.completion?.integration ?? "",
-    result.value.completion?.predecessor ?? "",
-  ]);
-  for (const check of result.value.checks) {
-    receiptRow(
-      lines,
-      " ",
-      `check ${check.index}`,
-      [
-        { text: check.kind === "terminal" ? "executed" : "execution stopped" },
-        { text: check.requirement, opaque: true },
-        { text: `· snapshot ${displayGitId(check.snapshot, abbreviations)}` },
-      ],
-      columns,
-    );
-    if (check.kind === "terminal") {
-      receiptRow(lines, check.verdict === "satisfied" ? "✓" : "×", "verdict", [{ text: check.verdict }], columns);
-      if (check.summary !== undefined) receiptPayload(lines, "summary", check.summary);
-      if (check.admission.kind === "stopped") {
-        receiptRow(lines, "!", "admission", [{ text: "stopped" }], columns);
-        lines.push(...stopLines(check.admission.stop, columns, result.contract));
-      } else receiptRow(lines, " ", "attestation", [{ text: check.admission.kind }], columns);
-    } else {
-      lines.push(...stopLines(check.stop, columns, result.contract));
-    }
-    if (check.retainedPath !== undefined)
-      receiptRow(lines, " ", "scratch retained", [{ text: check.retainedPath, opaque: true }], columns);
-  }
-  lines.push(...standingGateLines(result.value.gates, columns));
-  lines.push(...completedPlacementLines(result, columns));
-  if (result.value.placement !== undefined)
-    lines.push(...placementLines(result.value.placement, columns, result.contract));
-  lines.push(
-    ...continuationLines(result, columns),
-    ...recordBlock(result, columns),
-    ...worktreeRetirementLines(result, columns),
-    ...gatesAwaitLines(result.value.placement),
-  );
-  return lines.join("\n");
-}
-
-function renderAcceptedArc(result: Accepted<ArcOutcome>, columns: number): string {
-  const lines = titleLines(
-    "✓",
-    `chapter ${arcChapter(result.facts).seq} opened · ${arcChapter(result.facts).title}`,
-    result.contract,
+  if (result.admission === "reused") receiptRow(lines, " ", "admission", [{ text: "reused" }], columns);
+  receiptRow(
+    lines,
+    " ",
+    "candidate",
+    [{ text: `${displayGitId(result.candidate, ids)}${placement?.kind === "placed" ? "" : " · kept"}`, opaque: true }],
     columns,
   );
-  lines.push(...recordBlock(result, columns));
+  receiptRow(
+    lines,
+    " ",
+    "integration result",
+    [{ text: displayGitId(result.integration, ids), opaque: true }],
+    columns,
+  );
+  if (!/^0{40}$/u.test(result.contentId))
+    receiptRow(lines, " ", "content identity", [{ text: displayGitId(result.contentId, ids), opaque: true }], columns);
+  if (result.previousContentId !== undefined)
+    receiptRow(
+      lines,
+      " ",
+      "candidate content changed",
+      [{ text: `previous ${displayGitId(result.previousContentId, ids)}`, opaque: true }],
+      columns,
+    );
+  if (input.message !== undefined && result.admission !== "reused") receiptPayload(lines, "note", input.message);
+  lines.push(...trailingPlacementLines(result, columns));
   return lines.join("\n");
 }
 
-function renderAcceptedAbandon(result: Accepted<AbandonOutcome>, columns: number): string {
-  const lines = titleLines("✓", "abandoned", result.contract, columns);
-  const note = abandonedNote(result.facts);
-  if (note !== undefined) receiptRow(lines, " ", "note", [{ text: note }], columns);
-  lines.push(...recordBlock(result, columns));
-  lines.push(...worktreeRetirementLines(result, columns));
+function worktreeChangeLines(result: AcceptedOf<"review">, columns: number): readonly string[] {
+  const lines: string[] = [];
+  for (const field of ["staged", "unstaged", "untracked", "unmergedPaths"] as const)
+    for (const path of result.worktreeChanges?.[field] ?? [])
+      receiptRow(lines, " ", field === "unmergedPaths" ? "unmerged" : field, [{ text: path, opaque: true }], columns);
+  return lines;
+}
+
+function review(result: AcceptedOf<"review">, columns: number, input: PresentationInput): string {
+  if (input.verdict === undefined) throw new Error("review renderer requires its invocation verdict");
+  const lines = titleLines("✓", `review ${input.verdict}`, result.contractId, columns);
+  lines.push(...worktreeChangeLines(result, columns), ...trailingPlacementLines(result, columns));
   return lines.join("\n");
 }
 
-export function renderAccepted(result: AcceptedContractOutcome, context?: TextRenderContext): string {
+function verify(result: AcceptedOf<"verify">, columns: number): string {
+  const lines = titleLines("✓", "verify", result.contractId, columns);
+  lines.push(
+    ...verificationCheckLines(result.checks, result.snapshot, columns, result.contractId),
+    ...trailingPlacementLines(result, columns),
+  );
+  return lines.join("\n");
+}
+
+/** The operation and supplied input stay renderer context, never fields manufactured on the native result. */
+export function renderAccepted<K extends ContractMutationName>(
+  operation: K,
+  result: AcceptedOf<K>,
+  context?: TextRenderContext,
+  input: PresentationInput = {},
+): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
-  switch (result.operation) {
-    case "deliver-preview":
-      return renderDeliveryPreview(result, context);
+  switch (operation) {
     case "bind":
-      return renderAcceptedBind(result, columns, context?.color === true);
+      return bind(result as AcceptedOf<"bind">, columns, context?.color === true);
     case "amend":
-      return renderAcceptedAmend(result, columns, context?.color === true);
-    case "verify":
-      return renderAcceptedVerify(result, columns);
-    case "review":
-      return renderAcceptedReview(result, columns);
-    case "arc":
-      return renderAcceptedArc(result, columns);
-    case "abandon":
-      return renderAcceptedAbandon(result, columns);
+      return amend(result as AcceptedOf<"amend">, columns, context?.color === true);
     case "deliver":
-      return renderAcceptedDeliver(result, columns);
+      return deliver(result as AcceptedOf<"deliver">, columns, input);
+    case "review":
+      return review(result as AcceptedOf<"review">, columns, input);
+    case "verify":
+      return verify(result as AcceptedOf<"verify">, columns);
+    case "arc": {
+      const arc = result as AcceptedOf<"arc">;
+      return [
+        ...titleLines("✓", `chapter ${arc.chapter} opened`, arc.contractId, columns),
+        ...contractIssueLines(arc, columns, { mode: "receipt" }),
+        ...recoverySnapshotLines(arc.recoverySnapshots, columns, arc.contractId),
+      ].join("\n");
+    }
+    case "abandon": {
+      const abandoned = result as AcceptedOf<"abandon">;
+      const lines = titleLines("✓", "abandoned", abandoned.contractId, columns);
+      if (input.note !== undefined) receiptRow(lines, " ", "note", [{ text: input.note }], columns);
+      lines.push(
+        ...contractIssueLines(abandoned, columns, { mode: "terminal" }),
+        ...recoverySnapshotLines(abandoned.recoverySnapshots, columns, abandoned.contractId),
+      );
+      return lines.join("\n");
+    }
   }
 }
 
-export function renderRetry(result: RetryContractOutcome, context?: TextRenderContext): string {
+export function renderRetry(
+  operation: ContractMutationName | "deliver.preview",
+  result: Extract<ContractOutcome, { kind: "retry" }>,
+  context?: TextRenderContext,
+): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
-  const detail = retryLines(result.reason, HANG, columns);
-  return [...outcomeLines("?", result.operation, "retry", result.contract, columns), ...detail].join("\n");
+  const lines = outcomeLines("?", operation, "retry", "contractId" in result ? result.contractId : undefined, columns);
+  lines.push(...renderOpaqueBlock(words(result.reason), "  ", columns));
+  if (result.reason === "publication-failed") receiptPayload(lines, "reason", result.diagnostic);
+  return lines.join("\n");
 }
 
 export { renderContractHistory } from "./contract-history.js";

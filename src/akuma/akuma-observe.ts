@@ -28,43 +28,43 @@ import {
 import { resolveProviderExecution } from "./providers/index.js";
 import { abortableDelay } from "./abort.js";
 import type { WorldRoot } from "../world.js";
-import type { AkumaAlias } from "../identity/selector.js";
-import type { AkumaListRow, AkumaStatus, UnbornAkumaListRow } from "./akuma.js";
+import type { AkumaRosterRow, AkumaStatus } from "./akuma.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 
-export async function rosterListRow(
-  paths: AkumaPaths,
-  expected: AkumaId,
-  aliases: readonly AkumaAlias[] = [],
-): Promise<AkumaListRow | UnbornAkumaListRow> {
+export async function rosterListRow(paths: AkumaPaths, expected: AkumaId): Promise<AkumaRosterRow> {
   const snapshot = await readHeart(paths);
   if (snapshot.soul !== null) {
     const observed = await bornObservation(paths, expected, () => readHeart(paths), snapshot);
+    const lifeAtValue = lifeAt(
+      observed.currentLife,
+      observed.snapshot.latestBody,
+      observed.snapshot.latestKill,
+      observed.soul.createdAt,
+    );
+    const lastActivityAt = observed.snapshot.lastActivityAt;
+    const pending = observed.snapshot.pending.length;
     return {
+      kind: "born",
       id: observed.soul.id,
-      akumaName: observed.soul.akumaName,
-      ...(observed.soul.description === undefined ? {} : { description: observed.soul.description }),
       life: observed.currentLife,
-      lifeAt: lifeAt(
-        observed.currentLife,
-        observed.snapshot.latestBody,
-        observed.snapshot.latestKill,
-        observed.soul.createdAt,
-      ),
-      lastActivityAt: observed.snapshot.lastActivityAt,
-      pending: observed.snapshot.pending.map((tell) => tell.id),
-      aliases,
+      ...(lifeAtValue === null ? {} : { lifeAt: lifeAtValue }),
+      ...(lastActivityAt === null ? {} : { lastActivityAt }),
+      ...(pending === 0 ? {} : { pending }),
       ...(observed.soul.caller === undefined ? {} : { caller: observed.soul.caller }),
     };
   }
+  const unborn = (life: "unborn" | "stillborn", diagnostic?: string) => ({
+    kind: "unborn" as const,
+    id: expected,
+    life,
+    ...(diagnostic === undefined ? {} : { diagnostic }),
+  });
   try {
-    if ((await probeLeash(paths)) === "held") return { id: expected, life: "unborn", aliases };
+    if ((await probeLeash(paths)) === "held") return unborn("unborn");
     const seal = await readSeal(paths);
-    return seal === null
-      ? { id: expected, life: "unborn", aliases }
-      : { id: expected, life: "stillborn", seal, aliases };
+    return unborn(seal === null ? "unborn" : "stillborn", seal?.evidence);
   } catch (error) {
-    if (isHeartAbsent(error) && !(await heartExists(paths))) return { id: expected, life: "unborn", aliases };
+    if (isHeartAbsent(error) && !(await heartExists(paths))) return unborn("unborn");
     throw error;
   }
 }
@@ -105,14 +105,14 @@ export async function observeOutcomeRows(
   observer?: OutcomeObserver,
 ): Promise<void> {
   if (observer === undefined) return;
-  const historyIds = rows.flatMap((row) => (row.kind === "outcome" ? [row.outcome.historyId] : []));
+  const historyIds = rows.flatMap((row) => (row.kind === "outcome" ? [`turn/${row.turnSequence}`] : []));
   if (historyIds.length > 0) await observer(id, historyIds);
 }
 
 export async function observeStatusOutcome(status: AkumaStatus, observer?: OutcomeObserver): Promise<void> {
   const snapshot = status.timeline;
   if (snapshot.kind === "idle" && snapshot.outcome !== undefined)
-    await observer?.(status.id, [snapshot.outcome.outcome.historyId]);
+    await observer?.(status.id, [`turn/${snapshot.outcome.turnSequence}`]);
 }
 
 type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinarySelected: number }>;

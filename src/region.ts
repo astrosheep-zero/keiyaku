@@ -3,17 +3,18 @@ import { contractIdSchema } from "./git/identity.js";
 
 export const regionOverlapSchema = z
   .object({
-    contract: contractIdSchema,
+    contractId: contractIdSchema,
     patterns: z
       .array(
         z
           .object({
             mine: z.string(),
             theirs: z.string(),
-            relation: z.enum(["same", "mine-within-theirs", "theirs-within-mine", "intersect"]).optional(),
+            relation: z.enum(["mine-within-theirs", "theirs-within-mine", "intersect"]).exactOptional(),
           })
           .strict(),
       )
+      .min(1)
       .readonly(),
   })
   .strict();
@@ -28,6 +29,7 @@ export const regionOverlapResultSchema = regionOverlapSchema
           .extend({ relation: regionPatternSchema.shape.relation.unwrap().exactOptional() })
           .readonly(),
       )
+      .min(1)
       .readonly(),
   })
   .readonly();

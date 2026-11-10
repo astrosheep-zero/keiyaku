@@ -7,12 +7,13 @@ import type { GitDecodeChannel } from "../git/read-observation.js";
 import { mintIdentitySegment } from "../identity/mint.js";
 import { fitIdentityStemWords, normalizeIdentityStem } from "../identity/normalize.js";
 import { bindOperation, type BindTargetSelection } from "../protocol/bind.js";
-import { stateOperation, type IntentOutcome, type RepositoryScope } from "../protocol/operations.js";
+import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
 import { admitWithDebtHolderFence, claimDebtHolder } from "../settlement/holder.js";
 import type { ProtocolProgress } from "../protocol/progress.js";
 import type { DebtId } from "../debt/identity.js";
 import type { VerificationDeclarationPreparation } from "../verification/declaration.js";
-import type { ForkSourceRefusal, OperationRefusals } from "./refusal.js";
+import type { ForkSourceRefusal } from "./refusal.js";
+import { gitObjectIdForSnapshot } from "../git/identity.js";
 import { KeiyakuError } from "./outcome.js";
 import { contractTerms, documentDerivation } from "./input.js";
 
@@ -73,9 +74,7 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
   });
 }
 
-async function attemptCandidates(
-  input: BindAttemptInput,
-): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, OperationRefusals["bind"]>> {
+async function attemptCandidates(input: BindAttemptInput): Promise<Awaited<ReturnType<typeof bindOperation>>> {
   const stem = fitIdentityStemWords({
     stem: normalizeIdentityStem({ source: input.title }) || "contract",
     maxCodePoints: CONTRACT_ID_CODE_POINTS,
@@ -92,7 +91,7 @@ async function attemptCandidates(
 type ForkBindAdmission = Readonly<{
   kind: "document";
   document: ReturnType<typeof decodeContractDocument>;
-  admission: IntentOutcome<Readonly<{ contractId: ContractId }>, OperationRefusals["bind"]>;
+  admission: Awaited<ReturnType<typeof bindOperation>>;
 }>;
 
 /**
@@ -111,16 +110,15 @@ export async function admitForkBindWithAppointment(
 ): Promise<Readonly<{ kind: "refused"; refusal: ForkSourceRefusal }> | ForkBindAdmission> {
   const missing = (): Readonly<{ kind: "refused"; refusal: ForkSourceRefusal }> => ({
     kind: "refused",
-    refusal: { kind: "fork-source-missing", contractId: input.sourceId },
+    refusal: { kind: "fork-source-missing" },
   });
   let source = await stateOperation({ scope: input.scope, channel: input.channel, contractId: input.sourceId });
   if (source === null) return missing();
-  const sourceObject = (await input.channel.readObjects([source.coordinates.start as never])).get(
-    source.coordinates.start as never,
-  );
+  const sourceOid = gitObjectIdForSnapshot(source.coordinates.start);
+  const sourceObject = (await input.channel.readObjects([sourceOid])).get(sourceOid);
   if (sourceObject === undefined) throw new Error(`missing fork source object observation: ${input.sourceId}`);
   if (sourceObject.kind !== "present" || sourceObject.type !== "commit") {
-    return { kind: "refused", refusal: { kind: "fork-source-unavailable", contractId: input.sourceId } };
+    return { kind: "refused", refusal: { kind: "fork-source-unavailable" } };
   }
   const currentSource = await stateOperation({
     scope: input.scope,
@@ -133,7 +131,7 @@ export async function admitForkBindWithAppointment(
     currentSource.coordinates.start !== source.coordinates.start ||
     currentSource.terms.document.key !== source.terms.document.key
   ) {
-    return { kind: "refused", refusal: { kind: "fork-source-moved", contractId: input.sourceId } };
+    return { kind: "refused", refusal: { kind: "fork-source-moved" } };
   }
   source = currentSource;
   let sourceDocument: ReturnType<typeof decodeContractDocument>;

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
-import { Keis, Repo, type ContractId, type TopologyEffect } from "../src/index.js";
+import { Keis, Repo, type ContractId } from "../src/index.js";
 import { snapshotId } from "../src/core/facts/types.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
 import {
@@ -18,17 +18,6 @@ import {
   withGitShim,
 } from "./support/git.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
-
-function unchangedRef(effects: readonly TopologyEffect[], name: string, oid: string): boolean {
-  return effects.some(
-    (effect) =>
-      effect.kind === "ref" &&
-      effect.name === name &&
-      effect.action === "unchanged" &&
-      effect.before === oid &&
-      effect.after === oid,
-  );
-}
 
 type DeliveredReviewGatedTargetTemplate = Readonly<{
   repository: TestGitRepository;
@@ -47,7 +36,7 @@ async function buildDeliveredReviewGatedTargetTemplate(): Promise<DeliveredRevie
     target: "refs/heads/main",
     gates: ["reviewed"],
   }));
-  const contract = bound.value.kei;
+  const contract = bound.kei;
   const contractId = (present(await contract.state())).id;
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
@@ -92,27 +81,17 @@ async function projectionFixture() {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(await Keis.of(repo).bind({ markdown: document(), workspace: "worktree" }));
-  const id = present(await bound.value.kei.state()).id;
+  const id = present(await bound.kei.state()).id;
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
   return { repository, repo, id, worktree };
 }
 
 // Each case owns its repository, fault injector and cleanup; no process-global mocks.
 describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
-  for (const [index, relativePath, completed] of [
-    ["primary", ".keiyaku/.gitignore", []],
-    ["managed", ".keiyaku/.gitignore", ["primary:.keiyaku/.gitignore"]],
-    [
-      "managed",
-      ".agents/skills/keiyaku-deliver/SKILL.md",
-      [
-        "primary:.keiyaku/.gitignore",
-        "managed:.keiyaku/.gitignore",
-        "managed:.keiyaku/KEIYAKU.md",
-        "managed:.agents/skills/keiyaku-onboarding/.gitignore",
-        "managed:.agents/skills/keiyaku-onboarding/SKILL.md",
-      ],
-    ],
+  for (const [index, relativePath] of [
+    ["primary", ".keiyaku/.gitignore"],
+    ["managed", ".keiyaku/.gitignore"],
+    ["managed", ".agents/skills/keiyaku-deliver/SKILL.md"],
   ] as const) {
     test(`projection refuses ${relativePath} tracked only in the ${index} index before overwrite`, async () => {
       const { repository, repo, id, worktree } = await projectionFixture();
@@ -128,11 +107,11 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       writeFileSync(override, "custom\n");
 
       const report = await Keis.of(repo).reconcile({ contract: id });
+      assert.ok(report.kind === "contract");
 
-      const lag = report.lag.find((entry) => entry.kind === "contract-file-failed");
-      assert.ok(lag);
-      assert.equal(report.lag.length, 1);
-      assert.equal(lag.worktree, root);
+      const lag = (report.issues ?? []).find((issue) => issue.kind === "contract-file-failed");
+      assert.ok(lag?.kind === "contract-file-failed", JSON.stringify(report));
+      assert.equal((report.issues ?? []).filter((issue) => issue.kind === "contract-file-failed").length, 1);
       assert.equal(
         lag.path,
         relativePath.endsWith("SKILL.md") ? join(root, ".agents", "skills", "keiyaku-deliver") : path,
@@ -141,19 +120,11 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       assert.equal(readFileSync(path, "utf8"), "authored generated location\n");
       assert.equal(readFileSync(override, "utf8"), "custom\n");
       assert.equal(repository.run(["-C", root, "ls-files", "--stage"]), beforeIndex);
-      assert.deepEqual(
-        report.effects
-          .filter((effect) => effect.kind === "contract-file")
-          .map((effect) => {
-            const prefix = effect.path.startsWith(`${worktree}/`) ? "managed" : "primary";
-            return `${prefix}:${effect.path.slice((prefix === "managed" ? worktree : repository.path).length + 1)}`;
-          }),
-        completed,
-      );
 
       repository.run(["-C", root, "reset", "--quiet", "HEAD", "--", relativePath]);
       const retried = await Keis.of(repo).reconcile({ contract: id });
-      assert.deepEqual(retried.lag, []);
+      assert.ok(retried.kind === "contract");
+      assert.equal((retried.issues ?? []).some((issue) => issue.kind === "contract-file-failed"), false);
       assert.notEqual(readFileSync(path, "utf8"), "authored generated location\n");
       assert.equal(readFileSync(override, "utf8"), "custom\n");
     });
@@ -179,21 +150,20 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
         async (gitPath) =>
           Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({ contract: id }),
       );
+      assert.ok(report.kind === "contract");
 
-      const lag = report.lag.find((entry) => entry.kind === "contract-file-failed");
-      assert.ok(lag);
-      assert.equal(report.lag.length, 1);
-      assert.equal(lag.worktree, root);
+      const lag = (report.issues ?? []).find((issue) => issue.kind === "contract-file-failed");
+      assert.ok(lag?.kind === "contract-file-failed", JSON.stringify(report));
+      assert.equal((report.issues ?? []).filter((issue) => issue.kind === "contract-file-failed").length, 1);
       assert.equal(lag.path, join(root, ".keiyaku", ".gitignore"));
       assert.match(lag.diagnostic, /ls-files -z -- .*tracking read failed/);
       assert.equal(readFileSync(join(worktree, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
-      assert.deepEqual(
-        report.effects.filter((effect) => effect.kind === "contract-file").map((effect) => effect.path),
-        index === "primary" ? [] : [join(repository.path, ".keiyaku", ".gitignore")],
-      );
+
       if (index === "managed") assert.equal(readFileSync(context, "utf8"), `${id}\n`);
       else assert.equal(statSync(context, { throwIfNoEntry: false }), undefined);
-      assert.deepEqual((await Keis.of(repo).reconcile({ contract: id })).lag, []);
+      const recovered = await Keis.of(repo).reconcile({ contract: id });
+      assert.ok(recovered.kind === "contract");
+      assert.equal(recovered.issues, undefined);
     });
   }
   test("reconciliation repairs sentinelled skills and preserves a tracked user override", async () => {
@@ -203,7 +173,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       markdown: document(),
       workspace: "worktree",
     }));
-    const contract = bound.value.kei;
+    const contract = bound.kei;
     const contractId = (present(await contract.state())).id;
     const worktree = await appointedWorktreePath(await repositoryAt(repository.path), contractId);
     const deliverLeaf = join(worktree, ".agents", "skills", "keiyaku-deliver");
@@ -216,8 +186,9 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     writeFileSync(reviewSkill, "stale generated skill\n");
 
     const report = await Keis.of(repo).reconcile({ contract: contractId });
+    assert.ok(report.kind === "contract");
 
-    assert.deepEqual(report.lag, []);
+    assert.equal((report.issues ?? []).length, 0, JSON.stringify(report));
     assert.equal(readFileSync(deliverSkill, "utf8"), "# User deliverer skill\n");
     assert.equal(statSync(join(deliverLeaf, ".gitignore"), { throwIfNoEntry: false }), undefined);
     assert.match(readFileSync(reviewSkill, "utf8"), /^---\nname: keiyaku-review$/m);
@@ -225,7 +196,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(status.includes("keiyaku-review"), false);
   });
 
-  test("rewritten target history retains owned refs with unchanged effects", async () => {
+  test("rewritten target history retains owned refs without reporting a movement", async () => {
     const { contract, repository, repo } = await deliveredReviewGatedTargetFixture();
     writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
     repository.run(["add", "target-only.txt"]);
@@ -244,14 +215,13 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     repository.run(["update-ref", "refs/heads/main", rewritten]);
 
     const report = await Keis.of(repo).reconcile({ contract: state.id });
+    assert.ok(report.kind === "contract");
     const git = await repositoryAt(repository.path);
 
     assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
     assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), rewritten);
-    assert.equal(report.lag.length, 0);
-    assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
-    assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
+    assert.equal((report.issues ?? []).length, 0);
   });
 
   test("expected-target CAS retains owned refs under a stale frozen tip", async () => {
@@ -286,20 +256,20 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
           contract: state.id,
         }),
     );
+    assert.ok(report.kind === "contract");
     const git = await repositoryAt(repository.path);
     const moved = repository.run(["rev-parse", "refs/heads/main"]).trim();
 
     assert.notEqual(moved, frozen);
     assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
     assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
-    assert.equal(report.lag.length, 0);
-    assert.equal(unchangedRef(report.effects, deliveryRefFor(state.id), tender), true);
-    assert.equal(unchangedRef(report.effects, candidatePinRefFor(state.id), integration), true);
+    assert.equal((report.issues ?? []).length, 0);
 
     const retried = await Keis.of(repo).reconcile({ contract: state.id });
+    assert.ok(retried.kind === "contract");
     assert.equal(await readRef(git, deliveryRefFor(state.id)), null);
     assert.equal(await readRef(git, candidatePinRefFor(state.id)), null);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), moved);
-    assert.equal(retried.lag.length, 0);
+    assert.equal((retried.issues ?? []).length, 0);
   });
 });

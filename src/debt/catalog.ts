@@ -1,8 +1,8 @@
 import type { BoundedList } from "../bounded-list.js";
-import type { DebtRef, DebtRow } from "./board.js";
+import type { DebtSummary } from "./board.js";
 import type { DebtDocument } from "./document.js";
 import { isDebtSegment, parseDebtId, type DebtId } from "./identity.js";
-import { readRecentDebtDocuments, readDebtDocument } from "./store.js";
+import { readRecentDebtDocuments, readDebtDocument, type OpenDebtDocument } from "./store.js";
 import type { WorldRoot } from "../world.js";
 
 export function parseDebtNamespaceSelector(value: string): readonly string[] {
@@ -22,51 +22,35 @@ function terminal(debt: DebtDocument | undefined): boolean {
   return debt?.state === "done" || debt?.state === "drop";
 }
 
-export type RecentDebtStatusRow = DebtRow & Readonly<{ blockers?: readonly DebtRef[] }>;
+export type RecentDebtSummary = Omit<DebtSummary, "disposition"> & Readonly<{ disposition: "ready" | "blocked" }>;
 
 async function catalogRow(
   world: WorldRoot,
-  debt: DebtDocument,
+  debt: OpenDebtDocument,
   documents: ReadonlyMap<DebtId, DebtDocument>,
-): Promise<RecentDebtStatusRow> {
+): Promise<RecentDebtSummary> {
   const needs = await Promise.all(
     debt.needs.map(async (id) => documents.get(id) ?? (await readDebtDocument(world, id))),
   );
-  const blockers: DebtRef[] = [];
-  if (debt.state === "open") {
-    for (const [index, need] of needs.entries()) {
-      if (terminal(need)) continue;
-      blockers.push({ id: debt.needs[index]!, title: need?.title ?? null, state: need?.state ?? "missing" });
-    }
-  }
+  const blocked = needs.some((need) => !terminal(need));
   return {
     id: debt.id,
     title: debt.title,
-    state: debt.state,
     priority: debt.priority,
-    disposition:
-      debt.state === "open" && needs.some((need) => !terminal(need))
-        ? "blocked"
-        : debt.state === "open"
-          ? "ready"
-          : debt.state,
-    updatedAt: debt.updatedAt,
-    bodyPresent: debt.body.length > 0,
-    ...(blockers.length === 0 ? {} : { blockers }),
+    disposition: blocked ? "blocked" : "ready",
   };
 }
 
 export async function observeRecentDebtStatus(
   world: WorldRoot,
   input: Readonly<{ namespace?: readonly string[]; limit?: number }> = {},
-): Promise<BoundedList<RecentDebtStatusRow>> {
+): Promise<BoundedList<RecentDebtSummary>> {
   const { namespace } = input;
   if (namespace !== undefined && !namespace.every(isDebtSegment)) {
     throw new TypeError("namespace must contain canonical segments");
   }
   const documents = await readRecentDebtDocuments(world, {
     ...(namespace === undefined ? {} : { namespace }),
-    selection: "active",
     ...(input.limit === undefined ? {} : { limit: input.limit }),
   });
   const known = new Map(documents.rows.map((document) => [document.id, document]));

@@ -119,26 +119,31 @@ test("a public bind's appointed worktree inherits its installed namespace and sh
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const environment = { KEIYAKU_HOME: join(raw.path, "empty-home") };
   const bound = await cliJson<
-    Readonly<{ kind: string; contract: string; value: Readonly<{ workspace: Readonly<{ path: string }> }> }>
+    Readonly<{ kind: string; contractId: string; worktreePath: string }>
   >(["-C", raw.path, "bind", "--gates", "", "-"], { environment, readStdin: async () => document() });
   assert.equal(bound.value.kind, "accepted", JSON.stringify(bound.value));
-  const slug = bound.value.contract.slice("kei/".length),
-    worktree = bound.value.value.workspace.path,
-    namespace = ["kei", slug],
+  const slug = bound.value.contractId.slice("kei/".length),
+    worktree = bound.value.worktreePath,
+    namespace = `kei/${slug}`,
     src = join(worktree, "src");
   mkdirSync(src, { recursive: true });
 
   for (const directory of [worktree, src])
     assert.deepEqual(
-      (await cliJson<Readonly<{ value: unknown }>>(["-C", directory, "debt", "context"], { environment })).value.value,
-      { namespace, source: "contract-installed" },
+      (
+        await cliJson<Readonly<{ kind: string; namespace?: string; source: string }>>(
+          ["-C", directory, "debt", "context"],
+          { environment },
+        )
+      ).value,
+      { kind: "present", namespace, source: "contract-installed" },
     );
 
-  const added = await cliJson<Readonly<{ value: Readonly<{ id: string }> }>>(
+  const added = await cliJson<Readonly<{ kind: string; id: string }>>(
     ["-C", src, "debt", "add", "Worktree ledger entry"],
     { environment },
   );
-  const id = added.value.value.id,
+  const id = added.value.id,
     local = id.slice(id.lastIndexOf("/") + 1);
   assert.equal(id, `debt/kei/${slug}/${local}`);
   assert.ok(existsSync(join(raw.path, ".keiyaku", "debts", "kei", slug, `${local}.md`)));
@@ -158,28 +163,36 @@ test("an explicit context replacement installs the supplied namespace over malfo
   const replaced = await cliJson<unknown>(["-C", root, "debt", "context", "good/place"], { environment: {} });
   assert.equal(replaced.exit, 0, replaced.stderr);
   assert.deepEqual(replaced.value, {
-    kind: "accepted",
-    value: { namespace: ["good", "place"], source: "local-override" },
+    kind: "present",
+    namespace: "good/place",
+    source: "local-override",
   });
   assert.equal(readFileSync(current, "utf8"), "good/place\n");
   const read = await cliJson<unknown>(["-C", root, "debt", "context"], { environment: {} });
   assert.equal(read.exit, 0, read.stderr);
   assert.deepEqual(read.value, {
-    kind: "accepted",
-    value: { namespace: ["good", "place"], source: "local-override" },
+    kind: "present",
+    namespace: "good/place",
+    source: "local-override",
   });
-  const added = await cliJson<{ value: { id: string } }>(["-C", root, "debt", "add", "Spawned"], { environment: {} });
+  const added = await cliJson<{ kind: string; id: string }>(["-C", root, "debt", "add", "Spawned"], {
+    environment: {},
+  });
   assert.equal(added.exit, 0, added.stderr);
-  assert.match(added.value.value.id, /^debt\/good\/place\//u);
+  assert.match(added.value.id, /^debt\/good\/place\//u);
 });
 
 test("a malformed context still refuses the operations that need the default", async () => {
   const { root, current } = malformedContext();
-  const refusal = { kind: "invalid-namespace-context", path: current };
-  for (const argv of [["context"], ["ls"], ["query"], ["add", "Needs the default"]]) {
+  for (const [argv, expected] of [
+    [["context"], { kind: "refused", path: current }],
+    [["ls"], { kind: "invalid-namespace-context", path: current }],
+    [["query"], { kind: "refused", reason: "invalid-namespace-context", path: current }],
+    [["add", "Needs the default"], { kind: "refused", reason: "invalid-namespace-context", path: current }],
+  ] as const) {
     const result = await cliJson<unknown>(["-C", root, "debt", ...argv], { environment: {} });
     assert.equal(result.exit, 1, `${argv.join(" ")}: ${result.stderr}`);
-    assert.deepEqual(result.value, { kind: "refused", refusal });
+    assert.deepEqual(result.value, expected);
   }
   assert.equal(readFileSync(current, "utf8"), "Bad Namespace\n");
   assert.equal(existsSync(join(root, ".keiyaku", "debts")), false);

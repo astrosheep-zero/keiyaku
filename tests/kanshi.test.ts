@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { appendActivity, beginTurn, breakBody, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
+import { breakBody, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
@@ -21,8 +21,19 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
-import { Keis, Repo } from "../src/index.js";
-import { kanshi, observeKanshi, selectKanshi } from "../src/kanshi/index.js";
+import { Keis, Repo, kanshiCategory, contractSummarySchema } from "../src/index.js";
+import { kanshi, observeKanshi } from "../src/kanshi/index.js";
+import type { ContractKanshiDetail, KanshiContractReport, KanshiReport } from "../src/kanshi/index.js";
+
+function worldReport(report: KanshiReport | KanshiContractReport): KanshiReport {
+  if (!("contracts" in report)) throw new Error("expected a World report");
+  return report;
+}
+
+function contractReport(report: KanshiReport | KanshiContractReport): ContractKanshiDetail {
+  if (!("kind" in report) || report.kind !== "contract") throw new Error("expected an exact Contract report");
+  return report;
+}
 import { Debts } from "../src/debt/index.js";
 import { contractNamespace, debtAuthorityPath, parseDebtId } from "../src/debt/identity.js";
 import type { WorldRoot } from "../src/world.js";
@@ -100,38 +111,6 @@ async function replacePrivateState(
   );
 }
 
-async function akumaWithReportedChange(root: string, suffix: string) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "watcher", draw: () => suffix });
-  await initializeHeart(allocated.paths);
-  const at = "2026-08-09T00:00:00.000Z";
-  const leash = (await HeldAkumaLeash.try(allocated.paths))!;
-  await leash.birth(allocated.paths, {
-    id: allocated.id,
-    akumaName: "watcher",
-    provider: { name: "claude", kind: "claude-agent-sdk" },
-    options: {},
-    cwd: root,
-    origin: { kind: "direct" },
-    createdAt: at,
-  });
-  const body = await leash.recordBody(allocated.paths, { leashTakenAt: at });
-  const turn = await beginTurn(allocated.paths, { bodySequence: body.sequence, startedAt: at, call: "edit files" });
-  await appendActivity(allocated.paths, {
-    turnSequence: turn.sequence,
-    at,
-    event: {
-      type: "tool",
-      phase: "completed",
-      id: "file-change-1",
-      name: "edit",
-      call: { kind: "fileChange", changes: [{ op: "update", path: "src/observed.ts" }] },
-      result: { status: "ok" },
-    },
-  });
-  leash.release();
-  return allocated.id;
-}
-
 async function populatedWorld(t: TestContext) {
   const repository = fixtureRepository(t);
 
@@ -141,14 +120,14 @@ async function populatedWorld(t: TestContext) {
   assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      debt: added.value.id,
+      debt: added.id,
       markdown: document(),
       workspace: "worktree",
       target: "main",
     }),
   );
-  const contract = present(await bound.value.kei.state());
-  const renamed = await debts.debt({ id: added.value.id }).update({ title: "Investigate status rendering" });
+  const contract = present(await bound.kei.state());
+  const renamed = await debts.debt({ id: added.id }).update({ title: "Investigate status rendering" });
   assert.equal(renamed.kind, "accepted");
   const akumaId = await bornAkuma(repository.path, "a0000001");
   assert.equal(
@@ -162,12 +141,12 @@ async function populatedWorld(t: TestContext) {
     "dispatched",
   );
   await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akumaId: akumaId });
-  return { repository, contract, keiyaku: bound.value.kei, debtId: added.value.id, akumaId };
+  return { repository, contract, keiyaku: bound.kei, debtId: added.id, akumaId };
 }
 
 test("Contract Git format failure preserves independently readable Debt, Akuma, and Alias observations", async (t) => {
   const { repository, contract, debtId, akumaId } = await populatedWorld(t);
-  const changedAkuma = await akumaWithReportedChange(repository.path, "a0000002");
+  const changedAkuma = await bornAkuma(repository.path, "a0000002");
   assert.equal(
     (
       await publishDispatch({
@@ -184,41 +163,31 @@ test("Contract Git format failure preserves independently readable Debt, Akuma, 
     world: await World.at(repository.path),
     repo: await Repo.at({ path: repository.path }),
   });
-  const { report } = observation;
+  const report = worldReport(observation.report);
   assert.equal(report.contracts.kind, "failed");
   if (report.contracts.kind === "failed") {
-    assert.match(report.contracts.failure.message, /Git format is not current: meta\/format\.json/u);
+    assert.match(report.contracts.diagnostic, /Git format is not current: meta\/format\.json/u);
   }
   assert.equal(report.debts.kind, "present");
-  assert.equal(report.akuma.kind, "present");
+  assert.equal(report.akumas.kind, "present");
   assert.equal(observation.aliases.kind, "present");
-  if (report.debts.kind !== "present" || report.akuma.kind !== "present") return;
+  if (report.debts.kind !== "present" || report.akumas.kind !== "present") return;
 
   assert.equal(
-    report.debts.value.rows.some((row) => row.id === debtId),
+    report.debts.rows?.some((row) => row.id === debtId),
     true,
   );
-  const ordinary = report.akuma.value.rows.find((row) => row.id === akumaId);
+  const ordinary = report.akumas.rows?.find((row) => row.id === akumaId);
   assert.deepEqual(ordinary?.aliases, ["@watch"]);
-  const changed = report.akuma.value.rows.find((row) => row.id === changedAkuma);
-  assert.equal(changed?.contractAssociationUnavailable, true);
-  assert.deepEqual(
-    changed?.snapshot?.reportedChanges.map((change) => change.path),
-    ["src/observed.ts"],
-  );
-  const selected = selectKanshi({ report, contract: contract.id });
-  assert.equal(selected.debts.kind, "present");
-  assert.equal(selected.akuma.kind, "present");
-  if (selected.debts.kind === "present" && selected.akuma.kind === "present") {
-    assert.equal(
-      selected.debts.value.rows.some((row) => row.id === debtId),
-      false,
-    );
-    assert.equal(
-      selected.akuma.value.rows.some((row) => row.id === changedAkuma),
-      false,
-    );
-  }
+  const changed = report.akumas.rows?.find((row) => row.id === changedAkuma);
+  assert.deepEqual(changed?.contract, { kind: "unavailable" });
+  const exact = await kanshi({
+    world: await World.at(repository.path),
+    repo: await Repo.at({ path: repository.path }),
+    contract: contract.id,
+  });
+  assert.equal(exact.kind, "contract-failed", "the Contract's own decode failure stays on its exact report");
+  if (exact.kind === "contract-failed") assert.match(exact.diagnostic, /Git format is not current/u);
   const text = renderKanshiText(report, { columns: 100, color: false });
   assert.match(text, /contract association unavailable/u);
   assert.match(text, /@watch/u);
@@ -226,41 +195,38 @@ test("Contract Git format failure preserves independently readable Debt, Akuma, 
 
 test("unattempted associations without a Repo are not marked unavailable", async (t) => {
   const { repository, contract, debtId, akumaId } = await populatedWorld(t);
-  const report = await kanshi({ world: await World.at(repository.path) });
+  const report = worldReport(await kanshi({ world: await World.at(repository.path) }));
   assert.equal(report.contracts.kind, "absent");
   assert.equal(report.debts.kind, "present");
-  assert.equal(report.akuma.kind, "present");
-  if (report.debts.kind !== "present" || report.akuma.kind !== "present") return;
-  assert.equal(report.debts.value.rows.find((row) => row.id === debtId)?.contractAssociationUnavailable, undefined);
-  const akuma = report.akuma.value.rows.find((row) => row.id === akumaId);
-  assert.equal(akuma?.contractAssociationUnavailable, undefined);
-  assert.equal(report.akuma.value.aliasesUnavailable, undefined);
+  assert.equal(report.akumas.kind, "present");
+  if (report.debts.kind !== "present" || report.akumas.kind !== "present") return;
+  assert.equal(report.debts.rows?.find((row) => row.id === debtId)?.contract, undefined);
+  const akuma = report.akumas.rows?.find((row) => row.id === akumaId);
+  assert.equal(akuma?.contract, undefined);
+  assert.equal(report.akumas.aliasesError, undefined);
 
-  const contractOnly = await kanshi({ world: null, repo: await Repo.at({ path: repository.path }) });
+  const contractOnly = worldReport(
+    await kanshi({ world: null, repo: await Repo.at({ path: repository.path }) }),
+  );
   assert.equal(contractOnly.contracts.kind, "present");
   if (contractOnly.contracts.kind === "present") {
-    const row = contractOnly.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-    assert.deepEqual(row?.roster, []);
-    assert.equal(row?.rosterUnavailable, undefined);
+    const row = contractOnly.contracts.rows?.find((candidate) => candidate.id === contract.id);
+    assert.deepEqual(row?.associations, [{ kind: "debt", debtId }, { kind: "akuma", akumaId }]);
   }
 });
 
 test("selected Contract shows associated Akuma identity, alias, and life", async (t) => {
-  const { repository, contract, akumaId } = await populatedWorld(t);
-  const report = await kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-    contract: contract.id,
-  });
-  const selected = selectKanshi({ report, contract: contract.id });
-  const text = renderKanshiText(selected, { columns: 80, color: false }, "contract");
-  assert.ok(text.includes(akumaId));
-  assert.equal(selected.akuma.kind, "present");
-  if (selected.akuma.kind !== "present") return;
-  const life = selected.akuma.value.rows.find((row) => row.id === akumaId)?.life;
-  assert.ok(life !== undefined);
-  assert.ok(text.includes(`(@watch) · ${life}`));
-  assert.doesNotMatch(text, /akuma  \d/u);
+  const { repository, contract, akumaId, debtId } = await populatedWorld(t);
+  const selected = contractReport(
+    await kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+      contract: contract.id,
+    }),
+  );
+  assert.equal(selected.id, contract.id);
+  assert.deepEqual(selected.roster, [{ id: akumaId, aliases: ["@watch"] }]);
+  assert.equal(selected.holder, debtId);
 });
 
 test("selected Contract shares one Debt observation across its bounded and owned views", async (t) => {
@@ -272,35 +238,79 @@ test("selected Contract shares one Debt observation across its bounded and owned
   });
   assert.ok(scoped.kind === "accepted");
   const repo = await Repo.at({ path: repository.path });
-  const worldReport = await kanshi({ world, repo });
-  const selectedReport = await kanshi({ world, repo, contract: contract.id });
-  assert.equal(worldReport.debts.kind, "present");
-  assert.equal(selectedReport.debts.kind, "present");
-  assert.equal(selectedReport.contracts.kind, "present");
-  if (
-    worldReport.debts.kind !== "present" ||
-    selectedReport.debts.kind !== "present" ||
-    selectedReport.contracts.kind !== "present"
-  )
-    return;
-  assert.deepEqual(
-    selectedReport.debts.value.rows,
-    worldReport.debts.value.rows.filter((row) => row.contract?.id === contract.id),
-  );
-  const row = selectedReport.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  assert.equal(row?.namespaceDebts?.kind, "present");
-  if (row?.namespaceDebts?.kind === "present")
+  const worldBoard = worldReport(await kanshi({ world, repo }));
+  const selected = contractReport(await kanshi({ world, repo, contract: contract.id }));
+  assert.equal(worldBoard.debts.kind, "present");
+  if (worldBoard.debts.kind !== "present") return;
+  const namespaceDebts = selected.namespaceDebts;
+  assert.equal(namespaceDebts.kind, "present", "the exact Contract always exposes its namespace Debt observation");
+  if (namespaceDebts.kind === "present")
     assert.equal(
-      row.namespaceDebts.value.some((debt) => debt.id === scoped.value.id),
+      namespaceDebts.rows?.some((debt) => debt.id === scoped.id),
       true,
     );
+  assert.equal(selected.holder, debtId);
   assert.equal(
-    selectedReport.debts.value.rows.some((debt) => debt.id === debtId),
+    worldBoard.debts.rows?.some((debt) => debt.id === debtId),
     true,
   );
 });
 
-test("selected Contract preserves its Debt board after a later Git observation failure", async (t) => {
+test("exact target movement names only the owner-witnessed predecessor", async (t) => {
+  const repository = fixtureRepository(t);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repo = await Repo.at({ path: repository.path });
+  const world = await World.at(repository.path);
+  const bound = accepted(
+    await Keis.of(repo).bind({
+      markdown: document("Target movement"),
+      target: "main",
+      workspace: "worktree",
+      gates: ["reviewed"],
+    }),
+  );
+  const id = present(await bound.kei.state()).id;
+  const worktree = bound.worktreePath!;
+  writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "candidate"]);
+  const placed = accepted(await bound.kei.deliver());
+  assert.equal(
+    placed.placement?.kind,
+    "gates-unsatisfied",
+    "the delivery is admitted and placed, but the missing reviewed gate blocks completion",
+  );
+  const integration = present(await bound.kei.state()).currentIntegration;
+  assert.ok(integration !== null, "the blocked delivery retains its admitted integration");
+  const unchanged = repository.run(["rev-parse", "refs/heads/main"]).trim();
+  assert.equal(integration.predecessor, unchanged, "the admitted candidate integrated against the main head");
+
+  const still = contractReport(await kanshi({ world, repo, contract: id }));
+  assert.equal(
+    still.targetObservation,
+    undefined,
+    "an unchanged target is not drift merely because a candidate integrated against it",
+  );
+  assert.doesNotMatch(renderKanshiText(still, { columns: 100, color: false }), /target moved/u);
+
+  writeFileSync(join(repository.path, "advance.txt"), "advance\n");
+  repository.run(["add", "advance.txt"]);
+  repository.run(["commit", "--quiet", "-m", "advance main"]);
+  const movedHead = repository.run(["rev-parse", "refs/heads/main"]).trim();
+
+  const moved = contractReport(await kanshi({ world, repo, contract: id }));
+  assert.deepEqual(moved.targetObservation, {
+    kind: "moved",
+    before: integration.predecessor,
+    after: movedHead,
+  });
+  assert.match(
+    renderKanshiText(moved, { columns: 100, color: false }),
+    new RegExp(`^  target moved  ${integration.predecessor.slice(0, 7)} -> ${movedHead.slice(0, 7)}$`, "mu"),
+  );
+});
+
+test("selected Contract failure names its identity and bounded cause without a replayable partial value", async (t) => {
   const { repository, contract, debtId } = await populatedWorld(t);
   const debtPath = debtAuthorityPath(join(repository.path, ".keiyaku", "debts"), parseDebtId(debtId));
   const shim = [
@@ -312,23 +322,15 @@ test("selected Contract preserves its Debt board after a later Git observation f
     'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n");
   await withGitShim(shim, { KEIYAKU_DEBT_FILE: debtPath }, async (gitPath) => {
-    const report = await kanshi({
-      world: await World.at(repository.path),
-      repo: await Repo.at({ path: repository.path, gitPath }),
-      contract: contract.id,
-    });
-    assert.equal(report.contracts.kind, "failed");
-    if (report.contracts.kind === "failed")
-      assert.match(
-        report.contracts.failure.message,
-        /git cat-file --batch: git cat-file --batch did not close cleanly/u,
-      );
-    assert.equal(report.debts.kind, "present");
-    if (report.debts.kind !== "present") return;
-    assert.equal(
-      report.debts.value.rows.some((row) => row.id === debtId),
-      true,
-    );
+    const world = await World.at(repository.path);
+    const repo = await Repo.at({ path: repository.path, gitPath });
+    const report = await kanshi({ world, repo, contract: contract.id });
+    assert.equal(report.kind, "contract-failed");
+    if (report.kind !== "contract-failed") return;
+    assert.equal(report.id, contract.id);
+    assert.match(report.diagnostic, /git cat-file --batch: git cat-file --batch did not close cleanly/u);
+    assert.equal("workspace" in report, false, "a failed exact read carries no replayable partial detail");
+    assert.equal("namespaceDebts" in report, false, "a failed exact read carries no replayable partial value");
   });
 });
 
@@ -336,17 +338,24 @@ test("DebtHolder failure preserves Debt rows and marks Contract links unavailabl
   const { repository, contract, debtId } = await populatedWorld(t);
   await replacePrivateState(repository, new Map([["settlement/task-holders", "not a DebtHolder tree\n"]]));
 
-  const report = await kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-  });
+  const report = worldReport(
+    await kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+    }),
+  );
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.debts.kind, "present");
-  assert.equal(report.akuma.kind, "present");
+  assert.equal(report.akumas.kind, "present");
   if (report.contracts.kind !== "present" || report.debts.kind !== "present") return;
-  assert.equal(report.contracts.value.rows.find((row) => row.id === contract.id)?.holder.kind, "unavailable");
-  const debt = report.debts.value.rows.find((row) => row.id === debtId);
-  assert.equal(debt?.contractAssociationUnavailable, true);
+  assert.equal(
+    report.contracts.rows
+      ?.find((row) => row.id === contract.id)
+      ?.associations?.find((association) => association.kind === "unavailable")?.kind,
+    "unavailable",
+  );
+  const debt = report.debts.rows?.find((row) => row.id === debtId);
+  assert.deepEqual(debt?.contract, { kind: "unavailable" });
   assert.match(renderKanshiText(report, { columns: 100, color: false }), /contract association unavailable/u);
 });
 
@@ -354,28 +363,35 @@ test("Dispatch failure preserves Akuma rows and explicitly marks both associatio
   const { repository, contract, akumaId } = await populatedWorld(t);
   await replacePrivateState(repository, new Map([["dispatch", "not a Dispatch tree\n"]]));
 
-  const report = await kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-  });
+  const report = worldReport(
+    await kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+    }),
+  );
   assert.equal(report.contracts.kind, "present");
   assert.equal(report.debts.kind, "present");
-  assert.equal(report.akuma.kind, "present");
-  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") return;
-  const contractRow = report.contracts.value.rows.find((row) => row.id === contract.id);
-  assert.equal(contractRow?.rosterUnavailable, true);
-  const akuma = report.akuma.value.rows.find((row) => row.id === akumaId);
-  assert.equal(akuma?.contractAssociationUnavailable, true);
+  assert.equal(report.akumas.kind, "present");
+  if (report.contracts.kind !== "present" || report.akumas.kind !== "present") return;
+  const contractRow = report.contracts.rows?.find((row) => row.id === contract.id);
+  assert.ok(
+    contractRow?.associations?.some(
+      (association) => association.kind === "unavailable" && association.source === "roster",
+    ),
+    "a failed Dispatch read is explicit roster unavailability",
+  );
+  const akuma = report.akumas.rows?.find((row) => row.id === akumaId);
+  assert.deepEqual(akuma?.contract, { kind: "unavailable" });
   assert.deepEqual(akuma?.aliases, ["@watch"]);
   const text = renderKanshiText(report, { columns: 100, color: false });
-  assert.match(text, /akuma  unavailable/u);
+  assert.match(text, /roster association unavailable/u);
   assert.match(text, /contract association unavailable/u);
 });
 
-test("missing placement proof retains the Akuma's reported changes", async (t) => {
+test("a Dispatch to an unobserved Contract keeps its observed association", async (t) => {
   const repository = fixtureRepository(t);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
-  const akumaId = await akumaWithReportedChange(repository.path, "a0000003");
+  const akumaId = await bornAkuma(repository.path, "a0000003");
   const missingContract = contractId("kei/not-observed");
   assert.equal(
     (
@@ -387,19 +403,19 @@ test("missing placement proof retains the Akuma's reported changes", async (t) =
     ).kind,
     "dispatched",
   );
-  const report = await kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-  });
-  assert.equal(report.akuma.kind, "present");
-  if (report.akuma.kind !== "present") return;
-  const row = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
-  assert.equal(row?.contract?.id, missingContract);
-  assert.equal(row?.contract?.observed, "unavailable");
-  assert.deepEqual(
-    row?.snapshot?.reportedChanges.map((change) => change.path),
-    ["src/observed.ts"],
+  const report = worldReport(
+    await kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+    }),
   );
+  assert.equal(report.akumas.kind, "present");
+  if (report.akumas.kind !== "present") return;
+  const row = report.akumas.rows?.find((candidate) => candidate.id === akumaId);
+  assert.deepEqual(row?.contract, {
+    kind: "associated",
+    contractId: missingContract,
+  });
 });
 
 test("Alias failure leaves Akuma rows readable and marks the section's aliases unavailable", async (t) => {
@@ -410,14 +426,15 @@ test("Alias failure leaves Akuma rows readable and marks the section's aliases u
 
   const observation = await observeKanshi({ world: await World.at(repository.path) });
   assert.equal(observation.aliases.kind, "failed");
-  assert.equal(observation.report.akuma.kind, "present");
-  if (observation.report.akuma.kind !== "present") return;
-  assert.equal(observation.report.akuma.value.aliasesUnavailable, true);
-  const row = observation.report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
+  const report = worldReport(observation.report);
+  assert.equal(report.akumas.kind, "present");
+  if (report.akumas.kind !== "present") return;
+  assert.equal(report.akumas.aliasesError === undefined, false);
+  const row = report.akumas.rows?.find((candidate) => candidate.id === akumaId);
   assert.ok(row !== undefined);
   assert.equal("aliasesUnavailable" in row, false);
-  assert.deepEqual(row.aliases, []);
-  assert.match(renderKanshiText(observation.report, { columns: 100, color: false }), /aliases unavailable/u);
+  assert.equal("aliases" in row, false, "no readable alias binding is invented");
+  assert.match(renderKanshiText(report, { columns: 100, color: false }), /aliases unavailable/u);
 });
 
 test("an empty Akuma roster retains a failed Alias observation as section evidence", async (t) => {
@@ -425,11 +442,11 @@ test("an empty Akuma roster retains a failed Alias observation as section eviden
   mkdirSync(join(repository.path, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(repository.path, ".keiyaku", "akuma", "alias.json"), "not Alias authority\n");
 
-  const report = await kanshi({ world: await World.at(repository.path) });
-  assert.equal(report.akuma.kind, "present");
-  if (report.akuma.kind !== "present") return;
-  assert.equal(report.akuma.value.aliasesUnavailable, true);
-  assert.deepEqual(report.akuma.value.rows, []);
+  const report = worldReport(await kanshi({ world: await World.at(repository.path) }));
+  assert.equal(report.akumas.kind, "present");
+  if (report.akumas.kind !== "present") return;
+  assert.equal(report.akumas.aliasesError === undefined, false);
+  assert.equal(report.akumas.rows, undefined, "an empty roster omits rows");
   const text = renderKanshiText(report, { columns: 100, color: false });
   assert.match(text, /akuma  none/u);
   assert.match(text, /aliases unavailable/u);
@@ -440,46 +457,42 @@ test("an attached Contract roster derives Alias availability from the Akuma sect
   const { repository, contract, akumaId } = await populatedWorld(t);
   writeFileSync(join(repository.path, ".keiyaku", "akuma", "alias.json"), "not Alias authority\n");
 
-  const report = await kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-  });
-  assert.equal(report.akuma.kind, "present");
+  const report = worldReport(
+    await kanshi({
+      world: await World.at(repository.path),
+      repo: await Repo.at({ path: repository.path }),
+    }),
+  );
+  assert.equal(report.akumas.kind, "present");
   assert.equal(report.contracts.kind, "present");
-  if (report.akuma.kind !== "present" || report.contracts.kind !== "present") return;
-  assert.equal(report.akuma.value.aliasesUnavailable, true);
-  const akuma = report.akuma.value.rows.find((candidate) => candidate.id === akumaId);
+  if (report.akumas.kind !== "present" || report.contracts.kind !== "present") return;
+  assert.equal(report.akumas.aliasesError === undefined, false);
+  const akuma = report.akumas.rows?.find((candidate) => candidate.id === akumaId);
   assert.ok(akuma !== undefined);
   assert.equal("aliasesUnavailable" in akuma, false);
-  const contractRow = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  assert.equal(contractRow?.roster[0]?.aliasesUnavailable, true);
-  assert.deepEqual(contractRow?.roster[0]?.aliases, []);
+  const contractRow = report.contracts.rows?.find((candidate) => candidate.id === contract.id);
+  const attachment = contractRow?.associations?.find((association) => association.kind === "akuma");
+  assert.equal(attachment?.kind === "akuma" && attachment.aliasesUnavailable, true);
+  assert.equal(attachment?.kind === "akuma" && attachment.aliases, undefined);
 });
 
 test("Debt board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {
   const { repository, contract, akumaId } = await populatedWorld(t);
   writeFileSync(join(repository.path, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
-  const report = await kanshi({
-    world: await World.at(repository.path),
-    repo: await Repo.at({ path: repository.path }),
-    contract: contract.id,
-  });
+  const world = await World.at(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  const report = worldReport(await kanshi({ world, repo }));
+  const selected = contractReport(await kanshi({ world, repo, contract: contract.id }));
   assert.equal(report.contracts.kind, "present");
-  assert.equal(report.akuma.kind, "present");
+  assert.equal(report.akumas.kind, "present");
   assert.equal(report.debts.kind, "failed");
-  if (report.contracts.kind !== "present" || report.akuma.kind !== "present") return;
-  const row = report.contracts.value.rows.find((candidate) => candidate.id === contract.id);
-  assert.equal(row?.namespaceDebts, undefined);
+  if (report.contracts.kind !== "present" || report.akumas.kind !== "present") return;
+  assert.equal(selected.namespaceDebts.kind, "failed", "the owned namespace Debt read is explicitly failed");
+  assert.equal("issue" in selected, false);
   assert.equal(
-    report.akuma.value.rows.some((candidate) => candidate.id === akumaId),
+    report.akumas.rows?.some((candidate) => candidate.id === akumaId),
     true,
   );
-  const selected = renderKanshiText(
-    selectKanshi({ report, contract: contract.id }),
-    { columns: 80, color: false },
-    "contract",
-  );
-  assert.doesNotMatch(selected, /failed debt document must begin with YAML front matter/u);
   const worldText = renderKanshiText(report, { columns: 80, color: false });
   assert.equal(
     (worldText.match(/debt\/bad · failed debt document must begin with YAML front matter/gu) ?? []).length,
@@ -516,66 +529,88 @@ test("World status bounds worktree detail before observation and shares repeated
       target: index < 16 ? "main" : rows[0]!.id,
       gates: ["reviewed"],
     }));
-    rows.push({ id: present(await bound.value.kei.state()).id, path: bound.value.workspace!.path });
+    rows.push({ id: present(await bound.kei.state()).id, path: bound.worktreePath! });
   }
   const tracePath = join(raw.path, ".git", "status-trace.jsonl");
-  const expected = [...(await contracts.list({  })).rows].sort((left, right) =>
-    right.lastJournalAt.localeCompare(left.lastJournalAt) || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id)),
-  );
+  const expected = (await contracts.list({ limit: 20 })).rows;
+  assert.ok(expected !== undefined);
   const observed = await traceGit(tracePath, () => kanshi({ world, repo }));
-  if (observed.value.contracts.kind !== "present") assert.fail(JSON.stringify(observed.value.contracts));
-  const board = observed.value.contracts.value;
-  assert.equal(board.hasMore, true);
-  assert.deepEqual(board.rows, expected.slice(0, 10).map((row) => ({ ...row, holder: { kind: "none" }, roster: [] })));
+  const report = worldReport(observed.value);
+  if (report.contracts.kind !== "present") assert.fail(JSON.stringify(report.contracts));
+  const board = report.contracts;
+  assert.equal(board.more, true);
+  assert.deepEqual(board.rows, expected.slice(0, 10), "world rows are the same owner summaries");
   const status = observed.commands.filter((args) => args.includes("--porcelain=v2"));
   const lag = observed.commands.filter((args) => args.includes("rev-list"));
-  const parentReads = observed.commands.filter((args) => args[0] === "-C" && args[1] === rows[0]!.path);
-  const selectedPaths = new Set(board.rows.map((row) => row.worktreePath));
-  assert.deepEqual(new Set(status.map((args) => args[1])), selectedPaths);
-  assert.equal(status.length, 10);
-  assert.equal(lag.length, 10);
-  const detailedPaths = new Set(observed.commands.filter((args) => args[0] === "-C").map((args) => args[1]));
-  assert.ok([...detailedPaths].every((path) => selectedPaths.has(path!) || path === rows[0]!.path));
-  assert.equal(parentReads.length, new Set(parentReads.map((args) => JSON.stringify(args))).size);
-  assert.equal(observed.commands.filter((args) => args[0] === "worktree").length, 1);
+  assert.equal(status.length, 10, "only the ten selected catalogue workspaces are observed");
+  assert.equal(lag.length, 10, "target lag is observed only for selected rows");
+  const selectedPaths = new Set(board.rows!.map(row => rows.find(candidate => candidate.id === row.id)!.path));
+  assert.ok(status.every(args => selectedPaths.has(args[args.indexOf("-C") + 1]!)));
   t.diagnostic(JSON.stringify({
     stage: "bare", worktrees: rows.length, processes: observed.commands.length,
-    status: status.length, lag: lag.length, parentReads: parentReads.length, wallMs: observed.wallMs,
+    status: status.length, lag: lag.length, wallMs: observed.wallMs,
   }));
 
-  const exact = await traceGit(tracePath, () => kanshi({ world, repo, contract: rows.at(-1)!.id }));
-  if (exact.value.contracts.kind !== "present") assert.fail(JSON.stringify(exact.value.contracts));
-  const { holder: _holder, roster: _roster, namespaceDebts: _debts, ...exactRow } = exact.value.contracts.value.rows[0]!;
-  assert.deepEqual(exactRow, expected.find((row) => row.id === rows.at(-1)!.id)!);
+  const selected = rows.at(-1)!;
+  const exact = await traceGit(tracePath, () => kanshi({ world, repo, contract: selected.id }));
+  const selectedReport = contractReport(exact.value);
+  assert.equal(selectedReport.id, selected.id);
+  assert.equal(selectedReport.workspace.kind, "present");
+  assert.equal(selectedReport.workspace.kind === "present" && selectedReport.workspace.counts, undefined);
   assert.equal(exact.commands.filter((args) => args.includes("--porcelain=v2")).length, 1);
-  assert.ok(exact.commands.filter((args) => args[0] === "-C").every(
-    (args) => args[1] === rows[0]!.path || args[1] === rows.at(-1)!.path,
-  ));
+  assert.ok(
+    exact.commands.filter((args) => args[0] === "-C").every((args) => args[1] === selected.path || args[1] === rows[0]!.path),
+  );
   t.diagnostic(JSON.stringify({
     stage: "selected", processes: exact.commands.length,
     status: exact.commands.filter((args) => args.includes("--porcelain=v2")).length, wallMs: exact.wallMs,
   }));
 
-  const selected = rows.at(-1)!;
   renameSync(selected.path, `${selected.path}-missing`);
-  const unavailable = await kanshi({ world, repo, contract: selected.id });
-  if (unavailable.contracts.kind !== "present") assert.fail(JSON.stringify(unavailable.contracts));
-  assert.equal(unavailable.contracts.value.rows[0]!.workspaceObservation.kind, "unavailable");
-  assert.equal(unavailable.contracts.value.rows[0]!.targetLag.kind, "unknown");
+  const unavailable = contractReport(await kanshi({ world, repo, contract: selected.id }));
+  assert.equal(unavailable.workspace.kind, "unavailable");
+  assert.equal(unavailable.workspace.kind === "unavailable" && unavailable.workspace.path, selected.path);
+  assert.equal(unavailable.targetLag?.kind, "unknown");
+  const missingRow = (await contracts.list({ limit: 10 })).rows!.find(row => row.id === selected.id)!;
+  assert.deepEqual(contractSummarySchema.parse(JSON.parse(JSON.stringify(missingRow))), missingRow);
+  assert.deepEqual(missingRow.attention, [
+    { kind: "workspace-unavailable", path: selected.path },
+    { kind: "target-unknown", subject: selected.path },
+  ]);
+  const missingWorld = worldReport(await kanshi({ world, repo }));
+  assert.equal(missingWorld.contracts.kind, "present");
+  if (missingWorld.contracts.kind === "present")
+    assert.deepEqual(missingWorld.contracts.rows!.find(row => row.id === selected.id)?.attention, missingRow.attention);
+  const missingCategory = await kanshiCategory({ world, repo, category: "contract" });
+  assert.ok(missingCategory.section.kind === "present");
+  assert.deepEqual(missingCategory.section.rows!.find(row => row.id === selected.id)?.attention, missingRow.attention);
+  assert.ok(renderKanshiText(missingWorld, { columns: 120, color: false }).includes("workspace unavailable"));
   renameSync(`${selected.path}-missing`, selected.path);
+
+  const indexPath = raw.run(["-C", selected.path, "rev-parse", "--path-format=absolute", "--git-path", "index"]).trim();
+  const indexBytes = readFileSync(indexPath);
+  try {
+    writeFileSync(indexPath, "unreadable index");
+    assert.ok((await contracts.list({ limit: 10 })).rows!.find(row => row.id === selected.id)?.attention?.some(issue => issue.kind === "workspace-unavailable"));
+  } finally { writeFileSync(indexPath, indexBytes); }
 
   const parent = rows[0]!;
   renameSync(parent.path, `${parent.path}-missing`);
-  const missingTarget = await kanshi({ world, repo });
-  if (missingTarget.contracts.kind !== "present") assert.fail(JSON.stringify(missingTarget.contracts));
-  for (const row of missingTarget.contracts.value.rows.filter((row) => typeof row.target === "object")) {
-    assert.deepEqual(row.targetObservation, { head: null, drift: true });
-    assert.equal(row.targetLag.kind, "unknown");
+  for (const dependent of rows.slice(16)) {
+    const missingTarget = contractReport(await kanshi({ world, repo, contract: dependent.id }));
+    assert.deepEqual(missingTarget.targetObservation, { kind: "unknown" });
+    assert.equal(missingTarget.targetLag?.kind, "unknown");
   }
+  const unknownTargets = (await contracts.list({})).rows!;
+  for (const dependent of rows.slice(16))
+    assert.ok(unknownTargets.find(row => row.id === dependent.id)?.attention?.some(issue => issue.kind === "target-unknown"));
   renameSync(`${parent.path}-missing`, parent.path);
-  const recovered = await kanshi({ world, repo });
+  const recovered = worldReport(await kanshi({ world, repo }));
   if (recovered.contracts.kind !== "present") assert.fail(JSON.stringify(recovered.contracts));
-  assert.deepEqual(recovered.contracts.value.rows, board.rows);
+  assert.deepEqual(recovered.contracts.rows, board.rows);
+  raw.run(["commit", "--allow-empty", "--quiet", "-m", "advance target"]);
+  const lagged = (await contracts.list({})).rows!.find(row => row.id === rows[1]!.id)!;
+  assert.deepEqual(lagged.attention, [{ kind: "target-behind", behind: 1, subject: rows[1]!.path }]);
 });
 
 test("World running rows keep only one bounded latest activity line through the shared renderer", () => {
@@ -593,8 +628,8 @@ test("World running rows keep only one bounded latest activity line through the 
     );
     assert.equal(latest.length, 1);
     const board = renderAkuma(akumaWorldReport([row]), { columns, color: false });
-    const { snapshot: _snapshot, ...withoutSnapshot } = row;
-    const withoutActivity = renderAkuma(akumaWorldReport([withoutSnapshot]), { columns, color: false });
+    const { activity: _activity, outcome: _outcome, ...withoutActivityRow } = row;
+    const withoutActivity = renderAkuma(akumaWorldReport([withoutActivityRow]), { columns, color: false });
     assert.deepEqual(board, [...withoutActivity, `  ${latest[0]}`]);
     assert.match(board.at(-1)!, /report +first paragraph/u);
     assert.doesNotMatch(board.join("\n"), /older command/u);

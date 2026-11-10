@@ -17,7 +17,6 @@ export type {
   AkumaTellOptions,
 } from "./akuma-instance.js";
 export type { AkumaStreamSnapshot } from "./akuma-stream.js";
-export type { InterruptReceipt } from "./akuma-owner.js";
 export type { AkumaStatus } from "./akuma.js";
 export type { KillEvidence } from "./heart/index.js";
 export type { AkumaId } from "./identity.js";

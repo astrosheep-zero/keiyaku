@@ -328,8 +328,8 @@ test("overlapping file tools order each Turn and reported changes by completion"
   assert.deepEqual(
     view.reportedChanges,
     [
-      { sequence: 4, at: at(4), op: "update", path: "src/b.ts", diffstat: { added: 1, removed: 0 } },
-      { sequence: 6, at: at(6), op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 0 } },
+      { path: "src/b.ts", diffstat: { added: 1, removed: 0 } },
+      { path: "src/a.ts", diffstat: { added: 1, removed: 0 } },
     ],
     "reported changes stay a diffstat-only summary without observed content",
   );
@@ -409,9 +409,10 @@ for (const observation of ["status", "wait", "roster"] as const) {
       return await originalTry(paths);
     });
     try {
+      const roster = await (await akumaAt(root)).list();
       const result =
         observation === "roster"
-          ? (await (await akumaAt(root)).list()).rows.find((row) => row.id === value.allocated.id)
+          ? roster.rows?.find((row) => row.id === value.allocated.id)
           : observation === "wait"
             ? await value.handle.wait(undefined, { timeoutMs: 1_000 })
             : await value.handle.status();
@@ -594,7 +595,6 @@ test("snapshot selects one current focus while history keeps honest tool lifecyc
     selected.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
     [5, 6, 7, 8],
   );
-  assert.equal(selected.omitted, 0);
   assert.equal(
     selected.entries.some((entry) => entry.kind === "row" && entry.row.kind === "tool" && entry.row.state === "active"),
     true,
@@ -701,7 +701,6 @@ test("open snapshots retain one current-Turn opening input outside the ordinary 
   if (zero.snapshot.kind === "open") {
     assert.equal(zero.snapshot.openingSequence, 5);
     assert.deepEqual(snapshotSequences(zero.snapshot), [5, 6, "gap:2", 9, "gap:2"]);
-    assert.equal(zero.snapshot.omitted, 4);
   }
   assert.equal(zero.ordinaryCount, 0);
 
@@ -743,7 +742,6 @@ test("open snapshots protect settled says but select file changes as ordinary to
   assert.equal(zero.snapshot.kind, "open");
   if (zero.snapshot.kind === "open") {
     assert.deepEqual(snapshotSequences(zero.snapshot), [2, "gap:1", 4, "gap:2", 7, "gap:1"]);
-    assert.equal(zero.snapshot.omitted, 4);
   }
   assert.equal(zero.ordinaryCount, 0);
 
@@ -751,7 +749,6 @@ test("open snapshots protect settled says but select file changes as ordinary to
   assert.equal(selected.snapshot.kind, "open");
   if (selected.snapshot.kind === "open") {
     assert.deepEqual(snapshotSequences(selected.snapshot), [2, "gap:1", 4, "gap:2", 7, 8]);
-    assert.equal(selected.snapshot.omitted, 3);
     const edit = selected.snapshot.entries.find((entry) => entry.kind === "row" && entry.row.sequence === 8);
     assert.equal(edit?.kind, "row");
     if (edit?.kind === "row" && edit.row.kind === "tool" && edit.row.call.kind === "fileChange") {
@@ -926,14 +923,13 @@ test("opening input composes with existing actionable and receipt pins without a
 test("opening identity is positive and names exactly one open snapshot entry", () => {
   const open = activitySnapshotSchema.parse({
     kind: "open",
-    turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
+    turn: { kind: "turn", sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
     entries: [
       {
         kind: "row",
         row: { kind: "call", sequence: 1, turnSequence: 1, at: "2026-08-10T00:00:01.000Z", text: "opening" },
       },
     ],
-    omitted: 0,
     openingSequence: 1,
     reportedChanges: [],
     reportedChangesOmitted: 0,
@@ -942,9 +938,8 @@ test("opening identity is positive and names exactly one open snapshot entry", (
   assert.throws(() =>
     activitySnapshotSchema.parse({
       kind: "open",
-      turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
+      turn: { kind: "turn", sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
       entries: [],
-      omitted: 0,
       openingSequence: 1,
       reportedChanges: [],
       reportedChangesOmitted: 0,
@@ -953,14 +948,13 @@ test("opening identity is positive and names exactly one open snapshot entry", (
   assert.throws(() =>
     activitySnapshotSchema.parse({
       kind: "open",
-      turn: { kind: "turn", sequence: 1, turnSequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
+      turn: { kind: "turn", sequence: 1, bodySequence: 1, at: "2026-08-10T00:00:01.000Z" },
       entries: [
         {
           kind: "row",
           row: { kind: "call", sequence: 1, turnSequence: 1, at: "2026-08-10T00:00:01.000Z", text: "opening" },
         },
       ],
-      omitted: 0,
       openingSequence: 0,
       reportedChanges: [],
       reportedChangesOmitted: 0,
@@ -970,7 +964,6 @@ test("opening identity is positive and names exactly one open snapshot entry", (
     activitySnapshotSchema.parse({
       kind: "unborn",
       entries: [],
-      omitted: 0,
       openingSequence: 1,
       reportedChanges: [],
       reportedChangesOmitted: 0,
@@ -980,7 +973,6 @@ test("opening identity is positive and names exactly one open snapshot entry", (
     activitySnapshotSchema.parse({
       kind: "idle",
       entries: [],
-      omitted: 0,
       openingSequence: 1,
       reportedChanges: [],
       reportedChangesOmitted: 0,
@@ -1078,14 +1070,7 @@ test("reported file changes follow the open or latest closed frontier and aggreg
       result: { status: "ok" as const },
     }),
   ];
-  const reported = (view: ActivitySnapshot) =>
-    view.reportedChanges.map((change) => ({
-      sequence: change.sequence,
-      at: change.at,
-      op: change.op,
-      path: change.path,
-      ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
-    }));
+  const reported = (view: ActivitySnapshot) => view.reportedChanges;
   const openLedger = projectTurns(facts);
   const openFrontier = openLedger.openTurn?.rows.find(
     (row) => row.kind === "tool" && row.call.kind === "fileChange" && row.sequence === 7,
@@ -1097,24 +1082,15 @@ test("reported file changes follow the open or latest closed frontier and aggreg
   assert.equal(open.kind, "open");
   assert.deepEqual(reported(open), [
     {
-      sequence: 7,
-      at: "2026-08-10T00:00:07.000Z",
-      op: "add",
       path: "src/created.ts",
       diffstat: { added: 4, removed: 0 },
     },
     {
-      sequence: 7,
-      at: "2026-08-10T00:00:07.000Z",
-      op: "delete",
       path: "src/removed.ts",
       diffstat: { added: 0, removed: 3 },
     },
-    { sequence: 7, at: "2026-08-10T00:00:07.000Z", op: "unspecified", path: "src/unknown.ts" },
+    { path: "src/unknown.ts" },
     {
-      sequence: 7,
-      at: "2026-08-10T00:00:07.000Z",
-      op: "update",
       path: "src/repeated.ts",
       diffstat: { added: 3, removed: 1 },
     },
@@ -1204,14 +1180,8 @@ test("reported file changes keep the newest five independently of ordinary omiss
     view.reportedChanges.map((change) => change.path),
     ["src/four.ts", "src/five.ts", "src/six.ts", "src/seven.ts", "src/three.ts"],
   );
-  assert.deepEqual(
-    view.reportedChanges.map((change) => change.sequence),
-    [6, 6, 6, 6, 6],
-  );
-  assert.equal(view.reportedChanges.at(-1)?.op, "update");
   assert.equal(view.reportedChanges.at(-1)?.diffstat, undefined);
   assert.equal(view.reportedChangesOmitted, 2);
-  assert.equal(view.omitted, 5);
   assert.deepEqual(snapshotSequences(view), ["gap:5"]);
 });
 
@@ -1342,15 +1312,11 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   assert.deepEqual(await handle.lastAnswer(), { kind: "answer", answer: "complete without fork" });
   assert.deepEqual(historyPage(await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
     kind: "answered",
-    historyId: "turn/1",
     answer: "complete without fork",
   });
   const exact = await handle.history({ id: "turn/1" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
-  assert.deepEqual(await handle.fork({ at: "missing-point" }, spawnAkumaBody), {
-    kind: "unknown-history",
-    at: "missing-point",
-  });
+  assert.deepEqual(await handle.fork({ at: "missing-point" }, spawnAkumaBody), { kind: "unknown-history" });
 });
 
 test("SDK fork records its invoking caller independently of source lineage and emits born", async (t) => {
@@ -1394,10 +1360,10 @@ test("SDK fork records its invoking caller independently of source lineage and e
     });
     assert.equal(receipt.kind, "forked");
     if (receipt.kind !== "forked") return;
-    const child = pathsForAkumaId(world, receipt.child);
+    const child = pathsForAkumaId(world, receipt.childAkumaId);
     assert.equal((await readHeart(child)).soul?.bare, true);
     assert.equal((await readHeart(source.paths)).soul?.bare, undefined, "fork does not change its source");
-    const status = await (await akumaAt(root)).of({ id: receipt.child }).status();
+    const status = await (await akumaAt(root)).of({ id: receipt.childAkumaId }).status();
     assert.deepEqual(status.birth, { origin: { kind: "fork", parent: source.id, at: "turn/1" }, caller });
     const signals = readFileSync(output, "utf8")
       .trim()
@@ -1406,7 +1372,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
     assert.equal(signals.length, 2);
     assert.deepEqual(signals[1], {
       kind: "akuma.born",
-      akumaId: receipt.child,
+      akumaId: receipt.childAkumaId,
       bodySequence: 1,
       ...status.birth,
       initiator: "Invoker",
@@ -1416,7 +1382,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
     assert.equal(inherited.kind, "forked");
     if (inherited.kind === "forked") {
       assert.equal(
-        (await readHeart(pathsForAkumaId(world, inherited.child))).soul?.bare,
+        (await readHeart(pathsForAkumaId(world, inherited.childAkumaId))).soul?.bare,
         true,
         "false cannot undo a source's frozen opt-out",
       );
@@ -1456,7 +1422,6 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
     delete mutable.fork;
     assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), {
       kind: "provider-cannot-fork",
-      provider: "claude",
     });
 
     let nativeCalls = 0;
@@ -1465,7 +1430,7 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
         nativeCalls += 1;
         throw new Error("native refused");
       });
-    assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), { kind: "unknown-history", at: "missing" });
+    assert.deepEqual(await handle.fork({ at: "missing" }, spawnAkumaBody), { kind: "unknown-history" });
     assert.equal(nativeCalls, 0);
     assert.deepEqual(await handle.fork({ at: "turn/1" }, spawnAkumaBody), {
       kind: "fork-failed",
@@ -1480,9 +1445,9 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
         return { session: { sessionId: "orphan-upstream-session" } };
       });
     const partial = await handle.fork({ at: "turn/1" }, spawnAkumaBody);
-    assert.equal(partial.kind, "upstream-forked");
-    if (partial.kind === "upstream-forked") {
-      assert.deepEqual(partial.childSession, { sessionId: "orphan-upstream-session" });
+    assert.equal(partial.kind, "provider-forked-local-birth-failed");
+    if (partial.kind === "provider-forked-local-birth-failed") {
+      assert.deepEqual(partial.session, { kind: "session", sessionId: "orphan-upstream-session" });
       assert.match(partial.diagnostic, /exist|directory|not a directory/i);
     }
 
@@ -1509,14 +1474,18 @@ test("fork preserves categorical, exact-history, native, local, and not-born fai
 test("public Akuma handles separate compact list rows from full status and wait", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-public-");
   const world = await akumaAt(root);
-  assert.deepEqual((await world.list()).rows, []);
+  const empty = await world.list();
+  assert.equal(empty.rows, undefined, "an empty roster omits rows");
+  assert.equal(empty.more, undefined, "a complete roster omits more");
   const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "1234abcd" });
   await initializeHeart(allocated.paths);
   await moveAlias({ world: root as WorldRoot, alias: parseAkumaAlias("@early"), akumaId: allocated.id });
-  assert.equal((await world.list()).rows[0]?.life, "unborn");
-  assert.deepEqual((await world.list()).rows[0]?.aliases, ["@early"]);
-  assert.equal((await world.list({ akumaName: "claude" })).rows[0]?.id, allocated.id);
-  assert.deepEqual((await world.list({ akumaName: "reviewer" })).rows, []);
+  const unbornRows = (await world.list()).rows;
+  assert.ok(unbornRows !== undefined);
+  assert.equal(unbornRows[0]?.life, "unborn");
+  assert.deepEqual(unbornRows[0]?.aliases, ["@early"]);
+  assert.equal((await world.list({ akumaName: "claude" })).rows?.[0]?.id, allocated.id);
+  assert.equal((await world.list({ akumaName: "reviewer" })).rows, undefined);
   await assert.rejects(world.list({ akumaName: "not/a-name" }), /Akuma name/);
   await assert.rejects(world.list({ unknown: true } as never), /unknown field: unknown/);
 
@@ -1536,14 +1505,16 @@ test("public Akuma handles separate compact list rows from full status and wait"
   await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
 
   const handle = world.of({ id: allocated.id });
-  const listed = (await world.list()).rows[0]!;
-  assert.equal(listed.life, "asleep");
-  assert.equal("lifeAt" in listed && listed.lifeAt, "2026-08-08T00:00:00.000Z");
-  assert.equal("history" in listed, false);
-  assert.equal("answer" in listed, false);
-  assert.equal(listed.akumaName, "claude");
-  assert.equal(listed.description, "Fixture akuma");
-  assert.deepEqual(listed.pending, []);
+  const listedRows = (await world.list()).rows;
+  assert.ok(listedRows !== undefined);
+  const listed = listedRows[0];
+  assert.equal(listed?.life, "asleep");
+  assert.equal(listed?.life === "asleep" && listed.lifeAt, "2026-08-08T00:00:00.000Z");
+  assert.equal("history" in (listed ?? {}), false);
+  assert.equal("answer" in (listed ?? {}), false);
+  assert.equal(listed?.id.split("/")[1], "claude", "the roster identity carries the frozen akuma name");
+  assert.equal("description" in (listed ?? {}), false, "the public roster omits descriptions");
+  assert.equal(listed?.life === "asleep" && listed.pending, undefined, "known-empty pending is omitted");
   const status = await handle.status();
   assert.equal(status.life, "asleep");
   assert.equal(status.cwd, root, "status reports the Akuma's frozen execution workdir");
@@ -1552,16 +1523,15 @@ test("public Akuma handles separate compact list rows from full status and wait"
   assert.equal("pending" in status, false);
   assert.equal(status.timeline.kind, "idle");
   assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.kind === "answered", true);
-  assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.historyId, "turn/1");
+  assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.turnSequence, 1);
   assert.equal("history" in status, false);
   assert.deepEqual(historyPage(await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
     kind: "answered",
     answer: "public answer",
-    historyId: "turn/1",
   });
   const exact = await handle.history({ id: "turn/1" });
   if (!("kind" in exact) || exact.kind !== "exact") throw new Error("expected exact history");
-  assert.deepEqual(exact.outcome.outcome, { kind: "answered", answer: "public answer", historyId: "turn/1" });
+  assert.deepEqual(exact.outcome.outcome, { kind: "answered", answer: "public answer" });
   assert.equal(status.timeline.entries.length, 0);
   assert.deepEqual(
     await handle.wait(
@@ -1642,55 +1612,57 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   });
 
   const listed = await world.list({ caller: rootCaller });
+  const listedRows = listed.rows;
+  assert.ok(listedRows !== undefined);
   assert.deepEqual(
-    listed.rows.map((row) => row.id),
+    listedRows.map((row) => row.id),
     [delegation.id, greatGrandchild.id, grandchild.id, sibling.id, direct.id],
     "activity order applies after caller and akumaName selection",
   );
   assert.deepEqual(
-    listed.rows.map((row) => ("caller" in row ? row.caller : undefined)),
-    [akumaCaller(sibling.id), akumaCaller(grandchild.id), akumaCaller(direct.id), rootCaller, rootCaller],
+    listedRows.map((row) => ("parentAkumaId" in row ? row.parentAkumaId : undefined)),
+    [sibling.id, grandchild.id, direct.id, undefined, undefined],
     "every born row keeps its frozen caller edge",
   );
   assert.equal(
-    listed.rows.some((row) => row.id === unrelated.id),
+    listedRows.some((row) => row.id === unrelated.id),
     false,
     "a different caller is not descended",
   );
   assert.equal(
-    listed.rows.some((row) => row.id === forked.id),
+    listedRows.some((row) => row.id === forked.id),
     false,
     "fork origin alone is not a caller edge",
   );
 
   assert.deepEqual(
-    (await world.list({ caller: rootCaller, akumaName: "intern" })).rows.map((row) => row.id),
+    (await world.list({ caller: rootCaller, akumaName: "intern" })).rows?.map((row) => row.id),
     [greatGrandchild.id, grandchild.id],
     "the closure is complete across archetypes before the name filter",
   );
   assert.deepEqual(
-    (await world.list({ caller: akumaCaller(direct.id) })).rows.map((row) => row.id),
+    (await world.list({ caller: akumaCaller(direct.id) })).rows?.map((row) => row.id),
     [greatGrandchild.id, grandchild.id],
     "an Akuma caller sees its transitive descendants and not itself",
   );
   assert.deepEqual(
-    (await world.list({ caller: akumaCaller(sibling.id) })).rows.map((row) => row.id),
+    (await world.list({ caller: akumaCaller(sibling.id) })).rows?.map((row) => row.id),
     [delegation.id],
   );
 
   const bounded = await world.list({ caller: rootCaller, limit: 2 });
   assert.deepEqual(
-    bounded.rows.map((row) => row.id),
+    bounded.rows?.map((row) => row.id),
     [delegation.id, greatGrandchild.id],
   );
-  assert.equal(bounded.hasMore, true, "the remaining matching members are reported honestly");
+  assert.equal(bounded.more, true, "the remaining matching members are reported honestly");
 
   const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
   assert.equal(existsSync(cache), true, "the optional lineage cache stays inside this World");
   unlinkSync(cache);
   assert.deepEqual(
-    (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
-    listed.rows.map((row) => row.id),
+    (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
+    listedRows.map((row) => row.id),
     "an unavailable cache falls back to direct Soul reads",
   );
   await assert.rejects(world.list({ caller: { kind: "elsewhere" } } as never), TypeError);
@@ -1722,13 +1694,13 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
   const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
   await waitForFile(cache);
   assert.deepEqual(
-    (await world.list({ caller })).rows.map((row) => row.id),
+    (await world.list({ caller })).rows?.map((row) => row.id),
     [allocated.id],
     "the recorded edge answers the caller-scoped query",
   );
   unlinkSync(cache);
   assert.deepEqual(
-    (await world.list({ caller })).rows.map((row) => row.id),
+    (await world.list({ caller })).rows?.map((row) => row.id),
     [allocated.id],
     "the same birth remains discoverable without its cache",
   );
@@ -1781,22 +1753,22 @@ test("a wrong lineage cache edge cannot fabricate members or their ancestor chai
 
   const listed = await world.list({ caller: rootCaller });
   assert.deepEqual(
-    listed.rows.map((row) => row.id),
+    listed.rows?.map((row) => row.id),
     [descendant.id, direct.id],
     "only Soul-proven members survive the forged record",
   );
   assert.deepEqual(
-    (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
+    (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
     [descendant.id, direct.id],
     "the discarded record is rebuilt from Souls and stays correct",
   );
   assert.deepEqual(
-    (await world.list({ caller: akumaCaller(stranger.id) })).rows.map((row) => row.id),
+    (await world.list({ caller: akumaCaller(stranger.id) })).rows?.map((row) => row.id),
     [strangerChild.id],
     "the real child remains a child of its real caller",
   );
   assert.deepEqual(
-    (await world.list({ caller: rootCaller, akumaName: "intern" })).rows.map((row) => row.id),
+    (await world.list({ caller: rootCaller, akumaName: "intern" })).rows?.map((row) => row.id),
     [descendant.id],
   );
 });
@@ -1815,11 +1787,11 @@ test("a lineage cache row for a vanished directory never resurrects an identity"
   });
   await recordAkumaLineage(proved, { id: "aku/ghost/deadbeef" as never, caller: rootCaller });
   assert.deepEqual(
-    (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
+    (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
     [direct.id],
   );
   assert.deepEqual(
-    (await world.list({ caller: rootCaller })).rows.map((row) => row.id),
+    (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
     [direct.id],
     "the vanished identity stays pruned",
   );
@@ -1887,7 +1859,7 @@ test("kill settles a stranded dead Body and later observation presents the kille
   const status = await handle.status();
   assert.equal(status.life, "killed");
   assert.equal("strandedReason" in status, false);
-  const listed = (await world.list()).rows.find((row) => row.id === allocated.id);
+  const listed = (await world.list()).rows?.find((row) => row.id === allocated.id);
   assert.equal(listed !== undefined && "life" in listed && listed.life, "killed");
   assert.equal(await handle.kill(noBodyLaunch), "already-killed");
 });
@@ -2040,7 +2012,6 @@ test("interrupt waits for leash release after a durable Body end beyond the defa
     assert.equal("kind" in receipt, false);
     if ("kind" in receipt) throw new Error("interrupt was unavailable");
     assert.equal(receipt.interruption?.kind, "completed");
-    if (receipt.interruption?.kind === "completed") assert.equal(receipt.interruption.putDown, "was-idle");
   } finally {
     restoreTry?.();
     releaseHolder?.();
@@ -2182,13 +2153,13 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     const catalog = await listArchetypeDefinitions({ project: root, home });
     assert.deepEqual(catalog, {
       rows: [{ name: "home-only" }, { name: "project-only" }, { name: "shared", description: "Project" }],
-      hasMore: false,
     });
 
-    const cli = await cliJson<Readonly<{ rows: readonly unknown[]; hasMore: boolean }>>(["-C", root, "ls", "aku/"], {
-      environment: { KEIYAKU_HOME: home },
-    });
-    assert.deepEqual(cli.value, { rows: catalog.rows, hasMore: false });
+    const cli = await cliJson<Readonly<{ rows?: readonly unknown[]; more?: true }>>(
+      ["-C", root, "ls", "aku/"],
+      { environment: { KEIYAKU_HOME: home } },
+    );
+    assert.deepEqual(cli.value, catalog);
 
     const shared = await loadPreparedArchetype({ name: "shared", project: root, home, settings: settingsValue });
     assert.equal(shared.path, join(root, ".keiyaku", "akumas", "shared.md"));
@@ -2220,7 +2191,7 @@ test("dotted akumaName file stems join the catalogue as canonical names", async 
     writeFileSync(join(home, "akumas", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
 
     const catalog = await listArchetypeDefinitions({ project: root, home });
-    assert.deepEqual(catalog, { rows: [{ name: "review.v2" }], hasMore: false });
+    assert.deepEqual(catalog, { rows: [{ name: "review.v2" }] });
 
     const settingsValue = await settings({ root, home });
     const dotted = await loadPreparedArchetype({ name: "review.v2", project: root, home, settings: settingsValue });
@@ -2242,10 +2213,10 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
     writeFileSync(join(home, "akumas", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
 
     const catalog = await listArchetypeDefinitions({ project: root, home });
-    assert.deepEqual(catalog, { rows: [{ name: "child" }, { name: "visible" }], hasMore: false });
+    assert.deepEqual(catalog, { rows: [{ name: "child" }, { name: "visible" }] });
     assert.deepEqual(await listArchetypeDefinitions({ project: root, home, limit: 1 }), {
       rows: [{ name: "child" }],
-      hasMore: true,
+      more: true,
     });
 
     const settingsValue = await settings({ root, home });
@@ -2281,7 +2252,7 @@ test("list omits unreadable Hearts instead of reporting unborn, while direct sta
     world.of({ id: heartCut.id }).status(),
     (error: unknown) => !(error instanceof AkumaNotBornError),
   );
-  assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn", aliases: [] }]);
+  assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
   assert.equal(existsSync(noise), true);
 
   rmSync(heartCut.paths.directory, { recursive: true, force: true });
@@ -2292,7 +2263,7 @@ test("list omits unreadable Hearts instead of reporting unborn, while direct sta
   });
   await initializeHeart(leashCut.paths);
   unlinkSync(leashCut.paths.leash);
-  assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn", aliases: [] }]);
+  assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
 });
 
 test("kill gives the Body a grace window to abort its owned provider session", async (context) => {

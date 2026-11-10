@@ -257,7 +257,7 @@ test("public hosts capture independent immutable sinks for native and plural obs
   };
   const peer = Akumas.of(world, host);
 
-  assert.equal((await plural.status({ akuma: value.allocated.id })).status.life, "asleep");
+  assert.equal((await plural.status({ akuma: value.allocated.id })).life, "asleep");
   await plural.history({ akuma: value.allocated.id });
   assert.equal((await plural.wait({ akuma: [value.allocated.id], timeoutMs: 0 })).reason, "completed");
   await native.status();
@@ -298,8 +298,8 @@ test("host callback throws and async rejections cannot alter observation results
     },
   });
   const result = await plural.history({ akuma: value.allocated.id, last: true });
-  assert.equal(result.kind, "last");
-  assert.ok(result.kind === "last");
+  assert.equal(result.kind, "akuma-last");
+  assert.ok(result.kind === "akuma-last");
   assert.equal(result.answer, "unchanged answer");
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(thrown, 1);
@@ -358,7 +358,7 @@ test("host options reject malformed capabilities before construction or birth ef
     assert.throws(() => Akuma.select(world, "aku/worker/0b500015", host as never), TypeError);
     await assert.rejects(Akuma.birth("worker", { root: world, host: host as never }), TypeError);
   }
-  assert.deepEqual((await Akumas.of(world).list()).rows, []);
+  assert.equal((await Akumas.of(world).list()).rows, undefined, "an empty roster omits rows");
 });
 
 function signal(akumaId: string, sequence: number): Signal {
@@ -402,7 +402,7 @@ test("public status observes committed identity, not idle or incidental internal
   await api.history({ akuma: value.allocated.id, id: "turn/9999" });
   assert.deepEqual(recorded.signals(), [], "idle and missing history have no invented result");
   const observed = await api.status({ akuma: value.allocated.id });
-  assert.equal(observed.status.life, "running");
+  assert.equal(observed.life, "running");
   assert.deepEqual(recorded.signals(), [signal(value.allocated.id, answered.sequence)]);
   recorded.reset();
   const failed = await outcome(value);
@@ -418,7 +418,7 @@ test("public status observes committed identity, not idle or incidental internal
   recorded.reset();
   await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
   const open = await api.status({ akuma: value.allocated.id });
-  assert.equal(open.status.timeline.kind, "open");
+  assert.equal(open.timeline.kind, "open");
   assert.deepEqual(recorded.signals(), [], "a past outcome read to build an open view is not caller observation");
 });
 
@@ -431,7 +431,7 @@ test("history page, exact and last use the identity of the actual retained resul
   const failed = await outcome(value);
   const api = Akumas.of(world);
   const last = await api.history({ akuma: value.allocated.id, last: true });
-  assert.equal(last.kind, "last");
+  assert.equal(last.kind, "akuma-last");
   assert.deepEqual(
     recorded.signals(),
     [signal(value.allocated.id, answered.sequence)],
@@ -439,7 +439,7 @@ test("history page, exact and last use the identity of the actual retained resul
   );
   recorded.reset();
   const exact = await api.history({ akuma: value.allocated.id, id: `turn/${failed.sequence}` });
-  assert.equal(exact.kind, "exact");
+  assert.equal(exact.kind, "akuma-exact");
   assert.deepEqual(recorded.signals(), [signal(value.allocated.id, failed.sequence)]);
   recorded.reset();
   await api.history({ akuma: value.allocated.id });
@@ -543,9 +543,9 @@ test("CLI native Owners survive coalesced Tell admission into direct Body ledger
       environment: { PI_SESSION_ID: session, SQUARE_DELIVERY: process.env.SQUARE_DELIVERY },
     });
     assert.equal(result.exit, 0, result.stderr);
-    const fact = await readTell(target.allocated.paths, result.value.tell.admission.tellId);
+    const fact = await readTell(target.allocated.paths, result.value.tellId);
     assert.equal(fact?.initiator, owner);
-    receipts.push(result.value.tell.admission.tellId);
+    receipts.push(result.value.tellId);
   }
   target.holder.release();
   await driveAkumaBody(
@@ -666,7 +666,7 @@ for (const route of ["ask", "standalone-ask"] as const) {
               initiator: observed.owner,
               signal: t.signal,
             });
-      assert.equal(result.observation.reason, "invalid-output");
+      assert.equal(result.kind, "invalid-output");
       await sending;
       release();
       await settleFixtureBodies(bodies);
@@ -708,8 +708,8 @@ test(
           diagnostics.push(message);
         },
       }).ask("work", { schema, signal: t.signal });
-      assert.equal(result.observation.reason, "invalid-output");
-      const tell = await readTell(source.allocated.paths, result.tell.admission.tellId);
+      assert.equal(result.kind, "invalid-output");
+      const tell = await readTell(source.allocated.paths, result.tellId);
       assert.ok(tell?.binding);
       assert.deepEqual(recorded.signals(), [signal(source.allocated.id, tell.binding.turnSequence)]);
       const pluralResult = await akumasWithLauncher(peer.world, spawn, {
@@ -717,8 +717,8 @@ test(
           diagnostics.push(message);
         },
       }).ask({ akuma: peer.allocated.id, body: "work", schema, signal: t.signal });
-      assert.equal(pluralResult.observation.reason, "invalid-output");
-      const peerTell = await readTell(peer.allocated.paths, pluralResult.tell.admission.tellId);
+      assert.equal(pluralResult.kind, "invalid-output");
+      const peerTell = await readTell(peer.allocated.paths, pluralResult.tellId);
       assert.ok(peerTell?.binding);
       assert.deepEqual(peerRecorded.signals(), [signal(peer.allocated.id, peerTell.binding.turnSequence)]);
       assert.equal(diagnostics.filter((message) => message.includes("observer deliberately failed")).length, 2);

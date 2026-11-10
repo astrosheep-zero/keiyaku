@@ -158,11 +158,11 @@ async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Pro
   assert.equal(killed.results.length, 1, `public kill selected ${selector} once`);
   const member = killed.results[0]!;
   const settled =
-    member.evidence === "killed" || member.evidence === "already-killed" || member.evidence === "already-stopped";
+    member.outcome === "killed" || member.outcome === "already-killed" || member.outcome === "already-stopped";
   if (!settled)
     assert.fail(
       [
-        `public kill has settled evidence for ${selector}: ${member.evidence}`,
+        `public kill has settled evidence for ${selector}: ${member.outcome}`,
         await unsettledKillEvidence(akumas, selector, killed),
       ].join("\n"),
     );
@@ -172,9 +172,13 @@ async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Pro
     timeoutMs: 10_000,
   });
   assert.equal(waited.reason, "completed", `public wait confirms ${selector} settled after kill`);
-  assert.equal(waited.observations.length, 1, `public wait observes ${selector} once`);
-  assert.equal(waited.observations[0]!.status.id, member.id);
-  assert.notEqual(waited.observations[0]!.status.life, "running");
+  assert.equal(waited.results.length, 1, `public wait observes ${selector} once`);
+  const observed = waited.results[0]!;
+  assert.equal(observed.kind, "observed");
+  if (observed.kind === "observed") {
+    assert.equal(observed.id, member.id);
+    assert.notEqual(observed.life, "running");
+  }
 }
 
 /**
@@ -259,10 +263,13 @@ test(
 
       let detachedStarted = false;
       try {
-        const detached = await runPackagedCli(["-C", world, "spawn", "worker", "--bare", "--alias", "@detached", "prompt"], {
-          cwd: world,
-          env,
-        });
+        const detached = await runPackagedCli(
+          ["-C", world, "spawn", "worker", "--bare", "--alias", "@detached", "prompt"],
+          {
+            cwd: world,
+            env,
+          },
+        );
         assert.equal(detached.code, 0, detached.stderr);
         detachedStarted = true;
         const afterExit = await runPackagedCli(["-C", world, "wait", "@detached", "--timeout", "1s"], {
@@ -300,7 +307,11 @@ test(
       assert.equal(tell.code, 0, tell.stderr);
       assert.equal(tell.stdout, "the answer", "the bounded Tell writes only its exact answer bytes");
       assert.equal(tell.stderr.match(/^aku\/finisher\/[0-9a-f]{8}$/gmu)?.length, 1, "one shared input identity frame");
-      assert.equal(tell.stderr.match(/^(?:▸|⧗) continue$/gmu)?.length, 1, `the admitted input appears once:\n${tell.stderr}`);
+      assert.equal(
+        tell.stderr.match(/^(?:▸|⧗) continue$/gmu)?.length,
+        1,
+        `the admitted input appears once:\n${tell.stderr}`,
+      );
       assert.equal(tell.stderr.match(/\n\n/gu)?.length, 1, "only the answer separator is blank");
       assert.match(tell.stderr, /✓ answered — \d+s\n\n$/u, "the progress channel separates the raw answer");
 

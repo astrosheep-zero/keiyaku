@@ -1,0 +1,1070 @@
+{
+  "samples": [
+    {
+      "name": "bind",
+      "verb": "bind",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/native-output-budget-0001",
+        "target": "refs/heads/main",
+        "worktreePath": "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/bossroom/.keiyaku/native-output-budget/scene/repo/.keiyaku/wt/couchgap"
+      }
+    },
+    {
+      "name": "amend",
+      "verb": "amend",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/native-output-budget-0001",
+        "changedSections": [
+          "criteria"
+        ]
+      }
+    },
+    {
+      "name": "reconcile",
+      "verb": "reconcile",
+      "wire": {
+        "kind": "contract",
+        "contractId": "kei/native-output-budget-0001"
+      }
+    },
+    {
+      "name": "arc",
+      "verb": "arc",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/native-output-budget-0001",
+        "chapter": 1
+      }
+    },
+    {
+      "name": "show",
+      "verb": "show",
+      "wire": {
+        "kind": "present",
+        "guidance": "---\ncontract: kei/native-output-budget-0001\ndescription: This is a read-only projection. Do not edit manually.\n---\n\n# Native output budget\n\n## Context\n\nEvidence must come from real owners.\n\n## Objective\n\nPreserve decision-relevant facts without returning entire terms.\n\n## Design\n\nOne deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture.\n\n## Region\n\ncandidate.txt\nsrc/**\n\n## Criteria\n\n### Preserve evidence\n\nKeep exact requested content and actionable failures.\n\n## Verification\n\n```bash timeout=5s\nprintf checked\n```\n\n## Arc\n\n### Sequence\n\n1\n\n### Title\n\nMeasured chapter\n\n### Body\n\nKeep the same candidate and standing terms.\n\n## Fulfillment\n\n### Appointment\n\nThis worktree is materialized for one Appointment to the Contract above, and every commission into it names exactly one seat \u2014 Deliverer or Reviewer. The Contract document is journal-authoritative: its terms are the standing acceptance floor, changed only by journaled amend. If an Arc is dispatched, it is the current chapter of delivery.\n\n### Worktree\n\nThis worktree is the derived view of the Contract's subject. All Contract work happens here and stays here; the full current worktree state is the candidate.\n\n### Deliverer\n\nThe Deliverer implements and verifies the journaled terms, staying within the dispatched Arc; it does not decide Contract lifecycle. It stops and asks upward on contradictions, ungrounded terms, and open design choices.\nRead the Deliverer operating procedures at `.agents/skills/keiyaku-deliver/SKILL.md`.\n\n### Reviewer\n\nThe Reviewer examines the full current candidate snapshot, first decides whether each Criterion is adjudicable as written, and testifies satisfied or unsatisfied over the current document and worktree \u2014 reporting covered Criteria, findings, term defects, and missing evidence in the summary.\nRead the Reviewer operating procedures at `.agents/skills/keiyaku-review/SKILL.md`.\n"
+      }
+    },
+    {
+      "name": "preview",
+      "verb": "deliver.preview",
+      "wire": {
+        "kind": "ready",
+        "contractId": "kei/native-output-budget-0001",
+        "candidate": "79ca4041a3e3e0f068ae9a187eb79f50998f28b4",
+        "integration": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+        "contentId": "e88fc9644f285ae33c46970e296fd5fdae9fa58f",
+        "scope": {
+          "filesChanged": 1,
+          "insertions": 1,
+          "deletions": 1
+        },
+        "unmetGates": [
+          {
+            "gate": "reviewed",
+            "requirement": "gate:reviewed",
+            "state": "missing"
+          },
+          {
+            "gate": "verified",
+            "requirement": "verification:sha256:aa840b8d0e29aee2bf4b2f94ee2e2a6a413cfcc102af46b5e2dae934af98201e",
+            "state": "missing"
+          }
+        ],
+        "target": {
+          "kind": "placeable",
+          "ref": "refs/heads/main",
+          "head": "5d4a8c339af96be7fbe15fb87f148d7a4d4a1428"
+        }
+      }
+    },
+    {
+      "name": "preview.diff",
+      "verb": "deliver.preview",
+      "wire": {
+        "kind": "ready",
+        "contractId": "kei/native-output-budget-0001",
+        "candidate": "79ca4041a3e3e0f068ae9a187eb79f50998f28b4",
+        "integration": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+        "contentId": "e88fc9644f285ae33c46970e296fd5fdae9fa58f",
+        "scope": {
+          "filesChanged": 1,
+          "insertions": 1,
+          "deletions": 1,
+          "paths": [
+            "candidate.txt"
+          ]
+        },
+        "unmetGates": [
+          {
+            "gate": "reviewed",
+            "requirement": "gate:reviewed",
+            "state": "missing"
+          },
+          {
+            "gate": "verified",
+            "requirement": "verification:sha256:aa840b8d0e29aee2bf4b2f94ee2e2a6a413cfcc102af46b5e2dae934af98201e",
+            "state": "missing"
+          }
+        ],
+        "diff": {
+          "kind": "present",
+          "text": "diff --git a/candidate.txt b/candidate.txt\nindex df967b9..02e8acd 100644\n--- a/candidate.txt\n+++ b/candidate.txt\n@@ -1 +1 @@\n-base\n+candidate\n"
+        },
+        "target": {
+          "kind": "placeable",
+          "ref": "refs/heads/main",
+          "head": "5d4a8c339af96be7fbe15fb87f148d7a4d4a1428"
+        }
+      }
+    },
+    {
+      "name": "deliver",
+      "verb": "deliver",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/native-output-budget-0001",
+        "candidate": "79ca4041a3e3e0f068ae9a187eb79f50998f28b4",
+        "integration": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+        "contentId": "e88fc9644f285ae33c46970e296fd5fdae9fa58f",
+        "placement": {
+          "kind": "gates-unsatisfied",
+          "unmet": [
+            {
+              "gate": "reviewed",
+              "requirement": "gate:reviewed",
+              "state": "missing"
+            },
+            {
+              "gate": "verified",
+              "requirement": "verification:sha256:aa840b8d0e29aee2bf4b2f94ee2e2a6a413cfcc102af46b5e2dae934af98201e",
+              "state": "missing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "deliver.reused",
+      "verb": "deliver",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/native-output-budget-0001",
+        "candidate": "79ca4041a3e3e0f068ae9a187eb79f50998f28b4",
+        "integration": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+        "contentId": "e88fc9644f285ae33c46970e296fd5fdae9fa58f",
+        "admission": "reused",
+        "placement": {
+          "kind": "gates-unsatisfied",
+          "unmet": [
+            {
+              "gate": "reviewed",
+              "requirement": "gate:reviewed",
+              "state": "missing"
+            },
+            {
+              "gate": "verified",
+              "requirement": "verification:sha256:aa840b8d0e29aee2bf4b2f94ee2e2a6a413cfcc102af46b5e2dae934af98201e",
+              "state": "missing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "verify",
+      "verb": "verify",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/native-output-budget-0001",
+        "snapshot": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+        "checks": [
+          {
+            "index": 1,
+            "requirement": "verification:sha256:aa840b8d0e29aee2bf4b2f94ee2e2a6a413cfcc102af46b5e2dae934af98201e",
+            "kind": "terminal",
+            "verdict": "satisfied"
+          }
+        ],
+        "placement": {
+          "kind": "gates-unsatisfied",
+          "unmet": [
+            {
+              "gate": "reviewed",
+              "requirement": "gate:reviewed",
+              "state": "missing"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "history.contract",
+      "verb": "history",
+      "wire": {
+        "kind": "contract",
+        "contractId": "kei/native-output-budget-0001",
+        "events": [
+          {
+            "id": "01M702VXG09KY2KF7PGHGYGW3T",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "bind",
+            "start": "5d4a8c339af96be7fbe15fb87f148d7a4d4a1428",
+            "target": "refs/heads/main",
+            "gates": [
+              "reviewed",
+              "verified"
+            ]
+          },
+          {
+            "id": "01M702VXG0KY41AYPVJVH9C48J",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "amend",
+            "changedSections": [
+              "Criteria"
+            ]
+          },
+          {
+            "id": "01M702VXG09XA2EXK0TYYA1F9H",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "arc",
+            "chapter": 1,
+            "title": "Measured chapter",
+            "body": "\nKeep the same candidate and standing terms.\n"
+          },
+          {
+            "id": "01M702VXG02VX3Y2Z7AHXCYJBG",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "deliver",
+            "candidate": "79ca4041a3e3e0f068ae9a187eb79f50998f28b4",
+            "integration": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+            "contentId": "e88fc9644f285ae33c46970e296fd5fdae9fa58f",
+            "predecessor": "5d4a8c339af96be7fbe15fb87f148d7a4d4a1428"
+          },
+          {
+            "id": "01M702VXG07PCEFJ56YE2YNRBE",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "attestation",
+            "gate": "verified",
+            "requirement": "verification:sha256:aa840b8d0e29aee2bf4b2f94ee2e2a6a413cfcc102af46b5e2dae934af98201e",
+            "verdict": "satisfied",
+            "subject": "[[\"snapshot\",\"bfc5bd2da4e86c60886a78047123f6c15559779d\"]]"
+          }
+        ]
+      }
+    },
+    {
+      "name": "history.contract.full",
+      "verb": "history",
+      "wire": {
+        "kind": "contract",
+        "contractId": "kei/native-output-budget-0001",
+        "events": [
+          {
+            "id": "01M702VXG09KY2KF7PGHGYGW3T",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "bind",
+            "start": "5d4a8c339af96be7fbe15fb87f148d7a4d4a1428",
+            "target": "refs/heads/main",
+            "document": "# Native output budget\n\n## Context\n\nEvidence must come from real owners.\n\n## Objective\n\nPreserve decision-relevant facts without returning entire terms.\n\n## Design\n\nOne deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture.\n\n## Region\n\ncandidate.txt\nsrc/**\n\n## Criteria\n\n### Preserve evidence\n\nDo not truncate requested content.\n\n## Verification\n\n```bash timeout=5s\nprintf checked\n```\n",
+            "gates": [
+              "reviewed",
+              "verified"
+            ],
+            "after": []
+          },
+          {
+            "id": "01M702VXG0KY41AYPVJVH9C48J",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "amend",
+            "changedSections": [
+              "Criteria"
+            ],
+            "document": "# Native output budget\n\n## Context\n\nEvidence must come from real owners.\n\n## Objective\n\nPreserve decision-relevant facts without returning entire terms.\n\n## Design\n\nOne deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture. One deterministic real-owner fixture.\n\n## Region\n\ncandidate.txt\nsrc/**\n\n## Criteria\n\n### Preserve evidence\n\nKeep exact requested content and actionable failures.\n\n## Verification\n\n```bash timeout=5s\nprintf checked\n```\n",
+            "gates": [
+              "reviewed",
+              "verified"
+            ],
+            "after": []
+          },
+          {
+            "id": "01M702VXG09XA2EXK0TYYA1F9H",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "arc",
+            "chapter": 1,
+            "title": "Measured chapter",
+            "body": "\nKeep the same candidate and standing terms.\n"
+          },
+          {
+            "id": "01M702VXG02VX3Y2Z7AHXCYJBG",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "deliver",
+            "candidate": "79ca4041a3e3e0f068ae9a187eb79f50998f28b4",
+            "integration": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+            "contentId": "e88fc9644f285ae33c46970e296fd5fdae9fa58f",
+            "predecessor": "5d4a8c339af96be7fbe15fb87f148d7a4d4a1428",
+            "requireBranchesToBeUpToDate": false
+          },
+          {
+            "id": "01M702VXG07PCEFJ56YE2YNRBE",
+            "at": "2026-11-09T12:00:00.000Z",
+            "kind": "attestation",
+            "gate": "verified",
+            "requirement": "verification:sha256:aa840b8d0e29aee2bf4b2f94ee2e2a6a413cfcc102af46b5e2dae934af98201e",
+            "verdict": "satisfied",
+            "subject": "[[\"snapshot\",\"bfc5bd2da4e86c60886a78047123f6c15559779d\"]]"
+          }
+        ]
+      }
+    },
+    {
+      "name": "wait.contract",
+      "verb": "wait",
+      "wire": {
+        "kind": "contract",
+        "reason": "deadline",
+        "contracts": [
+          {
+            "id": "kei/native-output-budget-0001"
+          }
+        ]
+      }
+    },
+    {
+      "name": "status.contract",
+      "verb": "status",
+      "wire": {
+        "id": "kei/native-output-budget-0001",
+        "title": "Native output budget",
+        "phase": "bound",
+        "workspace": {
+          "kind": "present",
+          "path": "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/bossroom/.keiyaku/native-output-budget/scene/repo/.keiyaku/wt/couchgap"
+        },
+        "target": "refs/heads/main",
+        "targetLag": {
+          "kind": "counted"
+        },
+        "delivery": {
+          "candidate": "79ca4041a3e3e0f068ae9a187eb79f50998f28b4",
+          "integration": "bfc5bd2da4e86c60886a78047123f6c15559779d"
+        },
+        "gates": [
+          {
+            "gate": "reviewed",
+            "requirements": [
+              {
+                "current": {
+                  "kind": "missing"
+                }
+              }
+            ]
+          },
+          {
+            "gate": "verified",
+            "requirements": [
+              {
+                "index": 1,
+                "current": {
+                  "kind": "attested",
+                  "verdict": "satisfied"
+                }
+              }
+            ]
+          }
+        ],
+        "kind": "contract",
+        "namespaceDebts": {
+          "kind": "present"
+        }
+      }
+    },
+    {
+      "name": "ls.contract",
+      "verb": "ls",
+      "wire": {
+        "observedAt": "2026-11-09T12:00:00.000Z",
+        "rows": [
+          {
+            "id": "kei/native-output-budget-0001",
+            "title": "Native output budget",
+            "phaseAt": "2026-11-09T12:00:00.000Z",
+            "delivered": true,
+            "gates": [
+              {
+                "name": "reviewed",
+                "verdict": "missing"
+              },
+              {
+                "name": "verified",
+                "verdict": "satisfied"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "region",
+      "verb": "region",
+      "wire": {
+        "kind": "present",
+        "overlaps": [
+          {
+            "contractId": "kei/native-output-budget-0001",
+            "patterns": [
+              {
+                "mine": "candidate.txt",
+                "theirs": "candidate.txt"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "region.contract",
+      "verb": "region",
+      "wire": {
+        "kind": "present",
+        "id": "kei/native-output-budget-0001",
+        "patterns": [
+          "candidate.txt",
+          "src/**"
+        ]
+      }
+    },
+    {
+      "name": "debt.add",
+      "verb": "debt.add",
+      "wire": {
+        "kind": "accepted",
+        "id": "debt/budget-prerequisite-0002"
+      }
+    },
+    {
+      "name": "debt.addDocument",
+      "verb": "debt.addDocument",
+      "wire": {
+        "kind": "accepted",
+        "id": "debt/budget-authored-0004"
+      }
+    },
+    {
+      "name": "debt.update",
+      "verb": "debt.update",
+      "wire": {
+        "kind": "accepted",
+        "changes": [
+          "note"
+        ]
+      }
+    },
+    {
+      "name": "debt.update.unchanged",
+      "verb": "debt.update",
+      "wire": {
+        "kind": "accepted"
+      }
+    },
+    {
+      "name": "debt.show",
+      "verb": "debt.show",
+      "wire": {
+        "kind": "present",
+        "items": [
+          {
+            "kind": "found",
+            "title": "Budget prerequisite",
+            "state": "open",
+            "priority": 2,
+            "createdAt": "2026-11-09T12:00:00.000Z",
+            "updatedAt": "2026-11-09T12:00:00.001Z",
+            "body": "Unresolved work with exact body.",
+            "note": "updated note",
+            "createdBy": "budget-fixture"
+          },
+          {
+            "kind": "found",
+            "title": "Budget child",
+            "state": "open",
+            "priority": 2,
+            "createdAt": "2026-11-09T12:00:00.000Z",
+            "updatedAt": "2026-11-09T12:00:00.000Z",
+            "body": "Dependent work.",
+            "needs": [
+              {
+                "id": "debt/budget-prerequisite-0002",
+                "state": "open"
+              }
+            ],
+            "parent": {
+              "id": "debt/budget-prerequisite-0002",
+              "state": "open"
+            }
+          },
+          {
+            "kind": "missing"
+          }
+        ]
+      }
+    },
+    {
+      "name": "debt.list",
+      "verb": "ls",
+      "wire": {
+        "kind": "present",
+        "rows": [
+          {
+            "id": "debt/budget-authored-0004",
+            "title": "Budget authored",
+            "priority": 1,
+            "disposition": "ready"
+          }
+        ],
+        "more": true
+      }
+    },
+    {
+      "name": "debt.ready",
+      "verb": "debt.ready",
+      "wire": {
+        "kind": "present",
+        "rows": [
+          {
+            "id": "debt/budget-authored-0004",
+            "title": "Budget authored",
+            "priority": 1
+          },
+          {
+            "id": "debt/budget-prerequisite-0002",
+            "title": "Budget prerequisite",
+            "priority": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "debt.blocked",
+      "verb": "debt.blocked",
+      "wire": {
+        "kind": "present",
+        "rows": [
+          {
+            "id": "debt/budget-child-0003",
+            "title": "Budget child",
+            "priority": 2,
+            "blockers": [
+              {
+                "id": "debt/budget-prerequisite-0002"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "debt.query",
+      "verb": "debt.query",
+      "wire": {
+        "kind": "present",
+        "rows": [
+          {
+            "id": "debt/budget-authored-0004",
+            "title": "Budget authored",
+            "priority": 1,
+            "disposition": "ready"
+          },
+          {
+            "id": "debt/budget-child-0003",
+            "title": "Budget child",
+            "priority": 2,
+            "disposition": "blocked"
+          },
+          {
+            "id": "debt/budget-prerequisite-0002",
+            "title": "Budget prerequisite",
+            "priority": 2,
+            "disposition": "ready"
+          }
+        ]
+      }
+    },
+    {
+      "name": "debt.tree",
+      "verb": "debt.tree",
+      "wire": {
+        "kind": "present",
+        "title": "Budget prerequisite",
+        "state": "open",
+        "priority": 2,
+        "children": [
+          {
+            "kind": "node",
+            "id": "debt/budget-child-0003",
+            "title": "Budget child",
+            "state": "open",
+            "priority": 2
+          }
+        ]
+      }
+    },
+    {
+      "name": "debt.doctor",
+      "verb": "debt.doctor",
+      "wire": {
+        "kind": "present"
+      }
+    },
+    {
+      "name": "debt.doctor.issues",
+      "verb": "debt.doctor",
+      "wire": {
+        "kind": "present",
+        "issues": [
+          {
+            "kind": "cycle",
+            "relation": "needs",
+            "debts": [
+              "debt/budget-child-0003",
+              "debt/budget-prerequisite-0002"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "debt.context",
+      "verb": "debt.context",
+      "wire": {
+        "kind": "present",
+        "source": "local-override",
+        "namespace": "budget"
+      }
+    },
+    {
+      "name": "debt.update.refused",
+      "verb": "debt.update",
+      "wire": {
+        "kind": "refused",
+        "reason": "debt-missing"
+      }
+    },
+    {
+      "name": "debt.batch",
+      "verb": "debt.done",
+      "wire": {
+        "items": [
+          {
+            "kind": "accepted"
+          },
+          {
+            "kind": "accepted"
+          },
+          {
+            "kind": "refused",
+            "reason": "debt-missing"
+          }
+        ]
+      }
+    },
+    {
+      "name": "debt.drop",
+      "verb": "debt.drop",
+      "wire": {
+        "items": [
+          {
+            "kind": "refused",
+            "reason": "invalid-lifecycle-transition",
+            "state": "done"
+          },
+          {
+            "kind": "refused",
+            "reason": "debt-missing"
+          }
+        ]
+      }
+    },
+    {
+      "name": "debt.show.absent",
+      "verb": "debt.show",
+      "wire": {
+        "kind": "absent"
+      }
+    },
+    {
+      "name": "debt.tree.absent",
+      "verb": "debt.tree",
+      "wire": {
+        "kind": "absent"
+      }
+    },
+    {
+      "name": "tell",
+      "verb": "tell",
+      "wire": {
+        "akumaId": "aku/claude/b0d90001",
+        "tellId": "00000000-0000-4000-8000-000000000001"
+      }
+    },
+    {
+      "name": "ask",
+      "verb": "ask",
+      "wire": {
+        "akumaId": "aku/claude/b0d90003",
+        "tellId": "00000000-0000-4000-8000-000000000002",
+        "kind": "answered",
+        "answer": "The fixture answer is exact. answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content "
+      }
+    },
+    {
+      "name": "wait.akuma",
+      "verb": "wait",
+      "wire": {
+        "kind": "akuma",
+        "reason": "completed",
+        "results": [
+          {
+            "kind": "observed",
+            "id": "aku/claude/b0d90003",
+            "life": "asleep",
+            "outcome": {
+              "kind": "answered",
+              "historyId": "turn/2",
+              "answer": "The fixture answer is exact. answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content "
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "history.akuma",
+      "verb": "history",
+      "wire": {
+        "kind": "akuma",
+        "akumaId": "aku/claude/b0d90003",
+        "events": [
+          {
+            "kind": "tell",
+            "sequence": 1,
+            "at": "2026-11-09T12:00:00.000Z",
+            "tellId": "00000000-0000-4000-8000-000000000002",
+            "text": "Budget ask",
+            "state": "told",
+            "deliveries": [
+              {
+                "turnSequence": 2,
+                "route": "launch",
+                "deliveredAt": "2026-11-09T12:00:00.000Z"
+              }
+            ]
+          },
+          {
+            "kind": "turn",
+            "sequence": 2,
+            "bodySequence": 1,
+            "at": "2026-11-09T12:00:00.000Z"
+          },
+          {
+            "kind": "outcome",
+            "sequence": 4,
+            "turnSequence": 2,
+            "at": "2026-11-09T12:00:00.000Z",
+            "outcome": {
+              "kind": "answered",
+              "answer": "The fixture answer is exact. answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content "
+            }
+          }
+        ],
+        "lowestRetainedSequence": 1,
+        "highestSequence": 4
+      }
+    },
+    {
+      "name": "history.akuma.last",
+      "verb": "history",
+      "wire": {
+        "kind": "akuma-last",
+        "akumaId": "aku/claude/b0d90003",
+        "answer": "The fixture answer is exact. answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content "
+      }
+    },
+    {
+      "name": "fork.unknown-history",
+      "verb": "fork",
+      "wire": {
+        "kind": "unknown-history"
+      }
+    },
+    {
+      "name": "kill",
+      "verb": "kill",
+      "wire": {
+        "results": [
+          {
+            "id": "aku/claude/b0d90003",
+            "outcome": "already-stopped"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ask.invalid-output",
+      "verb": "ask",
+      "wire": {
+        "akumaId": "aku/claude/b0d90004",
+        "tellId": "00000000-0000-4000-8000-000000000003",
+        "kind": "invalid-output",
+        "diagnostic": "Unexpected token 'T', \"The fixtur\"... is not valid JSON",
+        "answer": "The fixture answer is exact. answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content answer-content "
+      }
+    },
+    {
+      "name": "spawn",
+      "verb": "spawn",
+      "wire": {
+        "akumaId": "aku/worker/4994ae5c"
+      }
+    },
+    {
+      "name": "report",
+      "verb": "report",
+      "wire": {
+        "kind": "recorded",
+        "reportId": "report/2"
+      }
+    },
+    {
+      "name": "ask.deadline",
+      "verb": "ask",
+      "wire": {
+        "akumaId": "aku/claude/b0d90002",
+        "tellId": "00000000-0000-4000-8000-000000000004",
+        "wake": {
+          "kind": "pending"
+        },
+        "kind": "deadline"
+      }
+    },
+    {
+      "name": "wait.akuma.pending",
+      "verb": "wait",
+      "wire": {
+        "kind": "akuma",
+        "reason": "deadline",
+        "results": [
+          {
+            "kind": "observed",
+            "id": "aku/claude/b0d90002",
+            "life": "running",
+            "pending": true
+          }
+        ]
+      }
+    },
+    {
+      "name": "ls.akuma",
+      "verb": "ls",
+      "wire": {
+        "observedAt": "2026-11-09T12:00:00.000Z",
+        "rows": [
+          {
+            "id": "aku/claude/b0d90001",
+            "life": "asleep",
+            "lifeAt": "2026-11-09T12:00:00.000Z",
+            "lastActivityAt": "2026-11-09T12:00:00.000Z"
+          },
+          {
+            "id": "aku/claude/b0d90002",
+            "life": "untidy",
+            "lastActivityAt": "2026-11-09T12:00:00.000Z",
+            "pending": 1
+          },
+          {
+            "id": "aku/claude/b0d90003",
+            "life": "asleep",
+            "lifeAt": "2026-11-09T12:00:00.000Z",
+            "lastActivityAt": "2026-11-09T12:00:00.000Z"
+          },
+          {
+            "id": "aku/claude/b0d90004",
+            "life": "stranded",
+            "lifeAt": "2026-11-09T12:00:00.000Z",
+            "lastActivityAt": "2026-11-09T12:00:00.000Z"
+          },
+          {
+            "id": "aku/worker/4994ae5c",
+            "life": "asleep",
+            "lifeAt": "2026-11-09T12:00:00.000Z"
+          }
+        ]
+      }
+    },
+    {
+      "name": "ls.archetypes",
+      "verb": "ls",
+      "wire": {
+        "rows": [
+          {
+            "name": "worker"
+          }
+        ]
+      }
+    },
+    {
+      "name": "status.world",
+      "verb": "status",
+      "wire": {
+        "observedAt": "2026-11-09T12:00:00.000Z",
+        "contracts": {
+          "kind": "present",
+          "rows": [
+            {
+              "id": "kei/native-output-budget-0001",
+              "title": "Native output budget",
+              "phaseAt": "2026-11-09T12:00:00.000Z",
+              "delivered": true,
+              "gates": [
+                {
+                  "name": "reviewed",
+                  "verdict": "missing"
+                },
+                {
+                  "name": "verified",
+                  "verdict": "satisfied"
+                }
+              ]
+            }
+          ]
+        },
+        "debts": {
+          "kind": "present",
+          "rows": [
+            {
+              "id": "debt/budget-authored-0004",
+              "title": "Budget authored",
+              "priority": 1,
+              "disposition": "ready"
+            }
+          ]
+        },
+        "akumas": {
+          "kind": "present"
+        }
+      }
+    },
+    {
+      "name": "review",
+      "verb": "review",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/native-output-budget-0001",
+        "placement": {
+          "kind": "placed",
+          "integration": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+          "predecessor": "5d4a8c339af96be7fbe15fb87f148d7a4d4a1428",
+          "target": "refs/heads/main"
+        }
+      }
+    },
+    {
+      "name": "deliver.refused",
+      "verb": "deliver",
+      "wire": {
+        "kind": "refused",
+        "contractId": "kei/native-output-budget-0001",
+        "reason": {
+          "kind": "terminal"
+        }
+      }
+    },
+    {
+      "name": "verify.failed",
+      "verb": "verify",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/failed-verification-budget-0005",
+        "issues": [
+          {
+            "kind": "worktree-leak",
+            "requirement": "verification:sha256:c1b48ca789441c6ff1377a37321370f33ac2c947db21f836875e507a8bfe2f7a",
+            "index": 1,
+            "path": "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/bossroom/.keiyaku/native-output-budget/scene/tmp/keiyaku-v4-verify-bc140ae5330a40013f7d8f52063b93ed7343b4b04fd3cc6341b3dc627a81e4d2-cc825e189d7f644a63b4a534ebdb9079a8a4080a41c2c5adbad3419cc93cde1c-57722876ff86a7852c9f188c2ea9f85d992ffe127d994dc7eedca97db16800d2",
+            "diagnostic": "failed Verification scratch retained for diagnosis"
+          }
+        ],
+        "snapshot": "bfc5bd2da4e86c60886a78047123f6c15559779d",
+        "checks": [
+          {
+            "index": 1,
+            "requirement": "verification:sha256:c1b48ca789441c6ff1377a37321370f33ac2c947db21f836875e507a8bfe2f7a",
+            "retainedPath": "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/bossroom/.keiyaku/native-output-budget/scene/tmp/keiyaku-v4-verify-bc140ae5330a40013f7d8f52063b93ed7343b4b04fd3cc6341b3dc627a81e4d2-cc825e189d7f644a63b4a534ebdb9079a8a4080a41c2c5adbad3419cc93cde1c-57722876ff86a7852c9f188c2ea9f85d992ffe127d994dc7eedca97db16800d2",
+            "kind": "terminal",
+            "verdict": "unsatisfied",
+            "summary": "[1 bash exit 3]\nstderr:\nfailure-detail"
+          }
+        ],
+        "placement": {
+          "kind": "delivery-missing"
+        }
+      }
+    },
+    {
+      "name": "abandon",
+      "verb": "abandon",
+      "wire": {
+        "kind": "accepted",
+        "contractId": "kei/abandoned-budget-0006"
+      }
+    },
+    {
+      "name": "whoami",
+      "verb": "whoami",
+      "wire": {
+        "self": {
+          "kind": "none"
+        },
+        "world": "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/bossroom/.keiyaku/native-output-budget/scene/repo"
+      }
+    },
+    {
+      "name": "settings",
+      "verb": "settings",
+      "wire": {
+        "scopes": {
+          "project": {
+            "kind": "read",
+            "path": "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/bossroom/.keiyaku/native-output-budget/scene/repo/.keiyaku/settings.json"
+          },
+          "user": {
+            "kind": "absent",
+            "path": "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/bossroom/.keiyaku/native-output-budget/scene/home/settings.json"
+          }
+        },
+        "namespaces": {
+          "plugins": {
+            "kind": "read"
+          }
+        }
+      }
+    },
+    {
+      "name": "nuke.refused",
+      "verb": "nuke",
+      "wire": {
+        "kind": "refused",
+        "world": "/Users/astrosheep/Developer/keiyaku-v4/.keiyaku/wt/bossroom/.keiyaku/native-output-budget/scene/repo"
+      }
+    },
+    {
+      "name": "nuke",
+      "verb": "nuke",
+      "wire": {
+        "kind": "accepted",
+        "refsRemoved": 1,
+        "debtsRemoved": 3
+      }
+    }
+  ]
+}

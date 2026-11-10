@@ -1,6 +1,5 @@
 /** @architectureCompositionRoot */
 import { decodeCanonicalContractDocument } from "../body/render.js";
-import { regionWarnings } from "../body/region.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
@@ -24,6 +23,7 @@ import { InvocationAccumulator } from "./invocation.js";
 import type { Kei, createKeiHandle } from "./kei.js";
 import { project, validated, type OutcomeProjection } from "./outcome.js";
 import { reconcileAffectedContracts } from "./reconcile.js";
+import { compactReason } from "../protocol/result-reasons.js";
 import type { OperationRefusals } from "./refusal.js";
 import { observeRegion, type RegionObservation } from "./region.js";
 
@@ -55,11 +55,11 @@ function bindInput(scope: RepositoryScope, input: BindInput, composition: LocalC
     }
     const derived = forkOf === undefined ? derivedGates(composition, gateNames(values.gates)) : undefined;
     return {
-      forkOf: forkOf === undefined ? undefined : contractId(forkOf as string),
+      forkOf: forkOf === undefined ? undefined : contractId(forkOf),
       scope,
       document,
       actor,
-      target: values.target as string | null | undefined,
+      target: values.target,
       debt: forkOf === undefined ? debtOption(values.debt) : undefined,
       gates: derived,
       after: forkOf === undefined ? normalizedList(values.after, "after", contractId) : undefined,
@@ -99,17 +99,15 @@ export async function bindKei(
                 ...(target === undefined ? {} : { target }),
                 ...actor,
               });
-              if (fork.kind === "refused") return { kind: "refused", refusal: fork.refusal };
+              if (fork.kind === "refused") return { kind: "refused", refusal: compactReason(fork.refusal) };
               const admission = fork.admission;
               if (admission.kind !== "accepted") return expected(undefined, admission);
               const id = admission.value.contractId;
-              accumulator.extendConclusions(id, { kei: handle(id) });
+              retainBindCoordinates(accumulator, admission);
               const value = await bindComplete(accumulator, id, scope, channel, admission, hooks, () =>
-                observeRegion(scope, channel, id, fork.document.region).then((region) =>
-                  bindValue(handle(id), region, []),
-                ),
+                observeRegion(scope, channel, id, fork.document.region).then((region) => bindValue(handle(id), region)),
               );
-              return acceptedOutcome("bind", id, accumulator, value);
+              return acceptedOutcome(id, accumulator, value);
             }
             if (document === undefined) throw new Error("Markdown bind requires its prepared document");
             return await markdownBind(prepared, document, hooks, scope, channel, accumulator, handle);
@@ -136,15 +134,13 @@ export async function bindKei(
   })();
   const projected = project("bind", accumulator.snapshot(), projection);
   if (projected.kind === "failed") throw projected.error;
-  return projected.outcome as BindOutcome;
+  return projected.outcome;
 }
 
-function bindValue(kei: Kei, region: RegionObservation, warnings: readonly string[]): BindValue {
-  return {
-    kei,
-    ...(warnings.length === 0 ? {} : { warnings }),
-    ...region,
-  };
+function bindValue(kei: Kei, region: RegionObservation): BindValue {
+  const value: BindValue = { ...region, kei };
+  Object.defineProperty(value, "kei", { value: kei, enumerable: false });
+  return value;
 }
 
 // eslint-disable-next-line max-params -- Keep this local operation's custody, admission, and policy witnesses explicit.
@@ -163,13 +159,15 @@ async function bindComplete<Value>(
     const appointment = await readManagedWorktreeAppointment(scope, id);
     if (appointment.kind === "appointed")
       accumulator.extendConclusions(id, {
-        workspace: { kind: "worktree", path: appointment.path },
+        worktreePath: appointment.path,
       });
   } catch (error) {
     if (!isOperationalStop(error, scope.signal)) throw error;
-    accumulator.recordStop(executionStop(id, "reconciliation", error, scope.signal));
+    accumulator.recordStop(executionStop(id, error, scope.signal));
   }
-  const built = { ...(await value()), ...accumulator.conclusions(id) } as BindValue;
+  const result = await value();
+  const built: BindValue = { ...result, ...accumulator.conclusions(id) };
+  Object.defineProperty(built, "kei", { value: result.kei, enumerable: false });
   accumulator.extendConclusions(id, built);
   return built;
 }
@@ -202,15 +200,21 @@ async function markdownBind(
   const leading = admission.admission === null ? admission.result : admission.admission.result;
   if (leading.kind !== "accepted") return expected(undefined, leading);
   const id = leading.value.contractId;
-  const warnings = regionWarnings(document.region);
-  accumulator.extendConclusions(id, {
-    kei: handle(id),
-    warnings,
-  });
+  retainBindCoordinates(accumulator, leading);
   const value = await bindComplete(accumulator, id, scope, channel, leading, hooks, async () =>
-    bindValue(handle(id), await observeRegion(scope, channel, id, document.region), warnings),
+    bindValue(handle(id), await observeRegion(scope, channel, id, document.region)),
   );
-  return acceptedOutcome("bind", id, accumulator, value);
+  return acceptedOutcome(id, accumulator, value);
+}
+
+function retainBindCoordinates<Value>(accumulator: InvocationAccumulator, leading: AcceptedIntent<Value>): void {
+  const bind = leading.facts.find((fact) => fact.kind === "bind");
+  if (bind?.kind !== "bind") throw new Error("bind receipt requires its admitted coordinates");
+  const target = bind.data.coordinates.target;
+  if (target !== undefined)
+    accumulator.extendConclusions(bind.contract, {
+      target: typeof target === "string" ? target : target.contractId,
+    });
 }
 
 function parseMarkdown(markdown: string) {

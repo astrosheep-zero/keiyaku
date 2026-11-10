@@ -1,8 +1,8 @@
-import { contractIdSchema, snapshotIdSchema } from "./identity.js";
+import { snapshotIdSchema } from "./identity.js";
 import { z } from "zod";
 import type { Preparation } from "../core/decide.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import type { ChangeId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
+import type { ChangeId, ContractCoordinates, SnapshotId } from "../core/facts/types.js";
 import { gitObjectId, gitObjectIdForSnapshot, mintChangeId, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { decodeGitNameOnly, decodeGitNumstat, readRef } from "./repository.js";
 import { executeGit, GitPlumbingError, runGitPipe, type GitRepository } from "./process.js";
@@ -19,8 +19,6 @@ import { resolveContractTarget, targetRef, targetRepository } from "./target.js"
 export { workspaceMergeStatePresent };
 
 type IntegrationTender = Pick<TenderCapture, "head" | "tree">;
-
-const REQUIRED_GIT = "2.38" as const;
 
 async function runAllowingNonzero(
   repository: GitRepository,
@@ -39,7 +37,6 @@ export const integrationPreparationRefusalSchema = z.union([
   z
     .object({
       kind: z.literal("integration-failed"),
-      contractId: contractIdSchema,
       reason: z.enum(["not-based-on-target", "unrelated-histories", "conflict"]),
       targetHead: snapshotIdSchema,
       conflictPaths: z
@@ -52,15 +49,12 @@ export const integrationPreparationRefusalSchema = z.union([
   z
     .object({
       kind: z.literal("integration-unsupported"),
-      contractId: contractIdSchema,
-      requiredGit: z.literal(REQUIRED_GIT),
     })
     .strict()
     .readonly(),
 ]);
 export type IntegrationPreparationRefusal = z.infer<typeof integrationPreparationRefusalSchema>;
 type IntegrationCoordinates = Readonly<{
-  contractId: ContractId;
   coordinates: ContractCoordinates;
 }>;
 
@@ -255,13 +249,12 @@ function nulFields(output: Buffer): readonly string[] {
 
 async function mergedTree(
   repository: GitRepository,
-  contractId: ContractId,
   base: SnapshotId,
   targetHead: SnapshotId,
   tenderTree: GitObjectId,
 ): Promise<Preparation<GitObjectId, IntegrationPreparationRefusal>> {
   if (!(await supportsMergeTree(repository))) {
-    return { kind: "refused", refusal: { kind: "integration-unsupported", contractId, requiredGit: REQUIRED_GIT } };
+    return { kind: "refused", refusal: { kind: "integration-unsupported" } };
   }
   const result = await runAllowingNonzero(repository, [
     "merge-tree",
@@ -285,7 +278,6 @@ async function mergedTree(
       kind: "refused",
       refusal: {
         kind: "integration-failed",
-        contractId,
         reason: "conflict",
         targetHead,
         conflictPaths: Object.freeze([...new Set(fields.slice(1))].sort()),
@@ -329,9 +321,7 @@ export async function planIntegration(
 ): Promise<
   Preparation<
     IntegrationPlan,
-    | Readonly<{ kind: "target-missing"; contractId: ContractId }>
-    | IntegrationPreparationRefusal
-    | import("./target.js").TargetWorkspaceRefusal
+    Readonly<{ kind: "target-missing" }> | IntegrationPreparationRefusal | import("./target.js").TargetWorkspaceRefusal
   >
 > {
   const target = input.coordinates.target;
@@ -350,7 +340,7 @@ export async function planIntegration(
   }
   const observed = await readRef(targetRepository(repository, target), targetRef(target));
   if (observed === null) {
-    return { kind: "refused", refusal: { kind: "target-missing", contractId: input.contractId } };
+    return { kind: "refused", refusal: { kind: "target-missing" } };
   }
   const targetHead = mintSnapshotId(observed);
   let tree: GitObjectId;
@@ -360,7 +350,6 @@ export async function planIntegration(
         kind: "refused",
         refusal: {
           kind: "integration-failed",
-          contractId: input.contractId,
           reason: "not-based-on-target",
           targetHead,
         },
@@ -374,13 +363,12 @@ export async function planIntegration(
         kind: "refused",
         refusal: {
           kind: "integration-failed",
-          contractId: input.contractId,
           reason: "unrelated-histories",
           targetHead,
         },
       };
     }
-    const merged = await mergedTree(repository, input.contractId, base, targetHead, tender.tree);
+    const merged = await mergedTree(repository, base, targetHead, tender.tree);
     if (merged.kind === "refused") return merged;
     tree = merged.data;
   }

@@ -22,8 +22,14 @@ import type {
 import type { SettlementReport } from "../settlement/settle.js";
 import type { WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
-import type { InvocationEffect, ReconciliationEffect, ReconciliationLag, ResetCounts } from "./outcome.js";
-import { reconcileLagScope } from "./reconcile.js";
+import type { InvocationEffect, ReconciliationLag, ResetCounts } from "./outcome.js";
+import { compactEffect, reconcileLagScope } from "./outcome.js";
+
+type RecordedVerificationCheck = Parameters<ProtocolProgress["recordVerificationCheck"]>[2];
+export type CandidateConclusion = Readonly<Record<string, unknown>> &
+  Readonly<{
+    checks?: readonly RecordedVerificationCheck[];
+  }>;
 
 export type InvocationSnapshot = Readonly<{
   facts: readonly JournalEntry[];
@@ -31,19 +37,17 @@ export type InvocationSnapshot = Readonly<{
   heads: ReadonlyMap<ContractId, ContractHead>;
   affected: readonly ContractId[];
   effects: readonly InvocationEffect[];
-  conclusions: ReadonlyMap<ContractId, Readonly<Record<string, unknown>>>;
-  reset?: Readonly<{ world: WorldRoot; removed: ResetCounts }>;
+  conclusions: ReadonlyMap<ContractId, CandidateConclusion>;
+  reset?: Readonly<{ world: WorldRoot; removed: ResetCounts; attempted: readonly ("git" | "debt")[] }>;
 }>;
 
 type ReconciliationRecord = Readonly<{
-  effects?: readonly ReconciliationEffect[];
+  effects?: ReconcileResult["effects"];
   lag?: readonly ReconciliationLag[];
   settlement?: SettlementReport;
-  retiredWorktree?: string;
-  retainedWorktree?: string;
 }>;
 
-const CANDIDATE_CONCLUSION_KEYS = ["completion", "gates", "placement"] as const;
+const CANDIDATE_CONCLUSION_KEYS = ["completion", "placement"] as const;
 
 function entryKey(fact: JournalEntry): string {
   return `${fact.contract}\u0000${fact.entry}`;
@@ -61,15 +65,24 @@ export class InvocationAccumulator implements ProtocolProgress {
   private readonly admittedCheckpoints = new Map<ContractId, ContractCheckpoint>();
   private readonly affectedContracts = new Set<ContractId>();
   private readonly records: InvocationEffect[] = [];
-  private readonly candidateConclusions = new Map<ContractId, Readonly<Record<string, unknown>>>();
+  private readonly candidateConclusions = new Map<ContractId, CandidateConclusion>();
   private readonly reportedResidue = new WeakSet<object>();
 
-  private resetState?: { world: WorldRoot; removed: { refs: number; worktrees: number; debts: number } };
+  private resetState?: {
+    world: WorldRoot;
+    removed: { refs: number; worktrees: number; debts: number };
+    attempted: ("git" | "debt")[];
+  };
 
   constructor(private readonly observer?: ExecutionObserver) {}
 
   beginReset(world: WorldRoot): void {
-    this.resetState = { world, removed: { refs: 0, worktrees: 0, debts: 0 } };
+    this.resetState = { world, removed: { refs: 0, worktrees: 0, debts: 0 }, attempted: [] };
+  }
+
+  recordResetAttempt(owner: "git" | "debt"): void {
+    if (this.resetState === undefined) throw new Error("reset progress requires its World");
+    if (!this.resetState.attempted.includes(owner)) this.resetState.attempted.push(owner);
   }
 
   recordResetRemoved(counts: Partial<ResetCounts>): void {
@@ -143,34 +156,37 @@ export class InvocationAccumulator implements ProtocolProgress {
   ): void {
     if (result.cleanup !== undefined)
       this.records.push({
-        kind: "cleanup",
+        kind: "issue",
         contract,
         issue: {
           kind: "verification-cleanup",
-          contractId: contract,
           ...(snapshot === undefined ? {} : { snapshot }),
           ...coordinate,
-          failure: result.cleanup,
+          name: result.cleanup.name,
+          diagnostic: result.cleanup.diagnostic,
         },
       });
     if (result.leak !== undefined)
       this.records.push({
-        kind: "cleanup",
+        kind: "issue",
         contract,
         issue: {
           kind: "worktree-leak",
-          contractId: contract,
           ...(snapshot === undefined ? {} : { snapshot }),
           ...coordinate,
-          leak: result.leak,
+          ...(result.leak.path === undefined ? {} : { path: result.leak.path }),
+          diagnostic: result.leak.diagnostic,
         },
       });
   }
 
-  recordVerificationCheck(contract: ContractId, check: import("../protocol/verify.js").VerificationCheck): void {
-    const previous = this.candidateConclusions.get(contract);
-    const checks = (previous?.checks ?? []) as readonly import("../protocol/verify.js").VerificationCheck[];
-    this.extendConclusions(contract, { snapshot: check.snapshot, checks: [...checks, check] });
+  recordVerificationCheck(
+    contract: ContractId,
+    snapshot: Parameters<ProtocolProgress["recordVerificationCheck"]>[1],
+    check: RecordedVerificationCheck,
+  ): void {
+    const checks = this.candidateConclusions.get(contract)?.checks ?? [];
+    this.extendConclusions(contract, { snapshot, checks: [...checks, check] });
   }
 
   /** Replace the current candidate's conclusions; accumulated resources are never erased. */
@@ -196,18 +212,6 @@ export class InvocationAccumulator implements ProtocolProgress {
   }
 
   recordPlacementPhysical(contract: ContractId, physical: ReconcileResult): void {
-    for (const lag of physical.lag) {
-      if (lag.kind !== "target-checkout-retained" || this.reportedResidue.has(lag)) continue;
-      this.reportedResidue.add(lag);
-      this.records.push({
-        kind: "checkout-retained",
-        contract,
-        path: lag.path,
-        target: lag.target,
-        diagnostic: lag.diagnostic,
-      });
-      this.affectedContracts.add(contract);
-    }
     this.recordReconciliation(contract, physical);
   }
 
@@ -220,20 +224,18 @@ export class InvocationAccumulator implements ProtocolProgress {
     if (
       this.records.some(
         (record) =>
-          record.kind === "execution-stopped" &&
+          record.kind === "issue" &&
+          record.issue.kind === "execution-stopped" &&
           record.contract === stop.contractId &&
-          record.stage === stop.stage &&
-          record.reason === stop.reason &&
-          record.diagnostic === stop.diagnostic,
+          record.issue.reason === stop.reason &&
+          record.issue.diagnostic === stop.diagnostic,
       )
     )
       return;
     this.records.push({
-      kind: "execution-stopped",
+      kind: "issue",
       contract: stop.contractId,
-      stage: stop.stage,
-      reason: stop.reason,
-      diagnostic: stop.diagnostic,
+      issue: { kind: "execution-stopped", reason: stop.reason, diagnostic: stop.diagnostic },
     });
   }
 
@@ -242,8 +244,9 @@ export class InvocationAccumulator implements ProtocolProgress {
     for (const effect of "effects" in record ? (record.effects ?? []) : []) {
       if (this.reportedResidue.has(effect)) continue;
       this.reportedResidue.add(effect);
-      this.records.push({ kind: "reconciliation-effect", contract, effect });
       this.affectedContracts.add(contract);
+      const movement = compactEffect(effect);
+      if (movement !== undefined) this.records.push({ kind: "movement", contract, effect: movement });
     }
     for (const lag of "lag" in record ? (record.lag ?? []) : []) {
       if (this.reportedResidue.has(lag)) continue;
@@ -252,37 +255,29 @@ export class InvocationAccumulator implements ProtocolProgress {
     }
     const settlement = "settlement" in record ? record.settlement : undefined;
     if (settlement !== undefined) this.recordSettlement(contract, settlement);
-    const retired = "retiredWorktree" in record ? record.retiredWorktree : undefined;
-    if (
-      retired !== undefined &&
-      !this.records.some(
-        (entry) => entry.kind === "worktree-retired" && entry.contract === contract && entry.name === retired,
-      )
-    )
-      this.records.push({ kind: "worktree-retired", contract, name: retired });
-    const retained = "retainedWorktree" in record ? record.retainedWorktree : undefined;
-    if (
-      retained !== undefined &&
-      !this.records.some(
-        (entry) => entry.kind === "worktree-retained" && entry.contract === contract && entry.path === retained,
-      )
-    )
-      this.records.push({ kind: "worktree-retained", contract, path: retained });
   }
 
   recordSettlement(contract: ContractId, report: SettlementReport): void {
     for (const action of report.actions) this.records.push({ kind: "settlement-action", contract, action });
-    for (const lag of report.lags) this.records.push({ kind: "settlement-lag", contract, lag });
+    for (const lag of report.lags)
+      this.records.push({
+        kind: "issue",
+        contract,
+        issue: {
+          kind: "settlement-failed",
+          ...(lag.debtId === undefined ? {} : { debtId: lag.debtId }),
+          diagnostic: `${lag.surface}: ${lag.diagnostic}`,
+        },
+      });
     for (const failure of report.seatClose ?? []) this.recordSeatClose(contract, failure);
   }
 
   recordChannelRetirement(contract: ContractId, error: unknown): void {
     this.records.push({
-      kind: "cleanup",
+      kind: "issue",
       contract,
       issue: {
         kind: "decode-channel-retirement",
-        contractId: contract,
         diagnostic: error instanceof Error ? error.message : String(error),
       },
     });
@@ -302,7 +297,7 @@ export class InvocationAccumulator implements ProtocolProgress {
     this.candidateConclusions.set(contract, { ...(this.candidateConclusions.get(contract) ?? {}), ...patch });
   }
 
-  conclusions(contract: ContractId): Readonly<Record<string, unknown>> | undefined {
+  conclusions(contract: ContractId): CandidateConclusion | undefined {
     return this.candidateConclusions.get(contract);
   }
 
@@ -320,6 +315,7 @@ export class InvocationAccumulator implements ProtocolProgress {
             reset: Object.freeze({
               world: this.resetState.world,
               removed: Object.freeze({ ...this.resetState.removed }),
+              attempted: Object.freeze([...this.resetState.attempted]),
             }),
           }),
     };
@@ -329,15 +325,14 @@ export class InvocationAccumulator implements ProtocolProgress {
     if (this.reportedResidue.has(failure)) return;
     this.reportedResidue.add(failure);
     this.records.push({
-      kind: "cleanup",
+      kind: "issue",
       contract,
-      issue: { kind: "private-state-seat-close", contractId: contract, failure },
+      issue: { kind: "private-state-seat-close", diagnostic: failure.diagnostic },
     });
   }
 
   private recordLag(contract: ContractId, lag: ReconciliationLag): void {
-    const affects = reconcileLagScope(lag);
-    this.records.push({ kind: "reconciliation-lag", contract, affects, lag });
-    if (affects !== "none") this.affectedContracts.add(contract);
+    if (reconcileLagScope(lag) !== "none") this.affectedContracts.add(contract);
+    this.records.push({ kind: "issue", contract, issue: lag });
   }
 }

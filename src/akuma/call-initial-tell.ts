@@ -4,7 +4,6 @@ import type { WorldRoot } from "../world.js";
 import { bornStatus, defaultWaitComplete, readWaitComplete, waitForObservation } from "./akuma-observe.js";
 import { recordTell, type TellFact } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId } from "./identity.js";
-import type { TellRow } from "./heart/facts.js";
 import { BIRTH_TIMEOUT_MS } from "./publication.js";
 
 export type CallInitialTell = Readonly<{
@@ -17,23 +16,20 @@ export type CallInitialTell = Readonly<{
 export type InitialTellAdmissionInput = Readonly<{
   id: AkumaId;
   initialTell: CallInitialTell;
-  contractId?: string;
   signal?: AbortSignal;
 }>;
 
 export const tellWakeSchema = z.union([
   z.strictObject({ kind: z.literal("told") }).readonly(),
   z.strictObject({ kind: z.literal("held") }).readonly(),
-  z.strictObject({ kind: z.literal("pursuing"), bodySequence: z.number() }).readonly(),
+  z.strictObject({ kind: z.literal("pursuing") }).readonly(),
   z
     .strictObject({
       kind: z.literal("failed"),
       diagnostic: z.string(),
       child: z
         .strictObject({
-          code: z.number().nullable(),
-          signal: z.string().nullable(),
-          log: z.strictObject({ path: z.string(), from: z.number(), to: z.number() }).readonly(),
+          log: z.strictObject({ path: z.string() }).readonly(),
         })
         .readonly()
         .exactOptional(),
@@ -42,18 +38,12 @@ export const tellWakeSchema = z.union([
 ]);
 export const tellResultSchema = z
   .strictObject({
-    admission: z.strictObject({ fact: z.literal("recorded"), tellId: z.string() }).readonly(),
-    row: tellRowSchema,
+    admission: z.strictObject({ tellId: z.string() }).readonly(),
+    row: tellRowSchema.unwrap().pick({ sequence: true, at: true, text: true }).strict().readonly(),
     wake: tellWakeSchema,
     interruption: z
       .union([
-        z
-          .strictObject({
-            kind: z.literal("completed"),
-            bodySequence: z.number(),
-            putDown: z.enum(["was-idle", "self-aborted"]),
-          })
-          .readonly(),
+        z.strictObject({ kind: z.literal("completed"), bodySequence: z.number() }).readonly(),
         z.strictObject({ kind: z.literal("pending"), bodySequence: z.number() }).readonly(),
         z
           .strictObject({
@@ -67,29 +57,10 @@ export const tellResultSchema = z
   })
   .readonly();
 
-export type TellWake =
-  | Readonly<{ kind: "told" }>
-  | Readonly<{ kind: "held" }>
-  | Readonly<{ kind: "pursuing"; bodySequence: number }>
-  | Readonly<{
-      kind: "failed";
-      diagnostic: string;
-      child?: Readonly<{
-        code: number | null;
-        signal: string | null;
-        log: Readonly<{ path: string; from: number; to: number }>;
-      }>;
-    }>;
+export type TellWake = z.output<typeof tellWakeSchema>;
 
-export type TellResult = Readonly<{
-  admission: Readonly<{ fact: "recorded"; tellId: string }>;
-  row: TellRow;
-  wake: TellWake;
-  interruption?:
-    | Readonly<{ kind: "completed"; bodySequence: number; putDown: "was-idle" | "self-aborted" }>
-    | Readonly<{ kind: "pending"; bodySequence: number }>
-    | Readonly<{ kind: "unavailable"; bodySequence: number; evidence: "hung" | "untidy" }>;
-}>;
+/** The progress receipt carries only the Tell coordinates progress needs; Heart keeps the native row. */
+export type TellResult = z.output<typeof tellResultSchema>;
 
 export type CallInitialTellAdmission =
   | Readonly<{ kind: "admitted"; tell: TellFact; wake: Promise<TellResult> }>

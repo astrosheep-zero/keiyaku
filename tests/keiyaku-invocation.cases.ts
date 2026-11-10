@@ -27,16 +27,16 @@ import { assertWireRoundTrip } from "./support/schema-parity.js";
 test("Debt facet preserves native lifecycle, context, and absent World", async (t) => {
   const cwd = temporaryDirectory(t, "debt-facet-");
   const facet = Keiyaku.at({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
-  assert.equal(await facet.debtShow({ id: "debt/missing" }), null);
-  assert.deepEqual(await facet.debtShow({ ids: ["debt/missing", "debt/missing"] }), [null, null]);
+  assert.deepEqual(await facet.debtShow({ id: "debt/missing" }), { kind: "absent" });
+  assert.deepEqual(await facet.debtShow({ ids: ["debt/missing", "debt/missing"] }), { kind: "absent" });
   await assert.rejects(facet.debtShow({ ids: [] }), TypeError);
   await assert.rejects(facet.debtDone({ ids: ["debt/missing", "debt/missing"] }), TypeError);
   assert.deepEqual(await facet.ls({ of: "debt" }), { kind: "absent" });
   assert.deepEqual(await facet.debtDoctor(), { kind: "absent" });
-  assert.equal((await facet.debtTree({ id: "debt/missing" })).kind, "refused");
+  assert.equal((await facet.debtTree({ id: "debt/missing" })).kind, "absent");
   assert.equal((await facet.debtUpdate({ id: "debt/missing", note: "note" })).kind, "refused");
-  assert.equal((await facet.debtDone({ ids: ["debt/missing"] })).items[0]?.outcome.kind, "refused");
-  assert.equal((await facet.debtDrop({ ids: ["debt/missing"] })).items[0]?.outcome.kind, "refused");
+  assert.equal((await facet.debtDone({ ids: ["debt/missing"] })).items[0]?.kind, "refused");
+  assert.equal((await facet.debtDrop({ ids: ["debt/missing"] })).items[0]?.kind, "refused");
   const reason = new Error("cancelled"),
     controller = new AbortController();
   controller.abort(reason);
@@ -48,58 +48,66 @@ test("Debt facet preserves native lifecycle, context, and absent World", async (
     await assert.rejects(operation, (error: unknown) => error === reason);
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   const defaultContext = await facet.debtContext();
-  assert.deepEqual(defaultContext, { kind: "accepted", value: { namespace: [], source: "default-root" } });
+  assert.deepEqual(defaultContext, { kind: "present", source: "default-root" });
   assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, defaultContext);
   await assert.rejects(facet.debtContext({ namespace: ["INVALID"] }), TypeError);
   await assert.rejects(facet.debtAdd({ title: " " }), TypeError);
   assert.deepEqual(await facet.ls({ of: "debt" }), { kind: "absent" });
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   const installedContext = await facet.debtContext({ namespace: ["nested"] });
-  assert.equal(installedContext.kind, "accepted");
+  assert.deepEqual(installedContext, { kind: "present", source: "local-override", namespace: "nested" });
   assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, installedContext);
   assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, await facet.debtContext());
-  const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" })).value;
-  const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] })).value;
-  const third = accepted(await facet.debtAdd({ title: "Third" })).value;
-  const root = accepted(await facet.debtAdd({ title: "Root", namespace: [] })).value;
-  assert.equal(first.createdBy, "fixture");
-  assert.equal(second.createdBy, "ambient-fixture");
-  assert.deepEqual(first.namespace, ["nested"]);
-  assert.deepEqual(
-    await facet.debtShow({ id: first.id }),
-    await Debts.of(await World.at(cwd))
-      .debt({ id: first.id })
-      .read(),
-  );
+  const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" }));
+  const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] }));
+  const third = accepted(await facet.debtAdd({ title: "Third" }));
+  const root = accepted(await facet.debtAdd({ title: "Root", namespace: [] }));
+  const shownDebt = async (id: string) => {
+    const shown = await facet.debtShow({ id });
+    assert.equal(shown.kind, "present");
+    if (shown.kind !== "present") throw new Error("missing Debt show");
+    const item = shown.items[0];
+    assert.equal(item?.kind, "found");
+    if (item?.kind !== "found") throw new Error("missing Debt");
+    const { kind: _kind, ...detail } = item;
+    return detail;
+  };
+  const firstDetail = await shownDebt(first.id);
+  const secondDetail = await shownDebt(second.id);
+  assert.equal(firstDetail.createdBy, "fixture");
+  assert.equal(secondDetail.createdBy, "ambient-fixture");
+  const nativeFirst = await Debts.of(await World.at(cwd)).debt({ id: first.id }).read();
+  assert.equal(nativeFirst.kind, "present");
+  if (nativeFirst.kind === "present") {
+    const { kind: _kind, ...detail } = nativeFirst;
+    assert.deepEqual(firstDetail, detail);
+  }
   assert.equal((await facet.debtUpdate({ id: first.id, note: "changed" })).kind, "accepted");
   const batch = await facet.debtDone({ ids: [first.id, second.id] });
   assert.deepEqual(
-    batch.items.map((item) => [item.id, item.outcome.kind]),
-    [
-      [first.id, "accepted"],
-      [second.id, "accepted"],
-    ],
+    batch.items.map((item) => item.kind),
+    ["accepted", "accepted"],
   );
-  assert.equal((await facet.debtDrop({ ids: [third.id] })).items[0]?.outcome.kind, "accepted");
+  assert.equal((await facet.debtDrop({ ids: [third.id] })).items[0]?.kind, "accepted");
   const active = await facet.ls({ of: "debt" });
   const closed = await facet.ls({ of: "debt", selection: "closed" });
-  assert.equal(active.kind, "accepted");
-  assert.equal(closed.kind, "accepted");
-  if (active.kind === "accepted" && closed.kind === "accepted") {
-    assert.equal(active.value.rows.length, 0);
-    assert.equal(closed.value.rows.length, 3);
+  assert.equal(active.kind, "present");
+  assert.equal(closed.kind, "present");
+  if (active.kind === "present" && closed.kind === "present") {
+    assert.equal(active.rows, undefined, "an empty page omits rows");
+    assert.equal(closed.rows!.length, 3);
   }
   const all = await facet.ls({ of: "debt", scope: "world", selection: "all", limit: 2 });
-  assert.equal(all.kind, "accepted");
-  if (all.kind === "accepted") {
-    assert.equal(all.value.rows.length, 2);
-    assert.equal(all.value.hasMore, true);
+  assert.equal(all.kind, "present");
+  if (all.kind === "present") {
+    assert.equal(all.rows!.length, 2);
+    assert.equal(all.more, true);
   }
   const rootOnly = await facet.ls({ of: "debt", namespace: [] });
-  assert.equal(rootOnly.kind, "accepted");
-  if (rootOnly.kind === "accepted")
+  assert.equal(rootOnly.kind, "present");
+  if (rootOnly.kind === "present")
     assert.deepEqual(
-      rootOnly.value.rows.map((row) => row.id),
+      rootOnly.rows!.map((row) => row.id),
       [root.id],
     );
 });
@@ -136,7 +144,7 @@ test("construction captures explicit inputs synchronously without observing cwd"
   const environment: Record<string, string> = { PI_SESSION_ID: "captured" };
   const captured = Keiyaku.at({ cwd: home, environment, home });
   environment.PI_SESSION_ID = "changed";
-  assert.deepEqual((await captured.whoami()).self, { kind: "external", integration: "pi", id: "captured" });
+  assert.deepEqual((await captured.whoami()).self, { kind: "external", id: "pi:captured" });
 });
 
 test("facet delegates reads and mutations using selected Repo but invocation World", async (t) => {
@@ -149,7 +157,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   await pluginRuntime({ world: worldA, settings: await settings({ root: worldA, home }) });
   const repoA = await Repo.at({ path: first.path });
   const repoB = await Repo.at({ path: second.path });
-  const debtA = accepted(await Debts.of(worldA).add({ title: "Debt in invocation world" }));
+  const debtA = accepted(await Debts.of(worldA).add({ title: "Debt in invocation world" })).id;
   accepted(await Debts.of(worldB).add({ title: "Debt in selected repo world" }));
   const worker = await bornLineageAkuma({
     root: worldA,
@@ -159,10 +167,10 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   });
   const facet = Keiyaku.at({ cwd: first.path, repo: relative(first.path, second.path), environment: {}, home });
   const bound = accepted(await facet.bind({ markdown, gates: ["reviewed"] }));
-  const contract = bound.contract;
-  assert.equal((await Keis.of(repoA).list({})).rows.length, 0);
+  const contract = bound.contractId;
+  assert.equal((await Keis.of(repoA).list({})).rows, undefined, "an empty catalogue omits rows");
   const nativeList = await Keis.of(repoB).list({});
-  assert.equal(nativeList.rows[0]?.id, contract);
+  assert.equal(nativeList.rows![0]?.id, contract);
   const { observedAt: _facetObservedAt, ...facetList } = await facet.ls({ of: "kei" });
   const { observedAt: _nativeObservedAt, ...comparableList } = nativeList;
   assert.deepEqual(facetList, comparableList);
@@ -171,10 +179,10 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
 
   const nativeDebts = await Debts.of(worldA).list({ selection: "active", namespace: [] });
   assert.deepEqual(await facet.ls({ of: "debt" }), nativeDebts);
-  assert.equal(nativeDebts.kind, "accepted");
-  if (nativeDebts.kind === "accepted") assert.equal(nativeDebts.value.rows[0]?.id, debtA.value.id);
+  assert.equal(nativeDebts.kind, "present");
+  if (nativeDebts.kind === "present") assert.equal(nativeDebts.rows![0]?.id, debtA);
   const nativeWorkers = await Akumas.of(worldA).list({ akumaName: "worker" });
-  assert.equal(nativeWorkers.rows[0]?.id, worker.id);
+  assert.equal(nativeWorkers.rows![0]?.id, worker.id);
   const { observedAt: _facetWorkersAt, ...facetWorkers } = await facet.ls({ of: "aku", akumaName: "worker" });
   const { observedAt: _nativeWorkersAt, ...comparableWorkers } = nativeWorkers;
   assert.deepEqual(facetWorkers, comparableWorkers);
@@ -186,9 +194,9 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   );
   const contractStatus = await kanshi({ world: worldA, repo: repoB, contract });
   const mixed = await facet.status({ selectors: [worker.id, contract] });
-  assert.ok(Array.isArray(mixed));
-  assert.deepEqual(mixed[0], workerStatus);
-  assert.deepEqual(withoutObservationTimes(mixed[1]), withoutObservationTimes(contractStatus));
+  assert.ok("items" in mixed);
+  assert.deepEqual(mixed.items[0], workerStatus);
+  assert.deepEqual(withoutObservationTimes(mixed.items[1]), withoutObservationTimes(contractStatus));
   assert.deepEqual(
     await facet.wait({ selectors: [contract], timeoutMs: 0 }),
     await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 }),
@@ -221,13 +229,13 @@ test("native Contract results, verification progress and cancellation pass throu
       gates: ["verified"],
     }),
   );
-  assert.ok(bound.value.workspace);
-  commitCandidate(repository, bound.value.workspace.path);
-  const native = bound.value.kei;
+  assert.ok(bound.worktreePath);
+  commitCandidate(repository, bound.worktreePath);
+  const native = bound.kei;
   const events: ExecutionObservation[] = [];
   const result = accepted(
     await facet.verify(
-      { contract: bound.contract },
+      { contract: bound.contractId },
       {
         observe: (event) => {
           events.push(event);
@@ -243,16 +251,16 @@ test("native Contract results, verification progress and cancellation pass throu
         event.observation.text.includes("invocation-progress"),
     ),
   );
-  const firstCheck = result.value.checks[0];
+  const firstCheck = result.checks[0];
   assert.ok(firstCheck?.kind === "terminal");
   const direct = accepted(await native.verify());
-  const repeated = accepted(await facet.verify({ contract: bound.contract }));
+  const repeated = accepted(await facet.verify({ contract: bound.contractId }));
   assert.deepEqual(repeated, direct);
   const controller = new AbortController();
   controller.abort(new Error("caller cancellation"));
   await assert.rejects(native.verify({ signal: controller.signal }));
-  await assert.rejects(facet.verify({ contract: bound.contract }, { signal: controller.signal }));
-  assert.deepEqual(await facet.previewDelivery({ contract: bound.contract }), await native.previewDelivery());
+  await assert.rejects(facet.verify({ contract: bound.contractId }, { signal: controller.signal }));
+  assert.deepEqual(await facet.previewDelivery({ contract: bound.contractId }), await native.previewDelivery());
 });
 
 test("report uses the explicit Akuma execution and returns native evidence", async (t) => {

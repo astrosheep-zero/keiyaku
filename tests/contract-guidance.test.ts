@@ -107,12 +107,11 @@ test("guidance repair replaces read-only bytes, preserves protection, and retrie
   for (const next of [changed, current]) {
     const result = await projectContractWorktree(git, next, register);
     assert.deepEqual(result.lag, []);
-    assert.equal(result.effects.find((effect) => effect.path === path)?.action, "updated");
     assert.equal(readFileSync(path, "utf8"), renderContractGuidance(next));
     assert.equal(statSync(path).mode & 0o222, 0);
     const before = statSync(path);
     const retry = await projectContractWorktree(git, next, register);
-    assert.equal(retry.effects.find((effect) => effect.path === path)?.action, "unchanged");
+    assert.deepEqual(retry.lag, []);
     assert.equal(statSync(path).ino, before.ino);
   }
 });
@@ -194,10 +193,6 @@ test("projection batches each index as generated files grow and preserves bytes 
       const capability = { ...git, gitPath };
       const small = await projectContractWorktree(capability, current, register);
       assert.deepEqual(small.lag, []);
-      assert.deepEqual(
-        small.effects.map((effect) => effect.action),
-        ["created", "created", "created"],
-      );
       for (const [seat] of skills) unlinkSync(join(worktree, ".agents", "skills", seat, "SKILL.md"));
       const full = await projectContractWorktree(capability, current, register);
       assert.deepEqual(full.lag, []);
@@ -209,13 +204,6 @@ test("projection batches each index as generated files grow and preserves bytes 
           [`.agents/skills/${seat}/SKILL.md`, bytes],
         ]),
       ];
-      assert.deepEqual(
-        full.effects.map((effect) => [effect.path, effect.action]),
-        [
-          [join(repository.path, ".keiyaku", ".gitignore"), "unchanged"],
-          ...generated.map(([path], index) => [join(worktree, path), index < 2 ? "unchanged" : "created"]),
-        ],
-      );
       assert.equal(
         readFileSync(join(repository.path, ".keiyaku", ".gitignore"), "utf8"),
         "*\n!settings.json\n!akumas/\n!akumas/*.md\n",
@@ -235,10 +223,6 @@ test("projection batches each index as generated files grow and preserves bytes 
       for (const [path, bytes] of generated) assert.equal(readFileSync(join(worktree, path), "utf8"), bytes);
       const retried = await projectContractWorktree(capability, current, register);
       assert.deepEqual(retried.lag, []);
-      assert.deepEqual(
-        retried.effects,
-        full.effects.map((effect) => ({ ...effect, action: "unchanged" })),
-      );
       const queries = readFileSync(log, "utf8")
         .trimEnd()
         .split("\n")

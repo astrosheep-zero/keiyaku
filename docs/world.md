@@ -75,8 +75,10 @@ A confirmed reset reports owner-confirmed removals and trailing owner stops in
 one accepted World answer. It does not invent Contract identity, head, journal
 facts, or another reset authority. Owner completion and retirement are
 independently awaited even when another owner fails; each confirmed removal
-remains visible before later cleanup or coordination fails. Required deletion
-stops and optional coordination residue retain their different meanings.
+remains visible before later cleanup or coordination fails. A stopped or partial
+answer distinguishes an owner attempted with no removals from one whose deletion
+was never attempted or whose effects are unknown. Required deletion stops and
+optional coordination residue retain their different meanings.
 Unexpected failures and authority corruption remain exceptional with the first
 native cause and all known reset evidence. No answer permits deletion while
 live writer custody remains unproven.

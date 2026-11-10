@@ -82,11 +82,18 @@ creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics. Public selection observations explicitly
 participate in identified-outcome observation, while association reads and
 roster expansion do not. Wait and ask deliver identified outcome observation
-in the observing process from the concrete result they return. Wait uses its
-returned status outcomes; ask uses private live observation evidence that never
-changes the public result. Delivery precedes answer decoding. Bounded spawn
+in the observing process from the concrete result they return. Wait uses its privately retained final native status evidence before returning
+compact completion observations; ask uses private live observation evidence that
+never changes the public result. Delivery precedes answer decoding. Bounded spawn
 answer observation stays with the submitting observer. Composition never
-rereads later state to infer the identity of an earlier observed answer.
+rereads later state to infer the identity of an earlier observed answer. Ordinary
+creation answers omit routine stage inventories and repeated input, while a later
+integration or observation failure retains the born child, admitted input and
+usable recovery coordinates with its native failure. That exceptional evidence
+is recognized only by its producing owner and survives shared failure projection.
+Public consumers can inspect that owner-confirmed evidence without changing the
+native exception or acquiring an execution capability; foreign error properties
+cannot claim confirmed creation or admission.
 
 A spawn composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a spawn without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a spawn awaits the answer to that first Tell without withdrawing it at the deadline.
 Akuma execution owns that admission and wake. Library composes surrounding
@@ -139,10 +146,11 @@ identity it yields.
 
 Selection composes public Akuma handles after address expansion. Plural
 selection resolves and freezes identities once, then fans out the same lower
-owner operations or one shared set-observation algorithm. It preserves the raw
-Akuma status and mutation evidence, adding separate read-only Dispatch and Debt
-associations where available; it never intersects them into Akuma state or
-re-evaluates lifecycle. Selection uses one verb per meaning on both faces: `tell` admits a Tell and returns its receipt; `ask` admits a Tell and observes the answer bound to that admission; `wait` observes existing Akuma-wide work. An ask returns one shared result with answered, failed, invalid-output, unanswered, and deadline observations. Bounds are optional and limit observation only, never admission. Schema belongs to ask, not tell. Interrupt is a flag on tell or ask: it durably admits the Tell with a request for the current Body to yield, then observes completion before waking a successor; if completion is not proven, the Tell remains admitted and recoverable. Cancellation after admission stops observation, not admission. Kill is the pure stop. Tell and ask address one Akuma directly; set selection remains for wait and kill. Standalone `idle` and plural or CLI `wait` name the same
+owner operations or one shared set-observation algorithm. Addressed status
+projects the native life and current actionable work, adding separate read-only
+Dispatch and Debt associations where available; it never intersects them into
+Akuma state or re-evaluates lifecycle. Execution history preserves requested
+historical content and correlation independently of current associations. Selection uses one verb per meaning on both faces: `tell` admits a Tell and returns its receipt; `ask` admits a Tell and observes the answer bound to that admission; `wait` observes existing Akuma-wide work. An ask returns one shared result with answered, failed, invalid-output, unanswered, and deadline observations. Bounds are optional and limit observation only, never admission. Schema belongs to ask, not tell. Interrupt is a flag on tell or ask: it durably admits the Tell with a request for the current Body to yield, then observes completion before waking a successor; if completion is not proven, the Tell remains admitted and recoverable. Cancellation after admission stops observation, not admission. Kill is the pure stop. Tell and ask address one Akuma directly; set selection remains for wait and kill. Standalone `idle` and plural or CLI `wait` name the same
 Akuma-owned completion judgment in their respective caller contexts. Wait and
 kill freeze their subject set at entry in the caller's deduplicated selection
 order. An
@@ -154,10 +162,12 @@ entire selected set. The mode changes completion criteria only; it never
 changes the frozen subject set, observation retries, or the honest
 distinguishing of observed and unobserved subjects. Plural wait retries
 transient unreadable members during observation, but final output never
-fabricates completion. A wait reports its requested mode separately from its
-completed-or-deadline return reason. Wait returns final status observations and
-does not expose a live activity stream or viewer callbacks. It uses the same
-status projection and association composition as ordinary status observation.
+fabricates completion. Wait returns compact final completion observations in frozen
+selection order and
+does not expose a timeline, live activity stream, current associations or viewer
+callbacks. It consumes the native completion judgment without reading Dispatch
+or Debt detail; compaction never removes stopped life, pending input, concurrent
+failure or unknown observation.
 Akuma wait refuses Contract selectors: Contract journal change observation belongs
 to the Contract product. Kill retains Contract-to-Dispatch selection.
 Tell and kill return their primary evidence; ask returns its input-bound observation.
@@ -169,7 +179,8 @@ entry. Its optional caller selection narrows that one World's roster to the
 selected caller's directly and transitively descended Akumas; the caller
 closure is completed across Archetypes before any Archetype filter, activity
 order, and bound, and it never aggregates Worlds or consults a user-home index.
-Its rows carry the frozen caller attribution the roster observed. The lower
+Caller selection follows the frozen birth attribution; visible Akuma lineage
+names the immediate parent independently of that selection. The lower
 roster supplies that native membership, order, and extent, and World
 composition attaches the current Alias bindings afterward without replacing the
 semantic order or counting the board. Archetype definitions are listed by the archetype

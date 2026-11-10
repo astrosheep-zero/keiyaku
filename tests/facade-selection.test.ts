@@ -183,13 +183,12 @@ test(
         signal: t.signal,
         schema,
       });
-      assert.equal(result.akuma, source.allocated.id);
-      assert.equal(result.tell.row.text, "continue");
-      assert.deepEqual(result.observation, { reason: "answered", answer: { ok: true } });
-      if (result.observation.reason === "answered") {
-        const typed: { ok: boolean } = result.observation.answer;
-        assert.equal(typed.ok, true);
-      }
+      assert.equal(result.akumaId, source.allocated.id);
+      assert.equal((await readTell(source.allocated.paths, result.tellId))?.body, "continue");
+      assert.equal(result.kind, "answered");
+      if (result.kind !== "answered") throw new Error("expected answer");
+      const typed: { ok: boolean } | undefined = result.answer;
+      assert.equal(typed?.ok, true);
       await assert.rejects(
         Akumas.of(root).tell({ akuma: "@worker", body: "no schema", schema } as never),
         /use Akumas.ask/u,
@@ -271,8 +270,8 @@ test(
         throw new Error("invalid answer");
       });
       const result = await api.ask({ akuma: source.allocated.id, body: "work", schema, signal: t.signal });
-      assert.equal(result.observation.reason, "invalid-output");
-      const tell = await readTell(source.allocated.paths, result.tell.admission.tellId);
+      assert.equal(result.kind, "invalid-output");
+      const tell = await readTell(source.allocated.paths, result.tellId);
       assert.ok(tell?.binding);
       assert.deepEqual(trace(), [
         ...acquired,
@@ -370,14 +369,14 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
   const reviewer = await answered(root, "reviewer", "00000001");
   await moveAlias({ world: root, alias: parseAkumaAlias("@review"), akumaId: reviewer.id });
 
-  assert.equal((await Akumas.of(root).status({ akuma: "@review" })).status.id, reviewer.id);
+  assert.equal((await Akumas.of(root).status({ akuma: "@review" })).id, reviewer.id);
   const waited = await Akumas.of(root).wait({
     akuma: ["aku/*/*", "@review", worker.id],
     completion: "all",
     timeoutMs: 0,
   });
   assert.deepEqual(
-    waited.observations.map((view) => view.status.id),
+    waited.results.map((item) => (item.kind === "observed" ? item.id : item.kind)),
     [reviewer.id, worker.id],
   );
 
@@ -387,7 +386,7 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
     [reviewer.id, worker.id],
   );
   assert.deepEqual(
-    killed.results.map((member) => member.evidence),
+    killed.results.map((member) => member.outcome),
     ["already-stopped", "already-stopped"],
   );
 });
@@ -455,7 +454,7 @@ test("a plural wait completes from the selected set's real life", async (t) => {
       ids,
       "a snapshot wait keeps the caller's order",
     );
-    assert.deepEqual(any.unobserved, []);
+    assert.deepEqual(any.results.filter((item) => item.kind === "unobserved"), []);
     assert.equal(defaultWaitComplete(any.observations[0]!), false);
     assert.equal(defaultWaitComplete(any.observations[1]!), true);
 
@@ -470,7 +469,7 @@ test("a plural wait completes from the selected set's real life", async (t) => {
       all.observations.map((status) => status.id),
       [running.id, finished.id],
     );
-    assert.deepEqual(all.unobserved, []);
+    assert.deepEqual(all.results.filter((item) => item.kind === "unobserved"), []);
 
     const pending = await answered(root, "reviewer", "00000013");
     const edge = await executeWaitAkuma({
@@ -498,7 +497,7 @@ test("a plural wait completes from the selected set's real life", async (t) => {
     const nothing = await executeWaitAkuma({ path: root, ids: [], completion: "all", timeoutMs: 0 });
     assert.deepEqual(
       nothing,
-      { mode: "all", reason: "deadline", observations: [], unobserved: [] },
+      { reason: "deadline", observations: [], results: [] },
       "an empty selection is never a vacuous completion",
     );
   } finally {
@@ -565,7 +564,7 @@ test("a plural wait polls lifecycle while skipping running projection", async (t
       silent.statements / silent.lifeReads < baseline.statements / baseline.lifeReads,
       "polling rounds reduce SQL work per member round against the full-round baseline",
     );
-    assert.deepEqual(silent.value.unobserved, []);
+    assert.deepEqual(silent.value.results.filter((item) => item.kind === "unobserved"), []);
   } finally {
     counter.restore();
     await first.end();
@@ -610,7 +609,7 @@ test("a transiently unreadable plural peer proves nothing until the next round",
       [first.id, second.id],
       "the full round still returns every selected member in caller order",
     );
-    assert.deepEqual(result.unobserved, []);
+    assert.deepEqual(result.results.filter((item) => item.kind === "unobserved"), []);
   } finally {
     DatabaseSync.prototype.prepare = originalPrepare;
   }
@@ -632,11 +631,12 @@ test("a persistently unreadable plural peer is reported unobserved at the deadli
     result.observations.map((status) => status.id),
     [readable.id],
   );
+  const unobserved = result.results.filter((item) => item.kind === "unobserved");
   assert.deepEqual(
-    result.unobserved.map((member) => member.id),
+    unobserved.map((member) => member.id),
     [broken.id],
   );
-  assert.ok((result.unobserved[0]!.diagnostic ?? "").length > 0, "the final round reports the real diagnostic");
+  assert.ok((unobserved[0]?.diagnostic ?? "").length > 0, "the final round reports the real diagnostic");
   assert.equal(defaultWaitComplete(result.observations[0]!), true, "a readable peer keeps its own honest evidence");
 
   const any = await executeWaitAkuma({
@@ -651,7 +651,7 @@ test("a persistently unreadable plural peer is reported unobserved at the deadli
     [readable.id],
   );
   assert.deepEqual(
-    any.unobserved.map((member) => member.id),
+    any.results.filter((item) => item.kind === "unobserved").map((member) => member.id),
     [broken.id],
   );
   await assert.rejects(
@@ -735,16 +735,23 @@ test("a Tell admitted after a completion probe is judged by the full round", asy
   }
 });
 
-test("a missing Soul remains a hard failure behind a running plural peer", async (t) => {
+test("a missing Soul is reported missing behind a running plural peer", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-wait-not-born-");
   const running = await retainedRunningWorker(root, "00000071", WAIT_AT);
   const missing = akumaId({ akumaName: "worker", suffix: "00000072" });
   try {
-    for (const completion of ["any", "all"] as const) {
-      await assert.rejects(executeWaitAkuma({ path: root, ids: [running.id, missing], completion, timeoutMs: 5_000 }), {
-        name: "AkumaNotBornError",
-      });
-    }
+    const all = await executeWaitAkuma({ path: root, ids: [running.id, missing], completion: "all", timeoutMs: 0 });
+    assert.equal(all.reason, "deadline", "a missing peer never proves the running member complete");
+    assert.deepEqual(
+      all.results.map((item) => (item.kind === "missing" ? [item.kind, item.id] : item.kind)),
+      ["observed", ["missing", missing]],
+      "missing keeps caller order and its own identity",
+    );
+    const any = await executeWaitAkuma({ path: root, ids: [running.id, missing], completion: "any", timeoutMs: 0 });
+    assert.equal(any.results.find((item) => item.kind === "missing")?.id, missing);
+    const single = await executeWaitAkuma({ path: root, ids: [missing], completion: "all", timeoutMs: 0 });
+    assert.deepEqual(single.results, [{ kind: "missing", id: missing }]);
+    assert.deepEqual(single.observations, [], "a missing identity contributes no fabricated status");
   } finally {
     await running.end();
   }
@@ -819,7 +826,7 @@ test("wait reselects an unchanged later Heart when an earlier member releases th
   assert.deepEqual(selectedCounts, [0, 6, 6]);
 });
 
-test("one and ten selected identities use one Dispatch batch at final wait attachment", async (t) => {
+test("one and ten selected identities wait without reading Dispatch associations", async (t) => {
   const repository = fixtureRepository(t);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
@@ -847,25 +854,24 @@ test("one and ten selected identities use one Dispatch batch at final wait attac
           timeoutMs: 0,
         });
         assert.deepEqual(
-          result.observations.map((observation) => observation.status.id),
+          result.results.map((item) => (item.kind === "observed" ? item.id : item.kind)),
           selected,
         );
-        assert.ok(result.observations.every((observation) => observation.contract.kind === "none"));
-        assert.equal(readFileSync(log, "utf8"), "rev-parse\ncat-file\n");
-        t.diagnostic(`${selected.length} IDs: one final attachment batch, 2 Git spawns`);
+        assert.ok(result.results.every((item) => !("contract" in item)));
+        assert.equal(readFileSync(log, "utf8"), "");
       }
     },
   );
 });
 
-test("wait observes a Dispatch published during polling at final attachment", { timeout: 15_000 }, async (t) => {
+test("wait ignores a Dispatch published during polling", { timeout: 15_000 }, async (t) => {
   const repository = fixtureRepository(t);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const { world, allocated } = await bornWorld(repository.path, "dddddd01");
   const peer = await answered(world, "worker", "dddddd02");
   const owner = contractId("kei/published-during-wait");
   const git = await repositoryAt(world);
-  // Seed private authority so selection opens a decode channel even though both selected associations are absent.
+  // Seed independent Dispatch authority before the wait.
   await publishDispatch({
     repository: git,
     akumaId: akumaId({ akumaName: "worker", suffix: "dddddd03" }),
@@ -920,8 +926,7 @@ test("wait observes a Dispatch published during polling at final attachment", { 
         let hooked = false;
         let logWhilePolling: string | undefined;
         let publication: ReturnType<typeof publishDispatch> | undefined;
-        // The first lifecycle probe after the wait starts is the deterministic seam: polling has
-        // begun, no Dispatch channel is open yet, and a later publication must still be attached.
+        // Publish during the first lifecycle probe; the wait must stay independent of Dispatch.
         t.mock.method(HeldAkumaLeash, "try", async (paths: Parameters<typeof originalTry>[0]) => {
           if (waiting && !hooked && paths.heart === allocated.paths.heart) {
             hooked = true;
@@ -943,15 +948,16 @@ test("wait observes a Dispatch published during polling at final attachment", { 
           assert.equal((await publication)?.kind, "dispatched");
           assert.equal(result.reason, "completed");
           assert.deepEqual(
-            result.observations.map((observation) => [observation.status.id, observation.contract]),
-            [
-              [allocated.id, { kind: "associated", contractId: owner }],
-              [peer.id, { kind: "none" }],
-            ],
+            result.results.map((item) => (item.kind === "observed" ? item.id : item.kind)),
+            [allocated.id, peer.id],
           );
-          const channels = readFileSync(log, "utf8").trim().split("\n");
-          assert.ok(channels.length >= 2, "final attachment opens a fresh channel");
-          assert.deepEqual(channels, Array.from({ length: channels.length / 2 }, () => ["opened", "closed"]).flat());
+          assert.ok(result.results.every((item) => !("contract" in item)));
+          assert.equal(readFileSync(log, "utf8"), "", "settlement opens no Dispatch channel");
+          const status = await Akumas.of(world).status({
+            akuma: allocated.id,
+            repo: await Repo.at({ path: world, gitPath }),
+          });
+          assert.deepEqual(status.contract, { kind: "associated", contractId: owner });
         } finally {
           t.mock.restoreAll();
         }
@@ -970,6 +976,11 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
     const source = await answered(root, "worker", "00000001");
     const debt = await Debts.of(await World.at(root)).add({ title: "Catalog debt" });
     assert.equal(debt.kind, "accepted");
+    const debtRead = await Debts.of(await World.at(root))
+      .debt({ id: debt.id })
+      .read();
+    assert.equal(debtRead.kind, "present");
+    if (debtRead.kind !== "present") throw new Error("missing catalog Debt");
     mkdirSync(join(home, "akumas"));
     writeFileSync(
       join(home, "akumas", "reviewer.md"),
@@ -984,28 +995,25 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
       ].join("\n"),
     );
     const debts = await Debts.of(await World.at(root)).list({ selection: "all" });
-    assert.equal(debts.kind, "accepted");
-    assert.deepEqual(debts.value.rows, [
+    assert.equal(debts.kind, "present");
+    if (debts.kind !== "present") throw new Error("missing Debt page");
+    assert.deepEqual(debts.rows, [
       {
-        id: debt.value.id,
+        id: debt.id,
         title: "Catalog debt",
-        state: "open",
         priority: 2,
         disposition: "ready",
-        updatedAt: debt.value.updatedAt,
-        bodyPresent: false,
       },
     ]);
     assert.deepEqual(await listArchetypeDefinitions({ home }), {
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
-      hasMore: false,
     });
     const workers = await Akumas.of(await World.at(root)).list({ akumaName: "worker" });
     assert.deepEqual(
-      workers.rows.map((row) => row.id),
+      workers.rows?.map((row) => row.id),
       [source.id],
     );
-    assert.deepEqual((await Akumas.of(await World.at(root)).list({ akumaName: "reviewer" })).rows, []);
+    assert.equal((await Akumas.of(await World.at(root)).list({ akumaName: "reviewer" })).rows, undefined);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
@@ -1038,10 +1046,10 @@ test("Akumas roster returns bounded Heart activity in semantic order", async (t)
 
   const page = await Akumas.of(await World.at(root)).list({ akumaName: "worker", limit: 2 });
   assert.deepEqual(
-    page.rows.map((row) => row.id),
+    page.rows?.map((row) => row.id),
     [tiedFirst.id, tiedSecond.id],
   );
-  assert.equal(page.hasMore, true);
+  assert.equal(page.more, true);
   const originalPrepare = DatabaseSync.prototype.prepare;
   let custodyReads = 0;
   DatabaseSync.prototype.prepare = function (...args) {
@@ -1129,12 +1137,12 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
     );
     assert.deepEqual(completeGlob.ids, [...oldIds, ...recent.map((source) => source.id)].sort());
     assert.deepEqual(
-      page.rows.map((row) => row.id),
+      page.rows?.map((row) => row.id),
       reference.slice(0, 2),
     );
-    assert.equal(page.hasMore, true);
+    assert.equal(page.more, true);
     assert.deepEqual(
-      page.rows.map((row) => row.id),
+      page.rows?.map((row) => row.id),
       recent
         .slice()
         .reverse()
@@ -1176,10 +1184,10 @@ test("all-null Akuma fallback retains exact membership through the fixed Heart r
 
     const expected = allocated.map((value) => value.id).sort();
     assert.deepEqual(
-      page.rows.map((row) => row.id),
+      page.rows?.map((row) => row.id),
       expected.slice(0, 7),
     );
-    assert.equal(page.hasMore, true);
+    assert.equal(page.more, true);
     assert.ok(
       custodyReads >= expected.length,
       `expected every null activity Heart to be read, received ${custodyReads}`,
@@ -1249,7 +1257,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
       ].join("\n"),
     }),
   );
-  const boundId = present(await bound.value.kei.state()).id;
+  const boundId = present(await bound.kei.state()).id;
   assert.match(boundId, /^kei\/review-[0-9a-f]{4}$/u);
   const alias = parseAkumaAlias(`@${contractSegment(boundId)}`);
   const source = await answered(repository.path, "worker", "00000001");
@@ -1299,10 +1307,14 @@ test("named Address resolves a retained Alias outside Kanshi roster rows", async
   await moveAlias({ world: root, alias: parseAkumaAlias("@outside"), akumaId: id });
   const observation = await observeKanshi({ world: root });
   const authority = await observeNamedAddress({ world: root, repo: null });
-  assert.equal(observation.report.akuma.kind, "present");
+  assert.ok("akumas" in observation.report);
+  if (!("akumas" in observation.report)) throw new Error("expected a world report");
+  const akumas = observation.report.akumas;
+  assert.equal(akumas.kind, "present");
   assert.equal(
-    observation.report.akuma.kind === "present" && observation.report.akuma.value.rows.some((row) => row.id === id),
-    false,
+    akumas.kind === "present" && akumas.rows,
+    undefined,
+    "an empty roster omits rows while the retained Alias stays addressable",
   );
   assert.deepEqual(
     resolveNamedAddress({ selector: "@outside", contracts: authority.contracts, aliases: authority.aliases }),
@@ -1366,22 +1378,26 @@ test("selection status projects Dispatch association without changing Akuma core
     akuma: source.id,
   });
   assert.equal("contractId" in plain, false);
-  assert.equal(plain.status.id, source.id);
+  assert.equal(plain.id, source.id);
+  assert.equal(plain.kind, "akuma");
   const projected = await Akumas.of(world).status({
     akuma: source.id,
     repo: await Repo.at({ path: repository.path }),
   });
   assert.deepEqual(projected.contract, { kind: "associated", contractId: owner });
-  assert.equal(projected.status.id, source.id);
+  assert.equal(projected.id, source.id);
   const waited = await Akumas.of(world).wait({
     akuma: [source.id],
     repo: await Repo.at({ path: repository.path }),
     timeoutMs: 0,
   });
-  assert.deepEqual(waited.observations[0]!.contract, { kind: "associated", contractId: owner });
+  const waitedMember = waited.results[0];
+  assert.equal(waitedMember?.kind, "observed");
+  assert.ok(waitedMember && !("contract" in waitedMember));
+  assert.equal(waited.reason, "completed");
 });
 
-test("multi-member wait and kill project every member from one Debt board snapshot", async (t) => {
+test("status projects created Debts while wait and kill retain member evidence", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-created-set-");
   const worker = await answered(root, "worker", "00000001");
   const reviewer = await answered(root, "reviewer", "00000002");
@@ -1407,23 +1423,20 @@ test("multi-member wait and kill project every member from one Debt board snapsh
   );
   const expected = projectDebtBoardObservation((await readBoard(world)).board);
   const status = await Akumas.of(root).status({ akuma: worker.id });
-  assert.deepEqual(status.createdDebts, { kind: "present", rows: expected.selectCreatedBy(worker.id) });
+  assert.deepEqual(
+    status.createdDebts,
+    expected.selectCreatedBy(worker.id).map(({ id, title, priority, disposition }) => ({ id, title, priority, disposition })),
+  );
   const waited = await Akumas.of(root).wait({
     akuma: [worker.id, reviewer.id],
     completion: "all",
     timeoutMs: 0,
   });
   assert.deepEqual(
-    waited.observations.map((observation) => observation.status.id),
+    waited.results.map((item) => (item.kind === "observed" ? item.id : item.kind)),
     [worker.id, reviewer.id],
   );
-  assert.deepEqual(
-    waited.observations.map((observation) => observation.createdDebts),
-    [
-      { kind: "present", rows: expected.selectCreatedBy(worker.id) },
-      { kind: "present", rows: expected.selectCreatedBy(reviewer.id) },
-    ],
-  );
+  assert.ok(waited.results.every((item) => !("createdDebts" in item)));
   const killed = await Akumas.of(root).kill({
     akuma: [worker.id, reviewer.id],
   });
@@ -1452,23 +1465,20 @@ test("failed Debt associations do not hide readable roster members or kill evide
   const status = await Akumas.of(root).status({
     akuma: a.id,
   });
-  assert.equal(status.status.id, a.id);
-  assert.equal(status.createdDebts.kind, "failed");
+  assert.equal(status.id, a.id);
+  assert.ok(status.createdDebts && "kind" in status.createdDebts && status.createdDebts.kind === "failed");
   const waited = await Akumas.of(root).wait({
     akuma: [a.id, b.id],
     completion: "all",
     timeoutMs: 0,
   });
-  assert.deepEqual(waited.observations.map((view) => view.status.id).sort(), [a.id, b.id]);
-  assert.deepEqual(
-    waited.observations.map((view) => view.createdDebts),
-    [status.createdDebts, status.createdDebts],
-  );
+  assert.deepEqual(waited.results.map((item) => (item.kind === "observed" ? item.id : item.kind)).sort(), [a.id, b.id]);
+  assert.ok(waited.results.every((item) => !("createdDebts" in item) && !("contract" in item)));
   const killed = await Akumas.of(root).kill({
     akuma: [a.id, b.id],
   });
   assert.deepEqual(killed.results.map((member) => member.id).sort(), [a.id, b.id]);
-  assert.ok(killed.results.every((member) => member.evidence === "already-stopped" && !("observation" in member)));
+  assert.ok(killed.results.every((member) => member.outcome === "already-stopped" && !("observation" in member)));
 });
 
 // Keep the exact maximum boundary at the pagination owner, independent of filesystem scale.

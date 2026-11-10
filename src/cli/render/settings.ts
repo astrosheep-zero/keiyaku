@@ -20,13 +20,17 @@ export function renderSettingsText(value: Settings, columns = DEFAULT_CLI_COLUMN
     ...scopeLines("user", value.scopes.user, columns),
     ...scopeLines("project", value.scopes.project, columns),
   ];
-  for (const view of value.namespaces) {
-    lines.push(`  namespace  ${fieldName(view.name)}  ${view.kind}`);
+  for (const [name, view] of Object.entries(value.namespaces ?? {})) {
+    lines.push(`  namespace  ${fieldName(name)}  ${view.kind}`);
     if (view.kind === "failed") {
-      for (const failure of view.failures) lines.push(`    failure  ${failure.scope}  ${failure.diagnostic}`);
+      for (const failure of view.failures) {
+        const scope = value.scopes[failure.scope];
+        const diagnostic = failure.diagnostic ?? (scope.kind === "failed" ? scope.diagnostic : undefined);
+        lines.push(`    failure  ${failure.scope}${diagnostic === undefined ? "" : `  ${diagnostic}`}`);
+      }
     }
-    for (const entry of view.entries) {
-      lines.push(`    entry  ${fieldName(entry.name)} · ${entry.source}${entry.shadows ? " · shadows user" : ""}`);
+    for (const [entryName, entry] of Object.entries(view.entries ?? {})) {
+      lines.push(`    entry  ${fieldName(entryName)} · ${entry.source}${entry.shadows ? " · shadows user" : ""}`);
       lines.push(...namedValueLines("value", entry.value, "      "));
     }
   }

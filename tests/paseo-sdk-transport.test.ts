@@ -9,9 +9,10 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { appendActivity, beginTurn, endTurn, HeldAkumaLeash, recordReport } from "../src/akuma/heart/index.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
-import { historySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { createHistorySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
+import { activityHistorySchema } from "../src/akuma/projection.js";
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
-import { tellPresentation, tellReceiptSchema } from "../plugins/paseo/plugin/server/message.js";
+import { tellPresentation } from "../plugins/paseo/plugin/server/message.js";
 import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
 import { ProviderEventSchema, type ProviderConnection, type ProviderEvent,
   type ProviderRegistration } from "@getpaseo/plugin/server/provider";
@@ -20,6 +21,7 @@ import * as pluginServerRuntime from "@getpaseo/plugin/server";
 import * as pluginProviderRuntime from "@getpaseo/plugin/server/provider";
 import * as zod from "zod";
 
+const historySchema = createHistorySchema(activityHistorySchema);
 const at = "2026-10-16T00:00:00.000Z";
 /**
  * The public package this suite proves the bridge against. The lane's own build
@@ -41,10 +43,14 @@ const nodeRequire = createRequire(import.meta.url);
 async function producer(): Promise<{ select(world: string, akuId: string): {
   history(options: Readonly<{ limit: number }>): Promise<History>;
   status(): Promise<unknown>;
-} }> {
-  const sdk = await import(PUBLIC_ENTRY) as unknown as { Akuma: { select: (world: string, akuId: string) => {
-    history(options: Readonly<{ limit: number }>): Promise<History>; status(): Promise<unknown> } } };
-  return { select: (world, akuId) => sdk.Akuma.select(world, akuId) };
+}; akumaTellResultSchema: { parse(value: unknown): unknown } }> {
+  const sdk = await import(PUBLIC_ENTRY) as unknown as {
+    Akuma: { select: (world: string, akuId: string) => {
+      history(options: Readonly<{ limit: number }>): Promise<History>; status(): Promise<unknown> } };
+    akumaTellResultSchema: { parse(value: unknown): unknown };
+  };
+  return { select: (world, akuId) => sdk.Akuma.select(world, akuId),
+    akumaTellResultSchema: sdk.akumaTellResultSchema };
 }
 /** One retained row exactly as the producer admits it. */
 async function producerRow(root: string, akuId: string, sequence: number): Promise<Row | undefined> {
@@ -127,7 +133,7 @@ test("the in-process transport serves the real public package's own stream, stat
   const frame = await stream.next();
   assert.ok(!frame.done, "the transport serves the real package's own bounded window");
   const rows = frame.value.rows;
-  const turn = rows.find((row) => row.kind === "turn" && row.turnSequence === started.sequence);
+  const turn = rows.find((row) => row.kind === "turn" && row.sequence === started.sequence);
   assert.ok(turn?.kind === "turn", "the real public window keeps the open Turn");
   const report = rows.find((row) => row.kind === "report");
   assert.ok(report?.kind === "report");
@@ -225,6 +231,7 @@ test("a native Pi completion reaches a Paseo edit detail through the public proj
 
 const FAKE_SDK = `import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
+export { akumaTellResultSchema, activityHistorySchema } from ${JSON.stringify(pathToFileURL(PUBLIC_ENTRY).href)};
 const control = async () => { try { return JSON.parse(await readFile(new URL("./control.json", import.meta.url), "utf8")); } catch { return {}; } };
 const empty = { rows: [], omitted: 0, hasEarlier: false, hasLater: false, historyLost: false, lowestRetained: null, highest: null };
 const wait = (milliseconds, signal) => delay(milliseconds, undefined, { signal });
@@ -239,10 +246,8 @@ export class Akuma {
     // A non-cooperative Tell never settles on its own; close owns the outcome.
     if (values.tellPending === true) await new Promise(() => {});
     if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
-    if (values.tellMismatch === true) return { akuma: "aku/other/1", tell: values.tell.tell };
-    return values.tell ?? { akuma: this.aku, tell: { admission: { fact: "recorded", tellId: "tell/1" },
-      row: { kind: "tell", sequence: 1, at: "t", tellId: "tell/1", text, state: "pending", deliveries: [] },
-      wake: { kind: "told" } } };
+    if (values.tellMismatch === true) return { akumaId: "aku/other/11111111", tellId: "tell/1" };
+    return values.tell ?? { akumaId: this.aku, tellId: "tell/1", wake: { kind: "pending" } };
   }
   async kill() { return (await control()).evidence ?? "already-stopped"; }
   async status() { return (await control()).status ?? {}; }
@@ -280,7 +285,7 @@ async function fakeTransport(t: TestContext, options: Readonly<{ timeoutMs?: num
   };
   const transport = createSdkTransport({ entry, ...options });
   t.after(async () => { await transport.close(); await rm(directory, { recursive: true, force: true }); });
-  return { transport, set, tellStarted: observed.tellStarted.promise, streams: observed.streams };
+  return { transport, set, entry, tellStarted: observed.tellStarted.promise, streams: observed.streams };
 }
 
 test("PATH discovery retries failed loads, names incompatible versions, and caches success", async (t) => {
@@ -345,7 +350,7 @@ const frame = (sequence: number): History => ({ rows: [{ kind: "said", sequence,
 test("SDK isolates bad records within trusted windows and continues to a real outcome", async (t) => {
   const { transport, set } = await fakeTransport(t);
   const raw = { ...frame(1), rows: [
-    { kind: "turn", sequence: 1, turnSequence: 1, at },
+    { kind: "turn", sequence: 1, bodySequence: 1, at },
     { kind: "future_" + "x".repeat(200), sequence: 2, at, secret: "never expose" },
     { kind: "outcome", sequence: 3, at, turnSequence: 1, outcome: { kind: "answered", answer: 42, secret: "never expose" } },
   ], highest: 3 };
@@ -379,33 +384,35 @@ test("SDK isolates bad records within trusted windows and continues to a real ou
   }
 });
 
-const RECEIPT = { akuma: "aku/test/1", tell: { admission: { fact: "recorded", tellId: "tell/7" },
-  row: { kind: "tell", sequence: 7, at, tellId: "tell/7", text: "change direction", state: "pending",
-    deliveries: [{ route: "live", turnSequence: 7, deliveredAt: at, receipt: "required" }] },
-  wake: { kind: "told" } } };
+const AKU = "aku/test/11111111";
+const RECEIPT = { akumaId: AKU, tellId: "tell/7" };
 
 test("the transport carries typed Tell admission, Stop evidence, and status", async (t) => {
   const { transport, set } = await fakeTransport(t);
   await set({ status: { provider: "pi", model: "kimi-coding/k3-256k" }, tell: RECEIPT });
   const signal = new AbortController().signal;
 
-  const admitted = await transport.tell("/world", "aku/test/1", signal, "change direction");
-  assert.equal(admitted.row.tellId, "tell/7");
-  assert.deepEqual(tellPresentation(admitted), { row: admitted.row, result: { type: "turn", turnId: "turn/7" } });
-  assert.deepEqual(tellPresentation(admitted, "turn/2"),
-    { row: admitted.row, result: { type: "steer", turnId: "turn/2" } }, "steering correlates the captured Turn, not delivery");
+  const admitted = await transport.tell("/world", AKU, signal, "change direction");
+  assert.deepEqual(admitted, RECEIPT, "the transport returns the producer's own flat receipt verbatim");
+  assert.deepEqual(tellPresentation(admitted, "change direction"),
+    { row: { tellId: "tell/7", text: "change direction" }, result: { type: "completed" } },
+    "a plain Tell presents the caller's own text, never a retired history row");
+  assert.deepEqual(tellPresentation(admitted, "change direction", "turn/2"),
+    { row: { tellId: "tell/7", text: "change direction" }, result: { type: "steer", turnId: "turn/2" } },
+    "steering correlates the captured Turn, not a removed delivery inference");
 
   const warned = t.mock.method(console, "warn", () => {});
-  await set({ tell: { ...RECEIPT, tell: { ...RECEIPT.tell, wake: { kind: "failed", diagnostic: "no provider" } } } });
-  const failedWake = await transport.tell("/world", "aku/test/1", signal, "change direction");
-  assert.deepEqual(tellPresentation(failedWake), { row: failedWake.row, result: { type: "turn", turnId: "turn/7" } },
+  await set({ tell: { ...RECEIPT, wake: { kind: "failed", diagnostic: "no provider" } } });
+  const failedWake = await transport.tell("/world", AKU, signal, "change direction");
+  assert.deepEqual(tellPresentation(failedWake, "change direction"),
+    { row: { tellId: "tell/7", text: "change direction" }, result: { type: "completed" } },
     "a recorded Tell with a failed wake stays an admitted Tell, never a retried failure");
-  await set({ tell: { ...RECEIPT, tell: { ...RECEIPT.tell, row: { ...RECEIPT.tell.row, deliveries: [] },
-    wake: { kind: "failed", diagnostic: "no provider" } } } });
-  const undelivered = await transport.tell("/world", "aku/test/1", signal, "change direction");
-  assert.deepEqual(tellPresentation(undelivered), { row: undelivered.row, result: { type: "completed" } },
-    "a recorded Tell with no delivery completes its send command without manufacturing an outcome");
-  assert.ok(warned.mock.callCount() >= 2, "each failed wake keeps its diagnostic");
+  await set({ tell: { ...RECEIPT, wake: { kind: "pending" } } });
+  const held = await transport.tell("/world", AKU, signal, "change direction");
+  assert.deepEqual(tellPresentation(held, "change direction"),
+    { row: { tellId: "tell/7", text: "change direction" }, result: { type: "completed" } },
+    "an admission whose work is only held completes its send command without manufacturing an outcome");
+  assert.equal(warned.mock.callCount(), 1, "a failed wake keeps its diagnostic; a held admission is not a failure");
   warned.mock.restore();
 
   assert.deepEqual(await transport.stop("/world", "aku/test/1", signal), { kind: "stopped" });
@@ -419,10 +426,28 @@ test("the transport carries typed Tell admission, Stop evidence, and status", as
   assert.deepEqual(await transport.status("/world", "aku/test/1", signal), {}, "an unknown configuration is absent, never guessed");
 });
 
-test("a Tell receipt that does not name the submitted Tell is an uncertain outcome", async (t) => {
+test("the SDK boundary validates Tell admission with the loaded producer's own schema", async (t) => {
+  const { transport, set, entry } = await fakeTransport(t);
+  const installed = await import(pathToFileURL(entry).href) as {
+    akumaTellResultSchema: { safeParse(value: unknown): { success: boolean } };
+  };
+  const retired = { akuma: AKU, tell: { admission: { fact: "recorded", tellId: "tell/7" },
+    row: { kind: "tell", sequence: 7, at, tellId: "tell/7", text: "change direction", state: "pending", deliveries: [] },
+    wake: { kind: "told" } } };
+  assert.equal(installed.akumaTellResultSchema.safeParse(retired).success, false,
+    "the fixture reexports the installed owner schema rather than a permissive local shim");
+  assert.equal(installed.akumaTellResultSchema.safeParse({ akumaId: AKU, tellId: "tell/7", wake: { kind: "told" } }).success, false,
+    "the retired told wake is not a native control value");
+  for (const value of [retired, { akumaId: AKU, tellId: "tell/7", wake: { kind: "told" } }, { akumaId: AKU }]) {
+    await set({ tell: value });
+    await assert.rejects(transport.tell("/world", AKU, new AbortController().signal, "change direction"));
+  }
+});
+
+test("a Tell receipt that does not name the submitted Akuma is an uncertain outcome", async (t) => {
   const { transport, set } = await fakeTransport(t);
   await set({ tellMismatch: true, tell: RECEIPT });
-  await assert.rejects(transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction"),
+  await assert.rejects(transport.tell("/world", AKU, new AbortController().signal, "change direction"),
     /outcome is uncertain/u);
 });
 
@@ -430,7 +455,7 @@ test("cancellation reaches only its own SDK request", async (t) => {
   const { transport, set, tellStarted } = await fakeTransport(t);
   await set({ tellPending: true, status: { provider: "pi" } });
   const controller = new AbortController();
-  const abandoned = transport.tell("/world", "aku/test/1", controller.signal, "change direction")
+  const abandoned = transport.tell("/world", AKU, controller.signal, "change direction")
     .then(() => "resolved", (error: Error) => error.message);
   const requestSignal = await tellStarted;
   controller.abort(new Error("observation closed"));
@@ -443,7 +468,7 @@ test("cancellation reaches only its own SDK request", async (t) => {
 test("close aborts every owned request and subscription and refuses new work", async (t) => {
   const { transport, set, tellStarted, streams } = await fakeTransport(t);
   await set({ tellPending: true, streamHistory: frame(1), streamDelayMs: 5_000 });
-  const inFlight = transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction")
+  const inFlight = transport.tell("/world", AKU, new AbortController().signal, "change direction")
     .then(() => "resolved", (error: Error) => error.message);
   const requestSignal = await tellStarted;
   const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
@@ -464,7 +489,7 @@ test("close aborts every owned request and subscription and refuses new work", a
   assert.equal((await idle.next()).done, true);
   await assert.rejects(transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]().next(),
     /transport is closed/u);
-  await assert.rejects(transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction"),
+  await assert.rejects(transport.tell("/world", AKU, new AbortController().signal, "change direction"),
     /transport is closed/u);
 });
 
@@ -540,7 +565,7 @@ test("an idle frame is never bounded by the ordinary request timeout", async (t)
   assert.deepEqual(pulled(await stream.next()), [2],
     "waiting for the next change is the observation's job, never a bounded request");
   await set({ tellDelayMs: 1_200 });
-  await assert.rejects(transport.tell("/world", "aku/test/1", new AbortController().signal, "change direction"),
+  await assert.rejects(transport.tell("/world", AKU, new AbortController().signal, "change direction"),
     /timed out after 400ms/u,
     "an ordinary request still carries its own bound");
 });
@@ -725,13 +750,11 @@ test("the real public package admits one Tell through the transport while custod
   const root = await realpath(value.root);
 
   const admitted = await transport.tell(root, value.allocated.id, new AbortController().signal, "change direction");
-  assert.equal(admitted.admission.fact, "recorded");
-  assert.equal(admitted.row.text, "change direction", "the receipt names the Tell the caller submitted");
-  assert.equal(admitted.row.state, "pending", "admission is never a claim of delivery");
-  assert.deepEqual(admitted.row.deliveries, [], "held custody delivers nothing");
-  assert.deepEqual(admitted.wake, { kind: "held" }, "a held leash is reported as held, not as a failed wake");
-  assert.deepEqual(tellReceiptSchema.parse({ akuma: value.allocated.id, tell: admitted }).tell, admitted,
-    "the transport's admission is the public receipt verbatim");
+  assert.equal(admitted.akumaId, value.allocated.id, "the flat receipt resolves the selected Akuma");
+  assert.equal(typeof admitted.tellId, "string");
+  assert.deepEqual(admitted.wake, { kind: "pending" }, "a held leash is reported as pending, not as a failed wake");
+  assert.deepEqual(await (await producer()).akumaTellResultSchema.parse(admitted), admitted,
+    "the transport's admission is the installed owner's own receipt verbatim, with no caller text echo");
 
   const stream = transport.stream(root, value.allocated.id, new AbortController().signal)[Symbol.asyncIterator]();
   const frame = await stream.next();
@@ -739,6 +762,6 @@ test("the real public package admits one Tell through the transport while custod
   const recorded = frame.value.rows.find((row) => row.kind === "tell");
   await stream.return?.();
   assert.ok(recorded?.kind === "tell");
-  assert.equal(recorded.tellId, admitted.row.tellId, "the admitted Tell is durably recorded, not merely acknowledged");
+  assert.equal(recorded.tellId, admitted.tellId, "the admitted Tell is durably recorded, not merely acknowledged");
   assert.equal(recorded.text, "change direction");
 });

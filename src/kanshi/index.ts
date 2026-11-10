@@ -1,8 +1,14 @@
 export { kanshi, kanshiCategory, observeKanshi, kanshiObservationSchema } from "./read.js";
 export { kanshiCounts, kanshiCountsReportSchema } from "./counts.js";
 export type { KanshiCountsInput, KanshiCountsReport } from "./counts.js";
-export { selectKanshi, selectRegion } from "./select.js";
-export { regionReadSchema, kanshiReportSchema, kanshiCategoryReportSchema } from "./report.js";
+export { selectRegion } from "./select.js";
+export {
+  regionReadSchema,
+  kanshiReportSchema,
+  kanshiContractReportSchema,
+  kanshiCategoryReportSchema,
+  kanshiResultSchema,
+} from "./report.js";
 
 export type { KanshiCategoryInput, KanshiInput } from "./read.js";
 export type {
@@ -11,7 +17,9 @@ export type {
   ContractEndpointObservation,
   ContractHolderObservation,
   ContractKanshiBoard,
-  ContractKanshiRow,
+  ContractKanshiDetail,
+  KanshiContractReport,
+  KanshiResult,
   KanshiCategoryReport,
   KanshiReport,
   Section,
@@ -22,4 +30,3 @@ export type {
   RegionOverlap,
   RegionRead,
 } from "./report.js";
-export type { KanshiSelection } from "./select.js";

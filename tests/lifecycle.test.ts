@@ -118,7 +118,6 @@ test("malformed inherited refusals, journals, and folds refuse without inventing
   assert.throws(() =>
     placementRefusalSchema.parse({
       kind: "prerequisites-unsatisfied",
-      contractId: String(id),
       unmet: [{ contractId: String(prerequisite), state: "unknown" }],
     }),
   );
@@ -128,9 +127,8 @@ test("malformed inherited refusals, journals, and folds refuse without inventing
       current: { kind: "attested", verdict: "passed", at: "2026-08-07T00:00:00Z" },
     }),
   );
-  assert.deepEqual(placementRefusalSchema.parse({ kind: "delivery-missing", contractId: String(id) }), {
+  assert.deepEqual(placementRefusalSchema.parse({ kind: "delivery-missing" }), {
     kind: "delivery-missing",
-    contractId: id,
   });
 });
 

@@ -94,16 +94,23 @@ starts anew; no cursor, acknowledgement, or replay is persisted. The handle
 and collection use the same native owner.
 
 Contract boards and observations are frozen read-time views of the journal and
-Git state. They show the adjudicated phase, current gate and dependency state,
-delivery and target/worktree observation needed by a caller, but are neither
-lifecycle authority nor a second eligibility judge. A targeted observation does
+Git state. Catalogues share a compact summary, while an exact addressed read
+retains requested detail and the availability of each observation. They show the
+adjudicated phase, current gate and dependency state, delivery and target/worktree
+observation needed by a caller, but are neither lifecycle authority nor a second
+eligibility judge. A targeted observation does
 not pretend to know the world-wide reverse-dependency view. Text rendering may
 shorten physical Git identities only when unambiguous; product identities remain
 complete.
 
-Contract listing preserves the complete board when no limit is selected. An
-explicit bound reports whether that same observation contains additional
-rows. Contract selector resolution is a read-only, invocation-scoped capability. A
+Contract listing preserves complete live membership when no limit is selected;
+it uses the same concise owner summary as a bounded catalogue. An explicit
+bound reports whether that same observation contains additional rows. Each selected
+catalogue row retains compact actionable physical attention and explicit unknown
+availability from the existing workspace and target observers. A bounded catalogue
+observes physical state only for its selected rows; omission of attention means
+those observations found no issue. Exact addressed observation owns full physical
+workspace and per-requirement detail. Contract selector resolution is a read-only, invocation-scoped capability. A
 complete identity is validated without consulting repository authority or proving
 existence; the requested operation owns absence. Short selectors use exact
 short-name equality among active Contracts with a managed, appointed worktree.
@@ -142,13 +149,18 @@ same typed result. It never runs Verification, reconciles, settles, or continues
 dependents. It executes through the same local owner.
 The observation is not a reservation: delivery observes again.
 
-`Delivery` exposes the captured candidate identity and a presentation diff.
-The diff may be unavailable when Git can no longer supply the recorded bytes;
-that absence is not a lifecycle error and the diff is never persisted, gated, or
-cached as authority.
+`Delivery` is the captured candidate and integration value. An explicitly
+requested delivery preview is the sole presentation diff surface. Its diff may
+be unavailable when Git can no longer supply the captured bytes; that absence
+is not a lifecycle error and the diff is never persisted, gated, or cached as
+authority.
 
-Native Contract and delivery abilities keep process custody private while their
-JSON projection retains public result data.
+Native Contract abilities keep process custody private while their
+JSON projection retains the single compact owner answer. Guidance reads preserve
+exact requested content and distinguish missing authority. Contract history
+normally returns semantic events without repeating complete terms. Explicit full
+history retains every historical record needed to recover earlier versions;
+current guidance is not a substitute for that historical evidence.
 
 A caller submitting review testimony supplies a nonblank summary; historical
 testimony remains readable whether or not it included one.

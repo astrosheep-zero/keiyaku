@@ -9,27 +9,16 @@ import { archetypeCatalogSchema, type ArchetypeCatalog } from "../akuma/archetyp
 import {
   akumaAskResultSchema,
   akumaKillResultSchema,
-  akumaObservationSchema,
   akumaTellResultSchema,
   akumaWaitResultSchema,
   type AkumaAskResult,
   type AkumaKillResult,
-  type AkumaObservation,
   type AkumaTellResult,
   type AkumaWaitResult,
 } from "../akuma/selection-observation.js";
-import {
-  kanshiReportSchema,
-  kanshiCategoryReportSchema,
-  regionReadSchema,
-  sectionSchema,
-  type KanshiReport,
-  type KanshiCategoryReport,
-  type RegionRead,
-  type Section,
-} from "../kanshi/report.js";
+import { regionResultSchema, type RegionResult } from "../kanshi/report.js";
 import { settingsSchema, type Settings } from "../settings.js";
-import { contractListSchema, contractObservationSchema, type ContractObservation } from "../protocol/read/status.js";
+import { contractCatalogueSchema, type ContractCatalogue } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
 import {
   spawnProgressSchema,
@@ -57,30 +46,34 @@ import {
   type ReviewOutcome,
   type AbandonOutcome,
 } from "./contract-outcomes.js";
-import { contractHistorySchema, type ContractHistory, type ContractList } from "./contract-types.js";
+import { contractHistorySchema, type ContractHistory } from "./contract-types.js";
+import { guidanceSchema, type Guidance } from "./kei.js";
 import { contractWaitResultSchema, type ContractWaitResult } from "./contract-wait.js";
 import { reconcileResultSchema, type ReconcileCompletion, type RepoReconcileReport } from "./reconcile.js";
 import { akumaHistoryResultSchema, type AkumaHistoryResult } from "./selection.js";
+import { statusResultSchema, type StatusResult } from "./keiyaku-status.js";
 import { whoamiFactsSchema, type WhoamiFacts } from "./keiyaku-identity.js";
 import { resetOutcomeSchema, type ResetOutcome } from "./outcome.js";
 import {
   debtAbsentSchema,
   debtBatchResultSchema,
-  debtDecompositionTreeSchema,
+  debtTreeResultSchema,
+  debtCatalogueSchema,
+  debtShowResultSchema,
   debtDoctorReportSchema,
-  debtListSchema,
+  debtReadyListSchema,
   blockedDebtListSchema,
   debtMutationResultSchema,
   debtQueryResultSchema,
-  debtReadSchema,
   debtContextResultSchema,
   debtUpdateResultSchema,
   type DebtAbsent,
   type DebtBatchResult,
-  type DebtDecompositionTree,
-  type DebtDetail,
+  type DebtTreeResult,
+  type DebtCatalogue,
+  type DebtShowResult,
   type DebtDoctorReport,
-  type DebtList,
+  type DebtReadyList,
   type BlockedDebtList,
   type DebtMutationResult,
   type DebtQueryExpression,
@@ -264,13 +257,13 @@ export const verbs = Object.freeze({
   show: {
     description: "Read Contract guidance.",
     input: z.strictObject(contract).readonly(),
-    output: text.nullable(),
+    output: guidanceSchema,
     effect: "read",
   },
   reconcile: {
     description: "Reconcile Contract effects.",
     input: z.strictObject({ ...contract, retryHooks: optBool }).readonly(),
-    output: z.union([reconcileResultSchema, contractObservationSchema.options[0]]),
+    output: reconcileResultSchema,
     effect: "write",
   },
   spawn: {
@@ -397,12 +390,7 @@ export const verbs = Object.freeze({
       z.strictObject({ selectors: z.array(text).min(2).readonly() }).readonly(),
       z.strictObject({ category: z.enum(["akuma", "contract"]), limit: positive.exactOptional() }).readonly(),
     ]),
-    output: z.union([
-      kanshiReportSchema,
-      kanshiCategoryReportSchema,
-      akumaObservationSchema,
-      z.array(z.union([kanshiReportSchema, akumaObservationSchema])).readonly(),
-    ]),
+    output: statusResultSchema,
     effect: "read",
   },
   region: {
@@ -412,7 +400,7 @@ export const verbs = Object.freeze({
       z.strictObject({ contract: text }).readonly(),
       z.strictObject({ paths: z.array(text).min(1).readonly() }).readonly(),
     ]),
-    output: z.union([sectionSchema(regionReadSchema), contractObservationSchema]),
+    output: regionResultSchema,
     effect: "read",
   },
   "debt.add": {
@@ -466,7 +454,7 @@ export const verbs = Object.freeze({
       z.strictObject({ id: text }).readonly(),
       z.strictObject({ ids: z.array(text).min(1).readonly() }).readonly(),
     ]),
-    output: z.union([debtReadSchema, z.array(debtReadSchema).readonly()]),
+    output: z.union([debtShowResultSchema, debtAbsentSchema]),
     effect: "read",
   },
   "debt.done": {
@@ -484,13 +472,13 @@ export const verbs = Object.freeze({
   "debt.ready": {
     description: "List ready Debts.",
     input: z.strictObject({ ...debtReadScope, parent: optText }).readonly(),
-    output: z.union([debtListSchema, debtAbsentSchema]),
+    output: debtReadyListSchema,
     effect: "read",
   },
   "debt.blocked": {
     description: "List blocked Debts.",
     input: z.strictObject({ ...debtReadScope, parent: optText }).readonly(),
-    output: z.union([blockedDebtListSchema, debtAbsentSchema]),
+    output: blockedDebtListSchema,
     effect: "read",
   },
   "debt.query": {
@@ -503,13 +491,13 @@ export const verbs = Object.freeze({
         sort: z.enum(["priority", "created", "updated", "id"]).exactOptional(),
       })
       .readonly(),
-    output: z.union([debtQueryResultSchema, debtAbsentSchema]),
+    output: debtQueryResultSchema,
     effect: "read",
   },
   "debt.tree": {
     description: "Observe a Debt decomposition tree.",
     input: z.strictObject({ id: text }).readonly(),
-    output: debtDecompositionTreeSchema,
+    output: z.union([debtTreeResultSchema, debtAbsentSchema]),
     effect: "read",
   },
   "debt.doctor": {
@@ -545,7 +533,7 @@ export const verbs = Object.freeze({
       z.strictObject({ of: z.literal("akuma-name"), limit: positive.exactOptional() }).readonly(),
       z.strictObject({ of: z.literal("debt"), ...debtReadScope, selection: debtSelection }).readonly(),
     ]),
-    output: z.union([contractListSchema, akumaListSchema, archetypeCatalogSchema, debtListSchema, debtAbsentSchema]),
+    output: z.union([contractCatalogueSchema, akumaListSchema, archetypeCatalogSchema, debtCatalogueSchema]),
     effect: "read",
   },
 } as const satisfies Record<string, VerbEntry>);
@@ -559,32 +547,32 @@ export type VerbOutputs = {
   verify: VerifyOutcome;
   review: ReviewOutcome;
   abandon: AbandonOutcome;
-  show: string | null;
-  reconcile: ReconcileCompletion | RepoReconcileReport | Extract<ContractObservation, { kind: "missing" }>;
+  show: Guidance;
+  reconcile: ReconcileCompletion | RepoReconcileReport;
   spawn: SpawnResult;
   fork: ForkResult;
   tell: AkumaTellResult;
   ask: AkumaAskResult<unknown>;
   kill: AkumaKillResult;
   wait: ContractWaitResult | AkumaWaitResult;
-  history: ContractHistory | null | AkumaHistoryResult;
+  history: ContractHistory | AkumaHistoryResult;
   report: AkumaReportResult;
   whoami: WhoamiFacts;
   settings: Settings;
   nuke: ResetOutcome;
-  status: KanshiReport | KanshiCategoryReport | AkumaObservation | readonly (KanshiReport | AkumaObservation)[];
-  region: Section<RegionRead> | ContractObservation;
-  ls: ContractList | AkumaList | ArchetypeCatalog | DebtList | DebtAbsent;
+  status: StatusResult;
+  region: RegionResult;
+  ls: ContractCatalogue | AkumaList | ArchetypeCatalog | DebtCatalogue;
   "debt.add": DebtMutationResult;
   "debt.addDocument": DebtMutationResult;
   "debt.update": DebtUpdateResult;
-  "debt.show": DebtDetail | null | readonly (DebtDetail | null)[];
+  "debt.show": DebtShowResult | DebtAbsent;
   "debt.done": DebtBatchResult;
   "debt.drop": DebtBatchResult;
-  "debt.ready": DebtList | DebtAbsent;
-  "debt.blocked": BlockedDebtList | DebtAbsent;
-  "debt.query": DebtQueryResult | DebtAbsent;
-  "debt.tree": DebtDecompositionTree;
+  "debt.ready": DebtReadyList;
+  "debt.blocked": BlockedDebtList;
+  "debt.query": DebtQueryResult;
+  "debt.tree": DebtTreeResult | DebtAbsent;
   "debt.doctor": DebtDoctorReport | DebtAbsent;
   "debt.context": DebtContextResult;
 };

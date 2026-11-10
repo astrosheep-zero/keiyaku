@@ -211,7 +211,7 @@ export type PauseFact = Readonly<{
 }>;
 export type InterruptCompletion =
   | Readonly<{ kind: "clear" }>
-  | Readonly<{ kind: "completed"; body: BodyFact }>
+  | Readonly<{ kind: "completed" }>
   | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" }>;
 
 export class BodyControlledError extends Error {

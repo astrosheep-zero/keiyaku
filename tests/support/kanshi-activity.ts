@@ -1,4 +1,15 @@
-import type { ActiveToolRow, ActivitySnapshot, ActivitySnapshotEntry, CompletedToolRow, IdleSnapshotRow, OpenSnapshotRow, OutcomeRow, ReportedFileChange, SnapshotRow } from "../../src/akuma/projection.js";
+import type {
+  ActiveToolRow,
+  ActivitySnapshot,
+  ActivitySnapshotEntry,
+  CompletedToolRow,
+  IdleSnapshotRow,
+  OpenSnapshotRow,
+  OutcomeRow,
+  ReportedFileChange,
+  SnapshotRow,
+} from "../../src/akuma/projection.js";
+import { projectStatusPreview, projectStatusOutcome } from "../../src/akuma/status-projection.js";
 import { parseAkumaId } from "../../src/akuma/identity.js";
 import type { AkumaKanshiRow, KanshiReport } from "../../src/kanshi/index.js";
 
@@ -24,27 +35,23 @@ export function completedTool(
   call: ActivityToolCall,
   state: ActivityToolResult = { status: "ok" },
 ): CompletedToolRow {
-  return { kind: "tool", ...eventFields(sequence), name, call, state };
+  return { kind: "tool", ...eventFields(sequence), toolId: `tool-${sequence}`, name, call, state };
 }
 
 export function activeTool(sequence: number, name: string, call: ActivityToolCall): ActiveToolRow {
-  return { kind: "tool", ...eventFields(sequence), name, call, state: "active" };
+  return { kind: "tool", ...eventFields(sequence), toolId: `tool-${sequence}`, name, call, state: "active" };
 }
 
 export function answeredOutcome(sequence: number, answer: string): OutcomeRow {
   return {
     kind: "outcome",
     ...eventFields(sequence),
-    outcome: { kind: "answered", historyId: "history-1", answer },
+    outcome: { kind: "answered", answer },
   };
 }
 
-export function reportedFileChange(
-  sequence: number,
-  op: ReportedFileChange["op"],
-  path: string,
-): ReportedFileChange {
-  return { sequence, at: AKUMA_ACTIVITY_AT, op, path };
+export function reportedFileChange(path: string): ReportedFileChange {
+  return { path };
 }
 
 export function openAkumaSnapshot(
@@ -53,9 +60,8 @@ export function openAkumaSnapshot(
 ): Extract<ActivitySnapshot, { kind: "open" }> {
   return {
     kind: "open",
-    turn: { kind: "turn", ...eventFields(TURN_SEQUENCE), bodySequence: 1 },
+    turn: { kind: "turn", sequence: TURN_SEQUENCE, bodySequence: 1, at: AKUMA_ACTIVITY_AT },
     entries,
-    omitted: 0,
     reportedChanges,
     reportedChangesOmitted: 0,
   };
@@ -68,40 +74,37 @@ export function idleAkumaSnapshot(
   return {
     kind: "idle",
     entries,
-    omitted: 0,
     reportedChanges: [],
     reportedChangesOmitted: 0,
     ...(outcome === undefined ? {} : { outcome }),
   };
 }
 
-export function activityAkumaRow(
-  id: string,
-  life: "running" | "asleep",
-  snapshot: ActivitySnapshot,
-): AkumaKanshiRow {
+export function activityAkumaRow(id: string, life: "running" | "asleep", snapshot: ActivitySnapshot): AkumaKanshiRow {
+  const activity = snapshot.entries.findLast(
+    (entry) => entry.kind === "row" && ["tool", "said", "thought", "note", "report"].includes(entry.row.kind),
+  );
+  const preview = activity?.kind === "row" ? projectStatusPreview(activity.row) : undefined;
   return {
     id: parseAkumaId(id).id,
-    akumaName: "worker",
     life,
     lifeAt: AKUMA_ACTIVITY_AT,
     lastActivityAt: AKUMA_ACTIVITY_AT,
-    pending: [],
-    aliases: [],
-    snapshot,
+    ...(preview === undefined ? {} : { activity: preview }),
+    ...(snapshot.kind === "idle" && snapshot.outcome !== undefined
+      ? { outcome: projectStatusOutcome(snapshot.outcome) }
+      : {}),
   };
 }
 
 export function akumaWorldReport(rows: readonly AkumaKanshiRow[]): KanshiReport {
   return {
-    root: null,
     observedAt: AKUMA_OBSERVED_AT,
-    branch: null,
     contracts: { kind: "absent" },
     debts: { kind: "absent" },
-    akuma: {
+    akumas: {
       kind: "present",
-      value: { observedAt: AKUMA_ACTIVITY_AT, searched: [], hasMore: false, rows },
+      ...(rows.length === 0 ? {} : { rows }),
     },
   };
 }

@@ -19,7 +19,6 @@ export type BindInput<Failure = never> = Readonly<{
 export type BindRefusal =
   | Readonly<{
       kind: "contract-exists" | "invalid-after" | "unknown-prerequisite";
-      contractId: ContractId;
     }>
   | TargetContractRefusal;
 
@@ -30,19 +29,19 @@ export function decideBind<Failure>({
 }: DecideInput<BindInput<Failure>>): OfferDecision<BindRefusal | Failure> {
   const id = input.contractId;
   const current = contractState(observation, id);
-  if (current !== null) return { kind: "refused", refusal: { kind: "contract-exists", contractId: id } };
+  if (current !== null) return { kind: "refused", refusal: { kind: "contract-exists" } };
   if (input.targetContract !== undefined) {
-    const refusal = targetContractIdRefusal(observation, id, input.targetContract);
+    const refusal = targetContractIdRefusal(observation, input.targetContract);
     if (refusal !== undefined) return { kind: "refused", refusal };
   }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
   const { data } = input.preparation;
-  const targetRefusal = targetContractRefusal(observation, id, data.coordinates.target);
+  const targetRefusal = targetContractRefusal(observation, data.coordinates.target);
   if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
-  if (data.terms.after.includes(id)) return { kind: "refused", refusal: { kind: "invalid-after", contractId: id } };
+  if (data.terms.after.includes(id)) return { kind: "refused", refusal: { kind: "invalid-after" } };
   const prerequisites = prerequisiteStatus(data.terms.after, observation);
   if (prerequisites === "unknown") {
-    return { kind: "refused", refusal: { kind: "unknown-prerequisite", contractId: id } };
+    return { kind: "refused", refusal: { kind: "unknown-prerequisite" } };
   }
   const bind = journalEntry("bind", input, attempt.entryUlids[0]!, data);
   return { kind: "offer", offer: { facts: [{ contractId: id, entries: [bind] }] } };

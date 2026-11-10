@@ -21,9 +21,13 @@ Different Contracts need no shared effect lock. A mutation that admitted newer
 authority triggers reconciliation from that newer state, so a prior replay
 cannot establish a competing terminal physical meaning.
 
-Reconciliation reports what it observed and completed, plus typed lags for work
-it could not safely complete. It does not claim the outcome of an unreported
-effect. Authority corruption remains an exception. A lag is safe to retry:
+Reconciliation reports meaningful completed physical movement and resource
+retirement, plus typed issues for work it could not safely complete. Completed
+Debt settlement remains visible even if releasing its association later fails.
+Ephemeral recovery snapshots retain their identities at the invocation that
+produced them. Unchanged observations and successful internal hook inventories
+are not receipt content; a complete world pass omits Contracts with no effect or
+issue. It does not claim the outcome of an unreported effect. Authority corruption remains an exception. A lag is safe to retry:
 every replay begins from durable facts and fresh topology, never a process-local
 receipt, progress marker, frozen hook list, detached runner, or recovery queue.
 Confirmed reset is a separate Git-owned operation, not reconciliation.
@@ -112,9 +116,10 @@ It either discovers the whole world, including an empty world, or reports
 observation failure before selecting any Contract. There is no synthetic or
 partial discovery result. It then returns each Contract's independent observed
 effects and lags; one Contract's lag neither discards another's report nor
-becomes a world-wide exception. Contract and world reports expose effects that
-actually occurred and flat retryable lags, without inventing lifecycle state or
-a second cleanup report.
+becomes a world-wide exception. Contract and world reports expose meaningful effects that
+actually occurred and actionable issues, without inventing lifecycle state or
+a second cleanup report. Known-empty reports remain distinct from failed world
+observation.
 
 Only an owner-recognized operational failure becomes reconciliation lag.
 Programming failures and corrupt authority remain exceptional; an invocation

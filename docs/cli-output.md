@@ -34,16 +34,18 @@ and operational failure. Text labels name a candidate and its integration result
 and a content identity is distinguished from a commit by its kind name alone —
 the teaching that a content identity is never Git-addressable lives in leaf
 help, not on receipt rows. Journal blobs, entry ids, and record-field
-enumeration stay out of ordinary text — evidence handles live in JSON and
-`history` alone. Verification evidence remains associated with its exact
+enumeration stay out of ordinary text. Ordinary JSON receipts likewise omit
+raw journal records and internal custody; explicitly requested full history
+retains historical content without duplicating storage envelopes. Verification
+evidence remains associated with its exact
 captured snapshot and individual requirement: a verify receipt exposes every
 executed check's verdict or stop, current declaration position, requirement, and
 whether testimony was newly admitted or reused, while delivery and review
 receipts consume standing evidence without claiming a producer run. When a
-verified snapshot lands, the landing names the same identity and the landed
-diff's shape in the shared diffstat vocabulary. A terminal receipt names its
-appointed worktree's short name when retired, or the retained path when removal
-failed. A landed placement is never vetoed by uncommitted checkout state: the
+verified snapshot lands, the landing names that same identity and its destination
+movement. Successful internal retirement is not an ordinary receipt inventory;
+failed removal retains its diagnostic path.
+A landed placement is never vetoed by uncommitted checkout state: the
 receipt names each target checkout this command's own follow could not carry as
 one `checkout behind` lag row with its path and target, leaving earlier
 retention to the typed result.
@@ -56,16 +58,15 @@ Contract, the movement names its reference, and the final lifecycle state reads
 collision-aware display rule and remain full in JSON; absent content identity
 has no row. Amend receipts use a verb-past title, name gate and prerequisite
 changes independently, reserve an unchanged-terms fact for a genuinely unchanged
-amendment, and keep only comparison headers in bounded terms diffs. Debt
-mutation receipts use verb-past titles and field-level changes, never
+amendment, and summarize actually changed sections instead of printing a full
+terms diff. Debt mutation receipts use verb-past titles and field-level changes, never
 projection-file diffs; Debt show timestamps omit millisecond precision in text
 and retain full precision in JSON. A placement receipt has three registers:
 landed states the reference movement and closes on `accepted`; pending states
 the target's non-movement and closes on `⧗ awaiting <events>` (omitted when
 every unmet requirement already holds a recorded verdict, which alarms on its
-own row); and failed keeps its stop rows. When completion re-integrates the
-candidate across target movement, the receipt names that re-integration count
-for delivery, review, and verify alike. Requirement states are met or unmet
+own row); and failed keeps its stop rows. Placement names its final integration
+after any necessary reintegration. Requirement states are met or unmet
 while recorded verdicts are satisfied or unsatisfied. A dependent stop on unmet
 requirements speaks the same pending vocabulary. Internal refusal kinds never
 print on receipts.
@@ -261,6 +262,7 @@ identity, containment, and partial intersection relations without asserting a
 code conflict. When an exceptional Contract execution already confirmed
 admissions, the CLI reports the failure together with those receipts instead
 of projecting a usage error or a no-effect refusal. Text and JSON preserve the
-same admitted facts and failure boundary, and resource cleanup has one
-invocation-wide carrier with enough ownership coordinates to distinguish
-problems from different candidates or dependents.
+same confirmed admission, consequential movement, and failure boundary without
+copying entire journal records. Resource issues keep enough ownership coordinates
+to distinguish problems from different candidates or dependents; successful
+internal mechanics and no-op inventories are not ordinary receipt content.

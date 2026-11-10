@@ -143,34 +143,33 @@ async function settleBefore<T>(promise: Promise<T>, cancellation: AbortSignal): 
   }
 }
 
-function selectedEntry(entry: SettingsEntry, report: PluginDiagnostic | undefined): SelectedPlugin | null {
-  if (entry.name.trim().length === 0) {
+function selectedEntry(
+  name: string,
+  entry: SettingsEntry,
+  report: PluginDiagnostic | undefined,
+): SelectedPlugin | null {
+  if (name.trim().length === 0) {
     reportPluginDiagnostic(report, "<unnamed>", "selection", new TypeError("plugin setting name must be nonblank"));
     return null;
   }
   if (!object(entry.value)) {
-    reportPluginDiagnostic(report, entry.name, "selection", new TypeError("plugin setting must be an object"));
+    reportPluginDiagnostic(report, name, "selection", new TypeError("plugin setting must be an object"));
     return null;
   }
   const names = Object.keys(entry.value);
   if (!names.includes("package") || names.some((name) => !["package", "enabled", "config"].includes(name))) {
-    reportPluginDiagnostic(
-      report,
-      entry.name,
-      "selection",
-      new TypeError("plugin setting has unknown or missing fields"),
-    );
+    reportPluginDiagnostic(report, name, "selection", new TypeError("plugin setting has unknown or missing fields"));
     return null;
   }
   const packageName = entry.value.package;
   if (typeof packageName !== "string" || packageName.trim().length === 0) {
-    reportPluginDiagnostic(report, entry.name, "selection", new TypeError("plugin package must be a nonblank string"));
+    reportPluginDiagnostic(report, name, "selection", new TypeError("plugin package must be a nonblank string"));
     return null;
   }
   if (packageName !== packageName.trim()) {
     reportPluginDiagnostic(
       report,
-      entry.name,
+      name,
       "selection",
       new TypeError("plugin package must not have surrounding whitespace"),
     );
@@ -178,27 +177,36 @@ function selectedEntry(entry: SettingsEntry, report: PluginDiagnostic | undefine
   }
   const enabled = entry.value.enabled;
   if (enabled !== undefined && typeof enabled !== "boolean") {
-    reportPluginDiagnostic(report, entry.name, "selection", new TypeError("plugin enabled must be a boolean"));
+    reportPluginDiagnostic(report, name, "selection", new TypeError("plugin enabled must be a boolean"));
     return null;
   }
   if (enabled === false) return null;
-  return Object.freeze({ id: entry.name, package: packageName, config: entry.value.config });
+  return Object.freeze({ id: name, package: packageName, config: entry.value.config });
 }
 
 function selectedPlugins(input: Settings, report: PluginDiagnostic | undefined): readonly SelectedPlugin[] {
   const view = input.namespace(PLUGIN_NAMESPACE);
   if (view.kind === "failed") {
-    for (const failure of view.failures) reportPluginDiagnostic(report, "settings", failure.scope, failure.diagnostic);
+    for (const failure of view.failures) {
+      const scope = input.scopes[failure.scope];
+      reportPluginDiagnostic(
+        report,
+        "settings",
+        failure.scope,
+        failure.diagnostic ?? (scope.kind === "failed" ? scope.diagnostic : "namespace unavailable"),
+      );
+    }
     return BUILTIN_PLUGINS;
   }
-  if (view.entries.length === 0) return BUILTIN_PLUGINS;
+  const entries = Object.entries(view.entries ?? {});
+  if (entries.length === 0) return BUILTIN_PLUGINS;
   const configured = new Map(
-    view.entries
-      .map((entry) => [entry.name, selectedEntry(entry, report)] as const)
+    entries
+      .map(([name, entry]) => [name, selectedEntry(name, entry, report)] as const)
       .filter((entry): entry is readonly [string, SelectedPlugin] => entry[1] !== null),
   );
   const disabled = new Set(
-    view.entries.filter((entry) => object(entry.value) && entry.value.enabled === false).map((entry) => entry.name),
+    entries.filter(([, entry]) => object(entry.value) && entry.value.enabled === false).map(([name]) => name),
   );
   const selected = [
     ...BUILTIN_PLUGINS.filter((entry) => !configured.has(entry.id) && !disabled.has(entry.id)),

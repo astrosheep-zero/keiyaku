@@ -47,7 +47,7 @@ test("a resolved Repo reads and binds only its own repository after ambient Git 
       target: null,
       gates: [],
     });
-    const handle = accepted(contract).value.kei;
+    const handle = accepted(contract).kei;
     assert.notEqual(await handle.state(), null, "the journal must also decode under ambient redirection");
   });
 

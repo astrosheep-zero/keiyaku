@@ -17,7 +17,9 @@ coordinate means there is no project scope, rather than permission to guess one.
 Each scope is independently observed as available, absent, or unavailable.
 Missing configuration is ordinary absence; a read, decoding, or outer-resource
 failure remains scoped failure with bounded diagnostic evidence. One scope's
-failure never makes an unrelated scope or namespace look empty.
+failure never makes an unrelated scope or namespace look empty. A namespace
+refers to an already reported scope failure without repeating its cause;
+a malformed namespace retains its own local cause.
 
 Settings exposes resolved views of the namespaces observed in its loaded scopes,
 as well as lookup of an individual named namespace. These remain opaque product
@@ -31,7 +33,10 @@ the caller must see that the potential shadowing authority could not be read.
 When both scopes supply the same named entry, the project entry shadows the
 whole user entry. Settings never deep-merges record fragments or fabricates
 per-field provenance. A resolved value retains whether it came from project or
-user scope and may reveal that it shadowed a lower candidate.
+user scope and reveals when it shadowed a lower candidate. Namespace and entry identities remain exact,
+including opaque names that coincide with ordinary object properties. Empty
+namespaces and empty, false, or null values remain observed content rather than
+absence.
 
 The consuming product owns its entry names, internal grammar, defaults,
 validation, and the moment at which an invalid selected value is refused.

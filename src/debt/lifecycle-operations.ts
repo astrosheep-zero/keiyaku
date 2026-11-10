@@ -2,22 +2,16 @@ import type { DebtBoard } from "./board.js";
 import { serializeDebtDocument, type DebtDocument } from "./document.js";
 import {
   type SettledDebtResult,
+  type DebtBatchItem,
   type DebtBatchResult,
   type DebtLifecycleVerb,
-  type DebtMutationResult,
+  type DebtLifecycleResult,
   type DebtRetry,
 } from "./operation-types.js";
 import type { DebtId } from "./identity.js";
 import { authorityBytesMatch, readBoard, replaceAuthority, withDebtLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
-import { advanceDebtTimestamp, debtView } from "./view.js";
-
-const TRANSITIONS: Readonly<
-  Record<DebtLifecycleVerb, Readonly<Partial<Record<DebtDocument["state"], DebtDocument["state"]>>>>
-> = {
-  done: { open: "done" },
-  drop: { open: "drop" },
-};
+import { advanceDebtTimestamp } from "./view.js";
 
 type CurrentDebtBoard = {
   board: DebtBoard;
@@ -30,7 +24,7 @@ type BatchLifecycleOptions = Readonly<{ signal?: AbortSignal; note?: string }>;
 function currentDebtBoard(board: DebtBoard, bytes: ReadonlyMap<DebtId, Uint8Array>): CurrentDebtBoard {
   return { board, bytes: new Map(bytes) };
 }
-function retry(reason: DebtRetry): DebtMutationResult {
+function retry(reason: DebtRetry): DebtLifecycleResult {
   return { kind: "retry", reason };
 }
 
@@ -40,24 +34,23 @@ async function transitionLifecycle(
   verb: DebtLifecycleVerb,
   currentBoard: CurrentDebtBoard,
   options: LifecycleOptions = {},
-): Promise<DebtMutationResult> {
+): Promise<DebtLifecycleResult> {
   const { note, freshness = "none" } = options;
   const current = currentBoard.board.debts.get(id);
   if (current === undefined) {
     return freshness === "batch" && !(await authorityBytesMatch(world, id, null))
       ? retry("concurrent-modification")
-      : { kind: "refused", refusal: { kind: "debt-missing", debtId: id } };
+      : { kind: "refused", reason: "debt-missing" };
   }
-  const state = TRANSITIONS[verb][current.state];
-  if (state === undefined) {
+  if (current.state !== "open") {
     return freshness === "batch" && !(await authorityBytesMatch(world, id, currentBoard.bytes.get(id)!))
       ? retry("concurrent-modification")
-      : { kind: "refused", refusal: { kind: "invalid-lifecycle-transition", debtId: id, state: current.state, verb } };
+      : { kind: "refused", reason: "invalid-lifecycle-transition", state: current.state };
   }
   const at = new Date().toISOString();
   const next = {
     ...current,
-    state,
+    state: verb,
     ...(note === undefined ? {} : { note }),
     updatedAt: advanceDebtTimestamp(current.updatedAt, at),
   };
@@ -76,7 +69,7 @@ async function transitionLifecycle(
     debts: new Map(currentBoard.board.debts).set(id, next),
   };
   currentBoard.bytes.set(id, bytes);
-  return { kind: "accepted", value: debtView(next) };
+  return { kind: "accepted" };
 }
 
 async function lifecycleFromCurrentBoard(
@@ -85,7 +78,7 @@ async function lifecycleFromCurrentBoard(
   verb: DebtLifecycleVerb,
   currentBoard: CurrentDebtBoard,
   options: BatchLifecycleOptions = {},
-): Promise<DebtMutationResult> {
+): Promise<DebtLifecycleResult> {
   const { signal, note } = options;
   const result = await withDebtLocks(
     { world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) },
@@ -104,10 +97,10 @@ export async function lifecycleDebt(
   verb: DebtLifecycleVerb,
   signal?: AbortSignal,
   note?: string,
-): Promise<DebtMutationResult> {
+): Promise<DebtLifecycleResult> {
   const result = await withDebtLocks(
     { world, allocation: false, ids: [id], ...(signal === undefined ? {} : { signal }) },
-    async (): Promise<DebtMutationResult> => {
+    async (): Promise<DebtLifecycleResult> => {
       const snapshot = await readBoard(world);
       const options = note === undefined ? {} : { note };
       return transitionLifecycle(world, id, verb, currentDebtBoard(snapshot.board, snapshot.bytes), options);
@@ -126,16 +119,14 @@ export async function batchDebts(
   signal?.throwIfAborted();
   const snapshot = await readBoard(world);
   const currentBoard = currentDebtBoard(snapshot.board, snapshot.bytes);
-  const items = [];
+  const items: DebtBatchItem[] = [];
   for (const id of ids) {
     signal?.throwIfAborted();
-    items.push({
-      id,
-      outcome: await lifecycleFromCurrentBoard(world, id, verb, currentBoard, {
-        ...(signal === undefined ? {} : { signal }),
-        ...(note === undefined ? {} : { note }),
-      }),
+    const result = await lifecycleFromCurrentBoard(world, id, verb, currentBoard, {
+      ...(signal === undefined ? {} : { signal }),
+      ...(note === undefined ? {} : { note }),
     });
+    items.push(result);
   }
   return { items };
 }
@@ -144,12 +135,13 @@ export async function settleDebt(world: WorldRoot, id: DebtId): Promise<SettledD
   const result = await withDebtLocks({ world, allocation: false, ids: [id] }, async (): Promise<SettledDebtResult> => {
     const snapshot = await readBoard(world),
       current = snapshot.board.debts.get(id);
-    if (current === undefined) return { kind: "refused", refusal: { kind: "debt-missing", debtId: id } };
+    if (current === undefined) return { kind: "refused", reason: "debt-missing" };
     if (current.state === "done") return { kind: "unchanged" };
     if (current.state === "drop") {
       return {
         kind: "refused",
-        refusal: { kind: "invalid-lifecycle-transition", debtId: id, state: current.state, verb: "done" },
+        reason: "invalid-lifecycle-transition",
+        state: current.state,
       };
     }
     const next: DebtDocument = {
@@ -163,9 +155,7 @@ export async function settleDebt(world: WorldRoot, id: DebtId): Promise<SettledD
       expected: snapshot.bytes.get(id)!,
       next: serializeDebtDocument(next),
     });
-    return replaced === "replaced"
-      ? { kind: "changed", debt: debtView(next), action: "done" }
-      : { kind: "retry", reason: "concurrent-modification" };
+    return replaced === "replaced" ? { kind: "changed" } : { kind: "retry", reason: "concurrent-modification" };
   });
   return result === "busy" ? { kind: "retry", reason: "busy" } : result;
 }

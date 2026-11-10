@@ -15,10 +15,8 @@ export type DeliverInput<Failure = never> = Readonly<{
 }>;
 
 export type DeliverRefusal =
-  | Readonly<{
-      kind: "contract-missing" | "terminal" | "document-moved";
-      contractId: ContractId;
-    }>
+  | Readonly<{ kind: "contract-missing" | "terminal" }>
+  | Readonly<{ kind: "document-moved" }>
   | TargetContractRefusal;
 
 export function decideDeliver<Failure>({
@@ -28,13 +26,13 @@ export function decideDeliver<Failure>({
 }: DecideInput<DeliverInput<Failure>>): OfferDecision<DeliverRefusal | Failure> {
   const state = activeContract(observation, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
-  const targetRefusal = targetContractRefusal(observation, state.id, state.coordinates.target);
+  const targetRefusal = targetContractRefusal(observation, state.coordinates.target);
   if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   if (input.preparation.kind === "unavailable") {
     throw new Error("existing contract requires a stamped delivery preparation");
   }
   if (!documentIsCurrent(state, input.preparation.document)) {
-    return { kind: "refused", refusal: { kind: "document-moved", contractId: input.contractId } };
+    return { kind: "refused", refusal: { kind: "document-moved" } };
   }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
   const deliver = journalEntry("deliver", input, attempt.entryUlids[0]!, input.preparation.data);

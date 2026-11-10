@@ -88,7 +88,7 @@ export async function spawnAkumaBody(launch: BodyLaunch): Promise<LiveBodyLaunch
       diagnostic:
         exit.code === null ? `pre-admission signal ${exit.signal ?? "unknown"}` : `pre-admission exit ${exit.code}`,
       held: exit.code === LEASH_HELD_EXIT,
-      child: { code: exit.code, signal: exit.signal, log: exit.log },
+      child: { log: { path: exit.log.path } },
     }));
     void completed.catch(() => undefined);
     return {
