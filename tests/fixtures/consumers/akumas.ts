@@ -5,6 +5,7 @@ import {
   Akumas,
   Keis,
   actorId,
+  akumaStatusSchema,
   listArchetypeDefinitions,
   nuke,
   type AkumaId,
@@ -52,6 +53,17 @@ const aliases: Promise<readonly AliasBinding[]> = plural.aliases(aliasInput);
 void aliases;
 const status = plural.status({ akuma: aku });
 const single = Akuma.select(world, aku, host);
+const nativeStatus = await single.status();
+const nativeEntry = nativeStatus.timeline.entries[0];
+if (nativeEntry?.kind === "gap") {
+  // @ts-expect-error native timeline entries retain the owner's readonly projection
+  nativeEntry.count = 1;
+}
+const wireEntry = akumaStatusSchema.parse(nativeStatus).timeline.entries[0];
+if (wireEntry?.kind === "gap") {
+  // @ts-expect-error parsed public wire entries remain readonly
+  wireEntry.count = 1;
+}
 const constructor: Function = Akuma;
 const prototype: Akuma = Akuma.prototype;
 if (nativeError instanceof Akuma) {

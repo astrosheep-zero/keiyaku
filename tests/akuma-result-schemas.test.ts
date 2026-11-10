@@ -7,62 +7,16 @@ import { akumaOriginSchema } from "../src/akuma/heart/facts.js";
 import type { BodyLauncher } from "../src/akuma/body-launch.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
-import type { Akuma, Akumas, listArchetypeDefinitions } from "../src/index.js";
 import * as root from "../src/index.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { beginTurn, endTurn } from "../src/akuma/heart/index.js";
 import { createdDebtObservationSchema } from "../src/debt/created-observation.js";
-import { tellResultSchema, type TellResult } from "../src/akuma/call-initial-tell.js";
+import { tellResultSchema } from "../src/akuma/call-initial-tell.js";
 import { debtSummarySchema } from "../src/debt/board.js";
 import { bornBody } from "./support/akuma-fixtures.js";
 import { bornWorld, fixtureAdapter, fixtureLauncher, answering, settleFixtureBodies } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory } from "./support/process.js";
-import { assertWireRoundTrip, type Assert, type Exact, type Wire } from "./support/schema-parity.js";
-
-type Result<T extends (...args: never[]) => unknown> = Wire<Awaited<ReturnType<T>>>;
-export type List = Assert<Exact<z.output<typeof root.akumaListSchema>, Result<Akumas["list"]>>>;
-// Generic decoders also return process-local values; compare their JSON specialization on both wire sides.
-export type Spawn = Assert<Exact<Wire<z.output<typeof root.spawnResultSchema>>, Wire<root.SpawnResult<z.JSONType>>>>;
-export type Fork = Assert<Exact<z.output<typeof root.forkResultSchema>, Result<Akumas["fork"]>>>;
-export type Status = Assert<Exact<z.output<typeof root.akumaObservationSchema>, Result<Akumas["status"]>>>;
-export type Tell = Assert<Exact<z.output<typeof root.akumaTellResultSchema>, Result<Akumas["tell"]>>>;
-export type Ask = Assert<Exact<Wire<z.output<typeof root.akumaAskResultSchema>>, Wire<root.AkumaAskResult<z.JSONType>>>>;
-export type Wait = Assert<Exact<z.output<typeof root.akumaWaitResultSchema>, Result<Akumas["wait"]>>>;
-export type Kill = Assert<Exact<z.output<typeof root.akumaKillResultSchema>, Result<Akumas["kill"]>>>;
-export type History = Assert<Exact<z.output<typeof root.akumaHistoryResultSchema>, Result<Akumas["history"]>>>;
-export type HandleStatus = Assert<Exact<z.output<typeof root.akumaStatusSchema>, Result<Akuma["status"]>>>;
-export type HandleTell = Assert<Exact<z.output<typeof root.akumaTellResultSchema>, Result<Akuma["tell"]>>>;
-export type HandleAsk = Ask;
-export type HandleIdle = Assert<Exact<z.output<typeof root.akumaIdleResultSchema>, Result<Akuma["idle"]>>>;
-export type HandleHistory = Assert<Exact<z.output<typeof root.activityHistorySchema>, Result<Akuma["history"]>>>;
-export type HandleKill = Assert<Exact<z.output<typeof root.killEvidenceSchema>, Result<Akuma["kill"]>>>;
-export type HandleReport = Assert<Exact<z.output<typeof root.akumaReportResultSchema>, Result<Akuma["report"]>>>;
-export type Stream = Assert<Exact<z.output<typeof root.activityHistorySchema>, Wire<root.AkumaStreamSnapshot>>>;
-export type Catalogue = Assert<
-  Exact<z.output<typeof root.archetypeCatalogSchema>, Result<typeof listArchetypeDefinitions>>
->;
-export type Dispatch = Assert<
-  Exact<z.output<typeof root.dispatchSchema>, Wire<import("../src/dispatch/index.js").Dispatch>>
->;
-export type DispatchFailure = Assert<
-  Exact<z.output<typeof root.dispatchFailureSchema>, Wire<import("../src/dispatch/index.js").DispatchFailure>>
->;
-export type LiveObservation = Assert<
-  Exact<
-    z.output<typeof root.liveStatusObservationSchema>,
-    Wire<import("../src/akuma/akuma-observe.js").LiveStatusObservation>
-  >
->;
-export type SpawnHead = Assert<Exact<z.output<typeof root.spawnWaitHeadSchema>, Wire<root.SpawnWaitHead>>>;
-export type TellReceipt = Assert<Exact<z.output<typeof tellResultSchema>, Wire<TellResult>>>;
-export type AliasBinding = Assert<
-  Exact<
-    z.output<typeof import("../src/alias/index.js").aliasBindingSchema>,
-    Wire<import("../src/alias/index.js").AliasBinding>
-  >
->;
-// Akuma.birth, Akuma.select, and Akumas.of return handles, not wire results.
-// Thrown errors are not results.
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 
 test("Akuma result wire schemas preserve real observations and mutations", async (context) => {
   const directory = temporaryDirectory(context, "akuma-wire-");

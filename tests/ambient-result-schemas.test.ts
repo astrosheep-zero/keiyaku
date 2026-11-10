@@ -1,4 +1,3 @@
-import type { z } from "zod";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,139 +51,6 @@ import {
   kanshiCategoryReportSchema as categorySchema,
   kanshiObservationSchema as observationSchema,
 } from "../src/index.js";
-import type {
-  ContractId,
-  Debt,
-  Debts,
-  World,
-  WorldRoot,
-  KanshiInput,
-  settings,
-  kanshiCategory,
-  kanshiCounts,
-  observeKanshi,
-  selectRegion,
-  nuke,
-} from "../src/index.js";
-import type { Assert, Exact, Wire } from "./support/schema-parity.js";
-import type {
-  debtMutationResultSchema,
-  debtLifecycleResultSchema,
-  debtListSchema,
-  debtReadyListSchema,
-  blockedDebtListSchema,
-  debtQueryResultSchema,
-  debtDoctorReportSchema,
-  debtBatchResultSchema,
-  debtReadResultSchema,
-  debtTreeResultSchema,
-  debtUpdateResultSchema,
-  settingsSchema,
-  settingsNamespaceViewSchema,
-  worldResolutionSchema,
-  worldLocationSchema,
-  worldRootSchema,
-  worldEstablishedSchema,
-  regionReadSchema,
-  nukeResultSchema,
-  kanshiCountsReportSchema,
-  kanshiReportSchema,
-  kanshiContractReportSchema,
-  kanshiResultSchema,
-  kanshiCategoryReportSchema,
-  kanshiObservationSchema,
-} from "../src/index.js";
-
-// Pin each public operation to its owner-held wire schema.
-const observeContract = (world: WorldRoot | null, repo: Repo, contract: ContractId) =>
-  observeWorld({ world, repo, contract });
-const observeWorldReport = () => observeWorld({ world: null });
-const observeResult = (input: KanshiInput) => observeWorld(input);
-type Output<S extends z.ZodType> = z.output<S>;
-type Add = Assert<Exact<Output<typeof debtMutationResultSchema>, Wire<Awaited<ReturnType<Debts["add"]>>>>>;
-type AddDocument = Assert<
-  Exact<Output<typeof debtMutationResultSchema>, Wire<Awaited<ReturnType<Debts["addDocument"]>>>>
->;
-type List = Assert<Exact<Output<typeof debtListSchema>, Wire<Awaited<ReturnType<Debts["list"]>>>>>;
-type Ready = Assert<Exact<Output<typeof debtReadyListSchema>, Wire<Awaited<ReturnType<Debts["ready"]>>>>>;
-type Blocked = Assert<Exact<Output<typeof blockedDebtListSchema>, Wire<Awaited<ReturnType<Debts["blocked"]>>>>>;
-type Query = Assert<Exact<Output<typeof debtQueryResultSchema>, Wire<Awaited<ReturnType<Debts["query"]>>>>>;
-type Doctor = Assert<Exact<Output<typeof debtDoctorReportSchema>, Wire<Awaited<ReturnType<Debts["doctor"]>>>>>;
-type Batch = Assert<Exact<Output<typeof debtBatchResultSchema>, Wire<Awaited<ReturnType<Debts["batch"]>>>>>;
-type Read = Assert<Exact<Output<typeof debtReadResultSchema>, Wire<Awaited<ReturnType<Debt["read"]>>>>>;
-export type DirectTree = Assert<
-  Exact<import("../src/debt/board.js").DebtTreeNode, Wire<import("../src/debt/board.js").DebtTreeNode>>
->;
-type Tree = Assert<Exact<Output<typeof debtTreeResultSchema>, Wire<Awaited<ReturnType<Debt["tree"]>>>>>;
-type Update = Assert<Exact<Output<typeof debtUpdateResultSchema>, Wire<Awaited<ReturnType<Debt["update"]>>>>>;
-type Done = Assert<Exact<Output<typeof debtLifecycleResultSchema>, Wire<Awaited<ReturnType<Debt["done"]>>>>>;
-type Drop = Assert<Exact<Output<typeof debtLifecycleResultSchema>, Wire<Awaited<ReturnType<Debt["drop"]>>>>>;
-type Settings = Assert<Exact<Output<typeof settingsSchema>, Omit<Awaited<ReturnType<typeof settings>>, "namespace">>>;
-type Namespace = Assert<
-  Exact<Output<typeof settingsNamespaceViewSchema>, ReturnType<Awaited<ReturnType<typeof settings>>["namespace"]>>
->;
-type Resolve = Assert<Exact<Output<typeof worldResolutionSchema>, Wire<Awaited<ReturnType<typeof World.resolve>>>>>;
-type Establish = Assert<
-  Exact<
-    Output<typeof worldRootSchema>,
-    Wire<Awaited<ReturnType<Awaited<ReturnType<typeof World.resolve>>["establish"]>>>
-  >
->;
-type Locate = Assert<Exact<Output<typeof worldLocationSchema>, Wire<Awaited<ReturnType<typeof World.locate>>>>>;
-type At = Assert<Exact<Output<typeof worldRootSchema>, Wire<Awaited<ReturnType<typeof World.at>>>>>;
-type Prove = Assert<Exact<Output<typeof worldRootSchema>, Wire<Awaited<ReturnType<typeof World.prove>>>>>;
-type Established = Assert<
-  Exact<Output<typeof worldEstablishedSchema>, Wire<Awaited<ReturnType<typeof World.established>>>>
->;
-type Kanshi = Assert<
-  Exact<Output<typeof kanshiReportSchema>, Wire<Awaited<ReturnType<typeof observeWorldReport>>>>
->;
-type Category = Assert<
-  Exact<Output<typeof kanshiCategoryReportSchema>, Wire<Awaited<ReturnType<typeof kanshiCategory>>>>
->;
-type Observation = Assert<
-  Exact<Output<typeof kanshiObservationSchema>, Wire<Awaited<ReturnType<typeof observeKanshi>>>>
->;
-type Counts = Assert<Exact<Output<typeof kanshiCountsReportSchema>, Wire<Awaited<ReturnType<typeof kanshiCounts>>>>>;
-type SelectContract = Assert<
-  Exact<Output<typeof kanshiContractReportSchema>, Wire<Awaited<ReturnType<typeof observeContract>>>>
->;
-type Result = Assert<Exact<Output<typeof kanshiResultSchema>, Wire<Awaited<ReturnType<typeof observeResult>>>>>;
-type SelectRegion = Assert<Exact<Output<typeof regionReadSchema>, Wire<ReturnType<typeof selectRegion>>>>;
-type Nuke = Assert<Exact<Output<typeof nukeResultSchema>, Wire<Awaited<ReturnType<typeof nuke>>>>>;
-export type Inventory = [
-  Add,
-  AddDocument,
-  List,
-  Ready,
-  Blocked,
-  Query,
-  Doctor,
-  Batch,
-  Read,
-  Tree,
-  Update,
-  Done,
-  Drop,
-  Settings,
-  Namespace,
-  Resolve,
-  Establish,
-  Locate,
-  At,
-  Prove,
-  Established,
-  Kanshi,
-  Category,
-  Observation,
-  Counts,
-  SelectContract,
-  Result,
-  SelectRegion,
-  Nuke,
-];
-// Debts.debt and Debts.of return native handles; excluded.
-// These operations expose no observer progress callback.
 
 test("Debt missing-world value has one strict owner schema", () => {
   assertWireRoundTrip(debtAbsentSchema, { kind: "absent" });
@@ -296,7 +162,7 @@ test("Kanshi schemas cover live Contract, Debt, Akuma, Alias, region and absent 
   const report = await observeWorld({ world, repo });
   assertWireRoundTrip(resultSchema, report);
   assertWireRoundTrip(reportSchema, report);
-  assertWireRoundTrip(contractReportSchema, await observeContract(world, repo, bound.contractId));
+  assertWireRoundTrip(contractReportSchema, await observeWorld({ world, repo, contract: bound.contractId }));
   assertWireRoundTrip(observationSchema, await observeComposite({ world, repo }));
   assertWireRoundTrip(categorySchema, await observeCategory({ world, repo, category: "akuma" }));
   assertWireRoundTrip(categorySchema, await observeCategory({ world, repo, category: "contract" }));

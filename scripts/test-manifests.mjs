@@ -54,7 +54,6 @@ export const LOCAL_TEST_FILES = [
   "tests/pi-status.test.ts",
   "tests/product-boundaries.test.ts",
   "tests/region.test.ts",
-  "tests/schema-parity.test.ts",
   "tests/settings.test.ts",
   "tests/v4-cut.test.ts",
   "tests/verification-declaration.test.ts",

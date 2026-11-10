@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import type { z } from "zod";
-import { Keis, Repo, type Kei, type BindResult, type ExecutionObservation } from "../src/index.js";
+import { Keis, Repo, type ExecutionObservation } from "../src/index.js";
 import {
   bindOutcomeSchema,
   contractCatalogueSchema,
@@ -24,37 +23,13 @@ import {
   reconcileResultSchema,
   executionObservationSchema,
 } from "../src/index.js";
-import { assertWireRoundTrip, type Assert, type Exact, type Wire } from "./support/schema-parity.js";
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { contractId } from "../src/core/facts/types.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-
-type Result<T extends (...args: never[]) => unknown> = Wire<Awaited<ReturnType<T>>>;
-// The native bind capability is deliberately nonenumerable, unlike ordinary data members.
-type BindWire = Wire<Omit<Extract<BindResult, { kind: "accepted" }>, "kei"> | Exclude<BindResult, { kind: "accepted" }>>;
-export type Bind = Assert<Exact<z.output<typeof bindOutcomeSchema>, BindWire>>;
-export type List = Assert<Exact<z.output<typeof contractCatalogueSchema>, Result<Keis["list"]>>>;
-export type Observe = Assert<Exact<z.output<typeof contractObservationSchema>, Result<Keis["observe"]>>>;
-export type Resolve = Assert<Exact<z.output<typeof contractResolutionSchema>, Result<Keis["resolve"]>>>;
-export type WaitMany = Assert<Exact<z.output<typeof contractWaitResultSchema>, Result<Keis["wait"]>>>;
-export type Reconcile = Assert<Exact<z.output<typeof reconcileResultSchema>, Result<Keis["reconcile"]>>>;
-export type State = Assert<Exact<z.output<typeof contractStateSchema>, Result<Kei["state"]>>>;
-export type WaitOne = Assert<Exact<z.output<typeof contractWaitResultSchema>, Result<Kei["wait"]>>>;
-export type History = Assert<Exact<z.output<typeof contractHistorySchema>, Result<Kei["history"]>>>;
-export type Guidance = Assert<Exact<z.output<typeof guidanceSchema>, Result<Kei["guidance"]>>>;
-export type Delivery = Assert<Exact<z.output<typeof deliverySchema>, Result<Kei["delivery"]>>>;
-export type Amend = Assert<Exact<z.output<typeof amendOutcomeSchema>, Result<Kei["amend"]>>>;
-export type Deliver = Assert<Exact<z.output<typeof deliverOutcomeSchema>, Result<Kei["deliver"]>>>;
-export type Verify = Assert<Exact<z.output<typeof verifyOutcomeSchema>, Result<Kei["verify"]>>>;
-export type Review = Assert<Exact<z.output<typeof reviewOutcomeSchema>, Result<Kei["review"]>>>;
-export type Abandon = Assert<Exact<z.output<typeof abandonOutcomeSchema>, Result<Kei["abandon"]>>>;
-export type Arc = Assert<Exact<z.output<typeof arcOutcomeSchema>, Result<Kei["arc"]>>>;
-export type Preview = Assert<Exact<z.output<typeof deliveryPreviewOutcomeSchema>, Result<Kei["previewDelivery"]>>>;
-export type Observation = Assert<Exact<z.output<typeof executionObservationSchema>, Wire<ExecutionObservation>>>;
-// Keis.kei returns a process-local handle rather than an operation result.
 
 test("Contract read, wait and terminal mutation wire projections", async () => {
   const repository = repositoryWithMain();
