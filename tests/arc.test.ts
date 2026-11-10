@@ -154,7 +154,7 @@ test("Arc decision refuses terminal contracts", () => {
 
 test("Arc CLI admits explicit chapters without changing the status result shape", async () => {
   assert.deepEqual(parseArgv(["arc", "@chapter", "--json", "-"]), {
-    command: { command: "arc", contract: "@chapter", output: "json" },
+    command: { name: "arc", input: { contract: "@chapter" }, acquire: { markdown: true }, output: "json" },
   });
   assert.throws(() => parseArgv(["arc", "kei/arc-test"]), CliUsageError);
 

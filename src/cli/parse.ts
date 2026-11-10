@@ -1,4 +1,4 @@
-import { commandRepoPolicy } from "../library/keiyaku-policy.js";
+import type { VerbInput, VerbName } from "../library/keiyaku-verbs.js";
 import {
   isDebtAction,
   parseDebtCommand,
@@ -14,7 +14,8 @@ import {
   renderAkumaHelp,
   renderAkumaRootRows,
   type AkumaAction,
-  type ParsedAkumaCommand,
+  type AkumaParseResult,
+  type AkumaPromptSource,
 } from "./commands/akuma-grammar.js";
 import {
   INSTALL_ROOT_PURPOSE,
@@ -23,11 +24,7 @@ import {
   renderInstallHelp,
   type ParsedInstallCommand,
 } from "./commands/install.js";
-import {
-  parseContractCommand,
-  type ParsedContractParts,
-  type ParsedContractCommand,
-} from "./commands/contract-grammar.js";
+import { parseContractCommand, type ContractTokens } from "./commands/contract-grammar.js";
 import {
   CONTRACT_COMMAND_SPECS,
   renderContractHelp as renderContractHelpForOwner,
@@ -113,11 +110,12 @@ function renderHelpText(help: string, columns: number | undefined): string {
 }
 
 export function usageGuideForCommand(command: ParsedCommand): CliUsageGuide {
-  if (command.command === "whoami") return commandGuide("whoami", WHOAMI_USAGE);
-  if (command.command === "install") return commandGuide("install", INSTALL_USAGE);
-  if (command.command === "debt") return debtUsageGuide(command.action);
-  if (isAkumaAction(command.command)) return akumaUsageGuide(command.command);
-  return commandGuide(command.command, CONTRACT_COMMAND_SPECS[command.command].usage);
+  const name = commandName(command);
+  if (name === "whoami") return commandGuide("whoami", WHOAMI_USAGE);
+  if (name === "install") return commandGuide("install", INSTALL_USAGE);
+  if ("command" in command && command.command === "debt") return debtUsageGuide(command.action);
+  if (isAkumaAction(name)) return akumaUsageGuide(name);
+  return commandGuide(name, CONTRACT_COMMAND_SPECS[name as Command].usage);
 }
 
 export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): string {
@@ -140,13 +138,40 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
   return renderHelpText(help, columns);
 }
 
+type RequestOutput = Readonly<{ output: "text" | "json" }>;
+export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami">;
+export type VerbRequest<K extends CliVerb = CliVerb> = {
+  [P in K]: RequestOutput & Readonly<{ name: P; input: VerbInput<P> }>;
+}[K];
+type DocumentBind = Extract<VerbInput<"bind">, { markdown: string }>;
+type Acquisitions = {
+  bind: { input: Omit<DocumentBind, "markdown">; acquire: { markdown: true } };
+  amend: { input: VerbInput<"amend">; acquire: { markdown: true } };
+  arc: { input: Omit<VerbInput<"arc">, "markdown">; acquire: { markdown: true } };
+  review: { input: Omit<VerbInput<"review">, "summary">; acquire: { summary: true } };
+  spawn: {
+    input: Omit<VerbInput<"spawn">, "prompt" | "schema">;
+    acquire: { prompt?: AkumaPromptSource; schema?: string };
+  };
+  tell: { input: Omit<VerbInput<"tell">, "prompt">; acquire: { prompt: AkumaPromptSource } };
+  ask: { input: Omit<VerbInput<"ask">, "prompt" | "schema">; acquire: { prompt: AkumaPromptSource; schema?: string } };
+};
+export type PendingRequest = {
+  [K in keyof Acquisitions]: RequestOutput & Readonly<{ name: K }> & Readonly<Acquisitions[K]>;
+}[keyof Acquisitions];
+export type CliRequest = VerbRequest | PendingRequest;
+
 export type ParsedWhoamiCommand = Readonly<{ command: "whoami"; output: "text" | "json" }>;
 export type ParsedCommand =
-  | ParsedContractCommand
+  | CliRequest
   | ParsedInstallCommand
-  | ParsedAkumaCommand
+  | Extract<AkumaParseResult, { command: "report" }>
   | ParsedDebtCommand
   | ParsedWhoamiCommand;
+
+export function commandName(command: ParsedCommand) {
+  return "name" in command ? (command.name === "deliver.preview" ? "deliver" : command.name) : command.command;
+}
 
 type CliHelpCoordinate =
   | Readonly<{ kind: "root" }>
@@ -161,9 +186,56 @@ export type ParsedInvocation =
   | Readonly<{ help: CliHelpCoordinate }>
   | Readonly<{ version: true }>;
 
+export function commandRepoPolicy(
+  command: ParsedCommand,
+): Readonly<{ use: "none" | "optional" | "required"; acceptsExplicit: boolean }> {
+  if (!("name" in command)) return { use: command.command === "whoami" ? "optional" : "none", acceptsExplicit: false };
+  switch (command.name) {
+    case "bind":
+    case "amend":
+    case "deliver":
+    case "deliver.preview":
+    case "verify":
+    case "review":
+    case "arc":
+    case "abandon":
+    case "reconcile":
+    case "region":
+    case "show":
+      return { use: "required", acceptsExplicit: true };
+    case "ls":
+      return { use: command.input.of === "kei" ? "required" : "none", acceptsExplicit: false };
+    case "status":
+    case "tell":
+    case "ask":
+      return { use: "optional", acceptsExplicit: false };
+    case "history":
+      return {
+        use: command.input.selector.startsWith("kei/") ? "required" : "optional",
+        acceptsExplicit: command.input.selector.startsWith("kei/"),
+      };
+    case "fork":
+      return { use: "optional", acceptsExplicit: true };
+    case "wait":
+    case "kill": {
+      const selectors = command.name === "wait" ? command.input.selectors : command.input.akuma;
+      const contractSelector = selectors.some((selector) => selector.startsWith("kei/"));
+      return { use: contractSelector ? "required" : "optional", acceptsExplicit: contractSelector };
+    }
+    case "spawn":
+      return {
+        use: command.input.contract === undefined ? "none" : "required",
+        acceptsExplicit: command.input.contract !== undefined,
+      };
+    case "settings":
+    case "nuke":
+      return { use: "none", acceptsExplicit: false };
+  }
+}
+
 function refuseUnusedRepo(command: ParsedCommand): never {
-  if (command.command === "spawn") throw new CliUsageError("--repo has no consumer without --contract");
-  throw new CliUsageError(`--repo has no consumer for ${command.command}`);
+  if (commandName(command) === "spawn") throw new CliUsageError("--repo has no consumer without --contract");
+  throw new CliUsageError(`--repo has no consumer for ${commandName(command)}`);
 }
 
 export function assertExplicitRepoUse(command: ParsedCommand, repo: string | undefined): void {
@@ -184,7 +256,7 @@ function contractScanSpec(command: Command, spec: CommandSpec): ScanSpec {
   };
 }
 
-function scanArgv(argv: readonly string[]): ParsedContractParts {
+function scanArgv(argv: readonly string[]): ContractTokens {
   const candidate = argv[0];
   if (!candidate || !Object.prototype.hasOwnProperty.call(CONTRACT_COMMAND_SPECS, candidate)) {
     throw new CliUsageError(
@@ -315,8 +387,8 @@ export function parseArgv(argv: readonly string[]): ParsedInvocation {
     invocation.commandArgv[0] === "install" ? parseInstallCommand(invocation.commandArgv.slice(1)) : undefined;
   const akuma = isAkumaAction(invocation.commandArgv[0]) ? parseAkumaCommand(invocation.commandArgv) : undefined;
   const command = whoami ?? debt ?? akuma ?? install ?? parseContractCommand(scanArgv(invocation.commandArgv));
-  if (invocation.workdir !== undefined && command.command !== "spawn") {
-    throw new CliUsageError(`option --workdir is not valid for ${command.command}`, usageGuideForCommand(command));
+  if (invocation.workdir !== undefined && commandName(command) !== "spawn") {
+    throw new CliUsageError(`option --workdir is not valid for ${commandName(command)}`, usageGuideForCommand(command));
   }
   return {
     ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),

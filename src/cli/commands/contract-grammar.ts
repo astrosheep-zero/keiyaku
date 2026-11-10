@@ -1,128 +1,26 @@
 import { validateAkumaName } from "../../identity/normalize.js";
-import { decodeAkumaCaller, type AkumaCaller } from "../../akuma/caller.js";
-import { parseAkumaId, type AkumaId } from "../../akuma/identity.js";
+import { decodeAkumaCaller } from "../../akuma/caller.js";
+import { parseAkumaId } from "../../akuma/identity.js";
 import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
+import type { VerbInput } from "../../library/keiyaku-verbs.js";
+import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
 
-type AkumaCallerSelector =
-  | Readonly<{ kind: "mine" }>
-  | Readonly<{ kind: "external"; caller: AkumaCaller }>
-  | Readonly<{ kind: "akuma"; akumaId: AkumaId }>;
-type CatalogQuery =
-  | Readonly<{ kind: "debts"; namespace?: readonly string[]; limit?: number; selection?: "closed" | "all" }>
-  | Readonly<{ kind: "contracts"; limit?: number }>
-  | Readonly<{ kind: "archetypes"; limit?: number }>
-  | Readonly<{ kind: "akuma"; akumaName?: string; caller?: AkumaCallerSelector; limit?: number }>;
-type Output = Readonly<{ output: "text" | "json" }>;
-type Actor = Readonly<{ actor?: string }>;
+type CatalogInput = VerbInput<"ls">;
+type AkumaCallerSelector = Extract<CatalogInput, { of: "aku" }>["caller"];
 
-function parseAkumaCatalogPath(
-  value: string,
-): Readonly<{ kind: "archetypes" } | { kind: "akuma"; akumaName?: string }> | null {
-  if (value === "aku" || value === "aku/") return { kind: "archetypes" };
-  if (value === "aku/*/*") return { kind: "akuma" };
+function parseAkumaCatalogPath(value: string): CatalogInput | null {
+  if (value === "aku" || value === "aku/") return { of: "akuma-name" };
+  if (value === "aku/*/*") return { of: "aku" };
   const scopedGlob = /^aku\/([^/]+)\/\*$/u.exec(value);
-  if (scopedGlob !== null) return { kind: "akuma", akumaName: validateAkumaName(scopedGlob[1]!) };
+  if (scopedGlob !== null) return { of: "aku", akumaName: validateAkumaName(scopedGlob[1]!) };
   const match = /^aku\/([^/]+)\/?$/u.exec(value);
   if (match === null) return null;
-  return { kind: "akuma", akumaName: validateAkumaName(match[1]!) };
+  return { of: "aku", akumaName: validateAkumaName(match[1]!) };
 }
 
-export type ParsedBind = Output &
-  Actor &
-  Readonly<{
-    command: "bind";
-    forkOf?: string;
-    debt?: string;
-    /** A literal target branch, or `null` for a deliberately targetless bind. */
-    target?: string | null;
-    after?: readonly string[];
-    gates?: readonly string[];
-  }>;
-export type ParsedAmend = Output &
-  Actor &
-  Readonly<{
-    command: "amend";
-    contract?: string;
-    after?: readonly string[];
-    clearAfter?: true;
-    gates?: readonly string[];
-    stdin?: true;
-  }>;
-export type ParsedDeliver = Output &
-  Readonly<{
-    command: "deliver";
-    contract?: string;
-    dryRun: boolean;
-    showDiff: boolean;
-    message?: string;
-    includeDirty: boolean;
-    materializeConflict: boolean;
-    overwrite: boolean;
-  }>;
-export type ParsedVerify = Output &
-  Readonly<{
-    command: "verify";
-    contract?: string;
-    index?: number;
-    includeDirty: boolean;
-  }>;
-export type ParsedReview = Output &
-  Actor &
-  Readonly<{
-    command: "review";
-    contract?: string;
-    verdict: "satisfied" | "unsatisfied";
-    summary?: string;
-    summaryFromStdin?: true;
-  }>;
-export type ParsedArc = Output &
-  Actor &
-  Readonly<{
-    command: "arc";
-    contract?: string;
-  }>;
-export type ParsedAbandon = Output &
-  Actor &
-  Readonly<{
-    command: "abandon";
-    contract?: string;
-    note?: string;
-  }>;
-export type ParsedShow = Output & Readonly<{ command: "show"; contract?: string }>;
-export type ParsedStatus = Output &
-  (
-    | Readonly<{
-        command: "status";
-        contract?: string;
-        selectors?: readonly string[];
-        akuma?: never;
-        category?: never;
-        limit?: never;
-      }>
-    | Readonly<{ command: "status"; contract: string; akuma: true; category?: never; limit?: never }>
-    | Readonly<{
-        command: "status";
-        category: StatusCategory;
-        limit?: number;
-        contract?: never;
-        selectors?: never;
-        akuma?: never;
-      }>
-  );
-export type ParsedLs = Output & Readonly<{ command: "ls"; query: CatalogQuery }>;
-export type ParsedReconcile = Output & Readonly<{ command: "reconcile"; contract?: string; retryHooks: boolean }>;
-export type ParsedNuke = Output & Readonly<{ command: "nuke"; confirm?: string }>;
-export type ParsedSettings = Output & Readonly<{ command: "settings" }>;
-export type ParsedRegion = Output &
-  Readonly<{
-    command: "region";
-    contract?: string;
-    paths?: readonly [string, ...string[]];
-  }>;
-
-export type ParsedContractParts = Readonly<{
+export type ContractTokens = Readonly<{
   command: ContractCommand;
   flags: Readonly<Record<string, string | true | readonly string[]>>;
   positionals: readonly string[];
@@ -131,26 +29,7 @@ export type ParsedContractParts = Readonly<{
   actor?: string;
 }>;
 
-export type ParsedContractCommand =
-  | ParsedBind
-  | ParsedAmend
-  | ParsedDeliver
-  | ParsedVerify
-  | ParsedReview
-  | ParsedArc
-  | ParsedAbandon
-  | ParsedShow
-  | ParsedStatus
-  | ParsedLs
-  | ParsedReconcile
-  | ParsedNuke
-  | ParsedSettings
-  | ParsedRegion;
-
-function optionalFlag(
-  flags: Readonly<Record<string, string | true | readonly string[]>>,
-  name: string,
-): string | undefined {
+function optionalFlag(flags: ContractTokens["flags"], name: string): string | undefined {
   const value = flags[name];
   return typeof value === "string" ? value : undefined;
 }
@@ -163,7 +42,7 @@ function refuse(command: ContractCommand, message: string): never {
 // pin in cli-parse.test.ts keeps this shape honest against the owner's gateWord.
 const GATE_NAME_PATTERN = /^[a-z][a-z0-9-]{0,63}$/u;
 
-function parseGateNames(parts: ParsedContractParts, command: "bind" | "amend"): readonly string[] | undefined {
+function parseGateNames(parts: ContractTokens, command: "bind" | "amend"): readonly string[] | undefined {
   const value = optionalFlag(parts.flags, "gates");
   if (value === undefined) return undefined;
   if (value === "") return [];
@@ -178,14 +57,14 @@ function parseGateNames(parts: ParsedContractParts, command: "bind" | "amend"): 
   return names;
 }
 
-function parseBindTarget(parts: ParsedContractParts): string | null | undefined {
+function parseBindTarget(parts: ContractTokens): string | null | undefined {
   const target = optionalFlag(parts.flags, "target");
   const noTarget = parts.flags["no-target"] === true;
   if (target !== undefined && noTarget) refuse("bind", "--target and --no-target are mutually exclusive");
   return noTarget ? null : target;
 }
 
-function parseBind(parts: ParsedContractParts): ParsedBind {
+function parseBind(parts: ContractTokens): VerbRequest<"bind"> | Extract<PendingRequest, { name: "bind" }> {
   const forkOf = optionalFlag(parts.flags, "fork-of");
   if (forkOf !== undefined) {
     if (parts.stdin) refuse("bind", "fork bind reads no stdin");
@@ -194,10 +73,12 @@ function parseBind(parts: ParsedContractParts): ParsedBind {
     }
     const target = parseBindTarget(parts);
     return {
-      command: "bind",
-      forkOf,
-      ...(target === undefined ? {} : { target }),
-      ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+      name: "bind",
+      input: {
+        forkOf,
+        ...(target === undefined ? {} : { target }),
+        ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+      },
       output: parts.output,
     };
   }
@@ -208,17 +89,20 @@ function parseBind(parts: ParsedContractParts): ParsedBind {
     parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
   const gates = parseGateNames(parts, "bind");
   return {
-    command: "bind",
-    ...(debt === undefined ? {} : { debt }),
-    ...(target === undefined ? {} : { target }),
-    ...(parts.flags.after === undefined ? {} : { after }),
-    ...(gates === undefined ? {} : { gates }),
-    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+    name: "bind",
+    input: {
+      ...(debt === undefined ? {} : { debt }),
+      ...(target === undefined ? {} : { target }),
+      ...(parts.flags.after === undefined ? {} : { after }),
+      ...(gates === undefined ? {} : { gates }),
+      ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+    },
+    acquire: { markdown: true },
     output: parts.output,
   };
 }
 
-function parseAmend(parts: ParsedContractParts): ParsedAmend {
+function parseAmend(parts: ContractTokens): CliRequest {
   const contract = parts.positionals[0];
   const after =
     parts.flags.after === undefined ? [] : Array.isArray(parts.flags.after) ? parts.flags.after : [parts.flags.after];
@@ -229,18 +113,19 @@ function parseAmend(parts: ParsedContractParts): ParsedAmend {
     refuse("amend", "amend requires stdin or --after, --clear-after, or --gates");
   }
   return {
-    command: "amend",
-    ...(contract === undefined ? {} : { contract }),
-    ...(parts.flags.after === undefined ? {} : { after }),
-    ...(parts.flags["clear-after"] === true ? { clearAfter: true as const } : {}),
-    ...(gates === undefined ? {} : { gates }),
-    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
-    ...(parts.stdin ? { stdin: true as const } : {}),
+    name: "amend",
+    input: {
+      ...(contract === undefined ? {} : { contract }),
+      ...(parts.flags["clear-after"] === true ? { after: [] } : parts.flags.after === undefined ? {} : { after }),
+      ...(gates === undefined ? {} : { gates }),
+      ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+    },
+    ...(parts.stdin ? { acquire: { markdown: true as const } } : {}),
     output: parts.output,
   };
 }
 
-function parseDeliver(parts: ParsedContractParts): ParsedDeliver {
+function parseDeliver(parts: ContractTokens): VerbRequest<"deliver" | "deliver.preview"> {
   const contract = parts.positionals[0];
   const message = optionalFlag(parts.flags, "message");
   const dryRun = parts.flags["dry-run"] === true;
@@ -251,34 +136,45 @@ function parseDeliver(parts: ParsedContractParts): ParsedDeliver {
   } else if (parts.flags["show-diff"] === true) {
     refuse("deliver", "--show-diff requires --dry-run");
   }
-  return {
-    command: "deliver",
-    dryRun,
-    showDiff: parts.flags["show-diff"] === true,
+  const selected = {
     ...(contract === undefined ? {} : { contract }),
-    ...(message === undefined ? {} : { message }),
     includeDirty: parts.flags["include-dirty"] === true,
-    materializeConflict: parts.flags["materialize-conflict"] === true,
-    overwrite: parts.flags.overwrite === true,
-    output: parts.output,
   };
+  return dryRun
+    ? {
+        name: "deliver.preview",
+        input: { ...selected, showDiff: parts.flags["show-diff"] === true },
+        output: parts.output,
+      }
+    : {
+        name: "deliver",
+        input: {
+          ...selected,
+          ...(message === undefined ? {} : { message }),
+          materializeConflict: parts.flags["materialize-conflict"] === true,
+          overwrite: parts.flags.overwrite === true,
+        },
+        output: parts.output,
+      };
 }
 
-function parseVerify(parts: ParsedContractParts): ParsedVerify {
+function parseVerify(parts: ContractTokens): VerbRequest<"verify"> {
   const contract = parts.positionals[0];
   const index = optionalFlag(parts.flags, "index");
   if (index !== undefined && (!/^[1-9][0-9]*$/u.test(index) || !Number.isSafeInteger(Number(index))))
     refuse("verify", "--index requires a positive safe integer");
   return {
-    command: "verify",
-    ...(contract === undefined ? {} : { contract }),
-    ...(index === undefined ? {} : { index: Number(index) }),
-    includeDirty: parts.flags["include-dirty"] === true,
+    name: "verify",
+    input: {
+      ...(contract === undefined ? {} : { contract }),
+      ...(index === undefined ? {} : { index: Number(index) }),
+      includeDirty: parts.flags["include-dirty"] === true,
+    },
     output: parts.output,
   };
 }
 
-function parseReview(parts: ParsedContractParts): ParsedReview {
+function parseReview(parts: ContractTokens): CliRequest {
   if (Number(parts.flags.satisfied === true) + Number(parts.flags.unsatisfied === true) !== 1) {
     refuse("review", "review requires exactly one verdict flag");
   }
@@ -287,19 +183,18 @@ function parseReview(parts: ParsedContractParts): ParsedReview {
     refuse("review", "review requires exactly one of --summary <text> or stdin '-'");
   }
   const contract = parts.positionals[0];
-  return {
-    command: "review",
+  const input = {
     ...(contract === undefined ? {} : { contract }),
-    verdict: parts.flags.satisfied === true ? "satisfied" : "unsatisfied",
-    ...(summary === undefined ? {} : { summary }),
-    ...(parts.stdin ? { summaryFromStdin: true as const } : {}),
+    verdict: parts.flags.satisfied === true ? ("satisfied" as const) : ("unsatisfied" as const),
     ...(parts.actor === undefined ? {} : { actor: parts.actor }),
-    output: parts.output,
   };
+  return summary === undefined
+    ? { name: "review", input, acquire: { summary: true }, output: parts.output }
+    : { name: "review", input: { ...input, summary }, output: parts.output };
 }
 
 // Only these fixed category forms are status selectors.
-const STATUS_CATEGORY_SELECTORS: ReadonlyMap<string, StatusCategory> = new Map([
+const STATUS_CATEGORY_SELECTORS: ReadonlyMap<string, "akuma" | "contract"> = new Map([
   ["aku", "akuma"],
   ["aku/", "akuma"],
   ["aku/*", "akuma"],
@@ -308,8 +203,6 @@ const STATUS_CATEGORY_SELECTORS: ReadonlyMap<string, StatusCategory> = new Map([
   ["kei/*", "contract"],
 ]);
 
-export type StatusCategory = "akuma" | "contract";
-
 function rejectStatusGlobs(positionals: readonly string[]): void {
   for (const selector of positionals) {
     if (!STATUS_CATEGORY_SELECTORS.has(selector) && !selector.startsWith("@") && /[*?\[\]]/u.test(selector))
@@ -317,7 +210,7 @@ function rejectStatusGlobs(positionals: readonly string[]): void {
   }
 }
 
-function showSelector(parts: ParsedContractParts): string | undefined {
+function showSelector(parts: ContractTokens): string | undefined {
   const selected = parts.positionals[0];
   if (selected !== undefined && STATUS_CATEGORY_SELECTORS.has(selected))
     refuse("show", "show cannot select a category");
@@ -328,49 +221,45 @@ function showSelector(parts: ParsedContractParts): string | undefined {
   return selected;
 }
 
-function parseStatus(parts: ParsedContractParts): ParsedStatus {
+function parseStatus(parts: ContractTokens): VerbRequest<"status"> {
   const limit = listLimit(parts, "status");
   rejectStatusGlobs(parts.positionals);
   if (parts.positionals.length > 1) {
     if (limit !== undefined) refuse("status", "--limit is valid only for one category selector");
     if (parts.positionals.some((selector) => STATUS_CATEGORY_SELECTORS.has(selector)))
       refuse("status", "a category selector cannot combine with other selectors");
-    return { command: "status", selectors: parts.positionals, output: parts.output };
+    return { name: "status", input: { selectors: parts.positionals }, output: parts.output };
   }
-  const selected = parts.positionals[0];
-  const category = selected === undefined ? undefined : STATUS_CATEGORY_SELECTORS.get(selected);
+  const selector = parts.positionals[0];
+  const category = selector === undefined ? undefined : STATUS_CATEGORY_SELECTORS.get(selector);
   if (category !== undefined)
-    return { command: "status", category, ...(limit === undefined ? {} : { limit }), output: parts.output };
+    return { name: "status", input: { category, ...(limit === undefined ? {} : { limit }) }, output: parts.output };
   if (limit !== undefined) refuse("status", "--limit is valid only for a category selector");
-  if (selected?.startsWith("aku/") === true)
-    return { command: "status", contract: selected, akuma: true, output: parts.output };
-  return { command: "status", ...(selected === undefined ? {} : { contract: selected }), output: parts.output };
+  return { name: "status", input: selector === undefined ? {} : { selector }, output: parts.output };
 }
 
-function parseRegion(parts: ParsedContractParts): ParsedRegion {
+function parseRegion(parts: ContractTokens): VerbRequest<"region"> {
   const contract = parts.positionals[0];
   const pathFlag = parts.flags.path;
   const paths = pathFlag === undefined ? undefined : Array.isArray(pathFlag) ? pathFlag : [pathFlag];
   if (paths !== undefined && contract !== undefined) refuse("region", "--path cannot combine with a contract");
   return {
-    command: "region",
-    ...(contract === undefined ? {} : { contract }),
-    ...(paths === undefined ? {} : { paths: paths as [string, ...string[]] }),
+    name: "region",
+    input: paths !== undefined ? { paths } : contract === undefined ? {} : { contract },
     output: parts.output,
   };
 }
 
-function listLimit(parts: ParsedContractParts, command: "ls" | "status" = "ls"): number | undefined {
+function listLimit(parts: ContractTokens, command: "ls" | "status" = "ls"): number | undefined {
   const limit = optionalFlag(parts.flags, "limit");
   if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || !Number.isSafeInteger(Number(limit))))
     refuse(command, "--limit requires a positive safe integer");
   return limit === undefined ? undefined : Number(limit);
 }
 
-function debtCatalogQuery(path: string, limit: number | undefined): CatalogQuery | null {
-  if (path === "debt" || path === "debt/") {
-    return { kind: "debts", namespace: [], ...(limit === undefined ? {} : { limit }) };
-  }
+function debtCatalogQuery(path: string, limit: number | undefined): Extract<CatalogInput, { of: "debt" }> | null {
+  if (path === "debt" || path === "debt/")
+    return { of: "debt", namespace: [], ...(limit === undefined ? {} : { limit }) };
   if (!path.startsWith("debt/")) return null;
   if (!path.endsWith("/")) refuse("ls", `invalid Debt namespace selector: ${path}`);
   const body = path.slice("debt/".length, -1);
@@ -378,13 +267,13 @@ function debtCatalogQuery(path: string, limit: number | undefined): CatalogQuery
     refuse("ls", `invalid Debt namespace selector: ${path}`);
   try {
     const namespace = parseDebtNamespaceSelector(path);
-    return { kind: "debts", namespace, ...(limit === undefined ? {} : { limit }) };
+    return { of: "debt", namespace, ...(limit === undefined ? {} : { limit }) };
   } catch (error) {
     refuse("ls", error instanceof Error ? error.message : `invalid Debt namespace selector: ${path}`);
   }
 }
 
-function parseCallerSelector(parts: ParsedContractParts): AkumaCallerSelector | undefined {
+function parseCallerSelector(parts: ContractTokens): AkumaCallerSelector {
   const mine = parts.flags.mine === true;
   const value = optionalFlag(parts.flags, "caller");
   if (mine && value !== undefined) refuse("ls", "--mine and --caller are mutually exclusive");
@@ -414,18 +303,18 @@ function parseCallerSelector(parts: ParsedContractParts): AkumaCallerSelector | 
 }
 
 function parseAkumaLs(
-  parts: ParsedContractParts,
+  parts: ContractTokens,
   path: string | undefined,
   limit: number | undefined,
-  caller: AkumaCallerSelector | undefined,
-): ParsedLs {
+  caller: AkumaCallerSelector,
+): VerbRequest<"ls"> {
   if (path === undefined && caller === undefined) refuse("ls", "ls requires a selector");
   try {
-    const query = path === undefined ? ({ kind: "akuma" } as const) : parseAkumaCatalogPath(path);
+    const query = path === undefined ? { of: "aku" as const } : parseAkumaCatalogPath(path);
     if (query === null) refuse("ls", "ls requires a supported identity directory selector");
     return {
-      command: "ls",
-      query: { ...query, ...(limit === undefined ? {} : { limit }), ...(caller === undefined ? {} : { caller }) },
+      name: "ls",
+      input: { ...query, ...(limit === undefined ? {} : { limit }), ...(caller === undefined ? {} : { caller }) },
       output: parts.output,
     };
   } catch (error) {
@@ -434,7 +323,7 @@ function parseAkumaLs(
   }
 }
 
-function parseLs(parts: ParsedContractParts): ParsedLs {
+function parseLs(parts: ContractTokens): VerbRequest<"ls"> {
   const path = parts.positionals[0];
   const limit = listLimit(parts);
   const caller = parseCallerSelector(parts);
@@ -447,22 +336,15 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
     if (debtQuery !== null) {
       if (caller !== undefined) refuse("ls", callerRefusal);
       return {
-        command: "ls",
-        query: {
-          ...debtQuery,
-          ...(all ? { selection: "all" as const } : closed ? { selection: "closed" as const } : {}),
-        },
+        name: "ls",
+        input: { ...debtQuery, ...(all ? { selection: "all" } : closed ? { selection: "closed" } : {}) },
         output: parts.output,
       };
     }
     if (all || closed) refuse("ls", "--all and --closed select Debts only");
     if (path === "kei" || path === "kei/") {
       if (caller !== undefined) refuse("ls", callerRefusal);
-      return {
-        command: "ls",
-        query: { kind: "contracts", ...(limit === undefined ? {} : { limit }) },
-        output: parts.output,
-      };
+      return { name: "ls", input: { of: "kei", ...(limit === undefined ? {} : { limit }) }, output: parts.output };
     }
     if (caller !== undefined && (path === "aku" || path === "aku/"))
       refuse("ls", "--mine and --caller need an Akuma instance catalogue, not Akuma names");
@@ -471,7 +353,11 @@ function parseLs(parts: ParsedContractParts): ParsedLs {
   return parseAkumaLs(parts, path, limit, caller);
 }
 
-export function parseContractCommand(parts: ParsedContractParts): ParsedContractCommand {
+export function parseContractCommand(parts: ContractTokens): CliRequest {
+  const contract = parts.positionals[0];
+  const selected = contract === undefined ? {} : { contract };
+  const actor = parts.actor === undefined ? {} : { actor: parts.actor };
+  const output = parts.output;
   switch (parts.command) {
     case "bind":
       return parseBind(parts);
@@ -483,49 +369,28 @@ export function parseContractCommand(parts: ParsedContractParts): ParsedContract
       return parseVerify(parts);
     case "review":
       return parseReview(parts);
-    case "arc": {
-      const contract = parts.positionals[0];
-      return {
-        command: "arc",
-        ...(contract === undefined ? {} : { contract }),
-        ...(parts.actor === undefined ? {} : { actor: parts.actor }),
-        output: parts.output,
-      };
-    }
+    case "arc":
+      return { name: "arc", input: { ...selected, ...actor }, acquire: { markdown: true }, output };
     case "abandon": {
-      const contract = parts.positionals[0];
       const note = optionalFlag(parts.flags, "note");
-      return {
-        command: "abandon",
-        ...(contract === undefined ? {} : { contract }),
-        ...(note === undefined ? {} : { note }),
-        ...(parts.actor === undefined ? {} : { actor: parts.actor }),
-        output: parts.output,
-      };
+      return { name: "abandon", input: { ...selected, ...actor, ...(note === undefined ? {} : { note }) }, output };
     }
     case "show": {
       const contract = showSelector(parts);
-      return { command: "show", ...(contract === undefined ? {} : { contract }), output: parts.output };
+      return { name: "show", input: contract === undefined ? {} : { contract }, output };
     }
     case "status":
       return parseStatus(parts);
     case "ls":
       return parseLs(parts);
-    case "reconcile": {
-      const contract = parts.positionals[0];
-      return {
-        command: "reconcile",
-        ...(contract === undefined ? {} : { contract }),
-        retryHooks: parts.flags["retry-hooks"] === true,
-        output: parts.output,
-      };
-    }
+    case "reconcile":
+      return { name: "reconcile", input: { ...selected, retryHooks: parts.flags["retry-hooks"] === true }, output };
     case "nuke": {
       const confirm = optionalFlag(parts.flags, "confirm");
-      return { command: "nuke", ...(confirm === undefined ? {} : { confirm }), output: parts.output };
+      return { name: "nuke", input: confirm === undefined ? {} : { confirm }, output };
     }
     case "settings":
-      return { command: "settings", output: parts.output };
+      return { name: "settings", input: {}, output };
     case "region":
       return parseRegion(parts);
   }

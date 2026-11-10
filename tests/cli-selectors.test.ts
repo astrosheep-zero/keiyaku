@@ -77,7 +77,7 @@ test("missing Contract selectors preserve each native read or mutation outcome",
     assert.deepEqual(JSON.parse(reconciled.stdout), { kind: "missing", contractId: "kei/missing" });
     const status = runCliJson(repo.path, ["status", "kei/missing"]);
     assert.equal(status.status, 1, status.stderr);
-    assert.deepEqual(JSON.parse(status.stdout), { kind: "contract-missing" });
+    assert.deepEqual(JSON.parse(status.stdout), { kind: "contract-missing", id: "kei/missing" });
     const region = runCliJson(repo.path, ["region", "kei/missing"]);
     assert.equal(region.status, 1, region.stderr);
     assert.deepEqual(JSON.parse(region.stdout), { kind: "contract-missing", id: "kei/missing" });
@@ -93,10 +93,10 @@ test("status category grammar stays separate from exact, plural, show and ls", (
   ] as const) {
     for (const selector of selectors) {
       assert.deepEqual(parseArgv(["status", selector]), {
-        command: { command: "status", category, output: "text" },
+        command: { name: "status", input: { category }, output: "text" },
       });
       assert.deepEqual(parseArgv(["status", selector, "--limit", "501", "--json"]), {
-        command: { command: "status", category, limit: 501, output: "json" },
+        command: { name: "status", input: { category, limit: 501 }, output: "json" },
       });
       assert.throws(() => parseArgv(["show", selector]), /cannot select a category/u);
       assert.throws(() => parseArgv(["status", selector, "kei/exact"]), /cannot combine/u);
@@ -114,19 +114,19 @@ test("status category grammar stays separate from exact, plural, show and ls", (
     assert.throws(() => parseArgv(["status", pattern]), /unsupported status glob/u);
     assert.throws(() => parseArgv(["status", "kei/exact", pattern]), /unsupported status glob/u);
   }
-  assert.deepEqual(parseArgv(["status"]), { command: { command: "status", output: "text" } });
+  assert.deepEqual(parseArgv(["status"]), { command: { name: "status", input: {}, output: "text" } });
   assert.deepEqual(parseArgv(["status", "kei/a", "aku/worker/1234abcd"]), {
-    command: { command: "status", selectors: ["kei/a", "aku/worker/1234abcd"], output: "text" },
+    command: { name: "status", input: { selectors: ["kei/a", "aku/worker/1234abcd"] }, output: "text" },
   });
   assert.throws(() => parseArgv(["show", "kei/a", "--limit", "2"]), /not valid for show/u);
   assert.deepEqual(parseArgv(["status", "aku/worker/1234abcd"]), {
-    command: { command: "status", contract: "aku/worker/1234abcd", akuma: true, output: "text" },
+    command: { name: "status", input: { selector: "aku/worker/1234abcd" }, output: "text" },
   });
   assert.deepEqual(parseArgv(["show", "kei/a"]), {
-    command: { command: "show", contract: "kei/a", output: "text" },
+    command: { name: "show", input: { contract: "kei/a" }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku"]), {
-    command: { command: "ls", query: { kind: "archetypes" }, output: "text" },
+    command: { name: "ls", input: { of: "akuma-name" }, output: "text" },
   });
 });
 
@@ -266,7 +266,9 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
   mkdirSync(join(world, ".keiyaku", "debts"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
   for (const selector of ["kei", "kei/", "kei/*"]) {
-    const json = await cliJson<KanshiCategoryReport<"contract">>(["-C", world, "status", selector], { environment: {} });
+    const json = await cliJson<KanshiCategoryReport<"contract">>(["-C", world, "status", selector], {
+      environment: {},
+    });
     assert.equal(json.exit, 0, json.stderr);
     const section = json.value.section;
     if (section.kind !== "present") assert.fail(json.stdout);
@@ -340,7 +342,9 @@ test("category empty, absent and unavailable observations remain distinct", asyn
   assert.equal(empty.stdout.trim(), "akuma  none");
   mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "broken\n");
-  const unavailableAliases = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku"], { environment: {} });
+  const unavailableAliases = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku"], {
+    environment: {},
+  });
   const unavailableSection = unavailableAliases.value.section;
   assert.equal(unavailableSection.kind, "present");
   if (unavailableSection.kind !== "present") assert.fail(unavailableAliases.stdout);

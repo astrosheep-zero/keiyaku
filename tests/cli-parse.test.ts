@@ -18,19 +18,21 @@ test("Debt replaces the old family without restoring planning or progress verbs"
     assert.throws(() => parseArgv(["debt", verb]), { diagnostic: /unknown debt command/u });
   }
   assert.throws(() => parseArgv(["debt", "show", "task/example"]), { diagnostic: /debt ID must be/u });
-  assert.equal(command(["debt", "show", "debt/example"]).command, "debt");
+  const debt = command(["debt", "show", "debt/example"]);
+  assert.ok("command" in debt);
+  assert.equal(debt.command, "debt");
 });
 
 test("root Debt listings select closed or all only for Debt", () => {
   assert.deepEqual(command(["ls", "debt/", "--closed"]), {
-    command: "ls",
+    name: "ls",
     output: "text",
-    query: { kind: "debts", namespace: [], selection: "closed" },
+    input: { of: "debt", namespace: [], selection: "closed" },
   });
   assert.deepEqual(command(["ls", "debt/ns/", "--all"]), {
-    command: "ls",
+    name: "ls",
     output: "text",
-    query: { kind: "debts", namespace: ["ns"], selection: "all" },
+    input: { of: "debt", namespace: ["ns"], selection: "all" },
   });
   assert.throws(() => command(["ls", "debt", "--all", "--closed"]), CliUsageError);
   assert.throws(() => command(["ls", "kei", "--all"]), CliUsageError);
@@ -39,10 +41,10 @@ test("root Debt listings select closed or all only for Debt", () => {
 
 test("nuke admits only a literal WorldRoot confirmation", () => {
   assert.deepEqual(parseArgv(["nuke"]), {
-    command: { command: "nuke", output: "text" },
+    command: { name: "nuke", input: {}, output: "text" },
   });
   assert.deepEqual(parseArgv(["nuke", "--confirm", "/world/root", "--json"]), {
-    command: { command: "nuke", confirm: "/world/root", output: "json" },
+    command: { name: "nuke", input: { confirm: "/world/root" }, output: "json" },
   });
   assert.throws(() => parseArgv(["nuke", "kei/example"]), /nuke accepts no contract/u);
   assert.throws(() => parseArgv(["nuke", "-"]), /nuke reads no stdin/u);
@@ -79,31 +81,28 @@ test("global coordinates are independent of command position", () => {
   });
   assert.deepEqual(parseArgv(["settings", "--cwd", "/repo/caller"]), {
     cwd: "/repo/caller",
-    command: { command: "settings", output: "text" },
+    command: { name: "settings", input: {}, output: "text" },
   });
   assert.deepEqual(parseArgv(["--repo", "../delivery", "status", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
     repo: "../delivery",
-    command: { command: "status", output: "text" },
+    command: { name: "status", input: {}, output: "text" },
   });
   assert.deepEqual(parseArgv(["spawn", "worker", "--workdir", "work", "body"]), {
     workdir: "work",
     command: {
-      command: "spawn",
-      akumaName: "worker",
-      mode: "detach",
-      prompt: { kind: "argument", value: "body" },
+      name: "spawn",
+      input: { akumaName: "worker", mode: "detach" },
+      acquire: { prompt: { kind: "argument", value: "body" } },
       output: "text",
     },
   });
   assert.deepEqual(parseArgv(["spawn", "worker", "--contract", "kei/example", "--workdir", "work", "body"]), {
     workdir: "work",
     command: {
-      command: "spawn",
-      akumaName: "worker",
-      contract: "kei/example",
-      mode: "detach",
-      prompt: { kind: "argument", value: "body" },
+      name: "spawn",
+      input: { akumaName: "worker", contract: "kei/example", mode: "detach" },
+      acquire: { prompt: { kind: "argument", value: "body" } },
       output: "text",
     },
   });
@@ -114,23 +113,20 @@ test("global coordinates are independent of command position", () => {
     /--workdir may appear only once/u,
   );
   assert.deepEqual(command(["spawn", "worker"]), {
-    command: "spawn",
-    akumaName: "worker",
-    mode: "detach",
+    name: "spawn",
+    input: { akumaName: "worker", mode: "detach" },
+    acquire: {},
     output: "text",
   });
   assert.deepEqual(command(["spawn", "worker", "--bare"]), {
-    command: "spawn",
-    akumaName: "worker",
-    mode: "detach",
-    bare: true,
+    name: "spawn",
+    input: { akumaName: "worker", mode: "detach", bare: true },
+    acquire: {},
     output: "text",
   });
   assert.deepEqual(command(["fork", "@worker", "--at", "turn/1", "--bare"]), {
-    command: "fork",
-    akuma: "@worker",
-    at: "turn/1",
-    bare: true,
+    name: "fork",
+    input: { akuma: "@worker", at: "turn/1", bare: true },
     output: "text",
   });
   assert.throws(() => parseArgv(["spawn", "worker", "--schema", "answer.json"]), /spawn --schema requires a prompt/u);
@@ -151,11 +147,10 @@ test("global coordinates are independent of command position", () => {
 
 test("spawn repeats native writable-directory grants and refuses retired options", () => {
   assert.deepEqual(command(["spawn", "worker", "--add-dir", "../runtime", "--add-dir", "/square"]), {
-    command: "spawn",
-    akumaName: "worker",
-    mode: "detach",
+    name: "spawn",
+    input: { akumaName: "worker", mode: "detach", writableDirectories: ["../runtime", "/square"] },
+    acquire: {},
     output: "text",
-    writableDirectories: ["../runtime", "/square"],
   });
   assert.throws(
     () => command(["spawn", "worker", "--allowed", "contract.review"]),
@@ -186,12 +181,10 @@ test("root version is recognized only after coordinates and help", () => {
 });
 
 test("verify parses contextual and indexed execution and refuses malformed index syntax", () => {
-  assert.deepEqual(command(["verify"]), { command: "verify", includeDirty: false, output: "text" });
+  assert.deepEqual(command(["verify"]), { name: "verify", input: { includeDirty: false }, output: "text" });
   assert.deepEqual(command(["verify", "@example", "--index", "2", "--include-dirty", "--json"]), {
-    command: "verify",
-    contract: "@example",
-    index: 2,
-    includeDirty: true,
+    name: "verify",
+    input: { contract: "@example", index: 2, includeDirty: true },
     output: "json",
   });
   for (const value of ["0", "-1", "+1", "01", "1.0", "1e2", "2x", "9007199254740992"]) {
@@ -205,29 +198,24 @@ test("verify parses contextual and indexed execution and refuses malformed index
 });
 
 test("delivery dry-run parses preview options and rejects unused mutation options", () => {
-  const normal = {
-    command: "deliver",
-    includeDirty: false,
-    materializeConflict: false,
-    overwrite: false,
-    dryRun: false,
-    showDiff: false,
+  assert.deepEqual(command(["deliver"]), {
+    name: "deliver",
+    input: { includeDirty: false, materializeConflict: false, overwrite: false },
     output: "text",
-  };
-  assert.deepEqual(command(["deliver"]), normal);
-  assert.deepEqual(command(["deliver", "--dry-run"]), { ...normal, dryRun: true });
+  });
+  assert.deepEqual(command(["deliver", "--dry-run"]), {
+    name: "deliver.preview",
+    input: { includeDirty: false, showDiff: false },
+    output: "text",
+  });
   assert.deepEqual(command(["deliver", "kei/example", "--dry-run", "--show-diff", "--include-dirty"]), {
-    ...normal,
-    contract: "kei/example",
-    dryRun: true,
-    includeDirty: true,
-    showDiff: true,
+    name: "deliver.preview",
+    input: { contract: "kei/example", includeDirty: true, showDiff: true },
+    output: "text",
   });
   assert.deepEqual(command(["deliver", "@example", "--dry-run", "--show-diff", "--json"]), {
-    ...normal,
-    contract: "@example",
-    dryRun: true,
-    showDiff: true,
+    name: "deliver.preview",
+    input: { contract: "@example", includeDirty: false, showDiff: true },
     output: "json",
   });
   assert.throws(() => parseArgv(["deliver", "--dry-run", "--diff"]), /option --diff is not valid for deliver/u);
@@ -240,12 +228,12 @@ test("delivery dry-run parses preview options and rejects unused mutation option
 });
 
 test("show parses a standalone Contract guidance read with root coordinates", () => {
-  assert.deepEqual(parseArgv(["show"]), { command: { command: "show", output: "text" } });
+  assert.deepEqual(parseArgv(["show"]), { command: { name: "show", input: {}, output: "text" } });
   for (const selector of ["kei/example", "@example"]) {
     assert.deepEqual(parseArgv(["-C", "/invocation", "--repo", "/repository", "show", selector, "--json"]), {
       cwd: "/invocation",
       repo: "/repository",
-      command: { command: "show", contract: selector, output: "json" },
+      command: { name: "show", input: { contract: selector }, output: "json" },
     });
   }
   for (const selector of ["aku", "aku/", "aku/*", "kei", "kei/", "kei/*", "aku/worker/1234abcd", "kei/foo*"]) {
@@ -259,10 +247,10 @@ test("show parses a standalone Contract guidance read with root coordinates", ()
 
 test("show parses one Contract selector and JSON output; status refuses the retired guidance flag", () => {
   assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
-    command: { command: "show", contract: "kei/example", output: "json" },
+    command: { name: "show", input: { contract: "kei/example" }, output: "json" },
   });
   assert.deepEqual(parseArgv(["show", "@example"]), {
-    command: { command: "show", contract: "@example", output: "text" },
+    command: { name: "show", input: { contract: "@example" }, output: "text" },
   });
   assert.throws(() => parseArgv(["show", "aku/x/*"]), /cannot select an Akuma/u);
   for (const selectors of [[], ["kei/example"], ["@example"], ["kei/one", "kei/two"], ["aku/x/*"]]) {
@@ -281,39 +269,39 @@ test("bare ls requires a selector rather than opening help", () => {
 test("ls parses only canonical identity directories", () => {
   for (const path of ["debt", "debt/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { command: "ls", query: { kind: "debts", namespace: [] }, output: "text" },
+      command: { name: "ls", input: { of: "debt", namespace: [] }, output: "text" },
     });
   }
   assert.deepEqual(parseArgv(["ls", "debt/feature/sub/", "--json"]), {
-    command: { command: "ls", query: { kind: "debts", namespace: ["feature", "sub"] }, output: "json" },
+    command: { name: "ls", input: { of: "debt", namespace: ["feature", "sub"] }, output: "json" },
   });
   for (const path of ["debt/feature", "debt//", "debt/feature//"]) {
     assert.throws(() => parseArgv(["ls", path]), /Debt namespace selector/);
   }
   for (const path of ["kei", "kei/"]) {
     assert.deepEqual(parseArgv(["ls", path, "--json"]), {
-      command: { command: "ls", query: { kind: "contracts" }, output: "json" },
+      command: { name: "ls", input: { of: "kei" }, output: "json" },
     });
   }
   assert.deepEqual(parseArgv(["ls", "kei/", "--limit", "100"]), {
-    command: { command: "ls", query: { kind: "contracts", limit: 100 }, output: "text" },
+    command: { name: "ls", input: { of: "kei", limit: 100 }, output: "text" },
   });
   assert.throws(() => parseArgv(["ls", "kei/", "--limit", "0"]), /positive safe integer/u);
   for (const path of ["aku", "aku/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { command: "ls", query: { kind: "archetypes" }, output: "text" },
+      command: { name: "ls", input: { of: "akuma-name" }, output: "text" },
     });
   }
   for (const path of ["aku/worker", "aku/worker/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { command: "ls", query: { kind: "akuma", akumaName: "worker" }, output: "text" },
+      command: { name: "ls", input: { of: "aku", akumaName: "worker" }, output: "text" },
     });
   }
   assert.deepEqual(parseArgv(["ls", "aku/*/*"]), {
-    command: { command: "ls", query: { kind: "akuma" }, output: "text" },
+    command: { name: "ls", input: { of: "aku" }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/elite/*", "--limit", "40"]), {
-    command: { command: "ls", query: { kind: "akuma", akumaName: "elite", limit: 40 }, output: "text" },
+    command: { name: "ls", input: { of: "aku", akumaName: "elite", limit: 40 }, output: "text" },
   });
   assert.match(renderContractHelp("ls"), /ls "aku\/<name>\/\*"/u);
   for (const path of [
@@ -332,19 +320,19 @@ test("ls parses only canonical identity directories", () => {
 
 test("ls parses caller-scoped Akuma selection", () => {
   assert.deepEqual(parseArgv(["ls", "--mine"]), {
-    command: { command: "ls", query: { kind: "akuma", caller: { kind: "mine" } }, output: "text" },
+    command: { name: "ls", input: { of: "aku", caller: { kind: "mine" } }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/*/*", "--mine", "--json"]), {
-    command: { command: "ls", query: { kind: "akuma", caller: { kind: "mine" } }, output: "json" },
+    command: { name: "ls", input: { of: "aku", caller: { kind: "mine" } }, output: "json" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/intern", "--mine"]), {
-    command: { command: "ls", query: { kind: "akuma", akumaName: "intern", caller: { kind: "mine" } }, output: "text" },
+    command: { name: "ls", input: { of: "aku", akumaName: "intern", caller: { kind: "mine" } }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/*/*", "--caller", "slack:channel:thread"]), {
     command: {
-      command: "ls",
-      query: {
-        kind: "akuma",
+      name: "ls",
+      input: {
+        of: "aku",
         caller: { kind: "external", caller: { kind: "external", integration: "slack", id: "channel:thread" } },
       },
       output: "text",
@@ -352,9 +340,9 @@ test("ls parses caller-scoped Akuma selection", () => {
   });
   assert.deepEqual(parseArgv(["ls", "aku/worker/*", "--caller", "aku/lead/1234abcd", "--limit", "5"]), {
     command: {
-      command: "ls",
-      query: {
-        kind: "akuma",
+      name: "ls",
+      input: {
+        of: "aku",
         akumaName: "worker",
         caller: { kind: "akuma", akumaId: "aku/lead/1234abcd" },
         limit: 5,
@@ -378,33 +366,38 @@ test("bind and amend retain complete after snapshots and mixed gate selectors", 
     parseArgv(["bind", "--after", "kei/one", "--after", "kei/two", "--gates", "strict,review-only", "-"]),
     {
       command: {
-        command: "bind",
-        after: ["kei/one", "kei/two"],
-        gates: ["strict", "review-only"],
+        name: "bind",
+        input: { after: ["kei/one", "kei/two"], gates: ["strict", "review-only"] },
+        acquire: { markdown: true },
         output: "text",
       },
     },
   );
   assert.deepEqual(parseArgv(["amend", "kei/example", "--clear-after", "-"]), {
-    command: { command: "amend", contract: "kei/example", clearAfter: true, stdin: true, output: "text" },
+    command: {
+      name: "amend",
+      input: { contract: "kei/example", after: [] },
+      acquire: { markdown: true },
+      output: "text",
+    },
   });
   assert.deepEqual(parseArgv(["amend", "kei/example", "--after", "kei/one"]), {
-    command: { command: "amend", contract: "kei/example", after: ["kei/one"], output: "text" },
+    command: { name: "amend", input: { contract: "kei/example", after: ["kei/one"] }, output: "text" },
   });
   assert.deepEqual(parseArgv(["amend", "kei/example", "--clear-after"]), {
-    command: { command: "amend", contract: "kei/example", clearAfter: true, output: "text" },
+    command: { name: "amend", input: { contract: "kei/example", after: [] }, output: "text" },
   });
   assert.deepEqual(parseArgv(["amend", "kei/example", "--gates", "default"]), {
-    command: { command: "amend", contract: "kei/example", gates: ["default"], output: "text" },
+    command: { name: "amend", input: { contract: "kei/example", gates: ["default"] }, output: "text" },
   });
   assert.deepEqual(parseArgv(["bind", "--gates", "", "-"]), {
-    command: { command: "bind", gates: [], output: "text" },
+    command: { name: "bind", input: { gates: [] }, acquire: { markdown: true }, output: "text" },
   });
   assert.deepEqual(parseArgv(["amend", "kei/example", "--gates", ""]), {
-    command: { command: "amend", contract: "kei/example", gates: [], output: "text" },
+    command: { name: "amend", input: { contract: "kei/example", gates: [] }, output: "text" },
   });
   assert.deepEqual(parseArgv(["bind", "--gates", "reviewed,strict", "-"]), {
-    command: { command: "bind", gates: ["reviewed", "strict"], output: "text" },
+    command: { name: "bind", input: { gates: ["reviewed", "strict"] }, acquire: { markdown: true }, output: "text" },
   });
   for (const value of [",", "strict,", ",strict", "strict,,default"]) {
     assert.throws(() => parseArgv(["bind", "--gates", value, "-"]), /comma-separated names/u);
@@ -453,10 +446,8 @@ test("--gates word grammar restates the Contract owner's gateWord", () => {
 test("abandon accepts a note but no caller-selected reason", () => {
   assert.deepEqual(parseArgv(["abandon", "kei/example", "--note", "scope changed", "--actor", "operator"]), {
     command: {
-      command: "abandon",
-      contract: "kei/example",
-      note: "scope changed",
-      actor: "operator",
+      name: "abandon",
+      input: { contract: "kei/example", note: "scope changed", actor: "operator" },
       output: "text",
     },
   });
@@ -466,38 +457,35 @@ test("abandon accepts a note but no caller-selected reason", () => {
 test("spawn accepts a bare alias name and keeps prefixed input compatible", () => {
   for (const input of ["pi-reset-api-review", "@pi-reset-api-review"]) {
     const parsed = command(["spawn", "intern", "--alias", input, "audit"]);
-    assert.equal(parsed.command, "spawn");
-    if (parsed.command === "spawn") assert.equal(parsed.alias, "@pi-reset-api-review");
+    assert.ok("name" in parsed && parsed.name === "spawn");
+    assert.equal(parsed.input.alias, "@pi-reset-api-review");
   }
   const unicode = command(["spawn", "审查-二号", "--alias", "审查-二号", "audit"]);
-  assert.equal(unicode.command, "spawn");
-  if (unicode.command === "spawn") assert.equal(unicode.alias, "@审查-二号");
+  assert.ok("name" in unicode && unicode.name === "spawn");
+  assert.equal(unicode.input.alias, "@审查-二号");
   assert.throws(() => parseArgv(["spawn", "intern", "--alias", "Reviewer", "audit"]), /normalized Akuma name/u);
   assert.throws(() => parseArgv(["spawn", "intern", "--alias", "a".repeat(65), "audit"]), /64 UTF-8 bytes/u);
 });
 
 test("wait accepts a plural selection without an explicit completion mode", () => {
   assert.deepEqual(command(["wait", "aku/claude/1234abcd", "aku/claude/5678ef90"]), {
-    command: "wait",
-    akuma: ["aku/claude/1234abcd", "aku/claude/5678ef90"],
+    name: "wait",
+    input: { selectors: ["aku/claude/1234abcd", "aku/claude/5678ef90"] },
     output: "text",
   });
   assert.deepEqual(command(["wait", "aku/claude/1234abcd", "@peer", "--timeout", "5m"]), {
-    command: "wait",
-    akuma: ["aku/claude/1234abcd", "@peer"],
-    timeoutMs: 300_000,
+    name: "wait",
+    input: { selectors: ["aku/claude/1234abcd", "@peer"], timeoutMs: 300_000 },
     output: "text",
   });
   assert.deepEqual(command(["wait", "aku/*/*", "--all"]), {
-    command: "wait",
-    akuma: ["aku/*/*"],
-    completion: "all",
+    name: "wait",
+    input: { selectors: ["aku/*/*"], completion: "all" },
     output: "text",
   });
   assert.deepEqual(command(["wait", "aku/*/*", "--any"]), {
-    command: "wait",
-    akuma: ["aku/*/*"],
-    completion: "any",
+    name: "wait",
+    input: { selectors: ["aku/*/*"], completion: "any" },
     output: "text",
   });
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
@@ -512,7 +500,11 @@ test("wait rejects mixed selector families while kill retains mixed selection", 
     const selectors = action === "wait" ? ["kei/example"] : ["kei/example", "aku/work*/12*"];
     const parsed = parseArgv([action, ...selectors, "--repo", "/repo", "--json"]);
     assert.ok("command" in parsed);
-    assert.deepEqual(parsed.command, { command: action, akuma: selectors, output: "json" });
+    assert.deepEqual(parsed.command, {
+      name: action,
+      input: action === "wait" ? { selectors } : { akuma: selectors },
+      output: "json",
+    });
     assert.doesNotThrow(() => assertExplicitRepoUse(parsed.command, parsed.repo));
     const akumaOnly = parseArgv([action, "aku/*/*", "--repo", "/repo"]);
     assert.ok("command" in akumaOnly);
@@ -522,27 +514,21 @@ test("wait rejects mixed selector families while kill retains mixed selection", 
 
 test("tell admits; ask parses optional observation windows and schema", () => {
   assert.deepEqual(command(["tell", "@worker", "continue"]), {
-    command: "tell",
-    akuma: "@worker",
-    interrupt: false,
-    prompt: { kind: "argument", value: "continue" },
+    name: "tell",
+    input: { akuma: "@worker" },
+    acquire: { prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
   assert.deepEqual(command(["ask", "@worker", "--wait", "0ms", "continue"]), {
-    command: "ask",
-    akuma: "@worker",
-    interrupt: false,
-    timeoutMs: 0,
-    prompt: { kind: "argument", value: "continue" },
+    name: "ask",
+    input: { akuma: "@worker", timeoutMs: 0 },
+    acquire: { prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
   assert.deepEqual(command(["ask", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
-    command: "ask",
-    akuma: "aku/worker/1234abcd",
-    interrupt: false,
-    schema: "answer.json",
-    timeoutMs: 300_000,
-    prompt: { kind: "argument", value: "continue" },
+    name: "ask",
+    input: { akuma: "aku/worker/1234abcd", timeoutMs: 300_000 },
+    acquire: { schema: "answer.json", prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
   assert.throws(() => parseArgv(["tell", "@worker", "--wait", "1s", "continue"]), /use ask --wait/u);
@@ -557,18 +543,14 @@ test("tell admits; ask parses optional observation windows and schema", () => {
 
 test("review accepts actor with either summary source", () => {
   assert.deepEqual(command(["review", "kei/example", "--satisfied", "--summary", "ok", "--actor", "operator"]), {
-    command: "review",
-    contract: "kei/example",
-    verdict: "satisfied",
-    summary: "ok",
-    actor: "operator",
+    name: "review",
+    input: { contract: "kei/example", verdict: "satisfied", summary: "ok", actor: "operator" },
     output: "text",
   });
   assert.deepEqual(command(["review", "--unsatisfied", "--actor", "operator", "-"]), {
-    command: "review",
-    verdict: "unsatisfied",
-    summaryFromStdin: true,
-    actor: "operator",
+    name: "review",
+    input: { verdict: "unsatisfied", actor: "operator" },
+    acquire: { summary: true },
     output: "text",
   });
 });
@@ -618,14 +600,13 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     );
   }
   assert.deepEqual(command(["review", "--unsatisfied", "--summary", "  keep  "]), {
-    command: "review",
-    verdict: "unsatisfied",
-    summary: "  keep  ",
+    name: "review",
+    input: { verdict: "unsatisfied", summary: "  keep  " },
     output: "text",
   });
   const called = command(["spawn", "worker", "  keep  "]);
-  assert.equal(called.command, "spawn");
-  if (called.command === "spawn") assert.deepEqual(called.prompt, { kind: "argument", value: "  keep  " });
+  assert.ok("name" in called && called.name === "spawn" && "acquire" in called);
+  assert.deepEqual(called.acquire.prompt, { kind: "argument", value: "  keep  " });
   assert.deepEqual(command(["debt", "add", "--", "--urgent debt"]), {
     command: "debt",
     action: "add",
@@ -634,18 +615,16 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     flags: {},
   });
   assert.deepEqual(command(["spawn", "worker", "--", "--workdir"]), {
-    command: "spawn",
-    akumaName: "worker",
-    mode: "detach",
-    prompt: { kind: "argument", value: "--workdir" },
+    name: "spawn",
+    input: { akumaName: "worker", mode: "detach" },
+    acquire: { prompt: { kind: "argument", value: "--workdir" } },
     output: "text",
   });
   assert.deepEqual(parseArgv(["spawn", "worker", "--", "--workdir"]), {
     command: {
-      command: "spawn",
-      akumaName: "worker",
-      mode: "detach",
-      prompt: { kind: "argument", value: "--workdir" },
+      name: "spawn",
+      input: { akumaName: "worker", mode: "detach" },
+      acquire: { prompt: { kind: "argument", value: "--workdir" } },
       output: "text",
     },
   });
@@ -661,68 +640,69 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
 
 test("a deliberately targetless bind parses as an explicit absence", () => {
   assert.deepEqual(parseArgv(["bind", "--no-target", "-", "--json"]), {
-    command: { command: "bind", target: null, output: "json" },
+    command: { name: "bind", input: { target: null }, acquire: { markdown: true }, output: "json" },
   });
   assert.deepEqual(parseArgv(["bind", "--fork-of", "kei/source", "--no-target", "--json"]), {
-    command: { command: "bind", forkOf: "kei/source", target: null, output: "json" },
+    command: { name: "bind", input: { forkOf: "kei/source", target: null }, output: "json" },
   });
 });
 
 test("stdin marker is position independent for Contract commands and global coordinates", () => {
   assert.deepEqual(parseArgv(["bind", "-", "--debt", "debt/example", "--json"]), {
-    command: { command: "bind", debt: "debt/example", output: "json" },
+    command: { name: "bind", input: { debt: "debt/example" }, acquire: { markdown: true }, output: "json" },
   });
   assert.deepEqual(parseArgv(["amend", "-", "kei/example", "--json"]), {
-    command: { command: "amend", contract: "kei/example", stdin: true, output: "json" },
+    command: { name: "amend", input: { contract: "kei/example" }, acquire: { markdown: true }, output: "json" },
   });
   assert.deepEqual(parseArgv(["arc", "-", "--actor", "operator", "kei/example"]), {
-    command: { command: "arc", contract: "kei/example", actor: "operator", output: "text" },
+    command: {
+      name: "arc",
+      input: { contract: "kei/example", actor: "operator" },
+      acquire: { markdown: true },
+      output: "text",
+    },
   });
   assert.deepEqual(parseArgv(["review", "-", "--satisfied", "kei/example"]), {
     command: {
-      command: "review",
-      contract: "kei/example",
-      verdict: "satisfied",
-      summaryFromStdin: true,
+      name: "review",
+      input: { contract: "kei/example", verdict: "satisfied" },
+      acquire: { summary: true },
       output: "text",
     },
   });
   assert.deepEqual(parseArgv(["bind", "-", "-C", "/repo/caller", "--repo", "../delivery"]), {
     cwd: "/repo/caller",
     repo: "../delivery",
-    command: { command: "bind", output: "text" },
+    command: { name: "bind", input: {}, acquire: { markdown: true }, output: "text" },
   });
   assert.deepEqual(parseArgv(["tell", "aku/claude/1234abcd", "--", "--json"]), {
     command: {
-      command: "tell",
-      akuma: "aku/claude/1234abcd",
-      interrupt: false,
-      prompt: { kind: "argument", value: "--json" },
+      name: "tell",
+      input: { akuma: "aku/claude/1234abcd" },
+      acquire: { prompt: { kind: "argument", value: "--json" } },
       output: "text",
     },
   });
   assert.deepEqual(parseArgv(["spawn", "worker", "--", "--cwd"]), {
     command: {
-      command: "spawn",
-      akumaName: "worker",
-      mode: "detach",
-      prompt: { kind: "argument", value: "--cwd" },
+      name: "spawn",
+      input: { akumaName: "worker", mode: "detach" },
+      acquire: { prompt: { kind: "argument", value: "--cwd" } },
       output: "text",
     },
   });
   assert.deepEqual(parseArgv(["spawn", "worker", "--", "--help"]), {
     command: {
-      command: "spawn",
-      akumaName: "worker",
-      mode: "detach",
-      prompt: { kind: "argument", value: "--help" },
+      name: "spawn",
+      input: { akumaName: "worker", mode: "detach" },
+      acquire: { prompt: { kind: "argument", value: "--help" } },
       output: "text",
     },
   });
   assert.deepEqual(parseArgv(["--repo", "../delivery", "bind", "-", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
     repo: "../delivery",
-    command: { command: "bind", output: "text" },
+    command: { name: "bind", input: {}, acquire: { markdown: true }, output: "text" },
   });
   assert.throws(() => parseArgv(["bind", "-", "--json", "-"]), /stdin marker '-' may appear only once/u);
   assert.throws(() => parseArgv(["status", "-", "--json"]), /status reads no stdin/u);

@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, w
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { BindDraftError, preserveBindDraft } from "../src/cli/draft.js";
-import { runContractMutation } from "../src/cli/commands/contract.js";
+import { acquireContractRequest, runContractRequest } from "../src/cli/commands/contract.js";
 import { resolveInvocationCoordinates } from "../src/cli/coordinates.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { writeExecutionProgress, type CliRuntime } from "../src/cli/runtime.js";
@@ -95,7 +95,13 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
   assert.equal(refusal.reason.kind, "target-missing");
   for (const output of ["text", "json"] as const) {
     const parsed = parseArgv(["bind", "-", "--target", "missing-target", ...(output === "json" ? ["--json"] : [])]);
-    if (!("command" in parsed) || parsed.command.command !== "bind") throw new Error("expected bind");
+    if (
+      !("command" in parsed) ||
+      !("name" in parsed.command) ||
+      parsed.command.name !== "bind" ||
+      !("acquire" in parsed.command)
+    )
+      throw new Error("expected bind");
     const command = parsed.command;
     const runtime: CliRuntime = {
       environment: {},
@@ -106,7 +112,9 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
       signal: new AbortController().signal,
       progress: writeExecutionProgress,
     };
-    const result = await captureOutput(async () => cliExitCode(await runContractMutation(command, runtime)));
+    const result = await captureOutput(async () =>
+      cliExitCode(await runContractRequest(await acquireContractRequest(command, runtime), runtime)),
+    );
     assert.equal(result.exit, 1);
     if (output === "json") {
       assert.deepEqual(JSON.parse(result.stdout), refusal);

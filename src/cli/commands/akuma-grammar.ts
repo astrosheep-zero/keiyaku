@@ -4,50 +4,13 @@ import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
 import { parseExactHistorySelector } from "../../akuma/identity.js";
 
-type Output = Readonly<{ output: "text" | "json" }>;
-type Addressed = Readonly<{ akuma: string }>;
+import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
+
 export type AkumaPromptSource = Readonly<{ kind: "argument"; value: string }> | Readonly<{ kind: "stdin" }>;
-type Prompted = Readonly<{ prompt: AkumaPromptSource }>;
+export type ReportCommand = Readonly<{ command: "report"; output: "text" | "json"; prompt: AkumaPromptSource }>;
+export type AkumaParseResult = CliRequest | ReportCommand;
 
-export type ParsedAkumaCommand = Output &
-  (
-    | (Readonly<{
-        command: "spawn";
-        akumaName: string;
-        contract?: string;
-        alias?: AkumaAlias;
-        mode: "wait" | "detach";
-        timeoutMs?: number;
-        writableDirectories?: readonly string[];
-        bare?: boolean;
-        schema?: string;
-      }> &
-        Readonly<{ prompt?: AkumaPromptSource }>)
-    | (Readonly<{ command: "report" }> & Prompted)
-    | Readonly<{ command: "kill"; akuma: readonly string[] }>
-    | Readonly<{ command: "wait"; akuma: readonly string[]; completion?: "any" | "all"; timeoutMs?: number }>
-    | (Readonly<{ command: "tell"; interrupt: boolean }> & Addressed & Prompted)
-    | (Readonly<{ command: "ask"; interrupt: boolean; schema?: string; timeoutMs?: number }> & Addressed & Prompted)
-    | (Readonly<{
-        command: "history";
-        last: boolean;
-        id?: string;
-        before?: number;
-        since?: number;
-        limit?: number;
-        full?: never;
-      }> &
-        Addressed)
-    | Readonly<{ command: "history"; contract: string; full: boolean }>
-    | (Readonly<{ command: "fork"; at: string; bare?: boolean }> & Addressed)
-  );
-
-export type InvokedAkumaCommand = Exclude<
-  ParsedAkumaCommand,
-  { command: "history"; contract: string } | { command: "report" }
->;
-
-export type AkumaAction = ParsedAkumaCommand["command"];
+export type AkumaAction = keyof typeof AKUMA_COMMAND_SPECS;
 type FlagValue = string | true | readonly string[];
 type AkumaCommandSpec = Readonly<{
   arity: number | "one-or-more";
@@ -193,14 +156,6 @@ export function isAkumaAction(value: string | undefined): value is AkumaAction {
   return value !== undefined && Object.hasOwn(AKUMA_COMMAND_SPECS, value);
 }
 
-export function isParsedAkumaCommand(command: Readonly<{ command: string }>): command is InvokedAkumaCommand {
-  return (
-    isAkumaAction(command.command) &&
-    command.command !== "report" &&
-    !("contract" in command && command.command === "history")
-  );
-}
-
 export function renderAkumaRootRows(): readonly string[] {
   return Object.entries(AKUMA_COMMAND_SPECS).map(([action, spec]) => `  ${action.padEnd(10)} ${spec.purpose}`);
 }
@@ -271,17 +226,19 @@ function parseWait(
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
   fail: (message: string) => never,
-): ParsedAkumaCommand {
+): VerbRequest<"wait"> {
   if (flags.any === true && flags.all === true) fail("wait --any and --all are mutually exclusive");
   const completion = flags.any === true ? ("any" as const) : flags.all === true ? ("all" as const) : undefined;
   const selectors = rawSelectors.map((value) => validateSet(value, fail));
   if (selectors.some((value) => value.startsWith("kei/")) && selectors.some((value) => !value.startsWith("kei/")))
     fail("wait cannot mix Contract and Akuma selectors");
   return {
-    command: "wait",
-    akuma: selectors,
-    ...(completion === undefined ? {} : { completion }),
-    ...(flags.timeout === undefined ? {} : { timeoutMs: parseDuration(flags.timeout, "--timeout", fail) }),
+    name: "wait",
+    input: {
+      selectors,
+      ...(completion === undefined ? {} : { completion }),
+      ...(flags.timeout === undefined ? {} : { timeoutMs: parseDuration(flags.timeout, "--timeout", fail) }),
+    },
     output,
   };
 }
@@ -291,12 +248,12 @@ function parseHistory(
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
   fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "history" }> {
+): VerbRequest<"history"> {
   if (selector.startsWith("kei/")) {
     if ([flags.id, flags.before, flags.since, flags.limit, flags.last].some((value) => value !== undefined)) {
       fail("history kei/... does not accept --id, --before, --since, --limit, or --last");
     }
-    return { command: "history", contract: selector, full: flags.full === true, output };
+    return { name: "history", input: { selector, full: flags.full === true }, output };
   }
   return parseAkumaHistory(selector, flags, output, fail);
 }
@@ -315,7 +272,7 @@ function parseAkumaHistory(
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
   fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "history"; akuma: string }> {
+): VerbRequest<"history"> {
   if (flags.full === true) fail("history --full is only valid for kei/...");
   const bounded = flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined;
   if (flags.before !== undefined && flags.since !== undefined)
@@ -329,13 +286,15 @@ function parseAkumaHistory(
   if (id !== undefined && parseExactHistorySelector(id) === null)
     fail("history --id requires turn/<positive safe integer> or report/<positive safe integer>");
   return {
-    command: "history",
-    akuma: selector,
-    ...(id === undefined ? {} : { id }),
-    last: flags.last === true,
-    ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
-    ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
-    ...(limit === undefined ? {} : { limit }),
+    name: "history",
+    input: {
+      selector,
+      ...(id === undefined ? {} : { id }),
+      last: flags.last === true,
+      ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
+      ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
+      ...(limit === undefined ? {} : { limit }),
+    },
     output,
   };
 }
@@ -346,9 +305,9 @@ function parseAddressed(
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
   fail: (message: string) => never,
-): ParsedAkumaCommand {
+): CliRequest {
   if (action === "kill")
-    return { command: action, akuma: rawSelectors.map((value) => validateSet(value, fail)), output };
+    return { name: action, input: { akuma: rawSelectors.map((value) => validateSet(value, fail)) }, output };
   if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
   if (action === "history") {
     const selector = rawSelectors[0]!;
@@ -357,7 +316,7 @@ function parseAddressed(
   }
   const akuma = rawSelectors[0]!;
   const at = stringFlag(flags.at, "fork requires --at <historyId>", fail);
-  return { command: action, akuma, at, ...(flags.bare === true ? { bare: true } : {}), output };
+  return { name: action, input: { akuma, at, ...(flags.bare === true ? { bare: true } : {}) }, output };
 }
 
 function parsePrompted(
@@ -388,12 +347,11 @@ function parseTell(
   subject: string,
   prompt: AkumaPromptSource,
   output: "text" | "json",
-): Extract<ParsedAkumaCommand, { command: "tell" }> {
+): Extract<PendingRequest, { name: "tell" }> {
   return {
-    command: "tell",
-    akuma: subject,
-    interrupt: flags.interrupt === true,
-    prompt,
+    name: "tell",
+    input: { akuma: subject, ...(flags.interrupt === true ? { interrupt: true } : {}) },
+    acquire: { prompt },
     output,
   };
 }
@@ -404,16 +362,17 @@ function parseAsk(
   prompt: AkumaPromptSource,
   output: "text" | "json",
   fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "ask" }> {
+): Extract<PendingRequest, { name: "ask" }> {
   const schema =
     flags.schema === undefined ? undefined : stringFlag(flags.schema, "ask --schema requires a file", fail);
   return {
-    command: "ask",
-    akuma: subject,
-    interrupt: flags.interrupt === true,
-    ...(schema === undefined ? {} : { schema }),
-    ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
-    prompt,
+    name: "ask",
+    input: {
+      akuma: subject,
+      ...(flags.interrupt === true ? { interrupt: true } : {}),
+      ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
+    },
+    acquire: { prompt, ...(schema === undefined ? {} : { schema }) },
     output,
   };
 }
@@ -424,7 +383,7 @@ function parseSpawn(
   prompt: AkumaPromptSource | undefined,
   output: "text" | "json",
   fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "spawn" }> {
+): Extract<PendingRequest, { name: "spawn" }> {
   let alias: AkumaAlias | undefined;
   if (flags.alias !== undefined) {
     try {
@@ -441,16 +400,17 @@ function parseSpawn(
   if (prompt === undefined && schema !== undefined) fail("spawn --schema requires a prompt");
   if (prompt === undefined && flags.wait !== undefined) fail("spawn --wait requires a prompt");
   return {
-    command: "spawn",
-    akumaName,
-    ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
-    ...(alias === undefined ? {} : { alias }),
-    mode,
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
-    ...(flags["add-dir"] === undefined ? {} : { writableDirectories: flags["add-dir"] as readonly string[] }),
-    ...(flags.bare === true ? { bare: true } : {}),
-    ...(schema === undefined ? {} : { schema }),
-    ...(prompt === undefined ? {} : { prompt }),
+    name: "spawn",
+    input: {
+      akumaName,
+      ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
+      ...(alias === undefined ? {} : { alias }),
+      mode,
+      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      ...(flags["add-dir"] === undefined ? {} : { writableDirectories: flags["add-dir"] as readonly string[] }),
+      ...(flags.bare === true ? { bare: true } : {}),
+    },
+    acquire: { ...(schema === undefined ? {} : { schema }), ...(prompt === undefined ? {} : { prompt }) },
     output,
   };
 }
@@ -460,7 +420,7 @@ function parseReport(
   stdin: boolean,
   output: "text" | "json",
   fail: (message: string) => never,
-): Extract<ParsedAkumaCommand, { command: "report" }> {
+): ReportCommand {
   if (stdin ? positionals.length !== 0 : positionals.length !== 1)
     fail("report requires one text argument or stdin, not both");
   const value = positionals[0];
@@ -468,7 +428,7 @@ function parseReport(
   return { command: "report", output, prompt: stdin ? { kind: "stdin" } : { kind: "argument", value: value! } };
 }
 
-export function parseAkumaCommand(argv: readonly string[]): ParsedAkumaCommand {
+export function parseAkumaCommand(argv: readonly string[]): AkumaParseResult {
   const candidate = argv[0];
   if (!isAkumaAction(candidate)) throw new CliUsageError(`unknown command: ${candidate ?? ""}`);
   const action = candidate;

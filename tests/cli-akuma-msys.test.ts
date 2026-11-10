@@ -26,10 +26,9 @@ function spawned(extra: Partial<SpawnResult> = {}): SpawnResult {
 
 test("spawn defaults to detached birth and rejects removed detach flags", () => {
   assert.deepEqual(command, {
-    command: "spawn",
-    akumaName: "worker",
-    mode: "detach",
-    prompt: { kind: "argument", value: "prompt" },
+    name: "spawn",
+    input: { akumaName: "worker", mode: "detach" },
+    acquire: { prompt: { kind: "argument", value: "prompt" } },
     output: "text",
   });
   assert.throws(() => parseArgv(["spawn", "worker", "-d", "prompt"]), /option -d is not valid for spawn/u);

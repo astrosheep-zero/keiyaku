@@ -5,8 +5,7 @@ import {
   KeiyakuUsageError,
   type InvocationCoordinates,
 } from "../library/keiyaku-coordinates.js";
-import { commandRepoPolicy } from "../library/keiyaku-policy.js";
-import type { ParsedCommand } from "./parse.js";
+import { commandRepoPolicy, type ParsedCommand } from "./parse.js";
 
 export type CliCoordinates = InvocationCoordinates;
 

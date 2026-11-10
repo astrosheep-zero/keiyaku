@@ -5,8 +5,8 @@ import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
 import { projectFailure, KeiyakuError } from "../library/outcome.js";
 import { classifyVerb, type VerbInput, type VerbName } from "../library/keiyaku-verbs.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
-import { isParsedAkumaCommand, runAkumaCommand } from "./commands/akuma.js";
-import { admitBindMarkdown, runContractCommand, runContractHistoryCommand } from "./commands/contract.js";
+import { acquireAkumaRequest, runSpawn, runAsk, runAkumaHistory } from "./commands/akuma.js";
+import { acquireContractRequest, admitBindMarkdown, runContractRequest } from "./commands/contract.js";
 import { installOutcome, installHarnesses, renderInstallText } from "./commands/install.js";
 import { runDebtCommand } from "./commands/debt.js";
 import { runReport } from "./commands/report.js";
@@ -15,6 +15,7 @@ import { resolveInvocationCoordinates } from "./coordinates.js";
 import { BindDraftError } from "./draft.js";
 import {
   assertExplicitRepoUse,
+  commandName,
   CliUsageError,
   usageGuideForCommand,
   type ParsedCommand,
@@ -103,14 +104,14 @@ type FacetCommand = Exclude<ParsedCommand, { command: "install" }>;
 // there was a wire input. The name still selects operation-specific judgment.
 function thrownCompletion(error: unknown, command: FacetCommand) {
   const name = (
-    command.command === "debt"
-      ? command.action === "ls"
-        ? "ls"
-        : command.action === "add" && command.stdin === "document"
-          ? "debt.addDocument"
-          : `debt.${command.action}`
-      : command.command === "deliver" && command.dryRun
-        ? "deliver.preview"
+    "name" in command
+      ? command.name
+      : command.command === "debt"
+        ? command.action === "ls"
+          ? "ls"
+          : command.action === "add" && command.stdin === "document"
+            ? "debt.addDocument"
+            : `debt.${command.action}`
         : command.command
   ) as VerbName;
   const input = undefined as unknown as VerbInput<VerbName>;
@@ -177,7 +178,7 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
     else writeStderr(error.message);
     return "usage";
   }
-  if (command.command === "install") return writeInstallFailure(error, command);
+  if ("command" in command && command.command === "install") return writeInstallFailure(error, command);
   const shared = thrownCompletion(error, command);
   if (
     error instanceof AkumaNotBornError ||
@@ -186,7 +187,7 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
     error instanceof AkumaObservationError
   )
     return writeAkumaFailure(error, command, shared);
-  if (error instanceof AkumaArchetypeError && command.command === "spawn")
+  if (error instanceof AkumaArchetypeError && commandName(command) === "spawn")
     return writeArchetypeFailure(error, command, shared);
   if (command.output === "json") writeJson(projectFailure(error));
   else if (error instanceof KeiyakuError && error.outcome !== undefined) writeStdout(shared.text());
@@ -236,28 +237,42 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
       signal: cancellation.signal,
       progress: () => (progress ??= writeExecutionProgress()),
     };
-    if (command.command === "install") {
-      const result = await installHarnesses(command.harnesses, environment);
-      return emit(command.output, result, () => renderInstallText(result), installOutcome(result));
+    if ("command" in command) {
+      if (command.command === "install") {
+        const result = await installHarnesses(command.harnesses, environment);
+        return emit(command.output, result, () => renderInstallText(result), installOutcome(result));
+      }
+      if (command.command === "report") return await runReport(command, runtime);
+      if (command.command === "whoami") return await runWhoami(command, runtime);
+      return await runDebtCommand(command, runtime);
     }
-    if (command.command === "bind" && command.forkOf === undefined) {
+    if (command.name === "bind" && "acquire" in command) {
       await admitBindMarkdown({
         markdown: await runtime.readStdin(),
         processCwd: input.cwd ?? process.cwd(),
         ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       });
     }
-    if (command.command === "report") return await runReport(command, runtime);
-    if (command.command === "whoami") return await runWhoami(command, runtime);
-    if (command.command === "history" && "contract" in command)
-      return await runContractHistoryCommand(command, runtime);
-    if (isParsedAkumaCommand(command)) return await runAkumaCommand(command, invocation.workdir, runtime);
-    if (command.command === "debt") return await runDebtCommand(command, runtime);
-    return await runContractCommand(command, runtime);
+    const request =
+      "acquire" in command
+        ? command.name === "spawn" || command.name === "tell" || command.name === "ask"
+          ? await acquireAkumaRequest(command, invocation.workdir, runtime)
+          : await acquireContractRequest(command, runtime)
+        : command;
+    if (request.name === "spawn") return await runSpawn(request, runtime);
+    if (request.name === "ask") return await runAsk(request, runtime);
+    if (request.name === "history" && !request.input.selector.startsWith("kei/"))
+      return await runAkumaHistory(request, runtime);
+    return await runContractRequest(request, runtime);
   } catch (error) {
     if (error instanceof KeiyakuUsageError) {
       const usage = new CliUsageError(error.message, usageGuideForCommand(command));
-      if (command.command === "ls" && command.query.kind === "akuma" && command.query.caller?.kind === "mine")
+      if (
+        "name" in command &&
+        command.name === "ls" &&
+        command.input.of === "aku" &&
+        command.input.caller?.kind === "mine"
+      )
         return await writeFailure(usage, command);
       throw usage;
     }

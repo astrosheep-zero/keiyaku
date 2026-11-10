@@ -2,12 +2,9 @@ import { classifyVerb } from "../../library/keiyaku-verbs.js";
 import type { CliRuntime } from "../runtime.js";
 import { renderVerb } from "../render/verbs.js";
 import { displayContext, emit, type CliOutcome } from "../streams.js";
-import type { ParsedAkumaCommand } from "./akuma-grammar.js";
+import type { ReportCommand } from "./akuma-grammar.js";
 
-export async function runReport(
-  command: Extract<ParsedAkumaCommand, { command: "report" }>,
-  runtime: CliRuntime,
-): Promise<CliOutcome> {
+export async function runReport(command: ReportCommand, runtime: CliRuntime): Promise<CliOutcome> {
   const text = command.prompt.kind === "stdin" ? await runtime.readStdin() : command.prompt.value;
   const wire = { text };
   const result = await runtime.facet.run("report", wire, { signal: runtime.signal });
