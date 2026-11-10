@@ -26,7 +26,6 @@ import type {
   BoardSection,
   DebtSection,
   ContractKanshiBoard,
-  ContractCategoryBoard,
   ContractRosterAttachment,
   DebtKanshiWorld,
   KanshiCategoryReport,
@@ -525,32 +524,10 @@ export async function kanshiCategory(input: KanshiCategoryInput): Promise<Kanshi
     const selectedRepo = scopeForRepo(repo!);
     return await withGitDecodeChannel(selectedRepo, (channel) =>
       withGitReadObservation(selectedRepo, channel, async (observation) => {
-        const holders = await holdersAt(observation);
-        const section = await contractsAt(observation, limit, holders, absent, aliases);
+        const [holders, dispatches] = await Promise.all([holdersAt(observation), dispatchesAt(observation)]);
+        const section = await contractsAt(observation, limit, holders, dispatches, aliases);
         if (section.kind === "absent") throw new Error("Contract category with Repo cannot be absent");
-        const sourceRows = section.kind === "present" ? section.rows : undefined;
-        const extent = section.kind === "present" && section.more === true ? { more: true as const } : {};
-        const rows = (sourceRows ?? []).map((row) => {
-          const { associations, ...facts } = row;
-          const holders = (associations ?? []).flatMap(
-            (
-              association,
-            ): NonNullable<NonNullable<ContractCategoryBoard["rows"]>[number]["associations"]>[number][] => {
-              if (association.kind === "debt") return [association];
-              if (association.kind === "unavailable" && association.source === "holder")
-                return [{ kind: "unavailable", source: "holder", diagnostic: association.diagnostic }];
-              return [];
-            },
-          );
-          return { ...facts, ...(holders.length === 0 ? {} : { associations: holders }) };
-        });
-        const report: KanshiCategoryReport<"contract"> = {
-          observedAt,
-          section:
-            section.kind === "failed"
-              ? section
-              : { kind: "present", ...extent, ...(rows.length === 0 ? {} : { rows }) },
-        };
+        const report: KanshiCategoryReport<"contract"> = { observedAt, section };
         observed = report;
         return report;
       }),

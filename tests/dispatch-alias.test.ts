@@ -10,12 +10,9 @@ import { parseAkumaId, type AkumaId } from "../src/akuma/identity.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
-import {
-  observeDispatchAssociations,
-  publishDispatch,
-  readDispatch,
-  readDispatches,
-} from "../src/dispatch/index.js";
+import { observeDispatchAssociations, publishDispatch, readDispatch, readDispatches } from "../src/dispatch/index.js";
+import { Akumas, Repo, World } from "../src/index.js";
+import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import {
   GIT_REF,
@@ -279,6 +276,37 @@ const ASSOCIATION_IDS = [
   parseAkumaId("aku/reviewer/00000002").id,
   parseAkumaId("aku/worker/00000003").id,
 ] as const;
+
+test("Contract member selection and complete Dispatch reads reject an unrelated obsolete fact before mutation", async (t) => {
+  const raw = makeGitRepository();
+  const repository = await repositoryAt(raw.path);
+  const world = await World.at(temporaryDirectory(t, "dispatch-members-"));
+  const born = await bornDirectAkuma({
+    root: world,
+    akumaName: "worker",
+    draw: "00000001",
+    createdAt: "2026-08-09T00:00:00.000Z",
+  });
+  t.after(() => born.leash.release());
+  const owner = contractId("kei/strict-members");
+  assert.equal((await publishDispatch({ repository, akumaId: born.id, contractId: owner })).kind, "dispatched");
+  const unrelated = ASSOCIATION_IDS[1];
+  await overwriteDispatchFact(
+    repository,
+    unrelated,
+    `${JSON.stringify({ akuId: unrelated, contractId: "kei/unrelated", dispatchedAt: "2026-08-09T00:00:00.000Z" })}\n`,
+  );
+  await assert.rejects(readDispatches(repository), AuthorityCorruptionError);
+  const before = await Akumas.of(world).status({ akuma: born.id });
+  assert.ok(before.kind === "akuma");
+  await assert.rejects(
+    Akumas.of(world).kill({ akuma: [owner], repo: await Repo.at({ path: raw.path }) }),
+    AuthorityCorruptionError,
+  );
+  const after = await Akumas.of(world).status({ akuma: born.id });
+  assert.ok(after.kind === "akuma");
+  assert.equal(after.life, before.life);
+});
 
 test("a selected association read answers every requested identity from one targeted observation", async () => {
   const repository = await repositoryAt(makeGitRepository().path);

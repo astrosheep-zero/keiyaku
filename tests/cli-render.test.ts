@@ -429,6 +429,23 @@ test("full Contract history renders supplied historical terms rather than a curr
   );
   assert.ok(full.includes(entry));
   assert.doesNotMatch(renderContractHistory(history), /Historical terms|Original scope/u);
+  const unavailable = {
+    ...history,
+    dispatches: {
+      kind: "unavailable" as const,
+      category: "authority-corruption" as const,
+      diagnostic: "Dispatch has invalid fields: dispatch/broken.json",
+    },
+  };
+  for (const full of [false, true]) {
+    const rendered = renderContractHistory(unavailable, { full });
+    assert.ok(rendered.includes(full ? "Original scope." : "bound to targetless"));
+    assert.ok(
+      rendered.includes(
+        "! Dispatch history unavailable · authority-corruption · Dispatch has invalid fields: dispatch/broken.json",
+      ),
+    );
+  }
 });
 
 test("a debt title wraps its em-dash and title as one unit", () => {

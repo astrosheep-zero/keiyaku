@@ -16,7 +16,19 @@ canonicality and duplication. Corrupt, missing, malformed, or duplicate durable
 Dispatch authority is `AuthorityCorruptionError`, never a partly repaired read
 or cache entry.
 
-Contract history may compose Dispatch facts from that same frozen observation.
+Contract history composes optional Dispatch enrichment only after establishing
+readable Contract authority, from that same frozen observation. Missing
+Contracts remain missing. An unavailable complete Dispatch source leaves the
+Contract journal readable and explicitly reports the association failure; it
+never supplies partial membership or establishes absence. Contract authority,
+observation, cancellation, and resource-retirement failures retain their own
+exceptional meaning. Complete Contract-to-Akuma selection depends on Dispatch
+as subject-set authority and remains strict when that authority is unavailable.
+
+Contract-category observations retain available Dispatch associations through
+the shared read-time composition. Unavailable association authority leaves
+readable Contract rows present with explicit unavailable evidence.
+
 Membership is exact Contract identity. This projection creates no Contract
 back-pointer, Akuma-history expansion, second timestamp, or reverse index.
 Failed publication creates no Dispatch event.

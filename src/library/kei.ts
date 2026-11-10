@@ -13,7 +13,7 @@ import {
   stateOperation,
   type RepositoryScope,
 } from "../protocol/operations.js";
-import { readContractValue, validated } from "./outcome.js";
+import { errorCategory, readContractValue, validated } from "./outcome.js";
 import { optionalBoolean, requireInput } from "./input.js";
 import { ContractExecution } from "./contract-execution.js";
 import type {
@@ -109,10 +109,7 @@ export class Kei {
     return await readContractValue(() =>
       withGitDecodeChannel(this.scope, (channel) =>
         withGitReadObservation(this.scope, channel, async (observation) => {
-          const [journals, dispatches] = await Promise.all([
-            observeContractsForAdmissionInObservationAt(observation, [this.id]),
-            readDispatchesAt(observation),
-          ]);
+          const journals = await observeContractsForAdmissionInObservationAt(observation, [this.id]);
           const record = journals.journals.get(this.id);
           if (record === undefined) throw new Error(`missing requested contract observation: ${this.id}`);
           if (record.state === null) return { kind: "contract-missing", contractId: this.id };
@@ -123,8 +120,21 @@ export class Kei {
             else if (entry.kind === "amend") terms = entry.data;
             return event;
           });
+          let unavailable: Extract<ContractHistory, { kind: "contract" }>["dispatches"];
+          let dispatches;
+          try {
+            dispatches = await readDispatchesAt(observation);
+          } catch (error) {
+            const category = errorCategory(error);
+            if (category === "aborted" || this.scope.signal?.aborted === true) throw error;
+            unavailable = {
+              kind: "unavailable",
+              category: category === "authority-corruption" ? category : "internal",
+              diagnostic: error instanceof Error ? error.message : String(error),
+            };
+          }
           events.push(
-            ...dispatches
+            ...(dispatches ?? [])
               .filter((dispatch) => dispatch.contractId === this.id)
               .map((dispatch) => ({
                 kind: "dispatch" as const,
@@ -137,7 +147,12 @@ export class Kei {
             if ((left.kind === "dispatch") !== (right.kind === "dispatch")) return left.kind === "dispatch" ? 1 : -1;
             return 0;
           });
-          return { kind: "contract", contractId: this.id, events };
+          return {
+            kind: "contract",
+            contractId: this.id,
+            events,
+            ...(unavailable === undefined ? {} : { dispatches: unavailable }),
+          };
         }),
       ),
     );

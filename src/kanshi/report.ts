@@ -95,20 +95,11 @@ const catalogue = <S extends z.ZodType>(row: S) =>
       more: z.literal(true).exactOptional(),
     })
     .readonly();
-const holderAssociation = z.union([
-  contractSummaryAssociationSchema.options[0],
-  z.strictObject({ kind: z.literal("unavailable"), source: z.literal("holder"), diagnostic: z.string() }).readonly(),
-]);
 const boardRow = contractSummarySchema
   .unwrap()
   .extend({ associations: z.array(contractSummaryAssociationSchema).min(1).readonly().exactOptional() })
   .readonly();
-const categoryRow = contractSummarySchema
-  .unwrap()
-  .extend({ associations: z.array(holderAssociation).min(1).readonly().exactOptional() })
-  .readonly();
 export const contractKanshiBoardSchema = catalogue(boardRow);
-const contractCategoryBoard = catalogue(categoryRow);
 const debtRow = debtSummarySchema
   .unwrap()
   .extend({ disposition: z.enum(["ready", "blocked"]), contract: associationSchema.exactOptional() })
@@ -138,7 +129,7 @@ export const contractCategoryReportSchema = z
   .strictObject({
     observedAt: z.string(),
     section: z.union([
-      contractCategoryBoard
+      contractKanshiBoardSchema
         .unwrap()
         .extend({ kind: z.literal("present") })
         .readonly(),
@@ -154,7 +145,6 @@ export type ContractHolderObservation = z.output<typeof holderSchema>;
 export type ContractRosterAttachment = z.output<typeof attachmentSchema>;
 export type ContractKanshiDetail = z.output<typeof contractDetail>;
 export type ContractKanshiBoard = z.output<typeof contractKanshiBoardSchema>;
-export type ContractCategoryBoard = z.output<typeof contractCategoryBoard>;
 export type DebtKanshiRow = z.output<typeof debtRow>;
 export type DebtKanshiWorld = z.output<typeof debtWorld>;
 export type AkumaKanshiRow = z.output<typeof akumaRow>;

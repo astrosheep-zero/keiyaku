@@ -114,6 +114,14 @@ export const contractHistorySchema = z.union([
       kind: z.literal("contract"),
       contractId: contractIdSchema,
       events: z.array(contractHistoryEventSchema).readonly(),
+      dispatches: z
+        .strictObject({
+          kind: z.literal("unavailable"),
+          category: z.enum(["authority-corruption", "internal"]),
+          diagnostic: z.string(),
+        })
+        .readonly()
+        .exactOptional(),
     })
     .readonly(),
   z.strictObject({ kind: z.literal("contract-missing"), contractId: contractIdSchema }).readonly(),

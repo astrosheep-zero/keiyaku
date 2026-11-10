@@ -161,7 +161,14 @@ export function renderContractHistory(
       ? "abandoned"
       : "bound";
   const header = `history  ${history.contractId}${options.full === true ? "" : ` · ${state}`}${counts.length === 0 ? "" : ` · ${counts.join(" · ")}`}`;
-  if (options.full === true) return [header, "", ...history.events.flatMap(fullEventLines)].join("\n");
+  const failure =
+    history.dispatches === undefined
+      ? []
+      : [
+          "",
+          `! Dispatch history unavailable · ${history.dispatches.category} · ${safeText(history.dispatches.diagnostic)}`,
+        ];
+  if (options.full === true) return [header, "", ...history.events.flatMap(fullEventLines), ...failure].join("\n");
   const lines = [header, ""];
   let day: string | undefined;
   for (let index = 0; index < history.events.length; index += 1) {
@@ -178,5 +185,5 @@ export function renderContractHistory(
     }
     lines.push(`${clock(event)} ${eventLine(event, adjacent)}`);
   }
-  return lines.join("\n");
+  return [...lines, ...failure].join("\n");
 }

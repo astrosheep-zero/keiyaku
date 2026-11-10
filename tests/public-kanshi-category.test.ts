@@ -3,12 +3,15 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
+import { createHash } from "node:crypto";
+import { parseAkumaId } from "../src/akuma/identity.js";
 import { breakBody } from "../src/akuma/heart/index.js";
 import { moveAlias } from "../src/alias/index.js";
 import { contractId } from "../src/core/facts/types.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import {
+  readGitPaths,
   updateGitTree,
   updateRefsAtomically,
   writeBlob,
@@ -16,7 +19,7 @@ import {
   repositoryAt,
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
-import { Akumas, kanshiCategory, Keis, Repo, World } from "../src/index.js";
+import { Akumas, kanshiCategory, kanshiCategoryReportSchema, Keis, Repo, World } from "../src/index.js";
 import type { KanshiCategoryInput, KanshiCategoryReport } from "../src/index.js";
 import type { WorldRoot } from "../src/world.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -24,6 +27,7 @@ import { cliJson } from "./support/cli-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 
 async function worldWithAkuma(context: TestContext, count: number): Promise<WorldRoot> {
   const world = await World.at(realpathSync(mkdtempSync(join(tmpdir(), "keiyaku-public-category-"))));
@@ -102,6 +106,64 @@ test("category observation reuses owner rows and is the operation the CLI runs",
   );
   assert.equal(rows[0]!.associations, undefined);
   assert.equal("akuma" in contracts, false);
+});
+
+test("Contract category attaches observed Dispatch facts and keeps rows when unrelated authority is corrupt", async (context) => {
+  const repository = makeGitRepository();
+  context.after(() => rmSync(repository.path, { recursive: true, force: true }));
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const repo = await Repo.at({ path: repository.path });
+  const bound = accepted(
+    await Keis.of(repo).bind({
+      target: "main",
+      gates: ["reviewed"],
+      markdown: contractMarkdown("Category association", {
+        Context: "category",
+        Objective: "observe",
+        Design: "shared association",
+        Region: "src/**",
+        Criteria: "### Visible\nReadable row.",
+      }),
+    }),
+  );
+  const world = await World.at(repository.path);
+  const git = await repositoryAt(repository.path);
+  const member = parseAkumaId("aku/worker/a0000001").id;
+  assert.equal(
+    (await publishDispatch({ repository: git, akumaId: member, contractId: bound.contractId })).kind,
+    "dispatched",
+  );
+  await moveAlias({ world, alias: parseAkumaAlias("@category"), akumaId: member });
+  const healthy = await kanshiCategory({ world, repo, category: "contract" });
+  assertWireRoundTrip(kanshiCategoryReportSchema, healthy);
+  if (healthy.section.kind !== "present") assert.fail(JSON.stringify(healthy));
+  const row = healthy.section.rows![0]!;
+  assert.equal(row.id, bound.contractId);
+  assert.deepEqual(row.associations, [{ kind: "akuma", akumaId: member, aliases: ["@category"] }]);
+  const unrelated = parseAkumaId("aku/worker/a0000002").id;
+  const path = `dispatch/${createHash("sha256").update(unrelated).digest("hex")}.json`;
+  const snapshot = await readGitPaths(git, []);
+  const bytes = `${JSON.stringify({ akuId: unrelated, contractId: "kei/unrelated", dispatchedAt: "2026-08-09T00:00:00.000Z" })}\n`;
+  const tree = await updateGitTree(git, snapshot.tree, new Map([[path, { oid: await writeBlob(git, bytes) }]]));
+  const commit = await writeStateCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(
+    (
+      await updateRefsAtomically(git, [
+        { ref: "refs/heads/keiyaku-state", newOid: commit, expectedOid: snapshot.commit },
+      ])
+    ).kind,
+    "published",
+  );
+  const corrupt = await kanshiCategory({ world, repo, category: "contract" });
+  assertWireRoundTrip(kanshiCategoryReportSchema, corrupt);
+  if (corrupt.section.kind !== "present") assert.fail(JSON.stringify(corrupt));
+  const failedRow = corrupt.section.rows![0]!;
+  const { associations: _healthy, ...expected } = row;
+  const { associations, ...actual } = failedRow;
+  assert.deepEqual(actual, expected);
+  assert.deepEqual(associations, [
+    { kind: "unavailable", source: "roster", diagnostic: `Dispatch has invalid fields: ${path}` },
+  ]);
 });
 
 test("failed Dispatch leaves the bounded Akuma category and Alias rows readable", async (context) => {
