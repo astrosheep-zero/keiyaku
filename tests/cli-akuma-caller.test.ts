@@ -129,12 +129,13 @@ test("ls caller selection refuses absent identity and non-Akuma catalogues", asy
   const missing = await runCli(["-C", root, "ls", "--mine"], { environment: {} });
   assert.equal(missing.exit, 64);
   assert.match(missing.stderr, /--mine requires a caller identity/u);
-  for (const environment of [
-    { CODEX_THREAD_ID: "codex", PI_SESSION_ID: "pi" },
-    { KEIYAKU_ACTOR_ID: "aku/parent/1234abcd" },
-  ]) {
+  for (const [environment, message] of [
+    [{ CODEX_THREAD_ID: "codex", PI_SESSION_ID: "pi" }, /Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID/u],
+    [{ KEIYAKU_ACTOR_ID: "aku/parent/1234abcd" }, /requires both KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD/u],
+  ] as const) {
     const ambiguous = await runCli(["-C", root, "ls", "--mine"], { environment });
     assert.equal(ambiguous.exit, 64);
+    assert.match(ambiguous.stderr, message);
   }
   for (const argv of [
     ["ls", "aku/*/*", "--mine", "--caller", "test:root"],

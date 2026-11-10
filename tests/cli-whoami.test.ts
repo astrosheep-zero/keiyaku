@@ -111,7 +111,7 @@ test("self declarations do not adopt outgoing attribution", async (t) => {
 
   for (const [environment, message] of [
     [{ KEIYAKU_ACTOR_ID: "aku/worker/1234abcd" }, /both KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD/u],
-    [{ CODEX_THREAD_ID: "one", PI_SESSION_ID: "two" }, /Ambiguous native host caller/u],
+    [{ CODEX_THREAD_ID: "one", PI_SESSION_ID: "two" }, /Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID/u],
     [{ KEIYAKU_EXTERNAL_CALLER: "bad" }, /<integration>:<id>/u],
   ] as const) {
     const result = await cliJson<WhoamiFacts>(["-C", root, "whoami"], { environment });

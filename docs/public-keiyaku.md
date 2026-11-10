@@ -20,6 +20,10 @@ initiator attribution. These declarations are not authentication. Akuma
 execution directories remain independent of Contract association. Product
 surfaces neither depend on the facet nor require it to operate.
 
+Ambiguous native harness caller declarations are refused rather than guessed.
+The diagnostic names every conflicting environment variable so the caller can
+identify the competing declarations without disclosing their values.
+
 Debt invocation resolves the caller's World independently of a selected Repo.
 Only operations consuming a default namespace read installed context; explicit
 namespace and World scope bypass it. Creation alone derives actor testimony,

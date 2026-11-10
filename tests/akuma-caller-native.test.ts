@@ -30,9 +30,15 @@ test("complete Akuma parent wins; incomplete custody and ambiguous native hosts 
     { kind: "akuma", akumaId: "aku/parent/1234abcd", world: realpathSync(world) });
   await assert.rejects(akumaCallerFromEnvironment({ ...hosts, KEIYAKU_ACTOR_ID: "aku/parent/1234abcd" }),
     /requires both/u);
-  await assert.rejects(akumaCallerFromEnvironment(hosts), /Ambiguous native host caller: codex, pi, claude/u);
+  await assert.rejects(akumaCallerFromEnvironment(hosts), {
+    name: "TypeError",
+    message: "Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID, CLAUDE_CODE_SESSION_ID",
+  });
   await assert.rejects(akumaCallerFromEnvironment({ CODEX_THREAD_ID: "codex", PI_SESSION_ID: "pi",
-    KEIYAKU_EXTERNAL_CALLER: "paseo:legacy" }), /Ambiguous native host caller/u);
+    CLAUDE_CODE_SESSION_ID: "", KEIYAKU_EXTERNAL_CALLER: "paseo:legacy" }), {
+    name: "TypeError",
+    message: "Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID",
+  });
 });
 
 test("existing execution boundary prevents inherited host identity from attributing the next Akuma", async () => {

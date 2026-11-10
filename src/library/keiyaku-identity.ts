@@ -25,14 +25,14 @@ export async function akumaCallerFromEnvironment(environment: NodeJS.ProcessEnv)
     return decodeAkumaCaller({ kind: "akuma", akumaId: id, world: resolved.candidate });
   }
   const hosts = [
-    { integration: "codex", id: environment.CODEX_THREAD_ID },
-    { integration: "pi", id: environment.PI_SESSION_ID },
-    { integration: "claude", id: environment.CLAUDE_CODE_SESSION_ID },
+    { integration: "codex", variable: "CODEX_THREAD_ID", id: environment.CODEX_THREAD_ID },
+    { integration: "pi", variable: "PI_SESSION_ID", id: environment.PI_SESSION_ID },
+    { integration: "claude", variable: "CLAUDE_CODE_SESSION_ID", id: environment.CLAUDE_CODE_SESSION_ID },
   ].filter(({ id }) => id !== undefined && id !== "");
   if (hosts.length > 1) {
-    throw new TypeError(`Ambiguous native host caller: ${hosts.map(({ integration }) => integration).join(", ")}`);
+    throw new TypeError(`Ambiguous native host caller: ${hosts.map(({ variable }) => variable).join(", ")}`);
   }
-  if (hosts[0]) return decodeAkumaCaller({ kind: "external", ...hosts[0] });
+  if (hosts[0]) return decodeAkumaCaller({ kind: "external", integration: hosts[0].integration, id: hosts[0].id });
   const external = environment.KEIYAKU_EXTERNAL_CALLER;
   if (external === undefined) return undefined;
   const colon = external.indexOf(":");
