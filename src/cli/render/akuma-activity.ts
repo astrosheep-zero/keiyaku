@@ -399,22 +399,6 @@ function groupedRows(rows: readonly RenderRow[], context: TextRenderContext, vie
   );
 }
 
-/** Ordered entry stream of one retained snapshot; an idle outcome keeps its sequence position. */
-function orderedSnapshotEntries(snapshot: RenderedSnapshot): readonly RenderEntry[] {
-  if (snapshot.kind !== "idle" || snapshot.outcome === undefined) return snapshot.entries;
-  const entries: RenderEntry[] = [];
-  let outcomeInserted = false;
-  for (const entry of snapshot.entries) {
-    if (!outcomeInserted && entry.kind === "row" && entry.row.sequence > snapshot.outcome.sequence) {
-      entries.push({ kind: "row", row: snapshot.outcome });
-      outcomeInserted = true;
-    }
-    entries.push(entry);
-  }
-  if (!outcomeInserted) entries.push({ kind: "row", row: snapshot.outcome });
-  return entries;
-}
-
 function currentTurnBoundary(activity: RenderedActivity): CurrentTurnBoundary | undefined {
   const snapshot = activity.snapshot;
   if (snapshot.kind !== "open" || snapshot.openingSequence === undefined) return undefined;
@@ -423,48 +407,6 @@ function currentTurnBoundary(activity: RenderedActivity): CurrentTurnBoundary | 
   // The projector selects a typed opening: its call or delivered launch Tell.
   if (row.kind !== "call" && !(row.kind === "tell" && row.state === "told")) return undefined;
   return { row, turnSequence: snapshot.turn.sequence };
-}
-
-/** Open status hides internal thought narration without selecting a second activity window. */
-function visibleOpenSnapshotEntries(snapshot: Extract<RenderedSnapshot, { kind: "open" }>): readonly RenderEntry[] {
-  return snapshot.entries.filter((entry) => entry.kind !== "row" || entry.row.kind !== "thought");
-}
-
-/** Adjacent omitted spans are one continuous unknown portion of the retained timeline. */
-function coalesceAdjacentGaps(entries: readonly RenderEntry[]): readonly RenderEntry[] {
-  return entries.reduce<RenderEntry[]>((coalesced, entry) => {
-    const previous = coalesced.at(-1);
-    if (entry.kind === "gap" && previous?.kind === "gap") {
-      coalesced[coalesced.length - 1] = { kind: "gap", count: previous.count + entry.count };
-    } else {
-      coalesced.push(entry);
-    }
-    return coalesced;
-  }, []);
-}
-
-/**
- * Shared snapshot activity rendering. Full snapshots render the selected
- * activity evidence; an idle snapshot is settled evidence. `latest` preserves
- * compact callers' established newest-entry selection.
- */
-export function snapshotActivityLines(
-  snapshot: RenderedSnapshot,
-  context: TextRenderContext,
-  selection: Readonly<{ latest?: boolean; tailAnswer?: true }> = {},
-): readonly string[] {
-  const entries = orderedSnapshotEntries(snapshot);
-  if (selection.latest !== true) {
-    const full = snapshot.kind === "open" ? visibleOpenSnapshotEntries(snapshot) : entries;
-    return groupedEntries(coalesceAdjacentGaps(full), context);
-  }
-  const latest = entries.filter((entry) => entry.kind === "row").at(-1);
-  return latest === undefined
-    ? []
-    : groupedEntries([latest], context, {
-        compact: true,
-        ...(selection.tailAnswer === true ? { tailAnswer: true as const } : {}),
-      });
 }
 
 /** One command's append-only activity view, with a baseline and a final tail flush. */

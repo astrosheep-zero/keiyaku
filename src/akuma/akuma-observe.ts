@@ -12,7 +12,6 @@ import {
   probeLeash,
   readHeart,
   readSeal,
-  readSoul,
   type HeartSnapshot,
 } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
@@ -347,12 +346,6 @@ export async function waitForObservation<T>(
       input.signal,
     );
   }
-}
-
-export async function readAkumaBirthCwd(worldPath: WorldRoot, id: AkumaId): Promise<string> {
-  const soul = await readSoul(pathsForAkumaId(worldPath, id));
-  if (soul === null) throw new AkumaNotBornError(id);
-  return soul.cwd;
 }
 
 export { selectHistory, type ActivityHistory, type ActivitySnapshot };

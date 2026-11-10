@@ -104,5 +104,3 @@ Akuma.nuke({ world, confirm: world });
 type RemovedAkumasSubpath = import("@astrosheep/keiyaku/akumas").Akumas;
 // @ts-expect-error the private Archetype loader stays off the package root
 type RemovedArchetypeLoader = import("@astrosheep/keiyaku").loadArchetype;
-// @ts-expect-error only the bounded definitions catalogue is public, not the name-only list
-type RemovedArchetypeNames = import("@astrosheep/keiyaku").listArchetypes;

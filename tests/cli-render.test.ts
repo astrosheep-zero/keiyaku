@@ -31,7 +31,7 @@ import {
   callObservationStream,
   frameRule,
   historyText as nativeHistoryText,
-  snapshotActivityLines,
+  activityRowLines,
   snapshotText,
   waitText as nativeWaitText,
 } from "../src/cli/render/akuma-activity.js";
@@ -112,7 +112,7 @@ test("canceled outcomes render as canceled in CLI history and snapshots", () => 
     ),
     "canceled",
   );
-  assert.match(snapshotActivityLines(idleAkumaSnapshot([], row), DEFAULT_CONTEXT).join("\n"), /canceled/u);
+  assert.match(activityRowLines(row.outcome, DEFAULT_CONTEXT).join("\n"), /canceled/u);
 });
 
 const DIRECT_BIRTH = { origin: { kind: "direct" }, caller: { kind: "unknown" } } as const;
@@ -185,9 +185,8 @@ function preview(value: unknown, truncated = false): Readonly<{ json: string; tr
 
 type GenericFixture = readonly [number, string, ReturnType<typeof preview>?];
 const genericLines = (rows: readonly GenericFixture[], columns: number) =>
-  snapshotActivityLines(
-    openAkumaSnapshot(rows.map(([sequence, name, input]) => snapshotRow(genericTool(sequence, name, input)))),
-    { columns, color: false },
+  rows.flatMap(([sequence, name, input]) =>
+    activityRowLines(genericTool(sequence, name, input), { columns, color: false }),
   );
 function callObservation(observation: NonNullable<SpawnResult["input"]>): SpawnResult {
   return {
@@ -1016,7 +1015,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(claimed, /│ /u);
   assert.match(claimed, /…”/u);
   assert.doesNotMatch(claimed, /candidate|candidate|predecessor|method|content identity|target moved|behind|worktree/u);
-  const answer = snapshotActivityLines(idleAkumaSnapshot([], answeredOutcome(2, long)), {
+  const answer = activityRowLines(answeredOutcome(2, long).outcome, {
     columns: 60,
     color: false,
   }).join("\n");
@@ -2040,43 +2039,29 @@ test("materialized conflict text keeps the exact recovery projection", () => {
   assert.doesNotMatch(renderConflictMaterialized(result), /staging|not-required|UU|please|next|then/u);
 });
 
-test("World roster reuses snapshot activity rendering for concrete tool work", () => {
-  const calls: readonly Readonly<{ name: string; call: ActivityToolCall; evidence: string }>[] = [
-    { name: "read", call: { kind: "read", path: "src/a.ts", offset: 10, limit: 5 }, evidence: "src/a.ts · L10-14" },
+test("World roster keeps the latest concrete tool work", () => {
+  const calls: readonly Readonly<{ name: string; call: ActivityToolCall }>[] = [
+    { name: "read", call: { kind: "read", path: "src/a.ts", offset: 10, limit: 5 } },
     {
       name: "grep",
       call: { kind: "search", query: "snapshot", scope: "content", path: "src" },
-      evidence: "snapshot · src",
     },
     {
       name: "edit",
       call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", diffstat: { added: 2, removed: 1 } }] },
-      evidence: "src/a.ts — +2 -1",
     },
     {
       name: "bash",
       call: { kind: "run", command: "npm test -- tests/cli-render.test.ts" },
-      evidence: "$ npm test -- tests/cli-render.test.ts",
     },
   ];
   const snapshot = openAkumaSnapshot(
     calls.map((member, index) => snapshotRow(completedTool(index + 1, member.name, member.call))),
   );
-  const targeted = snapshotActivityLines(snapshot, { columns: 118, color: false });
-  for (const member of calls)
-    assert.ok(
-      targeted.some((line) => line.includes(member.evidence)),
-      member.evidence,
-    );
   const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running", snapshot)]), {
     columns: 120,
     color: false,
   });
-  const bounded = snapshotActivityLines(snapshot, { columns: 118, color: false }, { latest: true });
-  assert.deepEqual(
-    roster.slice(-bounded.length),
-    bounded.map((line) => `  ${line}`),
-  );
   assert.match(roster.at(-1)!, /run +\$ npm test -- tests\/cli-render\.test\.ts/u);
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
@@ -2092,7 +2077,7 @@ test("World answer previews keep the conclusion, while detail keeps its opening"
   assert.match(board, /✓ …/u);
   assert.match(board, /conclusion: ship the fix$/mu);
   assert.doesNotMatch(board, /premise premise premise premise premise premise/u);
-  const detail = snapshotActivityLines(snapshot, context).join("\n");
+  const detail = activityRowLines(answeredOutcome(1, answer).outcome, context).join("\n");
   assert.match(detail, /^✓ premise premise/mu);
   assert.doesNotMatch(detail, /^✓ …/mu);
 });
@@ -2111,7 +2096,9 @@ test("long read and edit previews keep path tails with range and diffstat detail
   ];
 
   for (const columns of [100, 48]) {
-    const lines = snapshotActivityLines(openAkumaSnapshot(rows), { columns, color: false });
+    const lines = rows.flatMap((entry) =>
+      entry.kind === "row" ? activityRowLines(entry.row, { columns, color: false }) : [],
+    );
     const readPath = columns === 100 ? longRead : "…/reader/ReadMeber.ts";
     const editPath = columns === 100 ? longEdit : "…/changes/ChangedFile.ts";
     assert.ok(
@@ -2125,10 +2112,8 @@ test("long read and edit previews keep path tails with range and diffstat detail
     for (const line of lines) assert.ok(displayColumns(line) <= columns, `${columns} columns: ${line}`);
   }
 
-  const short = snapshotActivityLines(
-    openAkumaSnapshot([
-      snapshotRow(completedTool(1, "read", { kind: "read", path: "src/short.ts", offset: 2, limit: 2 })),
-    ]),
+  const short = activityRowLines(
+    completedTool(1, "read", { kind: "read", path: "src/short.ts", offset: 2, limit: 2 }),
     { columns: 100, color: false },
   );
   assert.ok(short.some((line) => line.includes("src/short.ts · L2-3")));
@@ -2154,7 +2139,9 @@ test("settled file changes retain exact stats or show unknown stats", () => {
       }),
     ),
   ]);
-  const lines = snapshotActivityLines(snapshot, { columns: 120, color: false });
+  const lines = snapshot.entries.flatMap((entry) =>
+    entry.kind === "row" ? activityRowLines(entry.row, { columns: 120, color: false }) : [],
+  );
 
   assert.ok(lines.some((line) => line.includes("src/exact.ts — +2 -1")));
   assert.ok(lines.some((line) => line.includes("src/unknown.ts — ~")));
@@ -2294,22 +2281,15 @@ test("generic tool rows preserve whole-field and indivisible-value omission", ()
 });
 
 test("generic tool rows keep failure diagnostics beside argument previews", () => {
-  const lines = snapshotActivityLines(
-    openAkumaSnapshot([
-      snapshotRow(
-        completedTool(
-          1,
-          "future_tool",
-          { kind: "other", input: preview({ alpha: 1 }) },
-          { status: "error", message: "refused" },
-        ),
-      ),
-      snapshotRow(
-        completedTool(2, "future_tool", { kind: "other", input: preview({}) }, { status: "error", exitCode: 7 }),
-      ),
-    ]),
-    { columns: 200, color: false },
-  );
+  const lines = [
+    completedTool(
+      1,
+      "future_tool",
+      { kind: "other", input: preview({ alpha: 1 }) },
+      { status: "error", message: "refused" },
+    ),
+    completedTool(2, "future_tool", { kind: "other", input: preview({}) }, { status: "error", exitCode: 7 }),
+  ].flatMap((row) => activityRowLines(row, { columns: 200, color: false }));
   for (const [pattern, message] of [
     [/\{"alpha":1\} — error · refused$/u, "argument evidence and its failure stay together"],
     [/future_tool\s+— exit 7$/u, "an empty argument object never swallows failure evidence"],
@@ -2319,10 +2299,8 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
       `${message}: ${lines.join("\n")}`,
     );
   assert.doesNotMatch(lines.join("\n"), / — ok/u);
-  const legacy = snapshotActivityLines(
-    openAkumaSnapshot([
-      snapshotRow(completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" })),
-    ]),
+  const legacy = activityRowLines(
+    completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" }),
     { columns: 120, color: false },
   ).join("\n");
   assert.match(legacy, /mystery\s+— error · refused$/mu);
@@ -2369,7 +2347,7 @@ test("generic tool rows preserve name, width, and grapheme behavior", () => {
 
 test("activity rows share one six-cell default action column", () => {
   const note = { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "payload" } as const;
-  const plainNote = snapshotActivityLines(openAkumaSnapshot([snapshotRow(note)]), { columns: 80, color: false })[0]!;
+  const plainNote = activityRowLines(note, { columns: 80, color: false })[0]!;
   const plainTool = genericLines([[1, "tool", preview({ value: 1 })]], 80)[0]!;
   assert.equal(
     plainNote.indexOf("payload"),
@@ -2401,8 +2379,6 @@ test("World roster keeps active, error and truncated activity marks truthful", (
   const truncated = openAkumaSnapshot([
     snapshotRow({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
   ]);
-  const truncatedActivity = snapshotActivityLines(truncated, { columns: 120, color: false });
-  assert.equal(truncatedActivity.length, 2, "a said row renders within its bounded line budget");
   const truncatedRoster = renderAkuma(
     akumaWorldReport([activityAkumaRow("aku/worker/eeff0008", "running", truncated)]),
     { columns: 120, color: false },
@@ -2475,7 +2451,7 @@ test("status text and JSON report the Akuma execution workdir", () => {
   assert.equal(json.cwd, "/work/tree");
 });
 
-test("status renders selected activity evidence while preserving history and compact selection", () => {
+test("status keeps current evidence while history retains thought narration", () => {
   const id = "aku/worker/abcd0040";
   const thought = {
     kind: "thought" as const,
@@ -2486,61 +2462,6 @@ test("status renders selected activity evidence while preserving history and com
   };
   const completed = (sequence: number, command: string) => completedTool(sequence, "bash", { kind: "run", command });
   const active = (sequence: number, command: string) => activeTool(sequence, "bash", { kind: "run", command });
-
-  for (const count of [0, 1, 2, 3, 4, 5]) {
-    const lines = snapshotActivityLines(
-      openAkumaSnapshot(
-        Array.from({ length: count }, (_, index) => snapshotRow(completed(index + 1, `small-${index + 1}`))),
-      ),
-      { columns: 120, color: false },
-    );
-    assert.doesNotMatch(lines.join("\n"), /omitted/u, `${count} tools fit the focused snapshot budget`);
-    for (let sequence = 1; sequence <= count; sequence += 1)
-      assert.equal(
-        lines.filter((line) => line.includes(`small-${sequence}`)).length,
-        1,
-        `tool ${sequence} renders once`,
-      );
-  }
-
-  const providerGaps = snapshotActivityLines(
-    openAkumaSnapshot([
-      ...Array.from({ length: 4 }, (_, index) => snapshotRow(completed(index + 1, `gap-${index + 1}`))),
-      { kind: "gap", count: 2 },
-      ...Array.from({ length: 5 }, (_, index) => snapshotRow(completed(index + 5, `gap-${index + 5}`))),
-    ]),
-    { columns: 120, color: false },
-  );
-  assert.deepEqual(
-    providerGaps.filter((line) => line.includes("omitted")),
-    ["   ···    2 omitted"],
-  );
-
-  const adjacentGaps = snapshotActivityLines(
-    openAkumaSnapshot([
-      { kind: "gap", count: 1 },
-      { kind: "gap", count: 2 },
-      snapshotRow(completed(3, "after-adjacent-gaps")),
-    ]),
-    { columns: 120, color: false },
-  );
-  assert.deepEqual(
-    adjacentGaps.filter((line) => line.includes("omitted")),
-    ["   ···    3 omitted"],
-  );
-
-  const separatedGaps = snapshotActivityLines(
-    openAkumaSnapshot([
-      { kind: "gap", count: 1 },
-      snapshotRow({ kind: "note", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "visible separator" }),
-      { kind: "gap", count: 2 },
-    ]),
-    { columns: 120, color: false },
-  );
-  assert.deepEqual(
-    separatedGaps.filter((line) => line.includes("omitted")),
-    ["   ···    1 omitted", "   ···    2 omitted"],
-  );
 
   const focusedEntries = [
     snapshotRow(thought),
@@ -2569,10 +2490,6 @@ test("status renders selected activity evidence while preserving history and com
   assert.doesNotMatch(statusText, /earlier activity/u, "the owner selected every row");
   assert.ok(statusText.indexOf("$ c7") < statusText.indexOf("after"));
   assert.ok(statusText.indexOf("after") < statusText.indexOf("$ c8"));
-
-  const compact = snapshotActivityLines(snapshot, { columns: 120, color: false }, { latest: true }).join("\n");
-  assert.match(compact, /\$ c9/u);
-  assert.doesNotMatch(compact, /c1|omitted/u, "latest-only callers keep their compact selection");
 
   const outcomeSnapshot = idleAkumaSnapshot(
     [
@@ -2643,70 +2560,6 @@ test("status renders selected activity evidence while preserving history and com
     assert.match(historyText, new RegExp(`\\$ ${command}`, "u"), `history keeps intermediate tool ${command}`);
 });
 
-test("open full snapshots preserve projected evidence order", () => {
-  const context = { columns: 120, color: false } as const;
-  const call = snapshotRow({
-    kind: "call" as const,
-    sequence: 1,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "initial commission",
-  });
-  const callSnapshot = {
-    ...openAkumaSnapshot([
-      call,
-      { kind: "gap" as const, count: 2 },
-      snapshotRow(completedTool(4, "bash", { kind: "run", command: "after-call-gap" })),
-      { kind: "gap" as const, count: 3 },
-      snapshotRow(activeTool(8, "bash", { kind: "run", command: "call-active" })),
-    ]),
-    openingSequence: 1,
-  };
-  const launchTell = snapshotRow({
-    kind: "tell" as const,
-    sequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    tellId: "tell/opening-launch",
-    text: "initial launch direction",
-    state: "told" as const,
-    deliveries: [{ route: "launch" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
-  });
-  const tellSnapshot = {
-    ...openAkumaSnapshot([
-      launchTell,
-      { kind: "gap" as const, count: 1 },
-      snapshotRow(completedTool(3, "bash", { kind: "run", command: "after-tell-gap" })),
-      { kind: "gap" as const, count: 4 },
-      snapshotRow(activeTool(8, "bash", { kind: "run", command: "tell-active" })),
-    ]),
-    openingSequence: 1,
-  };
-  const assertEvidenceOrder = (text: string, expected: readonly string[]): void => {
-    let previous = -1;
-    for (const evidence of expected) {
-      const index = text.indexOf(evidence);
-      assert.ok(index > previous, `${evidence} follows its projected predecessor:\n${text}`);
-      assert.equal(text.split(evidence).length - 1, 1, `${evidence} renders once:\n${text}`);
-      previous = index;
-    }
-  };
-
-  assertEvidenceOrder(snapshotActivityLines(callSnapshot, context).join("\n"), [
-    "initial commission",
-    "···    2 omitted",
-    "$ after-call-gap",
-    "···    3 omitted",
-    "$ call-active",
-  ]);
-  assertEvidenceOrder(snapshotActivityLines(tellSnapshot, context).join("\n"), [
-    "initial launch direction",
-    "···    1 omitted",
-    "$ after-tell-gap",
-    "···    4 omitted",
-    "$ tell-active",
-  ]);
-});
-
 test("current attempt boundaries lead live streams exactly once", () => {
   const context = { columns: 120, color: false } as const;
   const call = snapshotRow({
@@ -2719,11 +2572,6 @@ test("current attempt boundaries lead live streams exactly once", () => {
   const tool = snapshotRow(completedTool(2, "bash", { kind: "run", command: "after-boundary" }));
   const active = snapshotRow(activeTool(3, "bash", { kind: "run", command: "still-running" }));
   const initial = { ...openAkumaSnapshot([call, tool, active]), openingSequence: 1 };
-  const snapshot = snapshotActivityLines(initial, context).join("\n");
-  assert.match(snapshot, /^▸ initial commission/mu);
-  assert.ok(snapshot.indexOf("initial commission") < snapshot.indexOf("after-boundary"));
-  assert.equal((snapshot.match(/initial commission/gu) ?? []).length, 1);
-  assert.match(snapshotActivityLines(initial, context, { latest: true }).join("\n"), /still-running/u);
 
   const live = activityStream(context);
   const liveRows = [...live(liveActivity(initial)), ...live(liveActivity(initial)), ...live.flush()].join("\n");
@@ -2753,10 +2601,6 @@ test("current attempt boundaries lead live streams exactly once", () => {
     ]),
     openingSequence: 4,
   };
-  const wakeSnapshot = snapshotActivityLines(woken, context).join("\n");
-  assert.match(wakeSnapshot, /^▸ resume with the new direction/mu);
-  assert.ok(wakeSnapshot.indexOf("resume with the new direction") < wakeSnapshot.indexOf("after-wake"));
-  assert.equal((wakeSnapshot.match(/resume with the new direction/gu) ?? []).length, 1);
   const wakeStatusText = snapshotText(
     observation(
       akumaStatusSchema.parse({

@@ -76,12 +76,6 @@ export type SettlementInput = Readonly<{
   progress?: SettlementProgress;
 }>;
 
-export type SettlementBatchInput = Readonly<{
-  repository: GitRepository;
-  channel: GitDecodeChannel;
-  contracts: readonly Readonly<Pick<SettlementInput, "state" | "effects">>[];
-}>;
-
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -359,11 +353,4 @@ function onPrimaryWorktree(repository: GitRepository): GitRepository {
 export async function settle(input: SettlementInput): Promise<SettlementReport> {
   const repository = onPrimaryWorktree(input.repository);
   return await settleObserved({ ...input, repository });
-}
-
-export async function settleAll(input: SettlementBatchInput): Promise<readonly SettlementReport[]> {
-  const repository = onPrimaryWorktree(input.repository);
-  return await Promise.all(
-    input.contracts.map((contract) => settleObserved({ repository, channel: input.channel, ...contract })),
-  );
 }

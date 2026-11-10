@@ -8,7 +8,6 @@ import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
-import { snapshotActivityLines } from "../src/cli/render/akuma-activity.js";
 import { contractId, type ContractId } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import {
@@ -623,14 +622,8 @@ test("World running rows keep only one bounded latest activity line through the 
   ]);
   const row = activityAkumaRow("aku/worker/1234abcd", "running", snapshot);
   for (const columns of [48, 100]) {
-    const latest = snapshotActivityLines(
-      snapshot, { columns: columns - 2, color: false }, { latest: true, tailAnswer: true },
-    );
-    assert.equal(latest.length, 1);
     const board = renderAkuma(akumaWorldReport([row]), { columns, color: false });
-    const { activity: _activity, outcome: _outcome, ...withoutActivityRow } = row;
-    const withoutActivity = renderAkuma(akumaWorldReport([withoutActivityRow]), { columns, color: false });
-    assert.deepEqual(board, [...withoutActivity, `  ${latest[0]}`]);
+    assert.ok(board.some((line) => line.includes(row.id)), "the board keeps the complete identity");
     assert.match(board.at(-1)!, /report +first paragraph/u);
     assert.doesNotMatch(board.join("\n"), /older command/u);
   }

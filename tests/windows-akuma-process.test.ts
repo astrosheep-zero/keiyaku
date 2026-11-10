@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 import { pathToFileURL } from "node:url";
-import { AkumaComposition as Akuma, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
+import { isolateSquareFixtureLedger } from "./support/akuma-composition.js";
+import { Akuma, Akumas } from "../src/index.js";
 import { spawnOptionsFor, spawnWindowsLauncher } from "../src/runtime/proc/launch.js";
 import { consumeProcessStdout, runProcess, spawnDetachedProcess } from "../src/runtime/proc/run.js";
 import { spawnStdioProcess } from "../src/runtime/proc/stdio.js";
@@ -212,9 +213,16 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     process.env.NODE_OPTIONS = appendNodeOptionsImport(fixtureFile, process.env.NODE_OPTIONS);
     process.env.KEIYAKU_TEST_OPENAI_COMPLETION_RECEIPT = receipt;
 
-    const world = Akuma.of(worldRoot, { home });
-    const handle = await world.call({ akumaName: "fixture", body: "Return the fixture answer." });
-    const status = await handle.wait(undefined, { timeoutMs: 15_000 });
+    const spawned = await Akumas.of(worldRoot).spawn({
+      akumaName: "fixture",
+      body: "Return the fixture answer.",
+      cwd: process.cwd(),
+      home,
+      mode: "detach",
+    });
+    assert.equal(spawned.failure, undefined);
+    const handle = Akuma.select(worldRoot, spawned.akumaId);
+    const { status } = await handle.idle({ timeoutMs: 15_000 });
     assert.deepEqual(
       readFileSync(receipt, "utf8")
         .split("\n")
@@ -224,17 +232,15 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
     assert.equal(status.life, "asleep", JSON.stringify(status));
     assert.equal(status.timeline.kind === "idle" && status.timeline.outcome?.outcome.kind === "answered", true);
     const history = await handle.history();
-    assert.ok("rows" in history);
     const outcomeRow = history.rows.find((row) => row.kind === "outcome");
     const outcome = outcomeRow?.outcome;
     assert.equal(outcome?.kind, "answered");
     if (outcome?.kind === "answered" && outcomeRow !== undefined) {
       assert.equal(outcome.answer, "fixture answer");
       const historyId = `turn/${outcomeRow.turnSequence}`;
-      const exact = await handle.history({ id: historyId });
-      if (!("kind" in exact)) throw new Error("expected exact history result");
-      assert.equal(exact.kind, "exact");
-      if (exact.kind === "exact") assert.deepEqual(exact.outcome.outcome, outcome);
+      const exact = await Akumas.of(worldRoot).history({ akuma: handle.id, id: historyId });
+      assert.equal(exact.kind, "akuma-exact");
+      if (exact.kind === "akuma-exact") assert.deepEqual(exact.outcome, outcome);
     }
     operationFailed = false;
   } finally {

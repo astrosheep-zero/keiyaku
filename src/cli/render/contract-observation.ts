@@ -75,10 +75,6 @@ export function gateGlyph(report: Readonly<{ current: { kind: string; verdict?: 
   return report.current.verdict === "satisfied" ? "✓" : "×";
 }
 
-export function gateFact(report: Readonly<{ gate: string; current: { kind: string; verdict?: string } }>): string {
-  return `${gateGlyph(report)} ${gateDisplayName(report.gate)}${report.current.kind === "stale" ? " · stale" : ""}`;
-}
-
 export function requirementDisplayName(
   gate: string,
   requirement: Readonly<{ requirement?: string | undefined; index?: number | undefined }>,

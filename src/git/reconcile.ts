@@ -126,11 +126,6 @@ export type ReconcileResult = Readonly<{
   effects: readonly Effect[];
   lag: readonly ReconcileLag[];
 }>;
-type ReconcileBatchItem = Readonly<{
-  contract: ContractId;
-  state: ContractState | null;
-  result: ReconcileResult;
-}>;
 type GitReconcileObservation = Readonly<{
   state: ContractState | null;
   result: ReconcileResult;
@@ -552,35 +547,4 @@ export function reconcileObservationFailure(error: unknown): ReconcileResult {
 
 export function reconcileEffectFailure(error: unknown, prior?: ReconcileResult): ReconcileResult {
   return failed(error, prior?.effects, prior?.lag);
-}
-
-type ReconcileBatchOptions = Readonly<{
-  hooks: WorktreeHooks;
-  retryHooks: boolean;
-  retainTerminalWorktree: boolean;
-  places?: ReadonlyMap<ContractId, string>;
-}>;
-
-/** Reconcile each discovered Contract through its own serialized, fresh observation. */
-export async function reconcileBatch(
-  repository: GitRepository,
-  channel: GitDecodeChannel,
-  contracts: Iterable<ContractId>,
-  options: ReconcileBatchOptions,
-): Promise<readonly ReconcileBatchItem[]> {
-  const items: ReconcileBatchItem[] = [];
-  for (const contract of contracts) {
-    const place = options.places?.get(contract);
-    const observation = await reconcile({
-      repository,
-      channel,
-      contractId: contract,
-      hooks: options.hooks,
-      retryHooks: options.retryHooks,
-      retainTerminalWorktree: options.retainTerminalWorktree,
-      ...(place === undefined ? {} : { place }),
-    });
-    items.push({ contract, state: observation.state, result: observation.result });
-  }
-  return items;
 }

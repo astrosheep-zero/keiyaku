@@ -14,7 +14,7 @@ import {
   frameRule,
   historyText,
   killResultText,
-  snapshotActivityLines,
+  activityRowLines,
   snapshotText,
   tellText,
   waitText,
@@ -132,7 +132,7 @@ test("speech uses the rail without a label or quotes and wraps at a grapheme bou
     at: AKUMA_ACTIVITY_AT,
     text: "👩‍💻".repeat(45),
   };
-  const lines = snapshotActivityLines(openAkumaSnapshot([{ kind: "row", row }]), { columns: 40, color: false });
+  const lines = activityRowLines(row, { columns: 40, color: false });
   assert.equal(lines.length, 2);
   assert.doesNotMatch(lines.join("\n"), /say|[“”]/u);
   assert.match(lines[0]!, /^▎ 👩‍💻/u);
@@ -141,7 +141,7 @@ test("speech uses the rail without a label or quotes and wraps at a grapheme bou
   for (const line of lines) assert.ok(displayColumns(line) <= 40);
 });
 
-test("the shared timeline grammar renders input, speech, actions, outcomes, and gaps left-flowing", () => {
+test("history retains input, speech, actions, outcomes, and omission evidence", () => {
   const entries = [
     snapshotRow({
       kind: "call" as const,
@@ -178,29 +178,33 @@ test("the shared timeline grammar renders input, speech, actions, outcomes, and 
     }),
     { kind: "gap" as const, count: 2 },
   ];
-  const lines = snapshotActivityLines(idleAkumaSnapshot(entries, answeredOutcome(8, "the answer")), {
-    columns: 72,
-    color: false,
-  });
-  assert.deepEqual(lines, [
-    "▸ first input",
-    "▎ spoken line",
-    "▎   indented line",
-    "   think  hidden reasoning",
-    "   note   a note",
-    "   run    $ echo ok",
-    "!  run    $ false — exit 1",
-    "⧗ pending input",
-    "   ···    2 omitted",
-    "✓ the answer",
-  ]);
+  const text = historyText(
+    {
+      kind: "akuma",
+      akumaId: parseAkumaId("aku/worker/abcd1234").id,
+      events: [
+        ...entries.flatMap((entry) => entry.kind === "row" ? [entry.row] : []),
+        answeredOutcome(8, "the answer"),
+      ],
+      omitted: 2,
+      lowestRetainedSequence: 1,
+      highestSequence: 8,
+    },
+    {},
+    { columns: 72, color: false },
+  );
+  for (const evidence of [
+    "first input", "spoken line", "indented line", "hidden reasoning", "a note", "echo ok", "exit 1",
+    "pending input", "the answer", "2 earlier events",
+  ])
+    assert.ok(text.includes(evidence), evidence);
 });
 
 test("bounded paragraph previews never spend their last line on a blank", () => {
   const context = { columns: 40, color: false };
   const answer =
     "the first paragraph wraps across two lines before the blank\n\nthe second paragraph begins after a blank source line and keeps going";
-  const lines = snapshotActivityLines(idleAkumaSnapshot([], answeredOutcome(1, answer)), context);
+  const lines = activityRowLines(answeredOutcome(1, answer).outcome, context);
   assert.equal(lines.length, 3, "the preview stays inside its three-line budget");
   for (const line of lines) {
     assert.ok(displayColumns(line) <= 40, line);
@@ -737,22 +741,15 @@ test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
 });
 
 test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
-  const lines = snapshotActivityLines(
-    openAkumaSnapshot([
-      {
-        kind: "row",
-        row: completedTool(1, "edit", { kind: "fileChange", changes: [{ op: "add", path: "src/unknown.ts" }] }),
-      },
-      {
-        kind: "row",
-        row: completedTool(2, "edit", {
-          kind: "fileChange",
-          changes: [{ op: "update", path: "src/known.ts", diffstat: { added: 2, removed: 1 } }],
-        }),
-      },
-    ]),
-    { columns: 120, color: false },
-  ).join("\n");
+  const lines = [
+    completedTool(1, "edit", { kind: "fileChange", changes: [{ op: "add", path: "src/unknown.ts" }] }),
+    completedTool(2, "edit", {
+      kind: "fileChange",
+      changes: [{ op: "update", path: "src/known.ts", diffstat: { added: 2, removed: 1 } }],
+    }),
+  ]
+    .flatMap((row) => activityRowLines(row, { columns: 120, color: false }))
+    .join("\n");
   assert.match(lines, /src\/unknown\.ts — ~/u);
   assert.match(lines, /src\/known\.ts — \+2 -1/u);
   assert.doesNotMatch(lines, /\+\? -\?/u);

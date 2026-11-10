@@ -50,7 +50,7 @@ import { serializeDebtDocument, type DebtDocument } from "../src/debt/document.j
 import { Debts, type DebtId } from "../src/debt/index.js";
 import { readBoard } from "../src/debt/store.js";
 import { World } from "../src/world.js";
-import { AkumaComposition as Akuma } from "./support/akuma-composition.js";
+import { readAkumaCompleteRoster } from "../src/akuma/akuma.js";
 import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { Akuma as NativeAkuma } from "../src/akuma/index.js";
 import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
@@ -1111,7 +1111,8 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
       prepareCalls += 1;
       return originalPrepare.apply(this, args);
     };
-    const world = Akuma.of(await World.at(root));
+    const proved = await World.at(root);
+    const world = Akumas.of(proved);
     const page = await world.list({ limit: 2 });
     const pagePrepares = prepareCalls;
     DatabaseSync.prototype.prepare = originalPrepare;
@@ -1120,13 +1121,12 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
       prepareCalls += 1;
       return originalPrepare.apply(this, args);
     };
-    const complete = await world.listComplete();
+    const complete = await readAkumaCompleteRoster(proved);
     const completePrepares = prepareCalls;
     DatabaseSync.prototype.prepare = originalPrepare;
     const reference = complete.rows.map((row) => row.id);
     const completeGlob = await addressAkumaSet({ path: root, akuma: ["aku/*/*"] });
 
-    assert.equal(typeof world.listComplete, "function");
     assert.equal("hasMore" in complete, false);
     assert.deepEqual(
       reference,
@@ -1178,7 +1178,7 @@ test("all-null Akuma fallback retains exact membership through the fixed Heart r
       custodyReads += 1;
       return originalPrepare.apply(this, args);
     };
-    const world = Akuma.of(await World.at(root));
+    const world = Akumas.of(await World.at(root));
     const page = await world.list({ limit: 7 });
     DatabaseSync.prototype.prepare = originalPrepare;
 

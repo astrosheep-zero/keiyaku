@@ -154,10 +154,6 @@ function archetypeError(
   return new AkumaArchetypeError(name, searched, withChain, guidance);
 }
 
-export async function listArchetypes(input: ArchetypeCoordinates = {}): Promise<readonly string[]> {
-  return (await archetypePaths(input)).map(({ name }) => name);
-}
-
 function archetypeField(values: Readonly<Record<string, unknown>>, key: string, required = false): string | undefined {
   const value = values[key];
   if (value === undefined && !required) return undefined;

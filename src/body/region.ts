@@ -198,13 +198,6 @@ function regionPatterns(section: SectionNode): readonly string[] {
   return patterns;
 }
 
-/** A whitespace-bearing pattern is almost certainly strayed prose; bind warns and proceeds rather than rejecting. */
-export function regionWarnings(patterns: readonly string[]): readonly string[] {
-  return patterns
-    .filter((pattern) => /\s/u.test(pattern))
-    .map((pattern) => `Region pattern '${pattern}' contains whitespace and will never match a path`);
-}
-
 export function decodeRegion(_document: DocumentNode, section: SectionNode): readonly string[] {
   const structural = regionStructure(section);
   if (structural !== null) refusal(structural);

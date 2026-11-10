@@ -129,7 +129,6 @@ export const INTEGRATION_TEST_FILES = [
   "tests/mcp-adapter.test.ts",
   "tests/mcp-stdio.test.ts",
   "tests/native-contract-reads.test.ts",
-  "tests/native-output-budget.test.ts",
   "tests/nuke.test.ts",
   "tests/package-consumers.test.ts",
   "tests/path-coordinates.test.ts",

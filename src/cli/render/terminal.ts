@@ -310,29 +310,6 @@ export function safeText(value: string): string {
   );
 }
 
-type CheckoutNotFollowable = Readonly<{
-  reason: "staged" | "dirty-tracked" | "unmerged" | "untracked";
-  path: string;
-  target: string;
-  paths: readonly string[];
-}>;
-
-export function checkoutNotFollowableLines(refusal: CheckoutNotFollowable): readonly string[] {
-  const lines = [
-    "! checkout-not-followable",
-    `  checkout  ${safeText(refusal.path)}`,
-    `  target  ${safeText(refusal.target)}`,
-    `  reason  ${refusal.reason}`,
-  ];
-  if (refusal.paths.length === 0) {
-    lines.push("  paths  none");
-  } else {
-    lines.push("  paths");
-    lines.push(...refusal.paths.map((path) => `    ${safeText(path)}`));
-  }
-  return lines;
-}
-
 /**
  * Wrap `value` into the column budget under one indent. A `lead` such as an em dash joins the first
  * word as one unit, so it never dangles alone at a line end.
