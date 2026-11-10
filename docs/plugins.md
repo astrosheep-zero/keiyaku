@@ -72,8 +72,10 @@ integration failure never refuses a native operation.
 The submitting integration edge selects an opaque host Owner as optional
 initiator attribution. An explicit integration Owner wins; otherwise exactly one
 native host identity supplies it, with the external host fallback used only when
-no native identity exists. Ambiguous, missing, or child-only host identity selects
-nothing. Generic Akuma core persists and forwards attribution unchanged and never
+no native identity exists. Ambiguous or missing host identity selects nothing.
+The Claude child marker does not veto an explicit native session, because ordinary
+tool subprocesses also carry it; child-only identity still selects nothing.
+Generic Akuma core persists and forwards attribution unchanged and never
 reconstructs a parent Owner from a producing Body's environment. Caller lineage
 remains separate descriptive attribution.
 

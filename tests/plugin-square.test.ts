@@ -533,6 +533,35 @@ test("Body dedup tracks committed recipients independently and reports retain ex
   assert.equal((await f.cards()).length, 1);
 });
 
+test("Claude child markers preserve explicit native identity but not child-only fallback", async (t) => {
+  const f = await fixture(t);
+  delete process.env.PI_SESSION_ID;
+  process.env.CLAUDE_CODE_SESSION_ID = "claude-requester";
+  process.env.CLAUDE_CODE_CHILD_SESSION = "1";
+  process.env.PASEO_AGENT_ID = "fallback";
+  const native = harnessOwner({ channel: "claude-code", session: "claude-requester" });
+  assert.ok(await f.ledger.attach({ owner: native, expectedGeneration: null, routes: [] }));
+  const plugin = await f.activate();
+  await plugin.signals!["akuma.outcome-observed"]!({
+    kind: "akuma.outcome-observed",
+    akumaId: "aku/native/1234abcd",
+    historyId: "turn/1",
+  });
+  await plugin.signals!["akuma.turn-outcome"]!({
+    kind: "akuma.turn-outcome",
+    akumaId: "aku/native/1234abcd",
+    bodySequence: 1,
+    turnSequence: 1,
+    participants: [native],
+    outcome: { kind: "answered", text: "observed" },
+  });
+  assert.deepEqual(await f.cards(native), []);
+
+  delete process.env.CLAUDE_CODE_SESSION_ID;
+  const childOnly = await f.activate();
+  assert.equal(await childOnly.waitDeferral!({ akumaIds: ["aku/native/1234abcd"] }), undefined);
+});
+
 test("explicit opaque observer overrides local identity while another Owner stays independent", async (t) => {
   const f = await fixture(t);
   const opaque = "integration-owned-opaque-value" as typeof f.alice;

@@ -18,7 +18,7 @@ const WAIT_RENEW_MS = 2 * 60_000;
 function localOwner(environment: NodeJS.ProcessEnv): Owner | undefined {
   const explicit = environment.KEIYAKU_INITIATOR?.trim();
   if (explicit) return requireOwner(explicit);
-  if (environment.CLAUDE_CODE_CHILD_SESSION === "1") return undefined;
+  if (environment.CLAUDE_CODE_CHILD_SESSION === "1" && !environment.CLAUDE_CODE_SESSION_ID?.trim()) return undefined;
   const coordinates = [
     ["CLAUDE_CODE_SESSION_ID", "claude-code"],
     ["CODEX_THREAD_ID", "codex"],

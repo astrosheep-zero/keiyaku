@@ -6,7 +6,7 @@ function localOwner(environment) {
     const explicit = environment.KEIYAKU_INITIATOR?.trim();
     if (explicit)
         return requireOwner(explicit);
-    if (environment.CLAUDE_CODE_CHILD_SESSION === "1")
+    if (environment.CLAUDE_CODE_CHILD_SESSION === "1" && !environment.CLAUDE_CODE_SESSION_ID?.trim())
         return undefined;
     const coordinates = [
         ["CLAUDE_CODE_SESSION_ID", "claude-code"],

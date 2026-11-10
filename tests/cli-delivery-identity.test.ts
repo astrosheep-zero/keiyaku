@@ -16,6 +16,14 @@ test("one native coordinate selects its host Owner, ahead of Paseo", () => {
       harnessOwner({ channel, session: "session" }),
     );
   }
+  assert.equal(
+    deliveryOwner({
+      CLAUDE_CODE_SESSION_ID: "session",
+      CLAUDE_CODE_CHILD_SESSION: "1",
+      PASEO_AGENT_ID: "fallback",
+    }),
+    harnessOwner({ channel: "claude-code", session: "session" }),
+  );
   assert.equal(deliveryOwner({ PASEO_AGENT_ID: "managed" }), harnessOwner({ channel: "paseo", session: "managed" }));
 });
 
