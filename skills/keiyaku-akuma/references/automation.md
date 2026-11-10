@@ -18,11 +18,11 @@ stopping conditions) rather than in the flagship's conversation context:
 | Rare failure diagnosis | Generate competing hypotheses from logs/code; have agents propose distinguishing experiments; eliminate hypotheses from actual results. |
 | Untrusted issue triage | Separate readers of untrusted text (returning bounded structured evidence) from actors with mutation authority. |
 
-Create separate Akumas (`@judge-1`, etc., or distinct `Akumas.spawn`
+Create separate `Akumas` (`@judge-1`, etc., or distinct `Akumas.spawn`
 instances) for blind comparisons and adversarial checks so a judge never grades
 its own earlier work.
 
-## Public Entry And Structured Turns
+## Public Entry And Structured `Turns`
 
 Run an ESM script in a project where `@astrosheep/keiyaku` resolves. Keep
 schemas inside simple JSON shape vocabulary (`object`, `array`, `string`,
@@ -69,9 +69,9 @@ if (followUp.observation.reason === "answered") {
 
 ## Control, Concurrency, And Reconnection Rules
 
-- **Await `idle()` before the next schema Tell on the same Akuma:** an answer
-  can become visible slightly before its Body finishes settling. Separate
-  Akumas can run in parallel without waiting for each other.
+- **Await `idle()` before the next schema `Tell` on the same `Akuma`:** an answer
+  can become visible slightly before its `Body` finishes settling. Separate
+  `Akumas` can run in parallel without waiting for each other.
 - **`idle({ timeoutMs })` and `Promise.race` do not stop the worker:** a
   timeout only ends the wait. `idle()` resolves `{ kind: "idle", status, reason }`
   (`"asleep" | "killed" | "hung" | "untidy" | "stranded"`) or
@@ -83,5 +83,5 @@ if (followUp.observation.reason === "answered") {
   must survive restarts:** `Akuma.select(root, savedId)` reconnects
   synchronously (`status()` and `history()` inspect prior state), rather than
   blindly rerunning completed turns.
-- **Worktree isolation:** `Akumas.spawn` does not create an isolated Contract
+- **Worktree isolation:** `Akumas.spawn` does not create an isolated `Contract`
   worktree; give parallel writers non-overlapping paths or dedicated worktrees.
