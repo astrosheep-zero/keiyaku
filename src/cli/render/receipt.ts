@@ -368,8 +368,36 @@ export function stopLines(
   }
 }
 
-export function placementLines(stop: PlacementStop, columns: number, addressed: string): readonly string[] {
-  return stopLines(stop, columns, addressed);
+export function deliveryIdentityRows(
+  lines: string[],
+  identity: Readonly<{ candidate: string; integration: string; contentId: string | undefined }>,
+  columns: number,
+): void {
+  for (const [label, value] of [
+    ["candidate", identity.candidate],
+    ["integration result", identity.integration],
+    ["content identity", identity.contentId],
+  ] as const)
+    if (value !== undefined) receiptRow(lines, " ", label, [{ text: value, opaque: true }], columns);
+}
+
+export function targetMovementRows(
+  lines: string[],
+  placement: Readonly<{ target?: string; predecessor?: string; integration: string }>,
+  columns: number,
+): void {
+  const ids = abbreviateGitIds([placement.predecessor ?? "", placement.integration]);
+  const movement =
+    placement.predecessor === undefined
+      ? displayGitId(placement.integration, ids)
+      : `${displayGitId(placement.predecessor, ids)}..${displayGitId(placement.integration, ids)}`;
+  receiptRow(
+    lines,
+    " ",
+    "target",
+    [{ text: movement }, ...(placement.target === undefined ? [] : [{ text: placement.target, opaque: true }])],
+    columns,
+  );
 }
 
 export function gatesAwaitLines(placement: PlacementStop | undefined): readonly string[] {
@@ -455,19 +483,13 @@ function admittedLines(
     case "deliver": {
       receiptRow(lines, " ", "admitted", [{ text: "deliver" }, ...owned], columns);
       const ids = abbreviateGitIds([admission.candidate, admission.integration, admission.contentId]);
-      receiptRow(lines, " ", "candidate", [{ text: displayGitId(admission.candidate, ids), opaque: true }], columns);
-      receiptRow(
+      deliveryIdentityRows(
         lines,
-        " ",
-        "integration result",
-        [{ text: displayGitId(admission.integration, ids), opaque: true }],
-        columns,
-      );
-      receiptRow(
-        lines,
-        " ",
-        "content identity",
-        [{ text: displayGitId(admission.contentId, ids), opaque: true }],
+        {
+          candidate: displayGitId(admission.candidate, ids),
+          integration: displayGitId(admission.integration, ids),
+          contentId: displayGitId(admission.contentId, ids),
+        },
         columns,
       );
       return lines;
@@ -563,22 +585,9 @@ function effectLines(effect: ExceptionalEffect, columns: number, primary?: strin
     case "debt-settled":
       receiptRow(lines, " ", "settled", [{ text: effect.debtId, opaque: true }], columns);
       return lines;
-    case "placed": {
-      const ids = abbreviateGitIds([effect.predecessor ?? "", effect.integration]);
-      receiptRow(
-        lines,
-        " ",
-        "target",
-        [
-          {
-            text: `${effect.predecessor === undefined ? "" : `${displayGitId(effect.predecessor, ids)}..`}${displayGitId(effect.integration, ids)}`,
-          },
-          ...(effect.target === undefined ? [] : [{ text: effect.target, opaque: true }]),
-        ],
-        columns,
-      );
+    case "placed":
+      targetMovementRows(lines, effect, columns);
       return lines;
-    }
     case "worktree-created":
     case "worktree-removed":
       receiptRow(lines, " ", words(effect.kind), [{ text: effect.path, opaque: true }], columns);
@@ -588,14 +597,9 @@ function effectLines(effect: ExceptionalEffect, columns: number, primary?: strin
 
 function placementEvidenceLines(placement: Placement, columns: number, addressed: string): readonly string[] {
   if (placement.kind !== "placed") return stopLines(placement, columns, addressed);
-  const ids = abbreviateGitIds([placement.predecessor ?? "", placement.integration]);
   if (placement.target === undefined) return [];
-  const movement =
-    placement.predecessor === undefined
-      ? displayGitId(placement.integration, ids)
-      : `${displayGitId(placement.predecessor, ids)}..${displayGitId(placement.integration, ids)}`;
   const lines: string[] = [];
-  receiptRow(lines, " ", "target", [{ text: movement }, { text: placement.target, opaque: true }], columns);
+  targetMovementRows(lines, placement, columns);
   return lines;
 }
 

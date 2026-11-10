@@ -12,8 +12,9 @@ import type {
   RegionOverlap,
 } from "../../index.js";
 import {
+  deliveryIdentityRows,
   gatesAwaitLines,
-  placementLines,
+  targetMovementRows,
   receiptPayload,
   receiptRow,
   recoverySnapshotLines,
@@ -339,30 +340,6 @@ function amend(result: AcceptedOf<"amend">, columns: number, color: boolean): st
   return lines.join("\n");
 }
 
-function placedIntegration(
-  placement: Readonly<{ target?: string; predecessor?: string; integration?: string }>,
-  fallback: string | undefined,
-): string | undefined {
-  return placement.integration ?? fallback;
-}
-
-function placedMovementLines(
-  placement: Readonly<{ target?: string; predecessor?: string }>,
-  integration: string,
-  columns: number,
-): readonly string[] {
-  if (placement.target === undefined) return [];
-  const ids = abbreviateGitIds([placement.predecessor ?? "", integration]);
-  const lines: string[] = [];
-  const movement =
-    placement.predecessor === undefined
-      ? displayGitId(integration, ids)
-      : `${displayGitId(placement.predecessor, ids)}..${displayGitId(integration, ids)}`;
-  receiptRow(lines, " ", "target", [{ text: movement }, { text: placement.target, opaque: true }], columns);
-  receiptRow(lines, "✓", "accepted", [], columns);
-  return lines;
-}
-
 type CompletionAccepted = AcceptedOf<"deliver"> | AcceptedOf<"review"> | AcceptedOf<"verify">;
 
 function continuationLines(continuation: CompletionAccepted["continuation"], columns: number): readonly string[] {
@@ -389,11 +366,14 @@ function continuationLines(continuation: CompletionAccepted["continuation"], col
 function completionPlacementLines(result: CompletionAccepted, columns: number): readonly string[] {
   const placement = result.placement;
   if (placement === undefined) return [];
-  if (placement.kind !== "placed") return placementLines(placement, columns, result.contractId);
+  if (placement.kind !== "placed") return stopLines(placement, columns, result.contractId);
   const fallback = "integration" in result ? result.integration : undefined;
-  const integration = placedIntegration(placement, fallback);
-  if (integration === undefined) return [];
-  return placedMovementLines(placement, integration, columns);
+  const integration = ("integration" in placement ? placement.integration : undefined) ?? fallback;
+  if (integration === undefined || placement.target === undefined) return [];
+  const lines: string[] = [];
+  targetMovementRows(lines, { ...placement, integration }, columns);
+  receiptRow(lines, "✓", "accepted", [], columns);
+  return lines;
 }
 
 function trailingPlacementLines(result: CompletionAccepted, columns: number): readonly string[] {
@@ -409,32 +389,26 @@ function trailingPlacementLines(result: CompletionAccepted, columns: number): re
 
 function deliver(result: AcceptedOf<"deliver">, columns: number, input: PresentationInput): string {
   const lines = titleLines("✓", "delivered", result.contractId, columns);
-  const placement = result.placement;
+  const placement: Readonly<{ kind: string; predecessor?: string; integration?: string }> | undefined =
+    result.placement;
   const ids = abbreviateGitIds([
     result.candidate,
     result.integration,
     result.contentId,
     result.previousContentId ?? "",
     placement?.kind === "placed" ? (placement.predecessor ?? "") : "",
-    placement?.kind === "placed" ? (placedIntegration(placement, result.integration) ?? "") : "",
+    placement?.kind === "placed" ? (placement.integration ?? result.integration) : "",
   ]);
   if (result.admission === "reused") receiptRow(lines, " ", "admission", [{ text: "reused" }], columns);
-  receiptRow(
+  deliveryIdentityRows(
     lines,
-    " ",
-    "candidate",
-    [{ text: `${displayGitId(result.candidate, ids)}${placement?.kind === "placed" ? "" : " · kept"}`, opaque: true }],
+    {
+      candidate: `${displayGitId(result.candidate, ids)}${placement?.kind === "placed" ? "" : " · kept"}`,
+      integration: displayGitId(result.integration, ids),
+      contentId: /^0{40}$/u.test(result.contentId) ? undefined : displayGitId(result.contentId, ids),
+    },
     columns,
   );
-  receiptRow(
-    lines,
-    " ",
-    "integration result",
-    [{ text: displayGitId(result.integration, ids), opaque: true }],
-    columns,
-  );
-  if (!/^0{40}$/u.test(result.contentId))
-    receiptRow(lines, " ", "content identity", [{ text: displayGitId(result.contentId, ids), opaque: true }], columns);
   if (result.previousContentId !== undefined)
     receiptRow(
       lines,
