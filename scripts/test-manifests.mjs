@@ -126,6 +126,8 @@ export const INTEGRATION_TEST_FILES = [
   "tests/library-concurrency-placement.test.ts",
   "tests/library-contract-operations.test.ts",
   "tests/library-reconcile.test.ts",
+  "tests/mcp-adapter.test.ts",
+  "tests/mcp-stdio.test.ts",
   "tests/native-contract-reads.test.ts",
   "tests/native-output-budget.test.ts",
   "tests/nuke.test.ts",

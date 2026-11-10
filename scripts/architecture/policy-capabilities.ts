@@ -14,6 +14,7 @@ export const capabilityPolicy = {
       module: "zod",
       owners: [
         { source: "index.ts" },
+        { source: "mcp/adapter.ts", symbols: ["z"] },
         { source: "bounded-list.ts", symbols: ["z"] },
         { source: "region.ts", symbols: ["z"] },
         { source: "settings.ts", symbols: ["z"] },
@@ -185,21 +186,30 @@ export const capabilityPolicy = {
     { capability: "function-constructor", owners: [] },
     { capability: "math-random", owners: [] },
     { capability: "module-mutable-state", owners: ["plugin/runtime.ts"] },
-    { capability: "date-now", owners: ["cli/**", "protocol/**"] },
+    { capability: "date-now", owners: ["cli/**", "mcp/adapter.ts", "protocol/**"] },
     { capability: "new-date-current", owners: ["akuma/**", "dispatch/**", "kanshi/**", "protocol/**", "debt/**"] },
     {
       capability: "process-argv",
-      owners: ["akuma-body.ts", "akuma/detached-body.ts", "cli/**", "git/hooks.ts", "scripts/**"],
+      owners: ["akuma-body.ts", "akuma/detached-body.ts", "cli/**", "mcp/index.ts", "git/hooks.ts", "scripts/**"],
     },
     {
       capability: "process-cwd",
-      owners: ["akuma/**", "cli/**", "git/**", "kanshi/**", "library/**", "scripts/**", "debt/**"],
+      owners: ["akuma/**", "cli/**", "mcp/index.ts", "git/**", "kanshi/**", "library/**", "scripts/**", "debt/**"],
     },
     {
       capability: "process-environment",
-      owners: ["akuma-body.ts", "akuma/**", "cli/**", "git/**", "runtime/proc/**", "scripts/**", "verification/**"],
+      owners: [
+        "akuma-body.ts",
+        "akuma/**",
+        "cli/**",
+        "mcp/index.ts",
+        "git/**",
+        "runtime/proc/**",
+        "scripts/**",
+        "verification/**",
+      ],
     },
-    { capability: "process-output", owners: ["akuma-body.ts", "cli/**", "scripts/**"] },
+    { capability: "process-output", owners: ["akuma-body.ts", "cli/**", "mcp/**", "scripts/**"] },
     { capability: "process-pid", owners: ["runtime/proc/**"] },
     { capability: "require", owners: [] },
     {

@@ -182,6 +182,18 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
   ],
   zones: [
+    {
+      source: "mcp/**",
+      allow: [
+        any("mcp/**"),
+        any("library/keiyaku.ts"),
+        any("library/keiyaku-verbs.ts"),
+        any("library/outcome.ts", ["projectFailure"]),
+        any("cli/render/verbs.ts"),
+        any("cli/render/terminal.ts", ["DEFAULT_CLI_COLUMNS"]),
+        any("cli/version.ts", ["installedPackageVersion"]),
+      ],
+    },
     { source: "scripts/**", allow: [any("scripts/**")] },
     { source: "core/verbs/**", allow: [any("core/decide.ts"), any("core/facts/**"), any("core/subject.ts")] },
     { source: "core/facts/**", allow: [any("core/facts/**"), any("core/subject.ts"), any("identity/coordinates.ts")] },

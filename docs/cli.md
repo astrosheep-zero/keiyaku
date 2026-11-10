@@ -5,6 +5,17 @@ into public product operations, then gives their typed result to the shared
 renderer. It owns neither document interpretation, lifecycle judgment, Git
 adjudication, verification, reconciliation, nor Debt or Akuma authority.
 
+A standalone transport is another invocation edge, not another product surface.
+It discovers the facet's operations without observing or establishing a World,
+and supplies explicit coordinates independently for each call. Protocol validation,
+connection lifetime, and cancellation remain at that edge; the facet and product
+owners retain their native admission, result, and retirement semantics. Text and
+outcome classification are shared with the CLI rather than re-decided by the
+transport. A transport's structured owner-result contract does not describe a
+thrown failure; failure evidence remains available without claiming it is an
+owner result. A disconnected caller cannot be promised a late receipt, even when
+an owner has admitted facts that remain available through ordinary reads.
+
 ## Invocation and scope
 
 The edge owns literal command usage, input acquisition, and the distinction

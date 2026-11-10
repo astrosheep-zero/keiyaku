@@ -25,7 +25,8 @@
   },
   "bin": {
     "keiyaku": "build/src/cli/index.js",
-    "kei": "build/src/cli/index.js"
+    "kei": "build/src/cli/index.js",
+    "keiyaku-mcp": "build/src/mcp/index.js"
   },
   "type": "module",
   "engines": {
@@ -33,7 +34,7 @@
   },
   "scripts": {
     "release": "npm run test:release && npm version patch && npm publish",
-    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.json && npm run build --workspace @astrosheep/keiyaku-plugin-square && npm run build --workspace @astrosheep/keiyaku-plugin-paseo && node scripts/copy-plugins.js && node scripts/build-windows-launcher.js && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('build/src/cli/index.js', 0o755)\"",
+    "build": "node --input-type=module -e \"import { rmSync } from 'node:fs'; rmSync('build', { recursive: true, force: true })\" && tsc -p tsconfig.json && npm run build --workspace @astrosheep/keiyaku-plugin-square && npm run build --workspace @astrosheep/keiyaku-plugin-paseo && node scripts/copy-plugins.js && node scripts/build-windows-launcher.js && node --input-type=module -e \"import { chmodSync } from 'node:fs'; chmodSync('build/src/cli/index.js', 0o755); chmodSync('build/src/mcp/index.js', 0o755)\"",
     "prepack": "node scripts/verify-package.js",
     "postpack": "node scripts/verify-package.js",
     "harness:version": "node scripts/update-harness-version.js",
@@ -85,6 +86,7 @@
     "@astrosheep/square": "^0.4.1",
     "@getpaseo/client": "0.14.0",
     "@getpaseo/protocol": "0.14.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@opencode/client": "2.0.20",
     "@opencode/schema": "2.0.20",
     "cross-spawn": "^7.0.6",
