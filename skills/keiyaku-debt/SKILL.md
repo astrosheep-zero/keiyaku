@@ -31,17 +31,15 @@ merely because two `Debts` touch the same `Region` or are related.
 - `supersedes`: earlier `Debt` replaced by this one.
 - `relates`: non-blocking link.
 
-`show` displays only outbound relations declared on that `Debt`; use `tree`,
-parent-scoped `ready`/`blocked`, or `query` (`blocks`, `under`) to inspect
-reverse links.
+`show` displays only outbound relations declared on that `Debt`; use `tree`
+or `query` (`blocks`, `under`, `ready`, `blocked`) to inspect reverse links.
 
 ## 3. Scope And `Contract` Settlement
 
-- **Namespace scope:** an appointed `Contract` worktree scopes its default `Debt`
-  context to `debt/<contract>/...`. Select the root namespace `/` when filing a
-  repo-wide `Debt` from inside a worktree, and enable world scope on `ls`,
-  `ready`, `blocked`, or `query` to inspect across all namespaces. Always
-  address a specific `Debt` by its complete `debt/...` ID.
+- **Namespace scope:** supply a namespace explicitly when filing work under a
+  `Contract`; omitted namespace selects the root even inside a worktree. Use
+  `ls debt/<namespace>/` for that namespace or `query --world` to inspect across
+  namespaces. Always address a specific `Debt` by its complete `debt/...` ID.
 - **`Contract` settlement:** associating a `Debt` when binding a `kei` holds that
   `Debt`; accepting the `kei` marks it `done`, while abandoning the `kei`
   releases it back to `open`.

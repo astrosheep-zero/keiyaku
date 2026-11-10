@@ -50,7 +50,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | bind, amend, arc | Present Contract material for the Contract owner's admission judgment; refuse an impossible or contradictory invocation. | Return the Contract admission result. |
 | deliver, review, verify, abandon, reconcile | Request lifecycle, evidence production, or repair judgment, or delivery preview; refuse an absent or ambiguous Contract selector. | Return the owning operation result unchanged. |
 | status, ls | Read one requested Contract, Akuma, archetype, Debt, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
-| show | Read one explicitly or contextually selected Contract's guidance; refuse non-Contract and plural selection before reading. | Return the native guidance value without an envelope. |
+| show | Route explicitly addressed Debts to their owner or read one explicitly or contextually selected Contract's guidance; refuse mixed families and plural Contract selection before reading. | Return the selected owner's native value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
 | report | Record the invoking Akuma's explicit progress on its current execution; refused when not executing; no recipient selection or inferred caller fallback. | Return native report admission; recorded never claims notification receipt. |
@@ -59,7 +59,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | nuke | Call the named root `nuke` operation for the invocation World. | A missing or mismatched confirmation is refused before deletion; success is the World-owned receipt. |
 | debt | Delegate to the separate Debt command surface. | Debt owns Debt judgment and result semantics. |
 | wait | Route Contract journal change waits and Akuma completion waits to their respective owners; refuse mixed families before observation. | Return the selected owner's native observation. |
-| spawn, fork, tell, ask, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, answers, and recovery. |
+| spawn, fork, tell, history, kill | Delegate selection and plural operations to `Akumas`; a resolved single-Akuma lifecycle handle remains `Akuma`. | Akuma owns identity, life, answers, and recovery. |
 
 Bind target selection, including the omitted-target default and fork
 inheritance, is owned by [public-api.md](public-api.md); the edge only adapts
@@ -96,10 +96,11 @@ Its Dispatch association is independent of the contextual Contract. Independent
 facts remain visible when another is absent, invalid, ambiguous, or unavailable;
 the Akuma profile is descriptive, not live execution status.
 
-`show` alone reads one selected Contract's guidance, using the existing exact
-Contract selection context when selection is omitted. It refuses Akuma, plural,
-and world selection before reading. The returned guidance bytes are the owner's
-own value, rendered directly in text and serialized directly in JSON. `status`
+`show` reads addressed Debts through their owner or one selected Contract's
+guidance, using the existing exact Contract selection context when selection
+is omitted. Debt selection may be plural; mixed Debt and Contract selection,
+Akuma, category, and plural Contract selection refuse before reading. The
+returned text and JSON are the selected owner's own value. `status`
 only observes status: world, Contract, Akuma, category, and plural observations
 incur no guidance read and add no guidance output.
 
@@ -125,12 +126,14 @@ identity, a conflicting or invalid selector, and any Contract, Debt, or
 Akuma-name catalogue query refuse at the usage boundary rather than returning a
 misleading empty list.
 
-The spawn and ask edges may acquire a JSON Schema from a caller-selected file;
-the file is decoded once at the edge and passed to the public Akuma surface.
-Schema acquisition failures are usage or input failures, while ordinary spawn,
-ask, tell, wait, history, and kill behavior remains unchanged.
+The spawn and observing tell edges may acquire a JSON Schema from a
+caller-selected file; the file is decoded once at the edge and passed to the
+public Akuma surface. Schema acquisition failures are usage or input failures.
+Tell normally returns admission; explicitly requested answer observation uses
+the Akuma owner's input-bound answer operation and preserves its result,
+deadline, schema, interruption, and cancellation semantics.
 
-Spawn, fork, tell, and ask select the submitting process's opaque host Owner at
+Spawn, fork, and tell select the submitting process's opaque host Owner at
 the invocation facet and pass it unchanged as optional initiator attribution.
 A nonblank explicit integration Owner wins; otherwise one unambiguous native
 host coordinate supplies attribution, with the external host fallback used only

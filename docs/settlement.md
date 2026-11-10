@@ -38,10 +38,8 @@ re-evaluates it. A terminal Contract without its matching held holder is
 strictly inert: it does not create, repair, or inspect unrelated Debt, World, or
 context state.
 
-Contract-derived namespace context belongs to the active managed worktree
-projection. Settlement never installs or repairs it, and terminal Contracts
-never receive an active context projection. Kanshi uses the same Contract-derived
-namespace only as a read-time matching coordinate. Settlement has no Akuma rule,
+Kanshi uses the Contract-derived Debt namespace only as a read-time matching
+coordinate; it installs no namespace default. Settlement has no Akuma rule,
 configurable lifecycle hook, event bus, or generic cross-product registry.
 
 Admission is irreversible. The public sequence is admission, Git reconciliation,
@@ -69,8 +67,7 @@ second authority:
 - **Durable replay token:** The current matching held DebtHolder is the sole
   durable token that says this accepted Contract still owes Debt settlement.
 - **Token consumption point:** Settlement consumes that token only when it
-  publishes the holder as released, after Debt completion and the namespace
-  projection opportunity have been attempted.
+  publishes the holder as released, after Debt completion has been attempted.
 - **Crash windows:** A crash after admission, during Git reconciliation, after
   Debt completion but before holder release, or while holder release is being
   published is resolved by re-observing current Contract, Debt, and Git facts.

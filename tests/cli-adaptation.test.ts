@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Kei, Keis, Repo } from "../src/index.js";
+import { Kei, Keis, Repo, World } from "../src/index.js";
 import { main } from "../src/cli/main.js";
 import { captureOutput, cliJson, runCli } from "./support/cli-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { accepted } from "./support/library-verbs.js";
+import { installHostAcpFixture } from "./support/acp-host-fixture.js";
+import { bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { cleanupSpawnCapableFixtureForTest, installAkumaBodyPidReceipt, temporaryDirectory } from "./support/process.js";
 import { contractMarkdown } from "./support/markdown.js";
 
 test("show reads native bytes once for explicit and contextual Contract selection", async (t) => {
@@ -59,7 +62,7 @@ test("show reads native bytes once for explicit and contextual Contract selectio
   const status = await runCli(["-C", repository.path, "status", row.id], { environment: {} });
   assert.equal(status.exit, 0, status.stderr);
   assert.equal(read.mock.callCount(), before);
-  for (const selectors of [[], ["kei"], ["aku"], [row.id, `@${row.id.slice("kei/".length)}`]]) {
+  for (const selectors of [[], ["kei"], ["aku/"], [row.id, `@${row.id.slice("kei/".length)}`]]) {
     const ordinary = await runCli(["-C", repository.path, "status", ...selectors], { environment: {} });
     assert.equal(ordinary.exit, 0, ordinary.stderr);
     assert.equal(read.mock.callCount(), before);
@@ -91,7 +94,7 @@ test("show preserves native absence and selection refusals with command-specific
     [["@kei/missing"], /redundant short contract selector/u],
     [["aku/worker/1234abcd"], /cannot select an Akuma/u],
     [["kei/*"], /cannot select a category/u],
-    [["kei/a", "kei/b"], /at most one contract/u],
+    [["kei/a", "kei/b"], /at most one Contract/u],
     [["--unknown"], /not valid for show/u],
   ] as const) {
     const result = await captureOutput(() => main(["-C", repository.path, "show", ...args]));
@@ -118,6 +121,44 @@ test("retired status guidance is a usage refusal before World or guidance acquis
     assert.match(result.stderr, /option --guidance is not valid for status/u);
   }
   assert.equal(read.mock.callCount(), 0);
+});
+
+test("tell observes the admitted answer from stdin with a deadline or a schema", { timeout: 60_000 }, async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-cli-tell-");
+  const home = temporaryDirectory(t, "keiyaku-cli-tell-home-");
+  const world = await World.at(root);
+  installHostAcpFixture(world);
+  const agent = join(world, "host-acp.mjs");
+  const answer = '{"ok":true}';
+  writeFileSync(agent, readFileSync(agent, "utf8").replace('text: "acp-answer"', `text: ${JSON.stringify(answer)}`));
+  const schema = join(world, "answer.json");
+  writeFileSync(schema, JSON.stringify({ type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] }));
+  const born = await bornDirectAkuma({
+    root: world, akumaName: "acp-worker", draw: "a2000013", createdAt: "2026-08-10T00:00:00.000Z",
+    provider: { name: "fixture-acp", kind: "acp", executable: process.execPath,
+      config: { argvBefore: [agent], argvAfter: [], systemPromptArg: "--system-prompt" } },
+  });
+  born.leash.release();
+  const receipt = join(root, "body-pids");
+  const restore = installAkumaBodyPidReceipt(receipt);
+  let operationFailed = true;
+  try {
+    const runtime = { environment: { KEIYAKU_HOME: home }, signal: t.signal, readStdin: async () => "answer this" };
+    const text = await runCli(["-C", root, "tell", born.id, "--wait", "20s", "-"], runtime);
+    assert.equal(text.exit, 0, text.stderr);
+    assert.equal(text.stdout, answer);
+    const decoded = await cliJson<{ kind: string; answer: unknown }>(
+      ["-C", root, "tell", born.id, "--schema", schema, "-"], runtime,
+    );
+    assert.equal(decoded.exit, 0, decoded.stderr);
+    assert.equal(decoded.value.kind, "answered");
+    assert.deepEqual(decoded.value.answer, { ok: true });
+    operationFailed = false;
+  } finally {
+    try {
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: root, pidReceiptPath: receipt, timeoutMs: 30_000, operationFailed });
+    } finally { restore(); }
+  }
 });
 
 test("guidance acquisition failure stays a failure, not missing guidance", async (t) => {

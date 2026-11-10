@@ -1,4 +1,4 @@
-import { lstat, realpath } from "node:fs/promises";
+import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
 import { World, WorldError, type WorldRoot } from "../world.js";
 import { NoGitWorldError, Repo } from "./repo.js";
@@ -25,7 +25,6 @@ export type InvocationCoordinates = Readonly<{
   repo?: Repo;
   world: WorldRoot | null;
   candidateWorld: WorldRoot | null;
-  debtContext: Readonly<{ directory: string; boundary: string; writeRoot: string; managed: boolean }>;
   establishWorld: () => Promise<WorldRoot>;
 }>;
 
@@ -40,17 +39,6 @@ async function discoverRepo(path: string, gitPath?: string): Promise<RepoDiscove
   }
 }
 
-async function managedContractWorktree(root: string): Promise<boolean> {
-  try {
-    const stat = await lstat(resolve(root, ".keiyaku", "KEIYAKU.md"));
-    return stat.isFile() && !stat.isSymbolicLink();
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
-
-// eslint-disable-next-line complexity -- coordinate discovery preserves independent Repo and World policies.
 export async function invocationCoordinates(
   input: Readonly<{
     cwd: string;
@@ -82,7 +70,6 @@ export async function invocationCoordinates(
       ...(repo === undefined ? {} : { repo }),
       world: null,
       candidateWorld: null,
-      debtContext: { directory: cwd, boundary: cwd, writeRoot: cwd, managed: false },
       establishWorld: async () => {
         throw new Error("Contract wait has no World");
       },
@@ -91,18 +78,11 @@ export async function invocationCoordinates(
   const worldRepo = invocation?.kind === "present" ? invocation.repo : undefined;
   try {
     const world = await World.resolve({ cwd, ...(worldRepo === undefined ? {} : { repositoryRoot: worldRepo.root }) });
-    const boundary = worldRepo === undefined ? (world.root ?? world.candidate ?? cwd) : worldRepo.cwd;
     return {
       cwd,
       ...(repo === undefined ? {} : { repo }),
       world: world.root,
       candidateWorld: world.candidate,
-      debtContext: {
-        directory: cwd,
-        boundary,
-        writeRoot: worldRepo === undefined ? boundary : cwd,
-        managed: await managedContractWorktree(boundary),
-      },
       establishWorld: async () => {
         try {
           return await world.establish();

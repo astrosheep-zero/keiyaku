@@ -50,11 +50,8 @@ import {
   debtCatalogueSchema,
   debtShowResultSchema,
   debtDoctorReportSchema,
-  debtReadyListSchema,
-  blockedDebtListSchema,
   debtMutationResultSchema,
   debtQueryResultSchema,
-  debtContextResultSchema,
   debtUpdateResultSchema,
   type DebtQueryExpression,
 } from "../debt/index.js";
@@ -446,18 +443,6 @@ export const verbs = Object.freeze({
     output: debtBatchResultSchema,
     effect: "write",
   },
-  "debt.ready": {
-    description: "List ready Debts.",
-    input: z.strictObject({ ...debtReadScope, parent: optText }).readonly(),
-    output: debtReadyListSchema,
-    effect: "read",
-  },
-  "debt.blocked": {
-    description: "List blocked Debts.",
-    input: z.strictObject({ ...debtReadScope, parent: optText }).readonly(),
-    output: blockedDebtListSchema,
-    effect: "read",
-  },
   "debt.query": {
     description: "Query Debts using the owner expression.",
     input: z
@@ -482,12 +467,6 @@ export const verbs = Object.freeze({
     input: z.strictObject({}).readonly(),
     output: z.union([debtDoctorReportSchema, debtAbsentSchema]),
     effect: "read",
-  },
-  "debt.context": {
-    description: "Observe or set the Debt namespace context.",
-    input: z.strictObject({ namespace: strings.exactOptional() }).readonly(),
-    output: debtContextResultSchema,
-    effect: "write",
   },
   ls: {
     description: "List Contracts, Akumas, archetypes, or Debts.",

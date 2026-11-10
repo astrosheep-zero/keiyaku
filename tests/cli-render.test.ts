@@ -73,7 +73,6 @@ import type { TimelineFact } from "../src/akuma/heart/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import {
-  renderDebtContext,
   renderDebtLifecycle,
   renderDebtList,
   renderDebtMutation,
@@ -451,7 +450,7 @@ test("a debt title wraps its em-dash and title as one unit", () => {
   const context = { columns: 60, color: false } as const;
   const text = renderDebtList(
     "ls",
-    "current",
+    { namespace: "debt/" },
     debtPage([
       debtSummary({
         id: "debt/usability/a-very-long-debt-title-that-cannot-fit-here",
@@ -525,7 +524,7 @@ test("Debt lifecycle batches preserve order, verdicts, and accepted warnings", (
   assert.match(text, /^\? done retry  debt\/gamma\nbusy$/mu);
 });
 
-test("Debt tree, doctor, and context render their native relationship facts", () => {
+test("Debt tree and doctor render their native relationship facts", () => {
   const tree = renderDebtTree(
     "debt/root",
     {
@@ -560,15 +559,6 @@ test("Debt tree, doctor, and context render their native relationship facts", ()
   assert.match(issues, /^! missing-target debt\/a needs debt\/b$/mu);
   assert.match(issues, /^! self-relation debt\/a parent$/mu);
   assert.equal(renderDoctor({ kind: "absent" }), "debt world absent");
-  assert.equal(renderDebtContext({ kind: "present", source: "default-root" }), "context root · default-root");
-  assert.equal(
-    renderDebtContext({ kind: "present", namespace: "prod/api", source: "local-override" }),
-    "context prod/api · local-override",
-  );
-  assert.match(
-    renderDebtContext({ kind: "refused", path: "x" }),
-    /^× context refused\n  reason  invalid namespace context\n  path  x$/mu,
-  );
 });
 
 test("catalog text renders only the selected identity layer", () => {
@@ -731,30 +721,19 @@ test("World roster names a bound Contract once without a bare unavailable parent
   assert.doesNotMatch(free, /bound to|unbound/u);
   assert.doesNotMatch(free, /·\s*$/mu);
 });
-test("Debt family uses qualified empty frames and reads absence and refusal distinctly", () => {
+test("Debt listings retain empty and absent observations", () => {
   const context = { columns: 120, color: false } as const;
   const empty = { kind: "present" as const };
-  assert.equal(renderDebtList("ls", "current", empty, context), "debts  none");
-  assert.equal(renderDebtList("ready", "current", empty, context), "ready  none");
-  assert.equal(renderDebtList("blocked", "current", empty, context), "blocked  none");
-  assert.equal(renderDebtList("query", "current", empty, context), "query  none");
-  assert.equal(renderDebtList("ready", "current", { kind: "absent" }, context), "debt world absent");
-  const refused = renderDebtList(
-    "ls",
-    "current",
-    { kind: "refused", reason: "invalid-namespace-context", path: "bad namespace" },
-    context,
-  );
-  assert.match(refused, /^× ls refused$/mu);
-  assert.match(refused, /^  reason  invalid namespace context$/mu);
-  assert.match(refused, /^  path  bad namespace$/mu);
+  assert.equal(renderDebtList("ls", { namespace: "debt/" }, empty, context), "debts  none");
+  assert.equal(renderDebtList("query", "world", empty, context), "query  none");
+  assert.equal(renderDebtList("query", "world", { kind: "absent" }, context), "debt world absent");
   const text = renderDebtList(
     "ls",
-    "current",
+    { namespace: "debt/" },
     debtPage([debtSummary({ id: "debt/one-row", title: "One row" })], true),
     context,
   );
-  assert.match(text, /^DEBTS \/\/ current namespace$/mu);
+  assert.match(text, /^DEBTS \/\/ namespace root$/mu);
   assert.match(text, /^○ debt\/one-row · ready · P2 — One row$/mu);
   assert.ok(text.endsWith("\n…"));
 });
@@ -1181,7 +1160,7 @@ test("query displays dropped while the native disposition remains drop", () => {
     priority: 1,
     disposition: "drop",
   });
-  const text = renderDebtList("query", "current", debtPage([row]));
+  const text = renderDebtList("query", { namespace: "debt/" }, debtPage([row]));
   assert.match(text, /debt\/dropped · dropped · P1/u);
   assert.equal(row.disposition, "drop");
 });

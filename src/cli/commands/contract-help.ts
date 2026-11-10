@@ -77,7 +77,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "optional",
     flags: { actor: "value", after: "repeat", "clear-after": "boolean", gates: "raw-value", json: "boolean" },
     usage:
-      "amend [<contract>|@<contract>] [--after <kei/...> [--after <kei/...>]... | --clear-after] [--gates <name,...>] [--actor <actor>] [--repo <path>] [-]",
+      "amend [<contract>|@name] [--after <kei/...> [--after <kei/...>]... | --clear-after] [--gates <name,...>] [--actor <actor>] [--repo <path>] [-]",
     purpose: "Change a Contract's document, prerequisites, or acceptance gates.",
     details: [
       "Gates are checked at integration: reviewed needs a satisfied review;",
@@ -107,7 +107,7 @@ export const CONTRACT_COMMAND_SPECS = {
       json: "boolean",
     },
     usage:
-      "deliver [<contract>|@<contract>] [--message <text>] [--include-dirty] [--materialize-conflict] [--overwrite] [--repo <path>]\ndeliver [<contract>|@<contract>] --dry-run [--include-dirty] [--show-diff] [--repo <path>]",
+      "deliver [<contract>|@name] [--message <text>] [--include-dirty] [--materialize-conflict] [--overwrite] [--repo <path>]\ndeliver [<contract>|@name] --dry-run [--include-dirty] [--show-diff] [--repo <path>]",
     purpose: "Submit work for a Contract and integrate it when its requirements are met.",
     details: [
       "Delivery is judged against the whole Contract, not the current Arc. It uses",
@@ -143,7 +143,7 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { index: "value", "include-dirty": "boolean", json: "boolean" },
-    usage: "verify [<contract>|@<contract>] [--index <n>] [--include-dirty] [--repo <path>]",
+    usage: "verify [<contract>|@name] [--index <n>] [--include-dirty] [--repo <path>]",
     purpose: "Execute independent Verification checks and record their evidence.",
     details: [
       "Requires an active Contract with the verified gate and Verification declarations.",
@@ -172,7 +172,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "optional",
     flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
     usage:
-      "review [<contract>|@<contract>] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--repo <path>]",
+      "review [<contract>|@name] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--repo <path>]",
     purpose: "Record whether a Contract meets its acceptance criteria.",
     details: [
       "A review checks the whole Contract, not just one Arc. After delivery it checks the candidate; before delivery it checks the current Contract and worktree, but cannot integrate.",
@@ -187,7 +187,7 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "required",
     flags: { actor: "value", json: "boolean" },
-    usage: "arc [<contract>|@<contract>] [--actor <actor>] [--repo <path>] -",
+    usage: "arc [<contract>|@name] [--actor <actor>] [--repo <path>] -",
     purpose: "Name the current chapter of a Contract's story (a story arc).",
     details: [
       "stdin is one nonblank H1 chapter name followed by any Markdown body, including none:",
@@ -200,20 +200,21 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { actor: "value", note: "value", json: "boolean" },
-    usage: "abandon [<contract>|@<contract>] [--note <text>] [--actor <actor>] [--repo <path>]",
+    usage: "abandon [<contract>|@name] [--note <text>] [--actor <actor>] [--repo <path>]",
     purpose: "End work on a Contract without accepting it; optionally record why.",
   },
   show: {
     positional: "optional",
     stdin: "none",
     flags: { json: "boolean" },
-    usage: "show [<contract>|@<contract>] [--repo <path>]",
-    purpose: "Read one Contract's guidance.",
+    usage: "show [<contract>|@name] [--repo <path>]\nshow <debt/...>...",
+    purpose: "Read Contract guidance or addressed Debts and their relationships.",
     details: [
-      "Accepts a complete Contract identity or exact @<contract> short selector.",
+      "Accepts a complete Contract identity, exact @name short selector, or one or more complete Debt identities.",
       "Omitted selection uses the exact managed worktree's installed Contract context.",
-      "Akuma, category, and plural selections are refused before reading guidance.",
-      "Text returns guidance directly; --json serializes the same native value.",
+      "Akuma, category, mixed Debt and Contract, and plural Contract selections are refused before reading.",
+      "Debt reads use the invocation World and do not accept --repo.",
+      "Text returns Contract guidance directly or renders the Debt owner's detail; --json serializes the same native value.",
     ].join("\n"),
   },
   status: {
@@ -221,12 +222,12 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { limit: "value", json: "boolean" },
     usage:
-      "status [<contract>|@name|<aku/...>]...\nstatus (aku|aku/|aku/*) [--limit <count>]\nstatus (kei|kei/|kei/*) [--limit <count>]",
+      "status [<contract>|@name|<aku/...>]...\nstatus aku/ [--limit <count>]\nstatus (kei|kei/|kei/*) [--limit <count>]",
     purpose: "Show the world overview or selected Contract and Akuma status.",
     details: [
       "Akuma entries show the directory each Akuma was started in.",
       "",
-      "aku, aku/, and aku/* show the recent Akuma board; kei, kei/, and kei/* show the",
+      "aku/ shows the recent Akuma board; kei, kei/, and kei/* show the",
       "recent active Contract board. --limit bounds the board to that many recent rows",
       "(default 10). The Contract category requires a Repo; the Akuma category does not.",
     ].join("\n"),
@@ -252,7 +253,7 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { "retry-hooks": "boolean", json: "boolean" },
-    usage: "reconcile [<contract>|@<contract>] [--retry-hooks] [--repo <path>]",
+    usage: "reconcile [<contract>|@name] [--retry-hooks] [--repo <path>]",
     purpose: "Restore a Contract's Git workspace from its recorded state, or all of this World's.",
     details:
       "--retry-hooks reruns configured setup commands even when a Contract workspace already exists; otherwise they run when reconciliation creates it.",

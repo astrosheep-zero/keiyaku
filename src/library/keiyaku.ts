@@ -60,23 +60,19 @@ import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
 import type {
   DebtLsInvocation,
-  DebtReadyInvocation,
   DebtQueryInvocation,
   DebtUpdateInvocation,
   DebtCloseInvocation,
   DebtShowInvocation,
-  DebtContextInvocation,
 } from "./keiyaku-debt.js";
 export type {
   DebtSelection,
   DebtReadScope,
   DebtLsInvocation,
-  DebtReadyInvocation,
   DebtQueryInvocation,
   DebtUpdateInvocation,
   DebtCloseInvocation,
   DebtShowInvocation,
-  DebtContextInvocation,
 } from "./keiyaku-debt.js";
 export { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 
@@ -232,12 +228,9 @@ export class Keiyaku {
       case "debt.show":
       case "debt.done":
       case "debt.drop":
-      case "debt.ready":
-      case "debt.blocked":
       case "debt.query":
       case "debt.tree":
       case "debt.doctor":
-      case "debt.context":
         return this.#dispatchDebt(request, signal);
     }
   }
@@ -313,18 +306,12 @@ export class Keiyaku {
         return debt.debtClose(this.#input, { ...request.input, ...signal }, "done");
       case "debt.drop":
         return debt.debtClose(this.#input, { ...request.input, ...signal }, "drop");
-      case "debt.ready":
-        return debt.debtReady(this.#input, request.input, false);
-      case "debt.blocked":
-        return debt.debtReady(this.#input, request.input, true);
       case "debt.query":
         return debt.debtQuery(this.#input, request.input as DebtQueryInvocation);
       case "debt.tree":
         return debt.debtTree(this.#input, request.input);
       case "debt.doctor":
         return debt.debtDoctor(this.#input);
-      case "debt.context":
-        return debt.debtContext(this.#input, request.input);
     }
   }
 
@@ -424,12 +411,6 @@ export class Keiyaku {
   debtDrop({ signal, ...input }: DebtCloseInvocation) {
     return this.run("debt.drop", input, signal === undefined ? {} : { signal });
   }
-  debtReady(input: DebtReadyInvocation = {}) {
-    return this.run("debt.ready", input);
-  }
-  debtBlocked(input: DebtReadyInvocation = {}) {
-    return this.run("debt.blocked", input);
-  }
   debtQuery(input: DebtQueryInvocation = {}) {
     return this.run("debt.query", input);
   }
@@ -438,9 +419,6 @@ export class Keiyaku {
   }
   debtDoctor() {
     return this.run("debt.doctor", {});
-  }
-  debtContext(input: DebtContextInvocation = {}) {
-    return this.run("debt.context", input);
   }
   status(input: VerbInput<"status"> = {}) {
     return this.run("status", input);

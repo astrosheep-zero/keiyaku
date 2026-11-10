@@ -27,15 +27,13 @@ import {
 } from "../debt/input.js";
 import { parseDebtCreationDocument } from "../debt/document.js";
 import { debtQuerySelection, normalizeDebtQuery } from "../debt/query.js";
-import { installNamespaceContext, resolveDebtNamespaceContext, validateNamespaceContext } from "../debt/context.js";
-import { invocationCoordinates, KeiyakuUsageError } from "./keiyaku-coordinates.js";
+import { invocationCoordinates } from "./keiyaku-coordinates.js";
 import { resolveActor } from "./keiyaku-attribution.js";
 import type { KeiyakuAt } from "./keiyaku.js";
 
 export type DebtSelection = "active" | "closed" | "all";
 export type DebtReadScope = Readonly<{ scope?: "namespace" | "world"; namespace?: readonly string[]; limit?: number }>;
 export type DebtLsInvocation = DebtReadScope & Readonly<{ of: "debt"; selection?: DebtSelection }>;
-export type DebtReadyInvocation = DebtReadScope & Readonly<{ parent?: string }>;
 export type DebtQueryInvocation = DebtReadScope &
   Readonly<{ selection?: DebtSelection; where?: DebtQueryExpression; sort?: DebtQuerySort }>;
 export type DebtUpdateInvocation = UpdateDebtInput & Readonly<{ id: string }>;
@@ -43,7 +41,6 @@ export type DebtCloseInvocation = Readonly<{ ids: readonly string[]; note?: stri
 export type DebtShowInvocation =
   | Readonly<{ id: string; ids?: never }>
   | Readonly<{ ids: readonly string[]; id?: never }>;
-export type DebtContextInvocation = Readonly<{ namespace?: readonly string[] }>;
 
 const coordinates = (at: KeiyakuAt) => invocationCoordinates({ ...at, use: "none" });
 const absent: DebtAbsent = { kind: "absent" };
@@ -65,20 +62,8 @@ function readInput(input: unknown, label: string, extra: readonly string[]) {
   debtRowViewLimit(v.limit);
   return v;
 }
-async function selectedScope(
-  at: Awaited<ReturnType<typeof coordinates>>,
-  input: DebtReadScope,
-): Promise<
-  | { scope: "world" }
-  | { namespace: readonly string[] }
-  | { kind: "refused"; reason: "invalid-namespace-context"; path: string }
-> {
-  if (input.scope === "world") return { scope: "world" as const };
-  if (input.namespace !== undefined) return { namespace: input.namespace };
-  const context = await resolveDebtNamespaceContext(at.debtContext);
-  return "kind" in context
-    ? { kind: "refused" as const, reason: context.kind, path: context.path }
-    : { namespace: context.namespace };
+function selectedScope(input: DebtReadScope) {
+  return input.scope === "world" ? { scope: "world" as const } : { namespace: input.namespace ?? [] };
 }
 
 export async function debtAdd(at: KeiyakuAt, input: AddDebtInput | AddDebtDocumentInput, document: boolean) {
@@ -87,9 +72,7 @@ export async function debtAdd(at: KeiyakuAt, input: AddDebtInput | AddDebtDocume
   const actor = resolveActor({ env: at.environment, ...(parsed.actor === undefined ? {} : { actor: parsed.actor }) });
   const coord = await coordinates(at);
   const world = coord.world ?? (await coord.establishWorld());
-  const scope = parsed.namespace === undefined ? await selectedScope(coord, {}) : { namespace: parsed.namespace };
-  if ("kind" in scope) return scope;
-  const composed = { ...parsed, ...scope, ...(actor === undefined ? {} : { actor }) };
+  const composed = { ...parsed, ...(actor === undefined ? {} : { actor }) };
   return document ? addDebtDocument(world, composed as AddDebtDocumentInput) : addDebt(world, composed as AddDebtInput);
 }
 export async function debtUpdate(at: KeiyakuAt, input: DebtUpdateInvocation) {
@@ -136,37 +119,12 @@ export async function debtList(at: KeiyakuAt, input: DebtLsInvocation): Promise<
   const selected = selection(v.selection),
     coord = await coordinates(at);
   if (coord.world === null) return absent;
-  const scope = await selectedScope(coord, input);
-  if ("kind" in scope) return { kind: scope.reason, path: scope.path };
+  const scope = selectedScope(input);
   return Debts.of(coord.world).list({
     ...scope,
     selection: selected,
     ...(input.limit === undefined ? {} : { limit: input.limit }),
   });
-}
-export function debtReady(
-  at: KeiyakuAt,
-  input: DebtReadyInvocation,
-  blocked: false,
-): Promise<import("../debt/index.js").DebtReadyList | typeof absent>;
-export function debtReady(
-  at: KeiyakuAt,
-  input: DebtReadyInvocation,
-  blocked: true,
-): Promise<import("../debt/index.js").BlockedDebtList | typeof absent>;
-export async function debtReady(at: KeiyakuAt, input: DebtReadyInvocation, blocked: boolean) {
-  const v = readInput(input, blocked ? "blocked" : "ready", ["parent"]);
-  if (v.parent !== undefined) debtId(v.parent);
-  const coord = await coordinates(at);
-  if (coord.world === null) return absent;
-  const scope = await selectedScope(coord, input);
-  if ("kind" in scope) return scope;
-  const args = {
-    ...scope,
-    ...(input.parent === undefined ? {} : { parent: input.parent }),
-    ...(input.limit === undefined ? {} : { limit: input.limit }),
-  };
-  return blocked ? Debts.of(coord.world).blocked(args) : Debts.of(coord.world).ready(args);
 }
 export async function debtQuery(at: KeiyakuAt, input: DebtQueryInvocation) {
   const v = readInput(input, "query", ["selection", "where", "sort"]);
@@ -175,8 +133,7 @@ export async function debtQuery(at: KeiyakuAt, input: DebtQueryInvocation) {
   sort(v.sort);
   const coord = await coordinates(at);
   if (coord.world === null) return absent;
-  const scope = await selectedScope(coord, input);
-  if ("kind" in scope) return scope;
+  const scope = selectedScope(input);
   return Debts.of(coord.world).query({
     ...scope,
     where: debtQuerySelection(selected, input.where),
@@ -194,29 +151,4 @@ export async function debtTree(at: KeiyakuAt, input: Readonly<{ id: string }>) {
 export async function debtDoctor(at: KeiyakuAt) {
   const coord = await coordinates(at);
   return coord.world === null ? absent : Debts.of(coord.world).doctor();
-}
-export async function debtContext(at: KeiyakuAt, input: DebtContextInvocation) {
-  const v = record(input, "context input");
-  closed(v, ["namespace"], "context input");
-  if (v.namespace !== undefined) {
-    try {
-      validateNamespaceContext(v.namespace);
-    } catch (error) {
-      if (error instanceof TypeError) throw new KeiyakuUsageError(error.message);
-      throw error;
-    }
-  }
-  const coord = await coordinates(at);
-  if (v.namespace !== undefined) {
-    if (coord.world === null) await coord.establishWorld();
-    await installNamespaceContext(coord.debtContext.writeRoot, v.namespace as readonly string[]);
-  } else if (coord.world === null) return { kind: "present", source: "default-root" } as const;
-  const resolved = await resolveDebtNamespaceContext(coord.debtContext);
-  if ("kind" in resolved) return { kind: "refused", path: resolved.path } as const;
-  if (resolved.source === "default-root") return { kind: "present", source: resolved.source } as const;
-  return {
-    kind: "present",
-    source: resolved.source,
-    ...(resolved.namespace.length === 0 ? {} : { namespace: resolved.namespace.join("/") }),
-  } as const;
 }

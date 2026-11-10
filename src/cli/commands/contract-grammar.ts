@@ -2,6 +2,7 @@ import { validateAkumaName } from "../../identity/normalize.js";
 import { decodeAkumaCaller } from "../../akuma/caller.js";
 import { parseAkumaId } from "../../akuma/identity.js";
 import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
+import { parseDebtId } from "../../debt/identity.js";
 import type { VerbInput } from "../../library/keiyaku-verbs.js";
 import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
 import { CliUsageError, commandGuide } from "../usage.js";
@@ -195,9 +196,7 @@ function parseReview(parts: ContractTokens): CliRequest {
 
 // Only these fixed category forms are status selectors.
 const STATUS_CATEGORY_SELECTORS: ReadonlyMap<string, "akuma" | "contract"> = new Map([
-  ["aku", "akuma"],
   ["aku/", "akuma"],
-  ["aku/*", "akuma"],
   ["kei", "contract"],
   ["kei/", "contract"],
   ["kei/*", "contract"],
@@ -205,6 +204,7 @@ const STATUS_CATEGORY_SELECTORS: ReadonlyMap<string, "akuma" | "contract"> = new
 
 function rejectStatusGlobs(positionals: readonly string[]): void {
   for (const selector of positionals) {
+    if (selector === "aku" || selector === "aku/*") refuse("status", "Akuma category selector must be aku/");
     if (!STATUS_CATEGORY_SELECTORS.has(selector) && !selector.startsWith("@") && /[*?\[\]]/u.test(selector))
       refuse("status", `unsupported status glob: ${selector}`);
   }
@@ -215,7 +215,7 @@ function showSelector(parts: ContractTokens): string | undefined {
   if (selected !== undefined && STATUS_CATEGORY_SELECTORS.has(selected))
     refuse("show", "show cannot select a category");
   if (parts.positionals.length > 1) refuse("show", "show accepts at most one Contract selector");
-  if (selected?.startsWith("aku/") === true) refuse("show", "show cannot select an Akuma");
+  if (selected === "aku" || selected?.startsWith("aku/") === true) refuse("show", "show cannot select an Akuma");
   if (selected !== undefined && !selected.startsWith("@") && /[*?\[\]]/u.test(selected))
     refuse("show", `unsupported show glob: ${selected}`);
   return selected;
@@ -376,6 +376,17 @@ export function parseContractCommand(parts: ContractTokens): CliRequest {
       return { name: "abandon", input: { ...selected, ...actor, ...(note === undefined ? {} : { note }) }, output };
     }
     case "show": {
+      if (parts.positionals.some((selector) => selector.startsWith("debt/"))) {
+        if (parts.positionals.some((selector) => !selector.startsWith("debt/")))
+          refuse("show", "show cannot mix Debt and Contract selectors");
+        try {
+          for (const selector of parts.positionals) parseDebtId(selector);
+        } catch (error) {
+          refuse("show", error instanceof Error ? error.message : String(error));
+        }
+        const ids = parts.positionals;
+        return { name: "debt.show", input: ids.length === 1 ? { id: ids[0]! } : { ids }, output };
+      }
       const contract = showSelector(parts);
       return { name: "show", input: contract === undefined ? {} : { contract }, output };
     }

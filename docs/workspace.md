@@ -46,20 +46,15 @@ After admission, composition appoints before Git realizes the worktree and retri
 
 ## Derived Files And Cleanup
 
-The workspace owner atomically creates or repairs its guidance, namespace
-context, and narrow local ignore protection after an active managed worktree
-exists. These files keep derived management material out of ordinary status and
-delivery capture without hiding project-owned data. Primary management ignore
-protection excludes the local Debt ledger and runtime custody while leaving
-shared Settings and project Archetype definitions eligible for version control.
-Namespace context is the
-Contract-derived coordinate for active Debt work; a valid local override remains
-intact. The complete Contract coordinate is split into segments, so `kei/<slug>`
-provides Debt namespace `kei/<slug>` and identities under `debt/kei/<slug>/...`.
-Terminal Contracts never receive a new active context projection. A tracked
-generated location is a failure. A recognized user-owned skill leaf remains
-untouched; static seat skills contain procedure only, while Contract and arc
-facts remain in canonical guidance.
+The workspace owner atomically creates or repairs its guidance and narrow local
+ignore protection after an active managed worktree exists. These files keep
+derived management material out of ordinary status and delivery capture without
+hiding project-owned data. Primary management ignore protection excludes the
+local Debt ledger and runtime custody while leaving shared Settings and project
+Archetype definitions eligible for version control. A tracked generated location
+is a failure. A recognized user-owned skill leaf remains untouched; static seat
+skills contain procedure only, while Contract and arc facts remain in canonical
+guidance.
 
 All workspace reads, writes, protection, and cleanup are awaited. There is no
 synchronous appointment surface or deferred cleanup queue. A derived-file
@@ -67,6 +62,5 @@ failure is a typed post-admission lag and preserves accepted facts and completed
 Git effects. Git reconciliation does not parse guidance or invoke a projection
 callback; it completes Git effects first, then active workspace projection runs
 as the separate owner step. Terminal cleanup runs after the settlement
-opportunity and may remove the managed worktree, including its active-only
-derived context. Terminal byte custody and recovery remain owned by
-[git-reconciliation.md](git-reconciliation.md).
+opportunity and may remove the managed worktree. Terminal byte custody and
+recovery remain owned by [git-reconciliation.md](git-reconciliation.md).

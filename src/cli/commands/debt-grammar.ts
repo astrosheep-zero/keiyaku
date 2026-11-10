@@ -6,28 +6,10 @@ import {
   type CliUsageGuide,
 } from "../usage.js";
 import { scanArgs, type ScanFlagKind, type ScanSpec, type ScannedArgs } from "../scan.js";
-import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
 import { parseDebtId } from "../../debt/identity.js";
-import {
-  parseDebtQueryExpression,
-  validateDebtLimit,
-  validateDebtParent,
-  type DebtQueryExpression,
-} from "./debt-query.js";
+import { parseDebtQueryExpression, validateDebtLimit, type DebtQueryExpression } from "./debt-query.js";
 
-export type DebtAction =
-  | "add"
-  | "show"
-  | "ls"
-  | "ready"
-  | "blocked"
-  | "tree"
-  | "doctor"
-  | "update"
-  | "query"
-  | "done"
-  | "drop"
-  | "context";
+export type DebtAction = "add" | "tree" | "doctor" | "update" | "query" | "done" | "drop";
 type DebtFlagValue = string | true | readonly string[];
 type DebtStdin = "document" | "body" | "append" | "note";
 
@@ -79,36 +61,6 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
     details:
       "The stdin document is YAML front matter (title, state, priority, needs, parent, supersedes, relates, note) followed by a Markdown body.",
   },
-  show: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: COMMON,
-    usage: "debt show <debt/...>...",
-    purpose: "Read one or more Debts and their relationships.",
-  },
-  ls: {
-    arity: [0, 1],
-    flags: { ...COMMON, closed: "boolean", all: "boolean", world: "boolean", limit: "value" },
-    usage: "debt ls [<namespace-selector>] [--closed | --all] [--world] [--limit <count>]",
-    purpose: "List Debts in the selected namespace.",
-    details: [
-      "With no selector, lists the current directory Debt context.",
-      "debt/ selects the root namespace; --world lists every namespace in the current Debt world.",
-    ].join("\n"),
-  },
-  ready: {
-    arity: [0, 0],
-    flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
-    usage: "debt ready [--world] [--parent <debt/...>] [--limit <count>]",
-    purpose: "List open Debts whose every dependency is complete or dropped.",
-    details: "--world lists every namespace in the current Debt world.",
-  },
-  blocked: {
-    arity: [0, 0],
-    flags: { ...COMMON, world: "boolean", parent: "value", limit: "value" },
-    usage: "debt blocked [--world] [--parent <debt/...>] [--limit <count>]",
-    purpose: "List Debts with unmet dependencies.",
-    details: "--world lists every namespace in the current Debt world.",
-  },
   query: {
     arity: [0, 0],
     flags: {
@@ -131,6 +83,7 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
       "By default only active Debts match; --closed selects terminal Debts, --all includes both.",
       "examples:",
       "  keiyaku debt query --where 'priority <= 1 and ready' --world",
+      "  keiyaku debt query --where 'blocked and under = debt/release' --world",
       "  keiyaku debt query --where 'updated < 2026-08-06T00:00:00.000Z' --world",
     ].join("\n"),
   },
@@ -187,13 +140,6 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
     flags: { ...COMMON, note: "value" },
     usage: "debt drop <debt/...>... [--note <text>]",
     purpose: "Mark one or more Debts as no longer needed.",
-  },
-  context: {
-    arity: [0, 1],
-    flags: COMMON,
-    usage: "debt context [<namespace>]",
-    purpose: "Set or read the default Debt namespace for this directory.",
-    details: "Omit <namespace> to read the current context; use / to reset it to the root namespace.",
   },
 };
 
@@ -265,11 +211,8 @@ function validateDebtReadFlags(
   flags: Readonly<Record<string, DebtFlagValue>>,
   fail: (message: string) => never,
 ): void {
-  if ((action === "ls" || action === "query") && flags.closed === true && flags.all === true)
+  if (action === "query" && flags.closed === true && flags.all === true)
     fail("--closed and --all are mutually exclusive");
-  if (action === "ls" && flags.world === true) {
-    // An explicit selector is checked below, after positional shape is known.
-  }
   if (typeof flags.limit === "string") {
     try {
       validateDebtLimit(flags.limit);
@@ -286,17 +229,10 @@ function validateDebtReadFlags(
   ) {
     fail("--sort must be priority, created, updated, or id");
   }
-  if ((action === "ready" || action === "blocked") && typeof flags.parent === "string") {
-    try {
-      validateDebtParent(flags.parent);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : String(error));
-    }
-  }
 }
 
 /** Actions whose positionals are all addressed DebtIds validated by the native owner. */
-const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["show", "tree", "update", "done", "drop"]);
+const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["tree", "update", "done", "drop"]);
 
 /** Validate every addressed DebtId positional through the native owner before any read or write. */
 function validateDebtIdPositionals(positionals: readonly string[], fail: (message: string) => never): void {
@@ -306,18 +242,6 @@ function validateDebtIdPositionals(positionals: readonly string[], fail: (messag
     } catch (error) {
       fail(error instanceof Error ? error.message : String(error));
     }
-  }
-}
-
-/** Validate an explicit `debt ls` namespace selector through the native owner. */
-function validateListSelector(selector: string, fail: (message: string) => never): void {
-  if (selector !== "debt/" && (!selector.startsWith("debt/") || !selector.endsWith("/")))
-    fail(`invalid Debt namespace selector: ${selector}`);
-  if (selector === "debt/") return;
-  try {
-    parseDebtNamespaceSelector(selector);
-  } catch (error) {
-    fail(error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -341,10 +265,6 @@ function validateDebtScan(action: DebtAction, scanned: ScannedDebt, fail: (messa
   )
     fail("debt add document input owns its creation fields");
   if (DEBT_ID_ACTIONS.has(action)) validateDebtIdPositionals(positionals, fail);
-  if (action === "ls" && positionals.length === 1) {
-    validateListSelector(positionals[0]!, fail);
-    if (flags.world === true) fail("--world cannot be combined with an explicit Debt namespace selector");
-  }
   validateDebtReadFlags(action, flags, fail);
   if (action === "update") validateUpdate(scanned, fail);
 }

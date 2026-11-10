@@ -103,8 +103,6 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       assert.equal(repository.run(["-C", root, "ls-tree", "HEAD", "--", relativePath]), "");
       assert.equal(repository.run(["-C", other, "ls-files", "--", relativePath]), "");
       const beforeIndex = repository.run(["-C", root, "ls-files", "--stage"]);
-      const override = join(worktree, ".keiyaku", "namespace", "current");
-      writeFileSync(override, "custom\n");
 
       const report = await Keis.of(repo).reconcile({ contract: id });
       assert.ok(report.kind === "contract");
@@ -118,7 +116,6 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       );
       assert.equal(lag.diagnostic, `generated path is tracked by Git: ${path}`);
       assert.equal(readFileSync(path, "utf8"), "authored generated location\n");
-      assert.equal(readFileSync(override, "utf8"), "custom\n");
       assert.equal(repository.run(["-C", root, "ls-files", "--stage"]), beforeIndex);
 
       repository.run(["-C", root, "reset", "--quiet", "HEAD", "--", relativePath]);
@@ -126,7 +123,6 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       assert.ok(retried.kind === "contract");
       assert.equal((retried.issues ?? []).some((issue) => issue.kind === "contract-file-failed"), false);
       assert.notEqual(readFileSync(path, "utf8"), "authored generated location\n");
-      assert.equal(readFileSync(override, "utf8"), "custom\n");
     });
   }
 
@@ -135,8 +131,6 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       const { repository, repo, id, worktree } = await projectionFixture();
       const root = index === "primary" ? repository.path : worktree;
       const guidance = readFileSync(join(worktree, ".keiyaku", "KEIYAKU.md"), "utf8");
-      const context = join(worktree, ".keiyaku", "namespace", "current");
-      unlinkSync(context);
       const report = await withGitShim(
         [
           'if [ "$1" = "ls-files" ] && [ "$PWD" = "$KEIYAKU_FAILED_INDEX" ]; then',
@@ -159,8 +153,6 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
       assert.match(lag.diagnostic, /ls-files -z -- .*tracking read failed/);
       assert.equal(readFileSync(join(worktree, ".keiyaku", "KEIYAKU.md"), "utf8"), guidance);
 
-      if (index === "managed") assert.equal(readFileSync(context, "utf8"), `${id}\n`);
-      else assert.equal(statSync(context, { throwIfNoEntry: false }), undefined);
       const recovered = await Keis.of(repo).reconcile({ contract: id });
       assert.ok(recovered.kind === "contract");
       assert.equal(recovered.issues, undefined);

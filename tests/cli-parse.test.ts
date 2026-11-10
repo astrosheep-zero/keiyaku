@@ -12,15 +12,17 @@ function command(argv: readonly string[]): ParsedCommand {
   return parsed.command;
 }
 
-test("Debt replaces the old family without restoring planning or progress verbs", () => {
-  assert.throws(() => parseArgv(["task", "ls"]), CliUsageError);
-  for (const verb of ["compose", "start", "stop", "hold", "resume"]) {
-    assert.throws(() => parseArgv(["debt", verb]), { diagnostic: /unknown debt command/u });
-  }
-  assert.throws(() => parseArgv(["debt", "show", "task/example"]), { diagnostic: /debt ID must be/u });
-  const debt = command(["debt", "show", "debt/example"]);
-  assert.ok("command" in debt);
-  assert.equal(debt.command, "debt");
+test("show routes complete Debt addresses to the native Debt operation", () => {
+  assert.deepEqual(command(["show", "debt/example"]), {
+    name: "debt.show", input: { id: "debt/example" }, output: "text",
+  });
+  assert.deepEqual(command(["show", "debt/one", "debt/ns/two", "--json"]), {
+    name: "debt.show", input: { ids: ["debt/one", "debt/ns/two"] }, output: "json",
+  });
+  assert.throws(() => command(["show", "debt/one", "kei/two"]), /cannot mix Debt and Contract/u);
+  assert.throws(() => command(["show", "@one", "debt/two"]), /cannot mix Debt and Contract/u);
+  assert.throws(() => command(["show", "debt/Bad Name"]), /debt ID/u);
+  assert.throws(() => assertExplicitRepoUse(command(["show", "debt/example"]), "/repo"), /no consumer/u);
 });
 
 test("root Debt listings select closed or all only for Debt", () => {
@@ -75,9 +77,9 @@ test("persisted removed workspace bytes are authority corruption", () => {
 });
 
 test("global coordinates are independent of command position", () => {
-  assert.deepEqual(parseArgv(["debt", "ls", "-C", "/repo/caller"]), {
+  assert.deepEqual(parseArgv(["ls", "debt/", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
-    command: { command: "debt", action: "ls", output: "text", positionals: [], flags: {} },
+    command: { name: "ls", input: { of: "debt", namespace: [] }, output: "text" },
   });
   assert.deepEqual(parseArgv(["settings", "--cwd", "/repo/caller"]), {
     cwd: "/repo/caller",
@@ -239,7 +241,7 @@ test("show parses a standalone Contract guidance read with root coordinates", ()
   for (const selector of ["aku", "aku/", "aku/*", "kei", "kei/", "kei/*", "aku/worker/1234abcd", "kei/foo*"]) {
     assert.throws(() => parseArgv(["show", selector]), CliUsageError);
   }
-  assert.throws(() => parseArgv(["show", "kei/one", "kei/two"]), /at most one contract/u);
+  assert.throws(() => parseArgv(["show", "kei/one", "kei/two"]), /at most one Contract/u);
   assert.throws(() => parseArgv(["show", "--guidance"]), /not valid for show/u);
   assert.throws(() => parseArgv(["show", "--limit", "2"]), /not valid for show/u);
   assert.throws(() => parseArgv(["show", "-"]), /show reads no stdin/u);
@@ -512,32 +514,33 @@ test("wait rejects mixed selector families while kill retains mixed selection", 
   }
 });
 
-test("tell admits; ask parses optional observation windows and schema", () => {
+test("tell parses admission and input-bound observation with optional schema", () => {
   assert.deepEqual(command(["tell", "@worker", "continue"]), {
     name: "tell",
     input: { akuma: "@worker" },
     acquire: { prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
-  assert.deepEqual(command(["ask", "@worker", "--wait", "0ms", "continue"]), {
+  assert.deepEqual(command(["tell", "@worker", "--wait", "0ms", "continue"]), {
     name: "ask",
     input: { akuma: "@worker", timeoutMs: 0 },
     acquire: { prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
-  assert.deepEqual(command(["ask", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
+  assert.deepEqual(command(["tell", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
     name: "ask",
     input: { akuma: "aku/worker/1234abcd", timeoutMs: 300_000 },
     acquire: { schema: "answer.json", prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
-  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "1s", "continue"]), /use ask --wait/u);
-  assert.throws(() => parseArgv(["tell", "@worker", "--schema", "answer.json", "continue"]), /use ask --schema/u);
-  assert.throws(() => parseArgv(["tell", "@worker", "--wait"]), /use ask --wait/u);
-  assert.throws(() => parseArgv(["tell", "@worker", "--schema"]), /use ask --schema/u);
-  assert.throws(() => parseArgv(["ask", "@worker", "--wait", "--interrupt", "continue"]), /--wait requires a value/u);
-  assert.throws(() => parseArgv(["ask", "@worker", "--wait", "later", "continue"]), /integer duration/u);
-  assert.throws(() => parseArgv(["ask", "@worker"]), /requires a prompt/u);
+  assert.deepEqual(command(["tell", "@worker", "--schema", "answer.json", "-"]), {
+    name: "ask", input: { akuma: "@worker" },
+    acquire: { prompt: { kind: "stdin" }, schema: "answer.json" }, output: "text",
+  });
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait"]), /--wait requires a value/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--schema"]), /--schema requires a value/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "--interrupt", "continue"]), /--wait requires a value/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "later", "continue"]), /integer duration/u);
   assert.throws(() => parseArgv(["tell", "@worker"]), /requires a prompt/u);
 });
 
@@ -584,7 +587,7 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],
     [["bind", "--after", "kei/one", "--after", " ", "-"], /--after requires a nonblank value/],
     [["spawn", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],
-    [["debt", "show", " "], /debt show requires a nonblank value/],
+    [["show", " "], /show requires a nonblank value/],
     [["debt", "add", "Title", "--needs", "debt/a", "--needs", "\t"], /--needs requires a nonblank value/],
     [["wait", "aku/claude/1234abcd", " "], /wait requires a nonblank value/],
     [["region", "--path", "  "], /--path requires a nonblank value/],

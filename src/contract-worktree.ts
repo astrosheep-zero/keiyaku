@@ -12,8 +12,6 @@ import {
 import { executeGit, type GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
 import { appointmentFor, placeRegisterPath, type PlaceRegister } from "./workspace-place.js";
-import { repairNamespaceContext } from "./debt/context.js";
-import { contractNamespace } from "./debt/identity.js";
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
 const PRIMARY_IGNORE_BYTES = "*\n!settings.json\n!akumas/\n!akumas/*.md\n";
@@ -126,7 +124,6 @@ async function materialize(
   repository: GitRepository,
   worktree: string,
   guidance: string,
-  namespace: readonly string[],
 ): Promise<ContractWorktreeResult> {
   const failed = (path: string, error: unknown): ContractWorktreeResult => ({
     lag: [
@@ -163,11 +160,6 @@ async function materialize(
         },
       ],
     };
-  }
-  try {
-    await repairNamespaceContext(worktree, namespace);
-  } catch (error) {
-    return failed(join(worktree, ".keiyaku", "namespace", "current"), error);
   }
   if (worktree !== primaryWorktree) {
     try {
@@ -215,10 +207,5 @@ export async function projectContractWorktree(
       ],
     };
   }
-  return await materialize(
-    repository,
-    worktreePath(repository, appointed.place),
-    renderContractGuidance(state),
-    contractNamespace(state.id),
-  );
+  return await materialize(repository, worktreePath(repository, appointed.place), renderContractGuidance(state));
 }

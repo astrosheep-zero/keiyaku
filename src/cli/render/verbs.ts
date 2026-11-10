@@ -30,7 +30,6 @@ import {
 import { renderDeliveryPreview } from "./delivery-preview.js";
 import { contractWaitText } from "./contract-wait.js";
 import {
-  renderDebtContext,
   renderDebtLifecycle,
   renderDebtList,
   renderDebtMutation,
@@ -159,8 +158,8 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
 
 function debtScope(input: Readonly<{ scope?: "namespace" | "world"; namespace?: readonly string[] }>): DebtListScope {
   if (input.scope === "world") return "world";
-  if (input.namespace === undefined) return "current";
-  return { namespace: input.namespace.length === 0 ? "debt/" : `debt/${input.namespace.join("/")}/` };
+  const namespace = input.namespace ?? [];
+  return { namespace: namespace.length === 0 ? "debt/" : `debt/${namespace.join("/")}/` };
 }
 
 function statusObservation(value: StatusItem, selector: string | undefined, context: TextRenderContext): string {
@@ -271,24 +270,14 @@ function renderDebtVerb(
         value as VerbOutput<"debt.done">,
         context,
       );
-    case "debt.ready":
-    case "debt.blocked":
     case "debt.query": {
-      const action = name === "debt.ready" ? "ready" : name === "debt.blocked" ? "blocked" : "query";
-      const query = input as VerbInput<"debt.ready"> | VerbInput<"debt.blocked"> | VerbInput<"debt.query">;
-      return renderDebtList(
-        action,
-        debtScope(query),
-        value as VerbOutput<"debt.ready"> | VerbOutput<"debt.blocked"> | VerbOutput<"debt.query">,
-        context,
-      );
+      const query = input as VerbInput<"debt.query">;
+      return renderDebtList("query", debtScope(query), value as VerbOutput<"debt.query">, context);
     }
     case "debt.tree":
       return renderDebtTree((input as VerbInput<"debt.tree">).id, value as VerbOutput<"debt.tree">, context);
     case "debt.doctor":
       return renderDoctor(value as VerbOutput<"debt.doctor">);
-    case "debt.context":
-      return renderDebtContext(value as VerbOutput<"debt.context">, context);
   }
 }
 
@@ -400,12 +389,9 @@ export function renderVerb<K extends VerbName>(
     case "debt.show":
     case "debt.done":
     case "debt.drop":
-    case "debt.ready":
-    case "debt.blocked":
     case "debt.query":
     case "debt.tree":
     case "debt.doctor":
-    case "debt.context":
       return renderDebtVerb(name, input as VerbInput<DebtVerbName>, value as VerbOutput<DebtVerbName>, context);
     case "report":
       return renderReport(value as VerbOutput<"report">, context);

@@ -29,9 +29,9 @@ The diagnostic names every conflicting environment variable so the caller can
 identify the competing declarations without disclosing their values.
 
 Debt invocation resolves the caller's World independently of a selected Repo.
-Only operations consuming a default namespace read installed context; explicit
-namespace and World scope bypass it. Creation alone derives actor testimony,
-and only creation or deliberate context replacement establishes a missing World.
+An explicit namespace or World scope selects the requested Debt view; omission
+selects the root namespace without consulting directory state. Creation alone
+derives actor testimony and establishes a missing World.
 Debt reads retain native absence and refusal distinctions; listing defaults to
 open work.
 

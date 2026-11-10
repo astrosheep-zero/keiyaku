@@ -23,8 +23,8 @@ test("help resolves the longest legal command-word prefix before syntax scanning
     help: { kind: "contract", command: "bind" },
   });
   assert.deepEqual(parseArgv(["debt", "unknown", "--help"]), { help: { kind: "debt" } });
-  assert.deepEqual(parseArgv(["debt", "show", "bad", "--help"]), {
-    help: { kind: "debt", action: "show" },
+  assert.deepEqual(parseArgv(["debt", "tree", "bad", "--help"]), {
+    help: { kind: "debt", action: "tree" },
   });
   assert.deepEqual(parseArgv(["fork", "--json", "--help"]), {
     help: { kind: "akuma", action: "fork" },
@@ -44,16 +44,16 @@ test("namespace and leaf help expose executable usage and flags", () => {
   assert.match(renderRootHelp(), /--version/u);
   assert.match(renderDebtHelp("add"), /usage  keiyaku debt add/u);
   assert.match(renderAkumaHelp("tell"), /usage  keiyaku tell/u);
-  assert.match(renderAkumaHelp("ask"), /--wait <duration>/u);
+  assert.match(renderAkumaHelp("tell"), /--wait <duration>/u);
   assert.match(renderAkumaHelp("spawn"), /\[--workdir <path>\]/u);
   const verifyHelp = renderContractHelp("verify");
   assert.match(verifyHelp, /usage  keiyaku verify/u);
   assert.match(verifyHelp, /--index <n>/u);
   const showHelp = renderContractHelp("show");
-  assert.match(showHelp, /usage  keiyaku show \[<contract>\|@<contract>\]/u);
+  assert.match(showHelp, /usage  keiyaku show \[<contract>\|@name\]/u);
   assert.match(showHelp, /--json/u);
   const statusHelp = renderContractHelp("status");
-  assert.match(statusHelp, /status \(aku\|aku\/\|aku\/\*\) \[--limit <count>\]/u);
+  assert.match(statusHelp, /status aku\/ \[--limit <count>\]/u);
   assert.match(statusHelp, /status \(kei\|kei\/\|kei\/\*\) \[--limit <count>\]/u);
   const lsHelp = renderContractHelp("ls");
   assert.match(lsHelp, /--mine \| --caller \(<integration>:<id> \| aku\/<name>\/<suffix>\)/u);
@@ -64,7 +64,7 @@ test("leaf help and usage refusals share accepted invocation options", () => {
   for (const help of [
     renderContractHelp("show"),
     renderContractHelp("status"),
-    renderDebtHelp("show"),
+    renderDebtHelp("tree"),
     renderAkumaHelp("tell"),
     renderInstallHelp(),
     renderHelp({ kind: "whoami" }),
@@ -74,7 +74,7 @@ test("leaf help and usage refusals share accepted invocation options", () => {
   }
   for (const args of [
     ["show", "--bad"],
-    ["debt", "show"],
+    ["debt", "tree"],
     ["tell", "@worker"],
   ]) {
     assert.throws(

@@ -197,11 +197,3 @@ export function validateDebtLimit(source: string): void {
   if (!/^[1-9][0-9]*$/u.test(source) || !Number.isSafeInteger(Number(source)))
     throw new Error("--limit requires a positive safe integer");
 }
-
-export function validateDebtParent(source: string): void {
-  try {
-    normalizeDebtQueryPredicate({ field: "under", operator: "=", value: source });
-  } catch {
-    throw new Error("--parent requires a canonical DebtId");
-  }
-}

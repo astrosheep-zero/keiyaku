@@ -105,13 +105,11 @@ type FacetCommand = Exclude<ParsedCommand, { command: "install" }>;
 function thrownCompletion(error: unknown, command: FacetCommand) {
   const name = (
     "name" in command
-      ? command.name
+      ? commandName(command)
       : command.command === "debt"
-        ? command.action === "ls"
-          ? "ls"
-          : command.action === "add" && command.stdin === "document"
-            ? "debt.addDocument"
-            : `debt.${command.action}`
+        ? command.action === "add" && command.stdin === "document"
+          ? "debt.addDocument"
+          : `debt.${command.action}`
         : command.command
   ) as VerbName;
   const input = undefined as unknown as VerbInput<VerbName>;

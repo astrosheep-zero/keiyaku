@@ -1,5 +1,4 @@
 import { CliUsageError, isBlankInput } from "../usage.js";
-import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
 import type { DebtId, DebtPriority, DebtQuerySort, DebtState } from "../../debt/index.js";
 import type { ParsedDebtCommand } from "./debt-grammar.js";
 import type { CliRuntime } from "../runtime.js";
@@ -44,13 +43,9 @@ function optional<K extends string, T>(key: K, val: T | undefined): { [P in K]?:
   return val === undefined ? {} : ({ [key]: val } as { [P in K]: T });
 }
 function scope(command: ParsedDebtCommand) {
-  const ns =
-    command.action === "ls" && command.positionals.length === 1
-      ? parseDebtNamespaceSelector(command.positionals[0]!)
-      : undefined;
   const raw = value(command, "limit");
   return {
-    ...(command.flags.world === true ? { scope: "world" as const } : ns === undefined ? {} : { namespace: ns }),
+    ...(command.flags.world === true ? { scope: "world" as const } : {}),
     ...(raw === undefined ? {} : { limit: Number(raw) }),
   };
 }
@@ -139,43 +134,26 @@ export async function runDebtCommand(command: ParsedDebtCommand, runtime: CliRun
       return addDebt(command, runtime, stdin);
     case "update":
       return updateDebt(command, runtime, stdin);
-    case "show": {
-      const ids = command.positionals;
-      const input = ids.length === 1 ? { id: ids[0]! } : { ids };
-      return execute("debt.show", input, command, runtime);
-    }
     case "done":
     case "drop": {
       const input = { ids: command.positionals, ...optional("note", value(command, "note")) };
       return execute(command.action === "done" ? "debt.done" : "debt.drop", input, command, runtime);
     }
-    case "ls":
-    case "ready":
-    case "blocked":
-    case "query": {
-      const args = scope(command);
-      if (command.action === "ls")
-        return execute("ls", { of: "debt", ...args, selection: selection(command) }, command, runtime);
-      if (command.action === "query")
-        return execute(
-          "debt.query",
-          {
-            ...args,
-            selection: selection(command),
-            ...optional("where", command.where),
-            ...optional("sort", value(command, "sort") as DebtQuerySort | undefined),
-          },
-          command,
-          runtime,
-        );
-      const input = { ...args, ...optional("parent", value(command, "parent")) };
-      return execute(command.action === "ready" ? "debt.ready" : "debt.blocked", input, command, runtime);
-    }
+    case "query":
+      return execute(
+        "debt.query",
+        {
+          ...scope(command),
+          selection: selection(command),
+          ...optional("where", command.where),
+          ...optional("sort", value(command, "sort") as DebtQuerySort | undefined),
+        },
+        command,
+        runtime,
+      );
     case "tree":
       return execute("debt.tree", { id: command.positionals[0]! }, command, runtime);
     case "doctor":
       return execute("debt.doctor", {}, command, runtime);
-    case "context":
-      return execute("debt.context", { ...optional("namespace", namespace(command.positionals[0])) }, command, runtime);
   }
 }

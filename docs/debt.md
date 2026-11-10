@@ -8,23 +8,16 @@ do not depend on Debt; Debt does not interpret Contract authority or Git state.
 
 ## World, identity, and custody
 
-A Debt board belongs to one World. The invocation facet resolves the World and the
-directory-local namespace context before calling Debt. The directory-local
-context is the nearest one the invocation directory or an ancestor declares, and
-that walk includes the World boundary itself: a nearer context overrides a
-broader one, and the walk never continues above the boundary or adopts an outer
-context as a fallback. Context is a convenience default for a namespace, never
-Debt, Contract, or Git authority: a complete Debt identity is sufficient without
-it, and an explicit selector prevails over context. A managed worktree shares
-its repository's Debt World; a deliberate nested Debt World remains separate.
+A Debt board belongs to one World. The invocation facet resolves that World
+before calling Debt. An explicit namespace or complete Debt identity supplies
+the namespace; omission selects the root namespace. No directory-local default
+is persisted or consulted. A managed worktree shares its repository's Debt
+World; a deliberate nested Debt World remains separate.
 
 Debt identity is stable, human-readable, and names both its immutable namespace
 and local member. Creation derives an identity under Debt custody, rather than
 accepting a caller-invented coordinate; changing a title or closing a Debt does
-not free, move, or rewrite that identity. A malformed context is a refusal for
-an operation that needs the default, not a reason to silently select a broader
-World. The caller may change context, but Debt remains the only owner of its
-meaning and durable representation.
+not free, move, or rewrite that identity.
 
 Existing ledger identities and relationships retain their meaning across the
 product rename. An unmigrated board is unavailable, not an empty new ledger;

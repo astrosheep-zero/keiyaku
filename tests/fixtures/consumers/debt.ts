@@ -30,12 +30,9 @@ const created: Promise<DebtMutationResult> = facet.debtAdd({ title: "Example" })
 void facet.debtAddDocument({ markdown: "# Example" });
 void facet.debtUpdate({ id: "debt/example", note: "updated" });
 void facet.debtDrop({ ids: ["debt/example"] });
-void facet.debtReady();
-void facet.debtBlocked();
 void facet.debtQuery();
 void facet.debtDoctor();
 const selectedTree: Promise<DebtTreeResult | DebtAbsent> = facet.debtTree({ id: "debt/example" });
-void facet.debtContext({ namespace: [] });
 const debts = Debts.of(world);
 const debt: Debt = debts.debt({ id: "debt/example" });
 const id: DebtId = debt.id;

@@ -184,9 +184,10 @@ coordinates. Presentation may wrap or densify evidence but cannot truncate a
 copyable identity, replace a public discriminant with decoration, or remove
 evidence merely to hide internal terminology.
 
-One shared Akuma observation discipline serves status, observing spawn, ask, and
-history. Complete identity and known static context precede chronological
-activity, followed by one truthful conclusion, reported changes, and diagnostics.
+One shared Akuma observation discipline serves status, observing spawn,
+observing tell, and history. Complete identity and known static context precede
+chronological activity, followed by one truthful conclusion, reported changes,
+and diagnostics.
 Known coordinates appear once; unknown coordinates stay absent. Selected Akuma
 status foregrounds the age of its latest retained activity, when any, without
 inferring activity from a Turn opening or claiming continuous liveness. The
@@ -249,11 +250,12 @@ current declaration position, requirement, and exact snapshot without becoming a
 second result model. Its final receipt preserves partial admissions, retained
 failure scenes, operational stops, and the ordinary completion judgment.
 
-An observing spawn and an ask share one input-wait presentation discipline.
-Witnessed timeline activity streams once in owner order on the progress channel;
-active work stays in the redrawable frame until it settles. Closing preserves
-unresolved activity rather than inventing completion. Ask begins at its own
-admitted input, leaving earlier work to history. Its answer belongs to that
+An observing spawn and an observing tell share one input-wait presentation
+discipline. Witnessed timeline activity streams once in owner order on the
+progress channel; active work stays in the redrawable frame until it settles.
+Closing preserves unresolved activity rather than inventing completion.
+Observing tell begins at its own admitted input, leaving earlier work to history.
+Its answer belongs to that
 input's exact terminal Turn, never Akuma-wide idle, and stdout carries those
 answer bytes once. Deadline and failure preserve the observed life and explicit
 cause without fabricating an answer. Bounded omissions remain visible, settled

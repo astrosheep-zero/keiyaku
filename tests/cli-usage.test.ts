@@ -75,7 +75,7 @@ test("debt coordinate failures retain usage output for text and JSON", async (co
   context.after(() => rmSync(root, { recursive: true, force: true }));
   writeFileSync(join(root, ".keiyaku"), "not a directory");
   for (const flags of [[], ["--json"]]) {
-    const result = await captureOutput(() => main(["-C", root, "debt", "ls", ...flags]));
+    const result = await captureOutput(() => main(["-C", root, "ls", "debt/", ...flags]));
     assert.equal(result.exit, 64);
     assert.equal(result.stdout, "");
     assert.match(result.stderr, /world marker is not a directory/u);
@@ -87,10 +87,10 @@ test("debt owner failures use the shared verb failure projection", async (contex
   context.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, ".keiyaku", "debts"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "debts", "broken.md"), "not a Debt document\n");
-  const text = await captureOutput(() => main(["-C", root, "debt", "ready", "--world"]));
+  const text = await captureOutput(() => main(["-C", root, "debt", "query", "--where", "ready", "--world"]));
   assert.equal(text.exit, 3);
-  assert.match(text.stderr, /debt\.ready failed/u);
-  const json = await captureOutput(() => main(["-C", root, "debt", "ready", "--world", "--json"]));
+  assert.match(text.stderr, /debt\.query failed/u);
+  const json = await captureOutput(() => main(["-C", root, "debt", "query", "--where", "ready", "--world", "--json"]));
   assert.equal(json.exit, 3);
   assert.ok(JSON.parse(json.stdout));
 });
@@ -125,7 +125,7 @@ test("a closed stdout pipe during a blocked large write exits silently", async (
   const added = runCli(root, ["debt", "add", "-", "--json"], `---\ntitle: Title\n---\n\n${"x".repeat(500_000)}`);
   assert.equal(added.status, 0, added.stderr ?? added.error?.message);
   const id = JSON.parse(added.stdout).id as string;
-  const child = spawn(process.execPath, [builtCli(), "debt", "show", id, "--json"], {
+  const child = spawn(process.execPath, [builtCli(), "show", id, "--json"], {
     cwd: root,
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -212,12 +212,12 @@ test("native reconcile reports preserve hook, checkout, seat and settlement fail
     assert.equal(classifyVerb("reconcile", {}, { kind: "returned", value: report }), "failed");
 });
 
-test("debt show preserves a multi-line body end to end", () => {
+test("show preserves a Debt's multi-line body end to end", () => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-debt-"));
   const added = runCli(root, ["debt", "add", "Title", "--body", "first\nsecond", "--json"]);
   assert.equal(added.status, 0);
   const id = JSON.parse(added.stdout).id as string;
-  const shown = runCli(root, ["debt", "show", id]);
+  const shown = runCli(root, ["show", id]);
   assert.equal(shown.status, 0);
   assert.match(shown.stdout, /body\n  first\n  second/u);
   rmSync(root, { recursive: true, force: true });

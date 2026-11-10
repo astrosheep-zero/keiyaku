@@ -300,7 +300,7 @@ test(
       assert.doesNotMatch(answered.stderr, /(?:^|\n)the answer(?:\n|$)/u, "the stream never replays raw answer bytes");
       const finisherId = answered.stderr.match(/aku\/finisher\/[0-9a-f]{8}/u)?.[0];
       assert.notEqual(finisherId, undefined, "the observing call exposes its one identity frame");
-      const tell = await runPackagedCli(["-C", world, "ask", finisherId!, "--wait", "20s", "continue"], {
+      const tell = await runPackagedCli(["-C", world, "tell", finisherId!, "--wait", "20s", "continue"], {
         cwd: world,
         env,
       });

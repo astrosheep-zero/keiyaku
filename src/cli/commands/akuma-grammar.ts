@@ -21,7 +21,7 @@ type AkumaCommandSpec = Readonly<{
   details?: string;
 }>;
 
-const SET_SELECTORS = '(<aku/...> | @alias | <kei/...> | "aku/<name-pattern>/<hex-pattern>")...';
+const SET_SELECTORS = '(<aku/...> | @name | <kei/...> | "aku/<name-pattern>/<hex-pattern>")...';
 const SET_DETAILS =
   "Globs contain * and use lowercase hex digits or * in the suffix. --repo requires at least one Contract (kei/...) selector.";
 const SCHEMA_DETAILS =
@@ -85,26 +85,15 @@ const AKUMA_COMMAND_SPECS = {
     arity: 1,
     stdin: true,
     flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
-    usage: "tell <aku/...|@alias> [--interrupt] (<prompt> | -)",
-    purpose: "Tell an Akuma something without waiting for its answer.",
-    details: [
-      "Give <prompt> as one argument, or use - to read stdin.",
-      "--interrupt admits the Tell and asks current work to yield; the Tell remains admitted even if yielding cannot be confirmed.",
-      "Use ask to block for the answer or supply a schema.",
-    ].join("\n"),
-  },
-  ask: {
-    arity: 1,
-    stdin: true,
-    flags: { interrupt: "boolean", schema: "value", wait: "value", json: "boolean" },
-    usage: "ask <aku/...|@alias> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)",
-    purpose: "Ask an Akuma and block until it answers.",
+    usage: "tell <aku/...|@name> [--interrupt] [--schema <file>] [--wait <duration>] (<prompt> | -)",
+    purpose: "Tell an Akuma something, optionally observing its answer.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt admits the Tell and asks current work to yield; the Tell remains admitted even if yielding cannot be confirmed.",
       SCHEMA_DETAILS,
       "--wait bounds how long to block for the answer; the Tell stays admitted past the deadline.",
-      "Completed activity streams on stderr and the final answer is written to stdout once.",
+      "Without --wait or --schema, returns after Tell admission. --schema alone observes without a deadline.",
+      "With observation, completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
   },
   history: {
@@ -120,7 +109,7 @@ const AKUMA_COMMAND_SPECS = {
       json: "boolean",
     },
     usage:
-      "history <aku/...|@alias> [--before <index> | --since <index>] [--limit <count>]\nhistory <aku/...|@alias> --id <historyId>\nhistory <aku/...|@alias> --last\nhistory <kei/...> [--full] [--repo <path>]",
+      "history <aku/...|@name> [--before <index> | --since <index>] [--limit <count>]\nhistory <aku/...|@name> --id <historyId>\nhistory <aku/...|@name> --last\nhistory <kei/...> [--full] [--repo <path>]",
     purpose: "Read an Akuma's answers and activity, or a Contract's history of changes and assigned work.",
     details: [
       "--id reads an exact retained terminal turn (turn/<number>) or report (report/<number>).",
@@ -135,10 +124,10 @@ const AKUMA_COMMAND_SPECS = {
     arity: 1,
     stdin: false,
     flags: { at: "value", bare: "boolean", json: "boolean" },
-    usage: "fork <aku/...|@alias> --at <historyId> [--bare] [--repo <path>]",
+    usage: "fork <aku/...|@name> --at <historyId> [--bare] [--repo <path>]",
     purpose: "Create a new Akuma from an answered turn.",
     details: [
-      "--at takes a retained answered turn id (turn/<n>); find its historyId in paged keiyaku history <aku/...|@alias> --json. Fork also requires a retained provider fork point.",
+      "--at takes a retained answered turn id (turn/<n>); find its historyId in paged keiyaku history <aku/...|@name> --json. Fork also requires a retained provider fork point.",
       "A fork inherits bare; --bare additionally omits only the child's Keiyaku runtime instructions.",
     ].join("\n"),
   },
@@ -169,22 +158,14 @@ export function akumaUsageGuide(action: AkumaAction): CliUsageGuide {
   return commandGuide(action, AKUMA_COMMAND_SPECS[action].usage);
 }
 
-const TELL_ONLY_REFUSALS = {
-  "--wait": "tell --wait is not supported; use ask --wait",
-  "--schema": "tell --schema is not supported; use ask --schema",
-};
-
-/** The prompt is the only stdin reader; the ask-only options are refused tokens, as is `-d`. */
+/** The prompt is the only stdin reader. */
 function scanSpec(action: AkumaAction, spec: AkumaCommandSpec): ScanSpec {
   return {
     subject: action,
     flags: spec.flags,
     ...(spec.stdin ? { stdin: "prompt" } : {}),
     stdinRefusal: `stdin marker '-' is not valid for ${action}`,
-    refused: {
-      "-d": `option -d is not valid for ${action}`,
-      ...(action === "tell" ? TELL_ONLY_REFUSALS : {}),
-    },
+    refused: { "-d": `option -d is not valid for ${action}` },
   };
 }
 
@@ -300,7 +281,7 @@ function parseAkumaHistory(
 }
 
 function parseAddressed(
-  action: Exclude<AkumaAction, "spawn" | "tell" | "ask" | "report">,
+  action: Exclude<AkumaAction, "spawn" | "tell" | "report">,
   rawSelectors: readonly string[],
   flags: Readonly<Record<string, FlagValue>>,
   output: "text" | "json",
@@ -311,7 +292,7 @@ function parseAddressed(
   if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
   if (action === "history") {
     const selector = rawSelectors[0]!;
-    if (selector.includes("*")) fail("history accepts one complete aku/..., @alias, or kei/... selector");
+    if (selector.includes("*")) fail("history accepts one complete aku/..., @name, or kei/... selector");
     return parseHistory(selector, flags, output, fail);
   }
   const akuma = rawSelectors[0]!;
@@ -320,7 +301,7 @@ function parseAddressed(
 }
 
 function parsePrompted(
-  action: "spawn" | "tell" | "ask",
+  action: "spawn" | "tell",
   positionals: readonly string[],
   stdin: boolean,
   fail: (message: string) => never,
@@ -347,29 +328,17 @@ function parseTell(
   subject: string,
   prompt: AkumaPromptSource,
   output: "text" | "json",
-): Extract<PendingRequest, { name: "tell" }> {
-  return {
-    name: "tell",
-    input: { akuma: subject, ...(flags.interrupt === true ? { interrupt: true } : {}) },
-    acquire: { prompt },
-    output,
-  };
-}
-
-function parseAsk(
-  flags: Readonly<Record<string, FlagValue>>,
-  subject: string,
-  prompt: AkumaPromptSource,
-  output: "text" | "json",
   fail: (message: string) => never,
-): Extract<PendingRequest, { name: "ask" }> {
+): Extract<PendingRequest, { name: "tell" | "ask" }> {
+  const input = { akuma: subject, ...(flags.interrupt === true ? { interrupt: true } : {}) };
+  if (flags.wait === undefined && flags.schema === undefined)
+    return { name: "tell", input, acquire: { prompt }, output };
   const schema =
-    flags.schema === undefined ? undefined : stringFlag(flags.schema, "ask --schema requires a file", fail);
+    flags.schema === undefined ? undefined : stringFlag(flags.schema, "tell --schema requires a file", fail);
   return {
     name: "ask",
     input: {
-      akuma: subject,
-      ...(flags.interrupt === true ? { interrupt: true } : {}),
+      ...input,
       ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
     },
     acquire: { prompt, ...(schema === undefined ? {} : { schema }) },
@@ -439,13 +408,11 @@ export function parseAkumaCommand(argv: readonly string[]): AkumaParseResult {
   const { flags, positionals, stdin } = scanArgs(argv, scanSpec(action, spec), fail);
   const output = flags.json === true ? ("json" as const) : ("text" as const);
   if (action === "report") return parseReport(positionals, stdin !== undefined, output, fail);
-  if (action === "spawn" || action === "tell" || action === "ask") {
+  if (action === "spawn" || action === "tell") {
     const parsed = parsePrompted(action, positionals, stdin !== undefined, fail);
     return action === "spawn"
       ? parseSpawn(flags, parsed.subject, parsed.prompt, output, fail)
-      : action === "tell"
-        ? parseTell(flags, parsed.subject, parsed.prompt!, output)
-        : parseAsk(flags, parsed.subject, parsed.prompt!, output, fail);
+      : parseTell(flags, parsed.subject, parsed.prompt!, output, fail);
   }
   if (spec.arity === "one-or-more" ? positionals.length === 0 : positionals.length !== spec.arity) {
     if (positionals.length === 0)

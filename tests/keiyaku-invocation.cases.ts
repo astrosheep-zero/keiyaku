@@ -22,9 +22,8 @@ import { repositoryWithCommit } from "./support/git.js";
 import { accepted, commitCandidate, document } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { temporaryDirectory } from "./support/process.js";
-import { assertWireRoundTrip } from "./support/schema-parity.js";
 
-test("Debt facet preserves native lifecycle, context, and absent World", async (t) => {
+test("Debt facet preserves native lifecycle, explicit namespaces, and absent World", async (t) => {
   const cwd = temporaryDirectory(t, "debt-facet-");
   const facet = Keiyaku.at({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
   assert.deepEqual(await facet.debtShow({ id: "debt/missing" }), { kind: "absent" });
@@ -47,20 +46,12 @@ test("Debt facet preserves native lifecycle, context, and absent World", async (
   ])
     await assert.rejects(operation, (error: unknown) => error === reason);
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  const defaultContext = await facet.debtContext();
-  assert.deepEqual(defaultContext, { kind: "present", source: "default-root" });
-  assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, defaultContext);
-  await assert.rejects(facet.debtContext({ namespace: ["INVALID"] }), TypeError);
   await assert.rejects(facet.debtAdd({ title: " " }), TypeError);
   assert.deepEqual(await facet.ls({ of: "debt" }), { kind: "absent" });
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  const installedContext = await facet.debtContext({ namespace: ["nested"] });
-  assert.deepEqual(installedContext, { kind: "present", source: "local-override", namespace: "nested" });
-  assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, installedContext);
-  assertWireRoundTrip(Keiyaku.verbs["debt.context"].output, await facet.debtContext());
-  const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" }));
-  const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] }));
-  const third = accepted(await facet.debtAdd({ title: "Third" }));
+  const first = accepted(await facet.debtAdd({ title: "First", namespace: ["nested"], actor: "fixture" }));
+  const second = accepted(await facet.debtAdd({ title: "Second", namespace: ["nested"], needs: [first.id] }));
+  const third = accepted(await facet.debtAdd({ title: "Third", namespace: ["nested"] }));
   const root = accepted(await facet.debtAdd({ title: "Root", namespace: [] }));
   const shownDebt = async (id: string) => {
     const shown = await facet.debtShow({ id });
@@ -89,8 +80,8 @@ test("Debt facet preserves native lifecycle, context, and absent World", async (
     ["accepted", "accepted"],
   );
   assert.equal((await facet.debtDrop({ ids: [third.id] })).items[0]?.kind, "accepted");
-  const active = await facet.ls({ of: "debt" });
-  const closed = await facet.ls({ of: "debt", selection: "closed" });
+  const active = await facet.ls({ of: "debt", namespace: ["nested"] });
+  const closed = await facet.ls({ of: "debt", namespace: ["nested"], selection: "closed" });
   assert.equal(active.kind, "present");
   assert.equal(closed.kind, "present");
   if (active.kind === "present" && closed.kind === "present") {

@@ -25,13 +25,6 @@ const graphRefusalSchema = z
     diagnostic: z.string(),
   })
   .readonly();
-const contextRefusalSchema = z
-  .strictObject({
-    kind: z.literal("refused"),
-    reason: z.literal("invalid-namespace-context"),
-    path: z.string().exactOptional(),
-  })
-  .readonly();
 const ownershipRefusalSchema = z
   .strictObject({
     kind: z.literal("refused"),
@@ -49,19 +42,13 @@ const terminalRefusalSchema = z
 export const debtRefusalSchema = z.union([
   missingRefusalSchema,
   graphRefusalSchema,
-  contextRefusalSchema,
   ownershipRefusalSchema,
   terminalRefusalSchema,
 ]);
 export type DebtRefusal = z.output<typeof debtRefusalSchema>;
-export const debtReadRefusalSchema = z.union([
-  missingRefusalSchema.unwrap().extend({ debtId: debtIdSchema }).readonly(),
-  z
-    .strictObject({ kind: z.literal("refused"), reason: z.literal("invalid-namespace-context"), path: z.string() })
-    .readonly(),
-]);
+export const debtReadRefusalSchema = missingRefusalSchema.unwrap().extend({ debtId: debtIdSchema }).readonly();
 export type DebtReadRefusal = z.output<typeof debtReadRefusalSchema>;
-export const debtParentReadRefusalSchema = z.union([missingRefusalSchema, debtReadRefusalSchema.options[1]]);
+export const debtParentReadRefusalSchema = missingRefusalSchema;
 export type DebtParentReadRefusal = z.output<typeof debtParentReadRefusalSchema>;
 
 export function debtReadPageSchema<Row extends z.ZodType>(row: Row) {
@@ -87,7 +74,6 @@ export const debtMutationResultSchema = z.union([
     .strictObject({ kind: z.literal("accepted"), id: debtIdSchema, warning: debtWarningSchema.exactOptional() })
     .readonly(),
   graphRefusalSchema,
-  contextRefusalSchema,
   retryResultSchema,
 ]);
 export const debtChangeSchema = z.enum([

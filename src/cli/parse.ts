@@ -139,7 +139,7 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
 }
 
 type RequestOutput = Readonly<{ output: "text" | "json" }>;
-export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami">;
+export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami"> | "debt.show";
 export type VerbRequest<K extends CliVerb = CliVerb> = {
   [P in K]: RequestOutput & Readonly<{ name: P; input: VerbInput<P> }>;
 }[K];
@@ -170,7 +170,15 @@ export type ParsedCommand =
   | ParsedWhoamiCommand;
 
 export function commandName(command: ParsedCommand) {
-  return "name" in command ? (command.name === "deliver.preview" ? "deliver" : command.name) : command.command;
+  return "name" in command
+    ? command.name === "deliver.preview"
+      ? "deliver"
+      : command.name === "ask"
+        ? "tell"
+        : command.name === "debt.show"
+          ? "show"
+          : command.name
+    : command.command;
 }
 
 type CliHelpCoordinate =
@@ -203,6 +211,8 @@ export function commandRepoPolicy(
     case "region":
     case "show":
       return { use: "required", acceptsExplicit: true };
+    case "debt.show":
+      return { use: "none", acceptsExplicit: false };
     case "ls":
       return { use: command.input.of === "kei" ? "required" : "none", acceptsExplicit: false };
     case "status":
@@ -272,7 +282,7 @@ function scanArgv(argv: readonly string[]): ContractTokens {
   if (spec.positional === "none" && scanned.positionals.length > 0) {
     refuse(command, `${command} accepts no contract`);
   }
-  if (spec.positional === "optional" && scanned.positionals.length > 1 && command !== "status") {
+  if (spec.positional === "optional" && scanned.positionals.length > 1 && command !== "status" && command !== "show") {
     refuse(command, `${command} accepts at most one contract`);
   }
   if (spec.stdin === "required" && !stdin) {

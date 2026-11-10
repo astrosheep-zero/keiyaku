@@ -1,16 +1,13 @@
 import type {
-  BlockedDebtRow,
   DebtAbsent,
   DebtBatchItem,
   DebtBatchResult,
   DebtCatalogue,
-  DebtContextResult,
   DebtDetail,
   DebtDoctorIssue,
   DebtDoctorReport,
   DebtLifecycleResult,
   DebtMutationResult,
-  DebtParentReadRefusal,
   DebtReadPage,
   DebtReadRefusal,
   DebtRef,
@@ -22,7 +19,6 @@ import type {
   DebtTreeResult,
   DebtUpdateResult,
   DebtWarning,
-  ReadyDebtRow,
 } from "../../debt/index.js";
 import { debtMark } from "./marks.js";
 import { outcomeLines, receiptPayload, receiptRow, refusalLines } from "./receipt.js";
@@ -39,11 +35,10 @@ import {
 export { debtMark } from "./marks.js";
 
 /** Presentation-only list scope the leaf acquired; never part of a product value. */
-export type DebtListScope = "world" | "current" | Readonly<{ namespace: string }>;
+export type DebtListScope = "world" | Readonly<{ namespace: string }>;
 type DebtFailure =
   | Extract<DebtMutationResult | DebtUpdateResult | DebtLifecycleResult, { kind: "refused" | "retry" }>
-  | DebtReadRefusal
-  | DebtParentReadRefusal;
+  | DebtReadRefusal;
 type DebtEntity = Readonly<{
   id: string;
   priority: number;
@@ -72,14 +67,12 @@ function entityLines(entity: DebtEntity, columns: number, indent = ""): readonly
   return [scan, ...renderTextBlock(title, `${indent}  `, columns, "—")];
 }
 
-function projectRefusal(refusal: DebtRefusal | DebtReadRefusal | DebtParentReadRefusal): RefusalProjection {
+function projectRefusal(refusal: DebtRefusal | DebtReadRefusal): RefusalProjection {
   const diagnostic = refusal.reason.replaceAll("-", " ");
   if (refusal.reason === "debt-missing")
     return { diagnostic, ...("debtId" in refusal ? { facts: [`debt  ${refusal.debtId}`] } : {}) };
   if (refusal.reason === "invalid-lifecycle-transition")
     return { diagnostic, facts: [`state  ${dispositionText(refusal.state)}`] };
-  if (refusal.reason === "invalid-namespace-context")
-    return { diagnostic, ...(refusal.path === undefined ? {} : { facts: [`path  ${refusal.path}`] }) };
   if (refusal.reason === "relation-owned-by-other") return { diagnostic, facts: [`related debt  ${refusal.related}`] };
   return { diagnostic, facts: [`detail  ${refusal.diagnostic}`] };
 }
@@ -107,54 +100,24 @@ export function debtFrameHead(view: string, scope: string): string {
   return `${view.toUpperCase()} // ${scope}`;
 }
 
-function renderListRow(
-  item: DebtSummary | BlockedDebtRow | ReadyDebtRow,
-  columns: number,
-  action: "ls" | "ready" | "blocked" | "query",
-): readonly string[] {
-  const disposition = "disposition" in item ? item.disposition : action === "blocked" ? "blocked" : "ready";
-  const lines = [
-    ...entityLines(
-      {
-        ...item,
-        mark: debtMark(disposition),
-        ...(action === "ready" || action === "blocked" ? {} : { word: disposition }),
-      },
-      columns,
-    ),
-  ];
-  if ("blockers" in item)
-    for (const blocker of item.blockers)
-      lines.push(`  needs ${blocker.id} · ${blocker.missing === true ? "missing" : "open"}`);
-  return lines;
-}
-
 export function renderDebtList(
-  action: "ls" | "ready" | "blocked" | "query",
+  action: "ls" | "query",
   scope: DebtListScope,
-  result:
-    | DebtCatalogue
-    | DebtReadPage<DebtSummary | BlockedDebtRow | ReadyDebtRow, DebtReadRefusal | DebtParentReadRefusal>,
+  result: DebtCatalogue | DebtReadPage<DebtSummary>,
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
   const page = result;
   const columns = context.columns;
   if (page.kind === "absent") return "debt world absent";
-  if (page.kind === "invalid-namespace-context")
-    return refusalLines(action, ["reason  invalid namespace context", `path  ${page.path}`], columns).join("\n");
   if (page.kind === "refused") return renderFailure(action, page, columns);
   const rows = page.rows ?? [];
   const view = action === "ls" ? "debts" : action;
   if (rows.length === 0) return emptyCatalogue(view);
   const scopeText =
-    scope === "world"
-      ? "world"
-      : scope === "current"
-        ? "current namespace"
-        : `namespace ${scope.namespace.replace(/^debt\//u, "").replace(/\/$/u, "") || "root"}`;
+    scope === "world" ? "world" : `namespace ${scope.namespace.replace(/^debt\//u, "").replace(/\/$/u, "") || "root"}`;
   return [
     debtFrameHead(view, scopeText),
-    ...rows.flatMap((row) => renderListRow(row, columns, action)),
+    ...rows.flatMap((row) => entityLines({ ...row, mark: debtMark(row.disposition), word: row.disposition }, columns)),
     ...(page.more === true ? ["…"] : []),
   ].join("\n");
 }
@@ -257,15 +220,6 @@ export function renderDebtTree(
   if (result.kind === "missing")
     return refusalLines("tree", ["reason  debt missing", `debt  ${id}`], context.columns).join("\n");
   return treeLines(id, result, context.columns).join("\n");
-}
-
-export function renderDebtContext(result: DebtContextResult, context: TextRenderContext = DEFAULT_CONTEXT): string {
-  if (result.kind === "refused")
-    return refusalLines("context", ["reason  invalid namespace context", `path  ${result.path}`], context.columns).join(
-      "\n",
-    );
-  const value = "namespace" in result ? (result.namespace ?? "root") : "root";
-  return `context ${value} · ${result.source}`;
 }
 
 /** Creation retains its minted identity in the native answer. */

@@ -51,12 +51,10 @@ export type {
   DebtSelection,
   DebtReadScope,
   DebtLsInvocation,
-  DebtReadyInvocation,
   DebtQueryInvocation,
   DebtUpdateInvocation,
   DebtCloseInvocation,
   DebtShowInvocation,
-  DebtContextInvocation,
 } from "./library/keiyaku.js";
 export { classifyVerb } from "./library/keiyaku-verbs.js";
 export type {
@@ -325,8 +323,6 @@ export {
   DebtAuthorityCorruptionError,
   Debts,
   debtAbsentSchema,
-  resolvedNamespaceContextSchema,
-  debtContextResultSchema,
   debtDetailSchema,
   debtSummarySchema,
   debtWarningSchema,

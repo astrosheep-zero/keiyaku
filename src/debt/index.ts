@@ -50,11 +50,6 @@ import {
 } from "./operation-types.js";
 import { debtQueryRowSchema, type DebtQueryRow } from "./query.js";
 import type { WorldRoot } from "../world.js";
-import {
-  resolvedNamespaceContextSchema,
-  type NamespaceContextSource,
-  type ResolvedNamespaceContext,
-} from "./context.js";
 import type { DebtLifecycleVerb } from "./operation-types.js";
 export type { WorldRoot } from "../world.js";
 import { DebtAuthorityCorruptionError, type DebtPriority, type DebtState } from "./document.js";
@@ -127,20 +122,6 @@ export const debtDoctorReportSchema = z
   })
   .readonly();
 export type DebtDoctorReport = z.output<typeof debtDoctorReportSchema>;
-export const debtContextRefusalSchema = z.strictObject({ kind: z.literal("refused"), path: z.string() }).readonly();
-export type DebtContextRefusal = z.output<typeof debtContextRefusalSchema>;
-export const debtContextResultSchema = z.union([
-  z.strictObject({ kind: z.literal("present"), source: z.literal("default-root") }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("present"),
-      source: z.enum(["contract-installed", "local-override"]),
-      namespace: z.string().min(1).exactOptional(),
-    })
-    .readonly(),
-  debtContextRefusalSchema,
-]);
-export type DebtContextResult = z.output<typeof debtContextResultSchema>;
 export const debtListSchema = debtReadPageSchema(debtSummarySchema).options[0];
 export const debtReadyListSchema = z.union([
   debtReadPageSchema(readyDebtRowSchema).options[0],
@@ -153,19 +134,12 @@ export const blockedDebtListSchema = z.union([
   debtParentReadRefusalSchema,
 ]);
 export const debtQueryResultSchema = debtReadPageSchema(debtQueryRowSchema);
-export const debtCatalogueSchema = z.union([
-  debtListSchema,
-  debtAbsentSchema,
-  z.strictObject({ kind: z.literal("invalid-namespace-context"), path: z.string() }).readonly(),
-]);
+export const debtCatalogueSchema = z.union([debtListSchema, debtAbsentSchema]);
 export type DebtCatalogue = z.output<typeof debtCatalogueSchema>;
 export type DebtList = z.output<typeof debtListSchema>;
 export type DebtReadyList = DebtReadPage<ReadyDebtRow, DebtParentReadRefusal>;
 export type BlockedDebtList = DebtReadPage<BlockedDebtRow, DebtParentReadRefusal>;
 export type DebtQueryResult = DebtReadPage<DebtQueryRow>;
-export type DebtContextSource = NamespaceContextSource;
-export type { ResolvedNamespaceContext };
-export { resolvedNamespaceContextSchema };
 export { debtWarningSchema, debtRefusalSchema, debtRetrySchema, debtReadRefusalSchema, debtReadPageSchema };
 export {
   debtLifecycleResultSchema,

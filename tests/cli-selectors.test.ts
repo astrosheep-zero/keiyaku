@@ -88,7 +88,7 @@ test("missing Contract selectors preserve each native read or mutation outcome",
 
 test("status category grammar stays separate from exact, plural, show and ls", () => {
   for (const [category, selectors] of [
-    ["akuma", ["aku", "aku/", "aku/*"]],
+    ["akuma", ["aku/"]],
     ["contract", ["kei", "kei/", "kei/*"]],
   ] as const) {
     for (const selector of selectors) {
@@ -102,11 +102,13 @@ test("status category grammar stays separate from exact, plural, show and ls", (
       assert.throws(() => parseArgv(["status", selector, "kei/exact"]), /cannot combine/u);
     }
   }
+  for (const selector of ["aku", "aku/*"])
+    assert.throws(() => parseArgv(["status", selector]), /category selector must be aku\//u);
   for (const value of ["0", "-1", "01", "1.5", "1e2", "9007199254740992"]) {
-    assert.throws(() => parseArgv(["status", "aku", "--limit", value]), CliUsageError);
+    assert.throws(() => parseArgv(["status", "aku/", "--limit", value]), CliUsageError);
   }
-  assert.throws(() => parseArgv(["status", "aku", "--limit"]), /requires a value/u);
-  assert.throws(() => parseArgv(["status", "aku", "--limit", "2", "--limit", "3"]), /duplicate option/u);
+  assert.throws(() => parseArgv(["status", "aku/", "--limit"]), /requires a value/u);
+  assert.throws(() => parseArgv(["status", "aku/", "--limit", "2", "--limit", "3"]), /duplicate option/u);
   for (const selectors of [[], ["kei/exact"], ["aku/worker/1234abcd"], ["kei/a", "kei/b"]]) {
     assert.throws(() => parseArgv(["status", ...selectors, "--limit", "2"]), /only for/u);
   }
@@ -152,28 +154,26 @@ test("Akuma categories preserve bounded recent owner rows without Repo or Debt r
   await moveAlias({ world, alias: parseAkumaAlias("@recent"), akumaId: ownerRows[0]!.id });
   mkdirSync(join(world, ".keiyaku", "debts"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
-  for (const selector of ["aku", "aku/", "aku/*"]) {
-    const json = await cliJson<KanshiCategoryReport<"akuma">>(["-C", root, "status", selector], { environment: {} });
-    assert.equal(json.exit, 0, json.stderr);
-    const section = json.value.section;
-    if (section.kind !== "present") assert.fail(json.stdout);
-    assert.equal(section.more, true);
-    assert.deepEqual(
-      section.rows?.map((row) => row.id),
-      ownerRows.slice(0, 10).map((row) => row.id),
-    );
-    assert.deepEqual(section.rows?.[0]?.aliases, ["@recent"]);
-    assert.equal("debts" in json.value, false);
-    assert.equal("contracts" in json.value, false);
-    const text = await runCli(["-C", root, "status", selector, "--limit", "2"], { environment: {} });
-    assert.equal(text.exit, 0, text.stderr);
-    assert.match(text.stdout, /^AKUMA \/\/ 2 recent/u);
-    assert.match(text.stdout, /@recent/u);
-    assert.ok(text.stdout.indexOf(ownerRows[0]!.id) < text.stdout.indexOf(ownerRows[1]!.id));
-    assert.doesNotMatch(text.stdout, new RegExp(ownerRows[2]!.id, "u"));
-    assert.ok(text.stdout.trimEnd().endsWith("…"));
-  }
-  const full = await cliJson<KanshiCategoryReport<"akuma">>(["-C", root, "status", "aku", "--limit", "501"], {
+  const json = await cliJson<KanshiCategoryReport<"akuma">>(["-C", root, "status", "aku/"], { environment: {} });
+  assert.equal(json.exit, 0, json.stderr);
+  const section = json.value.section;
+  if (section.kind !== "present") assert.fail(json.stdout);
+  assert.equal(section.more, true);
+  assert.deepEqual(
+    section.rows?.map((row) => row.id),
+    ownerRows.slice(0, 10).map((row) => row.id),
+  );
+  assert.deepEqual(section.rows?.[0]?.aliases, ["@recent"]);
+  assert.equal("debts" in json.value, false);
+  assert.equal("contracts" in json.value, false);
+  const text = await runCli(["-C", root, "status", "aku/", "--limit", "2"], { environment: {} });
+  assert.equal(text.exit, 0, text.stderr);
+  assert.match(text.stdout, /^AKUMA \/\/ 2 recent/u);
+  assert.match(text.stdout, /@recent/u);
+  assert.ok(text.stdout.indexOf(ownerRows[0]!.id) < text.stdout.indexOf(ownerRows[1]!.id));
+  assert.doesNotMatch(text.stdout, new RegExp(ownerRows[2]!.id, "u"));
+  assert.ok(text.stdout.trimEnd().endsWith("…"));
+  const full = await cliJson<KanshiCategoryReport<"akuma">>(["-C", root, "status", "aku/", "--limit", "501"], {
     environment: {},
   });
   assert.equal(full.exit, 0, full.stderr);
@@ -294,7 +294,7 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
     assert.doesNotMatch(text.stdout, new RegExp(ownerRows[2]!.id, "u"));
     assert.ok(text.stdout.trimEnd().endsWith("…"));
   }
-  const akuma = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku"], { environment: {} });
+  const akuma = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku/"], { environment: {} });
   const akumaSection = akuma.value.section;
   if (akumaSection.kind !== "present") assert.fail(akuma.stdout);
   const akumaRows = akumaSection.rows;
@@ -330,19 +330,19 @@ test("Contract categories preserve active catalogue facts and readable Dispatch 
 test("category empty, absent and unavailable observations remain distinct", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-category-empty-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const absent = await cliJson<KanshiCategoryReport<"akuma">>(["-C", root, "status", "aku"], { environment: {} });
+  const absent = await cliJson<KanshiCategoryReport<"akuma">>(["-C", root, "status", "aku/"], { environment: {} });
   assert.equal(absent.exit, 0, absent.stderr);
   assert.equal(absent.value.section.kind, "absent");
   const noRepo = runCliJson(root, ["status", "kei"]);
   assert.equal(noRepo.status, 64);
   assert.match(noRepo.stderr, /requires a resolved Repo/u);
   const world = await World.at(root);
-  const empty = await runCli(["-C", world, "status", "aku"], { environment: {} });
+  const empty = await runCli(["-C", world, "status", "aku/"], { environment: {} });
   assert.equal(empty.exit, 0, empty.stderr);
   assert.equal(empty.stdout.trim(), "akuma  none");
   mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "broken\n");
-  const unavailableAliases = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku"], {
+  const unavailableAliases = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku/"], {
     environment: {},
   });
   const unavailableSection = unavailableAliases.value.section;
@@ -350,7 +350,7 @@ test("category empty, absent and unavailable observations remain distinct", asyn
   if (unavailableSection.kind !== "present") assert.fail(unavailableAliases.stdout);
   assert.equal(unavailableSection.aliasesError === undefined, false);
   assert.equal(unavailableSection.rows, undefined);
-  const text = await runCli(["-C", world, "status", "aku"], { environment: {} });
+  const text = await runCli(["-C", world, "status", "aku/"], { environment: {} });
   assert.match(text.stdout, /^akuma  none$/mu);
   assert.match(text.stdout, /aliases unavailable/u);
   assert.doesNotMatch(text.stdout, /AKUMA \/\/ unavailable|world empty/u);

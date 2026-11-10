@@ -13,25 +13,18 @@ leaf help and the parser, not this chapter.
 | --- | --- | --- |
 | add, update | Create or change a Debt fact. | The Debt product decides identity, validation, no-op, and authority corruption; creation preserves its minted identity, while an addressed change preserves the fields whose authority meaning actually changed. |
 | done, drop | Close resolved work or work that is no longer owed. | The Debt product decides legal transition, target availability, and batch outcomes; a refusal or retry remains visible per requested Debt. |
-| show, ls, ready, blocked, query, tree | Read Debt authority or a derived Debt view. | Missing World, empty result, unavailable observation, and corrupt authority are never collapsed together. |
-| context | Observe or deliberately change the caller's default Debt namespace. | Context is not authority and cannot retarget a complete Debt identity. |
+| query, tree | Read Debt authority or a derived Debt view. | Missing World, empty result, unavailable observation, and corrupt authority are never collapsed together. |
 | doctor | Diagnose Debt authority and relationship health. | It reports; it never repairs. |
 
 The Debt CLI adapts through the invocation facet, preserving native answers.
-Both listing spellings share the same operation and default to open work.
-A listing can refuse an unintelligible default context, but has no addressed
-Debt whose absence could become a target refusal.
+Root listing and addressed reads share the Debt owner's operations; listing
+defaults to open work. Readiness and blocking are query predicates.
 The Debt CLI acquires only the input a selected verb permits and refuses an
-ambiguous, surplus, or ill-formed request before invoking Debt. It does not
-infer a namespace, Debt identity, lifecycle state, association, or actor from
-the caller's directory, Contract, Git state, or Akuma request.
-
-Observing a context and deliberately changing one are different judgments. Only
-an operation that consumes the default resolves the installed context, so a
-malformed installed context refuses that work and never blocks a deliberate
-change. A change validates the supplied namespace before it touches anything,
-replaces the installed default durably, and reports the default later callers
-resolve; it reads no previous context and repairs nothing by implication.
+ambiguous, surplus, or ill-formed request before invoking Debt. An explicit
+namespace or complete identity selects its named coordinate; omission selects
+the root namespace. The caller's directory, Contract, Git state, or Akuma
+request never supplies an implicit namespace, identity, state, association,
+or actor.
 
 ## Presentation
 

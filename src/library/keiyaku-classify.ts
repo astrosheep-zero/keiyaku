@@ -11,7 +11,6 @@ import type {
   BlockedDebtList,
   DebtAbsent,
   DebtBatchResult,
-  DebtContextResult,
   DebtTreeResult,
   DebtShowResult,
   DebtCatalogue,
@@ -52,7 +51,6 @@ type DebtNativeResult =
   | DebtQueryResult
   | DebtTreeResult
   | DebtDoctorReport
-  | DebtContextResult
   | DebtAbsent;
 
 function classifyDebt(result: DebtNativeResult): VerbDisposition {
@@ -61,13 +59,7 @@ function classifyDebt(result: DebtNativeResult): VerbDisposition {
     return result.items.some((item) => item.kind === "refused" || item.kind === "missing") ? "refused" : "accepted";
   }
   if (result.kind === "retry") return "retryable";
-  if (
-    result.kind === "refused" ||
-    result.kind === "absent" ||
-    result.kind === "missing" ||
-    result.kind === "invalid-namespace-context"
-  )
-    return "refused";
+  if (result.kind === "refused" || result.kind === "absent" || result.kind === "missing") return "refused";
   return "issues" in result && (result.issues?.length ?? 0) > 0 ? "failed" : "accepted";
 }
 
@@ -157,12 +149,9 @@ export function classifyVerb<K extends VerbName>(
     case "debt.show":
     case "debt.done":
     case "debt.drop":
-    case "debt.ready":
-    case "debt.blocked":
     case "debt.query":
     case "debt.tree":
     case "debt.doctor":
-    case "debt.context":
       return classifyDebt(value as DebtNativeResult);
     case "bind":
     case "amend":

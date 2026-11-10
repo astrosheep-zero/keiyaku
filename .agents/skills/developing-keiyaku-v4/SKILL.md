@@ -46,8 +46,8 @@ not when a spec or code summary was left in place.
 Always select the v4 repository explicitly:
 
 ```bash
-keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 debt ls
-keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 debt show <debt-id>
+keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 ls debt/
+keiyaku -C /Users/astrosheep/Developer/keiyaku-v4 show <debt-id>
 ```
 
 Use the debt board for confirmed unresolved work and its prerequisites, not

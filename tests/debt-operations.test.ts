@@ -59,7 +59,7 @@ test("a pre-aborted Debt CLI mutation leaves authority unchanged", async (t) => 
   const before = readFileSync(path, "utf8");
   const controller = new AbortController();
   controller.abort(new Error("caller cancelled Debt mutation"));
-  const read = await runCli(["-C", root, "debt", "show", id, "--json"], {
+  const read = await runCli(["-C", root, "show", id, "--json"], {
     environment: {},
     signal: controller.signal,
   });
@@ -997,7 +997,7 @@ test("targeted reads ignore unrelated malformed and symlink authorities", async 
   assert.equal((await readDetail(debts, id)).title, "Targeted authority");
 });
 
-test("Debt ls returns a native page and its actual context failure without a family envelope", async (t) => {
+test("Debt ls returns its native page and distinguishes absent Worlds", async (t) => {
   const { root, debts } = await world();
   const absent = mkdtempSync(join(tmpdir(), "keiyaku-debt-list-absent-"));
   t.after(() => {
@@ -1005,34 +1005,18 @@ test("Debt ls returns a native page and its actual context failure without a fam
     rmSync(absent, { recursive: true, force: true });
   });
   const id = acceptedId(await debts.add({ title: "Catalogue member" }));
-  for (const args of [
-    ["ls", "debt/"],
-    ["debt", "ls"],
-  ]) {
-    const listed = await cliJson(["-C", root, ...args], { environment: {} });
-    assert.equal(listed.exit, 0, listed.stderr);
-    assert.deepEqual(listed.value, {
-      kind: "present",
-      rows: [{ id, title: "Catalogue member", priority: 2, disposition: "ready" }],
-    });
-  }
-  const noWorld = await cliJson(["-C", absent, "debt", "ls"], { environment: {} });
+  const listed = await cliJson(["-C", root, "ls", "debt/"], { environment: {} });
+  assert.equal(listed.exit, 0, listed.stderr);
+  assert.deepEqual(listed.value, {
+    kind: "present",
+    rows: [{ id, title: "Catalogue member", priority: 2, disposition: "ready" }],
+  });
+  const noWorld = await cliJson(["-C", absent, "ls", "debt/"], { environment: {} });
   assert.equal(noWorld.exit, 1, noWorld.stderr);
   assert.deepEqual(noWorld.value, { kind: "absent" });
-
-  const context = join(root, ".keiyaku", "namespace", "current");
-  mkdirSync(join(root, ".keiyaku", "namespace"), { recursive: true });
-  writeFileSync(context, "Bad Namespace\n");
-  const refused = await cliJson(["-C", root, "debt", "ls"], { environment: {} });
-  assert.equal(refused.exit, 1, refused.stderr);
-  assert.deepEqual(refused.value, { kind: "invalid-namespace-context", path: context });
-  const text = await runCli(["-C", root, "debt", "ls"], { environment: {} });
-  assert.equal(text.exit, 1, text.stderr);
-  assert.match(text.stdout, /reason  invalid namespace context/u);
-  assert.ok(text.stdout.includes(context));
 });
 
-test("debt show distinguishes an absent World from a missing addressed Debt", async (context) => {
+test("show distinguishes an absent World from a missing addressed Debt", async (context) => {
   const established = mkdtempSync(join(tmpdir(), "keiyaku-debt-show-world-"));
   const absent = mkdtempSync(join(tmpdir(), "keiyaku-debt-show-absent-"));
   context.after(() => {
@@ -1041,14 +1025,14 @@ test("debt show distinguishes an absent World from a missing addressed Debt", as
   });
   mkdirSync(join(established, ".keiyaku"));
 
-  const single = await runCli(["-C", established, "debt", "show", "debt/missing", "--json"], { environment: {} });
+  const single = await runCli(["-C", established, "show", "debt/missing", "--json"], { environment: {} });
   assert.equal(single.exit, 1, single.stderr);
   assert.deepEqual(JSON.parse(single.stdout), {
     kind: "present",
     items: [{ kind: "missing" }],
   });
 
-  const plural = await runCli(["-C", established, "debt", "show", "debt/a", "debt/b", "--json"], {
+  const plural = await runCli(["-C", established, "show", "debt/a", "debt/b", "--json"], {
     environment: {},
   });
   assert.equal(plural.exit, 1, plural.stderr);
@@ -1057,15 +1041,15 @@ test("debt show distinguishes an absent World from a missing addressed Debt", as
     items: [{ kind: "missing" }, { kind: "missing" }],
   });
 
-  const text = await runCli(["-C", established, "debt", "show", "debt/missing"], { environment: {} });
+  const text = await runCli(["-C", established, "show", "debt/missing"], { environment: {} });
   assert.equal(text.exit, 1, text.stderr);
   assert.match(text.stdout, /^× show refused$/mu);
   assert.match(text.stdout, /^  debt  debt\/missing$/mu);
 
-  const absentRead = await runCli(["-C", absent, "debt", "show", "debt/missing", "--json"], { environment: {} });
+  const absentRead = await runCli(["-C", absent, "show", "debt/missing", "--json"], { environment: {} });
   assert.equal(absentRead.exit, 1, absentRead.stderr);
   assert.deepEqual(JSON.parse(absentRead.stdout), { kind: "absent" });
-  const absentText = await runCli(["-C", absent, "debt", "show", "debt/missing"], { environment: {} });
+  const absentText = await runCli(["-C", absent, "show", "debt/missing"], { environment: {} });
   assert.equal(absentText.exit, 1, absentText.stderr);
   assert.match(absentText.stdout, /^debt world absent$/mu);
   assert.doesNotMatch(absentText.stdout, /refused|debt\/missing/u);

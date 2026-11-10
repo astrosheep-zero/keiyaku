@@ -104,36 +104,22 @@ async function create(
   signal?: AbortSignal,
   actor?: string,
 ): Promise<DebtMutationResult> {
-  let result: DebtMutationResult | "busy";
-  try {
-    result = await withDebtLocks(
-      { world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) },
-      async () => {
-        const snapshot = await readBoard(world),
-          next = addDocument(base, namespace, snapshot.board, currentTimestamp(), actor);
-        const problem = relationProblem(boardWith(snapshot.board, next), null, next);
-        if (problem !== null) return { kind: "refused", reason: "invalid-graph", diagnostic: problem } as const;
-        const replaced = await replaceAuthority({
-          world,
-          id: next.id,
-          expected: null,
-          next: serializeDebtDocument(next),
-        });
-        return replaced === "replaced"
-          ? ({ kind: "accepted", id: next.id } as const)
-          : retry("concurrent-modification");
-      },
-    );
-  } catch (error) {
-    if (
-      error instanceof TypeError &&
-      /debt identity (?:cannot fit the physical filename budget|contains a Windows-reserved physical segment)/u.test(
-        error.message,
-      )
-    )
-      return { kind: "refused", reason: "invalid-namespace-context" };
-    throw error;
-  }
+  const result = await withDebtLocks(
+    { world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) },
+    async () => {
+      const snapshot = await readBoard(world),
+        next = addDocument(base, namespace, snapshot.board, currentTimestamp(), actor);
+      const problem = relationProblem(boardWith(snapshot.board, next), null, next);
+      if (problem !== null) return { kind: "refused", reason: "invalid-graph", diagnostic: problem } as const;
+      const replaced = await replaceAuthority({
+        world,
+        id: next.id,
+        expected: null,
+        next: serializeDebtDocument(next),
+      });
+      return replaced === "replaced" ? ({ kind: "accepted", id: next.id } as const) : retry("concurrent-modification");
+    },
+  );
   return result === "busy" ? retry("busy") : result;
 }
 

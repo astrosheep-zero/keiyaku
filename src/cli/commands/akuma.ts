@@ -46,7 +46,9 @@ export async function acquireAkumaRequest(
   runtime: CliRuntime,
 ): Promise<VerbRequest<"spawn" | "tell" | "ask">> {
   const prompt =
-    request.acquire.prompt === undefined ? undefined : await promptBody(request.name, request.acquire.prompt, runtime);
+    request.acquire.prompt === undefined
+      ? undefined
+      : await promptBody(request.name === "ask" ? "tell" : request.name, request.acquire.prompt, runtime);
   if (request.name === "tell")
     return { name: "tell", input: { ...request.input, prompt: prompt! }, output: request.output };
   const schema = request.acquire.schema === undefined ? undefined : await schemaFromFile(request.acquire.schema);

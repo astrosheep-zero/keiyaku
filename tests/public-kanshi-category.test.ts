@@ -71,7 +71,7 @@ test("category observation reuses owner rows and is the operation the CLI runs",
   assert.equal("contracts" in report, false);
   assert.equal("debts" in report, false);
 
-  const cli = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku", "--limit", "2"], { environment: {} });
+  const cli = await cliJson<KanshiCategoryReport<"akuma">>(["-C", world, "status", "aku/", "--limit", "2"], { environment: {} });
   assert.equal(cli.exit, 0, cli.stderr);
   const withoutObservationTime = (category: KanshiCategoryReport<"akuma">): KanshiCategoryReport<"akuma"> => ({
     ...category,
