@@ -97,6 +97,12 @@ Square cards retain one consistent event-time name snapshot after alias moves;
 unaddressed notices need no name observation. Alias failure is diagnostic-only
 and cannot prevent an addressed notice from using complete identity.
 
+Paseo native parent matching uses the host's persisted native session identity,
+not a configured provider alias. A custom provider preserves its underlying
+native identity when the host records it; absent that evidence, only its recorded
+provider identity is available. Matching still requires a unique exact session
+and a fresh, unchanged, unarchived parent before attachment.
+
 Paseo mirrors instead converge to current bindings at their next ordinary
 refresh or explicit title synchronization. Alias moves promise no immediate
 update, signal, watcher, or retry queue. Names never change mirror creation

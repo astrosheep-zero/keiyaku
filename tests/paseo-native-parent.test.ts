@@ -8,9 +8,9 @@ import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import { attach } from "../plugins/paseo/plugin/server/attach.js";
 
 type Parent = ReturnType<typeof parent>;
-const parent = (id: string, provider: string, sessionId: string) => ({
+const parent = (id: string, provider: string, sessionId: string, metadata?: Record<string, unknown>) => ({
   id, provider: "not-the-persistence-provider", cwd: "/parent/cwd", archivedAt: null as string | null,
-  persistence: { provider, sessionId, nativeHandle: "/session/file-not-a-UUID" },
+  persistence: { provider, sessionId, nativeHandle: "/session/file-not-a-UUID", metadata },
 });
 async function harness(t: TestContext, pages: Parent[][], refreshed: Parent | null) {
   const world = await mkdtemp(join(tmpdir(), "native-parent-"));
@@ -60,6 +60,34 @@ test("native parents match exact persistence provider/sessionId across every dir
     }]);
     assert.equal(h.create.mock.calls[0]?.arguments[0]?.title, "aku/test/1234abcd",
       "the public SDK call carries the full Akuma identity as its title");
+  });
+});
+
+test("custom Claude provider attaches by native persistence metadata and exact session", async t => {
+  const selected = parent("parent", "wwz", "native-session", { provider: "claude" });
+  const wrongSession = parent("wrong-session", "wwz", "other-session", { provider: "claude" });
+  const wrongNative = parent("wrong-native", "wwz", "native-session", { provider: "codex" });
+  const h = await harness(t, [[wrongSession, wrongNative], [selected]], selected);
+  assert.deepEqual(await h.run("claude"), { attached: true });
+  assert.deepEqual(h.fetched, ["parent"]);
+  assert.equal(h.create.mock.calls[0]?.arguments[0]?.parent, "parent");
+});
+
+test("custom native identity still refuses ambiguous and changed mappings", async t => {
+  const selected = parent("parent", "wwz", "native-session", { provider: "claude" });
+  for (const scenario of [
+    { name: "duplicate native session", pages: [[selected], [parent("other", "claude", "native-session")]],
+      refreshed: selected, reason: /ambiguous claude session/u },
+    { name: "native metadata changed on refresh", pages: [[selected]],
+      refreshed: parent("parent", "wwz", "native-session", { provider: "codex" }), reason: /changed native identity/u },
+    { name: "native metadata lost on refresh", pages: [[selected]],
+      refreshed: parent("parent", "wwz", "native-session"), reason: /changed native identity/u },
+  ]) await t.test(scenario.name, async t => {
+    const h = await harness(t, scenario.pages, scenario.refreshed);
+    const warning = t.mock.method(console, "warn", () => {});
+    assert.deepEqual(await h.run("claude"), { attached: false });
+    assert.equal(h.create.mock.callCount(), 0);
+    assert.match(String(warning.mock.calls[0]?.arguments[0]), scenario.reason);
   });
 });
 

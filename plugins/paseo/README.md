@@ -47,7 +47,10 @@ legacy Paseo callers keep their existing selection behavior.
 A born signal carries that frozen caller to Paseo. The bridge enumerates public
 agent snapshots with the supported `includeArchived` filter, never an active-only
 scope, matching only
-`persistence.provider` plus `persistence.sessionId` (never Pi's file-path handle).
+the native provider in `persistence.metadata.provider` (falling back to
+`persistence.provider` when absent) plus `persistence.sessionId`, never Pi's
+file-path handle. This preserves native identity for custom providers such as
+`wwz` extending `claude`, without treating a provider alias alone as evidence.
 It refreshes the sole candidate and attaches only if its identity is unchanged
 and it is not archived. Missing, multiple, archived, or stale mappings diagnose
 non-attachment without affecting Keiyaku creation. Stored `paseo` callers retain

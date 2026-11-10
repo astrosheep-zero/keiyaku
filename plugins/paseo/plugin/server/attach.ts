@@ -15,8 +15,9 @@ export async function attach(input: z.output<typeof attachRpc.input>, { paseo }:
   if (caller?.kind !== "external") return skip("caller is not an external host");
   const native = ["codex", "pi", "claude"].includes(caller.integration);
   let parentId = caller.id;
-  const matches = (agent: { persistence?: { provider: string; sessionId: string } | null }) =>
-    agent.persistence?.provider === caller.integration && agent.persistence.sessionId === caller.id;
+  const matches = (agent: Pick<PaseoAgent, "persistence">) =>
+    agent.persistence?.sessionId === caller.id &&
+    (agent.persistence.metadata?.provider ?? agent.persistence.provider) === caller.integration;
   if (native) {
     const candidates: string[] = [];
     let cursor: string | undefined;
