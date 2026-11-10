@@ -29,13 +29,13 @@ import {
 import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
-import type { AkumaAskObservation, AkumaObservation, AkumaTellResult, AkumaWaitItem } from "../src/akuma/selection-observation.js";
+import type { AkumaObservation, AkumaTellResult, AkumaWaitItem } from "../src/akuma/selection-observation.js";
 import { projectStatusTimeline } from "../src/akuma/status-projection.js";
 import type { CreatedDebtObservation, DispatchAssociation } from "../src/index.js";
 import type { ForkResult, SpawnResult } from "../src/library/akuma-creation.js";
 import { contractId } from "../src/core/facts/types.js";
 import { debtIdSchema } from "../src/debt/identity.js";
-import { classifyVerb } from "../src/library/keiyaku-verbs.js";
+import { classifyVerb, type VerbOutput } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import {
   activeTool,
@@ -756,7 +756,7 @@ function compactTell(wake?: AkumaTellResult["wake"]) {
   };
 }
 
-function spawned(extra: Partial<SpawnResult> = {}): SpawnResult {
+function spawned(extra: Partial<VerbOutput<"spawn">> = {}): VerbOutput<"spawn"> {
   return { akumaId: SPECIMEN_ID, ...extra };
 }
 
@@ -817,7 +817,7 @@ test("Akuma outcomes distinguish admission from failed execution", () => {
 test("shared ask rendering preserves answer bytes and non-answer conclusions", () => {
   const input = { akuma: SPECIMEN_ID, prompt: "go" };
   const context = { columns: 100, color: false };
-  const render = (observation: AkumaAskObservation) =>
+  const render = (observation: NonNullable<VerbOutput<"spawn">["input"]>) =>
     renderVerb(
       "ask",
       input,

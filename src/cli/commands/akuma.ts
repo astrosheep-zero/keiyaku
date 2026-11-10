@@ -137,7 +137,7 @@ export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): 
           else driver.settle(progress.observe(event.observation), progress.frame());
         };
   try {
-    const result = await runtime.facet.run("ask", input, {
+    const result = await runtime.facet.run<"ask">("ask", input, {
       signal: runtime.signal,
       ...(observe === undefined ? {} : { observe }),
       ...(hasSchema ? { decode: (value: unknown) => value } : {}),

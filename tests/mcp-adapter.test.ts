@@ -37,17 +37,18 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const { tools } = await client.listTools();
   assert.deepEqual(
     tools.map((tool) => tool.name),
-    Object.keys(Keiyaku.verbs),
+    Object.keys(Keiyaku.verbs).map((name) => name.replaceAll(".", "_")),
   );
   for (const tool of tools) {
-    const entry = Keiyaku.verbs[tool.name as keyof typeof Keiyaku.verbs];
+    const entry = Keiyaku.verbs[tool.name.replaceAll("_", ".") as keyof typeof Keiyaku.verbs];
     assert.equal(tool.description, entry.description);
     assert.equal(tool.inputSchema.type, "object");
     assert.ok(tool.inputSchema.required?.includes("input"));
     const output = z.toJSONSchema(entry.output, { io: "input" });
-    assert.deepEqual(tool.outputSchema, output.type === "object" ? output : undefined);
+    assert.equal(tool.outputSchema?.type, "object");
+    assert.deepEqual(tool.outputSchema, { ...output, type: "object" });
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
-    assert.equal(tool.annotations?.destructiveHint, entry.effect !== "read");
+    assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
   for (const name of ["ls", "wait", "history", "nuke", "report"])
     assert.equal(tools.filter((tool) => tool.name === name).length, 1);
@@ -84,7 +85,12 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     projectFailure(new KeiyakuUsageError("expected input and optional nonblank cwd and repo")),
   );
   await assert.rejects(() => client.callTool({ name: "no-such-tool", arguments: { input: {} } }));
-  const added = await client.callTool({ name: "debt.add", arguments: { input: { title: "Fix the roof" } } });
+  await assert.rejects(() => client.callTool({ name: "debt.add", arguments: { input: { title: "Fix the roof" } } }), /Unknown tool: debt\.add/);
+  const added = await client.callTool({ name: "debt_add", arguments: { input: { title: "Fix the roof" } } });
+  const published = tools.find((tool) => tool.name === "debt_add")?.outputSchema;
+  assert.ok(published);
+  // Client.callTool validates successful structuredContent against the tools/list outputSchema.
+  assert.ok(published.anyOf);
   assert.equal(added.isError, false);
   const refusal = await client.callTool({ name: "nuke", arguments: { input: {} } });
   const nativeRefusal = await Keiyaku.at({ cwd, environment, home: cwd }).run("nuke", {});
@@ -92,16 +98,16 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(refusal._meta?.["keiyaku/disposition"], classifyVerb("nuke", {}, { kind: "returned", value: nativeRefusal }));
   assert.deepEqual(refusal.structuredContent, JSON.parse(JSON.stringify(nativeRefusal)));
   const id = (added.structuredContent as { kind: "accepted"; id: string }).id;
-  const shown = await client.callTool({ name: "debt.show", arguments: { input: { id } } });
+  const shown = await client.callTool({ name: "debt_show", arguments: { input: { id } } });
   assert.equal(shown.isError, false);
   const list = await client.callTool({ name: "ls", arguments: { input: { of: "debt" } } });
   assert.equal(list.isError, false);
   assert.match(JSON.stringify(list.structuredContent), /Fix the roof/);
-  const plural = await client.callTool({ name: "debt.show", arguments: { input: { ids: [id] } } });
+  const plural = await client.callTool({ name: "debt_show", arguments: { input: { ids: [id] } } });
   assert.deepEqual(plural.structuredContent, JSON.parse(JSON.stringify(
     await Keiyaku.at({ cwd, environment, home: cwd }).run("debt.show", { ids: [id] }),
   )));
-  const done = await client.callTool({ name: "debt.done", arguments: { input: { ids: [id] } } });
+  const done = await client.callTool({ name: "debt_done", arguments: { input: { ids: [id] } } });
   assert.equal(done.isError, false);
   assert.deepEqual(done.structuredContent, { items: [{ kind: "accepted" }] });
 
@@ -114,8 +120,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const processCwd = process.cwd();
   const processEnv = { ...process.env };
   const [a, b] = await Promise.all([
-    client.callTool({ name: "debt.add", arguments: { cwd: relative(cwd, first), input: { title: "First world" } } }),
-    client.callTool({ name: "debt.add", arguments: { cwd: second, input: { title: "Second world" } } }),
+    client.callTool({ name: "debt_add", arguments: { cwd: relative(cwd, first), input: { title: "First world" } } }),
+    client.callTool({ name: "debt_add", arguments: { cwd: second, input: { title: "Second world" } } }),
   ]);
   assert.equal(a.isError, false);
   assert.equal(b.isError, false);
@@ -246,7 +252,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     assert.equal(result.isError, false);
     const answer = result.structuredContent as VerbOutput<"ask">;
     assert.equal(answer.kind, "answered");
-    assert.ok(answer.kind === "answered");
+    assert.ok(answer.kind === "answered" && "answer" in answer);
     assert.deepEqual(answer.answer, { ok: true });
     assert.equal(result._meta?.["keiyaku/disposition"], classifyVerb("ask", { akuma: allocated.id, prompt: "structured", schema, timeoutMs: 30_000 }, { kind: "returned", value: answer }));
     assert.equal((await Akuma.select(world, allocated.id).idle({ timeoutMs: 30_000 })).reason, "completed");
@@ -259,7 +265,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
       const response = await client.callTool({ name: "ask", arguments: { input } });
       const value = response.structuredContent as VerbOutput<"ask">;
       assert.equal(value.kind, expectedKind);
-      assert.ok(value.kind === "answered" || value.kind === "invalid-output");
+      assert.ok((value.kind === "answered" || value.kind === "invalid-output") && "answer" in value);
       assert.equal(value.answer, expectedAnswer);
       assert.equal(typeof value.tellId, "string");
       const disposition = classifyVerb("ask", input, { kind: "returned", value });

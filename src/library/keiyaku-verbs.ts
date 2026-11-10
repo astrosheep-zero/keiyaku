@@ -11,19 +11,12 @@ import {
   akumaKillResultSchema,
   akumaTellResultSchema,
   akumaWaitResultSchema,
-  type AkumaAskResult,
 } from "../akuma/selection-observation.js";
 import { regionResultSchema } from "../kanshi/report.js";
-import { settingsSchema, type Settings } from "../settings.js";
+import { settingsSchema } from "../settings.js";
 import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
-import {
-  spawnProgressSchema,
-  spawnResultSchema,
-  forkResultSchema,
-  type SpawnProgress,
-  type SpawnResult,
-} from "./akuma-creation.js";
+import { spawnProgressSchema, spawnResultSchema, forkResultSchema, type SpawnProgress } from "./akuma-creation.js";
 import {
   bindOutcomeSchema,
   amendOutcomeSchema,
@@ -33,7 +26,6 @@ import {
   verifyOutcomeSchema,
   reviewOutcomeSchema,
   abandonOutcomeSchema,
-  type BindOutcome,
 } from "./contract-outcomes.js";
 import { contractHistorySchema } from "./contract-types.js";
 import { guidanceSchema } from "./kei.js";
@@ -494,15 +486,7 @@ export const verbs = Object.freeze({
   },
 } as const satisfies Record<string, VerbEntry>);
 
-export type VerbOutputs = Omit<
-  { [K in keyof typeof verbs]: z.output<(typeof verbs)[K]["output"]> },
-  "bind" | "settings" | "ask" | "spawn"
-> & {
-  bind: BindOutcome;
-  settings: Settings;
-  ask: AkumaAskResult<unknown>;
-  spawn: SpawnResult;
-};
+export type VerbOutputs = { [K in keyof typeof verbs]: z.output<(typeof verbs)[K]["output"]> };
 export type VerbName = keyof typeof verbs;
 export type VerbInput<K extends VerbName> = z.input<(typeof verbs)[K]["input"]>;
 export type VerbOutput<K extends VerbName> = VerbOutputs[K];

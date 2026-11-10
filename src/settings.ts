@@ -11,11 +11,7 @@ export type SettingsEntry = z.output<typeof settingsEntrySchema>;
 export type SettingsNamespaceFailure = z.output<typeof settingsNamespaceFailureSchema>;
 export type SettingsNamespaceView = z.output<typeof settingsNamespaceViewSchema>;
 
-export type Settings = Readonly<{
-  scopes: Readonly<{ project: SettingsScopeState; user: SettingsScopeState }>;
-  namespaces?: Readonly<Record<string, SettingsNamespaceView>>;
-  namespace(name: string): SettingsNamespaceView;
-}>;
+export type Settings = z.output<typeof settingsSchema> & Readonly<{ namespace(name: string): SettingsNamespaceView }>;
 
 export const settingsScopeStateSchema = z.union([
   z.strictObject({ kind: z.literal("absent"), path: z.string().exactOptional() }).readonly(),

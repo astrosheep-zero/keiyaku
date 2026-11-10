@@ -14,7 +14,7 @@ function labeledTokens(label: string, tokens: readonly string[], indent: string,
   return [...renderTextBlock(label, indent, columns), ...tokens.map((token) => `${indent}  ${token}`)];
 }
 
-export function renderSettingsText(value: Settings, columns = DEFAULT_CLI_COLUMNS): string {
+export function renderSettingsText(value: Omit<Settings, "namespace">, columns = DEFAULT_CLI_COLUMNS): string {
   const lines = [
     "settings",
     ...scopeLines("user", value.scopes.user, columns),

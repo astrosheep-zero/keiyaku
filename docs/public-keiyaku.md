@@ -11,11 +11,20 @@ both typed methods and generic execution over the same caller boundary. The
 facet also owns the shared interpretation of returned and thrown outcomes for
 adapters; this classification does not replace or alter the native answer.
 Structural descriptions expose wire inputs and owner result and progress schemas
-without validating trusted owner values as they flow through execution. Each
-result uses the native owner's single object answer. Invocation context can
+without validating trusted owner values as they flow through execution. Every
+described verb's output type is its producing owner's schema output; native
+process-local capabilities stay outside that wire description. Each result uses
+the native owner's single object answer. Invocation context can
 accompany text rendering without being echoed in that answer, and adapters
 consume the owner's outcome judgment rather than reconstructing authority from
 omitted implementation evidence.
+
+MCP publishes an object-rooted output schema for every described tool, including
+heterogeneous object answers. An alternative that cannot describe an object is a
+programmer error, never permission to omit the schema. Published names are safe
+for model APIs and are the only callable transport names. Read-only annotations
+identify reads; destructive annotations identify destruction alone, not ordinary
+writes.
 
 The invocation World is distinct from an explicitly selected Contract Repo:
 selecting a Repo never retargets the World. The facet adapts caller-supplied

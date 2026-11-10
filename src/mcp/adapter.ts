@@ -34,12 +34,17 @@ function describeTools(): Tool[] {
       { io: "input" },
     );
     const output = z.toJSONSchema(entry.output, { io: "input" });
+    const branches: z.core.JSONSchema.BaseSchema[] = [output];
+    for (const branch of branches) {
+      if (branch.anyOf !== undefined) branches.push(...branch.anyOf);
+      else if (branch.type !== "object") throw new Error(`Non-object output schema: ${name}`);
+    }
     return {
-      name,
+      name: name.replaceAll(".", "_"),
       description: entry.description,
       inputSchema: schema as Tool["inputSchema"],
-      ...(output.type === "object" ? { outputSchema: output as Tool["inputSchema"] } : {}),
-      annotations: { readOnlyHint: entry.effect === "read", destructiveHint: entry.effect !== "read" },
+      outputSchema: { ...output, type: "object" } as Tool["inputSchema"],
+      annotations: { readOnlyHint: entry.effect === "read", destructiveHint: entry.effect === "destroy" },
     };
   });
 }
@@ -70,8 +75,9 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
   let closing: Promise<void> | undefined;
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
   server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
-    const name = request.params.name;
-    if (!Object.hasOwn(Keiyaku.verbs, name)) throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${name}`);
+    const name = request.params.name.replaceAll("_", ".");
+    if (request.params.name.includes(".") || !Object.hasOwn(Keiyaku.verbs, name))
+      throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
     const operation = call(name as VerbName, request.params.arguments, extra.signal);
     pending.add(operation);
     void operation.then(
@@ -133,11 +139,10 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
   }
   return {
     server,
-    close() {
-      return (closing ??= (async () => {
+    close: () =>
+      (closing ??= (async () => {
         await server.close();
         await Promise.allSettled([...pending]);
-      })());
-    },
+      })()),
   };
 }

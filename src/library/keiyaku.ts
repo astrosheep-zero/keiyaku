@@ -316,7 +316,7 @@ export class Keiyaku {
   }
 
   bind(input: BindInvocation) {
-    return this.run("bind", input);
+    return this.#bind(input);
   }
   amend(input: Selected<AmendInvocation>) {
     return this.run("amend", input);
@@ -430,7 +430,7 @@ export class Keiyaku {
     return this.run("whoami", {});
   }
   settings() {
-    return this.run("settings", {});
+    return this.#settings();
   }
   nuke(input: Readonly<{ confirm?: string }> = {}) {
     return this.run("nuke", input);

@@ -2,12 +2,18 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
+import { z } from "zod";
+import { type VerbName, type VerbOutput } from "../src/library/keiyaku-verbs.js";
 import { Akuma, Keiyaku, KeiyakuUsageError, Schema, World, classifyVerb } from "../src/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { repositoryWithMain, accepted, commitCandidate, document } from "./support/library-verbs.js";
 import { cleanupSpawnCapableFixtureForTest, installAkumaBodyPidReceipt, temporaryDirectory } from "./support/process.js";
-import { assertWireRoundTrip } from "./support/schema-parity.js";
+import { assertWireRoundTrip, type Assert, type Exact } from "./support/schema-parity.js";
+
+export type VerbOutputParity = Assert<
+  { [K in VerbName]: Exact<z.output<(typeof Keiyaku.verbs)[K]["output"]>, VerbOutput<K>> }[VerbName]
+>;
 
 test("verb runner preserves native bind, show and review results", async (t) => {
   const home = temporaryDirectory(t, "keiyaku-verbs-home-");
@@ -15,7 +21,7 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   const facet = Keiyaku.at({ cwd: repository.path, environment: {}, home });
   const bindInput = { markdown: document(), workspace: "worktree" as const, target: null, gates: ["reviewed"] };
   assert.equal(Keiyaku.verbs.bind.input.safeParse(bindInput).success, true);
-  const bound = accepted(await facet.run("bind", bindInput));
+  const bound = accepted(await facet.bind(bindInput));
   assert.equal(classifyVerb("bind", bindInput, { kind: "returned", value: bound }), "accepted");
   assertWireRoundTrip(Keiyaku.verbs.bind.output, bound);
   // Parsing the wire form cannot preserve the native handle's methods.
