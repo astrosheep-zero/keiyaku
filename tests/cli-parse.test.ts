@@ -27,14 +27,14 @@ test("show routes complete Debt addresses to the native Debt operation", () => {
 
 test("root Debt listings select closed or all only for Debt", () => {
   assert.deepEqual(command(["ls", "debt/", "--closed"]), {
-    name: "ls",
+    name: "debt.query",
     output: "text",
-    input: { of: "debt", namespace: [], selection: "closed" },
+    input: { namespace: [], selection: "closed" },
   });
   assert.deepEqual(command(["ls", "debt/ns/", "--all"]), {
-    name: "ls",
+    name: "debt.query",
     output: "text",
-    input: { of: "debt", namespace: ["ns"], selection: "all" },
+    input: { namespace: ["ns"], selection: "all" },
   });
   assert.throws(() => command(["ls", "debt", "--all", "--closed"]), CliUsageError);
   assert.throws(() => command(["ls", "kei", "--all"]), CliUsageError);
@@ -79,7 +79,7 @@ test("persisted removed workspace bytes are authority corruption", () => {
 test("global coordinates are independent of command position", () => {
   assert.deepEqual(parseArgv(["ls", "debt/", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
-    command: { name: "ls", input: { of: "debt", namespace: [] }, output: "text" },
+    command: { name: "debt.query", input: { namespace: [] }, output: "text" },
   });
   assert.deepEqual(parseArgv(["settings", "--cwd", "/repo/caller"]), {
     cwd: "/repo/caller",
@@ -270,39 +270,39 @@ test("bare ls requires a selector rather than opening help", () => {
 test("ls parses only canonical identity directories", () => {
   for (const path of ["debt", "debt/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { name: "ls", input: { of: "debt", namespace: [] }, output: "text" },
+      command: { name: "debt.query", input: { namespace: [] }, output: "text" },
     });
   }
   assert.deepEqual(parseArgv(["ls", "debt/feature/sub/", "--json"]), {
-    command: { name: "ls", input: { of: "debt", namespace: ["feature", "sub"] }, output: "json" },
+    command: { name: "debt.query", input: { namespace: ["feature", "sub"] }, output: "json" },
   });
   for (const path of ["debt/feature", "debt//", "debt/feature//"]) {
     assert.throws(() => parseArgv(["ls", path]), /Debt namespace selector/);
   }
   for (const path of ["kei", "kei/"]) {
     assert.deepEqual(parseArgv(["ls", path, "--json"]), {
-      command: { name: "ls", input: { of: "kei" }, output: "json" },
+      command: { name: "kei.ls", input: {}, output: "json" },
     });
   }
   assert.deepEqual(parseArgv(["ls", "kei/", "--limit", "100"]), {
-    command: { name: "ls", input: { of: "kei", limit: 100 }, output: "text" },
+    command: { name: "kei.ls", input: { limit: 100 }, output: "text" },
   });
   assert.throws(() => parseArgv(["ls", "kei/", "--limit", "0"]), /positive safe integer/u);
   for (const path of ["aku", "aku/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { name: "ls", input: { of: "akuma-name" }, output: "text" },
+      command: { name: "aku.names", input: {}, output: "text" },
     });
   }
   for (const path of ["aku/worker", "aku/worker/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { name: "ls", input: { of: "aku", akumaName: "worker" }, output: "text" },
+      command: { name: "aku.ls", input: { akumaName: "worker" }, output: "text" },
     });
   }
   assert.deepEqual(parseArgv(["ls", "aku/*/*"]), {
-    command: { name: "ls", input: { of: "aku" }, output: "text" },
+    command: { name: "aku.ls", input: {}, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/elite/*", "--limit", "40"]), {
-    command: { name: "ls", input: { of: "aku", akumaName: "elite", limit: 40 }, output: "text" },
+    command: { name: "aku.ls", input: { akumaName: "elite", limit: 40 }, output: "text" },
   });
   assert.match(renderContractHelp("ls"), /ls "aku\/<name>\/\*"/u);
   for (const path of [
@@ -321,19 +321,18 @@ test("ls parses only canonical identity directories", () => {
 
 test("ls parses caller-scoped Akuma selection", () => {
   assert.deepEqual(parseArgv(["ls", "--mine"]), {
-    command: { name: "ls", input: { of: "aku", caller: { kind: "mine" } }, output: "text" },
+    command: { name: "aku.ls", input: { caller: { kind: "mine" } }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/*/*", "--mine", "--json"]), {
-    command: { name: "ls", input: { of: "aku", caller: { kind: "mine" } }, output: "json" },
+    command: { name: "aku.ls", input: { caller: { kind: "mine" } }, output: "json" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/intern", "--mine"]), {
-    command: { name: "ls", input: { of: "aku", akumaName: "intern", caller: { kind: "mine" } }, output: "text" },
+    command: { name: "aku.ls", input: { akumaName: "intern", caller: { kind: "mine" } }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/*/*", "--caller", "slack:channel:thread"]), {
     command: {
-      name: "ls",
+      name: "aku.ls",
       input: {
-        of: "aku",
         caller: { kind: "external", caller: { kind: "external", integration: "slack", id: "channel:thread" } },
       },
       output: "text",
@@ -341,9 +340,8 @@ test("ls parses caller-scoped Akuma selection", () => {
   });
   assert.deepEqual(parseArgv(["ls", "aku/worker/*", "--caller", "aku/lead/1234abcd", "--limit", "5"]), {
     command: {
-      name: "ls",
+      name: "aku.ls",
       input: {
-        of: "aku",
         akumaName: "worker",
         caller: { kind: "akuma", akumaId: "aku/lead/1234abcd" },
         limit: 5,

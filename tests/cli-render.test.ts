@@ -23,7 +23,7 @@ import {
   type ContractId,
 } from "../src/core/facts/types.js";
 import type { ReconcileCompletion } from "../src/library/reconcile.js";
-import { renderAkumaCatalogue, renderArchetypeCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
+import { renderArchetypeCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
 import type { SpawnResult } from "../src/library/akuma-creation.js";
 import {
   DEFAULT_CONTEXT,
@@ -35,11 +35,12 @@ import {
   snapshotText,
   waitText as nativeWaitText,
 } from "../src/cli/render/akuma-activity.js";
-import { akumaStatusSchema, type AkumaList, type AkumaStatus } from "../src/akuma/akuma.js";
+import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import { type ActivityRow, type CompletedToolRow, type OutcomeRow } from "../src/akuma/projection.js";
 import type { AkumaObservation, DeliverOutcome, Placement, Placed, RequirementProblem } from "../src/index.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
-import { renderKanshiCategoryText, renderKanshiText } from "../src/cli/render/kanshi.js";
+import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import {
   diagnosticLines,
   displayColumns,
@@ -576,34 +577,6 @@ test("catalog text renders only the selected identity layer", () => {
     }),
     ["AKUMA NAMES // available", "", "reviewer", "  codex-5 — Read the complete change without truncation."].join("\n"),
   );
-  assert.equal(
-    renderAkumaCatalogue(
-      {
-        observedAt: "2026-08-12T00:00:00.000Z",
-        rows: [{ id: parseAkumaId("aku/worker/deadbeef").id, life: "unborn" }],
-      },
-      "worker",
-    ),
-    ["AKUMA // worker", "", "○ aku/worker/deadbeef · unborn"].join("\n"),
-  );
-  assert.equal(
-    renderAkumaCatalogue(
-      {
-        observedAt: "2026-08-12T00:00:00.000Z",
-        rows: [
-          {
-            id: parseAkumaId("aku/worker/deadbeef").id,
-            life: "asleep",
-            lifeAt: "2026-08-11T23:00:00.000Z",
-            lastActivityAt: "2026-08-11T23:30:00.000Z",
-            aliases: [parseAkumaAlias("@lead"), parseAkumaAlias("@shadow")],
-          },
-        ],
-      },
-      "worker",
-    ),
-    ["AKUMA // worker", "", "○ aku/worker/deadbeef (@lead @shadow) · asleep · 1h · activity 30m"].join("\n"),
-  );
 });
 test("ls help lists the Akuma catalogue usage forms", () => {
   const help = renderContractHelp("ls");
@@ -655,52 +628,10 @@ test("empty World status has one explicit empty row", () => {
     "○ world empty",
   );
 });
-test("category boards reuse World rows and bounded omission while naming their own empty state", () => {
-  const context = { columns: 120, color: false };
-  const report = akumaWorldReport([activityAkumaRow("aku/worker/11110001", "asleep", idleAkumaSnapshot([]))]);
-  assert.equal(
-    renderKanshiCategoryText({ observedAt: report.observedAt, section: report.akumas }, "akuma", context),
-    renderAkuma(report, context).join("\n"),
-  );
-  const contracts = contractCatalog([contractSummary()], { more: true });
-  const category = {
-    observedAt: report.observedAt,
-    section: {
-      kind: "present" as const,
-      ...(contracts.rows === undefined ? {} : { rows: contracts.rows }),
-      more: true as const,
-    },
-  };
-  const text = renderKanshiCategoryText(category, "contract", context);
-  assert.equal(
-    text,
-    renderKanshiText(
-      {
-        observedAt: report.observedAt,
-        contracts: category.section,
-        debts: { kind: "present" },
-        akumas: { kind: "present" },
-      },
-      context,
-    ),
-  );
-  assert.ok(text.endsWith("…"));
-  assert.equal(
-    renderKanshiCategoryText({ observedAt: report.observedAt, section: { kind: "present" } }, "contract"),
-    "contracts  none",
-  );
-  assert.match(
-    renderKanshiCategoryText(
-      { observedAt: report.observedAt, section: { kind: "failed", diagnostic: "owner unavailable" } },
-      "contract",
-    ),
-    /CONTRACTS \/\/ unavailable\n\n! owner unavailable/u,
-  );
-});
 test("empty catalogues share a surface-named none state", () => {
   assert.equal(renderDebtList("ls", { namespace: "debt/" }, { kind: "present" }), "debts  none");
   assert.equal(renderContractCatalogue(contractCatalog([])), "contracts  none");
-  assert.equal(renderAkumaCatalogue({ observedAt: "2026-08-12T00:00:00.000Z" }, "worker"), "akuma  none");
+  assert.equal(renderVerb("aku.ls", {}, { kind: "returned", value: { observedAt: "2026-08-12T00:00:00.000Z" } }, { columns: 120, color: false }), "akuma  none");
 });
 test("World roster names a bound Contract once without a bare unavailable parenthetical", () => {
   const snapshot = idleAkumaSnapshot([]);
@@ -778,41 +709,6 @@ test("World roster states the activity age only when it differs from the state a
   assert.match(distinctText, /activity 1m/u);
 });
 
-test("scoped Akuma catalog text preserves bounded membership and marks further rows", () => {
-  const catalog: AkumaList = {
-    observedAt: "2026-08-12T00:00:00.000Z",
-    rows: Array.from({ length: 11 }, (_, index) => ({
-      id: parseAkumaId(`aku/worker/${String(index).padStart(8, "0")}`).id,
-      life: "unborn" as const,
-    })),
-    more: true,
-  };
-  const text = renderAkumaCatalogue(catalog, "worker");
-  assert.match(text, /AKUMA \/\/ worker/u);
-  assert.equal(text.endsWith("…"), true);
-  assert.equal((text.match(/aku\/worker\//gu) ?? []).length, catalog.rows?.length);
-  assert.doesNotMatch(text, /aku\/\*\/\*/u);
-  assert.doesNotMatch(text, /--all|next:|not shown|full|more available/u);
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(catalog)).rows.map((row: { id: string }) => row.id),
-    (catalog.rows ?? []).map((row) => row.id),
-  );
-});
-test("Akuma catalog keeps an unborn identity and unknown age explicit", () => {
-  const futureRow = {
-    id: parseAkumaId("aku/worker/face0001").id,
-    life: "unborn" as const,
-  };
-  const text = renderAkumaCatalogue(
-    {
-      observedAt: "2026-08-12T00:00:00.000Z",
-      rows: [futureRow],
-    },
-    "worker",
-  );
-  assert.match(text, /○ aku\/worker\/face0001 · unborn/u);
-  assert.doesNotMatch(text, /0s/u);
-});
 test("Contract catalog keeps domain IDs complete and makes every gate state legible", () => {
   const summary = (
     delivery: "pending" | "delivered",

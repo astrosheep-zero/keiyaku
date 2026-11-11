@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { listedBornAkumaSchema, listedUnbornAkumaSchema } from "../akuma/akuma.js";
+import { akumaIdSchema } from "../akuma/identity.js";
 import { statusPreviewSchema, compactOutcomeSchema } from "../akuma/status-projection.js";
 import { debtSummarySchema } from "../debt/index.js";
 import { debtIdSchema } from "../debt/identity.js";
@@ -105,18 +105,38 @@ const debtRow = debtSummarySchema
   .extend({ disposition: z.enum(["ready", "blocked"]), contract: associationSchema.exactOptional() })
   .readonly();
 const debtWorld = catalogue(debtRow);
-const akumaExtras = {
-  contract: associationSchema.exactOptional(),
-  activity: z
-    .union([statusPreviewSchema, z.strictObject({ kind: z.literal("unavailable"), diagnostic: z.string() }).readonly()])
-    .exactOptional(),
-  outcome: compactOutcomeSchema.exactOptional(),
-};
 const akumaRow = z.union([
-  listedBornAkumaSchema.unwrap().omit({ parentAkumaId: true }).extend(akumaExtras).readonly(),
-  listedUnbornAkumaSchema.unwrap().extend(akumaExtras).readonly(),
+  z
+    .strictObject({
+      id: akumaIdSchema,
+      life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]),
+      lifeAt: z.string().exactOptional(),
+      lastActivityAt: z.string().exactOptional(),
+      pending: z.number().int().positive().exactOptional(),
+      aliases: z.array(akumaAliasSchema).nonempty().readonly().exactOptional(),
+      parentAkumaId: akumaIdSchema.exactOptional(),
+      contract: associationSchema.exactOptional(),
+      activity: z
+        .union([
+          statusPreviewSchema,
+          z.strictObject({ kind: z.literal("unavailable"), diagnostic: z.string() }).readonly(),
+        ])
+        .exactOptional(),
+      outcome: compactOutcomeSchema.exactOptional(),
+    })
+    .readonly(),
+  z
+    .strictObject({
+      id: akumaIdSchema,
+      life: z.enum(["unborn", "stillborn"]),
+      aliases: z.array(akumaAliasSchema).nonempty().readonly().exactOptional(),
+      diagnostic: z.string().exactOptional(),
+      contract: associationSchema.exactOptional(),
+    })
+    .readonly(),
 ]);
 const akumaWorld = catalogue(akumaRow).unwrap().extend({ aliasesError: z.string().exactOptional() }).readonly();
+export const akumaCatalogueSchema = akumaWorld.unwrap().extend({ observedAt: z.string() }).readonly();
 export const kanshiReportSchema = z
   .strictObject({
     observedAt: z.string(),
@@ -125,22 +145,6 @@ export const kanshiReportSchema = z
     akumas: boardSection(akumaWorld),
   })
   .readonly();
-export const contractCategoryReportSchema = z
-  .strictObject({
-    observedAt: z.string(),
-    section: z.union([
-      contractKanshiBoardSchema
-        .unwrap()
-        .extend({ kind: z.literal("present") })
-        .readonly(),
-      failure,
-    ]),
-  })
-  .readonly();
-export const akumaCategoryReportSchema = z
-  .strictObject({ observedAt: z.string(), section: boardSection(akumaWorld) })
-  .readonly();
-export const kanshiCategoryReportSchema = z.union([contractCategoryReportSchema, akumaCategoryReportSchema]);
 export type ContractHolderObservation = z.output<typeof holderSchema>;
 export type ContractRosterAttachment = z.output<typeof attachmentSchema>;
 export type ContractKanshiDetail = z.output<typeof contractDetail>;
@@ -152,12 +156,6 @@ export type AkumaKanshiWorld = z.output<typeof akumaWorld>;
 export type KanshiReport = z.output<typeof kanshiReportSchema>;
 export type KanshiContractReport = z.output<typeof kanshiContractReportSchema>;
 export type ContractStatus = z.output<typeof contractStatusSchema>;
-export type KanshiCategoryByOwner = {
-  contract: z.output<typeof contractCategoryReportSchema>;
-  akuma: z.output<typeof akumaCategoryReportSchema>;
-};
-export type KanshiCategoryReport<C extends keyof KanshiCategoryByOwner = keyof KanshiCategoryByOwner> =
-  KanshiCategoryByOwner[C];
 
 export type KanshiRegionSelection =
   | Readonly<{ kind: "declarations" }>

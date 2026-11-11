@@ -6,10 +6,13 @@ import {
   Keis,
   actorId,
   akumaStatusSchema,
+  akumaCatalogueSchema,
   listArchetypeDefinitions,
   nuke,
   type AkumaId,
   type AkumaAliasesInput,
+  type AkumaListInput,
+  type AkumaList,
   type AliasBinding,
   type AkumaHostOptions,
   type AkumaHostScope,
@@ -47,7 +50,14 @@ void [scoped, scopedSingle, closed];
 
 const host: AkumaHostOptions = { reportDiagnostic: (message) => console.error(message) };
 const plural = Akumas.of(world, host);
-const roster = plural.list({ limit: 25 });
+const rosterInput: AkumaListInput = { limit: 25, repo };
+const roster: Promise<AkumaList> = plural.list(rosterInput);
+const row = akumaCatalogueSchema.parse(await roster).rows?.[0];
+if (row !== undefined && "activity" in row) {
+  const activity = row.activity;
+  const parent: AkumaId | undefined = row.parentAkumaId;
+  void [activity, parent];
+}
 const aliasInput: AkumaAliasesInput = { akumaIds: [aku, "aku/worker/1234abcd"] };
 const aliases: Promise<readonly AliasBinding[]> = plural.aliases(aliasInput);
 void aliases;

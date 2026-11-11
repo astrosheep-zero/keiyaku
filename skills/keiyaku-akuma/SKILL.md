@@ -43,11 +43,14 @@ research.
 
 ## 3. Observing, Branching, And Automation
 
-- **`status` and `history`:** `status` shows the `World` board or one `Akuma`'s
-  live snapshot and file-change summary; `history` reads recent timeline
-  events, the latest answer, or one exact `turn/N` or `report/N` item.
+- **`status` and `history`:** bare `status` shows the `World` board;
+  `status <aku/...|kei/...|@name>` observes one identity, with current work and
+  file-change summary for an Akuma. Plural and category status are refused.
+  `history` reads recent timeline events, the latest answer, or one exact
+  `turn/N` or `report/N` item.
 - **`ls`, `fork`, and `kill`:** `ls` lists archetypes (`aku/`), recent
-  instances (`"aku/*/*"`), or your own call tree; `fork` branches a new `Akuma`
+  instances with current work and outcomes (`"aku/*/*"`), or your own call tree;
+  `fork` branches a new `Akuma`
   from an answered `turn/N`; `kill` stops active work while keeping history.
 - **JavaScript orchestration:** for multi-agent tournaments, adversarial claim
   checking, or custom concurrency control in code, read

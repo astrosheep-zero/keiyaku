@@ -1,13 +1,22 @@
 /** @architectureCompositionRoot */
 import { captureAkumaHostDiagnostic, type AkumaHostOptions } from "../akuma/akuma-instance.js";
-import type { AkumaList, AkumaListInput } from "../akuma/akuma.js";
-import { readAkumaRoster } from "../akuma/akuma.js";
+import type { AkumaCaller } from "../akuma/caller.js";
+import type { AkumaRosterInput } from "../akuma/akuma.js";
+import { observeAkumaRoster, readAkumaTimeline, rosterInput } from "../akuma/akuma.js";
+import { boundedListLimit } from "../bounded-list.js";
+import { boundedMap } from "../akuma/read-pool.js";
+import { projectStatusPreview, projectStatusOutcome } from "../akuma/status-projection.js";
+import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
+import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
+import { Repo, scopeForRepo } from "./repo.js";
+import type { AkumaKanshiRow, AkumaKanshiWorld, Section } from "../kanshi/report.js";
+import type { z } from "zod";
+import type { akumaCatalogueSchema } from "../kanshi/report.js";
 import { captureAkumaHost } from "../body-host.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { parseAkumaId } from "../akuma/identity.js";
 import type { DispatchAssociation } from "../akuma/dispatch-association.js";
-import type { AkumaAlias } from "../identity/selector.js";
 import type { CreatedDebtObservation } from "../debt/created-observation.js";
 import { World, type WorldRoot } from "../world.js";
 import { sweepInactiveAkumas } from "./akuma-retention.js";
@@ -45,8 +54,6 @@ export type {
   AkumaAskResult,
   AkumaHistoryResult,
   AkumaKillResult,
-  AkumaList,
-  AkumaListInput,
   AkumaObservation,
   AkumaTellResult,
   AkumaWaitResult,
@@ -62,6 +69,8 @@ export type {
 export type Akumas = AkumasHandle;
 
 export type AkumaAliasesInput = Readonly<{ akumaIds: readonly string[] }>;
+export type AkumaListInput = AkumaRosterInput & Readonly<{ repo?: Repo }>;
+export type AkumaList = z.output<typeof akumaCatalogueSchema>;
 
 class AkumasHandle {
   #world: WorldRoot;
@@ -76,11 +85,22 @@ class AkumasHandle {
     Object.freeze(this);
   }
 
-  async list(input?: AkumaListInput): Promise<AkumaList> {
+  async list(input: AkumaListInput = {}): Promise<AkumaList> {
+    const { repo, ...native } = requireInput(input, "Akumas.list input", ["repo", "akumaName", "caller", "limit"]);
+    if (repo !== undefined && !(repo instanceof Repo)) throw new TypeError("Akumas.list repo must be a Repo");
+    const selection = rosterInput(native, true);
+    const limit = boundedListLimit(native.limit);
     const path = await World.prove(this.#world);
-    const roster = await readAkumaRoster(path, input);
-    if (roster.rows === undefined) return roster;
-    return withRosterAliases(roster, await readAliases(path));
+    const [roster, aliases] = await Promise.all([
+      akumaRowsAt(path, limit, selection.akumaName, selection.caller),
+      aliasesAt(path),
+    ]);
+    if (repo === undefined) return joinedAkumas(roster, aliases, { kind: "absent" });
+    return withGitDecodeChannel(scopeForRepo(repo), (channel) =>
+      withGitReadObservation(scopeForRepo(repo), channel, async (observation) =>
+        joinedAkumas(roster, aliases, await dispatchesAt(observation)),
+      ),
+    );
   }
 
   async aliases(input: AkumaAliasesInput): Promise<readonly AliasBinding[]> {
@@ -169,24 +189,88 @@ class AkumasHandle {
   }
 }
 
-/**
- * Upper World composition attaches the frozen Alias context to the lower
- * roster's native membership and semantic order without reopening its extent.
- */
-function withRosterAliases(roster: AkumaList, bindings: readonly AliasBinding[]): AkumaList {
-  const byId = new Map<string, AkumaAlias[]>();
-  for (const binding of bindings) {
-    const aliases = byId.get(binding.akumaId) ?? [];
-    aliases.push(binding.alias);
-    byId.set(binding.akumaId, aliases);
+export function diagnostic(error: unknown): string {
+  const source = error instanceof Error ? error.message : String(error);
+  const line = source.replaceAll(/\s+/gu, " ").trim();
+  return line.length <= 240 ? line : `${line.slice(0, 239)}…`;
+}
+export async function aliasesAt(world: WorldRoot | null): Promise<Section<readonly AliasBinding[]>> {
+  if (world === null) return { kind: "absent" };
+  try {
+    return { kind: "present", value: await readAliases(world) };
+  } catch (error) {
+    return { kind: "failed", failure: { message: diagnostic(error) } };
   }
-  if (roster.rows === undefined) return roster;
+}
+export async function dispatchesAt(observation: GitReadObservation): Promise<Section<readonly Dispatch[]>> {
+  try {
+    return { kind: "present", value: await readDispatchesAt(observation) };
+  } catch (error) {
+    return { kind: "failed", failure: { message: diagnostic(error) } };
+  }
+}
+/** Shared catalogue projection; World bounds snapshots by original roster position. */
+export async function akumaRowsAt(
+  world: WorldRoot,
+  limit: number,
+  name?: string,
+  caller?: AkumaCaller,
+  snapshotRows = Number.POSITIVE_INFINITY,
+): Promise<AkumaList> {
+  const source = await observeAkumaRoster(world, limit, name, caller);
+  const rows = await boundedMap([...(source.rows ?? []).entries()], async ([index, row]): Promise<AkumaKanshiRow> => {
+    if (row.kind === "unborn") {
+      const { kind: _kind, ...summary } = row;
+      return summary;
+    }
+    const { kind: _kind, caller, ...facts } = row;
+    const summary = { ...facts, ...(caller?.kind === "akuma" ? { parentAkumaId: caller.akumaId } : {}) };
+    if (index >= snapshotRows) return summary;
+    try {
+      const snapshot = await readAkumaTimeline(world, row.id);
+      const activity = snapshot.entries.findLast(
+        (entry) => entry.kind === "row" && ["tool", "said", "thought", "note", "report"].includes(entry.row.kind),
+      );
+      const preview = activity?.kind === "row" ? projectStatusPreview(activity.row) : undefined;
+      return {
+        ...summary,
+        ...(preview === undefined ? {} : { activity: preview }),
+        ...(snapshot.kind === "idle" && snapshot.outcome !== undefined
+          ? { outcome: projectStatusOutcome(snapshot.outcome) }
+          : {}),
+      };
+    } catch (error) {
+      return { ...summary, activity: { kind: "unavailable", diagnostic: diagnostic(error) } };
+    }
+  });
+  return { ...source, ...(rows.length === 0 ? {} : { rows }) };
+}
+export function joinedAkumas<T extends AkumaKanshiWorld>(
+  product: T,
+  aliases: Section<readonly AliasBinding[]>,
+  dispatches: Section<readonly Dispatch[]>,
+): T {
+  const byId = new Map(dispatches.kind === "present" ? dispatches.value.map((item) => [item.akumaId, item]) : []);
+  const rows = (product.rows ?? []).map((row): AkumaKanshiRow => {
+    const dispatch = byId.get(row.id);
+    const names =
+      aliases.kind === "present"
+        ? aliases.value.filter((binding) => binding.akumaId === row.id).map((binding) => binding.alias)
+        : [];
+    return {
+      ...row,
+      ...(names.length === 0 ? {} : { aliases: names }),
+      ...(dispatches.kind === "failed"
+        ? { contract: { kind: "unavailable" } }
+        : dispatch === undefined
+          ? {}
+          : { contract: { kind: "associated", contractId: dispatch.contractId } }),
+    };
+  });
   return {
-    ...roster,
-    rows: roster.rows.map((row) => {
-      const aliases = byId.get(row.id);
-      return aliases === undefined ? row : { ...row, aliases };
-    }),
+    ...product,
+    ...(rows.length === 0 ? {} : { rows }),
+    ...(aliases.kind === "failed" ? { aliasesError: aliases.failure.message } : {}),
   };
 }
 

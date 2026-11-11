@@ -30,7 +30,7 @@ test("Debt facet preserves native lifecycle, explicit namespaces, and absent Wor
   assert.deepEqual(await facet.debtShow({ ids: ["debt/missing", "debt/missing"] }), { kind: "absent" });
   await assert.rejects(facet.debtShow({ ids: [] }), TypeError);
   await assert.rejects(facet.debtDone({ ids: ["debt/missing", "debt/missing"] }), TypeError);
-  assert.deepEqual(await facet.ls({ of: "debt" }), { kind: "absent" });
+  assert.deepEqual(await facet.debtQuery(), { kind: "absent" });
   assert.deepEqual(await facet.debtDoctor(), { kind: "absent" });
   assert.equal((await facet.debtTree({ id: "debt/missing" })).kind, "absent");
   assert.equal((await facet.debtUpdate({ id: "debt/missing", note: "note" })).kind, "refused");
@@ -47,7 +47,7 @@ test("Debt facet preserves native lifecycle, explicit namespaces, and absent Wor
     await assert.rejects(operation, (error: unknown) => error === reason);
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   await assert.rejects(facet.debtAdd({ title: " " }), TypeError);
-  assert.deepEqual(await facet.ls({ of: "debt" }), { kind: "absent" });
+  assert.deepEqual(await facet.debtQuery(), { kind: "absent" });
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   const first = accepted(await facet.debtAdd({ title: "First", namespace: ["nested"], actor: "fixture" }));
   const second = accepted(await facet.debtAdd({ title: "Second", namespace: ["nested"], needs: [first.id] }));
@@ -80,21 +80,21 @@ test("Debt facet preserves native lifecycle, explicit namespaces, and absent Wor
     ["accepted", "accepted"],
   );
   assert.equal((await facet.debtDrop({ ids: [third.id] })).items[0]?.kind, "accepted");
-  const active = await facet.ls({ of: "debt", namespace: ["nested"] });
-  const closed = await facet.ls({ of: "debt", namespace: ["nested"], selection: "closed" });
+  const active = await facet.debtQuery({ namespace: ["nested"] });
+  const closed = await facet.debtQuery({ namespace: ["nested"], selection: "closed" });
   assert.equal(active.kind, "present");
   assert.equal(closed.kind, "present");
   if (active.kind === "present" && closed.kind === "present") {
     assert.equal(active.rows, undefined, "an empty page omits rows");
     assert.equal(closed.rows!.length, 3);
   }
-  const all = await facet.ls({ of: "debt", scope: "world", selection: "all", limit: 2 });
+  const all = await facet.debtQuery({ scope: "world", selection: "all", limit: 2 });
   assert.equal(all.kind, "present");
   if (all.kind === "present") {
     assert.equal(all.rows!.length, 2);
     assert.equal(all.more, true);
   }
-  const rootOnly = await facet.ls({ of: "debt", namespace: [] });
+  const rootOnly = await facet.debtQuery({ namespace: [] });
   assert.equal(rootOnly.kind, "present");
   if (rootOnly.kind === "present")
     assert.deepEqual(
@@ -120,7 +120,7 @@ test("construction captures explicit inputs synchronously without observing cwd"
   const missing = join(home, "missing");
   const facet = Keiyaku.at({ cwd: missing, environment: {}, home });
   assert.ok(facet instanceof Keiyaku);
-  await assert.rejects(facet.ls({ of: "kei" }), /invocation cwd is not an existing directory/u);
+  await assert.rejects(facet.keiLs(), /invocation cwd is not an existing directory/u);
 
   for (const input of [
     { cwd: "relative", environment: {} },
@@ -162,32 +162,30 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.equal((await Keis.of(repoA).list({})).rows, undefined, "an empty catalogue omits rows");
   const nativeList = await Keis.of(repoB).list({});
   assert.equal(nativeList.rows![0]?.id, contract);
-  const { observedAt: _facetObservedAt, ...facetList } = await facet.ls({ of: "kei" });
+  const { observedAt: _facetObservedAt, ...facetList } = await facet.keiLs();
   const { observedAt: _nativeObservedAt, ...comparableList } = nativeList;
   assert.deepEqual(facetList, comparableList);
   assert.deepEqual(await facet.show({ contract }), await Keis.of(repoB).kei({ id: contract }).guidance());
   assert.deepEqual(await facet.history({ selector: contract }), await Keis.of(repoB).kei({ id: contract }).history());
 
   const nativeDebts = await Debts.of(worldA).list({ selection: "active", namespace: [] });
-  assert.deepEqual(await facet.ls({ of: "debt" }), nativeDebts);
+  assert.deepEqual(await facet.debtQuery(), nativeDebts);
   assert.equal(nativeDebts.kind, "present");
   if (nativeDebts.kind === "present") assert.equal(nativeDebts.rows![0]?.id, debtA);
-  const nativeWorkers = await Akumas.of(worldA).list({ akumaName: "worker" });
+  const nativeWorkers = await Akumas.of(worldA).list({ akumaName: "worker", repo: repoB });
   assert.equal(nativeWorkers.rows![0]?.id, worker.id);
-  const { observedAt: _facetWorkersAt, ...facetWorkers } = await facet.ls({ of: "aku", akumaName: "worker" });
+  const { observedAt: _facetWorkersAt, ...facetWorkers } = await facet.akuLs({ akumaName: "worker" });
   const { observedAt: _nativeWorkersAt, ...comparableWorkers } = nativeWorkers;
   assert.deepEqual(facetWorkers, comparableWorkers);
   const workerStatus = await Akumas.of(worldA).status({ akuma: worker.id, repo: repoB });
-  assert.deepEqual(await facet.status({ selector: worker.id }), workerStatus);
+  assert.deepEqual(await facet.akuStatus({ id: worker.id }), workerStatus);
   assert.deepEqual(
     await facet.history({ selector: worker.id }),
     await Akumas.of(worldA).history({ akuma: worker.id, repo: repoB }),
   );
   const contractStatus = await kanshi({ world: worldA, repo: repoB, contract });
-  const mixed = await facet.status({ selectors: [worker.id, contract] });
-  assert.ok("items" in mixed);
-  assert.deepEqual(mixed.items[0], workerStatus);
-  assert.deepEqual(withoutObservationTimes(mixed.items[1]), withoutObservationTimes(contractStatus));
+  assert.deepEqual(withoutObservationTimes(await facet.keiStatus({ id: contract })), withoutObservationTimes(contractStatus));
+  assert.deepEqual(withoutObservationTimes(await facet.status()), withoutObservationTimes(await kanshi({ world: worldA, repo: repoB })));
   assert.deepEqual(
     await facet.wait({ selectors: [contract], timeoutMs: 0 }),
     await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 }),
@@ -200,11 +198,11 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.deepEqual(await facet.show({ contract: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
 
   const other = Keiyaku.at({ cwd: second.path, environment: {}, home });
-  assert.deepEqual(await other.ls({ of: "debt" }), await Debts.of(worldB).list({ selection: "active", namespace: [] }));
-  const { observedAt: _otherWorkersAt, ...otherWorkers } = await other.ls({ of: "aku" });
+  assert.deepEqual(await other.debtQuery(), await Debts.of(worldB).list({ selection: "active", namespace: [] }));
+  const { observedAt: _otherWorkersAt, ...otherWorkers } = await other.akuLs();
   const { observedAt: _emptyWorkersAt, ...emptyWorkers } = await Akumas.of(worldB).list({});
   assert.deepEqual(otherWorkers, emptyWorkers);
-  const { observedAt: _otherObservedAt, ...otherList } = await other.ls({ of: "kei" });
+  const { observedAt: _otherObservedAt, ...otherList } = await other.keiLs();
   assert.deepEqual(otherList, comparableList);
 });
 

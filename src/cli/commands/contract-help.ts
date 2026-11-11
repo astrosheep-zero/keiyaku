@@ -221,16 +221,14 @@ export const CONTRACT_COMMAND_SPECS = {
   status: {
     positional: "optional",
     stdin: "none",
-    flags: { limit: "value", json: "boolean" },
-    usage:
-      "status [<contract>|@name|<aku/...>]...\nstatus aku/ [--limit <count>]\nstatus (kei|kei/|kei/*) [--limit <count>]",
-    purpose: "Show the world overview or selected Contract and Akuma status.",
+    flags: { json: "boolean" },
+    usage: "status [<kei/...>|<aku/...>|@name]",
+    purpose: "Show the World overview or one Contract or Akuma status.",
     details: [
+      "Bare status observes the fixed World overview.",
+      "Addressed status accepts one complete identity or resolves one @name.",
+      "Plural selectors, categories, globs and --limit are refused before reading.",
       "Akuma entries show the directory each Akuma was started in.",
-      "",
-      "aku/ shows the recent Akuma board; kei, kei/, and kei/* show the",
-      "recent active Contract board. --limit bounds the board to that many recent rows",
-      "(default 10). The Contract category requires a Repo; the Akuma category does not.",
     ].join("\n"),
   },
   ls: {

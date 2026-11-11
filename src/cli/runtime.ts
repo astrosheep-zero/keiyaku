@@ -1,7 +1,12 @@
 import { resolve } from "node:path";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
 import { AkumaArchetypeError, Keiyaku, KeiyakuUsageError } from "../index.js";
-import { AkumaAddressError, AkumaWorldScopeError } from "../library/address.js";
+import {
+  AkumaAddressError,
+  AkumaWorldScopeError,
+  observeNamedAddress,
+  resolveNamedAddress,
+} from "../library/address.js";
 import { projectFailure, KeiyakuError } from "../library/outcome.js";
 import { classifyVerb, type VerbInput, type VerbName } from "../library/keiyaku-verbs.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
@@ -20,6 +25,7 @@ import {
   usageGuideForCommand,
   type ParsedCommand,
   type ParsedInvocation,
+  type VerbRequest,
 } from "./parse.js";
 import { createExecutionProgressRenderer } from "./render/execution-progress.js";
 import { renderVerb } from "./render/verbs.js";
@@ -105,7 +111,7 @@ type FacetCommand = Exclude<ParsedCommand, { command: "install" }>;
 function thrownCompletion(error: unknown, command: FacetCommand) {
   const name = (
     "name" in command
-      ? commandName(command)
+      ? command.name
       : command.command === "debt"
         ? command.action === "add" && command.stdin === "document"
           ? "debt.addDocument"
@@ -251,27 +257,36 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
         ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       });
     }
-    const request =
-      "acquire" in command
-        ? command.name === "spawn" || command.name === "tell" || command.name === "ask"
-          ? await acquireAkumaRequest(command, invocation.workdir, runtime)
-          : await acquireContractRequest(command, runtime)
-        : command;
+    let request: VerbRequest;
+    let selectedAlias: string | undefined;
+    if ("acquire" in command && command.name === "status") {
+      const { world, repo } = await invocationCoordinates(invocation, input, environment);
+      const selector = command.acquire.selector;
+      const authority = await observeNamedAddress({ world, repo: repo ?? null, selectors: [selector] });
+      const address = resolveNamedAddress({ selector, ...authority });
+      if (address.kind === "akuma") selectedAlias = selector;
+      request =
+        address.kind === "akuma"
+          ? { name: "aku.status", input: { id: address.id }, output: command.output }
+          : { name: "kei.status", input: { id: address.id }, output: command.output };
+    } else {
+      request =
+        "acquire" in command
+          ? command.name === "spawn" || command.name === "tell" || command.name === "ask"
+            ? await acquireAkumaRequest(command, invocation.workdir, runtime)
+            : await acquireContractRequest(command, runtime)
+          : command;
+    }
     if (request.name === "spawn") return await runSpawn(request, runtime);
     if (request.name === "ask" || (request.name === "tell" && request.input.wait === true))
       return await runAsk(request, runtime);
     if (request.name === "history" && !request.input.selector.startsWith("kei/"))
       return await runAkumaHistory(request, runtime);
-    return await runContractRequest(request, runtime);
+    return await runContractRequest(request, runtime, selectedAlias);
   } catch (error) {
     if (error instanceof KeiyakuUsageError) {
       const usage = new CliUsageError(error.message, usageGuideForCommand(command));
-      if (
-        "name" in command &&
-        command.name === "ls" &&
-        command.input.of === "aku" &&
-        command.input.caller?.kind === "mine"
-      )
+      if ("name" in command && command.name === "aku.ls" && command.input.caller?.kind === "mine")
         return await writeFailure(usage, command);
       throw usage;
     }

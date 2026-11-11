@@ -52,22 +52,19 @@ recomputing currentness, or inferring a producer run. An association outside
 that aperture is unavailable rather than missing; Kanshi uses missing only
 when the Contract observation is complete enough to establish absence.
 
-For bare World status, Kanshi obtains one bounded recent Akuma observation and
-keeps that owner order. Catalogue rows retain current actionable work and
-association. Addressed static reads retain the selected current frontier in
-owner order; historical event coordinates and tool output belong to explicit
-history or stream observation. The report retains whether the observation
-reaches farther without manufacturing a roster total. This bounded display observation
-never supplies the frozen complete subject set required by selection, waiting,
-mutation, or other complete roster operations.
-
-A requested category is a package-root observation that retains the same recent
-owner order and bounded extent as the corresponding World section. It validates
-the caller boundary before any owner read — refusing malformed requests or a
-Contract category without a Repo — then observes that section independently,
-preserving absence and owner failure while attaching available Alias, Dispatch,
-and DebtHolder facts without reading the Debt board or resolving exact
-identities.
+For bare World status, Kanshi consumes the Akuma catalogue's shared row and
+association composition within its bounded recent aperture, keeping native owner
+order and lineage. Only born members within the original leading snapshot
+positions receive current-work observation; birthless positions do not extend
+that aperture to later members. The ordinary Akuma catalogue instead observes
+every bounded selected born member. Birthless allocations have no activity or
+outcome, while selected born snapshot failures preserve membership with unavailable
+activity. Addressed static reads retain the selected current frontier in owner
+order; historical event coordinates and tool output belong to explicit history
+or stream observation. The report retains whether the observation reaches farther
+without manufacturing a roster total. This bounded display observation never
+supplies the frozen complete subject set required by selection, waiting, mutation,
+or other complete roster operations.
 
 An exact aggregate observes the complete owner-classified running Akumas and
 open Debts, and counts active Contract journal membership in the observed Git

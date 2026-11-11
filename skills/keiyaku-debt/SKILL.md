@@ -38,7 +38,8 @@ or `query` (`blocks`, `under`, `ready`, `blocked`) to inspect reverse links.
 
 - **Namespace scope:** supply a namespace explicitly when filing work under a
   `Contract`; omitted namespace selects the root even inside a worktree. Use
-  `ls debt/<namespace>/` for that namespace or `query --world` to inspect across
+  `ls debt/<namespace>/` for that namespace (the existing query operation with
+  ordinary listing selection) or `query --world` to inspect across
   namespaces. Always address a specific `Debt` by its complete `debt/...` ID.
 - **`Contract` settlement:** associating a `Debt` when binding a `kei` holds that
   `Debt`; accepting the `kei` marks it `done`, while abandoning the `kei`

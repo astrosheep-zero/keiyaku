@@ -3,7 +3,8 @@
  * Settings, and Plugin surfaces. Internal composition, execution, and
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
-export { akumaListSchema, akumaStatusSchema } from "./akuma/akuma.js";
+export { akumaStatusSchema } from "./akuma/akuma.js";
+export { akumaCatalogueSchema } from "./kanshi/report.js";
 export { activityHistorySchema, activityRowSchema, activitySnapshotSchema, tellRowSchema } from "./akuma/projection.js";
 export { akumaCallerSchema } from "./akuma/caller.js";
 export { killEvidenceSchema } from "./akuma/heart/facts.js";
@@ -50,7 +51,6 @@ export type {
   KeiyakuAt,
   DebtSelection,
   DebtReadScope,
-  DebtLsInvocation,
   DebtQueryInvocation,
   DebtUpdateInvocation,
   DebtCloseInvocation,
@@ -123,14 +123,12 @@ export type {
 } from "./core/facts/types.js";
 export {
   kanshi,
-  kanshiCategory,
   kanshiCounts,
   kanshiCountsReportSchema,
   observeKanshi,
   selectRegion,
   regionReadSchema,
   kanshiReportSchema,
-  kanshiCategoryReportSchema,
   kanshiContractReportSchema,
   kanshiResultSchema,
   kanshiObservationSchema,
@@ -145,8 +143,6 @@ export type {
   ContractKanshiDetail,
   KanshiContractReport,
   KanshiResult,
-  KanshiCategoryInput,
-  KanshiCategoryReport,
   KanshiInput,
   KanshiRegionSelection,
   KanshiReport,

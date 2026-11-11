@@ -24,7 +24,9 @@ completion without doing the implementation work yourself.
 
 1. **Scan the board (`status`):** check which `kei`s are ready to land, which
    are waiting on `after` prerequisites or gates, and which `@alias`es are
-   running (`●`), succeeded (`✓`), or failed (`!`).
+   running (`●`), succeeded (`✓`), or failed (`!`). Use `ls "aku/*/*"` for
+   the richer recent instance catalogue, `ls kei/` for active Contracts, and
+   `status <kei/...|aku/...|@name>` for one identity; status does not batch selectors.
 2. **Wait on the fleet (`wait`):** pass all in-flight worker `@alias`es to
    `wait` (wakes as soon as *any* worker settles by default), or pass active
    `kei/...` IDs to wait for journal transitions (do not mix `aku/...` and

@@ -1,14 +1,13 @@
 import { z } from "zod";
-import { observeAkumaRoster, readAkumaTimeline } from "../akuma/akuma.js";
-import { aliasBindingSchema, readAliases, type AliasBinding } from "../alias/index.js";
+import { akumaRowsAt, joinedAkumas, aliasesAt, dispatchesAt, diagnostic } from "../library/akumas.js";
+import { aliasBindingSchema, type AliasBinding } from "../alias/index.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { assertRegionPattern } from "../body/region.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
-import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
+import type { Dispatch } from "../dispatch/index.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { Repo, scopeForRepo } from "../library/repo.js";
 import { readDocuments } from "../protocol/read/documents.js";
-import { projectStatusPreview, projectStatusOutcome } from "../akuma/status-projection.js";
 import {
   readContractCatalogue,
   readContractObservation,
@@ -21,14 +20,12 @@ import { observeRecentDebtStatus, DebtAuthorityCorruptionError, type DebtSummary
 import { observeDebtBoard } from "../debt/operations.js";
 import type { WorldRoot } from "../world.js";
 import type {
-  AkumaKanshiRow,
   AkumaKanshiWorld,
   BoardSection,
   DebtSection,
   ContractKanshiBoard,
   ContractRosterAttachment,
   DebtKanshiWorld,
-  KanshiCategoryReport,
   KanshiContractReport,
   KanshiRegionSelection,
   KanshiReport,
@@ -59,11 +56,6 @@ type Holders = Section<DebtHolderProjection>;
 type Dispatches = Section<readonly Dispatch[]>;
 const absent = { kind: "absent" } as const;
 
-function diagnostic(error: unknown): string {
-  const source = error instanceof Error ? error.message : String(error);
-  const line = source.replaceAll(/\s+/gu, " ").trim();
-  return line.length <= 240 ? line : `${line.slice(0, 239)}…`;
-}
 function failure(error: unknown): Extract<Section<never>, { kind: "failed" }> {
   return {
     kind: "failed",
@@ -152,21 +144,6 @@ async function holdersAt(observation: GitReadObservation): Promise<Holders> {
     return failure(error);
   }
 }
-async function dispatchesAt(observation: GitReadObservation): Promise<Dispatches> {
-  try {
-    return { kind: "present", value: await readDispatchesAt(observation) };
-  } catch (error) {
-    return failure(error);
-  }
-}
-async function aliasesAt(world: WorldRoot | null): Promise<Section<readonly AliasBinding[]>> {
-  if (world === null) return absent;
-  try {
-    return { kind: "present", value: await readAliases(world) };
-  } catch (error) {
-    return failure(error);
-  }
-}
 async function debtRowsAt(world: WorldRoot | null): Promise<DebtSection<DebtKanshiWorld>> {
   if (world === null) return absent;
   try {
@@ -191,80 +168,6 @@ async function namespaceDebtsAt(
   } catch (error) {
     return debtFailure(error);
   }
-}
-async function akumaRowsAt(
-  world: WorldRoot | null,
-  limit = ROSTER_VISIBLE_ROWS,
-): Promise<BoardSection<AkumaKanshiWorld>> {
-  if (world === null) return absent;
-  try {
-    const source = await observeAkumaRoster(world, limit);
-    const rows = await Promise.all(
-      (source.rows ?? []).map(async (row, index): Promise<AkumaKanshiRow> => {
-        const summary = "parentAkumaId" in row ? (({ parentAkumaId: _parent, ...summary }) => summary)(row) : row;
-        if (index >= ROSTER_SNAPSHOT_ROWS) return summary;
-        try {
-          const snapshot = await readAkumaTimeline(world, row.id);
-          const activity = snapshot.entries.findLast(
-            (entry) => entry.kind === "row" && ["tool", "said", "thought", "note", "report"].includes(entry.row.kind),
-          );
-          const preview = activity?.kind === "row" ? projectStatusPreview(activity.row) : undefined;
-          return {
-            ...summary,
-            ...(preview === undefined ? {} : { activity: preview }),
-            ...(snapshot.kind === "idle" && snapshot.outcome !== undefined
-              ? { outcome: projectStatusOutcome(snapshot.outcome) }
-              : {}),
-          };
-        } catch (error) {
-          return { ...summary, activity: { kind: "unavailable", diagnostic: diagnostic(error) } };
-        }
-      }),
-    );
-    return {
-      kind: "present",
-      ...(rows.length === 0 ? {} : { rows }),
-      ...(source.more ? { more: true } : {}),
-    };
-  } catch (error) {
-    return boardFailure(error);
-  }
-}
-function joinedAkumas(
-  product: BoardSection<AkumaKanshiWorld>,
-  aliases: Section<readonly AliasBinding[]>,
-  dispatches: Dispatches,
-): BoardSection<AkumaKanshiWorld> {
-  if (product.kind !== "present") return product;
-  const byId = new Map(dispatches.kind === "present" ? dispatches.value.map((item) => [item.akumaId, item]) : []);
-  const rows = (product.rows ?? []).map((row): AkumaKanshiRow => {
-    const dispatch = byId.get(row.id);
-    const names =
-      aliases.kind === "present"
-        ? aliases.value.filter((binding) => binding.akumaId === row.id).map((binding) => binding.alias)
-        : [];
-    const { aliases: _oldAliases, ...facts } = row;
-    return {
-      ...facts,
-      ...(names.length === 0 ? {} : { aliases: names }),
-      ...(dispatches.kind === "failed"
-        ? { contract: { kind: "unavailable" } }
-        : dispatch === undefined
-          ? {}
-          : {
-              contract: {
-                kind: "associated",
-                contractId: contractId(dispatch.contractId),
-              },
-            }),
-    };
-  });
-  return {
-    kind: "present",
-    ...(rows.length === 0 ? {} : { rows }),
-    ...(product.more === true ? { more: true } : {}),
-    ...(aliases.kind === "failed" ? { aliasesError: aliases.failure.message } : {}),
-  };
 }
 function joinedDebts(debts: DebtSection<DebtKanshiWorld>, holders: Holders): DebtSection<DebtKanshiWorld> {
   if (debts.kind !== "present") return debts;
@@ -416,7 +319,12 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
   const observedAt = new Date().toISOString();
   const [aliases, akumaProduct, debts] = await Promise.all([
     aliasesAt(world),
-    contract === undefined ? akumaRowsAt(world) : Promise.resolve(absent),
+    contract === undefined && world !== null
+      ? akumaRowsAt(world, ROSTER_VISIBLE_ROWS, undefined, undefined, ROSTER_SNAPSHOT_ROWS).then(
+          ({ observedAt: _observedAt, ...rows }): BoardSection<AkumaKanshiWorld> => ({ kind: "present", ...rows }),
+          boardFailure,
+        )
+      : Promise.resolve(absent),
     contract === undefined ? debtRowsAt(world) : Promise.resolve(absent),
   ]);
   const worldReport = (
@@ -427,7 +335,7 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
     observedAt,
     contracts,
     debts: joinedDebts(debts, holders),
-    akumas: joinedAkumas(akumaProduct, aliases, dispatches),
+    akumas: akumaProduct.kind === "present" ? joinedAkumas(akumaProduct, aliases, dispatches) : akumaProduct,
   });
   if (repo === undefined)
     return {
@@ -471,70 +379,4 @@ export function kanshi(input: KanshiInput): Promise<KanshiReport | KanshiContrac
 export async function kanshi(input: KanshiInput): Promise<KanshiReport | KanshiContractReport | RegionRead> {
   const value = coordinate(input);
   return value.region === undefined ? (await observeKanshi(value)).report : regionAt(value.repo, value.region);
-}
-export type KanshiCategoryInput = Readonly<{
-  world: WorldRoot | null;
-  repo?: Repo;
-  category: "contract" | "akuma";
-  limit?: number;
-}>;
-function failedCategory(report: KanshiCategoryReport, error: unknown): KanshiCategoryReport {
-  return { observedAt: report.observedAt, section: { kind: "failed", diagnostic: diagnostic(error) } };
-}
-export function kanshiCategory(
-  input: KanshiCategoryInput & Readonly<{ category: "akuma" }>,
-): Promise<KanshiCategoryReport<"akuma">>;
-export function kanshiCategory(
-  input: KanshiCategoryInput & Readonly<{ category: "contract" }>,
-): Promise<KanshiCategoryReport<"contract">>;
-export function kanshiCategory(input: KanshiCategoryInput): Promise<KanshiCategoryReport>;
-export async function kanshiCategory(input: KanshiCategoryInput): Promise<KanshiCategoryReport> {
-  const value = record(input, "category input");
-  exactKeys(value, ["world", "repo", "category", "limit"], "category input");
-  worldCoordinate(value.world, value.repo);
-  if (value.category !== "contract" && value.category !== "akuma")
-    throw new TypeError(`kanshi category is invalid: ${String(value.category)}`);
-  const { world, repo, category, limit = 10 } = input;
-  if (!Number.isSafeInteger(limit) || limit < 1)
-    throw new TypeError("kanshi category limit must be a positive safe integer");
-  if (category === "contract" && repo === undefined) throw new TypeError("kanshi contract category requires a Repo");
-  const observedAt = new Date().toISOString();
-  const aliases = await aliasesAt(world);
-  let observed: KanshiCategoryReport | undefined;
-  if (category === "akuma") {
-    const product = await akumaRowsAt(world, limit);
-    const result = (dispatches: Dispatches): KanshiCategoryReport<"akuma"> => {
-      const report: KanshiCategoryReport<"akuma"> = { observedAt, section: joinedAkumas(product, aliases, dispatches) };
-      observed = report;
-      return report;
-    };
-    if (repo === undefined) return result(absent);
-    try {
-      return await withGitDecodeChannel(scopeForRepo(repo), (channel) =>
-        withGitReadObservation(scopeForRepo(repo), channel, async (observation) => {
-          const dispatches = await dispatchesAt(observation);
-          return result(dispatches);
-        }),
-      );
-    } catch (error) {
-      return observed === undefined ? result(failure(error)) : failedCategory(observed, error);
-    }
-  }
-  try {
-    const selectedRepo = scopeForRepo(repo!);
-    return await withGitDecodeChannel(selectedRepo, (channel) =>
-      withGitReadObservation(selectedRepo, channel, async (observation) => {
-        const [holders, dispatches] = await Promise.all([holdersAt(observation), dispatchesAt(observation)]);
-        const section = await contractsAt(observation, limit, holders, dispatches, aliases);
-        if (section.kind === "absent") throw new Error("Contract category with Repo cannot be absent");
-        const report: KanshiCategoryReport<"contract"> = { observedAt, section };
-        observed = report;
-        return report;
-      }),
-    );
-  } catch (error) {
-    return observed === undefined
-      ? { observedAt, section: { kind: "failed", diagnostic: diagnostic(error) } }
-      : failedCategory(observed, error);
-  }
 }

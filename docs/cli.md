@@ -100,23 +100,22 @@ the Akuma profile is descriptive, not live execution status.
 guidance, using the existing exact Contract selection context when selection
 is omitted. Debt selection may be plural; mixed Debt and Contract selection,
 Akuma, category, and plural Contract selection refuse before reading. The
-returned text and JSON are the selected owner's own value. `status`
-only observes status: world, Contract, Akuma, category, and plural observations
-incur no guidance read and add no guidance output.
-
-`status` can request a bounded recent category independently of the World overview.
-The edge selects the category before observation and keeps category bounds out of
-exact and plural identity selection. A category reads its selected owner section;
-Contract categories require Repo, while Akuma categories remain available in a
-World without Repo.
+returned text and JSON are the selected owner's own value. Status observes the
+fixed World report or one complete Contract or Akuma identity without guidance.
+Plural and category status requests refuse before authority observation. Named
+addresses are resolved once during asynchronous input acquisition through the
+existing address authority, then invoke the resolved family's exact operation;
+parsing remains synchronous and free of authority reads.
 
 `ls` routes Contract rows through the Repo-bound Contract collection, Akuma instances
 through `Akumas.of(world).list`, archetypes through their definition owner, and
-Debts through `Debts.of(world).list`. Contract-only selection, including region lookup, delegates to the public
+Debts through the existing Debt query with its default listing selection.
+Contract-only selection, including region lookup, delegates to the public
 Contract resolver owned by [public-api.md](public-api.md). The edge renders its
 typed refusal evidence as invocation diagnostics without owning candidate
 matching; a bounded display never narrows selector meaning. Complete identities
-retain the requested operation's missing-Contract refusal. The invocation facet routes mixed `ls` to those native owner listings.
+retain the requested operation's missing-Contract refusal. Parsing selects each
+catalogue's described owner operation directly.
 
 An Akuma-instance `ls` may additionally select one caller: `--mine` uses the
 invocation's own caller identity, and `--caller` names an external

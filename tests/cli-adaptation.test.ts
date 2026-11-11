@@ -71,7 +71,7 @@ test("show reads native bytes once for explicit and contextual Contract selectio
   const status = await runCli(["-C", repository.path, "status", row.id], { environment: {} });
   assert.equal(status.exit, 0, status.stderr);
   assert.equal(read.mock.callCount(), before);
-  for (const selectors of [[], ["kei"], ["aku/"], [row.id, `@${row.id.slice("kei/".length)}`]]) {
+  for (const selectors of [[], [row.id], [`@${row.id.slice("kei/".length)}`]]) {
     const ordinary = await runCli(["-C", repository.path, "status", ...selectors], { environment: {} });
     assert.equal(ordinary.exit, 0, ordinary.stderr);
     assert.equal(read.mock.callCount(), before);

@@ -1,3 +1,4 @@
+import type { VerbInput } from "../../library/keiyaku-verbs.js";
 import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, BoardSection } from "../../kanshi/report.js";
 import { activityRowLines } from "./akuma-activity.js";
 import { akumaMark } from "./marks.js";
@@ -39,7 +40,7 @@ function akumaStatusTone(row: AkumaKanshiRow, observedAt: string): SemanticTone 
 /** The native owner's current actionable row pair, rendered by the shared activity grammar. */
 function rowPreviewLines(row: AkumaKanshiRow, context: TextRenderContext): readonly string[] {
   const bounded = { ...context, columns: Math.max(1, context.columns - ACTIVITY_INDENT.length) };
-  const activity = row.activity;
+  const activity = "activity" in row ? row.activity : undefined;
   const preview =
     activity === undefined
       ? []
@@ -48,7 +49,9 @@ function rowPreviewLines(row: AkumaKanshiRow, context: TextRenderContext): reado
         : activityRowLines(activity, bounded, { compact: true });
   return [
     ...preview,
-    ...(row.outcome === undefined ? [] : activityRowLines(row.outcome, bounded, { compact: true, tailAnswer: true })),
+    ...("outcome" in row && row.outcome !== undefined
+      ? activityRowLines(row.outcome, bounded, { compact: true, tailAnswer: true })
+      : []),
   ].map((line) => `${ACTIVITY_INDENT}${line}`);
 }
 
@@ -68,6 +71,7 @@ function akumaRowLines(
   aliasesUnavailable: boolean,
   observedAt: string,
   context: TextRenderContext,
+  caller?: string,
 ): readonly string[] {
   const statusTone = akumaStatusTone(row, observedAt);
   const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
@@ -78,7 +82,15 @@ function akumaRowLines(
   const activityAge = lastActivityAt === undefined ? null : formatAge(lastActivityAt, observedAt);
   const activity = activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`];
   const key = [life, ...activity];
-  const relation = row.contract === undefined ? [] : [associationFact(row.contract)];
+  const relation = [
+    ...(row.contract === undefined ? [] : [associationFact(row.contract)]),
+    ...(caller !== undefined &&
+    "parentAkumaId" in row &&
+    row.parentAkumaId !== undefined &&
+    row.parentAkumaId !== caller
+      ? [`by ${safeText(row.parentAkumaId)}`]
+      : []),
+  ];
   const aliases = akumaLabel(row, aliasesUnavailable);
   const previewLines = rowPreviewLines(row, context);
   if (context.columns > NARROW_COLUMNS) {
@@ -104,11 +116,12 @@ function akumaBoardRows(
   rows: readonly AkumaKanshiRow[],
   observedAt: string,
   context: TextRenderContext,
+  caller?: string,
 ): readonly string[] {
   const aliasesUnavailable = board.aliasesError !== undefined;
   const rendered = renderSectionBlock({
     name: "AKUMA",
-    rows: rows.map((row) => akumaRowLines(row, aliasesUnavailable, observedAt, context)),
+    rows: rows.map((row) => akumaRowLines(row, aliasesUnavailable, observedAt, context, caller)),
     hasMore: board.more === true,
   });
   return [`AKUMA // ${rows.length} recent`, ...rendered.slice(1)];
@@ -116,16 +129,16 @@ function akumaBoardRows(
 
 /**
  * One Akuma board section. The World board omits an empty section because its other
- * sections already say what the World holds; a category board states that emptiness
- * itself, since it is the whole answer. A failed Alias observation belongs to the
+ * sections already say what the World holds; a standalone catalogue states its
+ * own emptiness. A failed Alias observation belongs to the
  * section, so an empty roster still states its emptiness rather than dropping that
  * evidence.
  */
 function renderAkumaBoard(
   section: BoardSection<AkumaKanshiWorld>,
   observedAt: string,
-  context: TextRenderContext,
-  emptyRows: readonly string[],
+  context: TextRenderContext & Readonly<{ caller?: VerbInput<"aku.ls">["caller"] }>,
+  emptyRows: readonly string[] = [emptyCatalogue("akuma")],
 ): readonly string[] {
   if (section.kind === "absent") return ["AKUMA // absent"];
   if (section.kind === "failed") {
@@ -142,7 +155,14 @@ function renderAkumaBoard(
       tone(`! aliases unavailable · ${aliasFailure}`, "alert", context.color),
     ];
   }
-  return akumaBoardRows(board, rows, observedAt, context);
+  const caller = context.caller?.kind === "external" ? context.caller.caller : context.caller;
+  return akumaBoardRows(
+    board,
+    rows,
+    observedAt,
+    context,
+    caller?.kind === "akuma" ? caller.akumaId : caller?.kind === "external" ? "external" : undefined,
+  );
 }
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {

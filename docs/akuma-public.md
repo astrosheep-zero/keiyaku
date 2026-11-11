@@ -197,15 +197,15 @@ fresh Heart evidence protected against succession for that bounded observation;
 it neither mutates lifecycle facts nor retains execution custody afterward.
 This is not a frozen view of subsequent activity or a barrier to future Bodies.
 
-The roster is a compact bounded recent-activity observation, not a smaller status
-view. Reading it, status, history, wait, tell, ask, or any other observation
+The native roster is an internal bounded recent-activity observation. Reading it,
+status, history, wait, tell, ask, or any other observation
 never retires an entry. Its order is the later of each readable Heart's life and
 activity evidence, with complete identity breaking equal activity and
 untimestamped rows following timestamped rows. The observation says whether another readable member lies
 beyond its bounded result without claiming a total or a frozen continuation.
-It exposes identity, the World's current alias bindings naming each member, life
-evidence, recent activity, and pending-work information without loading each
-history. Frozen caller attribution remains available to the owner for exact
+It supplies identity, life evidence, recent activity, and pending-work information
+without loading each history. Alias and current-work enrichment belong to the
+World-bound catalogue composition. Frozen caller attribution remains available to the owner for exact
 caller selection and retention judgments; ordinary roster observation does not
 repeat the birth recipe. Recognized
 unborn or stillborn allocation state remains visible; a hard direct-read failure

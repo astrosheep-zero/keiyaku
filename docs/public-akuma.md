@@ -181,9 +181,24 @@ closure is completed across Archetypes before any Archetype filter, activity
 order, and bound, and it never aggregates Worlds or consults a user-home index.
 Caller selection follows the frozen birth attribution; visible Akuma lineage
 names the immediate parent independently of that selection. The lower
-roster supplies that native membership, order, and extent, and World
-composition attaches the current Alias bindings afterward without replacing the
-semantic order or counting the board. Archetype definitions are listed by the archetype
+roster supplies that native membership, order, and extent. The composition owns
+the sole public instance catalogue, retaining immediate parent lineage and
+observing current work for every selected born member, without expanding history
+for lookahead or rejected members. Unborn and stillborn allocations retain their
+allocation evidence and available Contract association, but have no current work
+or outcome observation. A later born snapshot failure preserves selected membership
+and order with unavailable activity; it never reclassifies a selected member.
+
+One Alias observation enriches even an empty successful catalogue. Alias failure
+leaves readable membership and known emptiness intact with explicit catalogue
+availability, omitting unproven bindings. An optional explicit Repo supplies one
+shared Dispatch observation, without selecting another World or reading attached
+Contract journals, Hearts, or Debt boards. Absent Repo or known absence of a link
+omits the association; an independently failed Dispatch source makes links
+unavailable. Native roster source failures and whole Git observation or retirement
+failures remain exceptional at the catalogue boundary. World composition consumes
+the same rows and joins within its own bounded observation and failure isolation.
+Archetype definitions are listed by the archetype
 owner. The owner's bounded definitions catalogue and the native Archetype
 error that spawn admission already throws are reachable from the package root,
 so a root-only caller lists the same spawnable definitions the CLI shows and
@@ -191,7 +206,6 @@ identifies that error without a private module. An archetype definition may decl
 never appears in the archetype catalogue, but it resolves and answers spawns by
 name exactly as a visible one, and hiddenness is the definition's own
 catalogue visibility, never inherited through `base`. The pillars and product
-compositions expose no cross-product catalogue or `ls` operation, and no public
-definition loader. The invocation-level exception is owned by
-[public-keiyaku.md](public-keiyaku.md): it routes to existing owner listings
-without introducing another catalogue model.
+compositions expose no cross-product catalogue or generic listing operation,
+and no public definition loader. The invocation facet routes each described
+catalogue operation directly to its producing owner.

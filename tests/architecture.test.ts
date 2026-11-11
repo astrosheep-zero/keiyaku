@@ -35,7 +35,7 @@ function graph(owner: string, edges: readonly Edge[], prefix = ""): readonly Dia
 
 const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: boolean])[] = [
   ["index.ts", ["akuma/akuma.ts", "akumaListRowSchema"], false],
-  ["index.ts", ["akuma/akuma.ts", "akumaListSchema"], true],
+  ["index.ts", ["kanshi/report.ts", "akumaCatalogueSchema"], true],
   ["index.ts", ["akuma/projection.ts", "activityHistorySchema"], true],
   ["index.ts", ["akuma/caller.ts", "akumaCallerSchema"], true],
   ["index.ts", ["akuma/heart/facts.ts", "killEvidenceSchema"], true],
@@ -156,7 +156,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["kanshi/read.ts", ["body/decode.ts", "decodeContractDocument"], true],
   ["kanshi/read.ts", ["body/region.ts", "assertRegionPattern"], true],
   ["kanshi/report.ts", ["akuma/akuma.ts", "akumaListRowSchema"], false],
-  ["kanshi/report.ts", ["akuma/akuma.ts", "listedBornAkumaSchema"], true],
+  ["kanshi/report.ts", ["akuma/identity.ts", "akumaIdSchema"], true],
   ["kanshi/report.ts", ["akuma/status-projection.ts", "statusPreviewSchema"], true],
   ["kanshi/report.ts", ["akuma/projection.ts", "activityRowSchema"], false],
   ["kanshi/report.ts", ["core/facts/types.ts", "ContractId", true], true],
@@ -189,8 +189,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["kanshi/read.ts", ["library/region.ts", "regionOverlaps"], false],
   ["kanshi/select.ts", ["library/region.ts", "regionOverlaps"], false],
   ["index.ts", ["library/nuke.ts", "nukeResultSchema"], true],
-  ["index.ts", ["kanshi/index.ts", "kanshiCategory"], true],
-  ["cli/commands/contract.ts", ["index.ts", "kanshiCategory"], true],
+
   ["library/contract/moved-owner.ts", ["library/akuma-creation.ts", "createAkuma"], false],
   ["library/contract/moved-owner.ts", ["library/bind.ts", "bind"], false],
   ["library/contract/moved-owner.ts", ["protocol/delivery-preview.ts", "previewDeliveryOperation"], false],
@@ -237,7 +236,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["protocol/read/status.ts", ["protocol/result-leaves.ts", "gateSchema"], true],
   ["protocol/read/status.ts", ["protocol/result-leaves.ts", "deliverDataSchema"], false],
   ["index.ts", ["protocol/read/status.ts", "contractCatalogueSchema"], true],
-  ["library/keiyaku-verbs.ts", ["library/keiyaku-status.ts", "statusResultSchema"], true],
+  ["library/keiyaku-verbs.ts", ["kanshi/report.ts", "akumaCatalogueSchema"], true],
   ["library/contract-types.ts", ["git/identity.ts", "contractIdSchema"], true],
   ["library/outcome.ts", ["protocol/result-leaves.ts", "journalEntrySchema"], true],
   ["library/outcome.ts", ["git/identity.ts", "contractHeadSchema"], true],

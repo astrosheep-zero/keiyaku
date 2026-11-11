@@ -53,8 +53,7 @@ test("namespace and leaf help expose executable usage and flags", () => {
   assert.match(showHelp, /usage  keiyaku show \[<contract>\|@name\]/u);
   assert.match(showHelp, /--json/u);
   const statusHelp = renderContractHelp("status");
-  assert.match(statusHelp, /status aku\/ \[--limit <count>\]/u);
-  assert.match(statusHelp, /status \(kei\|kei\/\|kei\/\*\) \[--limit <count>\]/u);
+  assert.match(statusHelp, /status \[<kei\/\.\.\.>\|<aku\/\.\.\.>\|@name\]/u);
   const lsHelp = renderContractHelp("ls");
   assert.match(lsHelp, /--mine \| --caller \(<integration>:<id> \| aku\/<name>\/<suffix>\)/u);
   assert.match(lsHelp, /ls debt\/<namespace>\/ \[--closed \| --all\] \[--limit <count>\]/u);

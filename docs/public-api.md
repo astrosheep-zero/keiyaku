@@ -4,7 +4,7 @@ The ESM package exposes exactly two entries: the package root and the plugin
 entry. The root exposes Kei as the native Contract handle and Keis as the
 Repo-bound Contract collection, Akuma as the standalone single-Akuma product, Akumas as the World-bound
 plural Akuma composition, Debt as its independent product, Kanshi as composite
-observation including its bounded category aperture, Settings, Plugin types,
+World, addressed Contract, and Region observation, Settings, Plugin types,
 Repo, World, and the named `nuke` operation. No other subpath, compatibility
 alias, or other generic mixed orchestration facade exists. The one invocation
 facet is `Keiyaku`, owned by [public-keiyaku.md](public-keiyaku.md). No private

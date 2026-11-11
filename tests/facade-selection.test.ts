@@ -50,7 +50,7 @@ import { serializeDebtDocument, type DebtDocument } from "../src/debt/document.j
 import { Debts, type DebtId } from "../src/debt/index.js";
 import { readBoard } from "../src/debt/store.js";
 import { World } from "../src/world.js";
-import { readAkumaCompleteRoster } from "../src/akuma/akuma.js";
+import { observeAkumaRoster, readAkumaCompleteRoster } from "../src/akuma/akuma.js";
 import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { Akuma as NativeAkuma } from "../src/akuma/index.js";
 import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
@@ -1054,12 +1054,15 @@ test("Akumas roster returns bounded Heart activity in semantic order", async (t)
   assert.equal(custodyReads, 0);
 });
 
-test("Akumas roster refuses a corrupt alias authority rather than hiding bindings", async (t) => {
+test("Akumas catalogue preserves readable rows through corrupt Alias authority", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-akuma-alias-corrupt-");
-  await answered(root, "worker", "00000003");
+  const source = await answered(root, "worker", "00000003");
   mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "not json\n");
-  await assert.rejects(Akumas.of(await World.at(root)).list(), /invalid Alias JSON/u);
+  const catalogue = await Akumas.of(await World.at(root)).list();
+  assert.match(catalogue.aliasesError!, /invalid Alias JSON/u);
+  assert.deepEqual(catalogue.rows?.map((row) => row.id), [source.id]);
+  assert.equal(catalogue.rows?.[0]?.aliases, undefined);
 });
 
 test("recent Akuma page prunes physical reads and preserves complete membership", async (t) => {
@@ -1099,8 +1102,7 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
       return originalPrepare.apply(this, args);
     };
     const proved = await World.at(root);
-    const world = Akumas.of(proved);
-    const page = await world.list({ limit: 2 });
+    const page = await observeAkumaRoster(proved, 2);
     const pagePrepares = prepareCalls;
     DatabaseSync.prototype.prepare = originalPrepare;
     prepareCalls = 0;

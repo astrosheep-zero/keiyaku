@@ -362,7 +362,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/reconcile.ts"),
         any("library/selection.ts"),
         any("library/keiyaku-identity.ts"),
-        any("library/keiyaku-status.ts", ["StatusResult", "statusResultSchema"]),
         any("library/outcome.ts"),
         any("library/akuma-creation.ts", [
           "spawnProgressSchema",
@@ -475,7 +474,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "library/akumas.ts",
-      allow: [...libraryOwner.allow, any("library/akuma-creation.ts"), any("body-host.ts")],
+      allow: [...libraryOwner.allow, boundedList, any("library/akuma-creation.ts"), any("body-host.ts")],
       deny: [
         ...invocationFacet,
         any("git/target-placement.ts"),
@@ -557,8 +556,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "kanshi/read.ts",
       allow: [
-        any("akuma/akuma.ts"),
-        runtime("akuma/status-projection.ts", ["projectStatusOutcome", "projectStatusPreview"]),
+        any("library/akumas.ts", ["akumaRowsAt", "joinedAkumas", "aliasesAt", "dispatchesAt", "diagnostic"]),
         types("akuma/projection.ts"),
         runtime("akuma/projection.ts", ["withoutReportedChanges"]),
         any("alias/**"),
@@ -582,8 +580,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "kanshi/report.ts",
       allow: [
-        types("akuma/akuma.ts"),
-        runtime("akuma/akuma.ts", ["listedBornAkumaSchema", "listedUnbornAkumaSchema"]),
+        runtime("akuma/identity.ts", ["akumaIdSchema"]),
         runtime("akuma/status-projection.ts", ["compactOutcomeSchema", "statusPreviewSchema"]),
         types("akuma/projection.ts"),
         types("core/facts/types.ts"),
@@ -797,7 +794,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         any("body-host.ts", ["AkumaHost", "AkumaHostScope"]),
         any("akuma/index.ts"),
-        any("akuma/akuma.ts", ["akumaListSchema", "akumaStatusSchema"]),
+        any("akuma/akuma.ts", ["akumaStatusSchema"]),
+        runtime("kanshi/report.ts", ["akumaCatalogueSchema"]),
         runtime("akuma/projection.ts", [
           "activityHistorySchema",
           "activityRowSchema",
@@ -930,7 +928,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "cli/**",
       allow: [
-        runtime("core/facts/types.ts", ["targetName"]),
+        runtime("core/facts/types.ts", ["targetName", "contractId"]),
         any("akuma/**"),
         any("cli/**"),
         types("protocol/execution-observation.ts"),

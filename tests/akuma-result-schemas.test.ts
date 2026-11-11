@@ -28,7 +28,7 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   );
   const akumas = akumasWithLauncher(fixture.world, launcher);
   const id = fixture.allocated.id;
-  assertWireRoundTrip(root.akumaListSchema, await akumas.list());
+  assertWireRoundTrip(root.akumaCatalogueSchema, await akumas.list());
   assertWireRoundTrip(root.akumaObservationSchema, await akumas.status({ akuma: id }));
   const status = await fixture.akuma.status();
   assertWireRoundTrip(root.akumaStatusSchema, status);

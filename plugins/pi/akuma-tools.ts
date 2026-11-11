@@ -196,12 +196,12 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
     ["akuma"],
     async (input, akumas, ctx) => akumas.status(await address(input, ctx)),
   );
-  register<AkumaListInput>(
+  register<ToolAddress<AkumaListInput>>(
     "akuma_list",
-    "List a bounded recent-activity roster of Akuma instances, with aliases. Use akuma_definitions for spawnable names.",
-    { akumaName: { type: "string", minLength: 1 }, limit },
+    "List bounded recent Akuma instances with current work, outcomes, aliases and optional Contract associations. Use akuma_definitions for spawnable names.",
+    { akumaName: { type: "string", minLength: 1 }, limit, repo },
     [],
-    async (input, akumas) => akumas.list(input),
+    async (input, akumas, ctx) => akumas.list(await address(input, ctx)),
   );
   register<{ limit?: number }>(
     "akuma_definitions",

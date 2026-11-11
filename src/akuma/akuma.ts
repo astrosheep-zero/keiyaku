@@ -1,8 +1,7 @@
 import { akumaBirthSchema, akumaCallerKey, decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { readdir, stat } from "node:fs/promises";
 import { z } from "zod";
-import { boundedListLimit, projectBoundedList } from "../bounded-list.js";
-import { akumaAliasSchema } from "../identity/selector.js";
+import { projectBoundedList } from "../bounded-list.js";
 import type { WorldRoot } from "../world.js";
 import { rosterListRow } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
@@ -28,35 +27,7 @@ import {
 import { activitySnapshotSchema } from "./projection.js";
 import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
 
-const bornLifeSchema = z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed"]);
-type BornLife = z.output<typeof bornLifeSchema>;
-export const listedBornAkumaSchema = z
-  .strictObject({
-    id: akumaIdSchema,
-    life: bornLifeSchema,
-    lifeAt: z.string().exactOptional(),
-    lastActivityAt: z.string().exactOptional(),
-    pending: z.number().int().positive().exactOptional(),
-    aliases: z.array(akumaAliasSchema).nonempty().readonly().exactOptional(),
-    parentAkumaId: akumaIdSchema.exactOptional(),
-  })
-  .readonly();
-export const listedUnbornAkumaSchema = z
-  .strictObject({
-    id: akumaIdSchema,
-    life: z.enum(["unborn", "stillborn"]),
-    aliases: z.array(akumaAliasSchema).nonempty().readonly().exactOptional(),
-    diagnostic: z.string().exactOptional(),
-  })
-  .readonly();
-export const listedAkumaSchema = z.union([listedBornAkumaSchema, listedUnbornAkumaSchema]);
-export const akumaListSchema = z
-  .strictObject({
-    observedAt: z.string(),
-    rows: z.array(listedAkumaSchema).nonempty().readonly().exactOptional(),
-    more: z.literal(true).exactOptional(),
-  })
-  .readonly();
+type BornLife = AkumaStatus["life"];
 
 /** The lower owner's native roster row; public listing projects it. */
 export type AkumaRosterRow =
@@ -75,25 +46,11 @@ export type AkumaRosterRow =
       life: "unborn" | "stillborn";
       diagnostic?: string;
     }>;
-export type ListedAkuma = z.output<typeof listedAkumaSchema>;
-export type AkumaList = z.output<typeof akumaListSchema>;
-
-function listedAkuma(row: AkumaRosterRow): ListedAkuma {
-  if (row.kind === "unborn")
-    return {
-      id: row.id,
-      life: row.life,
-      ...(row.diagnostic === undefined ? {} : { diagnostic: row.diagnostic }),
-    };
-  return {
-    id: row.id,
-    life: row.life,
-    ...(row.lifeAt === undefined ? {} : { lifeAt: row.lifeAt }),
-    ...(row.lastActivityAt === undefined ? {} : { lastActivityAt: row.lastActivityAt }),
-    ...(row.pending === undefined ? {} : { pending: row.pending }),
-    ...(row.caller?.kind === "akuma" ? { parentAkumaId: row.caller.akumaId } : {}),
-  };
-}
+export type AkumaRosterPage = Readonly<{
+  observedAt: string;
+  rows?: readonly AkumaRosterRow[];
+  more?: true;
+}>;
 /** The advanced complete roster: every recognized member and known completeness. */
 export type AkumaCompleteList = Readonly<{
   kind: "akumas";
@@ -101,7 +58,7 @@ export type AkumaCompleteList = Readonly<{
   rows: readonly AkumaRosterRow[];
 }>;
 
-export type AkumaListInput = Readonly<{
+export type AkumaRosterInput = Readonly<{
   akumaName?: string;
   caller?: AkumaCaller;
   limit?: number;
@@ -227,8 +184,8 @@ export async function countRunningAkuma(path: WorldRoot): Promise<number> {
   return observed.rows.filter((row) => row.life === "running").length;
 }
 
-function rosterInput(
-  input: AkumaListInput | Readonly<{ akumaName?: string }>,
+export function rosterInput(
+  input: AkumaRosterInput | Readonly<{ akumaName?: string }>,
   allowLimit: boolean,
 ): Readonly<{ akumaName?: string; caller?: AkumaCaller }> {
   if (typeof input !== "object" || input === null || Array.isArray(input))
@@ -236,7 +193,7 @@ function rosterInput(
   const allowed = allowLimit ? ["akumaName", "caller", "limit"] : ["akumaName", "caller"];
   const unknown = Object.keys(input).find((key) => !allowed.includes(key));
   if (unknown !== undefined) throw new TypeError(`Akuma list input has unknown field: ${unknown}`);
-  const caller = decodeAkumaCaller((input as AkumaListInput).caller);
+  const caller = decodeAkumaCaller((input as AkumaRosterInput).caller);
   return {
     ...(input.akumaName === undefined ? {} : { akumaName: validateAkumaName(input.akumaName) }),
     ...(caller === undefined ? {} : { caller }),
@@ -444,19 +401,12 @@ async function readCallerPage(
 }
 
 /** One roster answer: empty rows and known completeness are both omissions. */
-function rosterResult(observedAt: string, rows: readonly AkumaRosterRow[], more: boolean): AkumaList {
+function rosterResult(observedAt: string, rows: readonly AkumaRosterRow[], more: boolean): AkumaRosterPage {
   return {
     observedAt,
-    ...(rows.length === 0 ? {} : { rows: rows.map(listedAkuma) }),
+    ...(rows.length === 0 ? {} : { rows }),
     ...(more ? { more: true as const } : {}),
   };
-}
-
-/** The bounded recent-activity roster input: native membership and observed extent. */
-export async function readAkumaRoster(path: WorldRoot, input: AkumaListInput = {}): Promise<AkumaList> {
-  const selection = rosterInput(input, true);
-  const limit = boundedListLimit(input.limit);
-  return observeAkumaRoster(path, limit, selection.akumaName, selection.caller);
 }
 
 /**
@@ -469,7 +419,7 @@ export async function observeAkumaRoster(
   limit: number,
   selected?: string,
   caller?: AkumaCaller,
-): Promise<AkumaList> {
+): Promise<AkumaRosterPage> {
   const observedAt = new Date().toISOString();
   if (caller !== undefined) {
     const page = await readCallerPage(path, limit, selected, caller);

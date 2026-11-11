@@ -6,10 +6,10 @@ import {
   type Debt,
   type DebtAbsent,
   type DebtBatchResult,
-  type DebtCatalogue,
+  type DebtQueryResult,
   type DebtDetail,
   type DebtId,
-  type DebtLsInvocation,
+  type DebtQueryInvocation,
   type DebtMutationResult,
   type DebtLifecycleResult,
   type DebtReadResult,
@@ -21,8 +21,8 @@ import {
 } from "@astrosheep/keiyaku";
 const world = null as unknown as import("@astrosheep/keiyaku").WorldRoot;
 const facet = Keiyaku.at({ cwd: "/tmp", environment: {} });
-const listing: DebtLsInvocation = { of: "debt", namespace: [], selection: "all" };
-const catalogue: Promise<DebtCatalogue> = facet.ls(listing);
+const listing: DebtQueryInvocation = { namespace: [], selection: "all" };
+const catalogue: Promise<DebtQueryResult> = facet.debtQuery(listing);
 const one: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ id: "debt/example" });
 const many: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ ids: ["debt/example"] });
 const batch: Promise<DebtBatchResult> = facet.debtDone({ ids: ["debt/example"] });

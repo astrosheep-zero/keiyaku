@@ -17,8 +17,8 @@ leaf help and the parser, not this chapter.
 | doctor | Diagnose Debt authority and relationship health. | It reports; it never repairs. |
 
 The Debt CLI adapts through the invocation facet, preserving native answers.
-Root listing and addressed reads share the Debt owner's operations; listing
-defaults to open work. Readiness and blocking are query predicates.
+Root listing uses the existing Debt query's ordinary listing selection, and
+addressed reads use the same Debt owner; listing defaults to open work. Readiness and blocking are query predicates.
 The Debt CLI acquires only the input a selected verb permits and refuses an
 ambiguous, surplus, or ill-formed request before invoking Debt. An explicit
 namespace or complete identity selects its named coordinate; omission selects

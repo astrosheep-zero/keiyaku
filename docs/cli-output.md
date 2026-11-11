@@ -197,7 +197,9 @@ inferring activity from a Turn opening or claiming continuous liveness. The
 projection owner selects current actionable work, the latest current narration,
 and bounded ordinary detail; rendering preserves that selection and only bounds
 individual payloads. Earlier omitted activity is named once and remains in
-history. Changes within the execution directory have priority over outside
+history. World status and the rich Akuma catalogue use the same board projection;
+catalogue enrichment never acquires a second entry formatter.
+Changes within the execution directory have priority over outside
 changes, which are summarized separately; an unavailable directory preserves the
 unpartitioned summary. Identity, conclusion, reported changes, and actionable
 failure or pending evidence remain visible. A diagnostic keeps its subject,

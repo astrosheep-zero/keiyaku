@@ -24,7 +24,6 @@ import type {
 import { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
 import type { ForkResult, SpawnResult } from "./akuma-creation.js";
 import type { ContractWaitResult } from "./contract-wait.js";
-import type { StatusResult } from "./keiyaku-status.js";
 import { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import type { VerbInput, VerbName, VerbOutput } from "./keiyaku-verbs.js";
 import {
@@ -93,10 +92,6 @@ function classifyFork(result: ForkResult): VerbDisposition {
   return result.kind === "fork-failed" || result.kind === "provider-forked-local-birth-failed" ? "failed" : "refused";
 }
 
-function classifyStatus(value: StatusResult): VerbDisposition {
-  return "kind" in value && value.kind === "contract-missing" ? "refused" : "accepted";
-}
-
 function classifyRegion(value: RegionRead): VerbDisposition {
   return value.kind === "contract-missing" || value.kind === "contract-terminal" ? "refused" : "accepted";
 }
@@ -133,15 +128,13 @@ function classifyNuke(result: VerbOutput<"nuke">): VerbDisposition {
 /** Classify the native completion without changing or reconstructing its evidence. */
 export function classifyVerb<K extends VerbName>(
   name: K,
-  input: VerbInput<K>,
+  _input: VerbInput<K>,
   completion: VerbCompletion<VerbOutput<K>>,
 ): VerbDisposition {
   if (completion.kind === "threw") return classifyThrown(name, completion.error);
 
   const value = completion.value;
   switch (name) {
-    case "ls":
-      return (input as { of: string }).of === "debt" ? classifyDebt(value as DebtNativeResult) : "accepted";
     case "debt.add":
     case "debt.addDocument":
     case "debt.update":
@@ -188,8 +181,8 @@ export function classifyVerb<K extends VerbName>(
       return classifyHistory(value as VerbOutput<"history">);
     case "show":
       return (value as VerbOutput<"show">).kind === "missing" ? "refused" : "accepted";
-    case "status":
-      return classifyStatus(value as StatusResult);
+    case "kei.status":
+      return (value as VerbOutput<"kei.status">).kind === "contract-missing" ? "refused" : "accepted";
     case "region":
       return classifyRegion(value as RegionRead);
     case "reconcile":

@@ -139,7 +139,7 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
 }
 
 type RequestOutput = Readonly<{ output: "text" | "json" }>;
-export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami"> | "debt.show";
+export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami"> | "debt.show" | "debt.query";
 export type VerbRequest<K extends CliVerb = CliVerb> = {
   [P in K]: RequestOutput & Readonly<{ name: P; input: VerbInput<P> }>;
 }[K];
@@ -153,6 +153,7 @@ type Acquisitions = {
     input: Omit<VerbInput<"spawn">, "prompt">;
     acquire: { prompt?: AkumaPromptSource };
   };
+  status: { input: VerbInput<"status">; acquire: { selector: string } };
   tell: { input: Omit<VerbInput<"tell">, "prompt">; acquire: { prompt: AkumaPromptSource } };
   ask: { input: Omit<VerbInput<"ask">, "prompt" | "schema">; acquire: { prompt: AkumaPromptSource; schema: string } };
 };
@@ -175,7 +176,14 @@ export function commandName(command: ParsedCommand) {
       ? "deliver"
       : command.name === "debt.show"
         ? "show"
-        : command.name
+        : command.name === "kei.status" || command.name === "aku.status"
+          ? "status"
+          : command.name === "kei.ls" ||
+              command.name === "aku.ls" ||
+              command.name === "aku.names" ||
+              command.name === "debt.query"
+            ? "ls"
+            : command.name
     : command.command;
 }
 
@@ -210,9 +218,14 @@ export function commandRepoPolicy(
     case "show":
       return { use: "required", acceptsExplicit: true };
     case "debt.show":
+    case "debt.query":
+    case "aku.names":
       return { use: "none", acceptsExplicit: false };
-    case "ls":
-      return { use: command.input.of === "kei" ? "required" : "none", acceptsExplicit: false };
+    case "kei.ls":
+    case "kei.status":
+      return { use: "required", acceptsExplicit: false };
+    case "aku.ls":
+    case "aku.status":
     case "status":
     case "tell":
     case "ask":

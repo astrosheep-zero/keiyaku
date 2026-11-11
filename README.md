@@ -161,7 +161,12 @@ snapshot but create no log store or replay authority.
 
 ## The board
 
-`keiyaku status` is the one screen. Two Contracts and two Debts in flight:
+`keiyaku status` is the World overview. `keiyaku status <kei/...|aku/...|@name>`
+observes one identity. List active Contracts with `keiyaku ls kei/`, rich recent
+Akuma instances with `keiyaku ls "aku/*/*"`, and spawnable definitions with
+`keiyaku ls aku/`. Instance listing observes current work for every selected born
+member; the World overview keeps its smaller aperture. Debt listing reuses the
+ordinary query selection. Two Contracts and two Debts in flight:
 
 ```text
 CONTRACTS // recent

@@ -1,16 +1,10 @@
-export { kanshi, kanshiCategory, observeKanshi, kanshiObservationSchema } from "./read.js";
+export { kanshi, observeKanshi, kanshiObservationSchema } from "./read.js";
 export { kanshiCounts, kanshiCountsReportSchema } from "./counts.js";
 export type { KanshiCountsInput, KanshiCountsReport } from "./counts.js";
 export { selectRegion } from "./select.js";
-export {
-  regionReadSchema,
-  kanshiReportSchema,
-  kanshiContractReportSchema,
-  kanshiCategoryReportSchema,
-  kanshiResultSchema,
-} from "./report.js";
+export { regionReadSchema, kanshiReportSchema, kanshiContractReportSchema, kanshiResultSchema } from "./report.js";
 
-export type { KanshiCategoryInput, KanshiInput } from "./read.js";
+export type { KanshiInput } from "./read.js";
 export type {
   AkumaKanshiRow,
   AkumaKanshiWorld,
@@ -20,7 +14,6 @@ export type {
   ContractKanshiDetail,
   KanshiContractReport,
   KanshiResult,
-  KanshiCategoryReport,
   KanshiReport,
   Section,
   DebtKanshiRow,

@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { breakBody, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
+import { breakBody, beginTurn, endTurn, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
+import { AkumaOwner } from "../src/akuma/akuma-owner.js";
+import { bornDirectAkuma, allocatedHeart } from "./support/akuma-fixtures.js";
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
@@ -20,7 +23,7 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
-import { Keis, Repo, kanshiCategory, contractSummarySchema } from "../src/index.js";
+import { Akumas, Keis, Repo, contractSummarySchema, akumaCatalogueSchema } from "../src/index.js";
 import { kanshi, observeKanshi } from "../src/kanshi/index.js";
 import type { ContractKanshiDetail, KanshiContractReport, KanshiReport } from "../src/kanshi/index.js";
 
@@ -580,9 +583,6 @@ test("World status bounds worktree detail before observation and shares repeated
   assert.equal(missingWorld.contracts.kind, "present");
   if (missingWorld.contracts.kind === "present")
     assert.deepEqual(missingWorld.contracts.rows!.find(row => row.id === selected.id)?.attention, missingRow.attention);
-  const missingCategory = await kanshiCategory({ world, repo, category: "contract" });
-  assert.ok(missingCategory.section.kind === "present");
-  assert.deepEqual(missingCategory.section.rows!.find(row => row.id === selected.id)?.attention, missingRow.attention);
   assert.ok(renderKanshiText(missingWorld, { columns: 120, color: false }).includes("workspace unavailable"));
   renameSync(`${selected.path}-missing`, selected.path);
 
@@ -627,4 +627,118 @@ test("World running rows keep only one bounded latest activity line through the 
     assert.match(board.at(-1)!, /report +first paragraph/u);
     assert.doesNotMatch(board.join("\n"), /older command/u);
   }
+});
+
+test("rich catalogue observes every selected born member while World keeps its original aperture", async (t) => {
+  const repository = fixtureRepository(t);
+  const world = await World.at(repository.path);
+  const reads: string[] = [];
+  const original = AkumaOwner.prototype.status;
+  t.mock.method(AkumaOwner.prototype, "status", async function(this: AkumaOwner) {
+    reads.push(this.id);
+    return original.call(this);
+  });
+  for (let index = 0; index < 11; index += 1) {
+    const at = `2026-08-09T00:00:${String(index).padStart(2, "0")}.000Z`;
+    const born = await bornDirectAkuma({ root: world, akumaName: "worker", draw: index.toString(16).padStart(8, "0"), createdAt: at });
+    try {
+      const body = await born.leash.recordBody(born.paths, { leashTakenAt: at });
+      const turn = await beginTurn(born.paths, { bodySequence: body.sequence, startedAt: at });
+      await endTurn(born.paths, { turnSequence: turn.sequence, completedAt: at, outcome: { kind: "answered", session: { sessionId: `session-${index}` }, answer: `answer ${index}` } });
+      await breakBody(born.paths, { sequence: body.sequence, end: "put-down", at });
+    } finally { born.leash.release(); }
+  }
+  const catalogue = await Akumas.of(world).list({ limit: 10 });
+  assertWireRoundTrip(akumaCatalogueSchema, catalogue);
+  assert.equal(catalogue.more, true);
+  assert.deepEqual(reads, catalogue.rows!.map(row => row.id));
+  assert.ok(catalogue.rows!.every(row => "outcome" in row && row.outcome?.kind === "answered"));
+  assert.equal(catalogue.rows![3]!.id, "aku/worker/00000007");
+  reads.length = 0;
+  const report = await kanshi({ world });
+  assert.equal(report.akumas.kind, "present");
+  if (report.akumas.kind !== "present") assert.fail(JSON.stringify(report));
+  assert.deepEqual(report.akumas.rows!.map(row => row.id), catalogue.rows!.map(row => row.id));
+  assert.deepEqual(reads, catalogue.rows!.slice(0, 3).map(row => row.id));
+  assert.equal(report.akumas.more, true);
+  assert.ok(report.akumas.rows!.slice(3).every(row => !("activity" in row) && !("outcome" in row)));
+});
+
+test("birthless members retain associations without timelines and born snapshot failure preserves peers", async (t) => {
+  const repository = fixtureRepository(t);
+  const world = await World.at(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  const unborn = await allocatedHeart(world, "worker", "a0000000");
+  const stillborn = await allocatedHeart(world, "worker", "a0000002");
+  const born = await bornDirectAkuma({ root: world, akumaName: "worker", draw: "a0000001", createdAt: "2026-08-09T00:00:00.000Z" });
+  born.leash.release();
+  const peer = await bornDirectAkuma({ root: world, akumaName: "worker", draw: "a0000003", createdAt: "2026-08-09T00:00:01.000Z" });
+  peer.leash.release();
+  // A failed birth seal is native allocation evidence, not a failed status snapshot.
+  const claim = (await HeldAkumaLeash.try(stillborn.paths))!;
+  await claim.sealIfUnborn(stillborn.paths, { evidence: "birth failed", at: "2026-08-09T00:00:00.000Z" });
+  claim.release();
+  for (const id of [unborn.id, stillborn.id]) assert.equal((await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: id, contractId: contractId("kei/catalogue") })).kind, "dispatched");
+  const reads: string[] = [];
+  const original = AkumaOwner.prototype.status;
+  t.mock.method(AkumaOwner.prototype, "status", async function(this: AkumaOwner) {
+    reads.push(this.id);
+    if (this.id === born.id) throw new Error("selected Heart became unreadable");
+    return original.call(this);
+  });
+  const catalogue = await Akumas.of(world).list({ repo });
+  assertWireRoundTrip(akumaCatalogueSchema, catalogue);
+  assert.deepEqual(reads, [born.id, peer.id]);
+  assert.deepEqual(catalogue.rows!.map(row => row.id), [unborn.id, born.id, stillborn.id, peer.id]);
+  const failed = catalogue.rows!.find(row => row.id === born.id)!;
+  assert.equal("activity" in failed && failed.activity?.kind, "unavailable");
+  assert.equal("outcome" in failed, false);
+  for (const row of catalogue.rows!.filter(row => row.life === "unborn" || row.life === "stillborn")) {
+    assert.equal("activity" in row, false);
+    assert.equal("outcome" in row, false);
+    assert.deepEqual(row.contract, { kind: "associated", contractId: "kei/catalogue" });
+    assert.equal(akumaCatalogueSchema.safeParse({ ...catalogue, rows: [{ ...row, activity: { kind: "unavailable", diagnostic: "wrong" } }] }).success, false);
+  }
+  reads.length = 0;
+  const report = await kanshi({ world, repo });
+  assert.equal(report.akumas.kind, "present");
+  assert.deepEqual(reads, [born.id], "birthless leading positions never backfill from the fourth row");
+});
+
+test("catalogue Alias failures survive empty and readable membership; source failures stay hard", async (t) => {
+  const repository = fixtureRepository(t);
+  const world = await World.at(repository.path);
+  const directory = join(world, ".keiyaku", "akuma");
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, "alias.json"), "invalid Alias\n");
+  const empty = await Akumas.of(world).list();
+  assert.equal(empty.rows, undefined);
+  assert.ok(empty.aliasesError);
+  const born = await bornAkuma(world, "a0000001");
+  const nonempty = await Akumas.of(world).list();
+  assert.equal(nonempty.rows![0]!.id, born);
+  assert.ok(nonempty.aliasesError);
+  assert.equal(nonempty.rows![0]!.aliases, undefined);
+  // The actual roster root is replaced with a file, making enumeration fail.
+  const { akumaRunRoot } = await import("../src/akuma/identity.js");
+  const root = akumaRunRoot(world);
+  renameSync(root, `${root}-saved`);
+  writeFileSync(root, "not a roster directory\n");
+  await assert.rejects(Akumas.of(world).list(), /ENOTDIR/u);
+  const report = await kanshi({ world });
+  assert.equal(report.akumas.kind, "failed");
+  assert.equal(report.debts.kind, "present");
+});
+
+test("catalogue Dispatch failure degrades links while whole Git failure remains exceptional", async (t) => {
+  const { repository, akumaId } = await populatedWorld(t);
+  const world = await World.at(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  await replacePrivateState(repository, new Map([["dispatch", "invalid Dispatch root\n"]]));
+  const catalogue = await Akumas.of(world).list({ repo });
+  assert.equal(catalogue.rows![0]!.id, akumaId);
+  assert.deepEqual(catalogue.rows![0]!.aliases, ["@watch"]);
+  assert.deepEqual(catalogue.rows![0]!.contract, { kind: "unavailable" });
+  await replacePrivateState(repository, new Map([[GIT_FORMAT_PATH, "invalid format\n"]]));
+  await assert.rejects(Akumas.of(world).list({ repo }), /Git format is not current/u);
 });

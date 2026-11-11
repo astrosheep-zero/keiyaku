@@ -43,12 +43,10 @@ import {
   Keis,
   Repo,
   kanshi as observeWorld,
-  kanshiCategory as observeCategory,
   observeKanshi as observeComposite,
   kanshiReportSchema as reportSchema,
   kanshiContractReportSchema as contractReportSchema,
   kanshiResultSchema as resultSchema,
-  kanshiCategoryReportSchema as categorySchema,
   kanshiObservationSchema as observationSchema,
 } from "../src/index.js";
 
@@ -158,14 +156,11 @@ test("Kanshi schemas cover live Contract, Debt, Akuma, Alias, region and absent 
   const empty = await observeWorld({ world: null });
   assertWireRoundTrip(reportSchema, empty);
   assertWireRoundTrip(observationSchema, await observeComposite({ world: null }));
-  assertWireRoundTrip(categorySchema, await observeCategory({ world: null, category: "akuma" }));
   const report = await observeWorld({ world, repo });
   assertWireRoundTrip(resultSchema, report);
   assertWireRoundTrip(reportSchema, report);
   assertWireRoundTrip(contractReportSchema, await observeWorld({ world, repo, contract: bound.contractId }));
   assertWireRoundTrip(observationSchema, await observeComposite({ world, repo }));
-  assertWireRoundTrip(categorySchema, await observeCategory({ world, repo, category: "akuma" }));
-  assertWireRoundTrip(categorySchema, await observeCategory({ world, repo, category: "contract" }));
   const declarations = [{ id: bound.contractId, patterns: ["src/**"] }];
   assertWireRoundTrip(
     regionSchema,

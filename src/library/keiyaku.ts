@@ -29,7 +29,7 @@ import {
 import type { ContractWaitInput } from "./contract-wait.js";
 import { deliveryOwner, resolveActor } from "./keiyaku-attribution.js";
 import { akumaCallerFromEnvironment } from "./keiyaku-identity.js";
-import type { ContractId } from "../core/facts/types.js";
+import { contractId, type ContractId } from "../core/facts/types.js";
 import { settings } from "../settings.js";
 import { Keis, type ReconcileInput } from "./contract-composition.js";
 import type { MutationObservation, DeliveryPreviewInput } from "./contract-outcomes.js";
@@ -47,16 +47,12 @@ import { KeiyakuError } from "./outcome.js";
 import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
-import { statusAt, type StatusInput } from "./keiyaku-status.js";
-import type { ContractCatalogue } from "../protocol/read/status.js";
-import type { AkumaList } from "../akuma/akuma.js";
-import { listArchetypeDefinitions, type ArchetypeCatalog } from "../akuma/archetype.js";
-import type { AkumaCaller } from "../akuma/caller.js";
-import type { AkumaId } from "../akuma/identity.js";
+import { listArchetypeDefinitions } from "../akuma/archetype.js";
+import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
+import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
 import type {
-  DebtLsInvocation,
   DebtQueryInvocation,
   DebtUpdateInvocation,
   DebtCloseInvocation,
@@ -65,7 +61,6 @@ import type {
 export type {
   DebtSelection,
   DebtReadScope,
-  DebtLsInvocation,
   DebtQueryInvocation,
   DebtUpdateInvocation,
   DebtCloseInvocation,
@@ -80,13 +75,7 @@ export type KeiyakuAt = Readonly<{
   repo?: string;
 }>;
 
-type LsCaller =
-  | Readonly<{ kind: "mine" }>
-  | Readonly<{ kind: "external"; caller: AkumaCaller }>
-  | Readonly<{ kind: "akuma"; akumaId: AkumaId }>;
-type KeiInput = Readonly<{ of: "kei"; limit?: number }>;
-type AkumaInput = Readonly<{ of: "aku"; limit?: number; akumaName?: string; caller?: LsCaller }>;
-type NameInput = Readonly<{ of: "akuma-name"; limit?: number }>;
+type LsCaller = NonNullable<VerbInput<"aku.ls">["caller"]>;
 type Selected<T> = T & Readonly<{ contract?: string }>;
 type BindInvocation =
   | (Omit<Extract<BindInput, { markdown: string }>, "after"> & Readonly<{ after?: readonly string[] }>)
@@ -149,11 +138,6 @@ export class Keiyaku {
       if (error instanceof ZodError) throw new KeiyakuUsageError(error.message);
       throw error;
     }
-    return (await this.#dispatch({ name, input: parsed } as VerbRequest, run)) as VerbOutput<K>;
-  }
-
-  async #dispatch(request: VerbRequest, run: VerbRunFor<VerbName> | undefined): Promise<unknown> {
-    const signal = run?.signal === undefined ? {} : { signal: run.signal };
     const observe = run?.observe;
     const notify = (event: unknown): void => {
       try {
@@ -163,6 +147,16 @@ export class Keiyaku {
         /* Observation cannot affect execution. */
       }
     };
+    return (await this.#dispatch({ name, input: parsed } as VerbRequest, run, notify)) as VerbOutput<K>;
+  }
+
+  async #dispatch(
+    request: VerbRequest,
+    run: VerbRunFor<VerbName> | undefined,
+    notify: (event: unknown) => void,
+  ): Promise<unknown> {
+    const signal = run?.signal === undefined ? {} : { signal: run.signal };
+    const observe = run?.observe;
     switch (request.name) {
       case "bind":
         return this.#bind(request.input as BindInvocation);
@@ -196,6 +190,9 @@ export class Keiyaku {
         return this.#show(request.input);
       case "reconcile":
         return this.#reconcile(request.input);
+      case "aku.status":
+      case "aku.ls":
+      case "aku.names":
       case "spawn":
       case "fork":
       case "tell":
@@ -211,33 +208,66 @@ export class Keiyaku {
         return this.#settings();
       case "nuke":
         return this.#nuke(request.input);
-      case "status":
-        return this.#status(request.input);
+      case "status": {
+        const at = await this.#coordinates("optional");
+        return kanshi({ world: at.world, ...(at.repo === undefined ? {} : { repo: at.repo }) });
+      }
+      case "kei.status": {
+        const at = await this.#coordinates("optional");
+        if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
+        const report = await kanshi({ world: at.world, repo: at.repo, contract: contractId(request.input.id) });
+        if (report.kind === "contract-absent") throw new Error("Contract observation with a Repo cannot be absent");
+        return report;
+      }
       case "region":
         return this.#region(request.input);
-      case "ls":
-        return this.#ls(request.input as KeiInput | AkumaInput | NameInput | DebtLsInvocation);
-      case "debt.add":
-      case "debt.addDocument":
-      case "debt.update":
-      case "debt.show":
-      case "debt.done":
-      case "debt.drop":
-      case "debt.query":
-      case "debt.tree":
-      case "debt.doctor":
+      case "kei.ls": {
+        const at = await this.#coordinates("required");
+        return Keis.of(at.repo!).list(request.input);
+      }
+      default:
         return this.#dispatchDebt(request, signal);
     }
   }
 
-  #dispatchAkuma(
-    request: Extract<VerbRequest, { name: "spawn" | "fork" | "tell" | "ask" | "kill" | "wait" | "history" | "report" }>,
+  async #dispatchAkuma(
+    request: Extract<
+      VerbRequest,
+      {
+        name:
+          | "aku.status"
+          | "aku.ls"
+          | "aku.names"
+          | "spawn"
+          | "fork"
+          | "tell"
+          | "ask"
+          | "kill"
+          | "wait"
+          | "history"
+          | "report";
+      }
+    >,
     run: VerbRunFor<VerbName> | undefined,
     notify: (event: unknown) => void,
   ) {
     const signal = run?.signal === undefined ? {} : { signal: run.signal };
     const observe = run?.observe;
     switch (request.name) {
+      case "aku.status": {
+        const { at, akumas } = await this.#akumas();
+        return akumas.status({ akuma: request.input.id, ...(at.repo === undefined ? {} : { repo: at.repo }) });
+      }
+      case "aku.ls":
+        return this.#akuLs(request.input);
+      case "aku.names": {
+        const at = await this.#coordinates("none");
+        return listArchetypeDefinitions({
+          ...(at.world === null ? {} : { project: at.world }),
+          ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
+          ...request.input,
+        });
+      }
       case "spawn": {
         return this.#spawn({
           ...request.input,
@@ -358,12 +388,20 @@ export class Keiyaku {
   report(input: Readonly<{ text: string }>, run?: VerbRun) {
     return this.run("report", input, run);
   }
-  ls(input: KeiInput): Promise<ContractCatalogue>;
-  ls(input: AkumaInput): Promise<AkumaList>;
-  ls(input: NameInput): Promise<ArchetypeCatalog>;
-  ls(input: DebtLsInvocation): ReturnType<typeof debt.debtList>;
-  ls(input: KeiInput | AkumaInput | NameInput | DebtLsInvocation) {
-    return this.run("ls", input);
+  keiLs(input: VerbInput<"kei.ls"> = {}) {
+    return this.run("kei.ls", input);
+  }
+  akuLs(input: VerbInput<"aku.ls"> = {}) {
+    return this.run("aku.ls", input);
+  }
+  akuNames(input: VerbInput<"aku.names"> = {}) {
+    return this.run("aku.names", input);
+  }
+  keiStatus(input: VerbInput<"kei.status">) {
+    return this.run("kei.status", input);
+  }
+  akuStatus(input: VerbInput<"aku.status">) {
+    return this.run("aku.status", input);
   }
   debtAdd({ signal, ...input }: AddDebtInput) {
     return this.run("debt.add", input, signal === undefined ? {} : { signal });
@@ -704,8 +742,8 @@ export class Keiyaku {
 
   async #resolveLsCaller(selection: LsCaller | undefined, world: WorldRoot): Promise<AkumaCaller | undefined> {
     if (selection === undefined) return undefined;
-    if (selection.kind === "external") return selection.caller;
-    if (selection.kind === "akuma") return { kind: "akuma", world, akumaId: selection.akumaId };
+    if (selection.kind === "external") return decodeAkumaCaller(selection.caller);
+    if (selection.kind === "akuma") return { kind: "akuma", world, akumaId: parseAkumaId(selection.akumaId).id };
     let caller: AkumaCaller | undefined;
     try {
       caller = await akumaCallerFromEnvironment(this.#input.environment);
@@ -720,34 +758,15 @@ export class Keiyaku {
     return caller;
   }
 
-  async #ls(
-    input: KeiInput | AkumaInput | NameInput | DebtLsInvocation,
-  ): Promise<ContractCatalogue | AkumaList | ArchetypeCatalog | Awaited<ReturnType<typeof debt.debtList>>> {
-    if (input.of === "debt") return debt.debtList(this.#input, input);
-    const at = await this.#coordinates(input.of === "kei" ? "required" : "none");
-    const limit = input.limit === undefined ? {} : { limit: input.limit };
-    if (input.of === "kei") {
-      if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
-      return Keis.of(at.repo).list(limit);
-    }
-    if (input.of === "akuma-name") {
-      return listArchetypeDefinitions({
-        ...(at.world === null ? {} : { project: at.world }),
-        ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
-        ...limit,
-      });
-    }
-    if (at.world === null) throw new KeiyakuUsageError("no Keiyaku world contains the invocation cwd");
-    const caller = await this.#resolveLsCaller(input.caller, at.world);
-    return Akumas.of(at.world).list({
-      ...limit,
+  async #akuLs(input: VerbInput<"aku.ls">) {
+    const { at, akumas } = await this.#akumas();
+    const caller = await this.#resolveLsCaller(input.caller, at.world!);
+    return akumas.list({
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
       ...(input.akumaName === undefined ? {} : { akumaName: input.akumaName }),
       ...(caller === undefined ? {} : { caller }),
+      ...(at.repo === undefined ? {} : { repo: at.repo }),
     });
-  }
-
-  async #status(input: StatusInput = {}) {
-    return await statusAt(await this.#coordinates("optional"), input);
   }
 
   async #region(input: Readonly<{ contract?: string; paths?: readonly string[] }> = {}) {

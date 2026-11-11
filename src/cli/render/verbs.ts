@@ -1,13 +1,10 @@
 import { AkumaNotBornError, AkumaObservationError } from "../../akuma/akuma-errors.js";
 import { AkumaArchetypeError } from "../../akuma/archetype.js";
-import type { AkumaCaller } from "../../akuma/caller.js";
-import type { AkumaList, ArchetypeCatalog, ContractCatalogue, ContractId, DebtCatalogue } from "../../index.js";
+import type { ContractId } from "../../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../../library/address.js";
 import type { VerbCompletion, VerbInput, VerbName, VerbOutput } from "../../library/keiyaku-verbs.js";
 import { KeiyakuArcDocumentError, KeiyakuUsageError } from "../../library/keiyaku-coordinates.js";
 import { KeiyakuError, projectFailure } from "../../library/outcome.js";
-import type { KanshiCategoryReport } from "../../kanshi/report.js";
-import type { StatusItem, StatusResult } from "../../library/keiyaku-status.js";
 import {
   askRawAnswer,
   callRawAnswer,
@@ -18,7 +15,8 @@ import {
   waitText,
 } from "./akuma-activity.js";
 import { renderCallText, renderForkText, renderKillText, renderSpawnFailure, waitedTellProgress } from "./akuma.js";
-import { renderAkumaCatalogue, renderArchetypeCatalogue, renderContractCatalogue } from "./catalog.js";
+import { renderArchetypeCatalogue, renderContractCatalogue } from "./catalog.js";
+import { renderAkumaBoard } from "./kanshi-akuma.js";
 import {
   contractIssueLines,
   renderAccepted,
@@ -39,7 +37,7 @@ import {
   renderDoctor,
   type DebtListScope,
 } from "./debt.js";
-import { renderKanshiCategoryText, renderKanshiText } from "./kanshi.js";
+import { renderKanshiText } from "./kanshi.js";
 import { renderNukeText } from "./nuke.js";
 import { executionFailureLines } from "./receipt.js";
 import { renderReconcile } from "./reconcile.js";
@@ -162,15 +160,6 @@ function debtScope(input: Readonly<{ scope?: "namespace" | "world"; namespace?: 
   return { namespace: namespace.length === 0 ? "debt/" : `debt/${namespace.join("/")}/` };
 }
 
-function statusObservation(value: StatusItem, selector: string | undefined, context: TextRenderContext): string {
-  if ("kind" in value && value.kind === "akuma") {
-    const selectedAlias = alias(selector);
-    return snapshotText(value, context, selectedAlias === undefined ? {} : { alias: selectedAlias });
-  }
-  if ("kind" in value && value.kind === "contract-missing") return missing("status", value.id, context);
-  return renderKanshiText(value, context);
-}
-
 function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">, context: TextRenderContext): string {
   if (result.kind === "contract-missing") return missing("region", result.id, context);
   if (result.kind === "contract-terminal")
@@ -180,30 +169,6 @@ function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">, 
       context,
     );
   return renderRegionText(result, input);
-}
-
-function renderLs(query: VerbInput<"ls">, result: VerbOutput<"ls">, context: TextRenderContext): string {
-  switch (query.of) {
-    case "debt":
-      return renderDebtList("ls", debtScope(query), result as DebtCatalogue, context);
-    case "kei":
-      return renderContractCatalogue(result as ContractCatalogue);
-    case "akuma-name":
-      return renderArchetypeCatalogue(result as ArchetypeCatalog);
-    case "aku": {
-      const caller = query.caller?.kind === "external" ? (query.caller.caller as AkumaCaller) : undefined;
-      return renderAkumaCatalogue(result as AkumaList, query.akumaName ?? null, caller);
-    }
-  }
-}
-
-function renderStatus(query: VerbInput<"status">, result: StatusResult, context: TextRenderContext): string {
-  if ("items" in result)
-    return result.items
-      .map((item, i) => statusObservation(item, "selectors" in query ? query.selectors?.[i] : undefined, context))
-      .join("\n\n");
-  if ("category" in query) return renderKanshiCategoryText(result as KanshiCategoryReport, query.category, context);
-  return statusObservation(result as StatusItem, "selector" in query ? query.selector : undefined, context);
 }
 
 function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, context: TextRenderContext): string {
@@ -278,6 +243,8 @@ function renderDebtVerb(
       return renderDebtTree((input as VerbInput<"debt.tree">).id, value as VerbOutput<"debt.tree">, context);
     case "debt.doctor":
       return renderDoctor(value as VerbOutput<"debt.doctor">);
+    default:
+      throw new Error(`No shared text renderer for ${String(name)}`);
   }
 }
 
@@ -335,7 +302,7 @@ export function renderVerb<K extends VerbName>(
   name: K,
   input: VerbInput<K>,
   completion: VerbCompletion<VerbOutput<K>>,
-  context: TextRenderContext,
+  context: TextRenderContext & Readonly<{ alias?: string }>,
 ): string {
   if (completion.kind === "threw") return thrown(name, completion.error, context, input);
   const value = completion.value;
@@ -370,10 +337,27 @@ export function renderVerb<K extends VerbName>(
     }
     case "region":
       return renderRegion(input as VerbInput<"region">, value as VerbOutput<"region">, context);
-    case "ls":
-      return renderLs(input as VerbInput<"ls">, value as VerbOutput<"ls">, context);
+    case "kei.ls":
+      return renderContractCatalogue(value as VerbOutput<"kei.ls">);
+    case "aku.names":
+      return renderArchetypeCatalogue(value as VerbOutput<"aku.names">);
+    case "aku.ls": {
+      const result = value as VerbOutput<"aku.ls">;
+      return renderAkumaBoard({ kind: "present", ...result }, result.observedAt, {
+        ...context,
+        caller: (input as VerbInput<"aku.ls">).caller,
+      }).join("\n");
+    }
     case "status":
-      return renderStatus(input as VerbInput<"status">, value as StatusResult, context);
+      return renderKanshiText(value as VerbOutput<"status">, context);
+    case "kei.status": {
+      const result = value as VerbOutput<"kei.status">;
+      return result.kind === "contract-missing"
+        ? missing("status", result.id, context)
+        : renderKanshiText(result, context);
+    }
+    case "aku.status":
+      return snapshotText(value as VerbOutput<"aku.status">, context, context);
     case "spawn":
       return renderSpawn(input as VerbInput<"spawn">, value as VerbOutput<"spawn">, context);
     case "fork":
@@ -387,19 +371,9 @@ export function renderVerb<K extends VerbName>(
       return renderWait(input as VerbInput<"wait">, value as VerbOutput<"wait">, context);
     case "history":
       return renderHistory(input as VerbInput<"history">, value as VerbOutput<"history">, context);
-    case "debt.add":
-    case "debt.addDocument":
-    case "debt.update":
-    case "debt.show":
-    case "debt.done":
-    case "debt.drop":
-    case "debt.query":
-    case "debt.tree":
-    case "debt.doctor":
-      return renderDebtVerb(name, input as VerbInput<DebtVerbName>, value as VerbOutput<DebtVerbName>, context);
     case "report":
       return renderReport(value as VerbOutput<"report">, context);
     default:
-      throw new Error(`No shared text renderer for ${String(name)}`);
+      return renderDebtVerb(name, input as VerbInput<DebtVerbName>, value as VerbOutput<DebtVerbName>, context);
   }
 }

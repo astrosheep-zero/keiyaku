@@ -7,7 +7,6 @@ import {
   type DebtQueryExpression,
   type DebtQuerySort,
   type DebtAbsent,
-  type DebtCatalogue,
   type DebtShowResult,
   type DebtShowItem,
 } from "../debt/index.js";
@@ -33,7 +32,6 @@ import type { KeiyakuAt } from "./keiyaku.js";
 
 export type DebtSelection = "active" | "closed" | "all";
 export type DebtReadScope = Readonly<{ scope?: "namespace" | "world"; namespace?: readonly string[]; limit?: number }>;
-export type DebtLsInvocation = DebtReadScope & Readonly<{ of: "debt"; selection?: DebtSelection }>;
 export type DebtQueryInvocation = DebtReadScope &
   Readonly<{ selection?: DebtSelection; where?: DebtQueryExpression; sort?: DebtQuerySort }>;
 export type DebtUpdateInvocation = UpdateDebtInput & Readonly<{ id: string }>;
@@ -112,19 +110,6 @@ export async function debtClose(at: KeiyakuAt, input: DebtCloseInvocation, verb:
   text(v.note, "note");
   signal(v.signal)?.throwIfAborted();
   return { items: ids.map(() => missing()) };
-}
-export async function debtList(at: KeiyakuAt, input: DebtLsInvocation): Promise<DebtCatalogue> {
-  const v = readInput(input, "list", ["of", "selection"]);
-  if (v.of !== "debt") throw new TypeError("of must be debt");
-  const selected = selection(v.selection),
-    coord = await coordinates(at);
-  if (coord.world === null) return absent;
-  const scope = selectedScope(input);
-  return Debts.of(coord.world).list({
-    ...scope,
-    selection: selected,
-    ...(input.limit === undefined ? {} : { limit: input.limit }),
-  });
 }
 export async function debtQuery(at: KeiyakuAt, input: DebtQueryInvocation) {
   const v = readInput(input, "query", ["selection", "where", "sort"]);

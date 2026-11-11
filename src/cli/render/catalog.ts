@@ -1,44 +1,7 @@
-import type { AkumaList, ListedAkuma } from "../../akuma/akuma.js";
-import type { AkumaCaller } from "../../akuma/caller.js";
 import type { ArchetypeCatalog, ContractCatalogue, ContractSummary } from "../../index.js";
 import { contractAttentionFacts, progressStrip } from "./contract-observation.js";
 import { ageText, emptyCatalogue, safeText } from "./terminal.js";
-import { akumaMark, contractMark } from "./marks.js";
-
-function relativeAge(source: string | undefined, observedAt: string): string | null {
-  return source === undefined ? null : ageText(source, observedAt);
-}
-
-function akumaAgeFacts(row: ListedAkuma, observedAt: string): readonly string[] {
-  const lifeAge = relativeAge("lifeAt" in row ? row.lifeAt : undefined, observedAt);
-  const activityAge = relativeAge("lastActivityAt" in row ? row.lastActivityAt : undefined, observedAt);
-  return [
-    ...(lifeAge === null ? [] : [lifeAge]),
-    ...(activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`]),
-  ];
-}
-
-function akumaCatalogueRow(row: ListedAkuma, observedAt: string, root: string | undefined): string {
-  const ages = akumaAgeFacts(row, observedAt);
-  const aliases = row.aliases === undefined ? "" : ` (${row.aliases.map((alias) => safeText(alias)).join(" ")})`;
-  const by =
-    root !== undefined && "parentAkumaId" in row && row.parentAkumaId !== undefined && row.parentAkumaId !== root
-      ? ` · by ${safeText(row.parentAkumaId)}`
-      : "";
-  return `${akumaMark(row.life)} ${safeText(row.id)}${aliases} · ${row.life}${ages.length === 0 ? "" : ` · ${ages.join(" · ")}`}${by}`;
-}
-
-export function renderAkumaCatalogue(list: AkumaList, akumaName: string | null, caller?: AkumaCaller): string {
-  const rows = list.rows ?? [];
-  if (rows.length === 0) return emptyCatalogue("akuma");
-  const root = caller === undefined ? undefined : caller.kind === "akuma" ? caller.akumaId : "external";
-  return [
-    akumaName === null ? "AKUMA // recent" : `AKUMA // ${safeText(akumaName)}`,
-    "",
-    ...rows.map((row) => akumaCatalogueRow(row, list.observedAt, root)),
-    ...(list.more === true ? ["…"] : []),
-  ].join("\n");
-}
+import { contractMark } from "./marks.js";
 
 function formatAge(source: string, observedAt: string): string {
   return ageText(source, observedAt, "future");

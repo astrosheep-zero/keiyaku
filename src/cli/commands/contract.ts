@@ -41,7 +41,7 @@ async function bindDraftReceipt(world: () => Promise<string>, markdown: string) 
 }
 
 export async function acquireContractRequest(
-  request: Exclude<PendingRequest, { name: "spawn" | "tell" | "ask" }>,
+  request: Exclude<PendingRequest, { name: "spawn" | "tell" | "ask" | "status" }>,
   runtime: CliRuntime,
 ): Promise<VerbRequest> {
   const bytes = await runtime.readStdin();
@@ -54,7 +54,7 @@ export async function acquireContractRequest(
   return { name: request.name, input: { ...request.input, markdown: bytes }, output: request.output };
 }
 
-async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime): Promise<CliOutcome> {
+async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime, alias?: string): Promise<CliOutcome> {
   const progressing =
     request.name === "deliver" ||
     request.name === "deliver.preview" ||
@@ -79,7 +79,11 @@ async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime): Promi
   return emit(
     request.output,
     value,
-    () => renderVerb(request.name, request.input, completion, displayContext()),
+    () =>
+      renderVerb(request.name, request.input, completion, {
+        ...displayContext(),
+        ...(alias === undefined ? {} : { alias }),
+      }),
     classifyVerb(request.name, request.input, completion),
   );
 }
@@ -111,7 +115,11 @@ async function runBind(request: VerbRequest<"bind">, runtime: CliRuntime): Promi
   }
 }
 
-export async function runContractRequest(request: VerbRequest, runtime: CliRuntime): Promise<CliOutcome> {
+export async function runContractRequest(
+  request: VerbRequest,
+  runtime: CliRuntime,
+  alias?: string,
+): Promise<CliOutcome> {
   if (request.name === "bind") return runBind(request, runtime);
   if (request.name === "arc") {
     try {
@@ -130,5 +138,5 @@ export async function runContractRequest(request: VerbRequest, runtime: CliRunti
   }
   if (request.name === "review" && isBlankInput(request.input.summary))
     throw new CliUsageError("review requires a nonblank summary");
-  return invokeAndFinish(request, runtime);
+  return invokeAndFinish(request, runtime, alias);
 }

@@ -3,8 +3,6 @@ import type {
   ContractKanshiDetail,
   DebtKanshiRow,
   DebtKanshiWorld,
-  KanshiCategoryByOwner,
-  KanshiCategoryReport,
   KanshiContractReport,
   KanshiReport,
   BoardSection,
@@ -29,7 +27,6 @@ import {
 } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
-  emptyCatalogue,
   elapsedMilliseconds,
   entityLines,
   identityLine,
@@ -41,7 +38,7 @@ import {
   type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
-import { associationFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard } from "./kanshi-akuma.js";
+import { associationFact, formatAge, NARROW_COLUMNS, renderAkuma } from "./kanshi-akuma.js";
 import { contractDetailMark, contractMark, debtDispositionMark } from "./marks.js";
 import { dispositionText } from "./debt.js";
 
@@ -93,10 +90,7 @@ function renderWorldContractRow(row: BoardRow, observedAt: string, context: Text
   });
 }
 
-/**
- * One Contract board section. A category board states its own emptiness; the World
- * board leaves an empty section out because the world is its surrounding answer.
- */
+/** The World omits an empty Contract section. */
 function contractBoardRows(
   board: ContractKanshiBoard,
   observedAt: string,
@@ -114,16 +108,14 @@ function renderContractBoard(
   section: BoardSection<ContractKanshiBoard>,
   observedAt: string,
   context: TextRenderContext,
-  emptyRows: readonly string[],
 ): readonly string[] {
   if (section.kind === "absent") return ["CONTRACTS // absent"];
   if (section.kind === "failed") {
     const failure = ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.diagnostic)}`, "alert", context.color)];
     return failure;
   }
-  const board = section;
-  if ((board.rows ?? []).length === 0) return emptyRows;
-  return contractBoardRows(board, observedAt, context);
+  if ((section.rows ?? []).length === 0) return [];
+  return contractBoardRows(section, observedAt, context);
 }
 
 function detailHasError(row: ContractKanshiDetail): boolean {
@@ -365,29 +357,9 @@ export function renderKanshiText(
 ): string {
   if (!("contracts" in report)) return renderSelectedContract(report, context).join("\n");
   const blocks = [
-    renderContractBoard(report.contracts, report.observedAt, context, []),
+    renderContractBoard(report.contracts, report.observedAt, context),
     renderAkuma(report, context),
     renderDebts(report, context),
   ].filter((block) => block.length > 0);
   return blocks.length === 0 ? "○ world empty" : blocks.map((block) => block.join("\n")).join("\n\n");
-}
-
-const categoryRenderers: {
-  [C in keyof KanshiCategoryByOwner]: (
-    report: KanshiCategoryByOwner[C],
-    context: TextRenderContext,
-  ) => readonly string[];
-} = {
-  contract: (report, context) =>
-    renderContractBoard(report.section, report.observedAt, context, [emptyCatalogue("contracts")]),
-  akuma: (report, context) => renderAkumaBoard(report.section, report.observedAt, context, [emptyCatalogue("akuma")]),
-};
-
-/** Invocation context selects the owner renderer without inspecting result rows. */
-export function renderKanshiCategoryText<C extends keyof KanshiCategoryByOwner>(
-  report: KanshiCategoryReport<C>,
-  category: C,
-  context: TextRenderContext = { columns: DEFAULT_CLI_COLUMNS, color: false },
-): string {
-  return categoryRenderers[category](report, context).join("\n");
 }

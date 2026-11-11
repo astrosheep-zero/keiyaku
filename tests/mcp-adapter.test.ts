@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
@@ -12,8 +12,10 @@ import { Keiyaku, KeiyakuUsageError } from "../src/library/keiyaku.js";
 import { projectFailure } from "../src/library/outcome.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { DEFAULT_CLI_COLUMNS } from "../src/cli/render/terminal.js";
-import { Akuma, Keis, Repo, World } from "../src/index.js";
-import { bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { Akuma, Akumas, Keis, Repo, World, kanshi, listArchetypeDefinitions } from "../src/index.js";
+import { publishDispatch } from "../src/dispatch/index.js";
+import { repositoryAt } from "../src/git/repository.js";
+import { bornDirectAkuma, bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import {
   cleanupSpawnCapableFixtureForTest,
@@ -50,7 +52,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const name of ["ls", "wait", "history", "nuke", "report"])
+  for (const name of ["status", "kei_status", "aku_status", "kei_ls", "aku_ls", "aku_names", "debt_query", "wait", "history", "nuke", "report"])
     assert.equal(tools.filter((tool) => tool.name === name).length, 1);
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   const native = await Keiyaku.at({ cwd, environment, home: cwd }).run("whoami", {});
@@ -100,7 +102,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const id = (added.structuredContent as { kind: "accepted"; id: string }).id;
   const shown = await client.callTool({ name: "debt_show", arguments: { input: { id } } });
   assert.equal(shown.isError, false);
-  const list = await client.callTool({ name: "ls", arguments: { input: { of: "debt" } } });
+  const list = await client.callTool({ name: "debt_query", arguments: { input: {} } });
   assert.equal(list.isError, false);
   assert.match(JSON.stringify(list.structuredContent), /Fix the roof/);
   const plural = await client.callTool({ name: "debt_show", arguments: { input: { ids: [id] } } });
@@ -126,8 +128,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(a.isError, false);
   assert.equal(b.isError, false);
   const [listA, listB] = await Promise.all([
-    client.callTool({ name: "ls", arguments: { cwd: first, input: { of: "debt" } } }),
-    client.callTool({ name: "ls", arguments: { cwd: second, input: { of: "debt" } } }),
+    client.callTool({ name: "debt_query", arguments: { cwd: first, input: {} } }),
+    client.callTool({ name: "debt_query", arguments: { cwd: second, input: {} } }),
   ]);
   assert.match(JSON.stringify(listA.structuredContent), /First world/);
   assert.doesNotMatch(JSON.stringify(listA.structuredContent), /Second world/);
@@ -136,15 +138,43 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   t.after(() => rmSync(otherRepo.path, { recursive: true, force: true }));
   const foreign = await Keiyaku.at({ cwd: otherRepo.path, environment, home: cwd }).run("debt.add", { title: "Foreign repo world" });
   assert.equal(foreign.kind, "accepted");
-  const badCoordinate = await client.callTool({ name: "ls", arguments: { cwd: " ", input: { of: "debt" } } });
+  const badCoordinate = await client.callTool({ name: "debt_query", arguments: { cwd: " ", input: {} } });
   assert.equal(badCoordinate._meta?.["keiyaku/disposition"], "usage");
   const explicitRepo = await client.callTool({
-    name: "ls",
-    arguments: { cwd: first, repo: otherRepo.path, input: { of: "debt" } },
+    name: "debt_query",
+    arguments: { cwd: first, repo: otherRepo.path, input: {} },
   });
   assert.equal(explicitRepo.isError, false);
   assert.deepEqual(explicitRepo.structuredContent, listA.structuredContent);
   assert.doesNotMatch(JSON.stringify(explicitRepo.structuredContent), /Foreign repo world/);
+  const world = await World.at(first);
+  const repo = await Repo.at({ path: otherRepo.path });
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  const worker = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a2000014", createdAt: "2026-08-10T00:00:00.000Z" });
+  mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWorker.\n");
+  assert.equal((await publishDispatch({ repository: await repositoryAt(otherRepo.path), akumaId: worker.id, contractId: bound.contractId })).kind, "dispatched");
+  const catalogue = await Akumas.of(world).list({ repo, limit: 1 });
+  assert.deepEqual(catalogue.rows?.[0]?.contract, { kind: "associated", contractId: bound.contractId });
+  for (const [name, input, expected] of [
+    ["kei_ls", { limit: 1 }, await Keis.of(repo).list({ limit: 1 })],
+    ["aku_ls", { limit: 1 }, catalogue],
+    ["aku_names", {}, await listArchetypeDefinitions({ project: world, home: cwd })],
+    ["kei_status", { id: bound.contractId }, await kanshi({ world, repo, contract: bound.contractId })],
+    ["aku_status", { id: worker.id }, await Akumas.of(world).status({ akuma: worker.id, repo })],
+    ["status", {}, await kanshi({ world, repo })],
+  ] as const) {
+    const response = await client.callTool({ name, arguments: { cwd: first, repo: otherRepo.path, input } });
+    assert.equal(response.isError, false, name);
+    assert.deepEqual(
+      JSON.parse(JSON.stringify(response.structuredContent, (key, value: unknown) => key === "observedAt" ? undefined : value)),
+      JSON.parse(JSON.stringify(expected, (key, value: unknown) => key === "observedAt" ? undefined : value)),
+      name,
+    );
+  }
+  const missing = await client.callTool({ name: "kei_status", arguments: { repo: otherRepo.path, input: { id: "kei/missing-mcp-status" } } });
+  assert.deepEqual(missing.structuredContent, { kind: "contract-missing", id: "kei/missing-mcp-status" });
+  assert.equal(missing._meta?.["keiyaku/disposition"], "refused");
   assert.equal(process.cwd(), processCwd);
   assert.deepEqual({ ...process.env }, processEnv);
 });
