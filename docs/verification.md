@@ -17,10 +17,13 @@ Requirement derivation and declaration identity belong to
 [document.md](document.md).
 
 Only explicit verify invokes this producer. It requires an active Contract with
-a selected `verified` gate and valid declarations, and selects all current
-declarations or one by its current one-based position. An out-of-range selection
-refuses before execution or admission. Without `verified`, the section serves as
-reference documentation and creates no placement requirements.
+valid declarations and selects all current declarations or one by its current
+one-based position, independently of gate selection. Explicit verify refuses
+absent, empty, or invalid declarations regardless of gate selection. An
+out-of-range selection refuses
+before execution or admission. The `verified` gate selects recording and placement
+obligations; without it, execution returns results without recording testimony or
+changing placement.
 Delivery, review, preview, refreshed-target completion, and dependent continuation
 never execute declarations or their hooks; they consume standing evidence only.
 
@@ -48,16 +51,19 @@ reproducibility claim.
 Each declaration and scratch hook inherits the executing caller process
 environment through the shared runtime. Candidate-owned settings remain the only
 settings authority for those hooks. Verify always executes its selection, even
-when current satisfied evidence exists. Each terminal check admits its own
-attestation before later checks begin. Identical current testimony may reuse an
-admission, but the result still reports execution and its verdict separately
+when current satisfied evidence exists. When `verified` is selected, each terminal
+check admits its own attestation before later checks begin. Otherwise no check
+admits testimony or another journal fact; its execution result remains visible to
+the caller. Identical current testimony may reuse an admission, but the result
+still reports execution and its verdict separately
 from admission reuse. Reuse requires identical testimony, including the bounded
 failure summary; changed diagnostic testimony is new evidence even when its
 verdict and captured subject match. No aggregate attestation is produced.
 
 Normal failure and timeout are terminal unsatisfied testimony for that
-requirement only; full verify continues with remaining declarations after those
-results. Candidate unavailability, environment/setup failure, spawn failure,
+requirement only when recording is selected; full verify continues with remaining
+declarations after those results. Candidate unavailability, environment/setup
+failure, spawn failure,
 unknown exit, and caller cancellation admit no testimony for the affected
 check. An operational stop may stop further scheduling; cancellation stops later
 owned work. Earlier admissions and cleanup residue remain visible. A terminal
@@ -67,9 +73,10 @@ verdict and identifies the admission stop without claiming testimony was recorde
 Admission never retargets captured testimony, even when the Contract has moved.
 Requirement identity carries declaration currency; no whole-section subject
 invalidates unrelated checks. Generic lifecycle currentness alone decides gate
-satisfaction. After execution and admissions, verify invokes ordinary completion
-using current evidence. Only an already-delivered Contract with ready
-prerequisites and all gates satisfied may place; a selected success alone makes
+satisfaction. With `verified` selected, execution and admissions are followed by
+ordinary completion using current evidence. Ungated execution requests no completion.
+Only an already-delivered Contract with ready prerequisites and all gates satisfied
+may place; a selected success alone makes
 no whole-gate promise. `verified` is this producer's conventional token; other
 opaque gates remain outside this chapter.
 

@@ -8,14 +8,7 @@ import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { activeContract, type ActiveContractRefusal } from "../core/facts/observation.js";
 import { dependencyKeySet } from "../core/subject.js";
-import type {
-  ActorId,
-  AttestationEntry,
-  ContractId,
-  DependencyKeySet,
-  RequirementId,
-  SnapshotId,
-} from "../core/facts/types.js";
+import type { ActorId, ContractId, DependencyKeySet, Gate, RequirementId, SnapshotId } from "../core/facts/types.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import {
   executeVerification,
@@ -110,6 +103,7 @@ type VerifyRequirementInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
   contractId: ContractId;
+  gates: readonly Gate[];
   actor?: ActorId;
   at: string;
   snapshot: SnapshotId;
@@ -148,12 +142,9 @@ type VerificationRuntimeStop = z.infer<typeof verificationRuntimeStopSchema>;
 type VerificationReuseRefusal = Readonly<{ kind: "verification-reuse" }>;
 
 type VerificationReuseStep = Readonly<{ kind: "reused" }>;
-export type VerificationStep =
-  | ProtocolResult<ActiveContractRefusal | VerificationReuseRefusal>
-  | VerificationRuntimeStop
-  | VerificationReuseStep;
+export type VerificationStep = ProtocolResult<ActiveContractRefusal> | VerificationRuntimeStop | VerificationReuseStep;
 export type VerificationResult = Readonly<{
-  step: VerificationStep;
+  step?: VerificationStep;
   reuse?: true;
   counts?: Readonly<{ verdict: "satisfied" | "unsatisfied"; summary?: string }>;
   cleanup?: VerificationCleanupFailure;
@@ -182,32 +173,13 @@ function verificationInput(
   };
 }
 
-function reusableVerificationAttestation(
-  current: AttestationEntry | undefined,
-  subject: DependencyKeySet,
-  verdict: "satisfied" | "unsatisfied",
-  summary: string | undefined,
-): true | undefined {
-  if (
-    current === undefined ||
-    current.data.subject !== subject ||
-    current.data.verdict !== verdict ||
-    current.data.summary !== summary
-  )
-    return undefined;
-  return true;
-}
-
-function retainVerificationReceipt(input: VerifyRequirementInput, step: VerificationStep): void {
-  if (!("failure" in step) && step.kind === "accepted") input.progress?.recordResidue(input.contractId, step);
-}
-
 async function verificationStep(
   input: VerifyRequirementInput,
   execution: VerificationExecution,
   subject: DependencyKeySet,
-): Promise<VerificationStep> {
+): Promise<VerificationStep | undefined> {
   if (execution.outcome.kind === "terminal") {
+    if (!input.gates.includes(VERIFIED)) return undefined;
     const { verdict, summary } = execution.outcome;
     const admission = await admitIntent<AttestationInput<never>, ActiveContractRefusal | VerificationReuseRefusal>(
       input.channel,
@@ -227,14 +199,16 @@ async function verificationStep(
                 attestation.data.requirement === input.requirement &&
                 attestation.data.subject === subject,
             );
-          const reuse = reusableVerificationAttestation(current, subject, verdict, summary);
-          return reuse === undefined ? undefined : { kind: "verification-reuse" };
+          if (current?.data.verdict === verdict && current.data.summary === summary)
+            return { kind: "verification-reuse" };
+          return undefined;
         },
       },
     );
-    if (admission.kind === "refused" && admission.refusal.kind === "verification-reuse") {
-      return { kind: "reused" };
-    }
+    if (admission.kind === "refused")
+      return admission.refusal.kind === "verification-reuse"
+        ? { kind: "reused" }
+        : { kind: "refused", refusal: admission.refusal };
     return admission;
   }
   if (execution.outcome.kind === "candidate-unavailable")
@@ -256,15 +230,7 @@ async function verificationStep(
   throw new Error("Verification execution returned an invalid outcome");
 }
 
-function verificationCounts(execution: VerificationExecution): VerificationResult["counts"] {
-  if (execution.outcome.kind !== "terminal") return undefined;
-  return {
-    verdict: execution.outcome.verdict,
-    ...(execution.outcome.summary === undefined ? {} : { summary: execution.outcome.summary }),
-  };
-}
-
-/** Execute and admit one declaration before its caller schedules another check. */
+/** Execute one declaration and record testimony only when its gate is selected. */
 export async function verifyRequirement(input: VerifyRequirementInput): Promise<VerificationResult> {
   const snapshot = input.snapshot;
   const subject = dependencyKeySet([{ kind: "snapshot", value: snapshot }]);
@@ -287,7 +253,7 @@ export async function verifyRequirement(input: VerifyRequirementInput): Promise<
     requirement: input.requirement,
     index: input.index,
   });
-  let step: VerificationStep;
+  let step: VerificationStep | undefined;
   try {
     step = await verificationStep(input, execution, subject);
   } catch (error) {
@@ -296,11 +262,16 @@ export async function verifyRequirement(input: VerifyRequirementInput): Promise<
     input.progress?.recordStop(stop);
     step = { failure: "cancelled" };
   }
-  const counts = verificationCounts(execution);
-  retainVerificationReceipt(input, step);
+  const outcome = execution.outcome;
+  const counts =
+    outcome.kind === "terminal"
+      ? { verdict: outcome.verdict, ...(outcome.summary === undefined ? {} : { summary: outcome.summary }) }
+      : undefined;
+  if (step !== undefined && !("failure" in step) && step.kind === "accepted")
+    input.progress?.recordResidue(input.contractId, step);
   return {
-    step,
-    ...("kind" in step && step.kind === "reused" ? { reuse: true } : {}),
+    ...(step === undefined ? {} : { step }),
+    ...(step !== undefined && "kind" in step && step.kind === "reused" ? { reuse: true } : {}),
     ...(counts === undefined ? {} : { counts }),
     ...(execution.cleanup === undefined ? {} : { cleanup: execution.cleanup }),
     ...(execution.leak === undefined ? {} : { leak: execution.leak }),

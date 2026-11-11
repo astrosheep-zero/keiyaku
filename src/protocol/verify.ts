@@ -48,7 +48,7 @@ export const checkAdmissionStopSchema = z.union([
 ]);
 export const verificationStopSchema = z.union([runtimeStopSchema, checkAdmissionStopSchema]);
 export type VerificationStop = z.output<typeof verificationStopSchema>;
-const admission = z.union([z.literal("reused"), checkAdmissionStopSchema]).exactOptional();
+const admission = z.union([z.enum(["reused", "unrecorded"]), checkAdmissionStopSchema]).exactOptional();
 export const verificationCheckSchema = z.union([
   z
     .strictObject({ ...checkCoordinate, kind: z.literal("terminal"), verdict: z.literal("satisfied"), admission })
@@ -117,7 +117,7 @@ type VerifyOperationInput = MutationOperationInput &
   }>;
 export type VerifyOperationResult =
   | Readonly<{ kind: "refused"; refusal: VerifyRefusal }>
-  | Readonly<{ kind: "accepted"; checkpoint: ContractCheckpoint; value: VerifyAcceptedValue }>;
+  | Readonly<{ kind: "accepted"; checkpoint?: ContractCheckpoint; value: VerifyAcceptedValue }>;
 
 type PreparedVerification = Readonly<{
   kind: "prepared";
@@ -138,7 +138,6 @@ async function prepareVerification(
   const derivation = input.deriveDocument(state);
   if (derivation.verification.kind === "refused") return { kind: "refused", refusal: derivation.verification.refusal };
   const definition = derivation.verification.data;
-  if (definition === null) return { kind: "refused", refusal: { kind: "verification-not-selected" } };
   if (input.index !== undefined && input.index > definition.declarations.length)
     return {
       kind: "refused",
@@ -180,26 +179,22 @@ function checkReport(
     if (stop.kind === "refused" || stop.kind === "retry") throw new Error("nonterminal check requires a runtime stop");
     return { ...fields, ...stop };
   }
-  // A terminal verdict only proves admission when custody holds the matching attestation, reuse, or stop.
-  const attested = checked.admission?.facts.some(
-    (fact) => fact.kind === "attestation" && fact.data.gate === VERIFIED && fact.data.requirement === requirement,
-  );
-  let admission: "reused" | z.output<typeof checkAdmissionStopSchema> | undefined;
+  let admission: "reused" | "unrecorded" | z.output<typeof checkAdmissionStopSchema> | undefined;
   if (checked.reuse !== undefined) admission = "reused";
-  else if (attested === true) admission = undefined;
+  else if (checked.admission !== undefined) admission = undefined;
   else if (checked.stop !== undefined) {
     const stop = compactVerificationStop(checked.stop);
     if (stop.kind === "refused" || stop.kind === "retry") admission = stop;
     else if (stop.kind === "cancelled") admission = { kind: "cancelled" };
     else throw new Error("terminal check admission can only refuse, retry or cancel");
-  } else throw new Error("terminal verification requires its admission conclusion");
+  } else admission = "unrecorded";
   const terminal = { ...fields, kind: "terminal" as const, ...(admission === undefined ? {} : { admission }) };
   if (checked.counts.verdict === "satisfied") return { ...terminal, verdict: "satisfied" };
   if (checked.counts.summary === undefined) throw new Error("unsatisfied terminal check requires its diagnosis");
   return { ...terminal, verdict: "unsatisfied", summary: checked.counts.summary };
 }
 
-/** Capture a prospective delivery without admitting a candidate, then independently attest each check. */
+/** Capture a prospective delivery, then independently execute each selected declaration. */
 export async function verifyOperation(input: VerifyOperationInput): Promise<VerifyOperationResult> {
   const prepared = await prepareVerification(input);
   if (prepared.kind === "refused") return prepared;
@@ -222,6 +217,7 @@ export async function verifyOperation(input: VerifyOperationInput): Promise<Veri
       channel: input.channel,
       repository: input.scope,
       contractId: state.id,
+      gates: state.terms.gates,
       at: timestamp(),
       snapshot,
       declaration,
@@ -245,5 +241,9 @@ export async function verifyOperation(input: VerifyOperationInput): Promise<Veri
     input.progress?.recordVerificationCheck(state.id, snapshot, check);
     if (checked.stop !== undefined) break;
   }
-  return { kind: "accepted", checkpoint, value: { snapshot, checks } };
+  return {
+    kind: "accepted",
+    ...(state.terms.gates.includes(VERIFIED) ? { checkpoint } : {}),
+    value: { snapshot, checks },
+  };
 }

@@ -73,9 +73,10 @@ and control flow, invariants, and failure handling clearly enough that two
 ~~~~
 
 - **Gates and `verified`:** omitting gates uses `gates.default` if configured,
-  otherwise `reviewed`. Without the `verified` gate, `## Verification` serves
-  as reference documentation for the `Deliverer` and `Reviewer` rather than a gate
-  requirement executed by `verify`.
+  otherwise `reviewed`. Explicit `verify` runs valid `## Verification`
+  declarations regardless of gate selection. With `verified`, it records evidence
+  and may complete placement; without it, it returns results without testimony,
+  journal facts, or placement effects.
 - **Independent scratch:** each closed fence in `## Verification` runs in its
   own clean scratch directory; include any required build in that fence or its
   setup hook.

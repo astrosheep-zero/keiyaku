@@ -17,10 +17,7 @@ export type VerificationDefinition = Readonly<{
 
 export type VerificationDeclarationRefusal = Readonly<{ kind: "verification-declaration-invalid" }>;
 
-export type VerificationDeclarationPreparation = Preparation<
-  VerificationDefinition | null,
-  VerificationDeclarationRefusal
->;
+export type VerificationDeclarationPreparation = Preparation<VerificationDefinition, VerificationDeclarationRefusal>;
 
 export const VERIFIED = gate("verified");
 
@@ -49,14 +46,9 @@ export function gateRequirements(
 }
 
 export function prepareVerificationDeclaration(
-  input: Readonly<{
-    gates: readonly Gate[];
-    definition: VerificationDefinition | null;
-  }>,
+  definition: VerificationDefinition | null,
 ): VerificationDeclarationPreparation {
-  if (!input.gates.includes(VERIFIED)) return { kind: "prepared", data: null };
-  if (input.definition !== null && input.definition.declarations.length > 0)
-    return { kind: "prepared", data: input.definition };
+  if (definition !== null && definition.declarations.length > 0) return { kind: "prepared", data: definition };
   return {
     kind: "refused",
     refusal: { kind: "verification-declaration-invalid" },

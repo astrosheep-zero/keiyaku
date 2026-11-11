@@ -68,16 +68,19 @@ test("exact duplicate declarations collapse obligations without losing their inv
     verificationRequirement(first),
     verificationRequirement(second),
   ]);
-  const prepared = documentDerivation(decoded, [gate("verified")]).verification;
+  const prepared = documentDerivation(decoded).verification;
   assert.equal(prepared.kind, "prepared");
   if (prepared.kind === "prepared") assert.equal(prepared.data!.declarations.length, 3);
 });
 
-test("an unselected Verification section is inert and selected Verification still requires declarations", () => {
+test("Verification requirements depend on gate selection while preparation depends only on declarations", () => {
   assert.deepEqual(contractTerms(document(), [gate("reviewed")], []).requirements, {
     reviewed: [singletonRequirement(gate("reviewed"))],
   });
   assert.deepEqual(contractTerms(document(), [], []).requirements, {});
+  const prepared = documentDerivation(document()).verification;
+  assert.ok(prepared.kind === "prepared");
+  assert.deepEqual(prepared.data.declarations, [first, second]);
   const noChecks = document({ verification: [] });
-  assert.equal(documentDerivation(noChecks, [gate("verified")]).verification.kind, "refused");
+  assert.equal(documentDerivation(noChecks).verification.kind, "refused");
 });

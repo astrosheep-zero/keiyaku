@@ -8,7 +8,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { makeGitRepository, observeContract } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
 
-test("amend names the missing Verification declaration required by verified", async () => {
+test("amend refuses verified without executable declarations", async () => {
   const raw = makeGitRepository();
   raw.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = await cliJson<Readonly<{ kind: string; contractId?: string }>>(
@@ -38,13 +38,7 @@ test("amend names the missing Verification declaration required by verified", as
     },
   );
   assert.equal(result.value.kind, "refused");
-  const rendered = await runCli(["-C", raw.path, "amend", bound.value.contractId, "--gates", "verified"], {
-    environment: {},
-    readStdin: async () => {
-      throw new Error("gate-only amend must not read stdin");
-    },
-  });
-  assert.match(rendered.stdout, /gate 'verified' requires a declared Verification; the Contract declares none/u);
+  assert.deepEqual(result.value.reason, { kind: "verification-declaration-invalid" });
 });
 
 test("CLI binds mixed gate selections and amends or binds an explicit empty selection", async () => {

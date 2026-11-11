@@ -44,7 +44,7 @@ function crossProcessAmend(
     "  const amended = prepareAmendDocument(process.env.KEIYAKU_MARKDOWN)(decodeContractDocument(sourceTerms.document.bytes));",
     "  const document = decodeContractDocument(amended.document);",
     "  const terms = contractTerms(document, sourceTerms.gates, sourceTerms.after);",
-    "  return { source: sourceTerms, deriveAmendment: () => ({ terms, verification: documentDerivation(document, terms.gates).verification }) };",
+    "  return { source: sourceTerms, deriveAmendment: () => ({ terms, verification: documentDerivation(document).verification }) };",
     "})();",
     "process.stdout.write(`ready${intent === undefined ? '' : `:${intent.source.document.key}`}\\n`);",
     "if (process.env.KEIYAKU_WAIT_FOR_RELEASE === '1') await new Promise((resolve) => process.stdin.once('data', resolve));",

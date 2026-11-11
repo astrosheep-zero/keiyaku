@@ -143,11 +143,12 @@ invocation convenience, never persisted evidence identity. It captures the
 appointed worktree under delivery's clean-worktree and explicit dirty-capture
 rules and prepares the exact prospective integration without admitting a
 candidate, delivery, review, or reintegration. Preparation conflict is typed
-non-admission, not conflict handoff. It always executes the selected work,
-admits each terminal check independently, then requests ordinary completion
-using current generic requirement evidence. Only an already-delivered Contract
-can place. Verification records each selected check independently of review and
-delivery; generic completion judges the current evidence for every requirement.
+non-admission, not conflict handoff. It always executes the selected work.
+With `verified` selected, it admits each terminal check independently, then
+requests ordinary completion using current generic requirement evidence. Only an
+already-delivered Contract can place. Without that gate, it returns execution
+results without recording testimony or requesting completion. Verification remains
+independent of review and delivery.
 
 Delivery preview observes a prospective candidate through a dedicated native handle
 operation, separate from delivery admission. CLI and other adapters consume that

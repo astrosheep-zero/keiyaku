@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VERIFIED } from "../verification/declaration.js";
 import { snapshotIdSchema, changeIdSchema } from "../git/identity.js";
 import { conflictRecoverySchema, worktreeWorkspaceSchema } from "../git/workspace.js";
 import {
@@ -401,7 +402,7 @@ async function prepareDeliveryArtifacts(
   state: ContractState,
 ): Promise<DeliveryArtifacts> {
   const derivation = input.deriveDocument(state);
-  if (derivation.verification.kind === "refused") return { kind: "defer" };
+  if (state.terms.gates.includes(VERIFIED) && derivation.verification.kind === "refused") return { kind: "defer" };
   if (input.materializeConflict === true && state.terminal === null) return { kind: "defer" };
   const captured = await captureAuthorizedDeliveryTender(
     input.scope,
@@ -447,7 +448,7 @@ async function assembleDeliveryAttempt(
   if (state === null) return { kind: "stale" };
   if (external.witness.head !== state.head) return { kind: "stale" };
   const derivation = input.deriveDocument(state);
-  if (derivation.verification.kind === "refused") {
+  if (state.terms.gates.includes(VERIFIED) && derivation.verification.kind === "refused") {
     return {
       kind: "assembled",
       state,

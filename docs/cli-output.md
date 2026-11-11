@@ -40,8 +40,10 @@ retains historical content without duplicating storage envelopes. Verification
 evidence remains associated with its exact
 captured snapshot and individual requirement: a verify receipt exposes every
 executed check's verdict or stop, current declaration position, requirement, and
-whether testimony was newly admitted or reused, while delivery and review
-receipts consume standing evidence without claiming a producer run. When a
+admission reuse or stop when recording is selected. Ungated execution explicitly
+states that no testimony was recorded; this is neither a failure nor an admission
+stop. Delivery and review receipts consume standing evidence without claiming a
+producer run. When a
 verified snapshot lands, the landing names that same identity and its destination
 movement. Successful internal retirement is not an ordinary receipt inventory;
 failed removal retains its diagnostic path.

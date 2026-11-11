@@ -75,10 +75,8 @@ function verificationRefusalFacts(
   if (refusal.kind === "verification-declaration-invalid")
     return [
       ...contract,
-      `${indent}reason  gate 'verified' requires a declared Verification; the Contract declares none`,
+      `${indent}reason  Verification requires valid executable declarations; the Contract declares none`,
     ];
-  if (refusal.kind === "verification-not-selected")
-    return [`${indent}reason  Contract does not select the verified gate`, ...contract];
   if (refusal.kind === "verification-index-out-of-range")
     return [
       `${indent}reason  Verification declaration index is out of range`,

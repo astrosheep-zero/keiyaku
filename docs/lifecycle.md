@@ -77,9 +77,9 @@ protocol adapter, or board recomputes it.
 
 Producer methodology for `verified` belongs to
 [verification.md](verification.md). Selection makes its current requirements
-placement obligations; without `verified`, the Verification section serves as
-reference documentation and creates none. Review and custom gates have a
-singleton requirement derived from the gate identity. The document boundary
+placement obligations. Without `verified`, explicit execution still returns its
+results but records no testimony and requests no placement. Review and custom
+gates have a singleton requirement derived from the gate identity. The document boundary
 derives and replaces the effective requirement set on bind, amend, and fork
 without teaching core producer vocabulary.
 

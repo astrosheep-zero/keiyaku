@@ -96,8 +96,11 @@ be repeated. Consumers never recompute currentness or eligibility.
 Explicit verify reports the captured snapshot once and accounts for every
 selected check that ran or stopped. Each check keeps its declaration position,
 stable requirement when needed to avoid ambiguity, verdict or operational
-stop, admission reuse or stop, and retained diagnostic path. Admission reuse
-never implies skipped execution. No aggregate gate testimony is produced.
+stop, admission reuse or stop when recording is selected, and retained diagnostic
+path. Each terminal result explicitly distinguishes execution without recording
+from newly admitted or reused testimony. Execution without the `verified` gate
+reports its results without recording testimony or requesting placement. Admission
+reuse never implies skipped execution. No aggregate gate testimony is produced.
 Earlier admissions, later completed checks, and cleanup residue remain visible.
 A selected success alone does not establish whole-gate satisfaction. Ordinary
 completion can place only an already-delivered Contract whose current

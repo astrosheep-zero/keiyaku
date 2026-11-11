@@ -31,9 +31,10 @@ must not be the `Deliverer` of the candidate under review):
   candidate, standing evidence, and target movement without mutating state. If
   the target branch moved and conflicts, merge the target head in the
   appointed worktree (or use delivery conflict handoff + dirty capture).
-- **`verify`:** runs `## Verification` fences in clean scratch against
-  the prospective integration when the `verified` gate is selected (without
-  `verified`, the section serves as reference documentation).
+- **`verify`:** runs `## Verification` fences in independent clean scratch against
+  the prospective integration regardless of gate selection. With `verified`, it
+  records evidence and may complete placement; without it, it returns results
+  without testimony, journal facts, or placement effects.
 - **`deliver` & `review`:** `deliver` tenders the worktree
   candidate; `review` records verdict testimony before or after delivery.
   Neither runs `Verification`.

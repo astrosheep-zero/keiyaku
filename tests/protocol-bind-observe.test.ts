@@ -53,7 +53,7 @@ import {
 
 const repositoryAt = cachedRepositoryAt;
 
-const NO_VERIFICATION = { kind: "prepared", data: null } as const;
+import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 const DELIVERY_DOCUMENT = "# Contract\n";
 
 let untitledBind = 0;
@@ -75,7 +75,7 @@ function bindOperation(
       contractId:
         id ??
         (title === undefined ? contractIdFromSegment(`protocol-bind-${untitledBind++}`) : protocolContractId(title)),
-      verification: NO_VERIFICATION,
+      verification: prepareVerificationDeclaration(null),
     }),
   );
 }
@@ -94,7 +94,7 @@ function amendOperation(input: AmendTestInput) {
       channel,
       ...(source === undefined || terms === undefined
         ? {}
-        : { source, deriveAmendment: () => ({ terms, verification: NO_VERIFICATION }) }),
+        : { source, deriveAmendment: () => ({ terms, verification: prepareVerificationDeclaration(null) }) }),
     }),
   );
 }

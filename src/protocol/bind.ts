@@ -17,9 +17,10 @@ import {
 } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import type {
-  VerificationDeclarationPreparation,
-  VerificationDeclarationRefusal,
+import {
+  VERIFIED,
+  type VerificationDeclarationPreparation,
+  type VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
 import { admitPreparedIntent } from "./intent.js";
 import { complete, type IntentOutcome } from "./outcome.js";
@@ -84,7 +85,7 @@ async function prepareBindCoordinates(
   input: BindOperationInput,
   selection: BindTargetSelection,
 ): Promise<ExternalProtocolPreparation<BindCoordinatesPreparation, BindRefusalUnion>> {
-  if (input.verification.kind === "refused") {
+  if (input.terms.gates.includes(VERIFIED) && input.verification.kind === "refused") {
     return { kind: "prepared", prepared: { kind: "declaration-refused", preparation: input.verification } };
   }
   if (selection.kind === "contract") {

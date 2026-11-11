@@ -9,7 +9,7 @@ import { entryUlid, type ContractTerms } from "../src/core/facts/types.js";
 import { decideArc } from "../src/core/verbs/arc.js";
 import { observeContractsForAdmissionAt } from "../src/git/observe.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../src/git/read-observation.js";
-import { contractTerms } from "../src/library/input.js";
+import { contractTerms, documentDerivation } from "../src/library/input.js";
 import { amendOperation } from "../src/protocol/amend.js";
 import { runProtocol } from "../src/protocol/run.js";
 import { cachedRepositoryAt, withGitShim } from "./support/git.js";
@@ -173,11 +173,11 @@ test("conflicting concurrent amends keep their typed business refusals", async (
   const capability = await cachedRepositoryAt(repository.path);
   const derive =
     (markdown: string) =>
-    (observed: ContractTerms): Readonly<{ terms: ContractTerms; verification: { kind: "prepared"; data: null } }> => {
+    (observed: ContractTerms) => {
       const amended = prepareAmendDocument(markdown)(decodeContractDocument(observed.document.bytes));
       const decoded = decodeContractDocument(amended.document);
       const terms = contractTerms(decoded, observed.gates, observed.after);
-      return { terms, verification: { kind: "prepared", data: null } };
+      return { terms, verification: documentDerivation(decoded).verification };
     };
   const writer = (markdown: string) =>
     withGitDecodeChannel(capability, (channel) =>

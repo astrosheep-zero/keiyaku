@@ -284,7 +284,7 @@ export class Kei {
                   ),
                 );
           const terms = contractTerms(amended, gates ?? source.gates, prerequisites ?? source.after);
-          return { terms, verification: documentDerivation(amended, terms.gates).verification };
+          return { terms, verification: documentDerivation(amended).verification };
         },
       });
       if (admission.kind !== "accepted")
@@ -417,7 +417,7 @@ export class Kei {
           return { kind: "refused", contractId: this.id, reason: compactVerifyRefusal(outcome.refusal) };
         accumulator.extendConclusions(this.id, outcome.value);
         try {
-          if (!signal?.aborted)
+          if (!signal?.aborted && outcome.checkpoint !== undefined)
             await advanceAndContinue(
               accumulator,
               scope,
@@ -435,7 +435,8 @@ export class Kei {
         } catch (error) {
           retainTrailingFailure(accumulator, this.id, error, signal);
         }
-        await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
+        if (outcome.checkpoint !== undefined)
+          await reconcileAffectedContracts(accumulator, this.id, scope, localChannel, hooks);
         const { continuation, ...value } = accumulator.conclusions(this.id) ?? {};
         return {
           kind: "accepted",
@@ -837,7 +838,7 @@ function persistedDocument(bytes: string): ReturnType<typeof decodeContractDocum
 }
 
 function derivedDocument(state: ContractState): DocumentDerivation {
-  return documentDerivation(persistedDocument(state.terms.document.bytes), state.terms.gates);
+  return documentDerivation(persistedDocument(state.terms.document.bytes));
 }
 
 function observationOptions(options: MutationObservation | undefined): ExecutionObserver | undefined {

@@ -77,7 +77,6 @@ export const operationRefusalSchemas = {
   verify: z.union([
     previewRefusalSchema,
     preparationReasonSchema,
-    z.strictObject({ kind: z.literal("verification-not-selected") }).readonly(),
     z
       .strictObject({ kind: z.literal("verification-index-out-of-range"), total: z.number().int().nonnegative() })
       .readonly(),

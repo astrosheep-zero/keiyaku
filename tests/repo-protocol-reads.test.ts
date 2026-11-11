@@ -23,6 +23,7 @@ import { decodeContractDocument } from "../src/body/decode.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
 import { contractJournalPath, contractJournalPaths } from "../src/git/identity.js";
+import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { bindOperation } from "../src/protocol/bind.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
 import {
@@ -62,7 +63,7 @@ async function bind(
       contractId: protocolContractId(title),
       terms: terms(title, after),
       targetSelection: { kind: "targetless" },
-      verification: { kind: "prepared", data: null },
+      verification: prepareVerificationDeclaration(null),
       workspace,
     }),
   );

@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { boundedListLimit } from "../bounded-list.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
-import type { ActiveContractRefusal } from "../core/facts/observation.js";
 import type { ActorId, ContractId, ContractState, DeliverData, DocumentKey } from "../core/facts/types.js";
 import { gateReportSchema } from "./result-leaves.js";
 export {
@@ -90,19 +89,13 @@ export const verificationDeclarationRefusalSchema = z
   .object({ kind: z.literal("verification-declaration-invalid") })
   .strict()
   .readonly();
-export const verifyRefusalSchema = z.union([
-  z
-    .object({ kind: z.literal("verification-not-selected") })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal("verification-index-out-of-range"),
-      total: z.number().int().nonnegative(),
-    })
-    .strict()
-    .readonly(),
-]);
+export const verifyRefusalSchema = z
+  .object({
+    kind: z.literal("verification-index-out-of-range"),
+    total: z.number().int().nonnegative(),
+  })
+  .strict()
+  .readonly();
 export const placementRefusalSchema = z.union([
   z
     .object({
@@ -300,14 +293,12 @@ export function unpackVerificationOutcome(verification: VerificationResult): Rea
 }> {
   const step = verification.step;
   const stop: VerificationStop | undefined =
-    "failure" in step
-      ? step
-      : "refusal" in step && step.refusal.kind === "verification-reuse"
-        ? undefined
-        : "kind" in step && step.kind === "reused"
-          ? undefined
-          : stepStop(step as ProtocolResult<ActiveContractRefusal>);
-  const admission = !("failure" in step) && step.kind === "accepted" ? step : undefined;
+    step === undefined || ("kind" in step && step.kind === "reused")
+      ? undefined
+      : "failure" in step
+        ? step
+        : stepStop(step);
+  const admission = step !== undefined && !("failure" in step) && step.kind === "accepted" ? step : undefined;
   return {
     ...(verification.cleanup === undefined ? {} : { cleanup: verification.cleanup }),
     ...(verification.leak === undefined ? {} : { leak: verification.leak }),

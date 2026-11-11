@@ -48,6 +48,27 @@ test("explicit checks accumulate on the prospective snapshot and unchanged deliv
   assert.equal(present(await contract.state()).terminal?.kind, "claimed");
 });
 
+test("review-only Contracts without declarations refuse verify and retain the delivery lifecycle", async () => {
+  const repository = repositoryWithMain();
+  const contract = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
+    markdown: document(), gates: ["reviewed"], target: "refs/heads/main",
+  })).kei;
+  const before = present(await contract.state());
+  const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), before.id);
+  commitCandidate(repository, worktree);
+  const invalid = await contract.verify();
+  assert.ok(invalid.kind === "refused");
+  assert.equal(invalid.reason.kind, "verification-declaration-invalid");
+  assert.deepEqual(present(await contract.state()), before);
+  assert.equal((await contract.previewDelivery()).kind, "ready");
+  const delivered = accepted(await contract.deliver());
+  assert.ok(delivered.placement?.kind === "gates-unsatisfied");
+  assert.deepEqual(delivered.placement.unmet.map(({ gate }) => gate), ["reviewed"]);
+  const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Review without declarations" }));
+  assert.equal(reviewed.placement?.kind, "placed");
+  assert.equal(present(await contract.state()).terminal?.kind, "claimed");
+});
+
 test("each declaration executes in fresh scratch and terminal failure preserves later evidence and scenes", async () => {
   const { contract } = await fixture(["echo created > scratch-only", "test -f scratch-only", "exit 7", "true"]);
   const verified = accepted(await contract.verify());

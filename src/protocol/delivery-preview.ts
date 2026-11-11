@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { VERIFIED } from "../verification/declaration.js";
 import { changeIdSchema, contractIdSchema, snapshotIdSchema } from "./operations.js";
 import {
   preparationReasonSchema,
@@ -208,7 +209,8 @@ export async function previewDeliveryOperation(
   const targetRefusal = targetContractRefusal(observed.decision, state.coordinates.target);
   if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   const derivation = input.deriveDocument(state);
-  if (derivation.verification.kind === "refused") return { kind: "refused", refusal: derivation.verification.refusal };
+  if (state.terms.gates.includes(VERIFIED) && derivation.verification.kind === "refused")
+    return { kind: "refused", refusal: derivation.verification.refusal };
   const appointment = await readManagedWorktreeAppointment(input.scope, state.id);
   if (appointment.kind === "failed") throw new Error(appointment.diagnostic);
   if (appointment.kind === "unappointed")

@@ -89,7 +89,7 @@ function words(kind: string): string {
 
 type PlacementStop = Exclude<Placement, { kind: "placed" }>;
 type TerminalCheck = Extract<VerificationCheck, { kind: "terminal" }>;
-type CheckAdmissionStop = Exclude<NonNullable<TerminalCheck["admission"]>, "reused">;
+type CheckAdmissionStop = Exclude<NonNullable<TerminalCheck["admission"]>, string>;
 type RuntimeCheck = Exclude<VerificationCheck, { kind: "terminal" }>;
 export type ContinuationStop = NonNullable<ContinuationReport["stopped"]>[number];
 export type ReceiptStop = PlacementStop | CheckAdmissionStop | RuntimeCheck | ContinuationStop;
@@ -435,7 +435,8 @@ export function verificationCheckLines(
       receiptRow(lines, check.verdict === "satisfied" ? "✓" : "×", "verdict", [{ text: check.verdict }], columns);
       if (check.verdict === "unsatisfied") receiptPayload(lines, "summary", check.summary);
       const admission = check.admission;
-      if (admission === "reused") receiptRow(lines, " ", "attestation", [{ text: "reused" }], columns);
+      if (typeof admission === "string")
+        receiptRow(lines, " ", "attestation", [{ text: admission === "reused" ? "reused" : "not recorded" }], columns);
       else if (admission !== undefined) {
         receiptRow(lines, "!", "admission", [{ text: "stopped" }], columns);
         lines.push(...stopLines(admission, columns, addressed));

@@ -258,7 +258,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/operations.ts"),
         any("protocol/result-reasons.ts"),
         any("protocol/deliver.ts", ["prepareDelivery", "deliveryIntegrationSnapshots"]),
-        any("verification/declaration.ts", ["verificationRequirement"]),
+        any("verification/declaration.ts", ["VERIFIED", "verificationRequirement"]),
         any("protocol/outcome.ts", ["accepted"]),
         runtime("protocol/completion.ts", [
           "compactScope",

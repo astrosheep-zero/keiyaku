@@ -141,7 +141,7 @@ test("full verify exposes mixed verdicts, independent scratches, and requirement
   assert.equal(existsSync(failed.retainedPath), false);
 });
 
-test("verify refuses out-of-range and unselected checks before execution or admission", async (t) => {
+test("verify refuses out-of-range checks before execution or admission", async (t) => {
   const external = temporaryDirectory(t, "cli-verify-refusal-");
   const marker = resolve(external, "ran");
   const { raw, id, repository } = await bindCandidate([`touch '${marker}'`]);
@@ -159,11 +159,49 @@ test("verify refuses out-of-range and unselected checks before execution or admi
   assert.match(text.stdout, /declarations\s+1/u);
   assert.equal(existsSync(marker), false);
   assert.deepEqual(await observeContract(repository, id), before);
-  const inert = await bindCandidate([`touch '${marker}'`], []);
-  const refused = await runCli(["-C", inert.raw.path, "verify", inert.id], { environment: {} });
-  assert.equal(refused.exit, 1);
-  assert.match(refused.stdout, /does not select the verified gate/u);
-  assert.equal(existsSync(marker), false);
+});
+
+test("review-only verify executes selected and full checks without recording testimony", async (t) => {
+  const external = temporaryDirectory(t, "cli-verify-ungated-");
+  const runs = resolve(external, "runs");
+  const { raw, id, repository } = await bindCandidate([
+    `echo first >> '${runs}'; touch scratch-only; exit 3`,
+    `test ! -f scratch-only && echo second >> '${runs}'`,
+  ], ["reviewed"]);
+  const before = await observeContract(repository, id);
+  const selected = accepted((await cliJson<VerifyOutcome>(
+    ["-C", raw.path, "verify", id, "--index", "2"], { environment: {} },
+  )).value);
+  assert.equal(readFileSync(runs, "utf8"), "second\n");
+  assert.deepEqual(selected.checks.map(({ index, kind }) => [index, kind]), [[2, "terminal"]]);
+  const full = accepted((await cliJson<VerifyOutcome>(
+    ["-C", raw.path, "verify", id], { environment: {} },
+  )).value);
+  assert.deepEqual(full.checks.map((check) => check.kind === "terminal" ? check.verdict : check.kind),
+    ["unsatisfied", "satisfied"]);
+  assert.ok([...selected.checks, ...full.checks].every((check) =>
+    check.kind === "terminal" && check.admission === "unrecorded"));
+  assert.equal(readFileSync(runs, "utf8"), "second\nfirst\nsecond\n");
+  assert.deepEqual(await observeContract(repository, id), before);
+  assert.equal(full.placement, undefined);
+  const delivered = accepted((await cliJson<DeliverOutcome>(
+    ["-C", raw.path, "deliver", id], { environment: {} },
+  )).value);
+  assert.ok(delivered.placement?.kind === "gates-unsatisfied");
+  assert.deepEqual(delivered.placement.unmet.map(({ gate }) => gate), ["reviewed"]);
+  writeFileSync(resolve(raw.path, "target.txt"), "target moved\n");
+  raw.run(["add", "target.txt"]);
+  raw.run(["commit", "--quiet", "-m", "advance target"]);
+  const deliveredState = await observeContract(repository, id);
+  const refreshed = accepted((await cliJson<VerifyOutcome>(
+    ["-C", raw.path, "verify", id, "--index", "2"], { environment: {} },
+  )).value);
+  assert.notEqual(refreshed.snapshot, full.snapshot);
+  assert.equal(refreshed.placement, undefined);
+  assert.deepEqual(await observeContract(repository, id), deliveredState);
+  await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
+  assert.equal((await observeContract(repository, id)).state?.terminal?.kind, "claimed");
+  assert.equal(readFileSync(runs, "utf8"), "second\nfirst\nsecond\nsecond\n");
 });
 
 test("verify captures dirty bytes only with explicit authorization and streams per-check progress", async () => {

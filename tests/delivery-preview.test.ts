@@ -9,7 +9,7 @@ import { waitForFixtureFile } from "./support/process.js";
 import { renderRootHelp } from "../src/cli/parse.js";
 import { decodeContractDocument, verificationDefinition } from "../src/body/decode.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
-import { contractId, entryUlid, gate } from "../src/core/facts/types.js";
+import { contractId, entryUlid } from "../src/core/facts/types.js";
 import { verificationRequirement } from "../src/verification/declaration.js";
 import { previewDeliveryOperation } from "../src/protocol/delivery-preview.js";
 import { admitDeliveryOperation, prepareDelivery } from "../src/protocol/deliver.js";
@@ -53,10 +53,7 @@ test("a stale document derivation is refused by the pure decision and restarts t
     document: decoded.document.key,
     bytes: state.terms.document.bytes,
     title: decoded.title,
-    verification: prepareVerificationDeclaration({
-      gates: [gate("verified")],
-      definition: verificationDefinition(decoded),
-    }),
+    verification: prepareVerificationDeclaration(verificationDefinition(decoded)),
   };
   await bound.kei.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
   const scope = await scopeOperation({ coordinate: repository.path });
@@ -122,10 +119,7 @@ test("preview without Verification still returns an accepted ready candidate", a
         document: decoded.document.key,
         bytes: decoded.document.bytes,
         title: decoded.title,
-        verification: prepareVerificationDeclaration({
-          gates: observed.state!.terms.gates,
-          definition: verificationDefinition(decoded),
-        }),
+        verification: prepareVerificationDeclaration(verificationDefinition(decoded)),
       }),
     }),
   );
@@ -153,18 +147,6 @@ test("ungated preview reports undeclared without executing declarations or admit
   assert.equal(audited.unmetGates?.some(({ gate }) => gate === "verified"), false);
   assert.equal(existsSync(marker), false);
   assert.deepEqual(present(await contract.state()).attestations, []);
-});
-
-// Test declaration admission at its owner, without binding two complete worktrees.
-test("verified terms require a declaration while unrelated gates do not", () => {
-  assert.deepEqual(
-    prepareVerificationDeclaration({ gates: [gate("verified")], definition: null }),
-    { kind: "refused", refusal: { kind: "verification-declaration-invalid" } },
-  );
-  assert.deepEqual(
-    prepareVerificationDeclaration({ gates: [gate("reviewed")], definition: null }),
-    { kind: "prepared", data: null },
-  );
 });
 
 test("preview target lag is absent at zero and counted when the target moved", () => {

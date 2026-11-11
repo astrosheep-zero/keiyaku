@@ -44,8 +44,9 @@ from the effective document and gate selection. Review and custom gates use a
 singleton derived from gate identity. Selected Verification requires valid
 declarations and derives one requirement per distinct canonical execution
 content: executor, script, and declared deadline. Exact duplicates share one
-requirement. Without `verified`, the Verification section serves as reference
-documentation and creates no requirements.
+requirement. Valid declarations remain executable independently of gate selection.
+Without `verified`, they create no placement requirements, and absent or
+reference-only Verification does not prevent other Contract operations.
 
 Declaration identity survives reordering. A declaration's current one-based
 position is only an invocation and display selector, never durable requirement

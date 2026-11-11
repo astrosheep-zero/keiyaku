@@ -3,9 +3,10 @@ import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import { contractState } from "../core/facts/observation.js";
 import type { AmendData, ContractId, ContractTerms } from "../core/facts/types.js";
 import { decideAmend, type AmendInput, type AmendRefusal } from "../core/verbs/amend.js";
-import type {
-  VerificationDeclarationPreparation,
-  VerificationDeclarationRefusal,
+import {
+  VERIFIED,
+  type VerificationDeclarationPreparation,
+  type VerificationDeclarationRefusal,
 } from "../verification/declaration.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import { admitted } from "./outcome.js";
@@ -77,7 +78,7 @@ export async function amendOperation(
           const preparation: AmendInput<VerificationDeclarationRefusal>["preparation"] =
             amendment === undefined
               ? undefined
-              : amendment.verification.kind === "prepared"
+              : amendment.verification.kind === "prepared" || !amendment.terms.gates.includes(VERIFIED)
                 ? { kind: "prepared", data: amendment.terms }
                 : { kind: "refused", refusal: amendment.verification.refusal };
           const decision = decideAmend({
