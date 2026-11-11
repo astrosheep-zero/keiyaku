@@ -1,12 +1,38 @@
 import { z } from "zod";
 import { createdDebtObservationSchema } from "../debt/created-observation.js";
 import { akumaStatusSchema } from "./akuma.js";
-import { compactTimelineSchema } from "./status-projection.js";
+import { currentWorkSchema } from "./status-projection.js";
 import { diffstatSchema } from "./heart/activity-schema.js";
 import type { TellResult } from "./call-initial-tell.js";
 import { dispatchAssociationSchema } from "./dispatch-association.js";
 import { killEvidenceSchema } from "./heart/facts.js";
+import { akumaAliasSchema } from "../identity/selector.js";
 import { akumaIdSchema, turnHistoryIdSchema, type AkumaId } from "./identity.js";
+
+export const akumaCatalogueRowSchema = z
+  .strictObject({
+    id: akumaIdSchema,
+    life: z.enum(["running", "asleep", "stranded", "hung", "untidy", "killed", "unborn", "stillborn"]),
+    lifeAt: z.string().exactOptional(),
+    lastActivityAt: z.string().exactOptional(),
+    pending: z.number().int().positive().exactOptional(),
+    diagnostic: z.string().exactOptional(),
+    aliases: z.array(akumaAliasSchema).nonempty().readonly().exactOptional(),
+    parentAkumaId: akumaIdSchema.exactOptional(),
+    contract: z
+      .union([dispatchAssociationSchema.options[1], z.strictObject({ kind: z.literal("unavailable") }).readonly()])
+      .exactOptional(),
+  })
+  .readonly();
+export const akumaCatalogueSchema = z
+  .strictObject({
+    kind: z.literal("akuma-catalogue"),
+    observedAt: z.string(),
+    rows: z.array(akumaCatalogueRowSchema).nonempty().readonly().exactOptional(),
+    more: z.literal(true).exactOptional(),
+    aliasesError: z.string().exactOptional(),
+  })
+  .readonly();
 
 const createdDebtRowSchema = createdDebtObservationSchema.options[0]
   .unwrap()
@@ -23,7 +49,7 @@ export const akumaObservationSchema = z
     cwd: z.string(),
     provider: z.string(),
     model: z.string().exactOptional(),
-    timeline: compactTimelineSchema,
+    work: currentWorkSchema,
     lastActivityAt: z.string().exactOptional(),
     strandedReason: z.literal("resume-unsupported").exactOptional(),
     contract: z.union([dispatchAssociationSchema.options[1], dispatchAssociationSchema.options[2]]).exactOptional(),

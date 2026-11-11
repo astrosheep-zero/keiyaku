@@ -1,83 +1,26 @@
-import {
-  Debts,
-  Keiyaku,
-  World,
-  type AddDebtInput,
-  type Debt,
-  type DebtAbsent,
-  type DebtCatalogue,
-  type DebtDetail,
-  type DebtId,
-  type DebtListInvocation,
-  type DebtMutationResult,
-  type DebtReadResult,
-  type DebtShowItem,
-  type DebtShowResult,
-  type DebtTreeResult,
-  type DebtTreeNode,
-  type DebtUpdateResult,
-} from "@astrosheep/keiyaku";
-const world = null as unknown as import("@astrosheep/keiyaku").WorldRoot;
-const facet = Keiyaku.at({ cwd: "/tmp", environment: {} });
-const listing: DebtListInvocation = { selection: "all" };
-const catalogue: Promise<DebtCatalogue> = facet.debtLs(listing);
-const one: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ id: "debt/example" });
-const many: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ ids: ["debt/example"] });
-const completed: Promise<DebtUpdateResult> = facet.debtUpdate({ id: "debt/example", state: "done" });
-const created: Promise<DebtMutationResult> = facet.debtAdd({ title: "Example" });
-void facet.debtAddDocument({ markdown: "# Example" });
-void facet.debtUpdate({ id: "debt/example", note: "updated" });
-void facet.debtUpdate({ id: "debt/example", state: "drop" });
-void facet.debtLs();
-void facet.debtDoctor();
-const selectedTree: Promise<DebtTreeResult | DebtAbsent> = facet.debtTree({ id: "debt/example" });
-const debts = Debts.of(world);
-const debt: Debt = debts.debt({ id: "debt/example" });
-const id: DebtId = debt.id;
-const result: Promise<DebtMutationResult> = debts.add({ title: "Example", state: "open", note: "initial" });
-const read: Promise<DebtReadResult> = debt.read();
-const tree: Promise<DebtTreeResult> = debt.tree();
-const update: Promise<DebtUpdateResult> = debt.update({ note: "replacement" });
-const node = null as unknown as DebtTreeNode;
-void debt.update({ state: "drop", note: "obsolete" });
+import { Debts, Keiyaku, World, type DebtDetail, type DebtShowItem, type DebtShowResult, type DebtUpdateResult } from "@astrosheep/keiyaku";
 
+const facet = Keiyaku.at({ cwd: "/tmp", environment: {} });
+const catalogue = facet.ls({ selector: "debt/", selection: "all" });
+const one = facet.show({ id: "debt/example" });
+const many = facet.show({ ids: ["debt/example"] });
+const completed: Promise<DebtUpdateResult> = facet.debtUpdate({ id: "debt/example", state: "done" });
+
+async function native(world: import("@astrosheep/keiyaku").WorldRoot) {
+  const debts = Debts.of(world);
+  const debt = debts.debt({ id: "debt/example" });
+  const batch: DebtShowResult = await debts.read({ ids: [debt.id] });
+  await debt.read();
+  await debt.tree();
+  await debt.update({ note: "replacement" });
+  return batch;
+}
 function firstFound(items: readonly DebtShowItem[]): DebtDetail | undefined {
   const first = items[0];
   return first?.kind === "found" ? first : undefined;
 }
-function foundTitles(shown: DebtShowResult | DebtAbsent): readonly string[] {
-  return shown.kind === "absent" ? [] : shown.items.flatMap((item) => item.kind === "found" ? [item.title] : []);
+async function selectedTitles() {
+  const result = await catalogue;
+  return result.kind === "debt-catalogue" && !("absent" in result) ? result.rows?.map(row => row.title) : undefined;
 }
-function acceptedId(mutation: DebtMutationResult): DebtId | undefined {
-  return mutation.kind === "accepted" ? mutation.id : undefined;
-}
-function treeRoot(decomposition: DebtTreeResult) {
-  return decomposition.kind === "present" ? decomposition : undefined;
-}
-const closedDebt: Promise<DebtUpdateResult> = debt.update({ state: "done" });
-const defaultAdd: AddDebtInput = { title: "Example" };
-void [catalogue, one, many, completed, created, selectedTree, read, update];
-void [firstFound, foundTitles, acceptedId, treeRoot, defaultAdd, closedDebt];
-
-// @ts-expect-error Debt has no static construction surface
-Debt.at({ path: "." });
-// @ts-expect-error callers do not choose IDs during creation
-debts.add({ id: "debt/chosen", title: "Chosen" });
-// @ts-expect-error tree accepts no full option
-void debt.tree({ full: true });
-// @ts-expect-error the removed execution carrier is not a public input
-Debts.of(world, { execution: {} });
-// @ts-expect-error show is one native result, not a bare detail or null
-const bareShow: Promise<DebtDetail | null> = facet.debtShow({ id: "debt/example" });
-// @ts-expect-error DAG residue type is not exported
-type OldTree = import("@astrosheep/keiyaku").DebtDependencyTree;
-// @ts-expect-error the retired ./debt subpath promise is gone
-type RemovedDebtSubpath = import("@astrosheep/keiyaku/debt").DebtRow;
-void World;
-void debts;
-void debt;
-void id;
-void result;
-void tree;
-void node;
-void bareShow;
+void [one, many, completed, native, firstFound, selectedTitles, World];

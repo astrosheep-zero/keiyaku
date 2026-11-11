@@ -12,8 +12,8 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { appendActivity, beginTurn, endTurn } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { createdDebtObservationSchema } from "../src/debt/created-observation.js";
-import { activityEntrySchema, projectActivityEntry, projectStatusOutcome, projectStatusTimeline } from "../src/akuma/status-projection.js";
-import { activeTool, completedTool, answeredOutcome, openAkumaSnapshot, idleAkumaSnapshot } from "./support/kanshi-activity.js";
+import { projectCurrentWork } from "../src/akuma/status-projection.js";
+import { activeTool, answeredOutcome, openAkumaSnapshot, idleAkumaSnapshot } from "./support/kanshi-activity.js";
 import { tellResultSchema } from "../src/akuma/call-initial-tell.js";
 import { debtSummarySchema } from "../src/debt/board.js";
 import { bornBody } from "./support/akuma-fixtures.js";
@@ -39,7 +39,7 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   assert.ok(Object.isFrozen(parsed));
   assert.ok(Object.isFrozen(parsed.birth));
   assert.ok(Object.isFrozen(parsed.birth.origin));
-  assert.ok(Object.isFrozen(parsed.timeline));
+  assert.ok(Object.isFrozen(parsed.work));
   assert.equal(
     root.akumaStatusSchema.safeParse({
       ...status,
@@ -119,26 +119,22 @@ test("standalone public status shares compact active and idle observations while
     assert.ok(native.timeline.entries.some(entry => entry.kind === "gap"));
     const active = await aku.status();
     assertWireRoundTrip(root.akumaStatusSchema, active);
-    assert.deepEqual(active.timeline, projectStatusTimeline(native.timeline));
-    assert.ok(active.timeline.entries?.some(entry => entry.id === activeId && entry.text.startsWith("active: ")));
-    for (const entry of active.timeline.entries ?? []) {
-      assert.deepEqual(Object.keys(entry).sort(), ["id", "text"]);
-      assert.equal(Array.from(entry.text).length, 300);
-      assert.ok(entry.text.endsWith("…"));
-      assert.doesNotMatch(entry.text, /[\uD800-\uDFFF]/u);
-    }
+    assert.deepEqual(active.work, projectCurrentWork(native.timeline));
+    assert.ok(active.work.summary?.id === activeId && active.work.summary.clipped);
+    assert.match(active.work.summary.text, /^run \$ npm test/u);
+    assert.deepEqual(active.work.activeTools, [{ id: activeId, turnSequence: turn.sequence, toolId: "native-long-tool" }]);
     assert.equal(root.akumaStatusSchema.safeParse(native).success, false);
     const answer = `answer ${"🙂".repeat(600)}`;
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:04.000Z", outcome: { kind: "answered", answer, session: { sessionId: "compact-status" } } });
     const idle = await aku.status();
     assertWireRoundTrip(root.akumaStatusSchema, idle);
-    assert.ok(idle.timeline.kind === "idle" && idle.timeline.outcome?.kind === "answered");
-    if (idle.timeline.kind !== "idle" || idle.timeline.outcome?.kind !== "answered") assert.fail("expected idle answer");
-    assert.equal(Array.from(idle.timeline.outcome.answer).length, 500);
-    assert.ok(idle.timeline.outcome.answer.startsWith("answer 🙂") && idle.timeline.outcome.answer.endsWith("…"));
+    assert.equal(idle.work.kind, "idle");
+    assert.equal(idle.work.outcome?.verdict, "answered");
+    assert.equal(idle.work.outcome?.historyId, `turn/${turn.sequence}`);
+    assert.equal(idle.work.latestActivity, idle.work.outcome?.activityId);
     const waited = await aku.idle({ timeoutMs: 0 });
     assertWireRoundTrip(root.akumaIdleResultSchema, waited);
-    assert.deepEqual(waited.status.timeline, idle.timeline);
+    assert.deepEqual(waited.status.work, idle.work);
     const history = await aku.history();
     assert.ok(history.rows.some(row => row.kind === "outcome" && row.outcome.kind === "answered" && row.outcome.answer === answer));
     const stream = aku.stream()[Symbol.asyncIterator]();
@@ -149,45 +145,23 @@ test("standalone public status shares compact active and idle observations while
   } finally { born.holder.release(); }
 });
 
-test("compact activity preserves correlation, head bounds and distinct idle outcomes", () => {
-  const command = `npm test ${"🙂".repeat(400)}`;
-  const active = projectActivityEntry(activeTool(2, "bash", { kind: "run", command }))!;
-  const failed = projectActivityEntry(completedTool(5, "bash", { kind: "run", command }, { status: "error", exitCode: 1 }))!;
-  for (const [entry, prefix] of [[active, "active: run $ "], [failed, "error: run $ "]] as const) {
-    assert.deepEqual(Object.keys(entry).sort(), ["id", "text"]);
-    assert.ok(entry.text.startsWith(`${prefix}npm test 🙂`));
-    assert.equal(Array.from(entry.text).length, 300);
-    assert.ok(entry.text.endsWith("…"));
-    assert.doesNotMatch(entry.text, /[\uD800-\uDFFF]/u);
-    assertWireRoundTrip(activityEntrySchema, entry);
+test("current work selects active commands before narration and preserves pending/outcome coordinates", () => {
+  for (const command of ["npm test", "square perceive"]) {
+    const work = projectCurrentWork(openAkumaSnapshot([
+      { kind: "row", row: activeTool(2, "bash", { kind: "run", command }) },
+      { kind: "row", row: { kind: "said", sequence: 3, turnSequence: 1, at: "2026-10-30T00:00:00.000Z", text: "waiting" } },
+    ]));
+    assert.equal(work.summary?.text, `run $ ${command}`);
+    assert.equal(work.summary?.id, 2);
   }
-  const said = { kind: "said", sequence: 8, turnSequence: 1, at: "2026-10-30T00:00:00.000Z", text: "first\n  indented" } as const;
-  const partial = projectActivityEntry({ ...said, truncated: true })!;
-  assert.equal(partial.text, `said: ${said.text}…`);
-  const native = openAkumaSnapshot([
-    { kind: "row", row: activeTool(2, "bash", { kind: "run", command }) },
-    { kind: "gap", count: 2 },
-    { kind: "row", row: { ...said, kind: "thought", sequence: 6 } },
-    { kind: "row", row: said },
-  ]);
-  const compact = projectStatusTimeline(native);
-  assert.deepEqual(compact.entries?.map(entry => entry.id), [2, 8]);
-  assert.equal(compact.entries?.[1]?.text, `said: ${said.text}`);
-  const answer = `opening ${"🙂".repeat(600)}`;
-  const outcome = projectStatusOutcome(answeredOutcome(9, answer));
-  assert.equal(outcome.kind, "answered");
-  if (outcome.kind !== "answered") assert.fail("expected answer");
-  assert.equal(Array.from(outcome.answer).length, 500);
-  assert.ok(outcome.answer.startsWith("opening 🙂") && outcome.answer.endsWith("…"));
-  assert.doesNotMatch(outcome.answer, /[\uD800-\uDFFF]/u);
-  assert.deepEqual(projectStatusOutcome(answeredOutcome(10, "")), { kind: "answered", answer: "" });
-  const pending = { kind: "tell", sequence: 11, at: said.at, tellId: "pending", text: "next\n step", state: "pending", deliveries: [] } as const;
-  assert.deepEqual(projectStatusTimeline(idleAkumaSnapshot([{ kind: "row", row: pending }], answeredOutcome(9, answer))), {
-    kind: "idle", entries: [{ id: 11, text: "pending-tell: next step" }], outcome,
-  });
-  const diagnostic = "failure ".repeat(100);
-  const failure = projectStatusOutcome({ ...answeredOutcome(12, ""), outcome: { kind: "failed", diagnostic } });
-  assert.deepEqual(failure, { kind: "failed", diagnostic: `${Array.from(diagnostic).slice(0, 499).join("")}…` });
+  const captured = projectCurrentWork(openAkumaSnapshot([
+    { kind: "row", row: activeTool(4, "custom", { kind: "other", input: { json: '{"path":"cut', truncated: true } }) },
+  ]));
+  assert.deepEqual(captured.summary, { id: 4, text: 'custom {"path":"cut…', clipped: true });
+  const pending = { kind: "tell", sequence: 11, at: "2026-10-30T00:00:00.000Z", tellId: "pending", text: "next step", state: "pending", deliveries: [] } as const;
+  const work = projectCurrentWork(idleAkumaSnapshot([{ kind: "row", row: pending }], answeredOutcome(9, "exact answer")));
+  assert.deepEqual(work.pending, [{ id: 11, tellId: "pending" }]);
+  assert.deepEqual(work.outcome, { historyId: "turn/1", activityId: 9, verdict: "answered" });
 });
 
 test("public timeline wire is strict, deeply readonly, and exact-optional", () => {

@@ -36,32 +36,32 @@ test("real CLI shares one flat ledger across managed worktrees and nested invoca
     assert.equal(invalid.status, 64, invalid.stderr);
   }
   for (const cwd of [repository.path, worktree, nested]) {
-    const listed = Keiyaku.verbs["debt.ls"].output.parse(JSON.parse(execFileSync(
+    const listed = Keiyaku.verbs.ls.output.parse(JSON.parse(execFileSync(
       process.execPath, [cli, "-C", cwd, "ls", "debt/", "--json"], { env: environment, encoding: "utf8" },
     )));
-    assert.ok(listed.kind === "present");
+    assert.ok(listed.kind === "debt-catalogue" && !("absent" in listed));
     assert.deepEqual(listed.rows?.map(({ id }) => id), [added.id]);
   }
   const child = accepted(Keiyaku.verbs["debt.add"].output.parse(JSON.parse(execFileSync(
     process.execPath, [cli, "-C", nested, "debt", "add", "Check shared work", "--parent", added.id, "--needs", added.id, "--json"],
     { env: environment, encoding: "utf8" },
   ))));
-  const tree = Keiyaku.verbs["debt.tree"].output.parse(JSON.parse(execFileSync(
-    process.execPath, [cli, "-C", worktree, "debt", "tree", added.id, "--json"],
+  const tree = Keiyaku.verbs.show.output.parse(JSON.parse(execFileSync(
+    process.execPath, [cli, "-C", worktree, "show", added.id, "--json"],
     { env: environment, encoding: "utf8" },
   )));
-  assert.ok(tree.kind === "present");
-  assert.deepEqual(tree.children?.map(({ id }) => id), [child.id]);
+  assert.ok(tree.kind === "debt-complete");
+  assert.deepEqual(tree.items[0]!.children?.map(({ id }) => id), [child.id]);
   const update = Keiyaku.verbs["debt.update"].output.parse(JSON.parse(execFileSync(
     process.execPath, [cli, "-C", repository.path, "debt", "update", added.id, "--state", "done", "--note", "finished", "--json"],
     { env: environment, encoding: "utf8" },
   )));
   assert.equal(update.kind, "accepted");
-  const shown = Keiyaku.verbs["debt.show"].output.parse(JSON.parse(execFileSync(
+  const shown = Keiyaku.verbs.show.output.parse(JSON.parse(execFileSync(
     process.execPath, [cli, "-C", nested, "show", child.id, added.id, "--json"],
     { env: environment, encoding: "utf8" },
   )));
-  assert.ok(shown.kind === "present" && shown.items[0]?.kind === "found" && shown.items[1]?.kind === "found");
+  assert.ok(shown.kind === "debt-complete" && shown.items[0]?.kind === "found" && shown.items[1]?.kind === "found");
   assert.deepEqual(shown.items[0].needs, [{ id: added.id, state: "done" }]);
   assert.equal(shown.items[1].note, "finished");
   assert.ok(existsSync(join(repository.path, ".keiyaku", "debts", `${added.id.slice(5)}.md`)));

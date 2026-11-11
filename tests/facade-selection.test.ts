@@ -980,8 +980,7 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
       ].join("\n"),
     );
     const debts = await Debts.of(await World.at(root)).list({ selection: "all" });
-    assert.equal(debts.kind, "present");
-    if (debts.kind !== "present") throw new Error("missing Debt page");
+    assert.equal(debts.kind, "debt-catalogue");
     assert.deepEqual(debts.rows, [
       {
         id: debt.id,
@@ -991,6 +990,7 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
       },
     ]);
     assert.deepEqual(await listArchetypeDefinitions({ home }), {
+      kind: "archetype-catalogue",
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
     });
     const workers = await Akumas.of(await World.at(root)).list({ akumaName: "worker" });

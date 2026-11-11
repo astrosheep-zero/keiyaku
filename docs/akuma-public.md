@@ -45,17 +45,17 @@ is unnamed returns the model to unknown. Descriptive birth origin, caller,
 provider environment, opaque configuration and system prompts remain outside
 this actionable status. A standalone handle may retain its frozen birth
 observation; composed addressed status answers current work without repeating it.
-A status snapshot shows current actionable work: active tools, the latest settled
-narration and admitted input for open work, pending tells, and otherwise the
-latest outcome. Its latest retained activity time is observation evidence for
-every life state, absent when no row remains and never inferred from a Turn
-opening. Compact observation retains correlated, bounded activity text and omits
-thoughts from selected detail. Each advertised activity coordinate names its
-exact retained activity independently of the compact payload. Omitted intervals
-are visible through the retained order without claiming an omitted event count.
-Clipping remains visible and preserves the beginning of the observed content;
-idle outcomes stay distinct from pending input. Native history and live
-observation keep their own full typed interpretation. Reported changes
+A status snapshot reports semantic current work: an open or idle frontier,
+pending input, exact retained activity coordinates and the latest known outcome
+identity and verdict. It does not carry a terminal-chat timeline or answer
+preview. One optional bounded current-action summary names the selected active
+tool, or the latest settled narration or input when no active tool supplies it.
+The native owner derives it from the same frontier using neutral activity
+formatting and exposes clipping; omission establishes neither inactivity nor
+idle. Its latest retained activity time is observation evidence for every life
+state, absent when no row remains and never inferred from a Turn opening.
+Exact history and live observation retain their full typed interpretation;
+status does not remove their capability. Reported changes
 are a read-time summary of successful file-change activity on that same frontier,
 grouped by path. When the execution directory is available, the summary bounds
 its own changes to the five most recently changed files and counts outside files

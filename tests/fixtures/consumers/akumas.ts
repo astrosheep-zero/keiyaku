@@ -53,25 +53,22 @@ const plural = Akumas.of(world, host);
 const rosterInput: AkumaListInput = { limit: 25, repo };
 const roster: Promise<AkumaList> = plural.list(rosterInput);
 const row = akumaCatalogueSchema.parse(await roster).rows?.[0];
-if (row !== undefined && "activity" in row) {
-  const activity = row.activity;
-  const parent: AkumaId | undefined = row.parentAkumaId;
-  void [activity, parent];
-}
+const parent: AkumaId | undefined = row?.parentAkumaId;
+void parent;
 const aliasInput: AkumaAliasesInput = { akumaIds: [aku, "aku/worker/1234abcd"] };
 const aliases: Promise<readonly AliasBinding[]> = plural.aliases(aliasInput);
 void aliases;
 const status = plural.status({ akuma: aku });
 const single = Akuma.select(world, aku, host);
 const singleStatus = await single.status();
-const entry = singleStatus.timeline.entries?.[0];
+const entry = singleStatus.work.summary;
 if (entry !== undefined) {
-  // @ts-expect-error public activity entries retain the owner's readonly projection
+  // @ts-expect-error public current-work summaries retain the owner's readonly projection
   entry.text = "changed";
 }
-const wireEntry = akumaStatusSchema.parse(singleStatus).timeline.entries?.[0];
+const wireEntry = akumaStatusSchema.parse(singleStatus).work.summary;
 if (wireEntry !== undefined) {
-  // @ts-expect-error parsed public wire entries remain readonly
+  // @ts-expect-error parsed public current-work summaries remain readonly
   wireEntry.text = "changed";
 }
 const constructor: Function = Akuma;

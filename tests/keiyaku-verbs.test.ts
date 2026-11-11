@@ -34,12 +34,16 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   assert.ok(bound.worktreePath);
   commitCandidate(repository, bound.worktreePath);
 
-  const showInput = { contract: bound.contractId };
+  const showInput = { id: bound.contractId };
   const guidance = await facet.run("show", showInput);
   assert.deepEqual(guidance, await bound.kei.guidance());
   assert.ok(guidance.kind === "present" && guidance.guidance.includes("Library verbs"));
   assert.equal(classifyVerb("show", showInput, { kind: "returned", value: guidance }), "accepted");
   assertWireRoundTrip(Keiyaku.verbs.show.output, guidance);
+
+  const contextual = Keiyaku.at({ cwd: bound.worktreePath, environment: {}, home });
+  assert.deepEqual(await contextual.show(), guidance);
+  assert.deepEqual(await contextual.run("show", {}), guidance);
 
   const reviewInput = { contract: bound.contractId, verdict: "satisfied" as const, summary: "Reviewed the candidate changes" };
   const reviewed = accepted(await facet.run("review", reviewInput));
@@ -125,6 +129,15 @@ test("wire validation and classification reject malformed calls before observati
         return true;
       });
     }
+  }
+  for (const [name, inputs] of [
+    ["show", [{ ids: [] }, { id: "debt/a", ids: ["debt/a"] }, { ids: ["debt/a", "kei/b"] },
+      { ids: ["kei/a"] }, { ids: ["kei/a", "kei/b"] }, { id: "aku/worker/1234abcd" }, { id: "debt/" }, { id: "@*" }, { id: "@" }]],
+    ["ls", [{ selector: "kei/", selection: "all" }, { selector: "debt/", caller: { kind: "mine" } },
+      { selector: "aku/", caller: { kind: "mine" } }, { selector: "aku/*", selection: "closed" }]],
+    ["status", [{}, { id: "debt/a" }, { id: "aku/*" }, { ids: ["kei/a", "kei/b"] }]],
+  ] as const) for (const input of inputs) {
+    await assert.rejects(facet.run(name, input as never), KeiyakuUsageError);
   }
   const mixed = { selectors: ["kei/example", "aku/example/12345678"] };
   assert.equal(Keiyaku.verbs.wait.input.safeParse(mixed).success, false);

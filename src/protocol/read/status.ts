@@ -83,6 +83,7 @@ export const contractSummarySchema = z
   .strictObject({
     id: contractIdSchema,
     title: z.string().min(1).exactOptional(),
+    phase: phaseSchema,
     phaseAt: z.string(),
     delivered: z.literal(true).exactOptional(),
     gates: z.array(summaryGateSchema).min(1).readonly().exactOptional(),
@@ -93,6 +94,7 @@ export type ContractSummary = z.output<typeof contractSummarySchema>;
 
 export const contractCatalogueSchema = z
   .strictObject({
+    kind: z.literal("contract-catalogue"),
     observedAt: z.string(),
     rows: z.array(contractSummarySchema).min(1).readonly().exactOptional(),
     more: z.literal(true).exactOptional(),
@@ -295,6 +297,7 @@ function summaryFor({ state, bindAt }: SelectedContractState): ContractSummary {
   return {
     id: state.id,
     ...(title === undefined ? {} : { title }),
+    phase: phaseFor(state),
     phaseAt: phaseAtFor(state, bindAt),
     ...(state.delivery === null ? {} : { delivered: true }),
     ...(gates.length === 0 ? {} : { gates }),
@@ -592,6 +595,7 @@ export async function readContractCatalogue(
     }),
   );
   return {
+    kind: "contract-catalogue",
     observedAt,
     ...(rows.length === 0 ? {} : { rows }),
     ...(selected.hasMore ? { more: true as const } : {}),

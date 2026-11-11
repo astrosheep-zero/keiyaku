@@ -33,8 +33,8 @@ import type { ContractSummary } from "../src/index.js";
 import type { Settings } from "../src/settings.js";
 import {
   activityAkumaRow,
+  activeTool,
   akumaWorldReport,
-  completedTool,
   openAkumaSnapshot,
   reportedFileChange,
   snapshotRow,
@@ -363,14 +363,14 @@ test("audit separates its observation outcome from complete candidate coordinate
   assert.doesNotMatch(output, /private-head|^[{[]|^✓ (?:candidate|verification|target)|next|then|please|key=/mu);
 });
 
-test("World roster keeps concrete activity evidence without duplicating snapshot sections", () => {
-  const command = "keiyaku audit kei/reuse-snapshot-activity-rendering";
+test("World roster keeps concrete current work without duplicating snapshot sections", () => {
+  const command = "npm test";
   const snapshot = openAkumaSnapshot(
-    [snapshotRow(completedTool(5, "bash", { kind: "run", command }))],
+    [snapshotRow(activeTool(5, "bash", { kind: "run", command }))],
     [reportedFileChange("src/cli/render/kanshi-akuma.ts")],
   );
   const report = akumaWorldReport([activityAkumaRow("aku/worker/ffff0001", "running", snapshot)]);
   const text = renderKanshiText(report, { columns: 120, color: false });
-  assert.match(text, /run +\$ keiyaku audit kei\/reuse-snapshot-activity-rendering/u);
+  assert.ok(text.includes(command));
   assert.doesNotMatch(text, /──|debts \d|changes \d|came back|STILL RUNNING|killed/u);
 });

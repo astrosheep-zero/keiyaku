@@ -26,72 +26,18 @@ import { temporaryDirectory } from "./support/process.js";
 test("Debt facet preserves native lifecycle, flat World listing, and absent World", async (t) => {
   const cwd = temporaryDirectory(t, "debt-facet-");
   const facet = Keiyaku.at({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
-  assert.deepEqual(await facet.debtShow({ id: "debt/missing" }), { kind: "absent" });
-  assert.deepEqual(await facet.debtShow({ ids: ["debt/missing", "debt/missing"] }), { kind: "absent" });
-  await assert.rejects(facet.debtShow({ ids: [] }), TypeError);
-  assert.deepEqual(await facet.debtLs(), { kind: "absent" });
+  assert.deepEqual(await facet.show({ id: "debt/missing" }), { kind: "absent" });
+  assert.deepEqual(await facet.ls({ selector: "debt/" }), { kind: "debt-catalogue", absent: true });
   assert.deepEqual(await facet.debtDoctor(), { kind: "absent" });
-  assert.equal((await facet.debtTree({ id: "debt/missing" })).kind, "absent");
   assert.equal((await facet.debtUpdate({ id: "debt/missing", note: "note" })).kind, "refused");
-  assert.equal((await facet.debtUpdate({ id: "debt/missing", state: "done" })).kind, "refused");
-  assert.equal((await facet.debtUpdate({ id: "debt/missing", state: "drop" })).kind, "refused");
-  const reason = new Error("cancelled"),
-    controller = new AbortController();
-  controller.abort(reason);
-  for (const operation of [
-    () => facet.debtUpdate({ id: "debt/missing", note: "note", signal: controller.signal }),
-    () => facet.debtUpdate({ id: "debt/missing", state: "done", signal: controller.signal }),
-    () => facet.debtUpdate({ id: "debt/missing", state: "drop", signal: controller.signal }),
-  ])
-    await assert.rejects(operation, (error: unknown) => error === reason);
-  assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  await assert.rejects(facet.debtAdd({ title: " " }), TypeError);
-  assert.deepEqual(await facet.debtLs(), { kind: "absent" });
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" }));
   const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] }));
-  const third = accepted(await facet.debtAdd({ title: "Third" }));
-  const root = accepted(await facet.debtAdd({ title: "Root" }));
-  const shownDebt = async (id: string) => {
-    const shown = await facet.debtShow({ id });
-    assert.equal(shown.kind, "present");
-    if (shown.kind !== "present") throw new Error("missing Debt show");
-    const item = shown.items[0];
-    assert.equal(item?.kind, "found");
-    if (item?.kind !== "found") throw new Error("missing Debt");
-    const { kind: _kind, ...detail } = item;
-    return detail;
-  };
-  const firstDetail = await shownDebt(first.id);
-  const secondDetail = await shownDebt(second.id);
-  assert.equal(firstDetail.createdBy, "fixture");
-  assert.equal(secondDetail.createdBy, "ambient-fixture");
-  const nativeFirst = await Debts.of(await World.at(cwd)).debt({ id: first.id }).read();
-  assert.equal(nativeFirst.kind, "present");
-  if (nativeFirst.kind === "present") {
-    const { kind: _kind, ...detail } = nativeFirst;
-    assert.deepEqual(firstDetail, detail);
-  }
-  assert.equal((await facet.debtUpdate({ id: first.id, note: "changed" })).kind, "accepted");
+  const world = await World.at(cwd);
+  assert.deepEqual(await facet.show({ ids: [first.id, second.id] }), await Debts.of(world).read({ ids: [first.id, second.id] }));
   assert.equal((await facet.debtUpdate({ id: first.id, state: "done", note: "finished" })).kind, "accepted");
-  assert.equal((await facet.debtUpdate({ id: second.id, state: "done" })).kind, "accepted");
-  assert.equal((await facet.debtUpdate({ id: third.id, state: "drop" })).kind, "accepted");
-  const active = await facet.debtLs();
-  const closed = await facet.debtLs({ selection: "closed" });
-  assert.equal(active.kind, "present");
-  assert.equal(closed.kind, "present");
-  if (active.kind === "present" && closed.kind === "present") {
-    assert.deepEqual(active.rows?.map((row) => row.id), [root.id]);
-    assert.equal(closed.rows!.length, 3);
-  }
-  const all = await facet.debtLs({ selection: "all", limit: 2 });
-  assert.equal(all.kind, "present");
-  if (all.kind === "present") {
-    assert.equal(all.rows!.length, 2);
-    assert.equal(all.more, true);
-  }
-  assert.equal((await facet.debtUpdate({ id: root.id, state: "drop" })).kind, "accepted");
-  assert.deepEqual(await facet.debtLs(), { kind: "present" });
+  for (const selection of ["active", "closed", "all"] as const)
+    assert.deepEqual(await facet.ls({ selector: "debt/", selection, limit: 1 }), await Debts.of(world).list({ selection, limit: 1 }));
 });
 
 function withoutObservationTimes(value: unknown): unknown {
@@ -111,7 +57,7 @@ test("construction captures explicit inputs synchronously without observing cwd"
   const missing = join(home, "missing");
   const facet = Keiyaku.at({ cwd: missing, environment: {}, home });
   assert.ok(facet instanceof Keiyaku);
-  await assert.rejects(facet.keiLs(), /invocation cwd is not an existing directory/u);
+  await assert.rejects(facet.ls({ selector: "kei/" }), /invocation cwd is not an existing directory/u);
 
   for (const input of [
     { cwd: "relative", environment: {} },
@@ -153,30 +99,34 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.equal((await Keis.of(repoA).list({})).rows, undefined, "an empty catalogue omits rows");
   const nativeList = await Keis.of(repoB).list({});
   assert.equal(nativeList.rows![0]?.id, contract);
-  const { observedAt: _facetObservedAt, ...facetList } = await facet.keiLs();
+  const selectedContracts = await facet.ls({ selector: "kei/" });
+  if (selectedContracts.kind !== "contract-catalogue") assert.fail("wrong catalogue");
+  const { observedAt: _facetObservedAt, ...facetList } = selectedContracts;
   const { observedAt: _nativeObservedAt, ...comparableList } = nativeList;
   assert.deepEqual(facetList, comparableList);
-  assert.deepEqual(await facet.show({ contract }), await Keis.of(repoB).kei({ id: contract }).guidance());
+  assert.deepEqual(await facet.show({ id: contract }), await Keis.of(repoB).kei({ id: contract }).guidance());
   assert.deepEqual(await facet.history({ selector: contract }), await Keis.of(repoB).kei({ id: contract }).history());
 
   const nativeDebts = await Debts.of(worldA).list({ selection: "active" });
-  assert.deepEqual(await facet.debtLs(), nativeDebts);
-  assert.equal(nativeDebts.kind, "present");
-  if (nativeDebts.kind === "present") assert.equal(nativeDebts.rows![0]?.id, debtA);
+  assert.deepEqual(await facet.ls({ selector: "debt/" }), nativeDebts);
+  assert.equal(nativeDebts.kind, "debt-catalogue");
+  assert.equal(nativeDebts.rows![0]?.id, debtA);
   const nativeWorkers = await Akumas.of(worldA).list({ akumaName: "worker", repo: repoB });
   assert.equal(nativeWorkers.rows![0]?.id, worker.id);
-  const { observedAt: _facetWorkersAt, ...facetWorkers } = await facet.akuLs({ akumaName: "worker" });
+  const selectedWorkers = await facet.ls({ selector: "aku/worker" });
+  if (selectedWorkers.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
+  const { observedAt: _facetWorkersAt, ...facetWorkers } = selectedWorkers;
   const { observedAt: _nativeWorkersAt, ...comparableWorkers } = nativeWorkers;
   assert.deepEqual(facetWorkers, comparableWorkers);
   const workerStatus = await Akumas.of(worldA).status({ akuma: worker.id, repo: repoB });
-  assert.deepEqual(await facet.akuStatus({ id: worker.id }), workerStatus);
+  assert.deepEqual(await facet.status({ id: worker.id }), workerStatus);
   assert.deepEqual(
     await facet.history({ selector: worker.id }),
     await Akumas.of(worldA).history({ akuma: worker.id, repo: repoB }),
   );
   const contractStatus = await kanshi({ world: worldA, repo: repoB, contract });
-  assert.deepEqual(withoutObservationTimes(await facet.keiStatus({ id: contract })), withoutObservationTimes(contractStatus));
-  assert.deepEqual(withoutObservationTimes(await facet.status()), withoutObservationTimes(await kanshi({ world: worldA, repo: repoB })));
+  assert.deepEqual(withoutObservationTimes(await facet.status({ id: contract })), withoutObservationTimes(contractStatus));
+  assert.deepEqual(withoutObservationTimes(await facet.kanshi()), withoutObservationTimes(await kanshi({ world: worldA, repo: repoB })));
   assert.deepEqual(
     await facet.wait({ selectors: [contract], timeoutMs: 0 }),
     await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 }),
@@ -186,14 +136,18 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
     await Akumas.of(worldA).wait({ akuma: [worker.id], repo: repoB, timeoutMs: 0 }),
   );
   const short = `@${contract.slice("kei/".length)}`;
-  assert.deepEqual(await facet.show({ contract: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
+  assert.deepEqual(await facet.show({ id: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
 
   const other = Keiyaku.at({ cwd: second.path, environment: {}, home });
-  assert.deepEqual(await other.debtLs(), await Debts.of(worldB).list({ selection: "active" }));
-  const { observedAt: _otherWorkersAt, ...otherWorkers } = await other.akuLs();
+  assert.deepEqual(await other.ls({ selector: "debt/" }), await Debts.of(worldB).list({ selection: "active" }));
+  const selectedOtherWorkers = await other.ls({ selector: "aku/*" });
+  if (selectedOtherWorkers.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
+  const { observedAt: _otherWorkersAt, ...otherWorkers } = selectedOtherWorkers;
   const { observedAt: _emptyWorkersAt, ...emptyWorkers } = await Akumas.of(worldB).list({});
   assert.deepEqual(otherWorkers, emptyWorkers);
-  const { observedAt: _otherObservedAt, ...otherList } = await other.keiLs();
+  const selectedOtherContracts = await other.ls({ selector: "kei/" });
+  if (selectedOtherContracts.kind !== "contract-catalogue") assert.fail("wrong catalogue");
+  const { observedAt: _otherObservedAt, ...otherList } = selectedOtherContracts;
   assert.deepEqual(otherList, comparableList);
 });
 

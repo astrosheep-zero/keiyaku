@@ -265,10 +265,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
       const authority = await observeNamedAddress({ world, repo: repo ?? null, selectors: [selector] });
       const address = resolveNamedAddress({ selector, ...authority });
       if (address.kind === "akuma") selectedAlias = selector;
-      request =
-        address.kind === "akuma"
-          ? { name: "aku.status", input: { id: address.id }, output: command.output }
-          : { name: "kei.status", input: { id: address.id }, output: command.output };
+      request = { name: "status", input: { id: address.id }, output: command.output };
     } else {
       request =
         "acquire" in command
@@ -286,7 +283,12 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
   } catch (error) {
     if (error instanceof KeiyakuUsageError) {
       const usage = new CliUsageError(error.message, usageGuideForCommand(command));
-      if ("name" in command && command.name === "aku.ls" && command.input.caller?.kind === "mine")
+      if (
+        "name" in command &&
+        command.name === "ls" &&
+        "caller" in command.input &&
+        command.input.caller?.kind === "mine"
+      )
         return await writeFailure(usage, command);
       throw usage;
     }

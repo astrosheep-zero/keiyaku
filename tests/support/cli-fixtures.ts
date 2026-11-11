@@ -120,6 +120,7 @@ export function contractSummary(overrides: Partial<ContractSummary> = {}): Contr
   return {
     id: contractId("kei/verified-commit"),
     title: "Verified commit",
+    phase: "bound",
     phaseAt: "2026-08-12T00:00:00.000Z",
     ...overrides,
   };
@@ -151,6 +152,7 @@ export function kanshiReport(
   overrides: Partial<Omit<KanshiReport, "contracts">> = {},
 ): KanshiReport {
   return {
+    kind: "world",
     observedAt: "2026-08-12T00:00:00.000Z",
     contracts,
     debts: { kind: "absent" },
@@ -165,6 +167,7 @@ export function contractCatalog(
   overrides: Partial<Omit<ContractCatalogue, "rows">> = {},
 ): ContractCatalogue {
   return {
+    kind: "contract-catalogue",
     observedAt: "2026-08-12T00:00:00.000Z",
     ...(rows.length === 0 ? {} : { rows }),
     ...overrides,

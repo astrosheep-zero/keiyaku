@@ -8,7 +8,7 @@ import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
 
-type AkumaCallerSelector = VerbInput<"aku.ls">["caller"];
+type AkumaCallerSelector = Extract<VerbInput<"ls">, { caller?: unknown }>["caller"];
 
 export type ContractTokens = Readonly<{
   command: ContractCommand;
@@ -193,14 +193,14 @@ function showSelector(parts: ContractTokens): string | undefined {
 function parseStatus(parts: ContractTokens): CliRequest {
   if (parts.positionals.length > 1) refuse("status", "status accepts at most one complete identity or @name");
   const selector = parts.positionals[0];
-  if (selector === undefined) return { name: "status", input: {}, output: parts.output };
+  if (selector === undefined) refuse("status", "status requires one subject; use kanshi for the World board");
   if (/[*?\[\]]/u.test(selector)) refuse("status", `unsupported status glob: ${selector}`);
   if (selector.startsWith("@")) return { name: "status", input: {}, acquire: { selector }, output: parts.output };
   try {
     if (selector.startsWith("kei/"))
-      return { name: "kei.status", input: { id: contractId(selector) }, output: parts.output };
+      return { name: "status", input: { id: contractId(selector) }, output: parts.output };
     if (selector.startsWith("aku/"))
-      return { name: "aku.status", input: { id: parseAkumaId(selector).id }, output: parts.output };
+      return { name: "status", input: { id: parseAkumaId(selector).id }, output: parts.output };
   } catch (error) {
     refuse("status", error instanceof Error ? error.message : String(error));
   }
@@ -224,10 +224,6 @@ function listLimit(parts: ContractTokens): number | undefined {
   if (limit !== undefined && (!/^[1-9][0-9]*$/u.test(limit) || !Number.isSafeInteger(Number(limit))))
     refuse("ls", "--limit requires a positive safe integer");
   return limit === undefined ? undefined : Number(limit);
-}
-
-function debtCatalogInput(path: string, limit: number | undefined): VerbInput<"debt.ls"> | null {
-  return path === "debt" || path === "debt/" ? { ...(limit === undefined ? {} : { limit }) } : null;
 }
 
 function parseCallerSelector(parts: ContractTokens): AkumaCallerSelector {
@@ -259,61 +255,45 @@ function parseCallerSelector(parts: ContractTokens): AkumaCallerSelector {
   }
 }
 
-function parseAkumaLs(
-  parts: ContractTokens,
-  path: string | undefined,
-  limit: number | undefined,
-  caller: AkumaCallerSelector,
-): VerbRequest<"aku.ls" | "aku.names"> {
-  if (path === undefined && caller === undefined) refuse("ls", "ls requires a selector");
-  const limitInput = limit === undefined ? {} : { limit };
-  if (path === "aku" || path === "aku/") return { name: "aku.names", input: limitInput, output: parts.output };
+function validateInstanceCatalogue(selector: string): void {
+  const match = /^aku\/([^/]+)(?:\/\*|\/)?$/u.exec(selector);
+  if (match === null || (match[1] === "*" && selector === "aku/*/"))
+    refuse("ls", "ls requires a supported identity directory selector");
+  if (match[1] === "*") return;
   try {
-    const match = path === undefined || path === "aku/*/*" ? undefined : /^aku\/([^/]+)(?:\/\*|\/)?$/u.exec(path);
-    if (match === null) refuse("ls", "ls requires a supported identity directory selector");
-    return {
-      name: "aku.ls",
-      input: {
-        ...limitInput,
-        ...(match === undefined ? {} : { akumaName: validateAkumaName(match[1]!) }),
-        ...(caller === undefined ? {} : { caller }),
-      },
-      output: parts.output,
-    };
+    validateAkumaName(match[1]!);
   } catch (error) {
-    if (error instanceof CliUsageError) throw error;
-    refuse("ls", error instanceof Error ? error.message : "invalid ls directory");
+    refuse("ls", error instanceof Error ? error.message : String(error));
   }
 }
 
-function parseLs(parts: ContractTokens): VerbRequest<"kei.ls" | "aku.ls" | "aku.names" | "debt.ls"> {
-  const path = parts.positionals[0];
+function parseLs(parts: ContractTokens): VerbRequest<"ls"> {
+  const selector =
+    parts.positionals[0] ?? (parts.flags.mine !== undefined || parts.flags.caller !== undefined ? "aku/*" : undefined);
+  if (selector === undefined) refuse("ls", "ls requires a selector");
   const limit = listLimit(parts);
+  const bound = limit === undefined ? {} : { limit };
   const caller = parseCallerSelector(parts);
-  const callerRefusal = "--mine and --caller select Akuma instances only";
   const all = parts.flags.all === true,
     closed = parts.flags.closed === true;
   if (all && closed) refuse("ls", "--all and --closed are mutually exclusive");
-  if (path !== undefined) {
-    const debtList = debtCatalogInput(path, limit);
-    if (debtList !== null) {
-      if (caller !== undefined) refuse("ls", callerRefusal);
-      return {
-        name: "debt.ls",
-        input: { ...debtList, ...(all ? { selection: "all" } : closed ? { selection: "closed" } : {}) },
-        output: parts.output,
-      };
-    }
-    if (all || closed) refuse("ls", "--all and --closed select Debts only");
-    if (path === "kei" || path === "kei/") {
-      if (caller !== undefined) refuse("ls", callerRefusal);
-      return { name: "kei.ls", input: limit === undefined ? {} : { limit }, output: parts.output };
-    }
-    if (caller !== undefined && (path === "aku" || path === "aku/"))
-      refuse("ls", "--mine and --caller need an Akuma instance catalogue, not Akuma names");
+  if (selector === "debt" || selector === "debt/") {
+    if (caller !== undefined) refuse("ls", "--mine and --caller select Akuma instances only");
+    return {
+      name: "ls",
+      input: { selector, ...bound, ...(all ? { selection: "all" } : closed ? { selection: "closed" } : {}) },
+      output: parts.output,
+    };
   }
   if (all || closed) refuse("ls", "--all and --closed select Debts only");
-  return parseAkumaLs(parts, path, limit, caller);
+  if (["kei", "kei/", "aku", "aku/"].includes(selector)) {
+    if (caller !== undefined) refuse("ls", "--mine and --caller select Akuma instances only");
+  } else validateInstanceCatalogue(selector);
+  return {
+    name: "ls",
+    input: { selector, ...bound, ...(caller === undefined ? {} : { caller }) },
+    output: parts.output,
+  };
 }
 
 export function parseContractCommand(parts: ContractTokens): CliRequest {
@@ -348,11 +328,13 @@ export function parseContractCommand(parts: ContractTokens): CliRequest {
           refuse("show", error instanceof Error ? error.message : String(error));
         }
         const ids = parts.positionals;
-        return { name: "debt.show", input: ids.length === 1 ? { id: ids[0]! } : { ids }, output };
+        return { name: "show", input: ids.length === 1 ? { id: ids[0]! } : { ids }, output };
       }
       const contract = showSelector(parts);
-      return { name: "show", input: contract === undefined ? {} : { contract }, output };
+      return { name: "show", input: contract === undefined ? {} : { id: contract }, output };
     }
+    case "kanshi":
+      return { name: "kanshi", input: {}, output };
     case "status":
       return parseStatus(parts);
     case "ls":

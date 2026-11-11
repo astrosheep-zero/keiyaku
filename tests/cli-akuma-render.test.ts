@@ -15,7 +15,6 @@ import {
   frameRule,
   historyText,
   killResultText,
-  activityRowLines,
   snapshotText,
   tellText,
   waitText,
@@ -31,7 +30,7 @@ import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import type { AkumaObservation, AkumaTellResult, AkumaWaitItem } from "../src/akuma/selection-observation.js";
-import { projectStatusTimeline } from "../src/akuma/status-projection.js";
+import { projectCurrentWork } from "../src/akuma/status-projection.js";
 import type { CreatedDebtObservation, DispatchAssociation } from "../src/index.js";
 import type { ForkResult, SpawnResult } from "../src/library/akuma-creation.js";
 import { contractId } from "../src/core/facts/types.js";
@@ -64,7 +63,7 @@ function observation(
     life: status.life,
     cwd: status.cwd ?? "/work/repo",
     provider: status.provider ?? "fixture",
-    timeline: projectStatusTimeline(status.timeline),
+    work: projectCurrentWork(status.timeline),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
     ...(association.kind === "none" ? {} : { contract: association }),
     ...(created === undefined ? {} : created.kind === "failed" ? { createdDebts: created } :
@@ -89,9 +88,9 @@ function liveObservation(status: LiveStatusObservation["status"], rows: readonly
   return { status, rows, ordinarySelected: 0 };
 }
 
-test("status panel puts static coordinates above the timeline and dynamic facts below", () => {
+test("status retains execution context, current work, changes, and unavailable associations", () => {
   const id = "aku/worker/abcd1234";
-  const note: ActivityRow = { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" };
+  const note: ActivityRow = { kind: "said", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "editing the projection" };
   const status = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id,
@@ -122,22 +121,6 @@ test("status panel puts static coordinates above the timeline and dynamic facts 
   assert.ok(lines.indexOf("  ! contract association unavailable") > lines.indexOf("  changes"));
   assert.deepEqual(lines.slice(-2), ["  ! contract association unavailable", "    lookup refused"]);
   assert.equal(lines.filter((line) => line.startsWith("!")).length, 0, "a diagnostic never becomes a bare static fact");
-});
-
-test("speech uses the rail without a label or quotes and wraps at a grapheme boundary", () => {
-  const row: ActivityRow = {
-    kind: "said",
-    sequence: 1,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "👩‍💻".repeat(45),
-  };
-  const lines = activityRowLines(row, { columns: 40, color: false });
-  assert.equal(lines.length, 2);
-  assert.doesNotMatch(lines.join("\n"), /say|[“”]/u);
-  assert.match(lines[0]!, /^▎ 👩‍💻/u);
-  assert.match(lines[1]!, /^▎ 👩‍💻/u);
-  assert.match(lines[1]!, /…$/u);
 });
 
 test("history retains input, speech, actions, outcomes, and omission evidence", () => {
@@ -197,19 +180,6 @@ test("history retains input, speech, actions, outcomes, and omission evidence", 
     "pending input", "the answer", "2 earlier events",
   ])
     assert.ok(text.includes(evidence), evidence);
-});
-
-test("bounded paragraph previews never spend their last line on a blank", () => {
-  const context = { columns: 40, color: false };
-  const answer =
-    "the first paragraph wraps across two lines before the blank\n\nthe second paragraph begins after a blank source line and keeps going";
-  const lines = activityRowLines(answeredOutcome(1, answer).outcome, context);
-  assert.equal(lines.length, 3, "the preview stays inside its three-line budget");
-  for (const line of lines) {
-    assert.notEqual(line.replace(/…$/u, "").trim(), "", "a content-carrying line is never blank");
-  }
-  assert.match(lines[2]!, /^ {2}the second paragraph/u, "content wins the final line over the paragraph break");
-  assert.match(lines[2]!, /…$/u, "the bounded preview names its truncation");
 });
 
 test("history renders the full exact report without confusing it with an outcome", () => {
@@ -275,7 +245,8 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
     timeline: idleAkumaSnapshot([{ kind: "row", row: pending }]),
   });
   const text = snapshotText(observation(status), DEFAULT_CONTEXT);
-  assert.ok(text.includes(pending.text));
+  assert.match(text, /pending input 1/u);
+  assert.deepEqual(observation(status).work.pending, [{ id: 1, tellId: "tell/pending" }]);
   assert.match(text, /⧗ pending tell$/u);
 });
 
@@ -719,15 +690,14 @@ test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
 });
 
 test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
-  const lines = [
+  const events = [
     completedTool(1, "edit", { kind: "fileChange", changes: [{ op: "add", path: "src/unknown.ts" }] }),
     completedTool(2, "edit", {
       kind: "fileChange",
       changes: [{ op: "update", path: "src/known.ts", diffstat: { added: 2, removed: 1 } }],
     }),
-  ]
-    .flatMap((row) => activityRowLines(row, { columns: 120, color: false }))
-    .join("\n");
+  ];
+  const lines = historyText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events }, {}, { columns: 120, color: false });
   assert.match(lines, /src\/unknown\.ts — ~/u);
   assert.match(lines, /src\/known\.ts — \+2 -1/u);
   assert.doesNotMatch(lines, /\+\? -\?/u);
@@ -1055,7 +1025,7 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
     life: "running",
     cwd: "/work/appointed",
     timeline: openAkumaSnapshot(
-      [{ kind: "row", row: { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" } }],
+      [{ kind: "row", row: { kind: "said", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" } }],
       [reportedFileChange("/work/file")],
     ),
   });

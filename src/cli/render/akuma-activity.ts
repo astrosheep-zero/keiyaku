@@ -4,14 +4,7 @@ import type { AkumaStatus } from "../../akuma/akuma.js";
 import type { KillEvidence } from "../../akuma/heart/index.js";
 import type { ActivityRow } from "../../akuma/projection.js";
 import { parseExactHistorySelector } from "../../akuma/identity.js";
-import {
-  renderDiffstat,
-  toolRepr,
-  type ToolRepr,
-  type ActivityEntry,
-  type CompactOutcome,
-  type CompactTimeline,
-} from "../../akuma/status-projection.js";
+import { renderDiffstat, toolRepr, type ToolRepr, type CurrentWork } from "../../akuma/status-projection.js";
 import type {
   AkumaAskObservation,
   AkumaAskResult,
@@ -69,7 +62,6 @@ const TOOL_BUDGET = 3;
 
 type StatusTimeline = LiveStatusObservation["status"]["timeline"];
 type RenderRow = ActivityRow;
-type PresentationRow = RenderRow | Readonly<{ kind: "outcome"; outcome: CompactOutcome }>;
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = StatusTimeline;
 type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows: readonly ActivityRow[] }>;
@@ -141,13 +133,13 @@ function contractFacts(contract: DisplayAssociation, columns: number): readonly 
 }
 
 /** The action family's one mark cell: a settled success stays blank, and live is only a frame mark. */
-function toolMargin(row: Extract<PresentationRow, { kind: "tool" }>, live: boolean): string {
+function toolMargin(row: Extract<RenderRow, { kind: "tool" }>, live: boolean): string {
   if (row.state === "active") return live ? "●  " : "?  ";
   if (row.state === "unsettled") return "?  ";
   return row.state.status === "ok" ? ACTION_MARGIN : "!  ";
 }
 
-function rowText(row: Exclude<PresentationRow, { kind: "tool" }>): Readonly<{
+function rowText(row: Exclude<RenderRow, { kind: "tool" }>): Readonly<{
   text: string;
   lines: number;
 }> {
@@ -189,20 +181,16 @@ function actionPrefix(
   };
 }
 
-/** One row's rendered view: the shared prefix family and the two compact callers. */
+/** One row's shared prefix family and observation context. */
 type RowView = Readonly<{
   /** Live frame: only an active tool asserts in-motion state. */
   live?: true;
-  /** Single-line preview: whitespace folds. */
-  compact?: true;
-  /** History expands narrative payloads. */
+  /** History expands narrative payloads and complete diagnostics. */
   history?: true;
-  /** Only selected detail and history expand complete diagnostics. */
-  detail?: true;
 }>;
 
 function rowPrefix(
-  row: PresentationRow,
+  row: RenderRow,
   tool: ToolRepr | undefined,
   columns: number,
   view: RowView,
@@ -226,30 +214,12 @@ function omissionMarker(text: string, columns: number): string {
 }
 
 /** Every selected timeline row renders through here: one prefix family per row class. */
-function renderRow(
-  row: PresentationRow | ActivityEntry,
-  context: TextRenderContext,
-  view: RowView = {},
-): readonly string[] {
-  if ("id" in row) {
-    const first = `${row.id} `;
-    return renderBoundedPayload({
-      text: row.text,
-      first,
-      continuation: " ".repeat(first.length),
-      columns: context.columns,
-      maxLines: view.compact === true ? 1 : Number.MAX_SAFE_INTEGER,
-      quote: "",
-      truncated: false,
-      ...(view.compact === true ? {} : { preserveLines: true }),
-    });
-  }
+function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {}): readonly string[] {
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   const { first, continuation } = rowPrefix(row, tool, context.columns, view);
   const value = row.kind === "tool" ? undefined : rowText(row);
   const text = tool === undefined ? value!.text : tool.text;
-  const compact = view.compact === true;
-  const singleLine = compact || tool !== undefined || row.kind === "call" || row.kind === "tell" || row.kind === "turn";
+  const singleLine = tool !== undefined || row.kind === "call" || row.kind === "tell" || row.kind === "turn";
   return renderBoundedPayload({
     text,
     first,
@@ -265,25 +235,10 @@ function renderRow(
           trailer: {
             text: tool.suffix,
             diagnostic: tool.diagnostic,
-            complete: view.detail === true || view.history === true,
+            complete: view.history === true,
           },
         }),
   });
-}
-
-/** One native activity row through the shared row grammar. */
-export function activityRowLines(
-  row: ActivityRow | ActivityEntry | CompactOutcome,
-  context: TextRenderContext,
-  view: Readonly<{ compact?: true }> = {},
-): readonly string[] {
-  return renderRow(
-    "kind" in row && (row.kind === "answered" || row.kind === "failed" || row.kind === "canceled")
-      ? { kind: "outcome", outcome: row }
-      : row,
-    context,
-    view,
-  );
 }
 
 function groupedEntries(
@@ -857,10 +812,24 @@ type SnapshotCoreOptions = Readonly<{
   facts?: readonly string[];
 }>;
 
-function selectedStatusActivity(snapshot: CompactTimeline, context: TextRenderContext): readonly string[] {
+export function currentWorkLines(work: CurrentWork, context: TextRenderContext): readonly string[] {
+  const summary = work.summary;
   return [
-    ...(snapshot.entries ?? []).flatMap((entry) => renderRow(entry, context)),
-    ...(snapshot.kind !== "idle" || snapshot.outcome === undefined ? [] : activityRowLines(snapshot.outcome, context)),
+    ...(summary === undefined
+      ? []
+      : renderBoundedPayload({
+          text: summary.text,
+          first: `${summary.id} `,
+          continuation: "  ",
+          columns: context.columns,
+          maxLines: 1,
+          quote: "",
+          truncated: summary.clipped === true,
+        })),
+    ...(work.pending === undefined ? [] : [`pending input ${work.pending.map((item) => item.id).join(" ")}`]),
+    ...(work.outcome === undefined
+      ? []
+      : [`${work.outcome.verdict} ${work.outcome.historyId} · activity ${work.outcome.activityId}`]),
   ];
 }
 
@@ -869,7 +838,7 @@ function snapshotCore(
   context: TextRenderContext,
   options: SnapshotCoreOptions,
 ): Readonly<{ activity: readonly string[]; head: readonly string[]; facts: readonly string[] }> {
-  const activity = selectedStatusActivity(view.timeline, context);
+  const activity = currentWorkLines(view.work, context);
   const contextFacts = [
     safeText(view.cwd),
     ...(view.lastActivityAt === undefined
@@ -890,9 +859,7 @@ function snapshotCore(
 }
 
 function snapshotConclusion(status: AkumaObservation): string {
-  const entries = status.timeline.entries ?? [];
-  if (status.timeline.kind === "idle" && status.timeline.outcome !== undefined) return "";
-  const conclusion = lifeConclusion(status.life, status.timeline.kind === "idle" && entries.length > 0);
+  const conclusion = lifeConclusion(status.life, status.work.pending !== undefined);
   return `${conclusion.mark} ${conclusion.verb}${status.strandedReason === undefined ? "" : ` · ${status.strandedReason}`}`;
 }
 

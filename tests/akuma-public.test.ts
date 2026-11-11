@@ -58,7 +58,7 @@ import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { settings } from "../src/settings.js";
 import { AkumaArchetypeError, Akumas, listArchetypeDefinitions } from "../src/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
-import { projectStatusTimeline } from "../src/akuma/status-projection.js";
+import { projectCurrentWork } from "../src/akuma/status-projection.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { withHeartTransaction } from "../src/akuma/heart/storage.js";
@@ -210,14 +210,14 @@ test("compact activity ids recover retained input, displaced tools and folded na
       event: { type: "tool", phase: "started", id: "native-run", name: "bash", call: { kind: "run", command } },
     });
     const observed = await cliJson<Awaited<ReturnType<typeof api.status>>>(["status", born.allocated.id], { cwd: root });
-    const active = observed.value.timeline.entries?.find(entry => entry.id === start);
-    assert.ok(active && active.text.startsWith("active: ") && active.text.endsWith("…"));
+    const active = observed.value.work.summary;
+    assert.ok(active && active.id === start && active.clipped);
     const rawStart = await runCli(["history", born.allocated.id, "--id", String(active.id)], { cwd: root });
     assert.equal(rawStart.exit, 0);
     assert.equal(rawStart.stdout, `active: run $ ${command.trim()}`);
-    const callEntry = observed.value.timeline.entries?.find(entry => entry.text.startsWith("call: "));
-    assert.ok(callEntry);
-    assert.equal((await runCli(["history", born.allocated.id, "--id", String(callEntry.id)], { cwd: root })).stdout, `call: ${call}`);
+    const callEntry = (await owner.status()).timeline.entries.find(entry => entry.kind === "row" && entry.row.kind === "call");
+    assert.ok(callEntry?.kind === "row");
+    assert.equal((await runCli(["history", born.allocated.id, "--id", String(callEntry.row.sequence)], { cwd: root })).stdout, `call: ${call}`);
 
     const done = await appendActivity(born.allocated.paths, {
       turnSequence: turn.sequence, at: "2026-08-10T00:00:03.000Z",
@@ -239,7 +239,7 @@ test("compact activity ids recover retained input, displaced tools and folded na
     const tellText = `continue\n  ${"direction ".repeat(50)}`;
     const admitted = await recordTell(born.allocated.paths, { kind: "tell", id: "exact-pending", body: tellText, recordedAt: "2026-08-10T00:00:04.000Z" });
     assert.equal(admitted.kind, "recorded");
-    const pending = (await api.status({ akuma: born.allocated.id })).timeline.entries?.find(entry => entry.text.startsWith("pending-tell: "));
+    const pending = (await api.status({ akuma: born.allocated.id })).work.pending?.[0];
     assert.ok(pending);
     assert.equal((await runCli(["history", born.allocated.id, "--id", String(pending.id)], { cwd: root })).stdout, `pending-tell: ${tellText}`);
     await recordTellDeliveries(born.allocated.paths, [{ tellId: "exact-pending", turnSequence: turn.sequence, route: "launch", fence: "native-fence", deliveredAt: "2026-08-10T00:00:05.000Z" }]);
@@ -247,8 +247,8 @@ test("compact activity ids recover retained input, displaced tools and folded na
 
     const answer = `first\n  ${"answer 🙂 ".repeat(80)}last`;
     const said = await appendActivity(born.allocated.paths, { turnSequence: turn.sequence, at: "2026-08-10T00:00:06.000Z", event: { type: "assistant", text: answer } });
-    const preview = (await api.status({ akuma: born.allocated.id })).timeline.entries?.find(entry => entry.id === said);
-    assert.ok(preview?.text.startsWith("said: first\n  ") && preview.text.endsWith("…"));
+    const preview = (await api.status({ akuma: born.allocated.id })).work.summary;
+    assert.ok(preview?.id === said && preview.text.startsWith("first ") && preview.clipped);
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-08-10T00:00:07.000Z", outcome: { kind: "answered", answer, session: { sessionId: "exact-native" } } });
     assert.equal(historyPage(await owner.history()).rows.some(row => row.sequence === said), false);
     const rawSaid = await runCli(["history", born.allocated.id, "--id", String(said)], { cwd: root });
@@ -261,10 +261,10 @@ test("compact activity ids recover retained input, displaced tools and folded na
     const idle = await recordTell(born.allocated.paths, { kind: "tell", id: "idle-pending", body: tellText, recordedAt: "2026-08-10T00:00:08.000Z" });
     assert.equal(idle.kind, "recorded");
     const idleStatus = await api.status({ akuma: born.allocated.id });
-    const idlePending = idleStatus.timeline.entries?.[0];
-    assert.ok(idlePending && idleStatus.timeline.kind === "idle" && idleStatus.timeline.outcome?.kind === "answered");
+    const idlePending = idleStatus.work.pending?.[0];
+    assert.ok(idlePending && idleStatus.work.kind === "idle" && idleStatus.work.outcome?.verdict === "answered");
     assert.equal((await runCli(["history", born.allocated.id, "--id", String(idlePending.id)], { cwd: root })).stdout, `pending-tell: ${tellText}`);
-    assert.deepEqual(projectStatusTimeline((await owner.status()).timeline), idleStatus.timeline);
+    assert.deepEqual(projectCurrentWork((await owner.status()).timeline), idleStatus.work);
   } finally { born.holder.release(); }
 });
 
@@ -2219,6 +2219,7 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     const settingsValue = await settings({ root, home });
     const catalog = await listArchetypeDefinitions({ project: root, home });
     assert.deepEqual(catalog, {
+      kind: "archetype-catalogue",
       rows: [{ name: "home-only" }, { name: "project-only" }, { name: "shared", description: "Project" }],
     });
 
@@ -2258,7 +2259,7 @@ test("dotted akumaName file stems join the catalogue as canonical names", async 
     writeFileSync(join(home, "akumas", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
 
     const catalog = await listArchetypeDefinitions({ project: root, home });
-    assert.deepEqual(catalog, { rows: [{ name: "review.v2" }] });
+    assert.deepEqual(catalog, { kind: "archetype-catalogue", rows: [{ name: "review.v2" }] });
 
     const settingsValue = await settings({ root, home });
     const dotted = await loadPreparedArchetype({ name: "review.v2", project: root, home, settings: settingsValue });
@@ -2280,8 +2281,9 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
     writeFileSync(join(home, "akumas", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
 
     const catalog = await listArchetypeDefinitions({ project: root, home });
-    assert.deepEqual(catalog, { rows: [{ name: "child" }, { name: "visible" }] });
+    assert.deepEqual(catalog, { kind: "archetype-catalogue", rows: [{ name: "child" }, { name: "visible" }] });
     assert.deepEqual(await listArchetypeDefinitions({ project: root, home, limit: 1 }), {
+      kind: "archetype-catalogue",
       rows: [{ name: "child" }],
       more: true,
     });

@@ -9,7 +9,10 @@ belong to the producing owners and executable specifications.
 
 Every described verb returns an object with one structural schema beside its
 producing native owner, not a transport adapter or test. Heterogeneous object answers
-and nested observations identify their alternatives explicitly. Missing
+and nested observations identify their alternatives explicitly. Each catalogue
+retains its owner-family identity through empty, absent, and unavailable answers;
+World observation has its own family and is not an addressed-status alternative.
+Missing
 authority, unavailable observation, unrequested detail, and known emptiness are
 different answers; an omitted optional collection means known empty, not a
 failed or skipped observation. An omitted catalogue remainder means the
@@ -49,7 +52,11 @@ answers add no persistent receipt, cache, or lifecycle state. The compact
 observation producer owns its lossy text projection and visible clipping;
 correlated retained activity remains independently exact-readable through its
 native owner. Consumers share that projection rather than rebuilding native
-facts or declaring a second result authority.
+facts or declaring a second result authority. Exact guidance and addressed Debt
+detail remain complete native values. A structured transport retains both their
+complete shared text rendering and native structured answer, serving direct text
+and script consumers independently. Wire duplication alone establishes no claim
+about a consumer's model context.
 
 The caller already knows the operation and supplied context. A renderer may
 receive that context explicitly; it never scrapes stored facts to recover an

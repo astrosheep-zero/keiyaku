@@ -54,14 +54,20 @@ derives actor testimony and establishes a missing World.
 Debt reads retain native absence and refusal distinctions; listing defaults to
 open work.
 
-Each list and status operation selects one producing owner before observation.
-World status is a fixed composite observation; an addressed status accepts one
-complete identity of its own family and preserves that owner's missing and failed
-observations. Catalogues distinguish Contract instances, Akuma instances, and
-Archetype definitions; Debt listing invokes its native list owner directly.
-Lifecycle selection precedes the bound, preserving the owner's
-order and remainder judgment. There is no
-cross-family catalogue, category status, or plural status result. A named CLI
+Each list and addressed status operation selects one producing owner before
+observation. The independent selector-free Kanshi read owns the World report;
+status requires one complete Contract or Akuma identity and never falls back to
+World observation. It preserves that owner's missing and failed observations.
+Catalogues identify their Contract, Akuma-instance, Archetype, or Debt family even
+when empty or unavailable. Instance caller selection and Debt lifecycle selection
+belong only to their respective owners and precede bounding. There is no
+cross-family catalogue, category status, or plural status result.
+
+Guidance selection reuses the Contract context resolver when omitted. Singular
+detail selects a Contract or Debt; plural detail selects Debts only, including a
+single-member batch. Invalid or mixed selection refuses before product reads.
+Debt partial absence preserves independently readable peers in the native answer
+while refusing the invocation. A named CLI
 address is acquired at the asynchronous process edge, then dispatched as the
 resolved family's ordinary exact operation. A Contract wait and an Akuma wait
 remain separate and a mixed wait is refused before observation. History selects

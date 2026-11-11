@@ -17,15 +17,15 @@ completion without doing the implementation work yourself.
   `review` as each worker returns.
 - **Delegated holder (`@holder-x`):** you handed the entire fulfillment loop for
   that `kei` to one dedicated `Akuma`. Watch the `Contract`'s journaled state
-  (`status`, `wait kei/...`) and steer **through** `@holder-x` with `tell` —
+  (`status <kei/...>`, `wait kei/...`) and steer **through** `@holder-x` with `tell` —
   never bypass the holder to micromanage its workers directly.
 
 ## 2. The Event-Driven Supervision Loop
 
-1. **Scan the board (`status`):** check which `kei`s are ready to land, which
+1. **Scan the board (`kanshi`):** check which `kei`s are ready to land, which
    are waiting on `after` prerequisites or gates, and which `@alias`es are
    running (`●`), succeeded (`✓`), or failed (`!`). Use `ls "aku/*/*"` for
-   the richer recent instance catalogue, `ls kei/` for active Contracts, and
+   the recent instance catalogue, `ls kei/` for active Contracts, and
    `status <kei/...|aku/...|@name>` for one identity; status does not batch selectors.
 2. **Wait on the fleet (`wait`):** pass all in-flight worker `@alias`es to
    `wait` (wakes as soon as *any* worker settles by default), or pass active

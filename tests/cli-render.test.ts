@@ -1,4 +1,4 @@
-import { projectStatusTimeline } from "../src/akuma/status-projection.js";
+import { projectCurrentWork } from "../src/akuma/status-projection.js";
 import type { ActivitySnapshot } from "../src/akuma/projection.js";
 import {
   acceptedReceipt,
@@ -29,7 +29,6 @@ import {
   callObservationStream,
   frameRule,
   historyText as nativeHistoryText,
-  activityRowLines,
   snapshotText,
   waitText as nativeWaitText,
 } from "../src/cli/render/akuma-activity.js";
@@ -76,11 +75,10 @@ import {
   renderDebtList,
   renderDebtMutation,
   renderDebtShow,
-  renderDebtTree,
   renderDebtUpdate,
   renderDoctor,
 } from "../src/cli/render/debt.js";
-import type { DebtDetail, DebtReadPage, DebtSummary } from "../src/debt/index.js";
+import type { DebtDetail, DebtList, DebtSummary } from "../src/debt/index.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { progressStrip } from "../src/cli/render/contract-observation.js";
 import type { ContractHistoryEvent } from "../src/index.js";
@@ -110,7 +108,6 @@ test("canceled outcomes render as canceled in CLI history and snapshots", () => 
     ),
     "canceled",
   );
-  assert.match(activityRowLines(row.outcome, DEFAULT_CONTEXT).join("\n"), /canceled/u);
 });
 
 const DIRECT_BIRTH = { origin: { kind: "direct" }, caller: { kind: "unknown" } } as const;
@@ -123,7 +120,7 @@ function observation(status: LiveStatusObservation["status"]): AkumaObservation 
     life: status.life,
     cwd: status.cwd ?? "/work/repo",
     provider: status.provider ?? "fixture",
-    timeline: projectStatusTimeline(status.timeline),
+    work: projectCurrentWork(status.timeline),
     ...(status.model === undefined ? {} : { model: status.model }),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
   };
@@ -183,9 +180,9 @@ function preview(value: unknown, truncated = false): Readonly<{ json: string; tr
 
 type GenericFixture = readonly [number, string, ReturnType<typeof preview>?];
 const genericLines = (rows: readonly GenericFixture[], columns: number) =>
-  rows.flatMap(([sequence, name, input]) =>
-    activityRowLines(genericTool(sequence, name, input), { columns, color: false }),
-  );
+  nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id,
+    events: rows.map(([sequence, name, input]) => genericTool(sequence, name, input)),
+  }, {}, { columns, color: false }).split("\n").slice(2);
 function callObservation(observation: NonNullable<SpawnResult["input"]>): SpawnResult {
   return {
     kind: "spawned",
@@ -206,10 +203,10 @@ function debtSummary(overrides: Partial<DebtSummary> = {}): DebtSummary {
   };
 }
 
-function debtPage(rows: readonly DebtSummary[], more = false): Extract<DebtReadPage<DebtSummary>, { kind: "present" }> {
+function debtPage(rows: readonly DebtSummary[], more = false): DebtList {
   const [first, ...rest] = rows;
   return {
-    kind: "present",
+    kind: "debt-catalogue",
     ...(first === undefined ? {} : { rows: [first, ...rest] as const }),
     ...(more ? { more: true as const } : {}),
   };
@@ -491,43 +488,35 @@ test("Debt receipts name identity, preserve exact content, and report field chan
   assert.match(refused, /^  reason  invalid graph$/mu);
   assert.match(refused, /^  detail  cycle$/mu);
   assert.equal(renderDebtMutation("add", { kind: "retry", reason: "busy" }), "? add retry\nbusy");
-  const shown = renderDebtShow([id], { kind: "present", items: [{ kind: "found", ...debt }] });
+  const shown = renderDebtShow({ kind: "debt-complete", items: [{ kind: "found", id, ...debt }] });
   assert.match(shown, /^  created  2026-08-12T00:00:00Z$/mu);
   assert.match(shown, /^  updated  2026-08-12T00:01:00Z$/mu);
   assert.match(shown, /^  note\n  new note/mu);
   assert.match(shown, /^  body\n  first line/mu);
-  const partial = renderDebtShow(["debt/gone", id], {
-    kind: "present",
-    items: [{ kind: "missing" }, { kind: "found", ...debt }],
+  const partial = renderDebtShow({
+    kind: "debt-partial",
+    items: [{ kind: "missing", id: "debt/gone" }, { kind: "found", id, ...debt }],
   });
   assert.match(partial, /^× show refused\n  reason  debt missing\n  debt  debt\/gone/mu);
   assert.match(partial, /debt\/alpha · open · P2 — Alpha/u);
-  assert.equal(renderDebtShow([id], { kind: "absent" }), "debt world absent");
+  assert.equal(renderDebtShow({ kind: "absent" }), "debt world absent");
 });
 
-test("Debt tree and doctor render their native relationship facts", () => {
-  const tree = renderDebtTree(
-    "debt/root",
+test("Debt show and doctor render their native relationship facts", () => {
+  const tree = renderDebtShow(
     {
-      kind: "present",
-      title: "Root",
-      state: "open",
-      priority: 2,
-      children: [
-        { kind: "node", id: "debt/child", title: "Child", state: "drop", priority: 1 },
-        { kind: "cycle", id: "debt/loop" },
-      ],
+      kind: "debt-complete", items: [{ kind: "found", id: "debt/root", ...debtDetail({ title: "Root" }),
+        children: [
+          { kind: "node", id: "debt/child", title: "Child", state: "drop", priority: 1 },
+          { kind: "cycle", id: "debt/loop" },
+        ],
+      }],
     },
     { columns: 120, color: false },
   );
   assert.match(tree, /^○ debt\/root · open · P2 — Root$/mu);
   assert.match(tree, /^ {2}× debt\/child · dropped · P1 — Child$/mu);
   assert.match(tree, /^ {2}! debt\/loop · cycle$/mu);
-  assert.match(
-    renderDebtTree("debt/gone", { kind: "missing" }),
-    /^× tree refused\n  reason  debt missing\n  debt  debt\/gone$/mu,
-  );
-  assert.equal(renderDebtTree("debt/root", { kind: "absent" }), "debt world absent");
   assert.equal(renderDoctor({ kind: "present" }), "✓ doctor  healthy");
   const issues = renderDoctor({
     kind: "present",
@@ -551,6 +540,7 @@ test("catalog text renders only the selected identity layer", () => {
   );
   assert.equal(
     renderArchetypeCatalogue({
+      kind: "archetype-catalogue",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
     }),
     ["AKUMA NAMES // available", "", "reviewer", "  codex-5 — Read the complete change without truncation."].join("\n"),
@@ -566,6 +556,7 @@ test("ls help lists the Akuma catalogue usage forms", () => {
 
 test("rendered Akuma catalog header names Akuma names, never akumaName", () => {
   const text = renderArchetypeCatalogue({
+    kind: "archetype-catalogue",
     rows: [{ name: "reviewer" }],
   });
   assert.ok(text.startsWith("AKUMA NAMES // available"));
@@ -596,6 +587,7 @@ test("empty World status has one explicit empty row", () => {
   assert.equal(
     renderKanshiText(
       {
+        kind: "world",
         observedAt: "2026-08-12T00:00:00.000Z",
         contracts: { kind: "present" },
         debts: { kind: "present" },
@@ -607,9 +599,9 @@ test("empty World status has one explicit empty row", () => {
   );
 });
 test("empty catalogues share a surface-named none state", () => {
-  assert.equal(renderDebtList({ kind: "present" }), "debts  none");
+  assert.equal(renderDebtList({ kind: "debt-catalogue" }), "debts  none");
   assert.equal(renderContractCatalogue(contractCatalog([])), "contracts  none");
-  assert.equal(renderVerb("aku.ls", {}, { kind: "returned", value: { observedAt: "2026-08-12T00:00:00.000Z" } }, { columns: 120, color: false }), "akuma  none");
+  assert.equal(renderVerb("ls", { selector: "aku/*" }, { kind: "returned", value: { kind: "akuma-catalogue", observedAt: "2026-08-12T00:00:00.000Z" } }, { columns: 120, color: false }), "akuma  none");
 });
 test("World roster names a bound Contract once without a bare unavailable parenthetical", () => {
   const snapshot = idleAkumaSnapshot([]);
@@ -632,9 +624,9 @@ test("World roster names a bound Contract once without a bare unavailable parent
 });
 test("Debt listings retain empty and absent observations", () => {
   const context = { columns: 120, color: false } as const;
-  const empty = { kind: "present" as const };
+  const empty = { kind: "debt-catalogue" as const };
   assert.equal(renderDebtList(empty, context), "debts  none");
-  assert.equal(renderDebtList({ kind: "absent" }, context), "debt world absent");
+  assert.equal(renderDebtList({ kind: "debt-catalogue", absent: true }, context), "debt world absent");
   const text = renderDebtList(
     debtPage([debtSummary({ id: "debt/one-row", title: "One row" })], true),
     context,
@@ -744,7 +736,7 @@ test("selected Contract roster preserves terminal associations and unavailable o
   assert.match(text, /aku\/worker\/22220002 \(aliases unavailable\)/u);
   assert.doesNotMatch(text, /activity|worktree|candidate/u);
 });
-test("Contract status cards collapse terminal mechanics and bound testimony like Akuma answers", () => {
+test("Contract status cards collapse terminal mechanics and bound testimony", () => {
   const integration = snapshotId("a".repeat(40));
   const tender = snapshotId("b".repeat(40));
   const long = "👩‍💻".repeat(120);
@@ -863,13 +855,6 @@ test("Contract status cards collapse terminal mechanics and bound testimony like
   assert.match(claimed, /│ /u);
   assert.match(claimed, /…”/u);
   assert.doesNotMatch(claimed, /candidate|candidate|predecessor|method|content identity|target moved|behind|worktree/u);
-  const answer = activityRowLines(answeredOutcome(2, long).outcome, {
-    columns: 60,
-    color: false,
-  }).join("\n");
-  assert.match(answer, /^✓ 👩‍💻/mu);
-  assert.match(answer, /^ {2}👩‍💻/mu);
-  assert.match(answer, /…$/mu);
   const abandoned = show({ ...base, phase: "abandoned", abandonNote: long });
   assert.match(abandoned, /× abandoned/u);
   assert.match(abandoned, /note  “/u);
@@ -1921,7 +1906,7 @@ test("World roster keeps the latest concrete tool work", () => {
     },
   ];
   const snapshot = openAkumaSnapshot(
-    calls.map((member, index) => snapshotRow(completedTool(index + 1, member.name, member.call))),
+    calls.map((member, index) => snapshotRow(activeTool(index + 1, member.name, member.call))),
   );
   const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running", snapshot)]), {
     columns: 120,
@@ -1931,18 +1916,18 @@ test("World roster keeps the latest concrete tool work", () => {
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
-test("World and detail answer previews preserve the beginning", () => {
-  const answer = `${"premise ".repeat(35)}conclusion: ship the fix`;
-  const snapshot = idleAkumaSnapshot([], answeredOutcome(1, answer));
+test("World and addressed status retain the outcome's exact history coordinate and verdict", () => {
+  const snapshot = idleAkumaSnapshot([], answeredOutcome(1, "complete retained answer"));
   const context = { columns: 70, color: false };
   const board = renderAkuma(
     akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]),
     context,
   ).join("\n");
-  assert.ok(board.includes(answer.slice(0, 24)));
-  const detail = activityRowLines(answeredOutcome(1, answer).outcome, context).join("\n");
-  assert.match(detail, /^✓ premise premise/mu);
-  assert.doesNotMatch(detail, /^✓ …/mu);
+  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
+    birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "asleep", timeline: snapshot,
+  });
+  for (const text of [board, snapshotText(observation(status), context)])
+    assert.match(text, /answered turn\/1 · activity 1/u);
 });
 
 test("native history retains diagnostics beneath a bounded command row", () => {
@@ -1959,10 +1944,8 @@ test("native history retains diagnostics beneath a bounded command row", () => {
   assert.doesNotMatch(continuation, /…/u, "a diagnostic that fits the continuation stays whole");
   assert.match(text, /run\s+\$[^…\n]+… — (?:error|exit 7)/u, "the command and failure status survive together");
   const short = completedTool(2, "bash", { kind: "run", command: "npm test" }, { status: "error", message: "hook failed" });
-  const shortStatus = liveStatusObservationSchema.unwrap().shape.status.parse({ ...status, timeline: openAkumaSnapshot([snapshotRow(short)]) });
-  for (const text of [snapshotText(observation(shortStatus), context), nativeHistoryText(
-    { kind: "akuma", akumaId: status.id, events: [short] }, {}, context)])
-    assert.equal(text.split("hook failed").length - 1, 1, "a complete inline diagnostic is not repeated");
+  const textShort = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [short] }, {}, context);
+  assert.equal(textShort.split("hook failed").length - 1, 1, "a complete inline diagnostic is not repeated");
 });
 
 test("native history bounds long diagnostics with a visible omission", () => {
@@ -1982,8 +1965,8 @@ test("native history bounds long diagnostics with a visible omission", () => {
 
 test("World roster keeps the honest fallback for unknown tool calls", () => {
   const snapshot = openAkumaSnapshot([
-    snapshotRow(completedTool(1, "mystery", { kind: "other" })),
-    snapshotRow(completedTool(2, "custom-tool", { kind: "other" })),
+    snapshotRow(activeTool(1, "mystery", { kind: "other" })),
+    snapshotRow(activeTool(2, "custom-tool", { kind: "other" })),
   ]);
   const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/cccc0003", "running", snapshot)]), {
     columns: 120,
@@ -2045,7 +2028,7 @@ test("generic tool rows preserve observed JSON arguments", () => {
 });
 
 test("generic tool rows keep failure diagnostics beside argument previews", () => {
-  const lines = [
+  const events = [
     completedTool(
       1,
       "future_tool",
@@ -2053,20 +2036,17 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
       { status: "error", message: "refused" },
     ),
     completedTool(2, "future_tool", { kind: "other", input: preview({}) }, { status: "error", exitCode: 7 }),
-  ].flatMap((row) => activityRowLines(row, { columns: 200, color: false }));
+  ];
+  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events }, {}, { columns: 200, color: false });
   for (const [pattern, message] of [
-    [/\{"alpha":1\} — error · refused$/u, "argument evidence and its failure stay together"],
-    [/future_tool\s+\{\} — exit 7$/u, "an empty argument object never swallows failure evidence"],
+    [/\{"alpha":1\} — error · refused$/mu, "argument evidence and its failure stay together"],
+    [/future_tool\s+\{\} — exit 7$/mu, "an empty argument object never swallows failure evidence"],
   ] as const)
-    assert.ok(
-      lines.some((line) => pattern.test(line)),
-      `${message}: ${lines.join("\n")}`,
-    );
-  assert.doesNotMatch(lines.join("\n"), / — ok/u);
-  const legacy = activityRowLines(
-    completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" }),
-    { columns: 120, color: false },
-  ).join("\n");
+    assert.match(text, pattern, message);
+  assert.doesNotMatch(text, / — ok/u);
+  const legacy = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id,
+    events: [completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" })],
+  }, {}, { columns: 120, color: false });
   assert.match(legacy, /mystery\s+… — error · refused$/mu);
   assert.equal((legacy.match(/refused/gu) ?? []).length, 1, "a name-only failure states its diagnostic once");
 });
@@ -2111,7 +2091,7 @@ test("generic tool rows preserve name, width, and grapheme behavior", () => {
 
 test("activity rows share one six-cell default action column", () => {
   const note = { kind: "note", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "payload" } as const;
-  const plainNote = activityRowLines(note, { columns: 80, color: false })[0]!;
+  const plainNote = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id, events: [note] }, {}, { columns: 80, color: false }).split("\n")[2]!;
   const plainTool = genericLines([[1, "tool", preview({ value: 1 })]], 80)[0]!;
   assert.equal(
     plainNote.indexOf("payload"),
@@ -2120,7 +2100,7 @@ test("activity rows share one six-cell default action column", () => {
   );
 });
 
-test("World roster keeps active, error and truncated activity marks truthful", () => {
+test("World current work keeps concrete active work and visible clipping", () => {
   const active = openAkumaSnapshot([
     snapshotRow(activeTool(1, "bash", { kind: "run", command: "keiyaku wait --all" })),
   ]);
@@ -2128,17 +2108,8 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(activeRoster, /active: run \$ keiyaku wait --all/u);
+  assert.match(activeRoster, /1 run \$ keiyaku wait --all/u);
   assert.doesNotMatch(activeRoster, /— ok/u);
-
-  const failed = openAkumaSnapshot([
-    snapshotRow(completedTool(2, "bash", { kind: "run", command: "npm test" }, { status: "error", exitCode: 1 })),
-  ]);
-  const failedRoster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/ccdd0007", "running", failed)]), {
-    columns: 120,
-    color: false,
-  }).join("\n");
-  assert.match(failedRoster, /error: run \$ npm test — exit 1/u);
 
   const truncated = openAkumaSnapshot([
     snapshotRow({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
@@ -2151,7 +2122,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
   assert.ok(!truncatedRoster.includes("x".repeat(200)), "truncation bounds retained said text");
 });
 
-test("a sleeping worker's outcome row is its ending, not a repeated completion mark", () => {
+test("a sleeping worker retains its outcome coordinate and completion judgment", () => {
   const sleeping = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0001",
@@ -2159,9 +2130,8 @@ test("a sleeping worker's outcome row is its ending, not a repeated completion m
     timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
   });
   const snapshot = snapshotText(observation(sleeping), { columns: 80, color: false });
-  assert.match(snapshot, /✓ the answer$/u, "the timeline ends at its outcome row");
-  assert.doesNotMatch(snapshot, /✓ completed/u, "the answered outcome is already the ending");
-  assert.equal((snapshot.match(/✓/gu) ?? []).length, 1, "one check on one stream");
+  assert.match(snapshot, /answered turn\/1 · activity 1/u);
+  assert.match(snapshot, /✓ completed$/u);
 
   const answerless = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
@@ -2246,14 +2216,8 @@ test("status keeps current evidence while history retains thought narration", ()
   const statusInvocation = parseArgv(["status", id]);
   assert.ok("command" in statusInvocation);
   const statusText = snapshotText(observation(status), DEFAULT_CONTEXT);
-  assert.doesNotMatch(statusText, /internal thought/u);
-  for (const command of ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"])
-    assert.match(statusText, new RegExp(`\\$ ${command}\\b`, "u"));
-  assert.match(statusText, /active: run \$ c9/u, "the active final tool remains visible");
-  assert.doesNotMatch(statusText, /●  run/u, "status never asserts live activity");
-  assert.doesNotMatch(statusText, /earlier activity/u, "the owner selected every row");
-  assert.ok(statusText.indexOf("$ c7") < statusText.indexOf("after"));
-  assert.ok(statusText.indexOf("after") < statusText.indexOf("$ c8"));
+  assert.match(statusText, /12 run \$ c9/u, "the owner-selected current work remains visible");
+  assert.deepEqual(observation(status).work.activeTools, [{ id: 12, turnSequence: 1, toolId: "tool-12" }]);
 
   const outcomeSnapshot = idleAkumaSnapshot(
     [
@@ -2278,8 +2242,7 @@ test("status keeps current evidence while history retains thought narration", ()
     timeline: outcomeSnapshot,
   });
   const outcomeText = snapshotText(observation(answeredStatus), DEFAULT_CONTEXT);
-  assert.match(outcomeText, /final outcome/u, "an answered status retains its complete outcome");
-  assert.doesNotMatch(outcomeText, /✓ say\s+“”/u, "a retained answer never becomes an empty say");
+  assert.match(outcomeText, /answered turn\/1 · activity 13/u);
 
   const failedOutcome: OutcomeRow = {
     kind: "outcome",
@@ -2299,7 +2262,7 @@ test("status keeps current evidence while history retains thought narration", ()
     ),
     DEFAULT_CONTEXT,
   );
-  assert.match(failedText, /retained provider diagnostic/u, "a failed status retains its diagnostic");
+  assert.match(failedText, /failed turn\/1 · activity 13/u);
 
   const historyInvocation = parseArgv(["history", id]);
   assert.ok("command" in historyInvocation);
@@ -2346,7 +2309,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
   const id = "aku/worker/abcd0101";
   const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: initial });
   const statusText = snapshotText(observation(status), context);
-  assert.ok(statusText.indexOf("initial commission") < statusText.indexOf("after-boundary"));
+  assert.match(statusText, /3 run \$ still-running/u);
 
   const wake = snapshotRow({
     kind: "tell" as const,
@@ -2376,7 +2339,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
     ),
     context,
   );
-  assert.ok(wakeStatusText.indexOf("resume with the new direction") < wakeStatusText.indexOf("after-wake"));
+  assert.match(wakeStatusText, /6 run \$ waking/u);
 });
 
 test("current attempt boundaries consume the projection opening identity", () => {
@@ -2912,6 +2875,7 @@ test("a streamed observing call concludes truthfully when its stream never opene
 test("failed sections preserve each owner diagnostic", () => {
   const text = renderKanshiText(
     {
+      kind: "world",
       observedAt: "2026-08-12T00:00:00.000Z",
       contracts: { kind: "failed", diagnostic: "contract read failed" },
       debts: { kind: "failed", diagnostic: "debt read failed", coordinate: "/work/debts" },

@@ -9,7 +9,7 @@ import type {
   ReportedFileChange,
   SnapshotRow,
 } from "../../src/akuma/projection.js";
-import { projectActivityEntry, projectStatusOutcome } from "../../src/akuma/status-projection.js";
+import { projectCurrentWork } from "../../src/akuma/status-projection.js";
 import { parseAkumaId } from "../../src/akuma/identity.js";
 import type { AkumaKanshiRow, KanshiReport } from "../../src/kanshi/index.js";
 
@@ -81,24 +81,18 @@ export function idleAkumaSnapshot(
 }
 
 export function activityAkumaRow(id: string, life: "running" | "asleep", snapshot: ActivitySnapshot): AkumaKanshiRow {
-  const activity = snapshot.entries.findLast(
-    (entry) => entry.kind === "row" && ["tool", "said", "thought", "note", "report"].includes(entry.row.kind),
-  );
-  const preview = activity?.kind === "row" ? projectActivityEntry(activity.row) : undefined;
   return {
     id: parseAkumaId(id).id,
     life,
     lifeAt: AKUMA_ACTIVITY_AT,
     lastActivityAt: AKUMA_ACTIVITY_AT,
-    ...(preview === undefined ? {} : { activity: preview }),
-    ...(snapshot.kind === "idle" && snapshot.outcome !== undefined
-      ? { outcome: projectStatusOutcome(snapshot.outcome) }
-      : {}),
+    work: projectCurrentWork(snapshot),
   };
 }
 
 export function akumaWorldReport(rows: readonly AkumaKanshiRow[]): KanshiReport {
   return {
+    kind: "world",
     observedAt: AKUMA_OBSERVED_AT,
     contracts: { kind: "absent" },
     debts: { kind: "absent" },

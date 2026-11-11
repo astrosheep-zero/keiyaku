@@ -30,17 +30,14 @@ type McpAdapterInput = Readonly<{
 const SCHEMA_TOOLS = new Set<VerbName>([
   "bind",
   "wait",
-  "kei.status",
-  "aku.status",
-  "kei.ls",
-  "aku.ls",
-  "debt.ls",
+  "status",
+  "ls",
+  "show",
   "verify",
   "spawn",
   "fork",
   "debt.add",
   "ask",
-  "debt.show",
 ]);
 const excluded = new Set<VerbName>(["nuke", "settings", "debt.doctor", "debt.addDocument"]);
 
@@ -53,7 +50,7 @@ function describeTools(): Tool[] {
     );
     let outputSchema: Tool["outputSchema"];
     if (SCHEMA_TOOLS.has(name as VerbName)) {
-      const output = z.toJSONSchema(entry.output, { io: "input" });
+      const output = z.toJSONSchema(entry.output, { io: "input", reused: "ref" });
       const branches: z.core.JSONSchema.BaseSchema[] = [output];
       for (const branch of branches) {
         if (branch.anyOf !== undefined) branches.push(...branch.anyOf);

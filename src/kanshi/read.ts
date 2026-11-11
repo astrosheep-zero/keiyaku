@@ -304,7 +304,10 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
     aliasesAt(world),
     contract === undefined && world !== null
       ? akumaRowsAt(world, ROSTER_VISIBLE_ROWS, undefined, undefined, ROSTER_SNAPSHOT_ROWS).then(
-          ({ observedAt: _observedAt, ...rows }): BoardSection<AkumaKanshiWorld> => ({ kind: "present", ...rows }),
+          ({ kind: _kind, observedAt: _observedAt, ...rows }): BoardSection<AkumaKanshiWorld> => ({
+            kind: "present",
+            ...rows,
+          }),
           boardFailure,
         )
       : Promise.resolve(absent),
@@ -315,6 +318,7 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
     holders: Holders,
     dispatches: Dispatches,
   ): KanshiReport => ({
+    kind: "world",
     observedAt,
     contracts,
     debts: joinedDebts(debts, holders),

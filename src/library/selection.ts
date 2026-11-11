@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { akumaIdSchema } from "../akuma/identity.js";
 import { activityRowSchema, outcomeRowSchema, reportRowSchema } from "../akuma/projection.js";
-import { projectStatusTimeline } from "../akuma/status-projection.js";
+import { projectCurrentWork } from "../akuma/status-projection.js";
 import { withoutReportedChanges } from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
@@ -169,7 +169,7 @@ async function observeAkuma(
     cwd: status.cwd,
     provider: status.provider,
     ...(status.model === undefined ? {} : { model: status.model }),
-    timeline: projectStatusTimeline(composed.timeline),
+    work: projectCurrentWork(composed.timeline),
     ...(status.lastActivityAt === undefined ? {} : { lastActivityAt: status.lastActivityAt }),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
     ...(contract.kind === "none" ? {} : { contract }),

@@ -5,13 +5,13 @@ import type { AkumaRosterInput } from "../akuma/akuma.js";
 import { observeAkumaRoster, readAkumaTimeline, rosterInput } from "../akuma/akuma.js";
 import { boundedListLimit } from "../bounded-list.js";
 import { boundedMap } from "../akuma/read-pool.js";
-import { projectActivityEntry, projectStatusOutcome } from "../akuma/status-projection.js";
+import { projectCurrentWork } from "../akuma/status-projection.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { Repo, scopeForRepo } from "./repo.js";
 import type { AkumaKanshiRow, AkumaKanshiWorld, Section } from "../kanshi/report.js";
 import type { z } from "zod";
-import type { akumaCatalogueSchema } from "../kanshi/report.js";
+import type { akumaCatalogueSchema } from "../akuma/selection-observation.js";
 import { captureAkumaHost } from "../body-host.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
@@ -64,8 +64,6 @@ export type {
   SpawnResult,
   SpawnWaitHead,
 };
-/** The existing native wait-observation seam, exposed type-only for CLI composition. */
-
 export type Akumas = AkumasHandle;
 
 export type AkumaAliasesInput = Readonly<{ akumaIds: readonly string[] }>;
@@ -215,7 +213,7 @@ export async function akumaRowsAt(
   limit: number,
   name?: string,
   caller?: AkumaCaller,
-  snapshotRows = Number.POSITIVE_INFINITY,
+  snapshotRows = 0,
 ): Promise<AkumaList> {
   const source = await observeAkumaRoster(world, limit, name, caller);
   const rows = await boundedMap([...(source.rows ?? []).entries()], async ([index, row]): Promise<AkumaKanshiRow> => {
@@ -227,23 +225,12 @@ export async function akumaRowsAt(
     const summary = { ...facts, ...(caller?.kind === "akuma" ? { parentAkumaId: caller.akumaId } : {}) };
     if (index >= snapshotRows) return summary;
     try {
-      const snapshot = await readAkumaTimeline(world, row.id);
-      const activity = snapshot.entries.findLast(
-        (entry) => entry.kind === "row" && ["tool", "said", "thought", "note", "report"].includes(entry.row.kind),
-      );
-      const preview = activity?.kind === "row" ? projectActivityEntry(activity.row) : undefined;
-      return {
-        ...summary,
-        ...(preview === undefined ? {} : { activity: preview }),
-        ...(snapshot.kind === "idle" && snapshot.outcome !== undefined
-          ? { outcome: projectStatusOutcome(snapshot.outcome) }
-          : {}),
-      };
+      return { ...summary, work: projectCurrentWork(await readAkumaTimeline(world, row.id)) };
     } catch (error) {
-      return { ...summary, activity: { kind: "unavailable", diagnostic: diagnostic(error) } };
+      return { ...summary, work: { kind: "unavailable", diagnostic: diagnostic(error) } };
     }
   });
-  return { ...source, ...(rows.length === 0 ? {} : { rows }) };
+  return { ...source, kind: "akuma-catalogue", ...(rows.length === 0 ? {} : { rows }) };
 }
 export function joinedAkumas<T extends AkumaKanshiWorld>(
   product: T,

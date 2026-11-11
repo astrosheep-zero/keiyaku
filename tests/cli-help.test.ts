@@ -23,8 +23,8 @@ test("help resolves the longest legal command-word prefix before syntax scanning
     help: { kind: "contract", command: "bind" },
   });
   assert.deepEqual(parseArgv(["debt", "unknown", "--help"]), { help: { kind: "debt" } });
-  assert.deepEqual(parseArgv(["debt", "tree", "bad", "--help"]), {
-    help: { kind: "debt", action: "tree" },
+  assert.deepEqual(parseArgv(["debt", "doctor", "bad", "--help"]), {
+    help: { kind: "debt", action: "doctor" },
   });
   assert.deepEqual(parseArgv(["fork", "--json", "--help"]), {
     help: { kind: "akuma", action: "fork" },
@@ -53,7 +53,7 @@ test("command family and leaf help expose executable usage and flags", () => {
   assert.match(showHelp, /usage  keiyaku show \[<contract>\|@name\]/u);
   assert.match(showHelp, /--json/u);
   const statusHelp = renderContractHelp("status");
-  assert.match(statusHelp, /status \[<kei\/\.\.\.>\|<aku\/\.\.\.>\|@name\]/u);
+  assert.match(statusHelp, /status <kei\/\.\.\.\|aku\/\.\.\.\|@name>/u);
   const lsHelp = renderContractHelp("ls");
   assert.match(lsHelp, /--mine \| --caller \(<integration>:<id> \| aku\/<name>\/<suffix>\)/u);
   assert.match(lsHelp, /ls debt\[\/\] \[--closed \| --all\] \[--limit <count>\]/u);
@@ -63,7 +63,7 @@ test("leaf help and usage refusals share accepted invocation options", () => {
   for (const help of [
     renderContractHelp("show"),
     renderContractHelp("status"),
-    renderDebtHelp("tree"),
+    renderDebtHelp("doctor"),
     renderAkumaHelp("tell"),
     renderInstallHelp(),
     renderHelp({ kind: "whoami" }),
@@ -73,7 +73,7 @@ test("leaf help and usage refusals share accepted invocation options", () => {
   }
   for (const args of [
     ["show", "--bad"],
-    ["debt", "tree"],
+    ["debt", "update"],
     ["tell", "@worker"],
   ]) {
     assert.throws(

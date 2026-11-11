@@ -8,18 +8,14 @@ import { akumaIdSchema } from "../akuma/identity.js";
 import { contractIdSchema } from "../git/identity.js";
 import { archetypeCatalogSchema } from "../akuma/archetype.js";
 import {
+  akumaCatalogueSchema,
   akumaObservationSchema,
   akumaAskResultSchema,
   akumaKillResultSchema,
   akumaTellResultSchema,
   akumaWaitResultSchema,
 } from "../akuma/selection-observation.js";
-import {
-  regionResultSchema,
-  kanshiReportSchema,
-  contractStatusSchema,
-  akumaCatalogueSchema,
-} from "../kanshi/report.js";
+import { regionResultSchema, kanshiReportSchema, contractStatusSchema } from "../kanshi/report.js";
 import { settingsSchema } from "../settings.js";
 import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
@@ -43,7 +39,6 @@ import { whoamiFactsSchema } from "./keiyaku-identity.js";
 import { resetOutcomeSchema } from "./outcome.js";
 import {
   debtAbsentSchema,
-  debtTreeResultSchema,
   debtShowResultSchema,
   debtDoctorReportSchema,
   debtMutationResultSchema,
@@ -90,6 +85,24 @@ const jsonDocument = z.record(z.string(), jsonValue).readonly();
 const contractSelector = text.startsWith("kei/");
 const akumaSelector = text.regex(/^(?!kei\/)/u);
 const debtSelection = z.enum(["active", "closed", "all"]).exactOptional();
+const lsCallerSchema = z.union([
+  z.strictObject({ kind: z.literal("mine") }).readonly(),
+  z.strictObject({ kind: z.literal("external"), caller: akumaCallerSchema }).readonly(),
+  z.strictObject({ kind: z.literal("akuma"), akumaId: akumaIdSchema }).readonly(),
+]);
+const listBound = { limit: positive.exactOptional() };
+const lsInputSchema = z.union([
+  z.strictObject({ selector: text.regex(/^kei\/?$/u), ...listBound }).readonly(),
+  z.strictObject({ selector: text.regex(/^debt\/?$/u), selection: debtSelection, ...listBound }).readonly(),
+  z.strictObject({ selector: text.regex(/^aku\/?$/u), ...listBound }).readonly(),
+  z
+    .strictObject({
+      selector: text.regex(/^aku\/(?:\*(?:\/\*)?|[^/*]+(?:\/\*|\/)?)$/u),
+      caller: lsCallerSchema.exactOptional(),
+      ...listBound,
+    })
+    .readonly(),
+]);
 const debtRelations = {
   needs: z.array(debtIdSchema).readonly().exactOptional(),
   parent: debtIdSchema.nullable().exactOptional(),
@@ -176,9 +189,14 @@ export const verbs = Object.freeze({
     effect: "destroy",
   },
   show: {
-    description: "Read Contract guidance.",
-    input: z.strictObject(contract).readonly(),
-    output: guidanceSchema,
+    description: "Read contextual Contract guidance or addressed Contract/Debt detail.",
+    input: z.union([
+      z
+        .strictObject({ id: z.union([contractIdSchema, debtIdSchema, text.regex(/^@[^*?\[\]]+$/u)]).exactOptional() })
+        .readonly(),
+      z.strictObject({ ids: z.array(debtIdSchema).nonempty().readonly() }).readonly(),
+    ]),
+    output: z.union([guidanceSchema, debtShowResultSchema, debtAbsentSchema]),
     effect: "read",
   },
   reconcile: {
@@ -305,22 +323,22 @@ export const verbs = Object.freeze({
     output: resetOutcomeSchema,
     effect: "destroy",
   },
-  status: {
-    description: "Observe the World.",
+  kanshi: {
+    description: "Observe the World board.",
     input: z.strictObject({}).readonly(),
     output: kanshiReportSchema,
     effect: "read",
   },
-  "kei.status": {
-    description: "Observe one Contract.",
-    input: z.strictObject({ id: contractIdSchema }).readonly(),
-    output: contractStatusSchema,
+  status: {
+    description: "Observe one Contract or Akuma by complete identity.",
+    input: z.strictObject({ id: z.union([contractIdSchema, akumaIdSchema]) }).readonly(),
+    output: z.union([contractStatusSchema, akumaObservationSchema]),
     effect: "read",
   },
-  "aku.status": {
-    description: "Observe one Akuma.",
-    input: z.strictObject({ id: akumaIdSchema }).readonly(),
-    output: akumaObservationSchema,
+  ls: {
+    description: "List Contracts, Debts, Akuma instances or Archetypes by selector.",
+    input: lsInputSchema,
+    output: z.union([contractCatalogueSchema, akumaCatalogueSchema, archetypeCatalogSchema, debtCatalogueSchema]),
     effect: "read",
   },
   region: {
@@ -378,61 +396,10 @@ export const verbs = Object.freeze({
     output: debtUpdateResultSchema,
     effect: "write",
   },
-  "debt.show": {
-    description: "Read one or more Debts.",
-    input: z.union([
-      z.strictObject({ id: debtIdSchema }).readonly(),
-      z.strictObject({ ids: z.array(debtIdSchema).min(1).readonly() }).readonly(),
-    ]),
-    output: z.union([debtShowResultSchema, debtAbsentSchema]),
-    effect: "read",
-  },
-  "debt.ls": {
-    description: "List World Debts by lifecycle.",
-    input: z.strictObject({ selection: debtSelection, limit: positive.exactOptional() }).readonly(),
-    output: debtCatalogueSchema,
-    effect: "read",
-  },
-  "debt.tree": {
-    description: "Observe a Debt decomposition tree.",
-    input: z.strictObject({ id: debtIdSchema }).readonly(),
-    output: z.union([debtTreeResultSchema, debtAbsentSchema]),
-    effect: "read",
-  },
   "debt.doctor": {
     description: "Diagnose Debt authority and relations.",
     input: z.strictObject({}).readonly(),
     output: z.union([debtDoctorReportSchema, debtAbsentSchema]),
-    effect: "read",
-  },
-  "kei.ls": {
-    description: "List active Contracts.",
-    input: z.strictObject({ limit: positive.exactOptional() }).readonly(),
-    output: contractCatalogueSchema,
-    effect: "read",
-  },
-  "aku.ls": {
-    description: "List Akuma instances with current work and associations.",
-    input: z
-      .strictObject({
-        limit: positive.exactOptional(),
-        akumaName: optText,
-        caller: z
-          .union([
-            z.strictObject({ kind: z.literal("mine") }).readonly(),
-            z.strictObject({ kind: z.literal("external"), caller: akumaCallerSchema }).readonly(),
-            z.strictObject({ kind: z.literal("akuma"), akumaId: akumaIdSchema }).readonly(),
-          ])
-          .exactOptional(),
-      })
-      .readonly(),
-    output: akumaCatalogueSchema,
-    effect: "read",
-  },
-  "aku.names": {
-    description: "List Akuma archetype definitions.",
-    input: z.strictObject({ limit: positive.exactOptional() }).readonly(),
-    output: archetypeCatalogSchema,
     effect: "read",
   },
 } as const satisfies Record<string, VerbEntry>);

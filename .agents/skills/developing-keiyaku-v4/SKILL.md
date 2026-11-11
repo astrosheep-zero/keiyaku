@@ -160,7 +160,7 @@ when the requested window is already shorter). Keep waiting on that handle
 until `keiyaku wait` exits or the requested timeout is reached; do not start a
 second wait in parallel or replace it with a shell timeout.
 
-Never implement observation as short polling: do not loop over bare `status`,
+Never implement observation as short polling: do not loop over `kanshi`,
 repeatedly restart `wait`, or inspect the projection at arbitrary
 three-minute intervals. The `5m` value is the default observation window and
 causes `keiyaku wait` to return one activity snapshot; it is not an
@@ -171,7 +171,7 @@ Five minutes is an observation timeout, not a hard implementation deadline.
 When it expires, the Akuma may still be running; the returned activity snapshot
 is the observation result. A timeout is never evidence that the work is complete,
 blocked, stale, or ready to kill. Only after that one wait has returned may the
-coordinator read bare `status`, inspect history, or steer with `tell`, and
+coordinator read `kanshi`, inspect history, or steer with `tell`, and
 only when the snapshot exposes a real blocker, scope drift, or useful correction.
 An interrupted or idle projection is likewise not a completion receipt. Leave a
 still-live projection running and begin another full observation window later;

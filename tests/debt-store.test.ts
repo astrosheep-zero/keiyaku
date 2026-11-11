@@ -233,8 +233,7 @@ test("flat Debt authority remains discoverable after a fresh World observation",
     if (read.kind !== "present") return;
     assert.equal(read.title, "Durable record");
     const listed = await second.list();
-    assert.equal(listed.kind, "present");
-    if (listed.kind !== "present") return;
+    assert.equal(listed.kind, "debt-catalogue");
     assert.deepEqual(
       listed.rows?.map((row) => row.id),
       [added.id],

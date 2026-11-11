@@ -82,10 +82,13 @@ work or all work. Lifecycle selection precedes the bound, and rows
 are ordered by priority and then canonical identity. Debt offers native listing
 and graph views without an expression language or caller-selected sorting.
 Catalogues summarize current work rather than repeat
-its full document, activity testimony, or decomposition. A targeted Debt read
-retains requested author testimony and resolved Debt-owned outbound relations;
-relationship endpoints retain availability and lifecycle judgment without
-repeating their work summaries. Blocked views identify every unresolved
+its full document, activity testimony, or decomposition. Native singular reads
+retain requested author testimony and resolved Debt-owned outbound relations.
+Complete invocation detail additionally retains cycle-safe child decomposition
+from one board snapshot; unavailable relationship endpoints remain explicit.
+Batch reads distinguish complete, partial and
+missing selection while preserving readable peers and the identity of each
+missing member. Blocked views identify every unresolved
 prerequisite and distinguish missing endpoints. Reverse relations are derived
 only by named board projections. Debt's board, readiness, blocked, tree, and
 diagnostic views are read-only interpretations of current Debt authority. Growing row catalogues

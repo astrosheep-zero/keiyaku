@@ -479,7 +479,7 @@ test("Pi command runs one text status and does not refresh when dismissed", asyn
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0]?.command, "keiyaku");
-  assert.deepEqual(calls[0]?.args, ["status"]);
+  assert.deepEqual(calls[0]?.args, ["kanshi"]);
   assert.equal(calls[0]?.args.includes("--json"), false);
   assert.ok(overlay);
   assert.equal(

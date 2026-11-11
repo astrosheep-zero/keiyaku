@@ -101,7 +101,7 @@ test("native report is a distinct durable history/stream row and does not comple
       assert.deepEqual(changed.value?.rows.filter(row => row.kind === "report"), [report]);
       const status = await akuma.status();
       assert.equal(status.life, "running");
-      assert.equal(status.timeline.kind, "open");
+      assert.equal(status.work.kind, "open");
       const idle = await akuma.idle({ timeoutMs: 0 });
       assert.equal(idle.reason, "deadline");
       await endTurn(value.allocated.paths, {
@@ -130,8 +130,8 @@ test("exact report history selects retained identity without observing outcomes"
     const firstReport = reports.find(row => `report/${row.sequence}` === first.reportId)!;
     const secondReport = reports.find(row => `report/${row.sequence}` === second.reportId)!;
     assert.equal(secondReport.text, ` second\n  ${"complete ".repeat(80)}\n`);
-    const preview = (await Akumas.of(value.world).status({ akuma: value.allocated.id })).timeline.entries?.find(entry => entry.id === secondReport.sequence);
-    assert.ok(preview?.text.endsWith("…"));
+    const current = (await Akumas.of(value.world).status({ akuma: value.allocated.id })).work;
+    assert.equal(current.latestActivity, secondReport.sequence);
     const decimal = String(secondReport.sequence);
     const activity = await owner.history({ id: decimal });
     assert.deepEqual(activity, { kind: "exact-activity", row: secondReport });

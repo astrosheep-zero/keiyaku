@@ -8,7 +8,7 @@ import {
 import { scanArgs, type ScanFlagKind, type ScanSpec, type ScannedArgs } from "../scan.js";
 import { canonicalDebtId } from "../../debt/identity.js";
 
-export type DebtAction = "add" | "tree" | "doctor" | "update";
+export type DebtAction = "add" | "doctor" | "update";
 type DebtFlagValue = string | true | readonly string[];
 type DebtStdin = "document" | "body" | "append" | "note";
 
@@ -57,12 +57,6 @@ debt add [--actor <actor>] -`,
     purpose: "Create a Debt from flags or a Debt document on stdin.",
     details:
       "The stdin document is YAML front matter (title, state, priority, needs, parent, supersedes, relates, note) followed by a Markdown body.",
-  },
-  tree: {
-    arity: [1, 1],
-    flags: COMMON,
-    usage: "debt tree <debt/...>",
-    purpose: "Show a Debt and its parent/child breakdown.",
   },
   doctor: {
     arity: [0, 0],
@@ -167,7 +161,7 @@ function validateUpdate(scanned: ScannedDebt, fail: (message: string) => never):
 }
 
 /** Actions whose positionals are all addressed DebtIds validated by the native owner. */
-const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["tree", "update"]);
+const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["update"]);
 
 /** Validate every addressed DebtId positional through the native owner before any read or write. */
 function validateDebtIdPositionals(positionals: readonly string[], fail: (message: string) => never): void {

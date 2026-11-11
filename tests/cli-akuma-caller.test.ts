@@ -73,17 +73,20 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   });
   const environment = { KEIYAKU_EXTERNAL_CALLER: "test:root" };
   const facet = Keiyaku.at({ cwd: root, environment });
-  const { observedAt: _facetTime, ...facetList } = await facet.akuLs({ caller: { kind: "mine" } });
+  const selectedFacet = await facet.ls({ selector: "aku/*", caller: { kind: "mine" } });
+  assert.equal(selectedFacet.kind, "akuma-catalogue");
+  if (selectedFacet.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
+  const { observedAt: _facetTime, ...facetList } = selectedFacet;
   const { observedAt: _nativeTime, ...nativeList } = await Akumas.of(root).list({ caller: external });
   assert.deepEqual(facetList, nativeList);
   const invalidEnvironmentFacet = Keiyaku.at({ cwd: root, environment: { KEIYAKU_ACTOR_ID: direct.id } });
-  const { observedAt: _directTime, ...directList } = await invalidEnvironmentFacet.akuLs({
-    caller: { kind: "external", caller: external },
-  });
+  const selectedDirect = await invalidEnvironmentFacet.ls({ selector: "aku/*", caller: { kind: "external", caller: external } });
+  if (selectedDirect.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
+  const { observedAt: _directTime, ...directList } = selectedDirect;
   assert.deepEqual(directList, nativeList, "an explicit caller is not re-derived from the environment");
-  const { observedAt: _childTime, ...childList } = await facet.akuLs({
-    caller: { kind: "akuma", akumaId: direct.id },
-  });
+  const selectedChild = await facet.ls({ selector: "aku/*", caller: { kind: "akuma", akumaId: direct.id } });
+  if (selectedChild.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
+  const { observedAt: _childTime, ...childList } = selectedChild;
   const { observedAt: _nativeChildTime, ...nativeChildList } = await Akumas.of(root).list({
     caller: { kind: "akuma", world: root, akumaId: direct.id },
   });
@@ -147,7 +150,7 @@ test("ls caller selection refuses absent identity and non-Akuma catalogues", asy
   const root = await World.at(temporaryDirectory(t, "keiyaku-cli-caller-refusal-"));
   const facet = Keiyaku.at({ cwd: root, environment: {} });
   await assert.rejects(
-    facet.akuLs({ caller: { kind: "mine" } }),
+    facet.ls({ selector: "aku/*", caller: { kind: "mine" } }),
     (error: unknown) => error instanceof KeiyakuUsageError && /--mine requires a caller identity/u.test(error.message),
   );
   const missing = await runCli(["-C", root, "ls", "--mine"], { environment: {} });

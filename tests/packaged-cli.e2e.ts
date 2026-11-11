@@ -166,7 +166,7 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   writeFileSync(join(repository, "README.md"), "initial\n");
   command("git", ["add", "README.md"], repository);
   command("git", ["commit", "--quiet", "-m", "initial"], repository);
-  const status = JSON.parse(installedCommand(["-C", repository, "status", "--json"], installed)) as {
+  const status = JSON.parse(installedCommand(["-C", repository, "kanshi", "--json"], installed)) as {
     contracts?: { kind?: string };
   };
   assert.equal(status.contracts?.kind, "present");

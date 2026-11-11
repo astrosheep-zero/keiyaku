@@ -52,7 +52,8 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | --- | --- | --- |
 | bind, amend, arc | Present Contract material for the Contract owner's admission judgment; refuse an impossible or contradictory invocation. | Return the Contract admission result. |
 | deliver, review, verify, abandon, reconcile | Request lifecycle, evidence production, or repair judgment, or delivery preview; refuse an absent or ambiguous Contract selector. | Return the owning operation result unchanged. |
-| status, ls | Read one requested Contract, Akuma, archetype, Debt, or World projection; `ls` routes to the owning product and refuses a selector that does not name one allowed read. | Render the owner observation without manufacturing facts. |
+| kanshi | Read the selector-free composite World report. | Render independent section availability without changing classification for section failure. |
+| status, ls | Read one addressed Contract or Akuma, or one owner's catalogue; refuse missing or invalid subjects before observation. | Render the owner observation without manufacturing facts. |
 | show | Route explicitly addressed Debts to their owner or read one explicitly or contextually selected Contract's guidance; refuse mixed families and plural Contract selection before reading. | Return the selected owner's native value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
@@ -105,8 +106,9 @@ the Akuma profile is descriptive, not live execution status.
 guidance, using the existing exact Contract selection context when selection
 is omitted. Debt selection may be plural; mixed Debt and Contract selection,
 Akuma, category, and plural Contract selection refuse before reading. The
-returned text and JSON are the selected owner's own value. Status observes the
-fixed World report or one complete Contract or Akuma identity without guidance.
+returned text and JSON are the selected owner's own value. Status requires one
+complete Contract or Akuma identity without guidance; omitted status is a usage
+refusal. Kanshi alone reads the selector-free World report.
 Plural and category status requests refuse before authority observation. Named
 addresses are resolved once during asynchronous input acquisition through the
 existing address authority, then invoke the resolved family's exact operation;

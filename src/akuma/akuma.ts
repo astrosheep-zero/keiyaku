@@ -25,7 +25,7 @@ import {
   type AkumaLineage,
 } from "./lineage-cache.js";
 import type { ActivitySnapshot } from "./projection.js";
-import { compactTimelineSchema } from "./status-projection.js";
+import { currentWorkSchema } from "./status-projection.js";
 import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
 
 type BornLife = AkumaStatus["life"];
@@ -74,7 +74,7 @@ export const akumaStatusSchema = z
     provider: z.string().exactOptional(),
     model: z.string().exactOptional(),
     lastActivityAt: z.string().exactOptional(),
-    timeline: compactTimelineSchema,
+    work: currentWorkSchema,
     strandedReason: z.literal("resume-unsupported").exactOptional(),
   })
   .strict()

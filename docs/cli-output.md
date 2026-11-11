@@ -140,17 +140,12 @@ capture truncates visibly. Rendering does not interpret foreign command or
 parameter dialects: retained commands and paths use the shared bounded
 payload discipline. Native tool rows preserve a nonempty work preview and the
 semantic trailer of read ranges, diffstats, durations, and exit/error status
-within the terminal width. Compact activity renders the producer's correlated
-text directly, keeping its complete coordinate and visible head clipping;
-renderers never reconstruct tool state or omitted counts from that text. A long
-compact argument can displace a trailing diagnostic within the producer's bound.
-Result messages, including row counts, are bounded diagnostic
-previews, and partial captures remain visibly truncated. Increasing width never
-reduces the body allowance. In native detail and history, only a cut inline
-diagnostic expands into a bounded continuation block, preferring word
-boundaries. Diagnostics that fit are shown whole; longer diagnostics end with a
-visible omission. World and compact observations retain one line per tool.
-Gate evidence keeps its compact visual
+within the terminal width. Status and World render the native owner's concrete
+current-action summary with its retained coordinate and visible clipping;
+renderers never reconstruct tool state or expand omitted activity. Native history
+keeps observed result diagnostics, expanding a cut inline diagnostic into a
+bounded continuation block. Diagnostics that fit are shown whole; longer
+captures name their omission. Gate evidence keeps its compact visual
 state beside each gate and requirement's identity across status, board, history,
 preview, receipts, and JSON; current declarations may be labeled by current one-based
 position while removed historical requirements retain stable identity. A raw
@@ -197,19 +192,19 @@ coordinates. Presentation may wrap or densify evidence but cannot truncate a
 copyable identity, replace a public discriminant with decoration, or remove
 evidence merely to hide internal terminology.
 
-One shared Akuma observation discipline serves status, observing spawn,
-observing tell, and history. Complete identity and known static context precede
-chronological activity, followed by one truthful conclusion, reported changes,
-and diagnostics.
+One Akuma observation discipline keeps complete identity and known static
+context ahead of current work or chronological activity, followed by the native
+life judgment, reported changes, and diagnostics. Status renders semantic work;
+history and live observation retain their chronological interpretation.
 Known coordinates appear once; unknown coordinates stay absent. Selected Akuma
 status foregrounds the age of its latest retained activity, when any, without
 inferring activity from a Turn opening or claiming continuous liveness. The
-projection owner selects current actionable work, the latest current narration,
-and bounded ordinary detail; rendering preserves that selection and only bounds
-individual payloads. Native omission evidence remains in history and live
-observation; compact activity does not reconstruct an omission marker. World
-status and the rich Akuma catalogue use the same board projection; catalogue
-enrichment never acquires a second entry formatter. Changes within the execution
+projection owner supplies semantic current-work facts and one concrete bounded
+current-action summary, with exact retained detail coordinates. Status and World
+render that answer without expanding a chat timeline. Thin catalogue rows share
+one projection with World observation; World current work is a separate bounded
+native observation. History and live observation retain their chronological
+activity, omissions and complete native interpretation. Changes within the execution
 directory have priority over outside changes, which are summarized separately;
 an unavailable directory preserves the
 unpartitioned summary. Identity, conclusion, reported changes, and actionable
@@ -231,8 +226,9 @@ Akuma observations. Multiline payloads preserve paragraphs and indentation;
 single-line previews fold whitespace. Speech, input, thought, and action remain
 distinct without invented quotation marks, and wrapping never changes event
 selection or meaning. Whole-grapheme terminal width governs wrapping and visible
-truncation, preferring word boundaries. Bounded answer previews keep the head
-and visible trailing omission in both World and selected detail. An exact
+truncation, preferring word boundaries. History previews retain the beginning
+and name their omission; status and World carry outcome coordinates and verdicts
+rather than answer previews. An exact
 activity text read returns the full retained authored content or neutral tool
 summary without terminal framing or payload clipping; exact typed output keeps
 the complete retained native row. Capture and retention limits remain honest.

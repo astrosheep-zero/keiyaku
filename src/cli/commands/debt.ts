@@ -115,8 +115,6 @@ export async function runDebtCommand(command: ParsedDebtCommand, runtime: CliRun
       return addDebt(command, runtime, stdin);
     case "update":
       return updateDebt(command, runtime, stdin);
-    case "tree":
-      return execute("debt.tree", { id: command.positionals[0]! }, command, runtime);
     case "doctor":
       return execute("debt.doctor", {}, command, runtime);
   }

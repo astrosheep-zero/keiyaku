@@ -42,8 +42,9 @@ import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import { parseAkumaId } from "../akuma/identity.js";
 import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
-import type { DebtListInvocation, DebtUpdateInvocation, DebtShowInvocation } from "./keiyaku-debt.js";
-export type { DebtSelection, DebtListInvocation, DebtUpdateInvocation, DebtShowInvocation } from "./keiyaku-debt.js";
+import { validateAkumaName } from "../identity/normalize.js";
+import type { DebtUpdateInvocation } from "./keiyaku-debt.js";
+export type { DebtUpdateInvocation } from "./keiyaku-debt.js";
 export { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 
 export type KeiyakuAt = Readonly<{
@@ -53,7 +54,7 @@ export type KeiyakuAt = Readonly<{
   repo?: string;
 }>;
 
-type LsCaller = NonNullable<VerbInput<"aku.ls">["caller"]>;
+type LsCaller = Extract<VerbInput<"ls">, { caller?: unknown }>["caller"];
 type Selected<T> = T & Readonly<{ contract?: string }>;
 type BindInvocation =
   | (Omit<Extract<BindInput, { markdown: string }>, "after"> & Readonly<{ after?: readonly string[] }>)
@@ -152,9 +153,6 @@ export class Keiyaku {
         return this.#show(request.input);
       case "reconcile":
         return this.#reconcile(request.input);
-      case "aku.status":
-      case "aku.ls":
-      case "aku.names":
       case "spawn":
       case "fork":
       case "tell":
@@ -170,12 +168,19 @@ export class Keiyaku {
         return this.#settings();
       case "nuke":
         return this.#nuke(request.input);
-      case "status": {
+      case "kanshi": {
         const at = await this.#coordinates("optional");
         return kanshi({ world: at.world, ...(at.repo === undefined ? {} : { repo: at.repo }) });
       }
-      case "kei.status": {
+      case "status": {
         const at = await this.#coordinates("optional");
+        if (request.input.id.startsWith("aku/")) {
+          if (at.world === null) throw new KeiyakuUsageError("no Keiyaku world contains the invocation cwd");
+          return Akumas.of(at.world).status({
+            akuma: request.input.id,
+            ...(at.repo === undefined ? {} : { repo: at.repo }),
+          });
+        }
         if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
         const report = await kanshi({ world: at.world, repo: at.repo, contract: contractId(request.input.id) });
         if (report.kind === "contract-absent") throw new Error("Contract observation with a Repo cannot be absent");
@@ -183,10 +188,8 @@ export class Keiyaku {
       }
       case "region":
         return this.#region(request.input);
-      case "kei.ls": {
-        const at = await this.#coordinates("required");
-        return Keis.of(at.repo!).list(request.input);
-      }
+      case "ls":
+        return this.#ls(request.input);
       default:
         return this.#dispatchDebt(request, signal);
     }
@@ -196,18 +199,7 @@ export class Keiyaku {
     request: Extract<
       VerbRequest,
       {
-        name:
-          | "aku.status"
-          | "aku.ls"
-          | "aku.names"
-          | "spawn"
-          | "fork"
-          | "tell"
-          | "ask"
-          | "kill"
-          | "wait"
-          | "history"
-          | "report";
+        name: "spawn" | "fork" | "tell" | "ask" | "kill" | "wait" | "history" | "report";
       }
     >,
     run: VerbRunFor<VerbName> | undefined,
@@ -216,20 +208,6 @@ export class Keiyaku {
     const signal = run?.signal === undefined ? {} : { signal: run.signal };
     const observe = run?.observe;
     switch (request.name) {
-      case "aku.status": {
-        const { at, akumas } = await this.#akumas();
-        return akumas.status({ akuma: request.input.id, ...(at.repo === undefined ? {} : { repo: at.repo }) });
-      }
-      case "aku.ls":
-        return this.#akuLs(request.input);
-      case "aku.names": {
-        const at = await this.#coordinates("none");
-        return listArchetypeDefinitions({
-          ...(at.world === null ? {} : { project: at.world }),
-          ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
-          ...request.input,
-        });
-      }
       case "spawn": {
         return this.#spawn({
           ...request.input,
@@ -281,12 +259,6 @@ export class Keiyaku {
         return debt.debtAdd(this.#input, { ...request.input, ...signal }, true);
       case "debt.update":
         return debt.debtUpdate(this.#input, { ...request.input, ...signal } as DebtUpdateInvocation);
-      case "debt.show":
-        return debt.debtShow(this.#input, request.input);
-      case "debt.ls":
-        return debt.debtLs(this.#input, request.input);
-      case "debt.tree":
-        return debt.debtTree(this.#input, request.input);
       case "debt.doctor":
         return debt.debtDoctor(this.#input);
     }
@@ -313,7 +285,7 @@ export class Keiyaku {
   abandon(input: Selected<AbandonInput>) {
     return this.run("abandon", input);
   }
-  show(input: Readonly<{ contract?: string }> = {}) {
+  show(input: VerbInput<"show"> = {}) {
     return this.run("show", input);
   }
   reconcile(input: ReconcileInput = {}) {
@@ -343,20 +315,8 @@ export class Keiyaku {
   report(input: Readonly<{ text: string }>, run?: VerbRun) {
     return this.run("report", input, run);
   }
-  keiLs(input: VerbInput<"kei.ls"> = {}) {
-    return this.run("kei.ls", input);
-  }
-  akuLs(input: VerbInput<"aku.ls"> = {}) {
-    return this.run("aku.ls", input);
-  }
-  akuNames(input: VerbInput<"aku.names"> = {}) {
-    return this.run("aku.names", input);
-  }
-  keiStatus(input: VerbInput<"kei.status">) {
-    return this.run("kei.status", input);
-  }
-  akuStatus(input: VerbInput<"aku.status">) {
-    return this.run("aku.status", input);
+  ls(input: VerbInput<"ls">) {
+    return this.run("ls", input);
   }
   debtAdd({ signal, ...input }: AddDebtInput) {
     return this.run("debt.add", input, signal === undefined ? {} : { signal });
@@ -367,19 +327,13 @@ export class Keiyaku {
   debtUpdate({ signal, ...input }: DebtUpdateInvocation) {
     return this.run("debt.update", input, signal === undefined ? {} : { signal });
   }
-  debtShow(input: DebtShowInvocation) {
-    return this.run("debt.show", input);
-  }
-  debtLs(input: DebtListInvocation = {}) {
-    return this.run("debt.ls", input);
-  }
-  debtTree(input: Readonly<{ id: string }>) {
-    return this.run("debt.tree", input);
-  }
   debtDoctor() {
     return this.run("debt.doctor", {});
   }
-  status(input: VerbInput<"status"> = {}) {
+  kanshi() {
+    return this.run("kanshi", {});
+  }
+  status(input: VerbInput<"status">) {
     return this.run("status", input);
   }
   region(input: VerbInput<"region"> = {}) {
@@ -525,8 +479,10 @@ export class Keiyaku {
     return await selected.contract.abandon({ ...input, ...selected.actor });
   }
 
-  async #show(input: Readonly<{ contract?: string }> = {}) {
-    return await (await this.#selected(input.contract)).contract.guidance();
+  async #show(input: VerbInput<"show">) {
+    if ("ids" in input) return debt.debtShow(this.#input, input.ids);
+    if (input.id?.startsWith("debt/") === true) return debt.debtShow(this.#input, [input.id]);
+    return await (await this.#selected(input.id)).contract.guidance();
   }
 
   async #reconcile(input: ReconcileInput = {}) {
@@ -708,12 +664,32 @@ export class Keiyaku {
     return caller;
   }
 
-  async #akuLs(input: VerbInput<"aku.ls">) {
+  async #ls(input: VerbInput<"ls">) {
+    const bound = input.limit === undefined ? {} : { limit: input.limit };
+    if (input.selector === "kei" || input.selector === "kei/") {
+      const at = await this.#coordinates("required");
+      return Keis.of(at.repo!).list(bound);
+    }
+    if (input.selector === "debt" || input.selector === "debt/")
+      return debt.debtLs(this.#input, {
+        ...bound,
+        ...("selection" in input && input.selection !== undefined ? { selection: input.selection } : {}),
+      });
+    if (input.selector === "aku" || input.selector === "aku/") {
+      const at = await this.#coordinates("none");
+      return listArchetypeDefinitions({
+        ...bound,
+        ...(at.world === null ? {} : { project: at.world }),
+        ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
+      });
+    }
+    const name = input.selector.split("/")[1]!;
+    const akumaName = name === "*" ? undefined : validateAkumaName(name);
     const { at, akumas } = await this.#akumas();
-    const caller = await this.#resolveLsCaller(input.caller, at.world!);
+    const caller = await this.#resolveLsCaller("caller" in input ? input.caller : undefined, at.world!);
     return akumas.list({
-      ...(input.limit === undefined ? {} : { limit: input.limit }),
-      ...(input.akumaName === undefined ? {} : { akumaName: input.akumaName }),
+      ...bound,
+      ...(akumaName === undefined ? {} : { akumaName }),
       ...(caller === undefined ? {} : { caller }),
       ...(at.repo === undefined ? {} : { repo: at.repo }),
     });

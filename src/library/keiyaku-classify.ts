@@ -8,14 +8,9 @@ import type {
 } from "../akuma/selection-observation.js";
 import type { RegionRead } from "../kanshi/report.js";
 import type {
-  BlockedDebtList,
   DebtAbsent,
-  DebtTreeResult,
   DebtShowResult,
-  DebtCatalogue,
   DebtDoctorReport,
-  DebtList,
-  DebtReadyList,
   DebtMutationResult,
   DebtUpdateResult,
 } from "../debt/index.js";
@@ -36,24 +31,12 @@ export type VerbDisposition = "accepted" | "unsatisfied" | "refused" | "retryabl
 
 export type VerbCompletion<O> = Readonly<{ kind: "returned"; value: O }> | Readonly<{ kind: "threw"; error: unknown }>;
 
-type DebtNativeResult =
-  | DebtMutationResult
-  | DebtUpdateResult
-  | DebtShowResult
-  | DebtCatalogue
-  | DebtList
-  | DebtReadyList
-  | BlockedDebtList
-  | DebtTreeResult
-  | DebtDoctorReport
-  | DebtAbsent;
+type DebtNativeResult = DebtMutationResult | DebtUpdateResult | DebtShowResult | DebtDoctorReport | DebtAbsent;
 
 function classifyDebt(result: DebtNativeResult): VerbDisposition {
-  if ("items" in result) {
-    return result.items.some((item) => item.kind === "missing") ? "refused" : "accepted";
-  }
+  if ("items" in result) return result.kind === "debt-complete" ? "accepted" : "refused";
   if (result.kind === "retry") return "retryable";
-  if (result.kind === "refused" || result.kind === "absent" || result.kind === "missing") return "refused";
+  if (result.kind === "refused" || result.kind === "absent") return "refused";
   return "issues" in result && (result.issues?.length ?? 0) > 0 ? "failed" : "accepted";
 }
 
@@ -133,9 +116,6 @@ export function classifyVerb<K extends VerbName>(
     case "debt.add":
     case "debt.addDocument":
     case "debt.update":
-    case "debt.show":
-    case "debt.ls":
-    case "debt.tree":
     case "debt.doctor":
       return classifyDebt(value as DebtNativeResult);
     case "bind":
@@ -164,10 +144,17 @@ export function classifyVerb<K extends VerbName>(
       return classifyWait(value as ContractWaitResult | AkumaWaitResult);
     case "history":
       return classifyHistory(value as VerbOutput<"history">);
-    case "show":
-      return (value as VerbOutput<"show">).kind === "missing" ? "refused" : "accepted";
-    case "kei.status":
-      return (value as VerbOutput<"kei.status">).kind === "contract-missing" ? "refused" : "accepted";
+    case "show": {
+      const result = value as VerbOutput<"show">;
+      if (result.kind === "present") return "accepted";
+      return result.kind === "missing" ? "refused" : classifyDebt(result);
+    }
+    case "ls": {
+      const result = value as VerbOutput<"ls">;
+      return result.kind === "debt-catalogue" && "absent" in result ? "refused" : "accepted";
+    }
+    case "status":
+      return (value as VerbOutput<"status">).kind === "contract-missing" ? "refused" : "accepted";
     case "region":
       return classifyRegion(value as RegionRead);
     case "reconcile":

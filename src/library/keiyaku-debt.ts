@@ -6,32 +6,21 @@ import {
   type UpdateDebtInput,
   type DebtAbsent,
   type DebtShowResult,
-  type DebtShowItem,
 } from "../debt/index.js";
 import { addDebt, addDebtDocument } from "../debt/operations.js";
-import { addInput, addDocumentInput, closed, record, debtId, updateInput } from "../debt/input.js";
+import { addInput, addDocumentInput, record, debtId, updateInput } from "../debt/input.js";
 import { parseDebtCreationDocument } from "../debt/document.js";
 import { invocationCoordinates } from "./keiyaku-coordinates.js";
 import { resolveActor } from "./keiyaku-attribution.js";
 import type { KeiyakuAt } from "./keiyaku.js";
 
-export type DebtSelection = "active" | "closed" | "all";
-export type DebtListInvocation = Readonly<{ selection?: DebtSelection; limit?: number }>;
+type DebtListInvocation = Readonly<{ selection?: "active" | "closed" | "all"; limit?: number }>;
 export type DebtUpdateInvocation = UpdateDebtInput & Readonly<{ id: string }>;
-export type DebtShowInvocation =
-  | Readonly<{ id: string; ids?: never }>
-  | Readonly<{ ids: readonly string[]; id?: never }>;
 
 const coordinates = (at: KeiyakuAt) => invocationCoordinates({ ...at, use: "none" });
 const absent: DebtAbsent = { kind: "absent" };
 const missing = () => ({ kind: "refused", reason: "debt-missing" }) as const;
 
-function selection(value: unknown): DebtSelection {
-  if (value === undefined) return "active";
-  if (value !== "active" && value !== "closed" && value !== "all")
-    throw new TypeError("selection must be active, closed, or all");
-  return value;
-}
 export async function debtAdd(at: KeiyakuAt, input: AddDebtInput | AddDebtDocumentInput, document: boolean) {
   const parsed = document ? addDocumentInput(input) : addInput(input);
   if (document) parseDebtCreationDocument((parsed as AddDebtDocumentInput).markdown);
@@ -52,40 +41,14 @@ export async function debtUpdate(at: KeiyakuAt, input: DebtUpdateInvocation) {
   updateInput(rest).signal?.throwIfAborted();
   return missing();
 }
-export async function debtShow(at: KeiyakuAt, input: DebtShowInvocation): Promise<DebtShowResult | DebtAbsent> {
-  const v = record(input, "show input");
-  closed(v, ["id", "ids"], "show input");
-  if ((v.id === undefined) === (v.ids === undefined)) throw new TypeError("show requires id or ids");
-  const plural = v.ids !== undefined;
-  if (plural && (!Array.isArray(v.ids) || v.ids.length === 0)) throw new TypeError("ids requires at least one DebtId");
-  const ids = plural ? (v.ids as unknown[]).map(debtId) : [debtId(v.id)];
+export async function debtShow(at: KeiyakuAt, ids: readonly string[]): Promise<DebtShowResult | DebtAbsent> {
   const coord = await coordinates(at);
-  if (coord.world === null) return absent;
-  const items: DebtShowItem[] = [];
-  for (const id of ids) {
-    const result = await Debts.of(coord.world).debt({ id }).read();
-    items.push(result.kind === "present" ? { ...result, kind: "found" } : result);
-  }
-  return { kind: "present", items };
+  return coord.world === null ? absent : Debts.of(coord.world).read({ ids });
 }
 export async function debtLs(at: KeiyakuAt, input: DebtListInvocation) {
-  const v = record(input, "list input");
-  closed(v, ["selection", "limit"], "list input");
-  const selected = selection(v.selection);
-  debtRowViewLimit(v.limit);
+  debtRowViewLimit(input.limit);
   const coord = await coordinates(at);
-  if (coord.world === null) return absent;
-  return Debts.of(coord.world).list({
-    selection: selected,
-    ...(input.limit === undefined ? {} : { limit: input.limit }),
-  });
-}
-export async function debtTree(at: KeiyakuAt, input: Readonly<{ id: string }>) {
-  const v = record(input, "tree input");
-  closed(v, ["id"], "tree input");
-  const id = debtId(v.id),
-    coord = await coordinates(at);
-  return coord.world === null ? absent : Debts.of(coord.world).debt({ id }).tree();
+  return coord.world === null ? ({ kind: "debt-catalogue", absent: true } as const) : Debts.of(coord.world).list(input);
 }
 export async function debtDoctor(at: KeiyakuAt) {
   const coord = await coordinates(at);

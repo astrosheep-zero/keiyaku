@@ -1,29 +1,35 @@
 import { z } from "zod";
-import { outcomeSchema, type ActivityRow, type ActivitySnapshot, type OutcomeRow, type ToolRow } from "./projection.js";
+import { type ActiveToolRow, type ActivityRow, type ActivitySnapshot, type ToolRow } from "./projection.js";
+import { turnHistoryIdSchema } from "./identity.js";
 
-export const activityEntrySchema = z
-  .strictObject({ id: z.number().int().positive().safe(), text: z.string() })
+const sequence = z.number().int().nonnegative().safe();
+const coordinate = z.strictObject({ id: sequence, turnSequence: sequence, toolId: z.string() }).readonly();
+export const currentWorkSchema = z
+  .strictObject({
+    kind: z.enum(["open", "idle"]),
+    turn: z.strictObject({ sequence, bodySequence: sequence }).readonly().exactOptional(),
+    activeTools: z.array(coordinate).nonempty().readonly().exactOptional(),
+    latestActivity: sequence.exactOptional(),
+    pending: z
+      .array(z.strictObject({ id: sequence, tellId: z.string() }).readonly())
+      .nonempty()
+      .readonly()
+      .exactOptional(),
+    outcome: z
+      .strictObject({
+        historyId: turnHistoryIdSchema,
+        activityId: sequence,
+        verdict: z.enum(["answered", "failed", "canceled"]),
+      })
+      .readonly()
+      .exactOptional(),
+    summary: z
+      .strictObject({ id: sequence, text: z.string(), clipped: z.literal(true).exactOptional() })
+      .readonly()
+      .exactOptional(),
+  })
   .readonly();
-export const compactOutcomeSchema = z.union([
-  outcomeSchema.options[0].unwrap().omit({ foldedSaidSequence: true }).readonly(),
-  outcomeSchema.options[1],
-  outcomeSchema.options[2],
-]);
-export const compactTimelineSchema = z.union([
-  z
-    .strictObject({ kind: z.literal("open"), entries: z.array(activityEntrySchema).min(1).readonly().exactOptional() })
-    .readonly(),
-  z
-    .strictObject({
-      kind: z.literal("idle"),
-      entries: z.array(activityEntrySchema).min(1).readonly().exactOptional(),
-      outcome: compactOutcomeSchema.exactOptional(),
-    })
-    .readonly(),
-]);
-export type ActivityEntry = z.output<typeof activityEntrySchema>;
-export type CompactOutcome = z.output<typeof compactOutcomeSchema>;
-export type CompactTimeline = z.output<typeof compactTimelineSchema>;
+export type CurrentWork = z.output<typeof currentWorkSchema>;
 
 export type ToolRepr = Readonly<{
   label: string;
@@ -148,46 +154,61 @@ export function toolRepr(row: ToolRow): ToolRepr {
   return { ...core, suffix: `${core.suffix}${suffix}`, diagnostic };
 }
 
-export function projectActivityEntry(row: ActivityRow): ActivityEntry | undefined {
+function currentAction(row: ActivityRow): CurrentWork["summary"] {
   let text: string;
   if (row.kind === "tool") {
-    if (row.state === "unsettled") return undefined;
     const tool = toolRepr(row);
-    const prefix = row.state === "active" ? "active: " : row.state.status === "error" ? "error: " : "";
-    text = oneLine(
-      `${prefix}${tool.label} ${tool.text}${tool.suffix}${tool.diagnostic === "" ? "" : ` · ${tool.diagnostic}`}`,
-    );
-  } else if (row.kind === "turn" || row.kind === "outcome") return undefined;
-  else {
-    const kind = row.kind === "tell" && row.state === "pending" ? "pending-tell" : row.kind;
-    text = `${kind}: ${row.kind === "call" || row.kind === "tell" ? oneLine(row.text) : row.text}`;
-  }
-  const points = Array.from(text);
-  const partial = "truncated" in row && row.truncated === true;
-  if (points.length > 300 || partial) text = `${points.slice(0, 299).join("").replace(/…$/u, "")}…`;
-  return { id: row.sequence, text };
+    text = `${tool.label} ${tool.text}${tool.suffix}${tool.diagnostic === "" ? "" : ` · ${tool.diagnostic}`}`;
+  } else if (row.kind === "call" || row.kind === "tell" || row.kind === "said") text = row.text;
+  else return undefined;
+  const points = Array.from(oneLine(text));
+  if (points.length === 0) return undefined;
+  const clipped =
+    points.length > 300 ||
+    ("truncated" in row && row.truncated === true) ||
+    (row.kind === "tool" && row.call.kind === "other" && row.call.input?.truncated === true);
+  return {
+    id: row.sequence,
+    text: clipped ? `${points.slice(0, 299).join("").replace(/…$/u, "")}…` : points.join(""),
+    ...(clipped ? { clipped: true } : {}),
+  };
 }
 
-export function projectStatusOutcome(row: OutcomeRow): CompactOutcome {
-  const outcome = row.outcome;
-  if (outcome.kind === "canceled") return { kind: "canceled" };
-  const points = Array.from(outcome.kind === "answered" ? outcome.answer : outcome.diagnostic);
-  const text = points.length > 500 ? `${points.slice(0, 499).join("")}…` : points.join("");
-  return outcome.kind === "answered" ? { kind: "answered", answer: text } : { kind: "failed", diagnostic: text };
-}
-
-export function projectStatusTimeline(snapshot: ActivitySnapshot): CompactTimeline {
+/** One semantic projection of the already selected retained frontier. */
+export function projectCurrentWork(snapshot: ActivitySnapshot): CurrentWork {
   if (snapshot.kind === "unborn") return { kind: "idle" };
-  const entries = snapshot.entries.flatMap((entry) => {
-    if (entry.kind === "gap" || entry.row.kind === "thought") return [];
-    const projected = projectActivityEntry(entry.row);
-    return projected === undefined ? [] : [projected];
-  });
-  return snapshot.kind === "open"
-    ? { kind: "open", ...(entries.length === 0 ? {} : { entries }) }
-    : {
-        kind: "idle",
-        ...(entries.length === 0 ? {} : { entries }),
-        ...(snapshot.outcome === undefined ? {} : { outcome: projectStatusOutcome(snapshot.outcome) }),
-      };
+  const rows = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+  const active = rows.filter((row): row is ActiveToolRow => row.kind === "tool" && row.state === "active");
+  const pending = rows.flatMap((row) =>
+    row.kind === "tell" && row.state === "pending" ? [{ id: row.sequence, tellId: row.tellId }] : [],
+  );
+  const selected =
+    active.at(-1) ??
+    rows.findLast((row) => row.kind === "said" || row.kind === "call" || (row.kind === "tell" && row.state === "told"));
+  const summary = selected === undefined ? undefined : currentAction(selected);
+  const outcome = snapshot.kind === "idle" ? snapshot.outcome : undefined;
+  const latest = Math.max(rows.at(-1)?.sequence ?? -1, outcome?.sequence ?? -1);
+  return {
+    kind: snapshot.kind,
+    ...(snapshot.kind === "open"
+      ? { turn: { sequence: snapshot.turn.sequence, bodySequence: snapshot.turn.bodySequence } }
+      : {}),
+    ...(active.length === 0
+      ? {}
+      : {
+          activeTools: active.map((row) => ({ id: row.sequence, turnSequence: row.turnSequence, toolId: row.toolId })),
+        }),
+    ...(latest < 0 ? {} : { latestActivity: latest }),
+    ...(pending.length === 0 ? {} : { pending }),
+    ...(outcome === undefined
+      ? {}
+      : {
+          outcome: {
+            historyId: `turn/${outcome.turnSequence}` as const,
+            activityId: outcome.sequence,
+            verdict: outcome.outcome.kind,
+          },
+        }),
+    ...(summary === undefined ? {} : { summary }),
+  };
 }

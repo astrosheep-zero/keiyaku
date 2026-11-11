@@ -21,7 +21,7 @@ import {
 
 export const liveStatusObservationSchema = z
   .strictObject({
-    status: akumaStatusSchema.unwrap().extend({ timeline: activitySnapshotSchema }).readonly(),
+    status: akumaStatusSchema.unwrap().omit({ work: true }).extend({ timeline: activitySnapshotSchema }).readonly(),
     ordinarySelected: z.number(),
     rows: z.array(activityRowSchema).readonly(),
   })

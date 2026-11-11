@@ -607,9 +607,7 @@ test("idle returns untidy execution while preserving a pending tell", async (con
   assert.equal(timed.reason, "completed");
   assert.equal(timed.status.life, "untidy");
   assert.equal(timed.status.id, allocated.id);
-  assert.ok(
-    timed.status.timeline.entries?.some(entry => entry.text === "pending-tell: later"),
-  );
+  assert.equal(timed.status.work.pending?.[0]?.tellId, "queued");
 });
 
 const LIVE_WAIT_AT = "2026-10-01T00:00:00.000Z";

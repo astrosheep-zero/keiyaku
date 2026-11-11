@@ -12,7 +12,6 @@ leaf help and the parser, not this chapter.
 | Verb family | Purpose | Refusal and result boundary |
 | --- | --- | --- |
 | add, update | Create or change a Debt fact, including an addressed lifecycle judgment. | The Debt product decides identity, validation, legal transition, no-op, and authority corruption; an addressed update changes its requested facts and disposition atomically or writes neither on refusal. |
-| tree | Read a Debt relationship view. | Missing World, missing Debt, unavailable observation, and corrupt authority are never collapsed together. |
 | doctor | Diagnose Debt authority and relationship health. | It reports; it never repairs. |
 
 The Debt CLI adapts through the invocation facet, preserving native answers.
@@ -42,7 +41,8 @@ caller's selection for identity. Update receipts identify actual semantic field
 changes, including a known unchanged result; they do not carry a projection-file
 difference.
 Catalogue presentation keeps work selection concise; exact activity testimony
-belongs to targeted detail and decomposition belongs to the tree view.
+belongs to targeted detail together with cycle-safe parent and child decomposition
+from the same observation.
 
 Debt presentation exposes open, done, and dropped work. Ready and blocked are
 derived views of open work and its prerequisites, never stored progress.

@@ -146,12 +146,13 @@ snapshot but create no log store or replay authority.
 
 ## The board
 
-`keiyaku status` is the World overview. `keiyaku status <kei/...|aku/...|@name>`
-observes one identity. List active Contracts with `keiyaku ls kei/`, rich recent
+`keiyaku kanshi` is the World overview. `keiyaku status <kei/...|aku/...|@name>`
+observes one identity. List active Contracts with `keiyaku ls kei/`, recent
 Akuma instances with `keiyaku ls "aku/*/*"`, and spawnable definitions with
-`keiyaku ls aku/`. Instance listing observes current work for every selected born
-member; the World overview keeps its smaller aperture. Debt listing reuses the
-ordinary query selection. Two Contracts and two Debts in flight:
+`keiyaku ls aku/`. Instance lists retain life and associations; addressed status
+and the World overview add current work with retained history coordinates.
+List open Debt work with `keiyaku ls debt/`; `keiyaku show <debt/...>` includes
+its detail and child decomposition. Two Contracts and two Debts in flight:
 
 ```text
 CONTRACTS // recent

@@ -418,7 +418,7 @@ test("public status observes committed identity, not idle or incidental internal
   recorded.reset();
   await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
   const open = await api.status({ akuma: value.allocated.id });
-  assert.equal(open.timeline.kind, "open");
+  assert.equal(open.work.kind, "open");
   assert.deepEqual(recorded.signals(), [], "a past outcome read to build an open view is not caller observation");
 });
 

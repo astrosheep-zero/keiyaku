@@ -582,8 +582,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "kanshi/report.ts",
       allow: [
-        runtime("akuma/identity.ts", ["akumaIdSchema"]),
-        runtime("akuma/status-projection.ts", ["compactOutcomeSchema", "activityEntrySchema"]),
+        runtime("akuma/status-projection.ts", ["currentWorkSchema"]),
+        runtime("akuma/selection-observation.ts", ["akumaCatalogueRowSchema", "akumaCatalogueSchema"]),
         types("akuma/projection.ts"),
         types("core/facts/types.ts"),
         runtime("bounded-list.ts", ["boundedListSchema"]),
@@ -797,7 +797,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("body-host.ts", ["AkumaHost", "AkumaHostScope"]),
         any("akuma/index.ts"),
         any("akuma/akuma.ts", ["akumaStatusSchema"]),
-        runtime("kanshi/report.ts", ["akumaCatalogueSchema"]),
         runtime("akuma/projection.ts", [
           "activityHistorySchema",
           "activityRowSchema",
@@ -811,6 +810,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("akuma/akuma-selection-execution.ts", ["liveStatusObservationSchema", "askProgressSchema", "AskProgress"]),
         runtime("akuma/archetype.ts", ["archetypeCatalogSchema", "archetypeCatalogRowSchema"]),
         runtime("akuma/selection-observation.ts", [
+          "akumaCatalogueSchema",
           "akumaObservationSchema",
           "akumaWaitResultSchema",
           "akumaWaitItemSchema",

@@ -139,7 +139,7 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
 }
 
 type RequestOutput = Readonly<{ output: "text" | "json" }>;
-export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami"> | "debt.show" | "debt.ls";
+export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami">;
 export type VerbRequest<K extends CliVerb = CliVerb> = {
   [P in K]: RequestOutput & Readonly<{ name: P; input: VerbInput<P> }>;
 }[K];
@@ -153,7 +153,7 @@ type Acquisitions = {
     input: Omit<VerbInput<"spawn">, "prompt">;
     acquire: { prompt?: AkumaPromptSource };
   };
-  status: { input: VerbInput<"status">; acquire: { selector: string } };
+  status: { input: Record<string, never>; acquire: { selector: string } };
   tell: { input: Omit<VerbInput<"tell">, "prompt">; acquire: { prompt: AkumaPromptSource } };
   ask: { input: Omit<VerbInput<"ask">, "prompt" | "schema">; acquire: { prompt: AkumaPromptSource; schema: string } };
 };
@@ -171,18 +171,7 @@ export type ParsedCommand =
   | ParsedWhoamiCommand;
 
 export function commandName(command: ParsedCommand) {
-  return "name" in command
-    ? command.name === "debt.show"
-      ? "show"
-      : command.name === "kei.status" || command.name === "aku.status"
-        ? "status"
-        : command.name === "kei.ls" ||
-            command.name === "aku.ls" ||
-            command.name === "aku.names" ||
-            command.name === "debt.ls"
-          ? "ls"
-          : command.name
-    : command.command;
+  return "name" in command ? command.name : command.command;
 }
 
 type CliHelpCoordinate =
@@ -212,17 +201,24 @@ export function commandRepoPolicy(
     case "abandon":
     case "reconcile":
     case "region":
-    case "show":
       return { use: "required", acceptsExplicit: true };
-    case "debt.show":
-    case "debt.ls":
-    case "aku.names":
-      return { use: "none", acceptsExplicit: false };
-    case "kei.ls":
-    case "kei.status":
-      return { use: "required", acceptsExplicit: false };
-    case "aku.ls":
-    case "aku.status":
+    case "show": {
+      const input = command.input;
+      const debt = "ids" in input || input.id?.startsWith("debt/") === true;
+      return { use: debt ? "none" : "required", acceptsExplicit: !debt };
+    }
+    case "ls":
+      return {
+        use: command.input.selector.startsWith("kei")
+          ? "required"
+          : command.input.selector === "aku" ||
+              command.input.selector === "aku/" ||
+              command.input.selector.startsWith("debt")
+            ? "none"
+            : "optional",
+        acceptsExplicit: false,
+      };
+    case "kanshi":
     case "status":
     case "tell":
     case "ask":

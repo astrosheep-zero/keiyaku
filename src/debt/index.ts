@@ -12,6 +12,7 @@ import {
   buildTree,
   createDebtRelations,
   diagnoseBoard,
+  projectDebtDetail,
   type BlockedDebtRow,
   type DebtDetail,
   type DebtDoctorIssue,
@@ -44,7 +45,7 @@ import {
 import type { WorldRoot } from "../world.js";
 export type { WorldRoot } from "../world.js";
 import { DebtAuthorityCorruptionError, type DebtPriority, type DebtState } from "./document.js";
-import { type DebtId } from "./identity.js";
+import { debtIdSchema, type DebtId } from "./identity.js";
 import {
   addDebt,
   addDebtDocument,
@@ -69,13 +70,26 @@ export const debtReadResultSchema = z.union([
 ]);
 export type DebtReadResult = z.output<typeof debtReadResultSchema>;
 export const debtShowItemSchema = z.union([
-  z.strictObject({ kind: z.literal("found"), ...debtDetailSchema.unwrap().shape }).readonly(),
-  z.strictObject({ kind: z.literal("missing") }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("found"),
+      id: debtIdSchema,
+      ...debtDetailSchema.unwrap().shape,
+      children: nonEmptyDebtArraySchema(debtTreeNodeSchema).exactOptional(),
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("missing"), id: debtIdSchema }).readonly(),
 ]);
 export type DebtShowItem = z.output<typeof debtShowItemSchema>;
-export const debtShowResultSchema = z
-  .strictObject({ kind: z.literal("present"), items: nonEmptyDebtArraySchema(debtShowItemSchema) })
-  .readonly();
+export const debtShowResultSchema = z.union([
+  z
+    .strictObject({ kind: z.literal("debt-complete"), items: nonEmptyDebtArraySchema(debtShowItemSchema.options[0]) })
+    .readonly(),
+  z.strictObject({ kind: z.literal("debt-partial"), items: nonEmptyDebtArraySchema(debtShowItemSchema) }).readonly(),
+  z
+    .strictObject({ kind: z.literal("debt-missing"), items: nonEmptyDebtArraySchema(debtShowItemSchema.options[1]) })
+    .readonly(),
+]);
 export type DebtShowResult = z.output<typeof debtShowResultSchema>;
 export const debtTreeResultSchema = z.union([
   z.strictObject({ kind: z.literal("present"), ...debtTreeRootSchema.unwrap().shape }).readonly(),
@@ -89,7 +103,10 @@ export const debtDoctorReportSchema = z
   })
   .readonly();
 export type DebtDoctorReport = z.output<typeof debtDoctorReportSchema>;
-export const debtListSchema = debtReadPageSchema(debtSummarySchema).options[0];
+export const debtListSchema = debtReadPageSchema(debtSummarySchema)
+  .options[0].unwrap()
+  .extend({ kind: z.literal("debt-catalogue") })
+  .readonly();
 export const debtReadyListSchema = z.union([
   debtReadPageSchema(readyDebtRowSchema).options[0],
   debtAbsentSchema,
@@ -100,7 +117,10 @@ export const blockedDebtListSchema = z.union([
   debtAbsentSchema,
   debtParentReadRefusalSchema,
 ]);
-export const debtCatalogueSchema = z.union([debtListSchema, debtAbsentSchema]);
+export const debtCatalogueSchema = z.union([
+  debtListSchema,
+  z.strictObject({ kind: z.literal("debt-catalogue"), absent: z.literal(true) }).readonly(),
+]);
 export type DebtCatalogue = z.output<typeof debtCatalogueSchema>;
 export type DebtList = z.output<typeof debtListSchema>;
 export type DebtReadyList = DebtReadPage<ReadyDebtRow, DebtParentReadRefusal>;
@@ -191,7 +211,10 @@ class DebtsHandle {
     closed(v, ["selection", "limit"], "list input");
     if (v.selection !== undefined && v.selection !== "active" && v.selection !== "closed" && v.selection !== "all")
       throw new TypeError("selection must be active, closed, or all");
-    return listDebts(this.world, v.selection ?? "active", boundedListLimit(v.limit));
+    return {
+      ...(await listDebts(this.world, v.selection ?? "active", boundedListLimit(v.limit))),
+      kind: "debt-catalogue",
+    };
   }
   async ready(input: Readonly<{ parent?: string; limit?: number }> = {}): Promise<DebtReadyList> {
     const v = record(input, "ready input");
@@ -204,6 +227,28 @@ class DebtsHandle {
     closed(v, ["parent", "limit"], "blocked input");
     const parent = v.parent === undefined ? undefined : id(v.parent);
     return blockedDebts(this.world, parent, boundedListLimit(v.limit));
+  }
+  async read(input: Readonly<{ ids: readonly string[] }>): Promise<DebtShowResult> {
+    const v = record(input, "read input");
+    closed(v, ["ids"], "read input");
+    if (!Array.isArray(v.ids) || v.ids.length === 0) throw new TypeError("ids requires at least one DebtId");
+    const ids = v.ids.map(id);
+    const board = (await readBoard(this.world)).board;
+    const relations = createDebtRelations(board);
+    const items = ids.map((id): DebtShowItem => {
+      const detail = projectDebtDetail(board, id);
+      const children = detail === null ? undefined : buildTree(board, id, relations)?.children;
+      return detail === null
+        ? { kind: "missing", id }
+        : { kind: "found", id, ...detail, ...(children === undefined ? {} : { children }) };
+    });
+    const found = items.filter((item) => item.kind === "found");
+    const missing = items.filter((item) => item.kind === "missing");
+    return missing.length === 0
+      ? { kind: "debt-complete", items: found }
+      : found.length === 0
+        ? { kind: "debt-missing", items: missing }
+        : { kind: "debt-partial", items };
   }
   async doctor(): Promise<DebtDoctorReport> {
     const issues = nonEmptyDebtValues(diagnoseBoard((await readBoard(this.world)).board));

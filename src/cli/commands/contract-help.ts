@@ -218,14 +218,22 @@ export const CONTRACT_COMMAND_SPECS = {
       "Text returns Contract guidance directly or renders the Debt owner's detail; --json serializes the same native value.",
     ].join("\n"),
   },
+  kanshi: {
+    positional: "none",
+    stdin: "none",
+    flags: { json: "boolean" },
+    usage: "kanshi",
+    purpose: "Show the World board.",
+    details: "Read the composite World observation; --json retains its native section availability and current work.",
+  },
   status: {
     positional: "optional",
     stdin: "none",
     flags: { json: "boolean" },
-    usage: "status [<kei/...>|<aku/...>|@name]",
-    purpose: "Show the World overview or one Contract or Akuma status.",
+    usage: "status <kei/...|aku/...|@name>",
+    purpose: "Show one Contract or Akuma status.",
     details: [
-      "Bare status observes the fixed World overview.",
+      "Use kanshi for the selector-free World board.",
       "Addressed status accepts one complete identity or resolves one @name.",
       "Plural selectors, categories, globs and --limit are refused before reading.",
       "Akuma entries show the directory each Akuma was started in.",
@@ -236,7 +244,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { limit: "value", json: "boolean", mine: "boolean", caller: "value", closed: "boolean", all: "boolean" },
     usage:
-      'ls debt[/] [--closed | --all] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] (--mine | --caller (<integration>:<id> | aku/<name>/<suffix>)) [--limit <count>]',
+      'ls debt[/] [--closed | --all] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] (--mine | --caller (<integration>:<id> | aku/<name>/<suffix>)) [--limit <count>]',
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
       "Debt lists open work by default; --closed selects terminal work and --all selects both.",

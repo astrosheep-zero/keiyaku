@@ -21,7 +21,7 @@ import { captureAkumaHost, type AkumaHostOptions } from "../body-host.js";
 export type { AkumaHostOptions } from "../body-host.js";
 import type { BodyLauncher } from "./body-launch.js";
 import { parseAkumaId, type AkumaId } from "./identity.js";
-import { projectStatusTimeline } from "./status-projection.js";
+import { projectCurrentWork } from "./status-projection.js";
 import type { ActivityHistory } from "./projection.js";
 import { canonicalDocument, type JsonSchemaDocument } from "./schema.js";
 import { type AkumaAskResult, type AkumaTellResult } from "./selection-observation.js";
@@ -189,8 +189,8 @@ class AkumaHandle {
   }
 
   async status(): Promise<AkumaStatus> {
-    const status = await this.owner(true).status();
-    return { ...status, timeline: projectStatusTimeline(status.timeline) };
+    const { timeline, ...status } = await this.owner(true).status();
+    return { ...status, work: projectCurrentWork(timeline) };
   }
 
   async idle(options: AkumaIdleOptions = {}): Promise<AkumaIdleResult> {
@@ -212,10 +212,8 @@ class AkumaHandle {
           ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
           ...(signal === undefined ? {} : { signal }),
         });
-        return {
-          reason: waited.reason,
-          status: { ...waited.status, timeline: projectStatusTimeline(waited.status.timeline) },
-        };
+        const { timeline, ...status } = waited.status;
+        return { reason: waited.reason, status: { ...status, work: projectCurrentWork(timeline) } };
       },
     );
   }

@@ -53,20 +53,16 @@ recomputing currentness, or inferring a producer run. An association outside
 that aperture is unavailable rather than missing; Kanshi uses missing only
 when the Contract observation is complete enough to establish absence.
 
-For bare World status, Kanshi consumes the Akuma catalogue's shared row and
-association composition within its bounded recent aperture, keeping native owner
-order and lineage. Only born members within the original leading snapshot
-positions receive current-work observation; birthless positions do not extend
-that aperture to later members. The ordinary Akuma catalogue instead observes
-every bounded selected born member. Birthless allocations have no activity or
-outcome, while selected born snapshot failures preserve membership with unavailable
-activity. Addressed static reads retain the selected current frontier in owner
-order; compact activity retains correlation to independently requested retained
-detail, while native history and live observation retain tool output and their
-own activity interpretation. The report retains whether the observation reaches
-farther without manufacturing a roster total. This bounded display observation
-never supplies the frozen complete subject set required by selection, waiting,
-mutation, or other complete roster operations.
+The selector-free World report identifies its composite family and reuses the
+native thin catalogue rows. Contract catalogue rows retain physical attention
+and availability rather than expanded addressed detail. Akuma catalogue rows
+retain life and associations; a bounded separate current-work observation adds
+the native semantic frontier and concrete current-action summary from the same
+read. No terminal-chat timeline or answer preview belongs in the World report.
+Unborn allocations have no frontier, and failed frontier observation remains
+explicit without changing roster membership. Native history and live observation
+keep exact retained detail. The bounded report retains owner order and whether
+more rows exist without claiming totals or supplying a complete selector set.
 
 An exact aggregate observes the complete owner-classified running Akumas and
 open Debts, and counts active Contract journal membership in the observed Git

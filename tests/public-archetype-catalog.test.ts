@@ -62,12 +62,14 @@ test("a root-only caller lists the same callable definitions the CLI shows", asy
     { name: "shared", description: "Project" },
   ]);
   assert.deepEqual(await listArchetypeDefinitions({ project: root, home, limit: 2 }), {
+    kind: "archetype-catalogue",
     rows: [{ name: "child" }, { name: "home-only" }],
     more: true,
   });
 
   // Omitted project keeps no project scope: the shared name falls back to Home.
   assert.deepEqual(await listArchetypeDefinitions({ home }), {
+    kind: "archetype-catalogue",
     rows: [{ name: "child" }, { name: "home-only" }, { name: "shared", description: "Home" }],
   });
 

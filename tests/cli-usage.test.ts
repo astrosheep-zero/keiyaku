@@ -89,7 +89,7 @@ test("debt owner failures use the shared verb failure projection", async (contex
   writeFileSync(join(root, ".keiyaku", "debts", "broken.md"), "not a Debt document\n");
   const text = await captureOutput(() => main(["-C", root, "ls", "debt/"]));
   assert.equal(text.exit, 3);
-  assert.match(text.stderr, /debt\.ls failed/u);
+  assert.match(text.stderr, /ls failed/u);
   const json = await captureOutput(() => main(["-C", root, "ls", "debt/", "--json"]));
   assert.equal(json.exit, 3);
   assert.ok(JSON.parse(json.stdout));

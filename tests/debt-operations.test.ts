@@ -60,10 +60,10 @@ test("a pre-aborted Debt CLI mutation leaves authority unchanged", async (t) => 
   });
   assert.equal(read.exit, 0, read.stderr);
   const shown = JSON.parse(read.stdout) as {
-    kind: "present";
+    kind: "debt-complete";
     items: readonly { kind: "found"; title: string }[];
   };
-  assert.equal(shown.kind, "present");
+  assert.equal(shown.kind, "debt-complete");
   assert.equal(shown.items[0]?.kind, "found");
   assert.equal(shown.items[0]?.title, "Cancellation fixture");
   const result = await runCli(["-C", root, "debt", "update", id, "--note", "changed"], {
@@ -495,18 +495,15 @@ test("Debt row views share the bounded-list contract and complete their graph ju
 
   const views = [await debts.list({ selection: "all" }), await debts.ready(), await debts.blocked()];
   for (const view of views) {
-    assert.equal(view.kind, "present");
-    if (view.kind !== "present") continue;
+    assert.ok(view.kind === "debt-catalogue" || view.kind === "present");
     assert.deepEqual(Object.keys(view).sort(), ["kind", "more", "rows"]);
     assert.equal(view.rows!.length, 50);
     assert.equal(view.more, true);
   }
   const maximum = await debts.list({ selection: "all", limit: 500 });
-  assert.equal(maximum.kind, "present");
-  if (maximum.kind === "present") {
-    assert.equal(maximum.rows!.length, 102);
-    assert.equal(maximum.more, undefined);
-  }
+  assert.equal(maximum.kind, "debt-catalogue");
+  assert.equal(maximum.rows!.length, 102);
+  assert.equal(maximum.more, undefined);
   await assert.rejects(() => debts.list({ limit: 501 }), /integer from 1 to 500/u);
 });
 
@@ -553,11 +550,11 @@ test("native, invocation and CLI listings select lifecycle before bounding the W
     const native = await debts.list(input);
     assert.deepEqual(native.rows?.map((row) => row.id) ?? [], ids);
     assert.equal(native.more, undefined);
-    assert.deepEqual(await facet.debtLs(input), native);
+    assert.deepEqual(await facet.ls({ selector: "debt/", ...input }), native);
     const bounded = await debts.list({ ...input, limit: 1 });
     assert.deepEqual(bounded.rows?.map((row) => row.id) ?? [], ids.slice(0, 1));
     assert.equal(bounded.more, ids.length > 1 ? true : undefined);
-    assert.deepEqual(await facet.run("debt.ls", { ...input, limit: 1 }), bounded);
+    assert.deepEqual(await facet.run("ls", { selector: "debt/", ...input, limit: 1 }), bounded);
     const flags = "selection" in input ? [input.selection === "closed" ? "--closed" : "--all"] : [];
     for (const selector of ["debt", "debt/"]) {
       const cli = await cliJson(["-C", root, "ls", selector, ...flags, "--limit", "1"], { environment: {} });
@@ -575,19 +572,19 @@ test("listing failures retain corrupt authority and unavailable custody rather t
   const { root, debts } = await world();
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const facet = Keiyaku.at({ cwd: root, environment: {} });
-  assert.deepEqual(await facet.debtLs(), { kind: "present" });
+  assert.deepEqual(await facet.ls({ selector: "debt/" }), { kind: "debt-catalogue" });
   const id = acceptedId(await debts.add({ title: "Readable" }));
   const corrupt = join(root, ".keiyaku", "debts", "broken.md");
   writeFileSync(corrupt, "not Debt authority\n");
   await assert.rejects(debts.list({ limit: 1 }), DebtAuthorityCorruptionError);
-  await assert.rejects(facet.debtLs({ limit: 1 }), DebtAuthorityCorruptionError);
+  await assert.rejects(facet.ls({ selector: "debt/", limit: 1 }), DebtAuthorityCorruptionError);
   const failed = await cliJson(["-C", root, "ls", "debt/", "--limit", "1"], { environment: {} });
   assert.equal(failed.exit, 3, failed.stderr);
   unlinkSync(corrupt);
   const link = join(root, ".keiyaku", "debts", "linked");
   symlinkSync(root, link, "dir");
   await assert.rejects(debts.list({ limit: 1 }), /custody violation/u);
-  await assert.rejects(facet.debtLs({ limit: 1 }), /custody violation/u);
+  await assert.rejects(facet.ls({ selector: "debt/", limit: 1 }), /custody violation/u);
   assert.equal((await debts.debt({ id }).read()).kind, "present");
 });
 
@@ -810,6 +807,52 @@ test("debt tree renders a parent cycle as a terminal cycle node", async () => {
   assert.deepEqual(await debts.blocked({ parent: first }), { kind: "present" });
 });
 
+test("Debt batch detail retains decomposition, missing endpoints, and readable peers from one snapshot", async (t) => {
+  const { root, debts } = await world();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const first = acceptedId(await debts.add({ title: "Parent" }));
+  const second = acceptedId(await debts.add({ title: "Child", parent: first }));
+  const removed = acceptedId(await debts.add({ title: "Removed endpoint" }));
+  assert.equal((await debts.debt({ id: first }).update({ parent: second, needs: [removed] })).kind, "accepted");
+  unlinkSync(debtAuthorityFile(root, removed));
+  const read = fsPromises.readFile;
+  const reads = new Map<string, number>();
+  const mocked = t.mock.method(fsPromises, "readFile", async (...args: Parameters<typeof read>) => {
+    const path = String(args[0]);
+    if (path === debtAuthorityFile(root, first) || path === debtAuthorityFile(root, second))
+      reads.set(path, (reads.get(path) ?? 0) + 1);
+    return read(...args);
+  });
+  syncBuiltinESMExports();
+  let batch;
+  try {
+    batch = await debts.read({ ids: [second, removed, first, second] });
+    assert.deepEqual([...reads.values()], [1, 1], "selected details and decomposition share one board read");
+  } finally {
+    mocked.mock.restore();
+    syncBuiltinESMExports();
+  }
+  assert.equal(batch.kind, "debt-partial");
+  assert.deepEqual(batch.items.map(item => item.id), [second, removed, first, second]);
+  assert.deepEqual(batch.items[1], { kind: "missing", id: removed });
+  const parent = batch.items[2];
+  assert.ok(parent?.kind === "found");
+  assert.deepEqual(parent.needs, [{ id: removed, state: "missing" }]);
+  assert.deepEqual(parent.parent, { id: second, state: "open" });
+  assert.deepEqual(parent.children?.[0], {
+    kind: "node", id: second, title: "Child", state: "open", priority: 2,
+    children: [{ kind: "cycle", id: first }],
+  });
+  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  assert.deepEqual(await facet.show({ ids: [second, removed, first, second] }), batch);
+  for (const input of [{ id: first }, { ids: [first] }]) {
+    const complete = await facet.show(input);
+    assert.equal(complete.kind, "debt-complete");
+    if (complete.kind === "debt-complete") assert.deepEqual(complete.items, [parent]);
+  }
+  assert.deepEqual(await debts.read({ ids: [removed] }), { kind: "debt-missing", items: [{ kind: "missing", id: removed }] });
+});
+
 test("creation actor persists as createdBy and later mutations leave it unchanged", async () => {
   const { root, debts } = await world();
   const envKey = "KEIYAKU_ACTOR_ID";
@@ -961,12 +1004,12 @@ test("Debt ls returns its native page and distinguishes absent Worlds", async (t
   const listed = await cliJson(["-C", root, "ls", "debt/"], { environment: {} });
   assert.equal(listed.exit, 0, listed.stderr);
   assert.deepEqual(listed.value, {
-    kind: "present",
+    kind: "debt-catalogue",
     rows: [{ id, title: "Catalogue member", priority: 2, disposition: "ready" }],
   });
   const noWorld = await cliJson(["-C", absent, "ls", "debt/"], { environment: {} });
   assert.equal(noWorld.exit, 1, noWorld.stderr);
-  assert.deepEqual(noWorld.value, { kind: "absent" });
+  assert.deepEqual(noWorld.value, { kind: "debt-catalogue", absent: true });
 });
 
 test("show distinguishes an absent World from a missing addressed Debt", async (context) => {
@@ -981,8 +1024,8 @@ test("show distinguishes an absent World from a missing addressed Debt", async (
   const single = await runCli(["-C", established, "show", "debt/missing", "--json"], { environment: {} });
   assert.equal(single.exit, 1, single.stderr);
   assert.deepEqual(JSON.parse(single.stdout), {
-    kind: "present",
-    items: [{ kind: "missing" }],
+    kind: "debt-missing",
+    items: [{ kind: "missing", id: "debt/missing" }],
   });
 
   const plural = await runCli(["-C", established, "show", "debt/a", "debt/b", "--json"], {
@@ -990,8 +1033,8 @@ test("show distinguishes an absent World from a missing addressed Debt", async (
   });
   assert.equal(plural.exit, 1, plural.stderr);
   assert.deepEqual(JSON.parse(plural.stdout), {
-    kind: "present",
-    items: [{ kind: "missing" }, { kind: "missing" }],
+    kind: "debt-missing",
+    items: [{ kind: "missing", id: "debt/a" }, { kind: "missing", id: "debt/b" }],
   });
 
   const text = await runCli(["-C", established, "show", "debt/missing"], { environment: {} });

@@ -5,7 +5,7 @@ import { registerAkumaTools } from "./akuma-tools.ts";
 type ExecResult = Readonly<{ stdout: string; stderr: string; code: number }>;
 
 async function runStatus(pi: ExtensionAPI): Promise<ExecResult> {
-  return await pi.exec("keiyaku", ["status"]);
+  return await pi.exec("keiyaku", ["kanshi"]);
 }
 
 function lineForWidth(value: string, width: number): string {

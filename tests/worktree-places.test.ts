@@ -384,8 +384,8 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       debts: Readonly<{ kind: string; rows?: readonly Readonly<{ id: string }>[] }>;
       akumas: Readonly<{ kind: string }>;
     }>;
-    const status = await cliJson<StatusReport>(["-C", repository.path, "status"]);
-    // Bare World status keeps the corrupt Place local to its Contract section.
+    const status = await cliJson<StatusReport>(["-C", repository.path, "kanshi"]);
+    // World observation keeps the corrupt Place local to its Contract section.
     assert.equal(status.value.contracts.kind, "failed");
     if (status.value.contracts.kind === "failed")
       assert.match(status.value.contracts.diagnostic ?? "", /Place file has invalid fields/u);

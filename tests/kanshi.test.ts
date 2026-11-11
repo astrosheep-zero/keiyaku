@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { breakBody, beginTurn, endTurn, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
+import { breakBody, beginTurn, endTurn, appendActivity, HeldAkumaLeash, initializeHeart } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { bornDirectAkuma, allocatedHeart } from "./support/akuma-fixtures.js";
+import { bornBody, bornDirectAkuma, allocatedHeart } from "./support/akuma-fixtures.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -25,7 +25,7 @@ import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-ob
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { Akumas, Keis, Repo, contractSummarySchema, akumaCatalogueSchema } from "../src/index.js";
 import { kanshi, observeKanshi } from "../src/kanshi/index.js";
-import type { ContractKanshiDetail, KanshiContractReport, KanshiReport } from "../src/kanshi/index.js";
+import type { AkumaKanshiRow, ContractKanshiDetail, KanshiContractReport, KanshiReport } from "../src/kanshi/index.js";
 
 function worldReport(report: KanshiReport | KanshiContractReport): KanshiReport {
   if (!("contracts" in report)) throw new Error("expected a World report");
@@ -44,7 +44,6 @@ import { contractMarkdown } from "./support/markdown.js";
 import {
   activityAkumaRow,
   akumaWorldReport,
-  completedTool,
   openAkumaSnapshot,
   snapshotRow,
   AKUMA_ACTIVITY_AT,
@@ -143,6 +142,38 @@ async function populatedWorld(t: TestContext) {
   await moveAlias({ world: repository.path as WorldRoot, alias: "@watch" as AkumaAlias, akumaId: akumaId });
   return { repository, contract, keiyaku: bound.kei, debtId: added.id, akumaId };
 }
+
+test("World exposes native current work for running peers while catalogues stay thin", async (t) => {
+  const repository = fixtureRepository(t);
+  repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+  const world = await World.at(repository.path);
+  const workers: Awaited<ReturnType<typeof bornBody>>[] = [];
+  try {
+    for (const [suffix, command] of [["cafe0011", "npm test"], ["cafe0012", "square perceive"]] as const) {
+      const born = await bornBody(world, suffix, "2026-10-30T00:00:00.000Z");
+      workers.push(born);
+      const turn = await beginTurn(born.allocated.paths, { bodySequence: born.body.sequence, startedAt: "2026-10-30T00:00:01.000Z" });
+      await appendActivity(born.allocated.paths, {
+        turnSequence: turn.sequence, at: "2026-10-30T00:00:02.000Z",
+        event: { type: "tool", phase: "started", id: command, name: "bash", call: { kind: "run", command } },
+      });
+    }
+    const report = await kanshi({ world, repo: await Repo.at({ path: repository.path }) });
+    assert.equal(report.akumas.kind, "present");
+    assert.ok(report.akumas.kind === "present");
+    for (const [index, command] of ["npm test", "square perceive"].entries()) {
+      const row: AkumaKanshiRow | undefined = report.akumas.rows?.find(row => row.id === workers[index]!.allocated.id);
+      assert.ok(row?.work && row.work.kind !== "unavailable");
+      assert.equal(row.work.summary?.text, `run $ ${command}`);
+      const exact = await Akumas.of(world).status({ akuma: row.id });
+      assert.deepEqual(exact.work, row.work);
+      const retained = await Akumas.of(world).history({ akuma: row.id, id: String(row.work.summary!.id) });
+      assert.ok(retained.kind === "akuma" && retained.events[0]?.kind === "tool");
+      assert.equal(retained.events[0].toolId, command);
+    }
+    assertWireRoundTrip(akumaCatalogueSchema, await Akumas.of(world).list());
+  } finally { for (const worker of workers) worker.holder.release(); }
+});
 
 test("Contract Git format failure preserves independently readable Debt, Akuma, and Alias observations", async (t) => {
   const { repository, contract, debtId, akumaId } = await populatedWorld(t);
@@ -587,23 +618,17 @@ test("World status bounds worktree detail before observation and shares repeated
 });
 
 test("World running rows keep only one bounded latest activity line through the shared renderer", () => {
-  const snapshot = openAkumaSnapshot([
-    snapshotRow(completedTool(1, "bash", { kind: "run", command: "older command" })),
-    snapshotRow({
-      kind: "report", sequence: 2, bodySequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT,
-      text: "first paragraph\n\nsecond paragraph\n".repeat(30),
-    }),
-  ]);
-  const row = activityAkumaRow("aku/worker/1234abcd", "running", snapshot);
+  const row = activityAkumaRow("aku/worker/1234abcd", "running", openAkumaSnapshot([
+    snapshotRow({ kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "first paragraph\nsecond paragraph".repeat(30) }),
+  ]));
   for (const columns of [48, 100]) {
     const board = renderAkuma(akumaWorldReport([row]), { columns, color: false });
     assert.ok(board.some((line) => line.includes(row.id)), "the board keeps the complete identity");
-    assert.ok(board.at(-1)!.includes("2 report: first paragraph"));
-    assert.doesNotMatch(board.join("\n"), /older command/u);
+    assert.ok(board.some(line => line.includes("2 first paragraph")));
   }
 });
 
-test("rich catalogue observes every selected born member while World keeps its original aperture", async (t) => {
+test("thin catalogue reads no current frontiers while World keeps its original aperture", async (t) => {
   const repository = fixtureRepository(t);
   const world = await World.at(repository.path);
   const reads: string[] = [];
@@ -625,8 +650,7 @@ test("rich catalogue observes every selected born member while World keeps its o
   const catalogue = await Akumas.of(world).list({ limit: 10 });
   assertWireRoundTrip(akumaCatalogueSchema, catalogue);
   assert.equal(catalogue.more, true);
-  assert.deepEqual(reads, catalogue.rows!.map(row => row.id));
-  assert.ok(catalogue.rows!.every(row => "outcome" in row && row.outcome?.kind === "answered"));
+  assert.deepEqual(reads, []);
   assert.equal(catalogue.rows![3]!.id, "aku/worker/00000007");
   reads.length = 0;
   const report = await kanshi({ world });
@@ -635,7 +659,7 @@ test("rich catalogue observes every selected born member while World keeps its o
   assert.deepEqual(report.akumas.rows!.map(row => row.id), catalogue.rows!.map(row => row.id));
   assert.deepEqual(reads, catalogue.rows!.slice(0, 3).map(row => row.id));
   assert.equal(report.akumas.more, true);
-  assert.ok(report.akumas.rows!.slice(3).every(row => !("activity" in row) && !("outcome" in row)));
+  assert.ok(report.akumas.rows!.slice(0, 3).every(row => row.work !== undefined && row.work.kind !== "unavailable" && row.work.outcome?.verdict === "answered"));
 });
 
 test("birthless members retain associations without timelines and born snapshot failure preserves peers", async (t) => {
@@ -662,20 +686,15 @@ test("birthless members retain associations without timelines and born snapshot 
   });
   const catalogue = await Akumas.of(world).list({ repo });
   assertWireRoundTrip(akumaCatalogueSchema, catalogue);
-  assert.deepEqual(reads, [born.id, peer.id]);
+  assert.deepEqual(reads, []);
   assert.deepEqual(catalogue.rows!.map(row => row.id), [unborn.id, born.id, stillborn.id, peer.id]);
-  const failed = catalogue.rows!.find(row => row.id === born.id)!;
-  assert.ok("activity" in failed && failed.activity !== undefined && "kind" in failed.activity && failed.activity.kind === "unavailable");
-  assert.equal("outcome" in failed, false);
-  for (const row of catalogue.rows!.filter(row => row.life === "unborn" || row.life === "stillborn")) {
-    assert.equal("activity" in row, false);
-    assert.equal("outcome" in row, false);
+  for (const row of catalogue.rows!.filter(row => row.life === "unborn" || row.life === "stillborn"))
     assert.deepEqual(row.contract, { kind: "associated", contractId: "kei/catalogue" });
-    assert.equal(akumaCatalogueSchema.safeParse({ ...catalogue, rows: [{ ...row, activity: { kind: "unavailable", diagnostic: "wrong" } }] }).success, false);
-  }
   reads.length = 0;
   const report = await kanshi({ world, repo });
   assert.equal(report.akumas.kind, "present");
+  if (report.akumas.kind !== "present") assert.fail("missing Akumas");
+  assert.deepEqual(report.akumas.rows!.find(row => row.id === born.id)?.work, { kind: "unavailable", diagnostic: "selected Heart became unreadable" });
   assert.deepEqual(reads, [born.id], "birthless leading positions never backfill from the fourth row");
 });
 

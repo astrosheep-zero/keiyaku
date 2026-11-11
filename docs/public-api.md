@@ -95,7 +95,8 @@ starts anew; no cursor, acknowledgement, or replay is persisted. The handle
 and collection use the same native owner.
 
 Contract boards and observations are frozen read-time views of the journal and
-Git state. Catalogues share a compact summary, while an exact addressed read
+Git state. Catalogues identify their owner family even when empty and share a
+compact summary, while an exact addressed read
 retains requested detail and the availability of each observation. They show the
 adjudicated phase, current gate and dependency state, delivery and target/worktree
 observation needed by a caller, but are neither lifecycle authority nor a second

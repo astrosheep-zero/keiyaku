@@ -4,7 +4,7 @@
  * configuration helpers stay off this entry; only CLI and Body import them.
  */
 export { akumaStatusSchema } from "./akuma/akuma.js";
-export { akumaCatalogueSchema } from "./kanshi/report.js";
+export { akumaCatalogueSchema } from "./akuma/selection-observation.js";
 export { activityHistorySchema, activityRowSchema, activitySnapshotSchema, tellRowSchema } from "./akuma/projection.js";
 export { akumaCallerSchema } from "./akuma/caller.js";
 export { killEvidenceSchema } from "./akuma/heart/facts.js";
@@ -47,13 +47,7 @@ export {
   contractHistoryEventSchema,
 } from "./library/contract-types.js";
 export { Keiyaku, KeiyakuUsageError } from "./library/keiyaku.js";
-export type {
-  KeiyakuAt,
-  DebtSelection,
-  DebtListInvocation,
-  DebtUpdateInvocation,
-  DebtShowInvocation,
-} from "./library/keiyaku.js";
+export type { KeiyakuAt, DebtUpdateInvocation } from "./library/keiyaku.js";
 export { classifyVerb } from "./library/keiyaku-verbs.js";
 export type {
   VerbEntry,

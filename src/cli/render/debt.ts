@@ -1,7 +1,7 @@
 import type {
   DebtAbsent,
   DebtCatalogue,
-  DebtDetail,
+  DebtShowItem,
   DebtDoctorIssue,
   DebtDoctorReport,
   DebtMutationResult,
@@ -9,13 +9,11 @@ import type {
   DebtRefusal,
   DebtShowResult,
   DebtTreeNode,
-  DebtTreeRoot,
-  DebtTreeResult,
   DebtUpdateResult,
   DebtWarning,
 } from "../../debt/index.js";
 import { debtMark } from "./marks.js";
-import { outcomeLines, receiptPayload, receiptRow, refusalLines } from "./receipt.js";
+import { outcomeLines, receiptRow, refusalLines } from "./receipt.js";
 import {
   DEFAULT_CLI_COLUMNS,
   displayColumns,
@@ -88,7 +86,7 @@ function edge(label: string, ref: DebtRef): string {
 export function renderDebtList(result: DebtCatalogue, context: TextRenderContext = DEFAULT_CONTEXT): string {
   const page = result;
   const columns = context.columns;
-  if (page.kind === "absent") return "debt world absent";
+  if ("absent" in page) return "debt world absent";
   const rows = page.rows ?? [];
   const view = "debts";
   if (rows.length === 0) return emptyCatalogue(view);
@@ -103,7 +101,7 @@ function textTimestamp(timestamp: string): string {
   return timestamp.replace(/\.\d+(?=Z$)/u, "");
 }
 
-function renderShowDetail(id: string, debt: DebtDetail, columns: number): string {
+function renderShowDetail(id: string, debt: Extract<DebtShowItem, { kind: "found" }>, columns: number): string {
   const lines = [
     ...entityLines(
       { id, priority: debt.priority, mark: debtMark(debt.state), word: debt.state, title: debt.title },
@@ -117,37 +115,40 @@ function renderShowDetail(id: string, debt: DebtDetail, columns: number): string
   if (debt.parent !== undefined) lines.push(edge("parent", debt.parent));
   for (const item of debt.supersedes ?? []) lines.push(edge("supersedes", item));
   for (const item of debt.relates ?? []) lines.push(edge("relates", item));
-  if (debt.note !== undefined) receiptPayload(lines, "note", debt.note);
-  if (debt.body !== undefined) receiptPayload(lines, "body", debt.body);
+  for (const child of debt.children ?? []) lines.push(...treeLines(child, columns));
+  for (const label of ["note", "body"] as const) {
+    const payload = debt[label];
+    if (payload !== undefined)
+      lines.push(`  ${label}`, ...payload.split("\n").map((line) => `  ${safeText(line)}`), "");
+  }
   return lines.join("\n");
 }
 
 /** Each item corresponds to the same invocation position, including missing targets. */
 export function renderDebtShow(
-  ids: readonly string[],
   result: DebtShowResult | DebtAbsent,
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
   if (result.kind === "absent") return "debt world absent";
   return result.items
-    .map((item, index) =>
+    .map((item) =>
       item.kind === "found"
-        ? renderShowDetail(ids[index]!, item, context.columns)
-        : refusalLines("show", ["reason  debt missing", `debt  ${ids[index]!}`], context.columns).join("\n"),
+        ? renderShowDetail(item.id, item, context.columns)
+        : refusalLines("show", ["reason  debt missing", `debt  ${item.id}`], context.columns).join("\n"),
     )
     .join("\n\n");
 }
 
-function treeLines(id: string, node: DebtTreeRoot | DebtTreeNode, columns: number, depth = 0): readonly string[] {
+function treeLines(node: DebtTreeNode, columns: number, depth = 1): readonly string[] {
   const indent = "  ".repeat(depth);
-  if ("kind" in node && node.kind === "cycle") return [`${indent}! ${node.id} · cycle`];
+  if (node.kind === "cycle") return [`${indent}! ${node.id} · cycle`];
   return [
     ...entityLines(
-      { id, priority: node.priority, mark: debtMark(node.state), word: node.state, title: node.title },
+      { id: node.id, priority: node.priority, mark: debtMark(node.state), word: node.state, title: node.title },
       columns,
       indent,
     ),
-    ...(node.children ?? []).flatMap((child) => treeLines(child.id, child, columns, depth + 1)),
+    ...(node.children ?? []).flatMap((child) => treeLines(child, columns, depth + 1)),
   ];
 }
 
@@ -178,17 +179,6 @@ export function renderDebtUpdate(
   for (const field of result.changes ?? []) lines.push(`  ${field}  changed`);
   if (result.warning !== undefined) lines.push(...warningLines(result.warning, columns));
   return lines.join("\n");
-}
-
-export function renderDebtTree(
-  id: string,
-  result: DebtTreeResult | DebtAbsent,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
-  if (result.kind === "absent") return "debt world absent";
-  if (result.kind === "missing")
-    return refusalLines("tree", ["reason  debt missing", `debt  ${id}`], context.columns).join("\n");
-  return treeLines(id, result, context.columns).join("\n");
 }
 
 /** Creation retains its minted identity in the native answer. */

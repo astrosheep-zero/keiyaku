@@ -37,6 +37,7 @@ export const archetypeCatalogRowSchema = z
   .readonly();
 export const archetypeCatalogSchema = z
   .strictObject({
+    kind: z.literal("archetype-catalogue"),
     rows: z.array(archetypeCatalogRowSchema).nonempty().readonly().exactOptional(),
     more: z.literal(true).exactOptional(),
   })
@@ -411,6 +412,7 @@ export async function listArchetypeDefinitions(input: ArchetypeCatalogInput = {}
     );
   const rows = limit === undefined ? visible : visible.slice(0, limit);
   return {
+    kind: "archetype-catalogue",
     ...(rows.length === 0 ? {} : { rows }),
     ...(limit !== undefined && visible.length > limit ? { more: true as const } : {}),
   };

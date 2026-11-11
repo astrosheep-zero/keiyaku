@@ -1,6 +1,6 @@
 import type { VerbInput } from "../../library/keiyaku-verbs.js";
 import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, BoardSection } from "../../kanshi/report.js";
-import { activityRowLines } from "./akuma-activity.js";
+import { currentWorkLines } from "./akuma-activity.js";
 import { akumaMark } from "./marks.js";
 import {
   ageText,
@@ -40,17 +40,14 @@ function akumaStatusTone(row: AkumaKanshiRow, observedAt: string): SemanticTone 
 /** The native owner's current actionable row pair, rendered by the shared activity grammar. */
 function rowPreviewLines(row: AkumaKanshiRow, context: TextRenderContext): readonly string[] {
   const bounded = { ...context, columns: Math.max(1, context.columns - ACTIVITY_INDENT.length) };
-  const activity = "activity" in row ? row.activity : undefined;
-  const preview =
-    activity === undefined
+  const work = row.work;
+  return (
+    work === undefined
       ? []
-      : "kind" in activity
-        ? [`! activity unavailable · ${activity.diagnostic}`]
-        : activityRowLines(activity, bounded, { compact: true });
-  return [
-    ...preview,
-    ...("outcome" in row && row.outcome !== undefined ? activityRowLines(row.outcome, bounded, { compact: true }) : []),
-  ].map((line) => `${ACTIVITY_INDENT}${line}`);
+      : work.kind === "unavailable"
+        ? [`! work unavailable · ${work.diagnostic}`]
+        : currentWorkLines(work, bounded)
+  ).map((line) => `${ACTIVITY_INDENT}${line}`);
 }
 
 function akumaLabel(row: Pick<AkumaKanshiRow, "aliases">, aliasesUnavailable: boolean): string {
@@ -135,7 +132,7 @@ function akumaBoardRows(
 function renderAkumaBoard(
   section: BoardSection<AkumaKanshiWorld>,
   observedAt: string,
-  context: TextRenderContext & Readonly<{ caller?: VerbInput<"aku.ls">["caller"] }>,
+  context: TextRenderContext & Readonly<{ caller?: Extract<VerbInput<"ls">, { caller?: unknown }>["caller"] }>,
   emptyRows: readonly string[] = [emptyCatalogue("akuma")],
 ): readonly string[] {
   if (section.kind === "absent") return ["AKUMA // absent"];

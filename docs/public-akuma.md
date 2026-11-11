@@ -187,14 +187,14 @@ order, and bound, and it never aggregates Worlds or consults a user-home index.
 Caller selection follows the frozen birth attribution; visible Akuma lineage
 names the immediate parent independently of that selection. The lower
 roster supplies that native membership, order, and extent. The composition owns
-the sole public instance catalogue, retaining immediate parent lineage and
-observing current work for every selected born member, without expanding history
-for lookahead or rejected members. Unborn and stillborn allocations retain their
-allocation evidence and available Contract association, but have no current work
-or outcome observation. A later born snapshot failure preserves selected membership
-and order with unavailable activity; it never reclassifies a selected member.
+the sole public instance catalogue, retaining immediate parent lineage and native
+life without current-work or outcome payloads. Unborn and stillborn allocations
+retain their allocation evidence and available Contract association. Addressed
+and World current-work observation is separate from this thin catalogue and
+preserves selected membership when its frontier is unavailable.
 
-One Alias observation enriches even an empty successful catalogue. Alias failure
+One Alias observation enriches even an empty successful catalogue, whose owner
+family remains explicit. Alias failure
 leaves readable membership and known emptiness intact with explicit catalogue
 availability, omitting unproven bindings. An optional explicit Repo supplies one
 shared Dispatch observation, without selecting another World or reading attached

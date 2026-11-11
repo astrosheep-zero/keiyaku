@@ -28,14 +28,7 @@ import {
 } from "./contract.js";
 import { renderDeliveryPreview } from "./delivery-preview.js";
 import { contractWaitText } from "./contract-wait.js";
-import {
-  renderDebtList,
-  renderDebtMutation,
-  renderDebtShow,
-  renderDebtTree,
-  renderDebtUpdate,
-  renderDoctor,
-} from "./debt.js";
+import { renderDebtList, renderDebtMutation, renderDebtShow, renderDebtUpdate, renderDoctor } from "./debt.js";
 import { renderKanshiText } from "./kanshi.js";
 import { renderNukeText } from "./nuke.js";
 import { executionFailureLines } from "./receipt.js";
@@ -226,14 +219,6 @@ function renderDebtVerb(
       const query = input as VerbInput<"debt.update">;
       return renderDebtUpdate(query.id, value as VerbOutput<"debt.update">, context);
     }
-    case "debt.show": {
-      const query = input as VerbInput<"debt.show">;
-      return renderDebtShow("ids" in query ? query.ids : [query.id], value as VerbOutput<"debt.show">, context);
-    }
-    case "debt.ls":
-      return renderDebtList(value as VerbOutput<"debt.ls">, context);
-    case "debt.tree":
-      return renderDebtTree((input as VerbInput<"debt.tree">).id, value as VerbOutput<"debt.tree">, context);
     case "debt.doctor":
       return renderDoctor(value as VerbOutput<"debt.doctor">);
     default:
@@ -285,9 +270,9 @@ function renderReport(result: VerbOutput<"report">, context: TextRenderContext):
 }
 
 function renderShow(input: VerbInput<"show">, result: VerbOutput<"show">, context: TextRenderContext): string {
-  return result.kind === "missing"
-    ? missing("show", input.contract?.startsWith("kei/") === true ? input.contract : undefined, context)
-    : result.guidance;
+  if (result.kind === "present") return result.guidance;
+  if (result.kind === "missing") return missing("show", "id" in input ? input.id : undefined, context);
+  return renderDebtShow(result, context);
 }
 
 /** Render native completion values without observing the World or parsing output. */
@@ -329,27 +314,27 @@ export function renderVerb<K extends VerbName>(
     }
     case "region":
       return renderRegion(input as VerbInput<"region">, value as VerbOutput<"region">, context);
-    case "kei.ls":
-      return renderContractCatalogue(value as VerbOutput<"kei.ls">);
-    case "aku.names":
-      return renderArchetypeCatalogue(value as VerbOutput<"aku.names">);
-    case "aku.ls": {
-      const result = value as VerbOutput<"aku.ls">;
-      return renderAkumaBoard({ kind: "present", ...result }, result.observedAt, {
+    case "ls": {
+      const result = value as VerbOutput<"ls">;
+      if (result.kind === "contract-catalogue") return renderContractCatalogue(result);
+      if (result.kind === "archetype-catalogue") return renderArchetypeCatalogue(result);
+      if (result.kind === "debt-catalogue") return renderDebtList(result, context);
+      const query = input as VerbInput<"ls">;
+      return renderAkumaBoard({ ...result, kind: "present" }, result.observedAt, {
         ...context,
-        caller: (input as VerbInput<"aku.ls">).caller,
+        ...("caller" in query && query.caller !== undefined ? { caller: query.caller } : {}),
       }).join("\n");
     }
-    case "status":
-      return renderKanshiText(value as VerbOutput<"status">, context);
-    case "kei.status": {
-      const result = value as VerbOutput<"kei.status">;
-      return result.kind === "contract-missing"
-        ? missing("status", result.id, context)
-        : renderKanshiText(result, context);
+    case "kanshi":
+      return renderKanshiText(value as VerbOutput<"kanshi">, context);
+    case "status": {
+      const result = value as VerbOutput<"status">;
+      return result.kind === "akuma"
+        ? snapshotText(result, context, context)
+        : result.kind === "contract-missing"
+          ? missing("status", result.id, context)
+          : renderKanshiText(result, context);
     }
-    case "aku.status":
-      return snapshotText(value as VerbOutput<"aku.status">, context, context);
     case "spawn":
       return renderSpawn(input as VerbInput<"spawn">, value as VerbOutput<"spawn">, context);
     case "fork":

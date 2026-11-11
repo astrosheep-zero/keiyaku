@@ -119,7 +119,7 @@ export async function observeStatusOutcome(
 }
 
 type BudgetedStatusObservation = Readonly<{
-  status: Omit<AkumaStatus, "timeline"> & Readonly<{ timeline: ActivitySnapshot }>;
+  status: Omit<AkumaStatus, "work"> & Readonly<{ timeline: ActivitySnapshot }>;
   ordinarySelected: number;
 }>;
 
