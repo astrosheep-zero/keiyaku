@@ -74,9 +74,8 @@ export async function kanshiCounts(input: KanshiCountsInput): Promise<KanshiCoun
       section(() => countRunningAkuma(world)),
       section(
         async () =>
-          (await observeDebtBoard(world)).statusRows.filter(
-            (row) => row.disposition === "ready" || row.disposition === "blocked",
-          ).length,
+          (await observeDebtBoard(world)).filter((row) => row.disposition === "ready" || row.disposition === "blocked")
+            .length,
       ),
     ]);
   };

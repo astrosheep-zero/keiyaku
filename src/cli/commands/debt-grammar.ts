@@ -6,7 +6,7 @@ import {
   type CliUsageGuide,
 } from "../usage.js";
 import { scanArgs, type ScanFlagKind, type ScanSpec, type ScannedArgs } from "../scan.js";
-import { parseDebtId } from "../../debt/identity.js";
+import { canonicalDebtId } from "../../debt/identity.js";
 
 export type DebtAction = "add" | "tree" | "doctor" | "update";
 type DebtFlagValue = string | true | readonly string[];
@@ -37,7 +37,6 @@ const DEBT_COMMAND_SPECS: Readonly<Record<DebtAction, DebtCommandSpec>> = {
     stdin: "document",
     flags: {
       ...COMMON,
-      namespace: "value",
       state: "value",
       priority: "value",
       needs: "repeat",
@@ -48,13 +47,13 @@ const DEBT_COMMAND_SPECS: Readonly<Record<DebtAction, DebtCommandSpec>> = {
       note: "value",
       actor: "value",
     },
-    usage: `debt add <TITLE> [--namespace <ns>] [--priority 0..3]
+    usage: `debt add <TITLE> [--priority 0..3]
   [--state open|done|drop]
   [--note <text>] [--actor <actor>]
   [--needs <debt/...>]... [--parent <debt/...>]
   [--supersedes <debt/...>]... [--relates <debt/...>]...
   [--body <text>]
-debt add [--namespace <ns>] [--actor <actor>] -`,
+debt add [--actor <actor>] -`,
     purpose: "Create a Debt from flags or a Debt document on stdin.",
     details:
       "The stdin document is YAML front matter (title, state, priority, needs, parent, supersedes, relates, note) followed by a Markdown body.",
@@ -174,7 +173,7 @@ const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["tree", "update"]);
 function validateDebtIdPositionals(positionals: readonly string[], fail: (message: string) => never): void {
   for (const debtId of positionals) {
     try {
-      parseDebtId(debtId);
+      canonicalDebtId(debtId);
     } catch (error) {
       fail(error instanceof Error ? error.message : String(error));
     }
@@ -197,7 +196,7 @@ function validateDebtScan(action: DebtAction, scanned: ScannedDebt, fail: (messa
   if (
     action === "add" &&
     stdin === "document" &&
-    Object.keys(flags).some((name) => name !== "json" && name !== "namespace" && name !== "actor")
+    Object.keys(flags).some((name) => name !== "json" && name !== "actor")
   )
     fail("debt add document input owns its creation fields");
   if (DEBT_ID_ACTIONS.has(action)) validateDebtIdPositionals(positionals, fail);

@@ -9,19 +9,14 @@ do not depend on Debt; Debt does not interpret Contract authority or Git state.
 ## World, identity, and custody
 
 A Debt board belongs to one World. The invocation facet resolves that World
-before calling Debt. An explicit namespace or complete Debt identity supplies
-the namespace; omission selects the root namespace. No directory-local default
-is persisted or consulted. A managed worktree shares its repository's Debt
-World; a deliberate nested Debt World remains separate.
+before calling Debt. Every catalogue covers that World's ledger. A managed
+worktree shares its repository's Debt World; a deliberate nested Debt World
+remains separate.
 
-Debt identity is stable, human-readable, and names both its immutable namespace
-and local member. Creation derives an identity under Debt custody, rather than
-accepting a caller-invented coordinate; changing a title or closing a Debt does
-not free, move, or rewrite that identity.
-
-Existing ledger identities and relationships retain their meaning across the
-product rename. An unmigrated board is unavailable, not an empty new ledger;
-reading it never performs an implicit migration or discards its testimony.
+Debt identity is stable, human-readable, and names one member of the flat World
+ledger. Creation derives an identity under Debt custody, rather than accepting
+a caller-invented coordinate; changing a title or closing a Debt does not free,
+move, or rewrite that identity.
 
 Canonical Debt Markdown is the sole durable Debt authority. Its established
 coordinate and contents must agree; manual edits are authoritative when they
@@ -32,11 +27,9 @@ changes Git references.
 Debt authority paths contain no symlink component and all Debt authority
 observations and replacements use the same Debt-owned physical path judgment.
 
-Completed Debt mutations provide a crash-durable namespace boundary: after a
-successful creation, the canonical Markdown and every namespace directory
-needed to reach it survive a crash as one accessible authority. A crash may
-leave the predecessor or the complete successor, but never a partially
-written document or an unreachable newly created namespace.
+Completed Debt mutations durably publish the canonical Markdown directly in the
+World ledger. A crash may leave the predecessor or the complete successor, but
+never a partially written document or an inaccessible completed creation.
 
 Debt reads and writes are asynchronous, complete observations. A Debt mutation
 replaces one complete authority document. Keiyaku locks serialize cooperating
@@ -85,7 +78,7 @@ authority, so a synthetic history would be dishonest.
 ## Views
 
 Invocation listing defaults to open work; callers may explicitly select terminal
-work or all work. Namespace and lifecycle selection precede the bound, and rows
+work or all work. Lifecycle selection precedes the bound, and rows
 are ordered by priority and then canonical identity. Debt offers native listing
 and graph views without an expression language or caller-selected sorting.
 Catalogues summarize current work rather than repeat

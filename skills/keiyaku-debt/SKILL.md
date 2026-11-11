@@ -16,8 +16,8 @@ conversation, while keeping transient scratch plans in session notes.
 - **Self-contained body:** write enough concrete evidence (files, symbols,
   repro, or why work was deferred) that a future reader can act on the `Debt`
   cold without rediscovering the problem.
-- **Priority (`0..3` ascending):** `0` is highest urgency (`priority <= 1`
-  selects high-priority work in queries).
+- **Priority (`0..3` ascending):** `0` is highest urgency; catalogue rows use
+  priority and then complete identity order.
 - **No mirror `Debts`:** never create a `Debt` just to mirror an already-bound `kei`.
 
 ## 2. Relationships And Readiness
@@ -31,16 +31,14 @@ merely because two `Debts` touch the same `Region` or are related.
 - `supersedes`: earlier `Debt` replaced by this one.
 - `relates`: non-blocking link.
 
-`show` displays only outbound relations declared on that `Debt`; use `tree`
-or `query` (`blocks`, `under`, `ready`, `blocked`) to inspect reverse links.
+`show` displays outbound relations declared on that `Debt`; use `tree` to inspect
+decomposition. Native readiness and blocked views interpret unresolved `needs`.
 
-## 3. Scope And `Contract` Settlement
+## 3. World Ledger And `Contract` Settlement
 
-- **Namespace scope:** supply a namespace explicitly when filing work under a
-  `Contract`; omitted namespace selects the root even inside a worktree. Use
-  `ls debt/<namespace>/` for that namespace (the existing query operation with
-  ordinary listing selection) or `query --world` to inspect across
-  namespaces. Always address a specific `Debt` by its complete `debt/...` ID.
+- **World ledger:** `ls debt/` lists open work across the World; `--closed` selects
+  terminal work and `--all` selects both. Address a specific `Debt` by its complete
+  flat `debt/<id>` identity. A managed worktree shares its repository's ledger.
 - **`Contract` settlement:** associating a `Debt` when binding a `kei` holds that
   `Debt`; accepting the `kei` marks it `done`, while abandoning the `kei`
   releases it back to `open`.

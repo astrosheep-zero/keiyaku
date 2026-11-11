@@ -9,13 +9,12 @@ import {
 } from "../src/debt/document.js";
 import {
   deriveLocalStem,
-  formatDebtId,
-  parseDebtId,
+  canonicalDebtId,
   physicalDebtSegment,
   DEBT_LOCAL_ID_BYTES,
 } from "../src/debt/identity.js";
 
-test("debt identity normalizes titles, fits new stems by whole words, and supports nested namespaces", () => {
+test("debt identity normalizes titles and fits new stems by whole words", () => {
   assert.equal(deriveLocalStem("  Ship Native Debt!  "), "ship-native-debt");
   assert.equal(deriveLocalStem("Ship review.v2 notes"), "ship-review.v2-notes");
   assert.equal(deriveLocalStem("one two three four five six seven eight nine ten"), "one-two-three-four-five-six");
@@ -23,13 +22,10 @@ test("debt identity normalizes titles, fits new stems by whole words, and suppor
     deriveLocalStem("abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz"),
     "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz",
   );
-  const id = formatDebtId({ namespace: ["contract", "internal"], localId: "ship-native-debt" });
-  assert.equal(id, "debt/contract/internal/ship-native-debt");
-  assert.deepEqual(parseDebtId(id), { namespace: ["contract", "internal"], localId: "ship-native-debt" });
-  const dotted = formatDebtId({ namespace: ["kei", "tell.ask"], localId: "ship-review.v2-notes" });
-  assert.equal(dotted, "debt/kei/tell.ask/ship-review.v2-notes");
-  assert.deepEqual(parseDebtId(dotted), { namespace: ["kei", "tell.ask"], localId: "ship-review.v2-notes" });
-  assert.throws(() => parseDebtId("debt/foo..bar"), /noncanonical segment/u);
+  assert.equal(canonicalDebtId("debt/ship-native-debt"), "debt/ship-native-debt");
+  assert.equal(canonicalDebtId("debt/ship-review.v2-notes"), "debt/ship-review.v2-notes");
+  assert.throws(() => canonicalDebtId("debt/foo..bar"), /noncanonical segment/u);
+  assert.throws(() => canonicalDebtId("debt/foo/bar"), /debt ID must be debt\/<id>/u);
 });
 
 test("debt physical local-ID budget fits authority and lock components", () => {
@@ -42,10 +38,10 @@ test("debt physical local-ID budget fits authority and lock components", () => {
 });
 
 test("optional createdBy is stored before timestamps and rejects blank values", () => {
-  const coordinate = { namespace: [], localId: "authored" } as const;
+  const coordinate = "debt/authored";
   const document = {
     ...parseDebtCreationDocument("---\ntitle: Authored\n---\n"),
-    id: formatDebtId(coordinate),
+    id: canonicalDebtId(coordinate),
     createdBy: "aku/worker/deadbeef",
     createdAt: "2026-08-07T01:02:03.004Z",
     updatedAt: "2026-08-07T02:03:04.005Z",
@@ -67,7 +63,7 @@ test("optional createdBy is stored before timestamps and rejects blank values", 
 });
 
 test("debt authority is closed and the path owns identity", () => {
-  const coordinate = { namespace: [], localId: "expected" } as const;
+  const coordinate = "debt/expected";
   const bytes = Buffer.from(
     "---\nid: debt/other\ntitle: Wrong\nstate: open\npriority: 2\nneeds: []\nparent: null\nsupersedes: []\nrelates: []\nnote: ''\ncreatedAt: 2026-08-07T01:02:03.004Z\nupdatedAt: 2026-08-07T01:02:03.004Z\n---\n",
   );
@@ -80,10 +76,10 @@ test("debt authority is closed and the path owns identity", () => {
 
 test("Debt states are a closed ledger vocabulary and corrupt state names remain visible", () => {
   assert.deepEqual(debtStateSchema.options, ["open", "done", "drop"]);
-  const coordinate = { namespace: [], localId: "state" } as const;
+  const coordinate = "debt/state";
   const document = {
     ...parseDebtCreationDocument("---\ntitle: State\n---\n"),
-    id: formatDebtId(coordinate),
+    id: canonicalDebtId(coordinate),
     createdAt: "2026-08-07T01:02:03.004Z",
     updatedAt: "2026-08-07T01:02:03.004Z",
   };
@@ -102,10 +98,10 @@ test("Debt states are a closed ledger vocabulary and corrupt state names remain 
 });
 
 test("stored debt timestamps are canonical and modification never precedes creation", () => {
-  const coordinate = { namespace: [], localId: "timestamped" } as const;
+  const coordinate = "debt/timestamped";
   const document = {
     ...parseDebtCreationDocument("---\ntitle: Timestamped\n---\n"),
-    id: formatDebtId(coordinate),
+    id: canonicalDebtId(coordinate),
     createdAt: "2026-08-07T01:02:03.004Z",
     updatedAt: "2026-08-07T01:02:03.004Z",
   };

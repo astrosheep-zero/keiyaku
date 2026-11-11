@@ -73,9 +73,6 @@ const contractDetail = contractDetailSchema
         z.strictObject({ kind: z.literal("unavailable") }).readonly(),
       ])
       .exactOptional(),
-    namespaceDebts: debtSection(
-      z.strictObject({ rows: z.array(debtSummarySchema).min(1).readonly().exactOptional() }).readonly(),
-    ),
   })
   .readonly();
 export const contractStatusSchema = z.union([

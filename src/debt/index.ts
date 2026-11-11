@@ -59,7 +59,7 @@ import {
 } from "./operations.js";
 import { boundedListLimit } from "../bounded-list.js";
 import { readBoard } from "./store.js";
-import { addDocumentInput, addInput, closed, namespace, record, debtId as id, updateInput } from "./input.js";
+import { addDocumentInput, addInput, closed, record, debtId as id, updateInput } from "./input.js";
 
 export const debtAbsentSchema = z.strictObject({ kind: z.literal("absent") }).readonly();
 export type DebtAbsent = z.output<typeof debtAbsentSchema>;
@@ -186,72 +186,24 @@ class DebtsHandle {
   addDocument(input: AddDebtDocumentInput): Promise<DebtMutationResult> {
     return addDebtDocument(this.world, addDocumentInput(input));
   }
-  async list(
-    input: Readonly<{
-      selection?: "active" | "closed" | "all";
-      scope?: "namespace" | "world";
-      namespace?: readonly string[];
-      limit?: number;
-    }> = {},
-  ): Promise<DebtList> {
+  async list(input: Readonly<{ selection?: "active" | "closed" | "all"; limit?: number }> = {}): Promise<DebtList> {
     const v = record(input, "list input");
-    closed(v, ["selection", "scope", "namespace", "limit"], "list input");
+    closed(v, ["selection", "limit"], "list input");
     if (v.selection !== undefined && v.selection !== "active" && v.selection !== "closed" && v.selection !== "all")
       throw new TypeError("selection must be active, closed, or all");
-    if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
-      throw new TypeError("scope must be namespace or world");
-    const selectedLimit = boundedListLimit(v.limit);
-    return listDebts(
-      this.world,
-      namespace(v.namespace),
-      v.selection ?? "active",
-      v.scope as "namespace" | "world" | undefined,
-      selectedLimit,
-    );
+    return listDebts(this.world, v.selection ?? "active", boundedListLimit(v.limit));
   }
-  async ready(
-    input: Readonly<{
-      scope?: "namespace" | "world";
-      namespace?: readonly string[];
-      parent?: string;
-      limit?: number;
-    }> = {},
-  ): Promise<DebtReadyList> {
+  async ready(input: Readonly<{ parent?: string; limit?: number }> = {}): Promise<DebtReadyList> {
     const v = record(input, "ready input");
-    closed(v, ["scope", "namespace", "parent", "limit"], "ready input");
-    if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
-      throw new TypeError("scope must be namespace or world");
+    closed(v, ["parent", "limit"], "ready input");
     const parent = v.parent === undefined ? undefined : id(v.parent);
-    const selectedLimit = boundedListLimit(v.limit);
-    return readyDebts(
-      this.world,
-      namespace(v.namespace),
-      v.scope as "namespace" | "world" | undefined,
-      parent,
-      selectedLimit,
-    );
+    return readyDebts(this.world, parent, boundedListLimit(v.limit));
   }
-  async blocked(
-    input: Readonly<{
-      scope?: "namespace" | "world";
-      namespace?: readonly string[];
-      parent?: string;
-      limit?: number;
-    }> = {},
-  ): Promise<BlockedDebtList> {
+  async blocked(input: Readonly<{ parent?: string; limit?: number }> = {}): Promise<BlockedDebtList> {
     const v = record(input, "blocked input");
-    closed(v, ["scope", "namespace", "parent", "limit"], "blocked input");
-    if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
-      throw new TypeError("scope must be namespace or world");
+    closed(v, ["parent", "limit"], "blocked input");
     const parent = v.parent === undefined ? undefined : id(v.parent);
-    const selectedLimit = boundedListLimit(v.limit);
-    return blockedDebts(
-      this.world,
-      namespace(v.namespace),
-      v.scope as "namespace" | "world" | undefined,
-      parent,
-      selectedLimit,
-    );
+    return blockedDebts(this.world, parent, boundedListLimit(v.limit));
   }
   async doctor(): Promise<DebtDoctorReport> {
     const issues = nonEmptyDebtValues(diagnoseBoard((await readBoard(this.world)).board));

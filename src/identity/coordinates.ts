@@ -1,4 +1,4 @@
-export type IdentityFamily = "aku" | "kei" | "debt" | "resp";
+export type IdentityFamily = "aku" | "kei" | "resp";
 
 function prefix(family: IdentityFamily): string {
   return `${family}/`;

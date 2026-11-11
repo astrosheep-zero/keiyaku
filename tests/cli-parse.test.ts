@@ -16,8 +16,8 @@ test("show routes complete Debt addresses to the native Debt operation", () => {
   assert.deepEqual(command(["show", "debt/example"]), {
     name: "debt.show", input: { id: "debt/example" }, output: "text",
   });
-  assert.deepEqual(command(["show", "debt/one", "debt/ns/two", "--json"]), {
-    name: "debt.show", input: { ids: ["debt/one", "debt/ns/two"] }, output: "json",
+  assert.deepEqual(command(["show", "debt/one", "debt/two", "--json"]), {
+    name: "debt.show", input: { ids: ["debt/one", "debt/two"] }, output: "json",
   });
   assert.throws(() => command(["show", "debt/one", "kei/two"]), /cannot mix Debt and Contract/u);
   assert.throws(() => command(["show", "@one", "debt/two"]), /cannot mix Debt and Contract/u);
@@ -29,12 +29,12 @@ test("root Debt listings select closed or all only for Debt", () => {
   assert.deepEqual(command(["ls", "debt/", "--closed"]), {
     name: "debt.ls",
     output: "text",
-    input: { namespace: [], selection: "closed" },
+    input: { selection: "closed" },
   });
-  assert.deepEqual(command(["ls", "debt/ns/", "--all"]), {
+  assert.deepEqual(command(["ls", "debt", "--all"]), {
     name: "debt.ls",
     output: "text",
-    input: { namespace: ["ns"], selection: "all" },
+    input: { selection: "all" },
   });
   assert.throws(() => command(["ls", "debt", "--all", "--closed"]), CliUsageError);
   assert.throws(() => command(["ls", "kei", "--all"]), CliUsageError);
@@ -79,7 +79,7 @@ test("persisted removed workspace bytes are authority corruption", () => {
 test("global coordinates are independent of command position", () => {
   assert.deepEqual(parseArgv(["ls", "debt/", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
-    command: { name: "debt.ls", input: { namespace: [] }, output: "text" },
+    command: { name: "debt.ls", input: {}, output: "text" },
   });
   assert.deepEqual(parseArgv(["settings", "--cwd", "/repo/caller"]), {
     cwd: "/repo/caller",
@@ -270,14 +270,11 @@ test("bare ls requires a selector rather than opening help", () => {
 test("ls parses only canonical identity directories", () => {
   for (const path of ["debt", "debt/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { name: "debt.ls", input: { namespace: [] }, output: "text" },
+      command: { name: "debt.ls", input: {}, output: "text" },
     });
   }
-  assert.deepEqual(parseArgv(["ls", "debt/feature/sub/", "--json"]), {
-    command: { name: "debt.ls", input: { namespace: ["feature", "sub"] }, output: "json" },
-  });
-  for (const path of ["debt/feature", "debt//", "debt/feature//"]) {
-    assert.throws(() => parseArgv(["ls", path]), /Debt namespace selector/);
+  for (const path of ["debt/feature", "debt/feature/", "debt//"]) {
+    assert.throws(() => parseArgv(["ls", path]), CliUsageError);
   }
   for (const path of ["kei", "kei/"]) {
     assert.deepEqual(parseArgv(["ls", path, "--json"]), {
@@ -309,7 +306,7 @@ test("ls parses only canonical identity directories", () => {
     "keiy/",
     "@review",
     "kei/review",
-    "debt/namespace",
+    "debt/example",
     "aku//",
     "aku/worker/1234abcd",
     "aku/*/",

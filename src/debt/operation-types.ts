@@ -109,7 +109,6 @@ export type SettledDebtResult =
   | Extract<DebtUpdateResult, { kind: "refused" | "retry" }>;
 export type AddDebtInput = Readonly<{
   title: string;
-  namespace?: readonly string[];
   body?: string;
   note?: string;
   state?: DebtState;
@@ -123,7 +122,6 @@ export type AddDebtInput = Readonly<{
 }>;
 export type AddDebtDocumentInput = Readonly<{
   markdown: string;
-  namespace?: readonly string[];
   actor?: string;
   signal?: AbortSignal;
 }>;

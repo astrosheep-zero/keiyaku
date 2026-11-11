@@ -1,22 +1,9 @@
 import type { BoundedList } from "../bounded-list.js";
 import type { DebtSummary } from "./board.js";
 import type { DebtDocument } from "./document.js";
-import { isDebtSegment, parseDebtId, type DebtId } from "./identity.js";
+import { type DebtId } from "./identity.js";
 import { readRecentDebtDocuments, readDebtDocument, type OpenDebtDocument } from "./store.js";
 import type { WorldRoot } from "../world.js";
-
-export function parseDebtNamespaceSelector(value: string): readonly string[] {
-  if (value === "debt/") return [];
-  if (!value.startsWith("debt/") || !value.endsWith("/")) {
-    throw new TypeError(`invalid Debt namespace selector: ${value}`);
-  }
-  const body = value.slice("debt/".length, -1);
-  const segments = body.split("/");
-  if (body.length === 0 || !segments.every(isDebtSegment)) {
-    throw new TypeError(`invalid Debt namespace selector: ${value}`);
-  }
-  return parseDebtId(`debt/${body}/placeholder`).namespace;
-}
 
 function terminal(debt: DebtDocument | undefined): boolean {
   return debt?.state === "done" || debt?.state === "drop";
@@ -43,16 +30,9 @@ async function catalogRow(
 
 export async function observeRecentDebtStatus(
   world: WorldRoot,
-  input: Readonly<{ namespace?: readonly string[]; limit?: number }> = {},
+  input: Readonly<{ limit?: number }> = {},
 ): Promise<BoundedList<RecentDebtSummary>> {
-  const { namespace } = input;
-  if (namespace !== undefined && !namespace.every(isDebtSegment)) {
-    throw new TypeError("namespace must contain canonical segments");
-  }
-  const documents = await readRecentDebtDocuments(world, {
-    ...(namespace === undefined ? {} : { namespace }),
-    ...(input.limit === undefined ? {} : { limit: input.limit }),
-  });
+  const documents = await readRecentDebtDocuments(world, input);
   const known = new Map(documents.rows.map((document) => [document.id, document]));
   return {
     rows: await Promise.all(documents.rows.map((document) => catalogRow(world, document, known))),

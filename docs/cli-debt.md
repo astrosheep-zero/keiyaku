@@ -21,11 +21,10 @@ owner. Listing defaults to open work, with explicit terminal or complete
 selection applied before bounding. Readiness and blocking remain Debt-owned
 graph views. The CLI offers no expression language or custom catalogue order.
 The Debt CLI acquires only the input a selected verb permits and refuses an
-ambiguous, surplus, or ill-formed request before invoking Debt. An explicit
-namespace or complete identity selects its named coordinate; omission selects
-the root namespace. The caller's directory, Contract, Git state, or Akuma
-request never supplies an implicit namespace, identity, state, association,
-or actor.
+ambiguous, surplus, or ill-formed request before invoking Debt. Catalogues cover
+the World ledger; addressed operations name one flat Debt identity. The caller's
+directory, Contract, Git state, or Akuma request never supplies an implicit
+identity, state, association, or actor.
 
 ## Presentation
 

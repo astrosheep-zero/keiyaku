@@ -1,6 +1,6 @@
 import { isMap, parseDocument, stringify } from "yaml";
 import { z } from "zod";
-import { debtIdSchema, formatDebtId, parseDebtId, type DebtCoordinate, type DebtId } from "./identity.js";
+import { debtIdSchema, canonicalDebtId, type DebtId } from "./identity.js";
 
 export const debtNonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 export const debtStateSchema = z.enum(["open", "done", "drop"]);
@@ -103,8 +103,7 @@ function timestamp(value: unknown, field: string, fail: (message: string) => nev
 function debtId(value: unknown, field: string, fail: (message: string) => never): DebtId {
   if (typeof value !== "string") fail(`${field} must be a DebtId`);
   try {
-    parseDebtId(value);
-    return value as DebtId;
+    return canonicalDebtId(value);
   } catch {
     return fail(`${field} must be a canonical DebtId`);
   }
@@ -139,15 +138,14 @@ function fields(
   };
 }
 
-export function parseDebtDocument(bytes: Uint8Array, expected: DebtCoordinate): DebtDocument {
-  const coordinate = formatDebtId(expected);
+export function parseDebtDocument(bytes: Uint8Array, coordinate: DebtId): DebtDocument {
   const fail = (message: string, cause?: unknown): never => {
     throw new DebtAuthorityCorruptionError(message, { coordinate, ...(cause === undefined ? {} : { cause }) });
   };
   const { value, body } = frontMatter(Buffer.from(bytes).toString("utf8"), fail);
   closed(value, STORED_KEYS, REQUIRED_STORED_KEYS, fail);
   const id = debtId(value.id, "id", fail);
-  if (id !== formatDebtId(expected)) fail(`debt document ID ${id} does not match its authority path`);
+  if (id !== coordinate) fail(`debt document ID ${id} does not match its authority path`);
   const createdAt = timestamp(value.createdAt, "createdAt", fail),
     updatedAt = timestamp(value.updatedAt, "updatedAt", fail);
   if (Date.parse(updatedAt) < Date.parse(createdAt)) fail("updatedAt must not precede createdAt");

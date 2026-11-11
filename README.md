@@ -31,22 +31,7 @@ and the derived `ready` / `blocked` views remain; execution progress and plan
 composition do not. A debt is `open`, `done`, or `drop`. Contract acceptance can
 settle an associated debt automatically.
 
-This replaces the former `task` CLI and `Tasks` API; use `debt` and `Debts`.
-For an existing board, stop ledger writers and run the offline upgrade from a
-source checkout:
-
-```bash
-node scripts/migrate-task-board.mjs /absolute/path/to/world
-```
-
-It moves `.keiyaku/tasks` to `.keiyaku/debts`, rewrites identity and relationship
-prefixes, and returns old progress states to `open`. Local IDs, namespaces,
-testimony and timestamps are unchanged. Original bytes remain in
-`.keiyaku/tasks.pre-debt`; an existing destination or backup is refused. Reads
-of an unmigrated board fail explicitly instead of reporting an empty ledger.
-If an interrupted upgrade leaves only the backup, restore that directory to
-`.keiyaku/tasks` before retrying. Contract journals and existing holder records
-are not rewritten or orphaned. Do not run old and new writers concurrently.
+Each World has one flat ledger; a complete `debt/<id>` names one record.
 
 ## What a contract looks like
 

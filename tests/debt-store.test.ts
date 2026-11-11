@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -12,7 +11,7 @@ import { DebtAuthorityCorruptionError } from "../src/debt/document.js";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { Debts, observeRecentDebtStatus } from "../src/debt/index.js";
 import { nukeDebt } from "../src/debt/operations.js";
-import { parseDebtId, type DebtId } from "../src/debt/identity.js";
+import { type DebtId } from "../src/debt/identity.js";
 import { readBoard } from "../src/debt/store.js";
 import { World } from "../src/world.js";
 
@@ -43,66 +42,6 @@ test("recent Debt catalogues exclude terminal work before bounding and judge its
     ],
     hasMore: false,
   });
-});
-
-test("an unmigrated board is not silently presented as an empty Debt ledger", async () => {
-  const root = await world();
-  try {
-    mkdirSync(join(root, ".keiyaku", "tasks"));
-    await assert.rejects(Debts.of(root).list(), /Unmigrated ledger authority/u);
-    await assert.rejects(Debts.of(root).add({ title: "Not a second board" }), /Unmigrated ledger authority/u);
-    assert.equal(existsSync(join(root, ".keiyaku", "debts")), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("offline board upgrade preserves testimony, identities and prerequisites with original bytes backed up", async () => {
-  const root = await world();
-  const old = join(root, ".keiyaku", "tasks", "task");
-  const source = (id: string, state: string, needs: string) =>
-    `---\nid: task/task/${id}\ntitle: Keep task in the title\nstate: ${state}\npriority: 1\nneeds: ${needs}\nparent: null\nsupersedes: []\nrelates: []\nnote: "task/test is testimony"\ncreatedAt: 2026-08-07T01:02:03.004Z\nupdatedAt: 2026-08-07T01:02:03.004Z\n---\nKeep task/test in the body.\n`;
-  try {
-    mkdirSync(old, { recursive: true });
-    const first = source("first", "in_progress", "[]");
-    const second = source("second", "on_hold", "\n  - task/task/first");
-    writeFileSync(join(old, "first.md"), first);
-    writeFileSync(join(old, "second.md"), second);
-    execFileSync(process.execPath, ["scripts/migrate-task-board.mjs", root]);
-    const debts = Debts.of(root);
-    const detail = await debts.debt({ id: "debt/task/second" }).read();
-    assert.equal(detail.kind, "present");
-    if (detail.kind !== "present") return;
-    assert.equal(detail.state, "open");
-    assert.deepEqual(detail.needs, [{ id: "debt/task/first", state: "open" }]);
-    assert.equal(detail.title, "Keep task in the title");
-    assert.equal(detail.note, "task/test is testimony");
-    assert.equal(detail.body, "Keep task/test in the body.\n");
-    assert.equal(readFileSync(join(root, ".keiyaku", "tasks.pre-debt", "task", "second.md"), "utf8"), second);
-    assert.equal(existsSync(join(root, ".keiyaku", "tasks")), false);
-    assert.deepEqual(await debts.doctor(), { kind: "present" });
-    assert.equal((await debts.ready({ scope: "world" })).kind, "present");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("offline board upgrade refuses a document that does not sit at its own identity path", async () => {
-  const root = await world();
-  const board = join(root, ".keiyaku", "tasks", "ns");
-  const source = "---\nid: task/other/first\ntitle: Elsewhere\nstate: open\n---\nBody.\n";
-  try {
-    mkdirSync(board, { recursive: true });
-    writeFileSync(join(board, "first.md"), source);
-    assert.throws(
-      () => execFileSync(process.execPath, ["scripts/migrate-task-board.mjs", root], { stdio: "pipe" }),
-      /Ledger identity does not match its authority path/u,
-    );
-    assert.equal(readFileSync(join(board, "first.md"), "utf8"), source);
-    assert.equal(existsSync(join(root, ".keiyaku", "debts")), false);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test("complete Debt reads bound in-flight I/O and retain canonical board and byte order", async (t) => {
@@ -236,7 +175,7 @@ test("Debt nuke lock contention is busy and does not delete unlocked files", asy
     const ownedBytes = readFileSync(owned);
     const otherBytes = readFileSync(other);
     const held = await acquireSqliteTransactionLock({
-      path: join(root, ".keiyaku", "locks", "debt", `${parseDebtId(locked.id).localId}.sqlite`),
+      path: join(root, ".keiyaku", "locks", "debt", `${locked.id.slice(5)}.sqlite`),
       mode: "immediate",
       timeoutMs: 100,
     });
@@ -281,33 +220,19 @@ test("Debt nuke re-enumerates after the allocation lock so a Debt created while 
   }
 });
 
-test("Debt nuke removes empty nested Debt directories when there are no owned files", async () => {
-  const root = await world();
-  try {
-    const debts = join(root, ".keiyaku", "debts");
-    mkdirSync(join(debts, "nested", "deeper"), { recursive: true });
-    await nukeDebt(root);
-    assert.equal(existsSync(join(debts, "nested", "deeper")), false);
-    assert.equal(existsSync(join(debts, "nested")), false);
-    assert.equal(existsSync(debts), true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
-
-test("nested Debt authority remains discoverable after a fresh World observation", async () => {
+test("flat Debt authority remains discoverable after a fresh World observation", async () => {
   const root = await world();
   try {
     const first = Debts.of(root);
-    const added = await first.add({ title: "Nested durable", namespace: ["deep", "inside"] });
+    const added = await first.add({ title: "Durable record" });
     assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
 
     const second = Debts.of(await World.at(root));
     const read = await second.debt({ id: added.id }).read();
     assert.equal(read.kind, "present");
     if (read.kind !== "present") return;
-    assert.equal(read.title, "Nested durable");
-    const listed = await second.list({ namespace: ["deep", "inside"] });
+    assert.equal(read.title, "Durable record");
+    const listed = await second.list();
     assert.equal(listed.kind, "present");
     if (listed.kind !== "present") return;
     assert.deepEqual(

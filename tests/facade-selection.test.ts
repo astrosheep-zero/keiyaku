@@ -45,10 +45,8 @@ import { observeKanshi } from "../src/kanshi/read.js";
 import { addressAkumaSet, observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
 import { createLiveStatusReader, defaultWaitComplete } from "../src/akuma/akuma-observe.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
-import { projectDebtBoardObservation } from "../src/debt/board.js";
 import { serializeDebtDocument, type DebtDocument } from "../src/debt/document.js";
 import { Debts, type DebtId } from "../src/debt/index.js";
-import { readBoard } from "../src/debt/store.js";
 import { World } from "../src/world.js";
 import { observeAkumaRoster, readAkumaCompleteRoster } from "../src/akuma/akuma.js";
 import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -1410,12 +1408,10 @@ test("status projects created Debts while wait and kill retain member evidence",
       state: "drop",
     }),
   );
-  const expected = projectDebtBoardObservation((await readBoard(world)).board);
   const status = await Akumas.of(root).status({ akuma: worker.id });
-  assert.deepEqual(
-    status.createdDebts,
-    expected.selectCreatedBy(worker.id).map(({ id, title, priority, disposition }) => ({ id, title, priority, disposition })),
-  );
+  assert.deepEqual(status.createdDebts, [
+    { id: "debt/from-worker", title: "From worker", priority: 1, disposition: "ready" },
+  ]);
   const waited = await Akumas.of(root).wait({
     akuma: [worker.id, reviewer.id],
     completion: "all",

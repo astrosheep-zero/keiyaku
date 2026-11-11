@@ -1,12 +1,9 @@
 import { z } from "zod";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
-import { contractSegment, type ContractId } from "../core/facts/types.js";
-import { identityCoordinate, identitySegments } from "../identity/coordinates.js";
 import { fitIdentityStem, normalizeIdentityStem } from "../identity/normalize.js";
 
 export type DebtId = `debt/${string}`;
-export type DebtCoordinate = Readonly<{ namespace: readonly string[]; localId: string }>;
 const STEM_CODE_POINTS = 32;
 const DEBT_FILENAME_BYTES = 255;
 const DEBT_EXTENSION_BYTES = Buffer.byteLength(".md");
@@ -17,7 +14,7 @@ export const DEBT_LOCAL_ID_BYTES =
 const GENERATED_STEM_BYTES = DEBT_LOCAL_ID_BYTES - Buffer.byteLength(GENERATED_SUFFIX);
 const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|clock\$|com[1-9]|lpt[1-9])(?:\..*)?$/iu;
 
-export function isDebtSegment(value: string): boolean {
+function isDebtSegment(value: string): boolean {
   return (
     value.length > 0 &&
     value !== "." &&
@@ -27,58 +24,26 @@ export function isDebtSegment(value: string): boolean {
   );
 }
 
-export function parseDebtId(value: string): DebtCoordinate {
-  let segments: readonly string[];
-  try {
-    segments = identitySegments({ family: "debt", value });
-  } catch {
-    throw new TypeError("debt ID must be debt/<local-id> or debt/<namespace...>/<local-id>");
-  }
-  if (!segments.every(isDebtSegment)) throw new TypeError("debt ID contains a noncanonical segment");
-  return { namespace: segments.slice(0, -1), localId: segments.at(-1)! };
-}
-
-export function formatDebtId(coordinate: DebtCoordinate): DebtId {
-  if (![...coordinate.namespace, coordinate.localId].every(isDebtSegment))
-    throw new TypeError("debt coordinate contains a noncanonical segment");
-  return identityCoordinate({ family: "debt", segments: [...coordinate.namespace, coordinate.localId] }) as DebtId;
-}
-
 export function canonicalDebtId(value: string): DebtId {
-  const id = formatDebtId(parseDebtId(value));
-  if (id !== value) throw new TypeError("debt ID is not canonical");
-  return id;
+  if (!value.startsWith("debt/") || value.slice(5).includes("/")) throw new TypeError("debt ID must be debt/<id>");
+  if (!isDebtSegment(value.slice(5))) throw new TypeError("debt ID contains a noncanonical segment");
+  return value as DebtId;
 }
 
-export const debtIdSchema = z.string().transform((value, context) => {
-  try {
-    return canonicalDebtId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "expected canonical DebtId" });
-    return z.NEVER;
-  }
-});
+export const debtIdSchema = z
+  .string()
+  .regex(/^debt\/[^/]+$/u, "expected flat DebtId")
+  .transform((value, context) => {
+    try {
+      return canonicalDebtId(value);
+    } catch {
+      context.addIssue({ code: "custom", message: "expected canonical DebtId" });
+      return z.NEVER;
+    }
+  });
 
-export const debtNamespaceSchema = z.array(z.string().refine(isDebtSegment)).readonly();
-export const debtIdsSchema = z
-  .array(debtIdSchema)
-  .superRefine((ids, context) => {
-    if (new Set(ids).size !== ids.length) context.addIssue({ code: "custom", message: "DebtIds must be unique" });
-  })
-  .readonly();
-
-export function contractNamespace(id: ContractId): readonly string[] {
-  return ["kei", contractSegment(id)];
-}
-
-export function debtAuthorityPath(debtsDirectory: string, coordinate: DebtCoordinate): string {
-  if (![...coordinate.namespace, coordinate.localId].every(isDebtSegment))
-    throw new TypeError("debt coordinate contains a noncanonical segment");
-  return join(
-    debtsDirectory,
-    ...coordinate.namespace.map((segment) => physicalDebtSegment(segment)),
-    `${physicalDebtSegment(coordinate.localId)}.md`,
-  );
+export function debtAuthorityPath(debtsDirectory: string, id: DebtId): string {
+  return join(debtsDirectory, `${physicalDebtSegment(canonicalDebtId(id).slice(5))}.md`);
 }
 
 export function deriveLocalStem(title: string): string {
@@ -106,13 +71,9 @@ export function allocateLocalId(stem: string, occupied: ReadonlySet<string>): st
   throw new Error("debt identity hexadecimal suffix space exhausted");
 }
 
-export function physicalDebtSegment(segment: string, maxBytes = DEBT_LOCAL_ID_BYTES): string {
-  if (Buffer.byteLength(segment) <= maxBytes && !WINDOWS_RESERVED.test(segment)) return segment;
-  if (Buffer.byteLength(segment) > maxBytes)
+export function physicalDebtSegment(segment: string): string {
+  if (Buffer.byteLength(segment) <= DEBT_LOCAL_ID_BYTES && !WINDOWS_RESERVED.test(segment)) return segment;
+  if (Buffer.byteLength(segment) > DEBT_LOCAL_ID_BYTES)
     throw new TypeError("debt identity cannot fit the physical filename budget");
   throw new TypeError("debt identity contains a Windows-reserved physical segment");
-}
-
-export function sameNamespace(left: readonly string[], right: readonly string[]): boolean {
-  return left.length === right.length && left.every((segment, index) => segment === right[index]);
 }

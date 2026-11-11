@@ -20,10 +20,10 @@ therefore cannot release or settle a Debt taken by a later Contract.
 
 Holder mutation and its associated Contract admission publish together. Holder
 records are not copied into Debts, deleted, reverse-indexed, or written by a
-second owner. Renaming the ledger product preserves existing holder authority,
-including a held completion that still needs replay; the rename is never a
-reason to orphan an association. Git carries their opaque companion bytes without interpreting
-them. Holder claim and release serialize per Debt, while the Debt store alone
+second owner. Each association names the exact flat Debt identity, including a
+held completion that still needs replay. Git carries their opaque companion
+bytes without interpreting them. Holder claim and release serialize per Debt,
+while the Debt store alone
 adjudicates its own concurrent document writes; neither product borrows the
 other's concurrency authority.
 
@@ -38,9 +38,9 @@ re-evaluates it. A terminal Contract without its matching held holder is
 strictly inert: it does not create, repair, or inspect unrelated Debt, World, or
 context state.
 
-Kanshi uses the Contract-derived Debt namespace only as a read-time matching
-coordinate; it installs no namespace default. Settlement has no Akuma rule,
-configurable lifecycle hook, event bus, or generic cross-product registry.
+Only explicit current DebtHolder facts establish Contract-to-Debt association.
+Contract names and identity spelling carry no association authority. Settlement
+has no Akuma rule, configurable lifecycle hook, event bus, or generic cross-product registry.
 
 Admission is irreversible. The public sequence is admission, Git reconciliation,
 active workspace projection, Settlement, then result projection. Git, workspace,

@@ -227,8 +227,9 @@ that owner's bounded catalogue and its native error; no public definition
 loader joins the root. The independent Debt product
 likewise captures World and does not read or write Contract authority except
 through the settlement owner. Its collection offers creation, bounded list,
-readiness and blocked views, and diagnosis. Listing selects namespace and lifecycle
-before bounding, under Debt's canonical priority and identity order; there is no
+readiness and blocked views, and diagnosis. Every catalogue covers the flat
+World ledger and selects lifecycle before bounding, under Debt's canonical
+priority and identity order; there is no
 public expression or custom-sort operation. Addressed Debt handles offer reads,
 relationship trees, and atomic updates of facts and disposition. Explicit
 completion and dropping belong to that addressed update, with no public batch

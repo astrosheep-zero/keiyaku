@@ -15,9 +15,7 @@ import {
   type ContractSummaryAssociation,
 } from "../protocol/read/status.js";
 import { readDebtHolderProjectionAt, type DebtHolderProjection } from "../settlement/holder.js";
-import { contractNamespace } from "../debt/identity.js";
-import { observeRecentDebtStatus, DebtAuthorityCorruptionError, type DebtSummary } from "../debt/index.js";
-import { observeDebtBoard } from "../debt/operations.js";
+import { observeRecentDebtStatus, DebtAuthorityCorruptionError } from "../debt/index.js";
 import type { WorldRoot } from "../world.js";
 import type {
   AkumaKanshiWorld,
@@ -157,18 +155,6 @@ async function debtRowsAt(world: WorldRoot | null): Promise<DebtSection<DebtKans
     return debtFailure(error);
   }
 }
-async function namespaceDebtsAt(
-  world: WorldRoot | null,
-  id: ContractId,
-): Promise<DebtSection<Readonly<{ rows?: readonly DebtSummary[] }>>> {
-  if (world === null) return absent;
-  try {
-    const rows = (await observeDebtBoard(world)).selectNamespace(contractNamespace(id));
-    return { kind: "present", ...(rows.length === 0 ? {} : { rows }) };
-  } catch (error) {
-    return debtFailure(error);
-  }
-}
 function joinedDebts(debts: DebtSection<DebtKanshiWorld>, holders: Holders): DebtSection<DebtKanshiWorld> {
   if (debts.kind !== "present") return debts;
   const byDebt = new Map(
@@ -250,7 +236,6 @@ async function contractsAt(
 }
 async function selectedContract(
   observation: GitReadObservation,
-  world: WorldRoot | null,
   id: ContractId,
   links: Readonly<{ holders: Holders; dispatches: Dispatches; aliases: Section<readonly AliasBinding[]> }>,
 ): Promise<KanshiContractReport> {
@@ -276,7 +261,6 @@ async function selectedContract(
                 ...(aliases.kind === "failed" ? { aliasesUnavailable: true as const } : {}),
               };
             });
-    const namespace = await namespaceDebtsAt(world, id);
     return {
       ...row,
       kind: "contract",
@@ -286,7 +270,6 @@ async function selectedContract(
           ? { holder: held.debtId }
           : {}),
       ...(dispatches.kind === "failed" ? { roster: { kind: "unavailable" } } : roster.length === 0 ? {} : { roster }),
-      namespaceDebts: namespace,
     };
   } catch (error) {
     return { kind: "contract-failed", id, diagnostic: diagnostic(error) };
@@ -348,7 +331,7 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
       withGitReadObservation(scopeForRepo(repo), channel, async (observation) => {
         const [holders, dispatches] = await Promise.all([holdersAt(observation), dispatchesAt(observation)]);
         if (contract !== undefined) {
-          observed = await selectedContract(observation, world, contract, { holders, dispatches, aliases });
+          observed = await selectedContract(observation, contract, { holders, dispatches, aliases });
         } else {
           const contracts = await contractsAt(observation, 10, holders, dispatches, aliases);
           observed = worldReport(contracts, holders, dispatches);

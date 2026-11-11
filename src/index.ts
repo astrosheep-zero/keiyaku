@@ -50,7 +50,6 @@ export { Keiyaku, KeiyakuUsageError } from "./library/keiyaku.js";
 export type {
   KeiyakuAt,
   DebtSelection,
-  DebtReadScope,
   DebtListInvocation,
   DebtUpdateInvocation,
   DebtShowInvocation,

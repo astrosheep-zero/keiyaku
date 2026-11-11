@@ -37,7 +37,6 @@ function contractReport(report: KanshiReport | KanshiContractReport): ContractKa
   return report;
 }
 import { Debts } from "../src/debt/index.js";
-import { contractNamespace, debtAuthorityPath, parseDebtId } from "../src/debt/identity.js";
 import type { WorldRoot } from "../src/world.js";
 import { World } from "../src/world.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
@@ -229,33 +228,8 @@ test("selected Contract shows associated Akuma identity, alias, and life", async
   assert.equal(selected.id, contract.id);
   assert.deepEqual(selected.roster, [{ id: akumaId, aliases: ["@watch"] }]);
   assert.equal(selected.holder, debtId);
-});
-
-test("selected Contract shares one Debt observation across its bounded and owned views", async (t) => {
-  const { repository, contract, debtId } = await populatedWorld(t);
-  const world = await World.at(repository.path);
-  const scoped = await Debts.of(world).add({
-    title: "Scoped finding",
-    namespace: contractNamespace(contract.id),
-  });
-  assert.ok(scoped.kind === "accepted");
-  const repo = await Repo.at({ path: repository.path });
-  const worldBoard = worldReport(await kanshi({ world, repo }));
-  const selected = contractReport(await kanshi({ world, repo, contract: contract.id }));
-  assert.equal(worldBoard.debts.kind, "present");
-  if (worldBoard.debts.kind !== "present") return;
-  const namespaceDebts = selected.namespaceDebts;
-  assert.equal(namespaceDebts.kind, "present", "the exact Contract always exposes its namespace Debt observation");
-  if (namespaceDebts.kind === "present")
-    assert.equal(
-      namespaceDebts.rows?.some((debt) => debt.id === scoped.id),
-      true,
-    );
-  assert.equal(selected.holder, debtId);
-  assert.equal(
-    worldBoard.debts.rows?.some((debt) => debt.id === debtId),
-    true,
-  );
+  assert.match(renderKanshiText(selected, { columns: 100, color: false }), new RegExp(`debt  ${debtId}`, "u"));
+  assert.match(renderKanshiText(selected, { columns: 60, color: false }), new RegExp(debtId, "u"));
 });
 
 test("exact target movement names only the owner-witnessed predecessor", async (t) => {
@@ -313,17 +287,15 @@ test("exact target movement names only the owner-witnessed predecessor", async (
 });
 
 test("selected Contract failure names its identity and bounded cause without a replayable partial value", async (t) => {
-  const { repository, contract, debtId } = await populatedWorld(t);
-  const debtPath = debtAuthorityPath(join(repository.path, ".keiyaku", "debts"), parseDebtId(debtId));
+  const { repository, contract } = await populatedWorld(t);
   const shim = [
     'if [ "$1 $2" = "cat-file --batch" ]; then',
     '  "$KEIYAKU_REAL_GIT" "$@"',
-    '  printf "not a debt document\\n" > "$KEIYAKU_DEBT_FILE"',
     "  exit 73",
     "fi",
     'exec "$KEIYAKU_REAL_GIT" "$@"',
   ].join("\n");
-  await withGitShim(shim, { KEIYAKU_DEBT_FILE: debtPath }, async (gitPath) => {
+  await withGitShim(shim, {}, async (gitPath) => {
     const world = await World.at(repository.path);
     const repo = await Repo.at({ path: repository.path, gitPath });
     const report = await kanshi({ world, repo, contract: contract.id });
@@ -332,7 +304,6 @@ test("selected Contract failure names its identity and bounded cause without a r
     assert.equal(report.id, contract.id);
     assert.match(report.diagnostic, /git cat-file --batch: git cat-file --batch did not close cleanly/u);
     assert.equal("workspace" in report, false, "a failed exact read carries no replayable partial detail");
-    assert.equal("namespaceDebts" in report, false, "a failed exact read carries no replayable partial value");
   });
 });
 
@@ -359,6 +330,11 @@ test("DebtHolder failure preserves Debt rows and marks Contract links unavailabl
   const debt = report.debts.rows?.find((row) => row.id === debtId);
   assert.deepEqual(debt?.contract, { kind: "unavailable" });
   assert.match(renderKanshiText(report, { columns: 100, color: false }), /contract association unavailable/u);
+  const selected = contractReport(await kanshi({
+    world: await World.at(repository.path), repo: await Repo.at({ path: repository.path }), contract: contract.id,
+  }));
+  assert.deepEqual(selected.holder, { kind: "unavailable" });
+  assert.match(renderKanshiText(selected, { columns: 100, color: false }), /debt association unavailable/u);
 });
 
 test("Dispatch failure preserves Akuma rows and explicitly marks both association views unavailable", async (t) => {
@@ -479,7 +455,7 @@ test("an attached Contract roster derives Alias availability from the Akuma sect
 });
 
 test("Debt board failure names the malformed document once without suppressing Contract or Akuma", async (t) => {
-  const { repository, contract, akumaId } = await populatedWorld(t);
+  const { repository, contract, akumaId, debtId } = await populatedWorld(t);
   writeFileSync(join(repository.path, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
   const world = await World.at(repository.path);
   const repo = await Repo.at({ path: repository.path });
@@ -489,7 +465,7 @@ test("Debt board failure names the malformed document once without suppressing C
   assert.equal(report.akumas.kind, "present");
   assert.equal(report.debts.kind, "failed");
   if (report.contracts.kind !== "present" || report.akumas.kind !== "present") return;
-  assert.equal(selected.namespaceDebts.kind, "failed", "the owned namespace Debt read is explicitly failed");
+  assert.equal(selected.holder, debtId, "the explicit holder remains independent of Debt board failure");
   assert.equal("issue" in selected, false);
   assert.equal(
     report.akumas.rows?.some((candidate) => candidate.id === akumaId),

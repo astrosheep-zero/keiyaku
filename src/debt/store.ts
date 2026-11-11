@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fsyncSync, openSync, renameSync, writeFileSync } from "node:fs";
-import { lstat, mkdir, readFile, readdir, rmdir, unlink } from "node:fs/promises";
-import { dirname, relative, resolve, sep } from "node:path";
+import { lstat, mkdir, readFile, readdir, unlink } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import {
   acquireSqliteTransactionLock,
   SqliteTransactionLockError,
@@ -11,31 +11,12 @@ import { syncDirectory } from "../coordination/durable-file.js";
 import type { WorldRoot } from "../world.js";
 import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
 import { parseDebtDocument, type DebtDocument } from "./document.js";
-import {
-  formatDebtId,
-  parseDebtId,
-  physicalDebtSegment,
-  DEBT_LOCAL_ID_BYTES,
-  sameNamespace,
-  debtAuthorityPath,
-  type DebtCoordinate,
-  type DebtId,
-} from "./identity.js";
+import { canonicalDebtId, physicalDebtSegment, debtAuthorityPath, type DebtId } from "./identity.js";
 import type { DebtBoard } from "./board.js";
 
 export type BoardSnapshot = Readonly<{ board: DebtBoard; bytes: ReadonlyMap<DebtId, Uint8Array> }>;
 const DEFAULT_DEBT_LOCK_TIMEOUT_MS = 3_000;
 
-async function debtsDirectory(world: WorldRoot): Promise<string> {
-  const legacy = resolve(world, ".keiyaku", "tasks");
-  try {
-    await lstat(legacy);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    return resolve(world, ".keiyaku", "debts");
-  }
-  throw new Error(`Unmigrated ledger authority: ${legacy}`);
-}
 function allocationLockPath(world: WorldRoot): string {
   return resolve(world, ".keiyaku", "locks", "debt-allocation.sqlite");
 }
@@ -69,16 +50,9 @@ async function resolveAuthority(
   id: DebtId,
   mode: "read" | "write",
 ): Promise<{ path: string; exists: boolean }> {
-  const coordinate = parseDebtId(id);
-  const root = await debtsDirectory(world);
-  const safePath = debtAuthorityPath(root, coordinate);
-  if (!(await requireDirectory(root, mode))) return { path: safePath, exists: false };
-  let parent = root;
-  for (const segment of coordinate.namespace) {
-    parent = resolve(parent, physicalDebtSegment(segment));
-    if (!(await requireDirectory(parent, mode))) return { path: safePath, exists: false };
-  }
-  const path = safePath;
+  const root = resolve(world, ".keiyaku", "debts");
+  const path = debtAuthorityPath(root, id);
+  if (!(await requireDirectory(root, mode))) return { path, exists: false };
   try {
     const stat = await lstat(path);
     if (stat.isSymbolicLink() || !stat.isFile()) throw custodyError(path);
@@ -97,57 +71,34 @@ async function authorityFiles(directory: string): Promise<readonly string[]> {
     const path = resolve(directory, entry);
     const stat = await lstat(path);
     if (stat.isSymbolicLink()) throw custodyError(path);
-    if (stat.isDirectory()) files.push(...(await authorityFiles(path)));
-    else if (stat.isFile() && entry.endsWith(".md")) files.push(path);
+    if (stat.isFile() && entry.endsWith(".md")) files.push(path);
   }
   return files.sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
 }
 
-function coordinateFromPath(debtsDirectory: string, path: string) {
-  const local = relative(debtsDirectory, path);
-  if (local.startsWith("..") || resolve(debtsDirectory, local) !== path || !local.endsWith(".md"))
-    throw new Error(`invalid Debt authority path: ${path}`);
-  const segments = local.slice(0, -3).split(sep);
-  segments.forEach((segment) => physicalDebtSegment(segment));
-  return parseDebtId(`debt/${segments.join("/")}`);
+function idFromPath(path: string): DebtId {
+  const member = physicalDebtSegment(basename(path, ".md"));
+  return canonicalDebtId(`debt/${member}`);
 }
 
-async function ownedAuthorityCandidates(directory: string): Promise<readonly Readonly<{ id: DebtId; path: string }>[]> {
-  const candidates: Readonly<{ id: DebtId; path: string }>[] = [];
+async function ownedAuthorityIds(directory: string): Promise<readonly DebtId[]> {
+  const ids: DebtId[] = [];
   for (const path of await authorityFiles(directory)) {
     try {
-      candidates.push({ id: formatDebtId(coordinateFromPath(directory, path)), path });
+      ids.push(idFromPath(path));
     } catch {
       // Files outside the Debt identity grammar are not owned candidates.
     }
   }
-  return candidates;
-}
-
-async function removeEmptyDebtDirectories(directory: string, removeSelf: boolean): Promise<void> {
-  if (!(await requireDirectory(directory, "read"))) return;
-  const entries = await readdir(directory);
-  for (const entry of entries) {
-    const path = resolve(directory, entry);
-    const stat = await lstat(path);
-    if (stat.isSymbolicLink()) throw custodyError(path);
-    if (stat.isDirectory()) await removeEmptyDebtDirectories(path, true);
-  }
-  if (!removeSelf) return;
-  try {
-    await rmdir(directory);
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "ENOENT" && code !== "ENOTEMPTY") throw error;
-  }
+  return ids;
 }
 
 export async function readBoard(world: WorldRoot): Promise<BoardSnapshot> {
-  const directory = await debtsDirectory(world);
+  const directory = resolve(world, ".keiyaku", "debts");
   const paths = await authorityFiles(directory);
-  const reads = new Array<
-    { kind: "read"; coordinate: DebtCoordinate; source: Uint8Array } | { kind: "failed"; error: unknown }
-  >(paths.length);
+  const reads = new Array<{ kind: "read"; id: DebtId; source: Uint8Array } | { kind: "failed"; error: unknown }>(
+    paths.length,
+  );
   let next = 0;
   const worker = async (): Promise<void> => {
     while (next < paths.length) {
@@ -158,8 +109,7 @@ export async function readBoard(world: WorldRoot): Promise<BoardSnapshot> {
         if (!stat.isFile() || stat.isSymbolicLink()) {
           throw new Error(`Debt authority is not a regular file: ${path}`);
         }
-        const coordinate = coordinateFromPath(directory, path);
-        reads[index] = { kind: "read", coordinate, source: await readFile(path) };
+        reads[index] = { kind: "read", id: idFromPath(path), source: await readFile(path) };
       } catch (error) {
         reads[index] = { kind: "failed", error };
       }
@@ -171,9 +121,8 @@ export async function readBoard(world: WorldRoot): Promise<BoardSnapshot> {
   const bytes = new Map<DebtId, Uint8Array>();
   for (const read of reads) {
     if (read.kind === "failed") throw read.error;
-    const { coordinate, source } = read;
-    const id = formatDebtId(coordinate);
-    debts.set(id, parseDebtDocument(source, coordinate));
+    const { id, source } = read;
+    debts.set(id, parseDebtDocument(source, id));
     bytes.set(id, source);
   }
   return { board: { debts }, bytes };
@@ -188,18 +137,16 @@ export type OpenDebtDocument = Omit<DebtDocument, "state"> & Readonly<{ state: "
 
 export async function readRecentDebtDocuments(
   world: WorldRoot,
-  input: Readonly<{ namespace?: readonly string[]; limit?: number }>,
+  input: Readonly<{ limit?: number }>,
 ): Promise<BoundedList<OpenDebtDocument>> {
   const limit = boundedListLimit(input.limit);
-  const directory = await debtsDirectory(world);
+  const directory = resolve(world, ".keiyaku", "debts");
   const debts: OpenDebtDocument[] = [];
   for (const path of await authorityFiles(directory)) {
     const metadata = await lstat(path);
     if (!metadata.isFile() || metadata.isSymbolicLink())
       throw new Error(`Debt authority is not a regular file: ${path}`);
-    const coordinate = coordinateFromPath(directory, path);
-    if (input.namespace !== undefined && !sameNamespace(coordinate.namespace, input.namespace)) continue;
-    const debt = parseDebtDocument(await readFile(path), coordinate);
+    const debt = parseDebtDocument(await readFile(path), idFromPath(path));
     if (debt.state !== "open") continue;
     debts.push({ ...debt, state: debt.state });
   }
@@ -208,7 +155,7 @@ export async function readRecentDebtDocuments(
 
 export async function readDebtDocument(world: WorldRoot, id: DebtId): Promise<DebtDocument | undefined> {
   const resolved = await resolveAuthority(world, id, "read");
-  return resolved.exists ? parseDebtDocument(await readFile(resolved.path), parseDebtId(id)) : undefined;
+  return resolved.exists ? parseDebtDocument(await readFile(resolved.path), id) : undefined;
 }
 
 function equal(left: Uint8Array | null, right: Uint8Array | null): boolean {
@@ -252,15 +199,7 @@ export async function replaceAuthority(
 }
 
 function lockPath(world: WorldRoot, id: DebtId): string {
-  const coordinate = parseDebtId(id);
-  return resolve(
-    world,
-    ".keiyaku",
-    "locks",
-    "debt",
-    ...coordinate.namespace.map((segment) => physicalDebtSegment(segment)),
-    `${physicalDebtSegment(coordinate.localId, DEBT_LOCAL_ID_BYTES)}.sqlite`,
-  );
+  return resolve(world, ".keiyaku", "locks", "debt", `${physicalDebtSegment(canonicalDebtId(id).slice(5))}.sqlite`);
 }
 
 function errorDetail(error: unknown): string {
@@ -288,18 +227,15 @@ export async function nukeDebtAuthority(
   world: WorldRoot,
   options?: Readonly<{ timeoutMs?: number; onRemoved?(count: number): void }>,
 ): Promise<number | "busy"> {
-  const directory = await debtsDirectory(world);
+  const directory = resolve(world, ".keiyaku", "debts");
   const lockOptions = options?.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs };
   const result = await withDebtLocks({ world, allocation: true, ids: [], ...lockOptions }, async () => {
-    const candidates = await ownedAuthorityCandidates(directory);
-    const ids = [...new Set(candidates.map((candidate) => candidate.id))].sort((left, right) =>
-      Buffer.compare(Buffer.from(left), Buffer.from(right)),
-    );
+    const ids = await ownedAuthorityIds(directory);
     return await withDebtLocks({ world, allocation: false, ids, ...lockOptions }, async () => {
       let removed = 0;
-      for (const candidate of candidates) {
+      for (const id of ids) {
         try {
-          const resolved = await resolveAuthority(world, candidate.id, "read");
+          const resolved = await resolveAuthority(world, id, "read");
           if (resolved.exists) {
             await unlink(resolved.path);
             removed += 1;
@@ -309,7 +245,6 @@ export async function nukeDebtAuthority(
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
       }
-      await removeEmptyDebtDirectories(directory, false);
       return removed;
     });
   });

@@ -19,7 +19,7 @@ import {
 } from "@astrosheep/keiyaku";
 const world = null as unknown as import("@astrosheep/keiyaku").WorldRoot;
 const facet = Keiyaku.at({ cwd: "/tmp", environment: {} });
-const listing: DebtListInvocation = { namespace: [], selection: "all" };
+const listing: DebtListInvocation = { selection: "all" };
 const catalogue: Promise<DebtCatalogue> = facet.debtLs(listing);
 const one: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ id: "debt/example" });
 const many: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ ids: ["debt/example"] });

@@ -9,15 +9,14 @@ import {
   type DebtShowItem,
 } from "../debt/index.js";
 import { addDebt, addDebtDocument } from "../debt/operations.js";
-import { addInput, addDocumentInput, closed, record, namespace, debtId, updateInput } from "../debt/input.js";
+import { addInput, addDocumentInput, closed, record, debtId, updateInput } from "../debt/input.js";
 import { parseDebtCreationDocument } from "../debt/document.js";
 import { invocationCoordinates } from "./keiyaku-coordinates.js";
 import { resolveActor } from "./keiyaku-attribution.js";
 import type { KeiyakuAt } from "./keiyaku.js";
 
 export type DebtSelection = "active" | "closed" | "all";
-export type DebtReadScope = Readonly<{ scope?: "namespace" | "world"; namespace?: readonly string[]; limit?: number }>;
-export type DebtListInvocation = DebtReadScope & Readonly<{ selection?: DebtSelection }>;
+export type DebtListInvocation = Readonly<{ selection?: DebtSelection; limit?: number }>;
 export type DebtUpdateInvocation = UpdateDebtInput & Readonly<{ id: string }>;
 export type DebtShowInvocation =
   | Readonly<{ id: string; ids?: never }>
@@ -33,20 +32,6 @@ function selection(value: unknown): DebtSelection {
     throw new TypeError("selection must be active, closed, or all");
   return value;
 }
-function readInput(input: unknown, label: string, extra: readonly string[]) {
-  const v = record(input, `${label} input`);
-  closed(v, ["scope", "namespace", "limit", ...extra], `${label} input`);
-  if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
-    throw new TypeError("scope must be namespace or world");
-  const ns = namespace(v.namespace);
-  if (v.scope === "world" && ns !== undefined) throw new TypeError("namespace and world scope are mutually exclusive");
-  debtRowViewLimit(v.limit);
-  return v;
-}
-function selectedScope(input: DebtReadScope) {
-  return input.scope === "world" ? { scope: "world" as const } : { namespace: input.namespace ?? [] };
-}
-
 export async function debtAdd(at: KeiyakuAt, input: AddDebtInput | AddDebtDocumentInput, document: boolean) {
   const parsed = document ? addDocumentInput(input) : addInput(input);
   if (document) parseDebtCreationDocument((parsed as AddDebtDocumentInput).markdown);
@@ -84,12 +69,13 @@ export async function debtShow(at: KeiyakuAt, input: DebtShowInvocation): Promis
   return { kind: "present", items };
 }
 export async function debtLs(at: KeiyakuAt, input: DebtListInvocation) {
-  const v = readInput(input, "list", ["selection"]);
+  const v = record(input, "list input");
+  closed(v, ["selection", "limit"], "list input");
   const selected = selection(v.selection);
+  debtRowViewLimit(v.limit);
   const coord = await coordinates(at);
   if (coord.world === null) return absent;
   return Debts.of(coord.world).list({
-    ...selectedScope(input),
     selection: selected,
     ...(input.limit === undefined ? {} : { limit: input.limit }),
   });

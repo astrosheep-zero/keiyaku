@@ -5,7 +5,7 @@ import {
   type DebtDocument,
   type DebtState,
 } from "./document.js";
-import { debtIdSchema, parseDebtId, sameNamespace, type DebtId } from "./identity.js";
+import { debtIdSchema, type DebtId } from "./identity.js";
 import { nonEmptyDebtValues, nonEmptyDebtArraySchema } from "./operation-types.js";
 import { z } from "zod";
 
@@ -93,16 +93,6 @@ export const debtTreeRootSchema = z
   .readonly();
 export type DebtTreeRoot = z.output<typeof debtTreeRootSchema>;
 export type DebtBoard = Readonly<{ debts: ReadonlyMap<DebtId, DebtDocument> }>;
-
-/** The local ids occupied across one namespace of the current board. */
-export function occupiedLocalIds(board: DebtBoard, namespace: readonly string[]): Set<string> {
-  return new Set(
-    [...board.debts.values()].flatMap((debt) => {
-      const coordinate = parseDebtId(debt.id);
-      return sameNamespace(coordinate.namespace, namespace) ? [coordinate.localId] : [];
-    }),
-  );
-}
 
 type DebtRelation = "needs" | "parent" | "supersedes" | "relates";
 export const debtDoctorIssueSchema = z.union([
@@ -209,9 +199,6 @@ export function projectDebtDetail(board: DebtBoard, id: DebtId): DebtDetail | nu
     ...(debt.relates.length === 0 ? {} : { relates: refs(debt.relates) }),
   };
 }
-function inScope(debt: DebtDocument, scope: readonly string[] | null): boolean {
-  return scope === null || sameNamespace(parseDebtId(debt.id).namespace, scope);
-}
 export function projectDebtSummary(board: DebtBoard, debt: DebtDocument): DebtSummary {
   return {
     id: debt.id,
@@ -220,13 +207,8 @@ export function projectDebtSummary(board: DebtBoard, debt: DebtDocument): DebtSu
     disposition: debtDisposition(board, debt),
   };
 }
-export function projectRows(
-  board: DebtBoard,
-  scope: readonly string[] | null,
-  selection: "active" | "closed" | "all",
-): readonly DebtSummary[] {
+export function projectRows(board: DebtBoard, selection: "active" | "closed" | "all"): readonly DebtSummary[] {
   return [...board.debts.values()]
-    .filter((debt) => inScope(debt, scope))
     .filter((debt) => selection === "all" || (selection === "closed") === terminal(debt.state))
     .map((debt) => projectDebtSummary(board, debt))
     .sort(compareDebtRows);
@@ -260,8 +242,8 @@ export function projectCreatedByRows(
   }
   return grouped;
 }
-export function projectBlocked(board: DebtBoard, scope: readonly string[] | null): readonly BlockedDebtRow[] {
-  return projectRows(board, scope, "active").flatMap((row) => {
+export function projectBlocked(board: DebtBoard): readonly BlockedDebtRow[] {
+  return projectRows(board, "active").flatMap((row) => {
     const debt = board.debts.get(row.id)!;
     if (!debtBlocked(board, debt)) return [];
     const blockers = nonEmptyDebtValues(
@@ -274,21 +256,6 @@ export function projectBlocked(board: DebtBoard, scope: readonly string[] | null
     );
     return blockers === undefined ? [] : [{ id: row.id, title: row.title, priority: row.priority, blockers }];
   });
-}
-
-export type DebtBoardObservation = Readonly<{
-  statusRows: readonly DebtSummary[];
-  selectNamespace(namespace: readonly string[]): readonly DebtSummary[];
-  selectCreatedBy(createdBy: string): readonly DebtSummary[];
-}>;
-
-export function projectDebtBoardObservation(board: DebtBoard): DebtBoardObservation {
-  const rows = projectRows(board, null, "all");
-  return {
-    statusRows: rows,
-    selectNamespace: (namespace) => projectRows(board, namespace, "all"),
-    selectCreatedBy: (createdBy) => rows.filter((row) => board.debts.get(row.id)?.createdBy === createdBy),
-  };
 }
 
 function relationIds(debt: DebtDocument, relation: DebtRelation): readonly DebtId[] {

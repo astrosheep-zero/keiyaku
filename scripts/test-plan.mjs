@@ -99,7 +99,7 @@ const SWEEP_COST_MS = Object.freeze({
   "tests/markdown-ast.test.ts": 200,
   "tests/model-impact.test.ts": 3500,
   "tests/mutation-finality.test.ts": 1300,
-  "tests/namespace-context.test.ts": 400,
+  "tests/debt-world-context.test.ts": 400,
   "tests/normalized-identity.test.ts": 300,
   "tests/nuke.test.ts": 4400,
   "tests/observation.test.ts": 300,

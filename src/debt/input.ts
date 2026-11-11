@@ -1,5 +1,5 @@
 import { type DebtPriority, type DebtState } from "./document.js";
-import { isDebtSegment, parseDebtId, type DebtId } from "./identity.js";
+import { canonicalDebtId, type DebtId } from "./identity.js";
 import type { AddDebtDocumentInput, AddDebtInput, UpdateDebtInput } from "./operations.js";
 
 export function record(value: unknown, label: string): Record<string, unknown> {
@@ -17,8 +17,7 @@ export function closed(value: Record<string, unknown>, allowed: readonly string[
 
 export function debtId(value: unknown): DebtId {
   if (typeof value !== "string") throw new TypeError("debt ID must be a string");
-  parseDebtId(value);
-  return value as DebtId;
+  return canonicalDebtId(value);
 }
 
 export function signal(value: unknown): AbortSignal | undefined {
@@ -40,13 +39,6 @@ export function debtIds(value: unknown, label: string): readonly DebtId[] | unde
   if (values !== undefined && new Set(values).size !== values.length) {
     throw new TypeError(`${label} must not contain duplicates`);
   }
-  return values;
-}
-
-export function namespace(value: unknown): readonly string[] | undefined {
-  const values = strings(value, "namespace");
-  if (values === undefined) return undefined;
-  if (!values.every(isDebtSegment)) throw new TypeError("namespace must contain canonical segments");
   return values;
 }
 
@@ -88,25 +80,11 @@ export function addInput(input: unknown): AddDebtInput {
   const value = record(input, "add input");
   closed(
     value,
-    [
-      "title",
-      "namespace",
-      "body",
-      "note",
-      "state",
-      "priority",
-      "needs",
-      "parent",
-      "supersedes",
-      "relates",
-      "actor",
-      "signal",
-    ],
+    ["title", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates", "actor", "signal"],
     "add input",
   );
   const title = text(value.title, "title");
   if (title === undefined || title.trim() === "") throw new TypeError("title is required");
-  const selectedNamespace = namespace(value.namespace);
   const body = text(value.body, "body");
   const note = text(value.note, "note");
   const initialState = state(value.state);
@@ -119,7 +97,6 @@ export function addInput(input: unknown): AddDebtInput {
   const abort = signal(value.signal);
   return {
     title,
-    ...(selectedNamespace === undefined ? {} : { namespace: selectedNamespace }),
     ...(body === undefined ? {} : { body }),
     ...(note === undefined ? {} : { note }),
     ...(initialState === undefined ? {} : { state: initialState }),
@@ -135,15 +112,13 @@ export function addInput(input: unknown): AddDebtInput {
 
 export function addDocumentInput(input: unknown): AddDebtDocumentInput {
   const v = record(input, "addDocument input");
-  closed(v, ["markdown", "namespace", "actor", "signal"], "addDocument input");
+  closed(v, ["markdown", "actor", "signal"], "addDocument input");
   const markdown = text(v.markdown, "markdown");
   if (markdown === undefined) throw new TypeError("markdown is required");
-  const ns = namespace(v.namespace),
-    createdBy = actor(v.actor),
+  const createdBy = actor(v.actor),
     abort = signal(v.signal);
   return {
     markdown,
-    ...(ns === undefined ? {} : { namespace: ns }),
     ...(createdBy === undefined ? {} : { actor: createdBy }),
     ...(abort === undefined ? {} : { signal: abort }),
   };

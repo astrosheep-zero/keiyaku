@@ -1,12 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { serializeDebtDocument, type DebtDocument } from "../../src/debt/document.js";
-import { parseDebtId, debtAuthorityPath, type DebtId } from "../../src/debt/identity.js";
+import { debtAuthorityPath, type DebtId } from "../../src/debt/identity.js";
 import type { WorldRoot } from "../../src/world.js";
 
 /** The physical Debt authority path a World gives one Debt identity. */
 export function debtAuthorityFile(world: WorldRoot, id: DebtId): string {
-  return debtAuthorityPath(resolve(world, ".keiyaku", "debts"), parseDebtId(id));
+  return debtAuthorityPath(resolve(world, ".keiyaku", "debts"), id);
 }
 
 export function debtDocument(

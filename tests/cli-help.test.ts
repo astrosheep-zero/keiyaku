@@ -38,7 +38,7 @@ test("help resolves the longest legal command-word prefix before syntax scanning
   assert.throws(() => parseArgv(["help"]), CliUsageError);
 });
 
-test("namespace and leaf help expose executable usage and flags", () => {
+test("command family and leaf help expose executable usage and flags", () => {
   assert.match(renderRootHelp(), /^usage  keiyaku <command> \[options\]$/mu);
   assert.match(renderRootHelp(), /--workdir <path>/u);
   assert.match(renderRootHelp(), /--version/u);
@@ -56,7 +56,7 @@ test("namespace and leaf help expose executable usage and flags", () => {
   assert.match(statusHelp, /status \[<kei\/\.\.\.>\|<aku\/\.\.\.>\|@name\]/u);
   const lsHelp = renderContractHelp("ls");
   assert.match(lsHelp, /--mine \| --caller \(<integration>:<id> \| aku\/<name>\/<suffix>\)/u);
-  assert.match(lsHelp, /ls debt\/<namespace>\/ \[--closed \| --all\] \[--limit <count>\]/u);
+  assert.match(lsHelp, /ls debt\[\/\] \[--closed \| --all\] \[--limit <count>\]/u);
 });
 
 test("leaf help and usage refusals share accepted invocation options", () => {

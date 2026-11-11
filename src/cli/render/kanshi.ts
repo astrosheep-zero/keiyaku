@@ -8,7 +8,6 @@ import type {
   BoardSection,
 } from "../../kanshi/report.js";
 type BoardRow = NonNullable<ContractKanshiBoard["rows"]>[number];
-import type { DebtSummary } from "../../debt/index.js";
 import {
   contractAttentionFacts,
   abbreviateGitIds,
@@ -30,7 +29,6 @@ import {
   elapsedMilliseconds,
   entityLines,
   identityLine,
-  plumbFacts,
   renderBoundedPayload,
   renderSectionBlock,
   safeText,
@@ -213,18 +211,14 @@ function issueAlarm(issue: NonNullable<ContractKanshiDetail["issue"]>, target?: 
 function liveAlarms(row: ContractKanshiDetail): readonly string[] {
   return [
     ...mergeFacts(row),
-    ...(typeof row.holder === "object" ? ["debt unavailable"] : []),
-    ...(typeof row.holder === "string" && row.namespaceDebts.kind !== "present" ? ["debt unavailable"] : []),
     ...(row.issue === undefined ? [] : [issueAlarm(row.issue, row.target)]),
     ...(row.workspace.kind === "unavailable" ? [workspaceState(row.workspace)] : []),
   ].map((alarm) => `! ${alarm}`);
 }
 
-/** One Debt row grammar serves the World board and the selected Contract's owned namespace view. */
-function debtRowLines(row: DebtKanshiRow | DebtSummary, context: TextRenderContext): readonly string[] {
-  const contract = "contract" in row ? row.contract : undefined;
+function debtRowLines(row: DebtKanshiRow, context: TextRenderContext): readonly string[] {
+  const contract = row.contract;
   const relation = contract === undefined ? [] : [associationFact(contract)];
-  const childFacts: readonly string[] = [];
   const association = relation.length === 0 ? "" : ` · ${relation.join(" · ")}`;
   if (context.columns > NARROW_COLUMNS)
     return [
@@ -233,24 +227,15 @@ function debtRowLines(row: DebtKanshiRow | DebtSummary, context: TextRenderConte
         row.id,
         `· ${dispositionText(row.disposition)} · P${row.priority} · ${row.title}${association}`,
       ),
-      ...plumbFacts(childFacts, context.columns),
     ];
   return entityLines({
     mark: debtDispositionMark(row.disposition),
     identity: row.id,
     state: `${dispositionText(row.disposition)} · P${row.priority}`,
     title: row.title,
-    facts: [...relation, ...childFacts],
+    facts: relation,
     context,
   });
-}
-
-function namespaceDebtLines(row: ContractKanshiDetail, context: TextRenderContext): readonly string[] {
-  const debts = row.namespaceDebts;
-  if (debts.kind === "absent") return [];
-  if (debts.kind === "failed") return [tone(`  ! debt  ${safeText(debtFailureFact(debts))}`, "alert", context.color)];
-  const bounded = { ...context, columns: Math.max(1, context.columns - 2) };
-  return (debts.rows ?? []).flatMap((debt) => debtRowLines(debt, bounded).map((line) => `  ${line}`));
 }
 
 function worktreeFacts(row: ContractKanshiDetail): readonly string[] {
@@ -270,7 +255,12 @@ function renderSelectedContractRow(
       identity: id,
       state: lifecycleWord(row.phase),
       title: row.title ?? "title unavailable",
-      facts: [],
+      facts:
+        typeof row.holder === "string"
+          ? [`debt  ${row.holder}`]
+          : row.holder === undefined
+            ? []
+            : ["debt association unavailable"],
       context,
     }),
   ];
@@ -281,7 +271,7 @@ function renderSelectedContractRow(
     lines.push(
       ...semanticBlock("alarms", row.issue === undefined ? [] : [`! ${issueAlarm(row.issue, row.target)}`], context),
     );
-    lines.push(...linkedAkumaRows(row), ...namespaceDebtLines(row, context));
+    lines.push(...linkedAkumaRows(row));
     return lines;
   }
   const deniedReview = (row.gates ?? [])
@@ -311,7 +301,6 @@ function renderSelectedContractRow(
   lines.push(...linkedAkumaRows(row));
   lines.push(...semanticBlock("worktree", worktreeFacts(row), context));
   lines.push(...semanticBlock("alarms", liveAlarms(row), context));
-  lines.push(...namespaceDebtLines(row, context));
   return lines;
 }
 

@@ -22,21 +22,21 @@ test("contract identity parsing accepts existing long persisted segments", () =>
 });
 
 test("identity coordinates preserve family ownership without importing another family", () => {
-  const id = identityCoordinate({ family: "debt", segments: ["one", "two"] });
-  assert.equal(id, "debt/one/two");
-  assert.deepEqual(identitySegments({ family: "debt", value: id }), ["one", "two"]);
+  const id = identityCoordinate({ family: "aku", segments: ["worker", "1234abcd"] });
+  assert.equal(id, "aku/worker/1234abcd");
+  assert.deepEqual(identitySegments({ family: "aku", value: id }), ["worker", "1234abcd"]);
   assert.throws(() => identitySegments({ family: "kei", value: id }), /identity must use kei\//u);
-  assert.throws(() => identityCoordinate({ family: "debt", segments: [""] }), /nonempty segments/u);
+  assert.throws(() => identityCoordinate({ family: "aku", segments: [""] }), /nonempty segments/u);
 });
 
 test("identity coordinates reject dot path segments", () => {
   for (const segment of [".", ".."]) {
     assert.throws(
-      () => identityCoordinate({ family: "debt", segments: [segment] }),
+      () => identityCoordinate({ family: "aku", segments: [segment] }),
       /nonempty segments/u,
     );
     assert.throws(
-      () => identitySegments({ family: "debt", value: `debt/${segment}` }),
+      () => identitySegments({ family: "aku", value: `aku/${segment}` }),
       /invalid segment/u,
     );
   }

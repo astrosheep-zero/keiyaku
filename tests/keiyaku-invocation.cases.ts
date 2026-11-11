@@ -23,7 +23,7 @@ import { accepted, commitCandidate, document } from "./support/library-verbs.js"
 import { contractMarkdown } from "./support/markdown.js";
 import { temporaryDirectory } from "./support/process.js";
 
-test("Debt facet preserves native lifecycle, explicit namespaces, and absent World", async (t) => {
+test("Debt facet preserves native lifecycle, flat World listing, and absent World", async (t) => {
   const cwd = temporaryDirectory(t, "debt-facet-");
   const facet = Keiyaku.at({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
   assert.deepEqual(await facet.debtShow({ id: "debt/missing" }), { kind: "absent" });
@@ -48,10 +48,10 @@ test("Debt facet preserves native lifecycle, explicit namespaces, and absent Wor
   await assert.rejects(facet.debtAdd({ title: " " }), TypeError);
   assert.deepEqual(await facet.debtLs(), { kind: "absent" });
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  const first = accepted(await facet.debtAdd({ title: "First", namespace: ["nested"], actor: "fixture" }));
-  const second = accepted(await facet.debtAdd({ title: "Second", namespace: ["nested"], needs: [first.id] }));
-  const third = accepted(await facet.debtAdd({ title: "Third", namespace: ["nested"] }));
-  const root = accepted(await facet.debtAdd({ title: "Root", namespace: [] }));
+  const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" }));
+  const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] }));
+  const third = accepted(await facet.debtAdd({ title: "Third" }));
+  const root = accepted(await facet.debtAdd({ title: "Root" }));
   const shownDebt = async (id: string) => {
     const shown = await facet.debtShow({ id });
     assert.equal(shown.kind, "present");
@@ -76,27 +76,22 @@ test("Debt facet preserves native lifecycle, explicit namespaces, and absent Wor
   assert.equal((await facet.debtUpdate({ id: first.id, state: "done", note: "finished" })).kind, "accepted");
   assert.equal((await facet.debtUpdate({ id: second.id, state: "done" })).kind, "accepted");
   assert.equal((await facet.debtUpdate({ id: third.id, state: "drop" })).kind, "accepted");
-  const active = await facet.debtLs({ namespace: ["nested"] });
-  const closed = await facet.debtLs({ namespace: ["nested"], selection: "closed" });
+  const active = await facet.debtLs();
+  const closed = await facet.debtLs({ selection: "closed" });
   assert.equal(active.kind, "present");
   assert.equal(closed.kind, "present");
   if (active.kind === "present" && closed.kind === "present") {
-    assert.equal(active.rows, undefined, "an empty page omits rows");
+    assert.deepEqual(active.rows?.map((row) => row.id), [root.id]);
     assert.equal(closed.rows!.length, 3);
   }
-  const all = await facet.debtLs({ scope: "world", selection: "all", limit: 2 });
+  const all = await facet.debtLs({ selection: "all", limit: 2 });
   assert.equal(all.kind, "present");
   if (all.kind === "present") {
     assert.equal(all.rows!.length, 2);
     assert.equal(all.more, true);
   }
-  const rootOnly = await facet.debtLs({ namespace: [] });
-  assert.equal(rootOnly.kind, "present");
-  if (rootOnly.kind === "present")
-    assert.deepEqual(
-      rootOnly.rows!.map((row) => row.id),
-      [root.id],
-    );
+  assert.equal((await facet.debtUpdate({ id: root.id, state: "drop" })).kind, "accepted");
+  assert.deepEqual(await facet.debtLs(), { kind: "present" });
 });
 
 function withoutObservationTimes(value: unknown): unknown {
@@ -164,7 +159,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.deepEqual(await facet.show({ contract }), await Keis.of(repoB).kei({ id: contract }).guidance());
   assert.deepEqual(await facet.history({ selector: contract }), await Keis.of(repoB).kei({ id: contract }).history());
 
-  const nativeDebts = await Debts.of(worldA).list({ selection: "active", namespace: [] });
+  const nativeDebts = await Debts.of(worldA).list({ selection: "active" });
   assert.deepEqual(await facet.debtLs(), nativeDebts);
   assert.equal(nativeDebts.kind, "present");
   if (nativeDebts.kind === "present") assert.equal(nativeDebts.rows![0]?.id, debtA);
@@ -194,7 +189,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.deepEqual(await facet.show({ contract: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
 
   const other = Keiyaku.at({ cwd: second.path, environment: {}, home });
-  assert.deepEqual(await other.debtLs(), await Debts.of(worldB).list({ selection: "active", namespace: [] }));
+  assert.deepEqual(await other.debtLs(), await Debts.of(worldB).list({ selection: "active" }));
   const { observedAt: _otherWorkersAt, ...otherWorkers } = await other.akuLs();
   const { observedAt: _emptyWorkersAt, ...emptyWorkers } = await Akumas.of(worldB).list({});
   assert.deepEqual(otherWorkers, emptyWorkers);

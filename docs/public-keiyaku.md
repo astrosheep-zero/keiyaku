@@ -49,8 +49,7 @@ The diagnostic names every conflicting environment variable so the caller can
 identify the competing declarations without disclosing their values.
 
 Debt invocation resolves the caller's World independently of a selected Repo.
-An explicit namespace or World scope selects the requested Debt view; omission
-selects the root namespace without consulting directory state. Creation alone
+Every Debt catalogue covers that World's flat ledger. Creation alone
 derives actor testimony and establishes a missing World.
 Debt reads retain native absence and refusal distinctions; listing defaults to
 open work.
@@ -60,7 +59,7 @@ World status is a fixed composite observation; an addressed status accepts one
 complete identity of its own family and preserves that owner's missing and failed
 observations. Catalogues distinguish Contract instances, Akuma instances, and
 Archetype definitions; Debt listing invokes its native list owner directly.
-Namespace and lifecycle selection precede the bound, preserving the owner's
+Lifecycle selection precedes the bound, preserving the owner's
 order and remainder judgment. There is no
 cross-family catalogue, category status, or plural status result. A named CLI
 address is acquired at the asynchronous process edge, then dispatched as the

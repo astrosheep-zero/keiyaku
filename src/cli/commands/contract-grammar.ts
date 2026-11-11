@@ -1,8 +1,7 @@
 import { validateAkumaName } from "../../identity/normalize.js";
 import { decodeAkumaCaller } from "../../akuma/caller.js";
 import { parseAkumaId } from "../../akuma/identity.js";
-import { parseDebtNamespaceSelector } from "../../debt/catalog.js";
-import { parseDebtId } from "../../debt/identity.js";
+import { canonicalDebtId } from "../../debt/identity.js";
 import type { VerbInput } from "../../library/keiyaku-verbs.js";
 import { contractId } from "../../core/facts/types.js";
 import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
@@ -228,18 +227,7 @@ function listLimit(parts: ContractTokens): number | undefined {
 }
 
 function debtCatalogInput(path: string, limit: number | undefined): VerbInput<"debt.ls"> | null {
-  if (path === "debt" || path === "debt/") return { namespace: [], ...(limit === undefined ? {} : { limit }) };
-  if (!path.startsWith("debt/")) return null;
-  if (!path.endsWith("/")) refuse("ls", `invalid Debt namespace selector: ${path}`);
-  const body = path.slice("debt/".length, -1);
-  if (body.length === 0 || body.split("/").some((segment) => segment.length === 0))
-    refuse("ls", `invalid Debt namespace selector: ${path}`);
-  try {
-    const namespace = parseDebtNamespaceSelector(path);
-    return { namespace, ...(limit === undefined ? {} : { limit }) };
-  } catch (error) {
-    refuse("ls", error instanceof Error ? error.message : `invalid Debt namespace selector: ${path}`);
-  }
+  return path === "debt" || path === "debt/" ? { ...(limit === undefined ? {} : { limit }) } : null;
 }
 
 function parseCallerSelector(parts: ContractTokens): AkumaCallerSelector {
@@ -355,7 +343,7 @@ export function parseContractCommand(parts: ContractTokens): CliRequest {
         if (parts.positionals.some((selector) => !selector.startsWith("debt/")))
           refuse("show", "show cannot mix Debt and Contract selectors");
         try {
-          for (const selector of parts.positionals) parseDebtId(selector);
+          for (const selector of parts.positionals) canonicalDebtId(selector);
         } catch (error) {
           refuse("show", error instanceof Error ? error.message : String(error));
         }

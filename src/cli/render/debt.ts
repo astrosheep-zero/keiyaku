@@ -28,8 +28,6 @@ import {
 
 export { debtMark } from "./marks.js";
 
-/** Presentation-only list scope the leaf acquired; never part of a product value. */
-export type DebtListScope = "world" | Readonly<{ namespace: string }>;
 type DebtFailure = Extract<DebtMutationResult | DebtUpdateResult, { kind: "refused" | "retry" }>;
 type DebtEntity = Readonly<{
   id: string;
@@ -87,25 +85,15 @@ function edge(label: string, ref: DebtRef): string {
   return `  ${label} ${ref.id} · ${dispositionText(ref.state)}`;
 }
 
-export function debtFrameHead(view: string, scope: string): string {
-  return `${view.toUpperCase()} // ${scope}`;
-}
-
-export function renderDebtList(
-  scope: DebtListScope,
-  result: DebtCatalogue,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
+export function renderDebtList(result: DebtCatalogue, context: TextRenderContext = DEFAULT_CONTEXT): string {
   const page = result;
   const columns = context.columns;
   if (page.kind === "absent") return "debt world absent";
   const rows = page.rows ?? [];
   const view = "debts";
   if (rows.length === 0) return emptyCatalogue(view);
-  const scopeText =
-    scope === "world" ? "world" : `namespace ${scope.namespace.replace(/^debt\//u, "").replace(/\/$/u, "") || "root"}`;
   return [
-    debtFrameHead(view, scopeText),
+    "DEBTS // world",
     ...rows.flatMap((row) => entityLines({ ...row, mark: debtMark(row.disposition), word: row.disposition }, columns)),
     ...(page.more === true ? ["…"] : []),
   ].join("\n");

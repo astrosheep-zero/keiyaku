@@ -115,8 +115,21 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.ok(published.anyOf);
   assert.equal(added.isError, false);
   const id = (added.structuredContent as { kind: "accepted"; id: string }).id;
-  const shown = await client.callTool({ name: "debt_show", arguments: { input: { id } } });
+  assert.match(id, /^debt\/fix-the-roof-[0-9a-f]{4}$/u);
+  assert.ok(existsSync(join(cwd, ".keiyaku", "debts", `${id.slice(5)}.md`)));
+  const childResult = await client.callTool({
+    name: "debt_add", arguments: { input: { title: "Check the repair", parent: id, needs: [id] } },
+  });
+  assert.equal(childResult.isError, false);
+  const child = accepted(Keiyaku.verbs["debt.add"].output.parse(childResult.structuredContent)).id;
+  const tree = await client.callTool({ name: "debt_tree", arguments: { input: { id } } });
+  assert.equal(tree.isError, false);
+  assert.match(JSON.stringify(tree.content), /Check the repair/u);
+  const shown = await client.callTool({ name: "debt_show", arguments: { input: { id: child } } });
   assert.equal(shown.isError, false);
+  const childDetail = Keiyaku.verbs["debt.show"].output.parse(shown.structuredContent);
+  assert.ok(childDetail.kind === "present" && childDetail.items[0]?.kind === "found");
+  assert.deepEqual(childDetail.items[0].needs, [{ id, state: "open" }]);
   const list = await client.callTool({ name: "debt_ls", arguments: { input: {} } });
   assert.equal(list.isError, false);
   assert.match(JSON.stringify(list.structuredContent), /Fix the roof/);
@@ -131,18 +144,28 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.ok(completed.kind === "present" && completed.items[0]?.kind === "found");
   assert.equal(completed.items[0].state, "done");
   assert.equal(completed.items[0].note, "finished");
+  const unblocked = await client.callTool({ name: "debt_ls", arguments: { input: {} } });
+  assert.equal(unblocked.isError, false);
+  assert.deepEqual(unblocked.structuredContent, {
+    kind: "present", rows: [{ id: child, title: "Check the repair", priority: 2, disposition: "ready" }],
+  });
+  const malformedDebt = await client.callTool({
+    name: "debt_update", arguments: { input: { id: "debt/one/two", note: "unwritten" } },
+  });
+  assert.equal(malformedDebt.isError, true);
+  assert.equal(malformedDebt._meta?.["keiyaku/disposition"], "usage");
+  assert.deepEqual(
+    (await client.callTool({ name: "debt_ls", arguments: { input: {} } })).structuredContent,
+    unblocked.structuredContent,
+  );
   const facet = Keiyaku.at({ cwd, environment, home: cwd });
-  await facet.debtAdd({ title: "Root active", priority: 3 });
-  await facet.debtAdd({ title: "Team active", namespace: ["team"], priority: 0 });
-  await facet.debtAdd({ title: "Team terminal", namespace: ["team"], state: "drop", priority: 1 });
+  await facet.debtAdd({ title: "Low priority", priority: 3 });
+  await facet.debtAdd({ title: "High priority", priority: 0 });
+  await facet.debtAdd({ title: "Dropped", state: "drop", priority: 1 });
   for (const input of [
     { limit: 1 },
     { selection: "closed", limit: 1 },
     { selection: "all", limit: 1 },
-    { namespace: ["team"], limit: 1 },
-    { namespace: ["team"], selection: "closed", limit: 1 },
-    { namespace: ["missing"], limit: 1 },
-    { scope: "world", selection: "all", limit: 1 },
   ] as const) {
     const listed = await client.callTool({ name: "debt_ls", arguments: { input } });
     assert.equal(listed.isError, false);

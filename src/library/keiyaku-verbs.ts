@@ -51,6 +51,7 @@ import {
   debtUpdateResultSchema,
 } from "../debt/index.js";
 import { debtPrioritySchema, debtStateSchema } from "../debt/document.js";
+import { debtIdSchema } from "../debt/identity.js";
 
 export type VerbEntry = Readonly<{
   description: string;
@@ -89,17 +90,12 @@ const jsonValue: z.ZodType<JsonValue> = z.lazy(() =>
 const jsonDocument = z.record(z.string(), jsonValue).readonly();
 const contractSelector = text.startsWith("kei/");
 const akumaSelector = text.regex(/^(?!kei\/)/u);
-const debtReadScope = {
-  scope: z.enum(["namespace", "world"]).exactOptional(),
-  namespace: strings.exactOptional(),
-  limit: positive.exactOptional(),
-};
 const debtSelection = z.enum(["active", "closed", "all"]).exactOptional();
 const debtRelations = {
-  needs: strings.exactOptional(),
-  parent: text.nullable().exactOptional(),
-  supersedes: strings.exactOptional(),
-  relates: strings.exactOptional(),
+  needs: z.array(debtIdSchema).readonly().exactOptional(),
+  parent: debtIdSchema.nullable().exactOptional(),
+  supersedes: z.array(debtIdSchema).readonly().exactOptional(),
+  relates: z.array(debtIdSchema).readonly().exactOptional(),
 };
 export const verbs = Object.freeze({
   bind: {
@@ -108,7 +104,7 @@ export const verbs = Object.freeze({
       z
         .strictObject({
           markdown: text,
-          debt: optText,
+          debt: debtIdSchema.exactOptional(),
           ...commonBind,
           after: strings.exactOptional(),
           gates: strings.exactOptional(),
@@ -343,7 +339,6 @@ export const verbs = Object.freeze({
     input: z
       .strictObject({
         title: text,
-        namespace: strings.exactOptional(),
         body: optText,
         note: optText,
         state: debtStateSchema.exactOptional(),
@@ -357,7 +352,7 @@ export const verbs = Object.freeze({
   },
   "debt.addDocument": {
     description: "Create a Debt from Markdown.",
-    input: z.strictObject({ markdown: text, namespace: strings.exactOptional(), ...actor }).readonly(),
+    input: z.strictObject({ markdown: text, ...actor }).readonly(),
     output: debtMutationResultSchema,
     effect: "write",
   },
@@ -365,7 +360,7 @@ export const verbs = Object.freeze({
     description: "Update a Debt.",
     input: z
       .strictObject({
-        id: text,
+        id: debtIdSchema,
         title: optText,
         body: optText,
         appendBody: optText,
@@ -373,12 +368,12 @@ export const verbs = Object.freeze({
         state: debtStateSchema.exactOptional(),
         priority: debtPrioritySchema.exactOptional(),
         ...debtRelations,
-        addNeeds: strings.exactOptional(),
-        dropNeeds: strings.exactOptional(),
-        addSupersedes: strings.exactOptional(),
-        dropSupersedes: strings.exactOptional(),
-        addRelates: strings.exactOptional(),
-        dropRelates: strings.exactOptional(),
+        addNeeds: z.array(debtIdSchema).readonly().exactOptional(),
+        dropNeeds: z.array(debtIdSchema).readonly().exactOptional(),
+        addSupersedes: z.array(debtIdSchema).readonly().exactOptional(),
+        dropSupersedes: z.array(debtIdSchema).readonly().exactOptional(),
+        addRelates: z.array(debtIdSchema).readonly().exactOptional(),
+        dropRelates: z.array(debtIdSchema).readonly().exactOptional(),
       })
       .readonly(),
     output: debtUpdateResultSchema,
@@ -387,21 +382,21 @@ export const verbs = Object.freeze({
   "debt.show": {
     description: "Read one or more Debts.",
     input: z.union([
-      z.strictObject({ id: text }).readonly(),
-      z.strictObject({ ids: z.array(text).min(1).readonly() }).readonly(),
+      z.strictObject({ id: debtIdSchema }).readonly(),
+      z.strictObject({ ids: z.array(debtIdSchema).min(1).readonly() }).readonly(),
     ]),
     output: z.union([debtShowResultSchema, debtAbsentSchema]),
     effect: "read",
   },
   "debt.ls": {
-    description: "List Debts by namespace and lifecycle.",
-    input: z.strictObject({ ...debtReadScope, selection: debtSelection }).readonly(),
+    description: "List World Debts by lifecycle.",
+    input: z.strictObject({ selection: debtSelection, limit: positive.exactOptional() }).readonly(),
     output: debtCatalogueSchema,
     effect: "read",
   },
   "debt.tree": {
     description: "Observe a Debt decomposition tree.",
-    input: z.strictObject({ id: text }).readonly(),
+    input: z.strictObject({ id: debtIdSchema }).readonly(),
     output: z.union([debtTreeResultSchema, debtAbsentSchema]),
     effect: "read",
   },

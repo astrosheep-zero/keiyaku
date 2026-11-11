@@ -448,10 +448,9 @@ test("full Contract history renders supplied historical terms rather than a curr
 test("a debt title wraps its em-dash and title as one unit", () => {
   const context = { columns: 60, color: false } as const;
   const text = renderDebtList(
-    { namespace: "debt/" },
     debtPage([
       debtSummary({
-        id: "debt/usability/a-very-long-debt-title-that-cannot-fit-here",
+        id: "debt/a-very-long-debt-title-that-cannot-fit-here",
         title:
           "a very long debt title that cannot fit inside one narrow rendered row and keeps going well past the terminal",
       }),
@@ -545,7 +544,6 @@ test("Debt tree and doctor render their native relationship facts", () => {
 test("catalog text renders only the selected identity layer", () => {
   assert.match(
     renderDebtList(
-      { namespace: "debt/" },
       debtPage([debtSummary({ id: "debt/catalog-row", title: "Catalog row" })], true),
     ),
     /debt\/catalog-row/u,
@@ -589,7 +587,7 @@ test("root Debt catalogue marks every disposition with its own state", () => {
       }),
     ),
   );
-  const text = renderDebtList({ namespace: "debt/" }, catalog);
+  const text = renderDebtList(catalog);
   for (const [state, mark] of cases) assert.ok(text.includes(`${mark} debt/${state}`));
 });
 
@@ -608,7 +606,7 @@ test("empty World status has one explicit empty row", () => {
   );
 });
 test("empty catalogues share a surface-named none state", () => {
-  assert.equal(renderDebtList({ namespace: "debt/" }, { kind: "present" }), "debts  none");
+  assert.equal(renderDebtList({ kind: "present" }), "debts  none");
   assert.equal(renderContractCatalogue(contractCatalog([])), "contracts  none");
   assert.equal(renderVerb("aku.ls", {}, { kind: "returned", value: { observedAt: "2026-08-12T00:00:00.000Z" } }, { columns: 120, color: false }), "akuma  none");
 });
@@ -634,22 +632,19 @@ test("World roster names a bound Contract once without a bare unavailable parent
 test("Debt listings retain empty and absent observations", () => {
   const context = { columns: 120, color: false } as const;
   const empty = { kind: "present" as const };
-  assert.equal(renderDebtList({ namespace: "debt/" }, empty, context), "debts  none");
-  assert.equal(renderDebtList("world", empty, context), "debts  none");
-  assert.equal(renderDebtList("world", { kind: "absent" }, context), "debt world absent");
+  assert.equal(renderDebtList(empty, context), "debts  none");
+  assert.equal(renderDebtList({ kind: "absent" }, context), "debt world absent");
   const text = renderDebtList(
-    { namespace: "debt/" },
     debtPage([debtSummary({ id: "debt/one-row", title: "One row" })], true),
     context,
   );
-  assert.match(text, /^DEBTS \/\/ namespace root$/mu);
+  assert.match(text, /^DEBTS \/\/ world$/mu);
   assert.match(text, /^○ debt\/one-row · ready · P2 — One row$/mu);
   assert.ok(text.endsWith("\n…"));
 });
 
 test("Debt catalogue rows render the compact native summary", () => {
   const text = renderDebtList(
-    { namespace: "debt/" },
     debtPage([debtSummary({ id: "debt/no-body", title: "No body", priority: 1 })]),
   );
   assert.match(text, /^○ debt\/no-body · ready · P1 — No body$/mu);
@@ -1033,7 +1028,7 @@ test("Debt listing displays dropped while the native disposition remains drop", 
     priority: 1,
     disposition: "drop",
   });
-  const text = renderDebtList({ namespace: "debt/" }, debtPage([row]));
+  const text = renderDebtList(debtPage([row]));
   assert.match(text, /debt\/dropped · dropped · P1/u);
   assert.equal(row.disposition, "drop");
 });
@@ -2924,28 +2919,9 @@ test("a failed selected Contract retains its identity and failure", () => {
   assert.match(text, /kei\/verified-commit/u);
 });
 
-test("a selected Contract renders its owned namespace Debt rows in the shared row grammar", () => {
-  const report = contractReport(
-    contractDetail({
-      namespaceDebts: {
-        kind: "present",
-        rows: [
-          debtSummary({
-            id: "debt/namespace-row",
-            title: "Namespace row",
-            priority: 2,
-            disposition: "drop",
-          }),
-        ],
-      },
-    }),
-  );
-  assert.match(
-    renderKanshiText(report, { columns: 120, color: false }),
-    /^ {2}× debt\/namespace-row · dropped · P2 · Namespace row$/mu,
-  );
-  const narrow = renderKanshiText(report, { columns: 60, color: false });
-  assert.match(narrow, /^ {2}× dropped · P2$/mu);
-  assert.match(narrow, /^ {4}debt\/namespace-row$/mu);
-  for (const line of narrow.split("\n")) assert.ok(displayColumns(line) <= 60, line);
+test("a selected Contract renders its explicit held Debt and unavailable association", () => {
+  const report = contractReport(contractDetail({ holder: "debt/held-work" }));
+  assert.match(renderKanshiText(report, { columns: 120, color: false }), /debt  debt\/held-work/u);
+  const failed = contractReport(contractDetail({ holder: { kind: "unavailable" } }));
+  assert.match(renderKanshiText(failed, { columns: 120, color: false }), /debt association unavailable/u);
 });

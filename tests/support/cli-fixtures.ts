@@ -133,7 +133,6 @@ export function contractDetail(overrides: Partial<ContractKanshiDetail> = {}): C
     title: "Verified commit",
     phase: "bound",
     workspace: { kind: "present", path: "/tmp/wt" },
-    namespaceDebts: { kind: "absent" },
     ...overrides,
   };
 }

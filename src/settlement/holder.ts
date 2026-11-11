@@ -12,7 +12,7 @@ import {
   type GitReadObservation,
   type GitTreeSelection,
 } from "../git/read-observation.js";
-import { parseDebtId, type DebtId } from "../debt/identity.js";
+import { canonicalDebtId, type DebtId } from "../debt/identity.js";
 import { acquireDebtSettlementFence } from "./fence.js";
 
 // The private persisted spelling predates the product rename. Keep its bytes
@@ -76,7 +76,7 @@ function decodeHolder(path: string, bytes: Uint8Array): DebtHolder {
   let owner: ContractId;
   try {
     debtId = `debt/${record.taskId.slice("task/".length)}`;
-    parseDebtId(debtId);
+    canonicalDebtId(debtId);
     owner = contractId(record.contractId);
   } catch (error) {
     return corruption(`DebtHolder identity is invalid: ${path}`, error);

@@ -20,7 +20,7 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   const empty = await kanshiCounts({ world, repo });
   assert.deepEqual([empty.akuma, empty.contracts, empty.debts], Array(3).fill({ kind: "present", value: 0 }));
   const debts = Debts.of(world);
-  for (let i = 0; i < 12; i++) accepted(await debts.add({ title: `Open ${i}`, namespace: i % 2 ? ["nested"] : [] }));
+  for (let i = 0; i < 12; i++) accepted(await debts.add({ title: `Open ${i}` }));
   const done = accepted(await debts.add({ title: "Done" })).id;
   const drop = accepted(await debts.add({ title: "Drop" })).id;
   accepted(await debts.debt({ id: done }).update({ state: "done" }));

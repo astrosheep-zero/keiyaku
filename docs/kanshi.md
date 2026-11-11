@@ -36,9 +36,10 @@ Alias owner's and attached Contract rosters derive availability from that
 section fact.
 
 The World Debt section is a recent bounded catalogue. It attaches only
-relationships already observed for those rows, while a selected Contract's
-owned Debt section retains the complete owner view required to explain that
-Contract.
+relationships already observed for those rows. A selected Contract retains its
+explicit DebtHolder observation; it does not discover a collection of owned
+Debts. Holder failure leaves that association unavailable while independently
+readable World Debt rows remain visible.
 
 The bare World Contract section is likewise a recent bounded catalogue. A
 selected Contract retains its exact owner observation, so the convenience of a

@@ -4,7 +4,7 @@ import { validated } from "./outcome.js";
 import { verificationDefinition } from "../body/decode.js";
 import type { DecodedContractDocument } from "../body/types.js";
 import { actorId, type ActorId, type ContractId, type ContractTerms, type Gate } from "../core/facts/types.js";
-import { parseDebtId, type DebtId } from "../debt/identity.js";
+import { canonicalDebtId, type DebtId } from "../debt/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";
 import { gateRequirements, prepareVerificationDeclaration } from "../verification/declaration.js";
 
@@ -39,7 +39,7 @@ export function debtOption(value: unknown): DebtId | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new TypeError("debt must be a DebtId");
   try {
-    parseDebtId(value);
+    canonicalDebtId(value);
   } catch (error) {
     throw new TypeError(error instanceof Error ? error.message : "debt must be a DebtId");
   }

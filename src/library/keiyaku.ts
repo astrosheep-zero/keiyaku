@@ -45,13 +45,7 @@ import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
 import type { DebtListInvocation, DebtUpdateInvocation, DebtShowInvocation } from "./keiyaku-debt.js";
-export type {
-  DebtSelection,
-  DebtReadScope,
-  DebtListInvocation,
-  DebtUpdateInvocation,
-  DebtShowInvocation,
-} from "./keiyaku-debt.js";
+export type { DebtSelection, DebtListInvocation, DebtUpdateInvocation, DebtShowInvocation } from "./keiyaku-debt.js";
 export { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 
 export type KeiyakuAt = Readonly<{

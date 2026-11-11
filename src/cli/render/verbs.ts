@@ -34,7 +34,6 @@ import {
   renderDebtTree,
   renderDebtUpdate,
   renderDoctor,
-  type DebtListScope,
 } from "./debt.js";
 import { renderKanshiText } from "./kanshi.js";
 import { renderNukeText } from "./nuke.js";
@@ -150,12 +149,6 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
   return error instanceof KeiyakuUsageError ? diagnostic : `× ${name} failed\n  reason  ${safeText(diagnostic)}`;
 }
 
-function debtScope(input: Readonly<{ scope?: "namespace" | "world"; namespace?: readonly string[] }>): DebtListScope {
-  if (input.scope === "world") return "world";
-  const namespace = input.namespace ?? [];
-  return { namespace: namespace.length === 0 ? "debt/" : `debt/${namespace.join("/")}/` };
-}
-
 function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">, context: TextRenderContext): string {
   if (result.kind === "contract-missing") return missing("region", result.id, context);
   if (result.kind === "contract-terminal")
@@ -223,10 +216,8 @@ function renderDebtVerb(
       const query = input as VerbInput<"debt.show">;
       return renderDebtShow("ids" in query ? query.ids : [query.id], value as VerbOutput<"debt.show">, context);
     }
-    case "debt.ls": {
-      const listing = input as VerbInput<"debt.ls">;
-      return renderDebtList(debtScope(listing), value as VerbOutput<"debt.ls">, context);
-    }
+    case "debt.ls":
+      return renderDebtList(value as VerbOutput<"debt.ls">, context);
     case "debt.tree":
       return renderDebtTree((input as VerbInput<"debt.tree">).id, value as VerbOutput<"debt.tree">, context);
     case "debt.doctor":

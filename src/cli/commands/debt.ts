@@ -36,9 +36,6 @@ function values(command: ParsedDebtCommand, name: string): readonly DebtId[] | u
   const item = command.flags[name];
   return Array.isArray(item) ? (item as readonly DebtId[]) : undefined;
 }
-function namespace(raw: string | undefined): readonly string[] | undefined {
-  return raw === undefined ? undefined : raw === "/" ? [] : raw.split("/");
-}
 function optional<K extends string, T>(key: K, val: T | undefined): { [P in K]?: T } {
   return val === undefined ? {} : ({ [key]: val } as { [P in K]: T });
 }
@@ -47,15 +44,13 @@ async function addDebt(
   runtime: CliRuntime,
   stdin: string | undefined,
 ): Promise<CliOutcome> {
-  const ns = namespace(value(command, "namespace")),
-    actor = value(command, "actor");
+  const actor = value(command, "actor");
   if (command.stdin === "document") {
-    const input = { markdown: stdin!, ...optional("namespace", ns), ...optional("actor", actor) };
+    const input = { markdown: stdin!, ...optional("actor", actor) };
     return execute("debt.addDocument", input, command, runtime);
   }
   const input = {
     title: command.positionals[0]!,
-    ...optional("namespace", ns),
     ...optional("actor", actor),
     ...optional("body", value(command, "body")),
     ...optional("note", value(command, "note")),

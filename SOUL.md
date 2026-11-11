@@ -42,7 +42,7 @@ keiyaku akuma    subagent    跨 harness 派工、观察、steer、fork
 
 **每一根都单独站得住。** 不用 akuma，用你自家的 subagent 工具，契约工作流照常跑。不开契约，debt 账本自己就能记录、关联和了结欠着的事。这不是一个套餐，是三件武器。
 
-**但边可以很深。** debt 可升格成契约；契约下有 namespace 隔离的 debts；akuma 与契约、debt 深度互通。集成是**边**，不是粘连——砍掉任何一根柱子，另外两根不许流血。
+**但边可以很深。** debt 可通过明确的持有关联升格成契约；每个 World 有独立平铺的 debt 账本；akuma 与契约、debt 深度互通。集成是**边**，不是粘连——砍掉任何一根柱子，另外两根不许流血。
 
 ## Pipeline：可配置，开箱好用
 

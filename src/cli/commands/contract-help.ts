@@ -236,7 +236,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { limit: "value", json: "boolean", mine: "boolean", caller: "value", closed: "boolean", all: "boolean" },
     usage:
-      'ls debt[/] [--closed | --all] [--limit <count>]\nls debt/<namespace>/ [--closed | --all] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] (--mine | --caller (<integration>:<id> | aku/<name>/<suffix>)) [--limit <count>]',
+      'ls debt[/] [--closed | --all] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] (--mine | --caller (<integration>:<id> | aku/<name>/<suffix>)) [--limit <count>]',
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
       "Debt lists open work by default; --closed selects terminal work and --all selects both.",
