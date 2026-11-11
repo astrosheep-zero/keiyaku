@@ -17,7 +17,6 @@ import {
 } from "./akuma-observe.js";
 import { executeWaitAkuma } from "./akuma-wait.js";
 import { createAkumaStream, type AkumaStreamSnapshot } from "./akuma-stream.js";
-import type { AkumaStatus } from "./akuma.js";
 import type { BodyLauncher } from "./body-launch.js";
 import { handoffPendingTells, wakeRecordedTell, type TellResult, type TellWakeRuntime } from "./body.js";
 import { admitCallInitialTell, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
@@ -219,15 +218,27 @@ export class AkumaOwner {
       throw new TypeError("Akuma history id cannot be combined with before, since, or limit");
     const selector = parseExactHistorySelector(input.id);
     if (selector === null)
-      throw new TypeError("Akuma history id must match turn/<positive safe integer> or report/<positive safe integer>");
-    return selectExactHistory((await this.projectHistoryTurns()).rows, selector);
+      throw new TypeError(
+        "Akuma history id must be a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
+      );
+    const slice = await activitySlice(this.paths);
+    const ledger = projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest });
+    if (selector.kind !== "activity")
+      return selectExactHistory(ledger.rows, { kind: selector.kind, sequence: selector.sequence });
+    const fact = slice.rows.find((row) => row.sequence === selector.sequence);
+    const row =
+      ledger.rows.find((row) => row.sequence === selector.sequence) ??
+      (fact === undefined ? undefined : projectTurns([fact]).rows.find((row) => row.sequence === selector.sequence));
+    return row === undefined || row.kind === "turn" || row.kind === "outcome"
+      ? { kind: "unknown-history", id: input.id }
+      : { kind: "exact-activity", row };
   }
 
   async report(input: Readonly<{ text: string; at: string }>, signal?: AbortSignal): Promise<ReportAdmission> {
     return await recordReport(this.paths, input, signal);
   }
 
-  async status(): Promise<AkumaStatus> {
+  async status(): Promise<LiveStatusObservation["status"]> {
     const { status } = await bornStatus(this.paths, this.id, { aperture: "monitoring" });
     await observeStatusOutcome(status, this.outcomeObserved);
     return status;
@@ -275,9 +286,9 @@ export class AkumaOwner {
   }
 
   async waitReceipt(
-    predicate: (status: AkumaStatus) => boolean = defaultWaitComplete,
+    predicate: (status: LiveStatusObservation["status"]) => boolean = defaultWaitComplete,
     options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
-  ): Promise<Readonly<{ reason: WaitReason; status: AkumaStatus }>> {
+  ): Promise<Readonly<{ reason: WaitReason; status: LiveStatusObservation["status"] }>> {
     if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
       throw new TypeError("Akuma wait timeoutMs must be a nonnegative finite millisecond duration");
     }
@@ -302,9 +313,9 @@ export class AkumaOwner {
   }
 
   async wait(
-    predicate: (status: AkumaStatus) => boolean = defaultWaitComplete,
+    predicate: (status: LiveStatusObservation["status"]) => boolean = defaultWaitComplete,
     options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
-  ): Promise<AkumaStatus> {
+  ): Promise<LiveStatusObservation["status"]> {
     return (await this.waitReceipt(predicate, options)).status;
   }
 

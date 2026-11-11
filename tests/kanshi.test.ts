@@ -624,7 +624,7 @@ test("World running rows keep only one bounded latest activity line through the 
   for (const columns of [48, 100]) {
     const board = renderAkuma(akumaWorldReport([row]), { columns, color: false });
     assert.ok(board.some((line) => line.includes(row.id)), "the board keeps the complete identity");
-    assert.match(board.at(-1)!, /report +first paragraph/u);
+    assert.ok(board.at(-1)!.includes("2 report: first paragraph"));
     assert.doesNotMatch(board.join("\n"), /older command/u);
   }
 });
@@ -691,7 +691,7 @@ test("birthless members retain associations without timelines and born snapshot 
   assert.deepEqual(reads, [born.id, peer.id]);
   assert.deepEqual(catalogue.rows!.map(row => row.id), [unborn.id, born.id, stillborn.id, peer.id]);
   const failed = catalogue.rows!.find(row => row.id === born.id)!;
-  assert.equal("activity" in failed && failed.activity?.kind, "unavailable");
+  assert.ok("activity" in failed && failed.activity !== undefined && "kind" in failed.activity && failed.activity.kind === "unavailable");
   assert.equal("outcome" in failed, false);
   for (const row of catalogue.rows!.filter(row => row.life === "unborn" || row.life === "stillborn")) {
     assert.equal("activity" in row, false);

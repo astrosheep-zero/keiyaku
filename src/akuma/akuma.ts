@@ -24,7 +24,8 @@ import {
   rebuildAkumaLineage,
   type AkumaLineage,
 } from "./lineage-cache.js";
-import { activitySnapshotSchema } from "./projection.js";
+import type { ActivitySnapshot } from "./projection.js";
+import { compactTimelineSchema } from "./status-projection.js";
 import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
 
 type BornLife = AkumaStatus["life"];
@@ -73,7 +74,7 @@ export const akumaStatusSchema = z
     provider: z.string().exactOptional(),
     model: z.string().exactOptional(),
     lastActivityAt: z.string().exactOptional(),
-    timeline: activitySnapshotSchema,
+    timeline: compactTimelineSchema,
     strandedReason: z.literal("resume-unsupported").exactOptional(),
   })
   .strict()
@@ -452,6 +453,6 @@ export async function readAkumaCompleteRoster(
 }
 
 /** Internal timeline observation for composition owners. */
-export async function readAkumaTimeline(path: WorldRoot, id: AkumaId): Promise<AkumaStatus["timeline"]> {
+export async function readAkumaTimeline(path: WorldRoot, id: AkumaId): Promise<ActivitySnapshot> {
   return (await new AkumaOwner(id, path).status()).timeline;
 }

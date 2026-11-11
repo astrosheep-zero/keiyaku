@@ -109,13 +109,19 @@ export async function observeOutcomeRows(
   if (historyIds.length > 0) await observer(id, historyIds);
 }
 
-export async function observeStatusOutcome(status: AkumaStatus, observer?: OutcomeObserver): Promise<void> {
+export async function observeStatusOutcome(
+  status: LiveStatusObservation["status"],
+  observer?: OutcomeObserver,
+): Promise<void> {
   const snapshot = status.timeline;
   if (snapshot.kind === "idle" && snapshot.outcome !== undefined)
     await observer?.(status.id, [`turn/${snapshot.outcome.turnSequence}`]);
 }
 
-type BudgetedStatusObservation = Readonly<{ status: AkumaStatus; ordinarySelected: number }>;
+type BudgetedStatusObservation = Readonly<{
+  status: Omit<AkumaStatus, "timeline"> & Readonly<{ timeline: ActivitySnapshot }>;
+  ordinarySelected: number;
+}>;
 
 /**
  * The internal live-observation companion for one status frontier.  It is not
@@ -268,7 +274,7 @@ function complete(life: AkumaStatus["life"], pending: boolean): boolean {
   return executionProgress(life, pending) !== "advancing";
 }
 
-export function defaultWaitComplete(status: AkumaStatus): boolean {
+export function defaultWaitComplete(status: LiveStatusObservation["status"]): boolean {
   return complete(
     status.life,
     status.timeline.entries.some(

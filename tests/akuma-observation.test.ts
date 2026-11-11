@@ -74,8 +74,9 @@ test("chatty status keeps latest intent, observed activity age, current tools an
     const text = snapshotText(view, { ...DEFAULT_CONTEXT, now: Date.parse(at) + 19_000 });
     assert.match(text, /running · last activity \S+ ago/u);
     assert.ok(text.indexOf("last activity") < text.indexOf("intent 31"));
-    assert.deepEqual([...text.matchAll(/▎ intent \d+/gu)].map(match => match[0]), ["▎ intent 31"]);
-    assert.equal(text.match(/earlier activity in history/gu)?.length, 1);
+    const intent = view.timeline.entries?.filter(entry => entry.text.startsWith("said: "));
+    assert.deepEqual(intent?.map(entry => entry.text), ["said: intent 31"]);
+    assert.ok(intent?.every(entry => text.includes(`${entry.id} ${entry.text}`)));
     for (const content of ["watch current work", "recent-one.ts", "recent-two.ts", "recent-three.ts", "3 outside worktree"])
       assert.ok(text.includes(content), content);
     for (const path of outside) assert.ok(!text.includes(path));

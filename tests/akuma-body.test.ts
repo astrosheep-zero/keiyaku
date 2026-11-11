@@ -1600,7 +1600,7 @@ test("kill publishes cancellation only after provider closure and emits that com
     assert.deepEqual(recorder.observations[0]?.outcomes, [{ kind: "canceled" }]);
     const status = await Akuma.select(await World.at(root), allocated.id).status();
     assert.equal(status.timeline.kind, "idle");
-    if (status.timeline.kind === "idle") assert.equal(status.timeline.outcome?.outcome.kind, "canceled");
+    if (status.timeline.kind === "idle") assert.equal(status.timeline.outcome?.kind, "canceled");
   } finally {
     close();
     await driven?.catch(() => undefined);

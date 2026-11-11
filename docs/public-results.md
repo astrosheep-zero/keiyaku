@@ -40,7 +40,11 @@ retain the resolved Contract identity and the operation's confirmed conclusion.
 They omit ordinary successful mechanics and empty defaults. Detailed terms and
 historical evidence belong to explicitly requested reads, not every mutation.
 The journal, Heart, and Debt documents remain unchanged authorities; compact
-answers add no persistent receipt, cache, or lifecycle state.
+answers add no persistent receipt, cache, or lifecycle state. The compact
+observation producer owns its lossy text projection and visible clipping;
+correlated retained activity remains independently exact-readable through its
+native owner. Consumers share that projection rather than rebuilding native
+facts or declaring a second result authority.
 
 The caller already knows the operation and supplied context. A renderer may
 receive that context explicitly; it never scrapes stored facts to recover an

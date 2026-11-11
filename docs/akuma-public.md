@@ -49,9 +49,13 @@ A status snapshot shows current actionable work: active tools, the latest settle
 narration and admitted input for open work, pending tells, and otherwise the
 latest outcome. Its latest retained activity time is observation evidence for
 every life state, absent when no row remains and never inferred from a Turn
-opening. It omits historical event coordinates and thoughts from selected detail;
-exact history retains them. Bounded ordinary detail can become typed gaps, but
-active work, tool failures and actionable tells remain visible. Reported changes
+opening. Compact observation retains correlated, bounded activity text and omits
+thoughts from selected detail. Each advertised activity coordinate names its
+exact retained activity independently of the compact payload. Omitted intervals
+are visible through the retained order without claiming an omitted event count.
+Clipping remains visible and preserves the beginning of the observed content;
+idle outcomes stay distinct from pending input. Native history and live
+observation keep their own full typed interpretation. Reported changes
 are a read-time summary of successful file-change activity on that same frontier,
 grouped by path. When the execution directory is available, the summary bounds
 its own changes to the five most recently changed files and counts outside files
@@ -92,6 +96,11 @@ History pages the same projected ledger and is the sole public execution-history
 read. Page boundaries distinguish retained extent, omission and retention loss;
 known completeness is never inferred from an unavailable observation. Requested
 historical delivery evidence remains exact rather than reconstructed by later reads.
+An exact activity read recovers that activity's retained content, including a
+start displaced by its completion or final narration folded from a page. It
+creates no outcome, fork point, or durable fact, and never substitutes a nearby
+row or another result. Provider capture and retention still bound recovery;
+unretained and non-activity coordinates remain unknown.
 It retains exact answered outcome bytes, including an empty answer, and
 the public history identity for a retained answered Turn. When that projection
 omits a final narration as its answered outcome's duplicate, the outcome also

@@ -136,12 +136,16 @@ concrete work observed rather than substituting a broad category; a tool row
 names the actual tool observed with a bounded argument preview, and a partial
 capture truncates visibly. Rendering does not interpret foreign command or
 parameter dialects: retained commands and paths use the shared bounded
-payload discipline. Tool rows preserve a nonempty work preview and the semantic
-trailer of read ranges, diffstats, durations, and exit/error status within the
-terminal width. Result messages, including row counts, are bounded diagnostic
+payload discipline. Native tool rows preserve a nonempty work preview and the
+semantic trailer of read ranges, diffstats, durations, and exit/error status
+within the terminal width. Compact activity renders the producer's correlated
+text directly, keeping its complete coordinate and visible head clipping;
+renderers never reconstruct tool state or omitted counts from that text. A long
+compact argument can displace a trailing diagnostic within the producer's bound.
+Result messages, including row counts, are bounded diagnostic
 previews, and partial captures remain visibly truncated. Increasing width never
-reduces the body allowance. Only a cut inline diagnostic expands into a bounded
-continuation block in selected Akuma detail and history, preferring word
+reduces the body allowance. In native detail and history, only a cut inline
+diagnostic expands into a bounded continuation block, preferring word
 boundaries. Diagnostics that fit are shown whole; longer diagnostics end with a
 visible omission. World and compact observations retain one line per tool.
 Gate evidence keeps its compact visual
@@ -196,11 +200,12 @@ status foregrounds the age of its latest retained activity, when any, without
 inferring activity from a Turn opening or claiming continuous liveness. The
 projection owner selects current actionable work, the latest current narration,
 and bounded ordinary detail; rendering preserves that selection and only bounds
-individual payloads. Earlier omitted activity is named once and remains in
-history. World status and the rich Akuma catalogue use the same board projection;
-catalogue enrichment never acquires a second entry formatter.
-Changes within the execution directory have priority over outside
-changes, which are summarized separately; an unavailable directory preserves the
+individual payloads. Native omission evidence remains in history and live
+observation; compact activity does not reconstruct an omission marker. World
+status and the rich Akuma catalogue use the same board projection; catalogue
+enrichment never acquires a second entry formatter. Changes within the execution
+directory have priority over outside changes, which are summarized separately;
+an unavailable directory preserves the
 unpartitioned summary. Identity, conclusion, reported changes, and actionable
 failure or pending evidence remain visible. A diagnostic keeps its subject,
 unavailable state, cause, and recovery coordinates together, never as an
@@ -220,8 +225,11 @@ Akuma observations. Multiline payloads preserve paragraphs and indentation;
 single-line previews fold whitespace. Speech, input, thought, and action remain
 distinct without invented quotation marks, and wrapping never changes event
 selection or meaning. Whole-grapheme terminal width governs wrapping and visible
-truncation, preferring word boundaries. World-board answer previews show the
-tail with a leading omission; selected detail keeps the head.
+truncation, preferring word boundaries. Bounded answer previews keep the head
+and visible trailing omission in both World and selected detail. An exact
+activity text read returns the full retained authored content or neutral tool
+summary without terminal framing or payload clipping; exact typed output keeps
+the complete retained native row. Capture and retention limits remain honest.
 
 Selected Contract status foregrounds current work or the terminal outcome,
 without repeating settled mechanics. A delivered integration observed before

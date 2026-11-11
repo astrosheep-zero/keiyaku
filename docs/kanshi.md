@@ -60,11 +60,12 @@ that aperture to later members. The ordinary Akuma catalogue instead observes
 every bounded selected born member. Birthless allocations have no activity or
 outcome, while selected born snapshot failures preserve membership with unavailable
 activity. Addressed static reads retain the selected current frontier in owner
-order; historical event coordinates and tool output belong to explicit history
-or stream observation. The report retains whether the observation reaches farther
-without manufacturing a roster total. This bounded display observation never
-supplies the frozen complete subject set required by selection, waiting, mutation,
-or other complete roster operations.
+order; compact activity retains correlation to independently requested retained
+detail, while native history and live observation retain tool output and their
+own activity interpretation. The report retains whether the observation reaches
+farther without manufacturing a roster total. This bounded display observation
+never supplies the frozen complete subject set required by selection, waiting,
+mutation, or other complete roster operations.
 
 An exact aggregate observes the complete owner-classified running Akumas and
 open Debts, and counts active Contract journal membership in the observed Git

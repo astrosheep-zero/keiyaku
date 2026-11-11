@@ -715,10 +715,15 @@ test("history accepts separate paged, exact, last, and Contract forms", () => {
   for (const args of [
     ["history", "@worker", "--since", "2", "--limit", "4"],
     ["history", "@worker", "--id", "turn/3"],
+    ["history", "@worker", "--id", "3"],
     ["history", "@worker", "--last"],
     ["history", "kei/example", "--full", "--json"],
   ])
     assert.doesNotThrow(() => parseArgv(args));
+  for (const id of ["0", "-1", "01", "+1", "1.5", "1e2", "9007199254740992", "act/3"]) {
+    assert.throws(() => parseArgv(["history", "@worker", "--id", id]));
+  }
+  assert.throws(() => parseArgv(["history", "@worker", "--id", "3", "--last"]), /cannot be combined/u);
   assert.throws(() => parseArgv(["history", "@worker", "--last", "--limit", "4"]), /cannot be combined/u);
 });
 

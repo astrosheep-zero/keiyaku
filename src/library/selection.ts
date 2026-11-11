@@ -14,6 +14,7 @@ import {
   type AskObserver,
 } from "../akuma/akuma-selection-execution.js";
 import { executeWaitAkuma } from "../akuma/akuma-wait.js";
+import type { LiveStatusObservation } from "../akuma/akuma-observe.js";
 import { type AkumaStatus } from "../akuma/akuma.js";
 import { parseExactHistorySelector } from "../akuma/identity.js";
 import { type ActivityHistory } from "../akuma/projection.js";
@@ -148,7 +149,11 @@ function placementDischarged(repo: Repo | undefined): (contract: DispatchAssocia
   };
 }
 
-async function observeAkuma(status: AkumaStatus, path: WorldRoot, repo?: Repo): Promise<AkumaObservation> {
+async function observeAkuma(
+  status: LiveStatusObservation["status"],
+  path: WorldRoot,
+  repo?: Repo,
+): Promise<AkumaObservation> {
   const contract = (await dispatchAssociations(repo, [status.id])).get(status.id)!;
   const createdDebts = (await observeCreatedDebtObservations(path, [status.id]))[0]!;
   if (status.cwd === undefined || status.provider === undefined)
@@ -433,7 +438,9 @@ function validateHistoryInput(values: Record<string, unknown>): void {
   if (values.id !== undefined && (typeof values.id !== "string" || values.id.trim() === ""))
     throw new TypeError("id must be a nonblank string");
   if (values.id !== undefined && parseExactHistorySelector(values.id as string) === null)
-    throw new TypeError("id must match turn/<positive safe integer> or report/<positive safe integer>");
+    throw new TypeError(
+      "id must be a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
+    );
   if (
     values.id !== undefined &&
     (values.last === true || values.before !== undefined || values.since !== undefined || values.limit !== undefined)
@@ -481,6 +488,8 @@ export async function historyAkuma(
       ...(values.limit === undefined ? {} : { limit: values.limit as number }),
     });
     if (values.id !== undefined) {
+      if ("kind" in history && history.kind === "exact-activity")
+        return { kind: "akuma", ...subject, events: [history.row] };
       if ("kind" in history && history.kind === "exact") {
         const { kind: _kind, ...row } = history.outcome;
         return { kind: "akuma-exact", ...subject, ...row };

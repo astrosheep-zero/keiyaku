@@ -123,13 +123,19 @@ test("exact report history selects retained identity without observing outcomes"
   const owner = new AkumaOwner(value.allocated.id, value.world, async (_id, ids) => { observed.push(...ids); });
   try {
     const first = await akuma.report("first");
-    const second = await akuma.report(" second\n  complete\n");
+    const second = await akuma.report(` second\n  ${"complete ".repeat(80)}\n`);
     if (first.kind !== "recorded" || second.kind !== "recorded") assert.fail("report refused");
     const id = second.reportId;
     const reports = (await akuma.history()).rows.filter(row => row.kind === "report");
     const firstReport = reports.find(row => `report/${row.sequence}` === first.reportId)!;
     const secondReport = reports.find(row => `report/${row.sequence}` === second.reportId)!;
-    assert.equal(secondReport.text, " second\n  complete\n");
+    assert.equal(secondReport.text, ` second\n  ${"complete ".repeat(80)}\n`);
+    const preview = (await Akumas.of(value.world).status({ akuma: value.allocated.id })).timeline.entries?.find(entry => entry.id === secondReport.sequence);
+    assert.ok(preview?.text.endsWith("…"));
+    const decimal = String(secondReport.sequence);
+    const activity = await owner.history({ id: decimal });
+    assert.deepEqual(activity, { kind: "exact-activity", row: secondReport });
+    assert.equal((await runCli(["history", value.allocated.id, "--id", decimal], { cwd: root })).stdout, `report: ${secondReport.text}`);
     assert.equal(parsePublicHistoryId(id), null);
     assert.deepEqual(await owner.fork({ at: id }, noBodyLaunch), { kind: "unknown-history" });
     assert.deepEqual(await owner.history({ id }), { kind: "exact-report", report: secondReport });
@@ -230,6 +236,8 @@ test("reports use the existing retention sequence and do not acquire a second hi
     const owner = new AkumaOwner(value.allocated.id, value.world);
     const id = old.reportId;
     assert.deepEqual(await owner.history({ id }), { kind: "unknown-history", id });
+    const decimal = old.reportId.slice("report/".length);
+    assert.deepEqual(await owner.history({ id: decimal }), { kind: "unknown-history", id: decimal });
     const report = retained.rows.find(row => `report/${row.sequence}` === latest.reportId);
     assert.ok(report?.kind === "report");
     assert.equal(report.text, "retained");

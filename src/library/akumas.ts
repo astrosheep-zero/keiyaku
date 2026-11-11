@@ -5,7 +5,7 @@ import type { AkumaRosterInput } from "../akuma/akuma.js";
 import { observeAkumaRoster, readAkumaTimeline, rosterInput } from "../akuma/akuma.js";
 import { boundedListLimit } from "../bounded-list.js";
 import { boundedMap } from "../akuma/read-pool.js";
-import { projectStatusPreview, projectStatusOutcome } from "../akuma/status-projection.js";
+import { projectActivityEntry, projectStatusOutcome } from "../akuma/status-projection.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { Repo, scopeForRepo } from "./repo.js";
@@ -231,7 +231,7 @@ export async function akumaRowsAt(
       const activity = snapshot.entries.findLast(
         (entry) => entry.kind === "row" && ["tool", "said", "thought", "note", "report"].includes(entry.row.kind),
       );
-      const preview = activity?.kind === "row" ? projectStatusPreview(activity.row) : undefined;
+      const preview = activity?.kind === "row" ? projectActivityEntry(activity.row) : undefined;
       return {
         ...summary,
         ...(preview === undefined ? {} : { activity: preview }),

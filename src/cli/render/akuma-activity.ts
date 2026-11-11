@@ -1,8 +1,17 @@
+import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaStatus } from "../../akuma/akuma.js";
 import type { KillEvidence } from "../../akuma/heart/index.js";
 import type { ActivityRow } from "../../akuma/projection.js";
-import type { CompactOutcome, CompactTimeline, StatusPreview } from "../../akuma/status-projection.js";
+import { parseExactHistorySelector } from "../../akuma/identity.js";
+import {
+  renderDiffstat,
+  toolRepr,
+  type ToolRepr,
+  type ActivityEntry,
+  type CompactOutcome,
+  type CompactTimeline,
+} from "../../akuma/status-projection.js";
 import type {
   AkumaAskObservation,
   AkumaAskResult,
@@ -14,7 +23,6 @@ import type { AkumaObservation } from "../../index.js";
 import type { SpawnResult } from "../../library/akuma-creation.js";
 import type { TellResult } from "../../akuma/body.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
-import { renderDiffstat, toolContent, toolRepr, type ToolRepr } from "./akuma-tool.js";
 import { dispositionText } from "./debt.js";
 import { debtDispositionMark } from "./marks.js";
 import {
@@ -26,7 +34,6 @@ import {
   renderBoundedPayload,
   renderBoundedTextBlock,
   safeText,
-  takeDisplayColumnsFromEnd,
   truncateDisplayText,
   type TextRenderContext,
 } from "./terminal.js";
@@ -60,13 +67,9 @@ export function frameRule(headLines: readonly string[], columns?: number): strin
 /** Tool rows an activity view prints after each say or Tell checkpoint; the surplus folds in place. */
 const TOOL_BUDGET = 3;
 
-type StatusTimeline = AkumaStatus["timeline"];
+type StatusTimeline = LiveStatusObservation["status"]["timeline"];
 type RenderRow = ActivityRow;
-type PresentationRow =
-  | RenderRow
-  | StatusPreview
-  | Readonly<{ kind: "outcome"; outcome: CompactOutcome }>
-  | Readonly<{ kind: "call" | "tell" | "pending-tell"; text: string }>;
+type PresentationRow = RenderRow | Readonly<{ kind: "outcome"; outcome: CompactOutcome }>;
 type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = StatusTimeline;
 type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows: readonly ActivityRow[] }>;
@@ -154,8 +157,7 @@ function rowText(row: Exclude<PresentationRow, { kind: "tool" }>): Readonly<{
     row.kind === "thought" ||
     row.kind === "note" ||
     row.kind === "call" ||
-    row.kind === "tell" ||
-    row.kind === "pending-tell"
+    row.kind === "tell"
   ) {
     return {
       text: row.text,
@@ -193,8 +195,6 @@ type RowView = Readonly<{
   live?: true;
   /** Single-line preview: whitespace folds. */
   compact?: true;
-  /** World-board answer previews keep the conclusion at the tail. */
-  tailAnswer?: true;
   /** History expands narrative payloads. */
   history?: true;
   /** Only selected detail and history expand complete diagnostics. */
@@ -217,8 +217,7 @@ function rowPrefix(
       continuation: TOP_CONTINUATION,
     };
   if (row.kind === "said") return { first: TOP_SPEAK, continuation: TOP_SPEAK };
-  if (row.kind === "pending-tell" || (row.kind === "tell" && "state" in row && row.state === "pending"))
-    return { first: TOP_PENDING, continuation: TOP_CONTINUATION };
+  if (row.kind === "tell" && row.state === "pending") return { first: TOP_PENDING, continuation: TOP_CONTINUATION };
   return { first: TOP_INPUT, continuation: TOP_CONTINUATION };
 }
 
@@ -226,36 +225,31 @@ function omissionMarker(text: string, columns: number): string {
   return `${actionPrefix(ACTION_MARGIN, OMISSION, columns).first}${text}`;
 }
 
-function tailAnswerPreview(first: string, text: string, columns: number): readonly string[] {
-  const readable = safeText(text).replace(/\s+/gu, " ").trim();
-  const budget = Math.max(0, columns - displayColumns(first));
-  const tail = takeDisplayColumnsFromEnd(readable, budget).text;
-  const preview =
-    tail.length === readable.length ? tail : `…${takeDisplayColumnsFromEnd(readable, Math.max(0, budget - 1)).text}`;
-  return [`${first}${preview}`];
-}
-
 /** Every selected timeline row renders through here: one prefix family per row class. */
-function renderRow(row: PresentationRow, context: TextRenderContext, view: RowView = {}): readonly string[] {
+function renderRow(
+  row: PresentationRow | ActivityEntry,
+  context: TextRenderContext,
+  view: RowView = {},
+): readonly string[] {
+  if ("id" in row) {
+    const first = `${row.id} `;
+    return renderBoundedPayload({
+      text: row.text,
+      first,
+      continuation: " ".repeat(first.length),
+      columns: context.columns,
+      maxLines: view.compact === true ? 1 : Number.MAX_SAFE_INTEGER,
+      quote: "",
+      truncated: false,
+      ...(view.compact === true ? {} : { preserveLines: true }),
+    });
+  }
   const tool = row.kind === "tool" ? toolRepr(row) : undefined;
   const { first, continuation } = rowPrefix(row, tool, context.columns, view);
   const value = row.kind === "tool" ? undefined : rowText(row);
-  const text =
-    row.kind === "tool"
-      ? row.call.kind === "other"
-        ? toolContent(row, Math.max(0, context.columns - displayColumns(first)))
-        : tool!.text
-      : value!.text;
+  const text = tool === undefined ? value!.text : tool.text;
   const compact = view.compact === true;
-  if (view.tailAnswer === true && row.kind === "outcome" && row.outcome.kind === "answered")
-    return tailAnswerPreview(first, text, context.columns);
-  const singleLine =
-    compact ||
-    tool !== undefined ||
-    row.kind === "call" ||
-    row.kind === "tell" ||
-    row.kind === "pending-tell" ||
-    row.kind === "turn";
+  const singleLine = compact || tool !== undefined || row.kind === "call" || row.kind === "tell" || row.kind === "turn";
   return renderBoundedPayload({
     text,
     first,
@@ -279,12 +273,12 @@ function renderRow(row: PresentationRow, context: TextRenderContext, view: RowVi
 
 /** One native activity row through the shared row grammar. */
 export function activityRowLines(
-  row: ActivityRow | StatusPreview | CompactOutcome,
+  row: ActivityRow | ActivityEntry | CompactOutcome,
   context: TextRenderContext,
-  view: Readonly<{ compact?: true; tailAnswer?: true }> = {},
+  view: Readonly<{ compact?: true }> = {},
 ): readonly string[] {
   return renderRow(
-    row.kind === "answered" || row.kind === "failed" || row.kind === "canceled"
+    "kind" in row && (row.kind === "answered" || row.kind === "failed" || row.kind === "canceled")
       ? { kind: "outcome", outcome: row }
       : row,
     context,
@@ -576,7 +570,7 @@ function lifeConclusion(life: AkumaStatus["life"], pending: boolean): Readonly<{
 }
 
 function conclusionMarkVerb(
-  status: AkumaStatus | undefined,
+  status: LiveStatusObservation["status"] | undefined,
   outcome: "answered" | "failed" | "unanswered" | "life",
 ): Readonly<{ mark: string; verb: string }> {
   if (outcome === "failed" || (status !== undefined && failedOutcomeDiagnostic(status) !== undefined))
@@ -613,7 +607,12 @@ function waitConclusionRow(
 
 export function inputWaitConclusion(
   observation: AkumaAskObservation,
-  input: Readonly<{ startedAt: number; completedAt?: string | null; now?: number; status?: AkumaStatus }>,
+  input: Readonly<{
+    startedAt: number;
+    completedAt?: string | null;
+    now?: number;
+    status?: LiveStatusObservation["status"];
+  }>,
 ): readonly string[] {
   const end = input.now;
   const complete = observation.kind !== "deadline";
@@ -668,7 +667,9 @@ export type InputWaitConclusion =
 
 export type InputWaitStream = Readonly<{
   admitted: (input: Readonly<{ at?: string; sequence?: number; rows: readonly string[] }>) => readonly string[];
-  observe: (observation: Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>) => readonly string[];
+  observe: (
+    observation: Readonly<{ status: LiveStatusObservation["status"]; rows: readonly ActivityRow[] }>,
+  ) => readonly string[];
   /** Current live rows for the redrawable frame; never part of append-only output. */
   frame: () => readonly string[];
   /** In-flight rows with their unresolved marks, emitted by a close that never concluded. */
@@ -685,7 +686,7 @@ export type CallObservationStream = Readonly<
   Omit<InputWaitStream, "conclude"> & { conclude: (result: SpawnResult) => string }
 >;
 
-function failedOutcomeDiagnostic(status: AkumaStatus): string | undefined {
+function failedOutcomeDiagnostic(status: LiveStatusObservation["status"]): string | undefined {
   const outcome = status.timeline.kind === "idle" ? status.timeline.outcome : undefined;
   return outcome !== undefined && outcome.outcome.kind === "failed" ? outcome.outcome.diagnostic : undefined;
 }
@@ -707,7 +708,7 @@ export function inputWaitStream(
   let opened = false;
   let cursorSeeded = false;
   /** The last observed life, so a caller deadline concludes on the target's status rather than naming the deadline. */
-  let lastStatus: AkumaStatus | undefined;
+  let lastStatus: LiveStatusObservation["status"] | undefined;
   const admit: InputWaitStream["admitted"] = (input) => {
     if (admitted) throw new Error("input wait admitted more than once");
     const pinned = input.at === undefined ? Number.NaN : Date.parse(input.at);
@@ -846,23 +847,10 @@ type SnapshotCoreOptions = Readonly<{
 }>;
 
 function selectedStatusActivity(snapshot: CompactTimeline, context: TextRenderContext): readonly string[] {
-  let omitted = false;
-  let marked = false;
-  return (snapshot.entries ?? []).flatMap((entry) => {
-    if (entry.kind === "gap") {
-      omitted = true;
-      return [];
-    }
-    const row: PresentationRow =
-      entry.kind === "answered" || entry.kind === "failed" || entry.kind === "canceled"
-        ? { kind: "outcome", outcome: entry }
-        : entry;
-    const lines = renderRow(row, context, { detail: true });
-    if (lines.length === 0) return [];
-    const marker = omitted && !marked ? [omissionMarker("earlier activity in history", context.columns)] : [];
-    if (omitted) marked = true;
-    return [...marker, ...lines];
-  });
+  return [
+    ...(snapshot.entries ?? []).flatMap((entry) => renderRow(entry, context)),
+    ...(snapshot.kind !== "idle" || snapshot.outcome === undefined ? [] : activityRowLines(snapshot.outcome, context)),
+  ];
 }
 
 function snapshotCore(
@@ -892,15 +880,8 @@ function snapshotCore(
 
 function snapshotConclusion(status: AkumaObservation): string {
   const entries = status.timeline.entries ?? [];
-  if (
-    status.timeline.kind === "idle" &&
-    entries.some((entry) => entry.kind === "answered" || entry.kind === "failed" || entry.kind === "canceled")
-  )
-    return "";
-  const conclusion = lifeConclusion(
-    status.life,
-    entries.some((entry) => entry.kind === "pending-tell"),
-  );
+  if (status.timeline.kind === "idle" && status.timeline.outcome !== undefined) return "";
+  const conclusion = lifeConclusion(status.life, status.timeline.kind === "idle" && entries.length > 0);
   return `${conclusion.mark} ${conclusion.verb}${status.strandedReason === undefined ? "" : ` · ${status.strandedReason}`}`;
 }
 
@@ -958,6 +939,25 @@ export function callRawAnswer(result: SpawnResult, streamed: boolean): string | 
 
 export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {
   if (historyId === undefined) return undefined;
+  const selector = parseExactHistorySelector(historyId);
+  if (selector?.kind === "activity" && result.kind === "akuma" && result.events.length === 1) {
+    const row = result.events[0]!;
+    if (row.sequence !== selector.sequence || row.kind === "turn" || row.kind === "outcome") return undefined;
+    if (row.kind === "tool") {
+      const tool = toolRepr(row);
+      const prefix =
+        row.state === "unsettled"
+          ? "unknown: "
+          : row.state === "active"
+            ? "active: "
+            : row.state.status === "error"
+              ? "error: "
+              : "";
+      return `${prefix}${tool.label} ${tool.text}${tool.suffix}${tool.diagnostic === "" ? "" : ` · ${tool.diagnostic}`}`;
+    }
+    const kind = row.kind === "tell" && row.state === "pending" ? "pending-tell" : row.kind;
+    return `${kind}: ${row.text}`;
+  }
   if (result.kind === "akuma-report") return result.text;
   if (result.kind !== "akuma-exact") return undefined;
   const outcome = result.outcome;

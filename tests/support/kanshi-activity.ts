@@ -9,7 +9,7 @@ import type {
   ReportedFileChange,
   SnapshotRow,
 } from "../../src/akuma/projection.js";
-import { projectStatusPreview, projectStatusOutcome } from "../../src/akuma/status-projection.js";
+import { projectActivityEntry, projectStatusOutcome } from "../../src/akuma/status-projection.js";
 import { parseAkumaId } from "../../src/akuma/identity.js";
 import type { AkumaKanshiRow, KanshiReport } from "../../src/kanshi/index.js";
 
@@ -84,7 +84,7 @@ export function activityAkumaRow(id: string, life: "running" | "asleep", snapsho
   const activity = snapshot.entries.findLast(
     (entry) => entry.kind === "row" && ["tool", "said", "thought", "note", "report"].includes(entry.row.kind),
   );
-  const preview = activity?.kind === "row" ? projectStatusPreview(activity.row) : undefined;
+  const preview = activity?.kind === "row" ? projectActivityEntry(activity.row) : undefined;
   return {
     id: parseAkumaId(id).id,
     life,

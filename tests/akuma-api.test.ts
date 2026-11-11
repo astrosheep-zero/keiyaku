@@ -602,13 +602,7 @@ test("idle returns untidy execution while preserving a pending tell", async (con
   assert.equal(timed.status.life, "untidy");
   assert.equal(timed.status.id, allocated.id);
   assert.ok(
-    timed.status.timeline.entries.some(
-      (entry) =>
-        entry.kind === "row" &&
-        entry.row.kind === "tell" &&
-        entry.row.tellId === "queued" &&
-        entry.row.state === "pending",
-    ),
+    timed.status.timeline.entries?.some(entry => entry.text === "pending-tell: later"),
   );
 });
 

@@ -117,7 +117,7 @@ const AKUMA_COMMAND_SPECS = {
       "history <aku/...|@name> [--before <index> | --since <index>] [--limit <count>]\nhistory <aku/...|@name> --id <historyId>\nhistory <aku/...|@name> --last\nhistory <kei/...> [--full] [--repo <path>]",
     purpose: "Read an Akuma's answers and activity, or a Contract's history of changes and assigned work.",
     details: [
-      "--id reads an exact retained terminal turn (turn/<number>) or report (report/<number>).",
+      "--id reads exact retained activity by its positive decimal id, a terminal turn (turn/<number>), or a report (report/<number>).",
       "--before <index> pages older rows before that sequence; --since <index> pages newer rows after it.",
       "--limit bounds page size (default 12); without --since, the latest rows are shown.",
       "With --since, paging starts at the earliest newer rows.",
@@ -270,7 +270,9 @@ function parseAkumaHistory(
   const id =
     flags.id === undefined ? undefined : stringFlag(flags.id, "history --id requires a nonblank historyId", fail);
   if (id !== undefined && parseExactHistorySelector(id) === null)
-    fail("history --id requires turn/<positive safe integer> or report/<positive safe integer>");
+    fail(
+      "history --id requires a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
+    );
   return {
     name: "history",
     input: {

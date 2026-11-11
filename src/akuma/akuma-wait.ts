@@ -21,14 +21,14 @@ type WaitExecutionInput = Readonly<{
   timeoutMs?: number;
   signal?: AbortSignal;
   /** Internal custom completion judge over the full final observation where supplied. */
-  predicate?: (status: AkumaStatus) => boolean;
+  predicate?: (status: LiveStatusObservation["status"]) => boolean;
   outcomeObserved?: OutcomeObserver;
 }>;
 
 /** One wait's association-free native evidence; upper composition attaches cross-product context. */
 export type NativeWaitResult = Readonly<{
   reason: WaitReason;
-  observations: readonly AkumaStatus[];
+  observations: readonly LiveStatusObservation["status"][];
   results: readonly AkumaWaitItem[];
 }>;
 
@@ -70,7 +70,7 @@ async function observeWaitRound(
 function roundComplete(
   round: WaitRound,
   completion: "any" | "all",
-  predicate?: (status: AkumaStatus) => boolean,
+  predicate?: (status: LiveStatusObservation["status"]) => boolean,
 ): boolean {
   const judge = predicate ?? defaultWaitComplete;
   const settled = [

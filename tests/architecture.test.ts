@@ -157,7 +157,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["kanshi/read.ts", ["body/region.ts", "assertRegionPattern"], true],
   ["kanshi/report.ts", ["akuma/akuma.ts", "akumaListRowSchema"], false],
   ["kanshi/report.ts", ["akuma/identity.ts", "akumaIdSchema"], true],
-  ["kanshi/report.ts", ["akuma/status-projection.ts", "statusPreviewSchema"], true],
+  ["kanshi/report.ts", ["akuma/status-projection.ts", "activityEntrySchema"], true],
   ["kanshi/report.ts", ["akuma/projection.ts", "activityRowSchema"], false],
   ["kanshi/report.ts", ["core/facts/types.ts", "ContractId", true], true],
   ["kanshi/report.ts", ["akuma/projection.ts", "activitySnapshotSchema"], false],

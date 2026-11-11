@@ -9,8 +9,11 @@ import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import * as root from "../src/index.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { beginTurn, endTurn } from "../src/akuma/heart/index.js";
+import { appendActivity, beginTurn, endTurn } from "../src/akuma/heart/index.js";
+import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { createdDebtObservationSchema } from "../src/debt/created-observation.js";
+import { activityEntrySchema, projectActivityEntry, projectStatusOutcome, projectStatusTimeline } from "../src/akuma/status-projection.js";
+import { activeTool, completedTool, answeredOutcome, openAkumaSnapshot, idleAkumaSnapshot } from "./support/kanshi-activity.js";
 import { tellResultSchema } from "../src/akuma/call-initial-tell.js";
 import { debtSummarySchema } from "../src/debt/board.js";
 import { bornBody } from "./support/akuma-fixtures.js";
@@ -95,6 +98,96 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   const first = await stream.next();
   assertWireRoundTrip(root.activityHistorySchema, first.value);
   await stream.return?.();
+});
+
+test("standalone public status shares compact active and idle observations while native detail stays retained", async (context) => {
+  const directory = temporaryDirectory(context, "akuma-standalone-compact-");
+  const world = await root.World.at(directory);
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
+  const born = await bornBody(directory, "feed0020", "2026-10-30T00:00:00.000Z");
+  const aku = root.Akuma.select(world, born.allocated.id);
+  const owner = new AkumaOwner(born.allocated.id, world);
+  try {
+    const turn = await beginTurn(born.allocated.paths, { bodySequence: born.body.sequence, startedAt: "2026-10-30T00:00:01.000Z" });
+    const activeId = await appendActivity(born.allocated.paths, {
+      turnSequence: turn.sequence, at: "2026-10-30T00:00:02.000Z",
+      event: { type: "tool", phase: "started", id: "native-long-tool", name: "bash", call: { kind: "run", command: `npm test ${"🙂".repeat(400)}` } },
+    });
+    for (let index = 0; index < 12; index += 1)
+      await appendActivity(born.allocated.paths, { turnSequence: turn.sequence, at: "2026-10-30T00:00:03.000Z", event: { type: "note", text: `detail ${index} ${"🙂".repeat(400)}` } });
+    const native = await owner.status();
+    assert.ok(native.timeline.entries.some(entry => entry.kind === "gap"));
+    const active = await aku.status();
+    assertWireRoundTrip(root.akumaStatusSchema, active);
+    assert.deepEqual(active.timeline, projectStatusTimeline(native.timeline));
+    assert.ok(active.timeline.entries?.some(entry => entry.id === activeId && entry.text.startsWith("active: ")));
+    for (const entry of active.timeline.entries ?? []) {
+      assert.deepEqual(Object.keys(entry).sort(), ["id", "text"]);
+      assert.equal(Array.from(entry.text).length, 300);
+      assert.ok(entry.text.endsWith("…"));
+      assert.doesNotMatch(entry.text, /[\uD800-\uDFFF]/u);
+    }
+    assert.equal(root.akumaStatusSchema.safeParse(native).success, false);
+    const answer = `answer ${"🙂".repeat(600)}`;
+    await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:04.000Z", outcome: { kind: "answered", answer, session: { sessionId: "compact-status" } } });
+    const idle = await aku.status();
+    assertWireRoundTrip(root.akumaStatusSchema, idle);
+    assert.ok(idle.timeline.kind === "idle" && idle.timeline.outcome?.kind === "answered");
+    if (idle.timeline.kind !== "idle" || idle.timeline.outcome?.kind !== "answered") assert.fail("expected idle answer");
+    assert.equal(Array.from(idle.timeline.outcome.answer).length, 500);
+    assert.ok(idle.timeline.outcome.answer.startsWith("answer 🙂") && idle.timeline.outcome.answer.endsWith("…"));
+    const waited = await aku.idle({ timeoutMs: 0 });
+    assertWireRoundTrip(root.akumaIdleResultSchema, waited);
+    assert.deepEqual(waited.status.timeline, idle.timeline);
+    const history = await aku.history();
+    assert.ok(history.rows.some(row => row.kind === "outcome" && row.outcome.kind === "answered" && row.outcome.answer === answer));
+    const stream = aku.stream()[Symbol.asyncIterator]();
+    try {
+      const window = root.activityHistorySchema.parse((await stream.next()).value);
+      assert.ok(window.rows.some(row => row.kind === "tool" && row.toolId === "native-long-tool"));
+    } finally { await stream.return?.(); }
+  } finally { born.holder.release(); }
+});
+
+test("compact activity preserves correlation, head bounds and distinct idle outcomes", () => {
+  const command = `npm test ${"🙂".repeat(400)}`;
+  const active = projectActivityEntry(activeTool(2, "bash", { kind: "run", command }))!;
+  const failed = projectActivityEntry(completedTool(5, "bash", { kind: "run", command }, { status: "error", exitCode: 1 }))!;
+  for (const [entry, prefix] of [[active, "active: run $ "], [failed, "error: run $ "]] as const) {
+    assert.deepEqual(Object.keys(entry).sort(), ["id", "text"]);
+    assert.ok(entry.text.startsWith(`${prefix}npm test 🙂`));
+    assert.equal(Array.from(entry.text).length, 300);
+    assert.ok(entry.text.endsWith("…"));
+    assert.doesNotMatch(entry.text, /[\uD800-\uDFFF]/u);
+    assertWireRoundTrip(activityEntrySchema, entry);
+  }
+  const said = { kind: "said", sequence: 8, turnSequence: 1, at: "2026-10-30T00:00:00.000Z", text: "first\n  indented" } as const;
+  const partial = projectActivityEntry({ ...said, truncated: true })!;
+  assert.equal(partial.text, `said: ${said.text}…`);
+  const native = openAkumaSnapshot([
+    { kind: "row", row: activeTool(2, "bash", { kind: "run", command }) },
+    { kind: "gap", count: 2 },
+    { kind: "row", row: { ...said, kind: "thought", sequence: 6 } },
+    { kind: "row", row: said },
+  ]);
+  const compact = projectStatusTimeline(native);
+  assert.deepEqual(compact.entries?.map(entry => entry.id), [2, 8]);
+  assert.equal(compact.entries?.[1]?.text, `said: ${said.text}`);
+  const answer = `opening ${"🙂".repeat(600)}`;
+  const outcome = projectStatusOutcome(answeredOutcome(9, answer));
+  assert.equal(outcome.kind, "answered");
+  if (outcome.kind !== "answered") assert.fail("expected answer");
+  assert.equal(Array.from(outcome.answer).length, 500);
+  assert.ok(outcome.answer.startsWith("opening 🙂") && outcome.answer.endsWith("…"));
+  assert.doesNotMatch(outcome.answer, /[\uD800-\uDFFF]/u);
+  assert.deepEqual(projectStatusOutcome(answeredOutcome(10, "")), { kind: "answered", answer: "" });
+  const pending = { kind: "tell", sequence: 11, at: said.at, tellId: "pending", text: "next\n step", state: "pending", deliveries: [] } as const;
+  assert.deepEqual(projectStatusTimeline(idleAkumaSnapshot([{ kind: "row", row: pending }], answeredOutcome(9, answer))), {
+    kind: "idle", entries: [{ id: 11, text: "pending-tell: next step" }], outcome,
+  });
+  const diagnostic = "failure ".repeat(100);
+  const failure = projectStatusOutcome({ ...answeredOutcome(12, ""), outcome: { kind: "failed", diagnostic } });
+  assert.deepEqual(failure, { kind: "failed", diagnostic: `${Array.from(diagnostic).slice(0, 499).join("")}…` });
 });
 
 test("public timeline wire is strict, deeply readonly, and exact-optional", () => {

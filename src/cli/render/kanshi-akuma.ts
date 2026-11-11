@@ -44,14 +44,12 @@ function rowPreviewLines(row: AkumaKanshiRow, context: TextRenderContext): reado
   const preview =
     activity === undefined
       ? []
-      : activity.kind === "unavailable"
+      : "kind" in activity
         ? [`! activity unavailable · ${activity.diagnostic}`]
         : activityRowLines(activity, bounded, { compact: true });
   return [
     ...preview,
-    ...("outcome" in row && row.outcome !== undefined
-      ? activityRowLines(row.outcome, bounded, { compact: true, tailAnswer: true })
-      : []),
+    ...("outcome" in row && row.outcome !== undefined ? activityRowLines(row.outcome, bounded, { compact: true }) : []),
   ].map((line) => `${ACTIVITY_INDENT}${line}`);
 }
 

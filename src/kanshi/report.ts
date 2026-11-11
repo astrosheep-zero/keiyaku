@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { akumaIdSchema } from "../akuma/identity.js";
-import { statusPreviewSchema, compactOutcomeSchema } from "../akuma/status-projection.js";
+import { activityEntrySchema, compactOutcomeSchema } from "../akuma/status-projection.js";
 import { debtSummarySchema } from "../debt/index.js";
 import { debtIdSchema } from "../debt/identity.js";
 import { akumaAliasSchema } from "../identity/selector.js";
@@ -118,7 +118,7 @@ const akumaRow = z.union([
       contract: associationSchema.exactOptional(),
       activity: z
         .union([
-          statusPreviewSchema,
+          activityEntrySchema,
           z.strictObject({ kind: z.literal("unavailable"), diagnostic: z.string() }).readonly(),
         ])
         .exactOptional(),

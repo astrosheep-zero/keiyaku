@@ -5,7 +5,7 @@ import test, { type TestContext } from "node:test";
 import * as pi from "@earendil-works/pi-coding-agent";
 import { Akuma, AkumaHost, Akumas, World } from "../src/index.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
-import { temporaryDirectory, waitForCondition } from "./support/process.js";
+import { recordRetainedFixtureRoot, temporaryDirectory, waitForCondition } from "./support/process.js";
 
 const root = resolve(import.meta.dirname, import.meta.url.endsWith(".js") ? "../.." : "..");
 const shippedExtension = join(root, "build/plugins/pi/keiyaku.ts");
@@ -319,6 +319,9 @@ test(
       }),
       timeoutMs: 20_000,
     });
+    if (nested.input.kind !== "answered")
+      recordRetainedFixtureRoot(world, `nested Pi Tell did not answer: ${JSON.stringify(nested)}`, { expected: false });
+    assert.equal(nested.input.kind, "answered", JSON.stringify(nested));
     const nestedBirth = JSON.parse(nested.input.answer);
     assert.equal(nestedBirth.input.kind, "answered");
     assert.equal(nestedBirth.input.answer, "ack:nested child");
@@ -348,6 +351,7 @@ test(
       ),
       timeoutMs: 30_000,
     });
+    assert.equal(local.input.kind, "answered", JSON.stringify(local));
     const localBirth = JSON.parse(local.input.answer);
     assert.equal(localBirth.input.kind, "answered");
     assert.equal(localBirth.input.answer, "ack:local child");

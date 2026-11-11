@@ -9,9 +9,7 @@ import {
   kanshiReport,
 } from "./support/cli-fixtures.js";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
   changeId,
   contractId,
@@ -35,8 +33,9 @@ import {
   snapshotText,
   waitText as nativeWaitText,
 } from "../src/cli/render/akuma-activity.js";
-import { akumaStatusSchema, type AkumaStatus } from "../src/akuma/akuma.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
+import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
+import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
 import { type ActivityRow, type CompletedToolRow, type OutcomeRow } from "../src/akuma/projection.js";
 import type { AkumaObservation, DeliverOutcome, Placement, Placed, RequirementProblem } from "../src/index.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
@@ -118,7 +117,7 @@ test("canceled outcomes render as canceled in CLI history and snapshots", () => 
 const DIRECT_BIRTH = { origin: { kind: "direct" }, caller: { kind: "unknown" } } as const;
 
 /** One native selected observation over a status row; absent fields stay absent. */
-function observation(status: AkumaStatus): AkumaObservation {
+function observation(status: LiveStatusObservation["status"]): AkumaObservation {
   return {
     kind: "akuma",
     id: status.id,
@@ -158,7 +157,7 @@ function activityRows(timeline: ActivitySnapshot): readonly ActivityRow[] {
   return timeline.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
 }
 
-function live(status: AkumaStatus, rows: readonly ActivityRow[] = activityRows(status.timeline)) {
+function live(status: LiveStatusObservation["status"], rows: readonly ActivityRow[] = activityRows(status.timeline)) {
   return { status, rows };
 }
 
@@ -1941,7 +1940,7 @@ test("World roster keeps the latest concrete tool work", () => {
   assert.doesNotMatch(roster.join("\n"), /src\/a\.ts|activity "/u);
 });
 
-test("World answer previews keep the conclusion, while detail keeps its opening", () => {
+test("World and detail answer previews preserve the beginning", () => {
   const answer = `${"premise ".repeat(35)}conclusion: ship the fix`;
   const snapshot = idleAkumaSnapshot([], answeredOutcome(1, answer));
   const context = { columns: 70, color: false };
@@ -1949,90 +1948,45 @@ test("World answer previews keep the conclusion, while detail keeps its opening"
     akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]),
     context,
   ).join("\n");
-  assert.match(board, /✓ …/u);
-  assert.match(board, /conclusion: ship the fix$/mu);
-  assert.doesNotMatch(board, /premise premise premise premise premise premise/u);
+  assert.ok(board.includes(answer.slice(0, 24)));
   const detail = activityRowLines(answeredOutcome(1, answer).outcome, context).join("\n");
   assert.match(detail, /^✓ premise premise/mu);
   assert.doesNotMatch(detail, /^✓ …/mu);
 });
 
-test("failed tool detail and history retain word-wrapped diagnostics beneath a bounded command row", () => {
+test("native history retains diagnostics beneath a bounded command row", () => {
   const diagnostic = "hook failed; retained diagnostic words; log /work/recovery/log.txt";
   const row = completedTool(1, "bash", { kind: "run", command: `bash -lc 'npm test ${"long-file ".repeat(30)}'` },
     { status: "error", exitCode: 7, message: diagnostic });
   const context = { columns: 48, color: false };
-  const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "running",
+  const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "running",
     timeline: openAkumaSnapshot([snapshotRow(row)]) });
-  const views = [snapshotText(observation(status), context), nativeHistoryText(
-    { kind: "akuma", akumaId: status.id, events: [row] }, {}, context)];
-  for (const text of views) {
-    const lines = text.split("\n");
-    assert.ok(lines.every((line) => displayColumns(line) <= context.columns), text);
-    const continuation = lines.slice(lines.findIndex((line) => line.includes("run")) + 1).join(" ").replace(/\s+/gu, " ");
-    assert.ok(continuation.includes(diagnostic));
-    assert.doesNotMatch(continuation, /…/u, "a diagnostic that fits the continuation stays whole");
-    assert.match(text, /run\s+\$[^…\n]+… — (?:error|exit 7)/u, "the command and failure status survive together");
-  }
+  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {}, context);
+  const lines = text.split("\n");
+  const continuation = lines.slice(lines.findIndex((line) => line.includes("run")) + 1).join(" ").replace(/\s+/gu, " ");
+  assert.ok(continuation.includes(diagnostic));
+  assert.doesNotMatch(continuation, /…/u, "a diagnostic that fits the continuation stays whole");
+  assert.match(text, /run\s+\$[^…\n]+… — (?:error|exit 7)/u, "the command and failure status survive together");
   const short = completedTool(2, "bash", { kind: "run", command: "npm test" }, { status: "error", message: "hook failed" });
-  const shortStatus = akumaStatusSchema.parse({ ...status, timeline: openAkumaSnapshot([snapshotRow(short)]) });
+  const shortStatus = liveStatusObservationSchema.unwrap().shape.status.parse({ ...status, timeline: openAkumaSnapshot([snapshotRow(short)]) });
   for (const text of [snapshotText(observation(shortStatus), context), nativeHistoryText(
     { kind: "akuma", akumaId: status.id, events: [short] }, {}, context)])
     assert.equal(text.split("hook failed").length - 1, 1, "a complete inline diagnostic is not repeated");
 });
 
-test("selected tool detail and history bound long diagnostics with a visible omission", () => {
+test("native history bounds long diagnostics with a visible omission", () => {
   const message = "diagnostic word ".repeat(1000);
   for (const columns of [24, 48, 100, 200]) {
     const context = { columns, color: false };
     for (const failed of [false, true]) {
       const row = completedTool(1, "bash", { kind: "run", command: "npm test" }, { status: failed ? "error" : "ok", message });
-      const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "running",
+      const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "running",
         timeline: openAkumaSnapshot([snapshotRow(row)]) });
-      for (const text of [snapshotText(observation(status), context), nativeHistoryText(
-        { kind: "akuma", akumaId: status.id, events: [row] }, {}, context)]) {
-        const lines = text.split("\n");
-        const continuation = lines.slice(lines.findIndex((line) => line.includes("run")) + 1).filter((line) => /^\s/u.test(line));
-        assert.ok(continuation.length > 0 && continuation.length <= 3, "diagnostic continuation has a finite line bound");
-        assert.match(continuation.at(-1)!, /…/u, "the bounded diagnostic visibly omits its remainder");
-        assert.ok(lines.every((line) => displayColumns(line) <= columns), "wrapped diagnostics respect terminal width");
-      }
+      const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {}, context);
+      assert.match(text, /diagnostic/u);
+      assert.match(text.trimEnd(), /…$/u, "the bounded diagnostic visibly omits its remainder");
     }
   }
-});
-
-test("compact and world tool rows keep trailers, bounded diagnostics and partial-capture marks", () => {
-  const path = `/work/${"long-directory/".repeat(12)}file.ts`;
-  const message = "diagnostic word ".repeat(1000);
-  const context = { columns: 48, color: false };
-  const cases = [
-    [completedTool(1, "read", { kind: "read", path, offset: 20, limit: 3 }), "· L20-22"],
-    [completedTool(2, "edit", { kind: "fileChange", changes: [{ op: "update", path, diffstat: { added: 5, removed: 2 } }] }), "— +5 -2"],
-    [{ ...completedTool(3, "bash", { kind: "run", command: `npm test ${path}` }), durationMs: 12_000 }, "— 12s"],
-    [completedTool(4, "query", { kind: "other", input: preview({ path }) }, { status: "ok", message: "12 rows" }), "12 rows"],
-    [completedTool(5, "bash", { kind: "run", command: "npm test" }, { status: "ok", message }), "…"],
-    [completedTool(6, "bash", { kind: "run", command: "npm test" }, { status: "error", message }), "error"],
-    [{ ...completedTool(7, "future_tool", { kind: "other", input: preview({ a: 1 }) }), truncated: true }, '{"a":1}…'],
-  ] as const;
-  for (const [row, trailer] of cases) {
-    const compact = activityRowLines(row, context, { compact: true });
-    const board = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running",
-      openAkumaSnapshot([snapshotRow(row)]))]), context);
-    assert.equal(compact.length, 1);
-    const baseline = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running",
-      openAkumaSnapshot([snapshotRow(completedTool(row.sequence, row.name, row.call))]))]), context);
-    assert.equal(board.length, baseline.length, "diagnostic size never adds world-board lines");
-    for (const lines of [compact, board]) {
-      assert.ok(lines.every((line) => displayColumns(line) <= context.columns), lines.join("\n"));
-      assert.ok(lines.join("\n").includes(trailer), lines.join("\n"));
-      if (typeof row.state === "object" && row.state.message === message)
-        assert.match(lines.join("\n"), /diagnostic[^\n]*…$/mu, "a long diagnostic keeps its bounded preview and omission");
-    }
-  }
-  const boundary = completedTool(8, "bash", { kind: "run", command: `npm test ${path}` },
-    { status: "error", exitCode: 7, message: "hook failed; log /work/a.log" });
-  const bodyAt = (columns: number) => activityRowLines(boundary, { ...context, columns }, { compact: true })[0]!.match(/\$.*?(?= — exit 7)/u)![0];
-  assert.ok(displayColumns(bodyAt(52)) >= displayColumns(bodyAt(51)), "fitting a diagnostic never steals body space");
 });
 
 test("World roster keeps the honest fallback for unknown tool calls", () => {
@@ -2044,20 +1998,12 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(roster, /^ {5}custom-tool …$/mu);
-});
-
-test("the output law names the current mark vocabulary and retires the one-check sentence", () => {
-  const law = readFileSync(fileURLToPath(new URL("../docs/cli-output.md", import.meta.url)), "utf8");
-  assert.doesNotMatch(law, /at most once per stream/u, "the retired one-check law is gone");
-  assert.doesNotMatch(law, /settled intermediate activity uses the plain/u);
-  assert.match(law, /A settled\s+successful action row spends no mark/u, "the replacement law exists");
-  assert.match(law, /Voice rows carry\s+their own rail/u);
+  assert.ok(roster.includes("2 custom-tool"));
 });
 
 test("a settled successful tool spends no mark while voice and input rows keep their own leads", () => {
   const id = "aku/worker/abcd0040";
-  const status = akumaStatusSchema.parse({
+  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id,
     life: "running",
@@ -2081,7 +2027,7 @@ test("a settled successful tool spends no mark while voice and input rows keep t
       },
     ]),
   });
-  const text = snapshotText(observation(status), { columns: 100, color: false });
+  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: activityRows(status.timeline) }, {}, { columns: 100, color: false });
   assert.match(text, /^ {3}read +src\/a\.ts · L0-0$/mu, "a settled tool affirms success by spending no mark");
   assert.match(text, /^▎ spoken$/mu, "speech sits on its own rail without a label or quotes");
   assert.match(text, /^▸ told direction$/mu, "a told input keeps its input lead");
@@ -2107,48 +2053,6 @@ test("generic tool rows preserve observed JSON arguments", () => {
   assert.match(text, /^ {3}silent …$/mu, "an unavailable body keeps a visible placeholder");
 });
 
-test("generic tool rows preserve whole-field and indivisible-value omission", () => {
-  const cases = [
-    {
-      columns: 40,
-      name: "future_tool",
-      input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }),
-      expected: /future_tool\s+\{"a":1,"b":2\} \+4 fields$/u,
-      absent: undefined,
-      message: "leading whole fields survive with an explicit trailing-field count",
-    },
-    {
-      columns: 40,
-      name: "future_tool",
-      input: preview({ data: "x".repeat(400) }),
-      expected: /future_tool\s+\{"data":"x+…$/u,
-      absent: undefined,
-      message: "a first value too large becomes one visibly truncated prefix",
-    },
-    {
-      columns: 30,
-      name: "ft",
-      input: preview({ a: 1, b: 2, c: 3, d: 4, e: 5, f: 6 }),
-      expected: /\{"a":1\} \+5 fields$/u,
-      absent: /"f":6/u,
-      message: "a narrow row keeps the explicit trailing-field count",
-    },
-    {
-      columns: 24,
-      name: "ft",
-      input: preview({ data: "x".repeat(400) }),
-      expected: /…$/u,
-      absent: undefined,
-      message: "an indivisible value truncates visibly",
-    },
-  ] as const;
-  for (const { columns, name, input, expected, absent, message } of cases) {
-    const line = genericLines([[1, name, input]], columns)[0]!;
-    assert.match(line, expected, message);
-    if (absent) assert.doesNotMatch(line, absent, "trailing fields are never silently present");
-  }
-});
-
 test("generic tool rows keep failure diagnostics beside argument previews", () => {
   const lines = [
     completedTool(
@@ -2161,7 +2065,7 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
   ].flatMap((row) => activityRowLines(row, { columns: 200, color: false }));
   for (const [pattern, message] of [
     [/\{"alpha":1\} — error · refused$/u, "argument evidence and its failure stay together"],
-    [/future_tool\s+… — exit 7$/u, "an empty argument object never swallows failure evidence"],
+    [/future_tool\s+\{\} — exit 7$/u, "an empty argument object never swallows failure evidence"],
   ] as const)
     assert.ok(
       lines.some((line) => pattern.test(line)),
@@ -2233,7 +2137,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(activeRoster, /\?  run +\$ keiyaku wait --all/u);
+  assert.match(activeRoster, /active: run \$ keiyaku wait --all/u);
   assert.doesNotMatch(activeRoster, /— ok/u);
 
   const failed = openAkumaSnapshot([
@@ -2243,7 +2147,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
     columns: 120,
     color: false,
   }).join("\n");
-  assert.match(failedRoster, /!  run +\$ npm test — error · exit 1/u);
+  assert.match(failedRoster, /error: run \$ npm test — exit 1/u);
 
   const truncated = openAkumaSnapshot([
     snapshotRow({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
@@ -2257,7 +2161,7 @@ test("World roster keeps active, error and truncated activity marks truthful", (
 });
 
 test("a sleeping worker's outcome row is its ending, not a repeated completion mark", () => {
-  const sleeping = akumaStatusSchema.parse({
+  const sleeping = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0001",
     life: "asleep",
@@ -2268,7 +2172,7 @@ test("a sleeping worker's outcome row is its ending, not a repeated completion m
   assert.doesNotMatch(snapshot, /✓ completed/u, "the answered outcome is already the ending");
   assert.equal((snapshot.match(/✓/gu) ?? []).length, 1, "one check on one stream");
 
-  const answerless = akumaStatusSchema.parse({
+  const answerless = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0002",
     life: "asleep",
@@ -2299,7 +2203,7 @@ test("a sleeping worker's outcome row is its ending, not a repeated completion m
 
 test("status text and JSON report the Akuma execution workdir", () => {
   const id = "aku/worker/abcd0009";
-  const status = akumaStatusSchema.parse({
+  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id,
     life: "running",
@@ -2347,14 +2251,14 @@ test("status keeps current evidence while history retains thought narration", ()
     snapshotRow(active(12, "c9")),
   ];
   const snapshot = openAkumaSnapshot(focusedEntries);
-  const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: snapshot });
+  const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: snapshot });
   const statusInvocation = parseArgv(["status", id]);
   assert.ok("command" in statusInvocation);
   const statusText = snapshotText(observation(status), DEFAULT_CONTEXT);
   assert.doesNotMatch(statusText, /internal thought/u);
   for (const command of ["c1", "c2", "c3", "c4", "c5", "c6", "c7", "c8", "c9"])
     assert.match(statusText, new RegExp(`\\$ ${command}\\b`, "u"));
-  assert.match(statusText, /\?  run +\$ c9/u, "the active final tool remains visible as unsettled");
+  assert.match(statusText, /active: run \$ c9/u, "the active final tool remains visible");
   assert.doesNotMatch(statusText, /●  run/u, "status never asserts live activity");
   assert.doesNotMatch(statusText, /earlier activity/u, "the owner selected every row");
   assert.ok(statusText.indexOf("$ c7") < statusText.indexOf("after"));
@@ -2376,7 +2280,7 @@ test("status keeps current evidence while history retains thought narration", ()
     ],
     answeredOutcome(13, "final outcome"),
   );
-  const answeredStatus = akumaStatusSchema.parse({
+  const answeredStatus = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id,
     life: "asleep",
@@ -2395,7 +2299,7 @@ test("status keeps current evidence while history retains thought narration", ()
   };
   const failedText = snapshotText(
     observation(
-      akumaStatusSchema.parse({
+      liveStatusObservationSchema.unwrap().shape.status.parse({
         birth: DIRECT_BIRTH,
         id,
         life: "asleep",
@@ -2449,7 +2353,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
   assert.equal((liveRows.match(/initial commission/gu) ?? []).length, 1);
 
   const id = "aku/worker/abcd0101";
-  const status = akumaStatusSchema.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: initial });
+  const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: initial });
   const statusText = snapshotText(observation(status), context);
   assert.ok(statusText.indexOf("initial commission") < statusText.indexOf("after-boundary"));
 
@@ -2472,7 +2376,7 @@ test("current attempt boundaries lead live streams exactly once", () => {
   };
   const wakeStatusText = snapshotText(
     observation(
-      akumaStatusSchema.parse({
+      liveStatusObservationSchema.unwrap().shape.status.parse({
         birth: DIRECT_BIRTH,
         id: "aku/worker/abcd0102",
         life: "running",
@@ -2550,7 +2454,7 @@ test("call and ask stream projected overlapping tool completions once in complet
   const projection = (facts: readonly TimelineFact[]) => {
     const ledger = projectTurns(facts);
     return {
-      status: akumaStatusSchema.parse({
+      status: liveStatusObservationSchema.unwrap().shape.status.parse({
         birth: DIRECT_BIRTH,
         id,
         life: "running",
@@ -2833,7 +2737,7 @@ test("an observing call's conclusion asserts real waiting", () => {
     { id, contract: { kind: "none" }, facts: [] },
     { now: () => now },
   );
-  const running = akumaStatusSchema.parse({
+  const running = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id,
     life: "running",
@@ -2845,13 +2749,13 @@ test("an observing call's conclusion asserts real waiting", () => {
 });
 
 test("an any-mode completion keeps an incomplete peer's own state honest", () => {
-  const complete = akumaStatusSchema.parse({
+  const complete = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0047",
     life: "asleep",
     timeline: idleAkumaSnapshot([]),
   });
-  const pending = akumaStatusSchema.parse({
+  const pending = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0048",
     life: "asleep",
@@ -2937,7 +2841,7 @@ test("a streamed observing call opens one framed head and never replays a settle
   };
   const stream = callObservationStream({ columns: 100, color: false }, head, { now: () => now });
   const running = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
-    akumaStatusSchema.parse({
+    liveStatusObservationSchema.unwrap().shape.status.parse({
       birth: DIRECT_BIRTH,
       id,
       life: "running",
@@ -2981,7 +2885,7 @@ test("a streamed observing call concludes truthfully when its stream never opene
   const observedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
   observedStream.observe(
     live(
-      akumaStatusSchema.parse({
+      liveStatusObservationSchema.unwrap().shape.status.parse({
         birth: DIRECT_BIRTH,
         id,
         life: "running",

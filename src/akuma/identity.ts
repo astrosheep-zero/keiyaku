@@ -19,7 +19,11 @@ export function parsePublicHistoryId(value: string): number | null {
 
 export function parseExactHistorySelector(
   value: string,
-): Readonly<{ kind: "turn" | "report"; sequence: number }> | null {
+): Readonly<{ kind: "turn" | "report" | "activity"; sequence: number }> | null {
+  if (/^[1-9][0-9]*$/u.test(value)) {
+    const sequence = Number(value);
+    return Number.isSafeInteger(sequence) ? { kind: "activity", sequence } : null;
+  }
   const match = /^(turn|report)\/([1-9][0-9]*)$/u.exec(value);
   if (match === null) return null;
   const sequence = Number(match[2]);

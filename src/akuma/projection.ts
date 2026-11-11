@@ -332,6 +332,7 @@ export type ActivityHistory = z.output<typeof activityHistorySchema>;
 export type ExactHistory =
   | Readonly<{ kind: "exact"; outcome: OutcomeRow }>
   | Readonly<{ kind: "exact-report"; report: ReportRow }>
+  | Readonly<{ kind: "exact-activity"; row: ActivityRow }>
   | Readonly<{ kind: "unknown-history"; id: string }>;
 
 export type HistoryPage = ActivityHistory;

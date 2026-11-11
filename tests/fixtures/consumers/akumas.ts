@@ -63,16 +63,16 @@ const aliases: Promise<readonly AliasBinding[]> = plural.aliases(aliasInput);
 void aliases;
 const status = plural.status({ akuma: aku });
 const single = Akuma.select(world, aku, host);
-const nativeStatus = await single.status();
-const nativeEntry = nativeStatus.timeline.entries[0];
-if (nativeEntry?.kind === "gap") {
-  // @ts-expect-error native timeline entries retain the owner's readonly projection
-  nativeEntry.count = 1;
+const singleStatus = await single.status();
+const entry = singleStatus.timeline.entries?.[0];
+if (entry !== undefined) {
+  // @ts-expect-error public activity entries retain the owner's readonly projection
+  entry.text = "changed";
 }
-const wireEntry = akumaStatusSchema.parse(nativeStatus).timeline.entries[0];
-if (wireEntry?.kind === "gap") {
+const wireEntry = akumaStatusSchema.parse(singleStatus).timeline.entries?.[0];
+if (wireEntry !== undefined) {
   // @ts-expect-error parsed public wire entries remain readonly
-  wireEntry.count = 1;
+  wireEntry.text = "changed";
 }
 const constructor: Function = Akuma;
 const prototype: Akuma = Akuma.prototype;

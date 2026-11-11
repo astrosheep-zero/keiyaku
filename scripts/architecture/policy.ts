@@ -581,7 +581,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "kanshi/report.ts",
       allow: [
         runtime("akuma/identity.ts", ["akumaIdSchema"]),
-        runtime("akuma/status-projection.ts", ["compactOutcomeSchema", "statusPreviewSchema"]),
+        runtime("akuma/status-projection.ts", ["compactOutcomeSchema", "activityEntrySchema"]),
         types("akuma/projection.ts"),
         types("core/facts/types.ts"),
         runtime("bounded-list.ts", ["boundedListSchema"]),
