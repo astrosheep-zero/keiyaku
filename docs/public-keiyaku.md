@@ -19,12 +19,13 @@ accompany text rendering without being echoed in that answer, and adapters
 consume the owner's outcome judgment rather than reconstructing authority from
 omitted implementation evidence.
 
-MCP publishes an owner's object-rooted output schema when a caller reads the
-result to choose its next call; other tools return rendered text. An alternative
-that cannot describe an object is a programmer error for a tool publishing a
-schema. Error results are text led by their classification. An unsatisfied
-verification verdict is an answered negative, distinct from an operation failure,
-and is not a transport error. Published names are safe
+MCP publishes the facet's operations subject to the administration and raw-import
+exclusion owned by [cli.md](cli.md). It publishes an owner's object-rooted output
+schema when a caller reads the result to choose its next call; other tools return
+rendered text. An alternative that cannot describe an object is a programmer
+error for a tool publishing a schema. Error results are text led by their
+classification. An unsatisfied verification verdict is an answered negative,
+distinct from an operation failure, and is not a transport error. Published names are safe
 for model APIs and are the only callable transport names. Read-only annotations
 identify reads; destructive annotations identify destruction alone, not ordinary
 writes.

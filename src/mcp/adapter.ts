@@ -42,9 +42,11 @@ const SCHEMA_TOOLS = new Set<VerbName>([
   "ask",
   "debt.show",
 ]);
+const excluded = new Set<VerbName>(["nuke", "settings", "debt.doctor", "debt.addDocument"]);
 
 function describeTools(): Tool[] {
-  return Object.entries(Keiyaku.verbs).map(([name, entry]) => {
+  const entries = Object.entries(Keiyaku.verbs).filter(([name]) => !excluded.has(name as VerbName));
+  return entries.map(([name, entry]) => {
     const schema = z.toJSONSchema(
       z.object({ cwd: z.string().min(1).optional(), repo: z.string().min(1).optional(), input: entry.input }).strict(),
       { io: "input" },
@@ -96,14 +98,11 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools }));
   server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
     const name = request.params.name.replaceAll("_", ".");
-    if (request.params.name.includes(".") || !Object.hasOwn(Keiyaku.verbs, name))
+    if (request.params.name.includes(".") || !Object.hasOwn(Keiyaku.verbs, name) || excluded.has(name as VerbName))
       throw new McpError(ErrorCode.InvalidParams, `Unknown tool: ${request.params.name}`);
     const operation = call(name as VerbName, request.params.arguments, extra.signal);
     pending.add(operation);
-    void operation.then(
-      () => pending.delete(operation),
-      () => pending.delete(operation),
-    );
+    void operation.finally(() => pending.delete(operation)).catch(() => {});
     return operation;
   });
 

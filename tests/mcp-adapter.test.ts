@@ -5,6 +5,7 @@ import { join, relative } from "node:path";
 import test from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { classifyVerb, type VerbOutput } from "../src/library/keiyaku-verbs.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
@@ -15,7 +16,8 @@ import { DEFAULT_CLI_COLUMNS } from "../src/cli/render/terminal.js";
 import { Akuma, Akumas, Keis, Repo, World, kanshi, listArchetypeDefinitions } from "../src/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { bornDirectAkuma, bornLineageAkuma } from "./support/akuma-fixtures.js";
+import { bornBody, bornDirectAkuma, bornLineageAkuma } from "./support/akuma-fixtures.js";
+import { beginTurn } from "../src/akuma/heart/index.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import {
   cleanupSpawnCapableFixtureForTest,
@@ -38,14 +40,32 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     await adapter.close();
   });
   const { tools } = await client.listTools();
+  const excluded = ["nuke", "settings", "debt.doctor", "debt.addDocument"];
   assert.deepEqual(
     tools.map((tool) => tool.name),
-    Object.keys(Keiyaku.verbs).map((name) => name.replaceAll(".", "_")),
+    Object.keys(Keiyaku.verbs).filter((name) => !excluded.includes(name)).map((name) => name.replaceAll(".", "_")),
   );
   const schemaTools = new Set([
     "bind", "wait", "kei_status", "aku_status", "kei_ls", "aku_ls", "debt_query",
     "verify", "spawn", "fork", "debt_add", "ask", "debt_show",
   ]);
+  let unknown: McpError | undefined;
+  await assert.rejects(
+    () => client.callTool({ name: "no-such-tool", arguments: { input: {} } }),
+    (error: unknown) => {
+      assert.ok(error instanceof McpError);
+      assert.equal(error.code, ErrorCode.InvalidParams);
+      unknown = error;
+      return true;
+    },
+  );
+  assert.ok(unknown);
+  for (const name of [...excluded.map((name) => name.replaceAll(".", "_")), "debt.add"]) {
+    await assert.rejects(
+      () => client.callTool({ name, arguments: { input: {} } }),
+      { name: unknown.name, code: unknown.code, message: unknown.message.replace("no-such-tool", name) },
+    );
+  }
   for (const tool of tools) {
     const entry = Keiyaku.verbs[tool.name.replaceAll("_", ".") as keyof typeof Keiyaku.verbs];
     assert.equal(tool.description, entry.description);
@@ -58,8 +78,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const name of ["status", "kei_status", "aku_status", "kei_ls", "aku_ls", "aku_names", "debt_query", "wait", "history", "nuke", "report"])
-    assert.equal(tools.filter((tool) => tool.name === name).length, 1);
+  for (const name of ["debt_query", "report", "reconcile"])
+    assert.ok(tools.some((tool) => tool.name === name));
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   const native = await Keiyaku.at({ cwd, environment, home: cwd }).run("whoami", {});
   const result = await client.callTool({ name: "whoami", arguments: { input: {} } });
@@ -77,11 +97,6 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   ]);
   assert.equal(result.isError, false);
   assert.equal(result._meta?.["keiyaku/disposition"], classifyVerb("whoami", {}, { kind: "returned", value: native }));
-  const settings = await client.callTool({ name: "settings", arguments: { input: {} } });
-  assert.equal(settings.isError, false);
-  assert.equal(settings.structuredContent, undefined);
-  const nativeSettings = await Keiyaku.at({ cwd, environment, home: cwd }).run("settings", {});
-  assert.equal(settings._meta?.["keiyaku/disposition"], classifyVerb("settings", {}, { kind: "returned", value: nativeSettings }));
   const bad = await client.callTool({ name: "whoami", arguments: { input: {}, extra: true } });
   assert.equal(bad.isError, true);
   assert.equal(bad._meta?.["keiyaku/disposition"], "usage");
@@ -93,20 +108,12 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     JSON.parse(failureText!.text),
     projectFailure(new KeiyakuUsageError("expected input and optional nonblank cwd and repo")),
   );
-  await assert.rejects(() => client.callTool({ name: "no-such-tool", arguments: { input: {} } }));
-  await assert.rejects(() => client.callTool({ name: "debt.add", arguments: { input: { title: "Fix the roof" } } }), /Unknown tool: debt\.add/);
   const added = await client.callTool({ name: "debt_add", arguments: { input: { title: "Fix the roof" } } });
   const published = tools.find((tool) => tool.name === "debt_add")?.outputSchema;
   assert.ok(published);
   // Client.callTool validates successful structuredContent against the tools/list outputSchema.
   assert.ok(published.anyOf);
   assert.equal(added.isError, false);
-  const refusal = await client.callTool({ name: "nuke", arguments: { input: {} } });
-  const nativeRefusal = await Keiyaku.at({ cwd, environment, home: cwd }).run("nuke", {});
-  assert.equal(refusal.isError, true);
-  assert.equal(refusal._meta?.["keiyaku/disposition"], classifyVerb("nuke", {}, { kind: "returned", value: nativeRefusal }));
-  assert.equal(refusal.structuredContent, undefined);
-  assert.equal((refusal.content as { text: string }[])[0]?.text.split("\n")[0], "refused");
   const id = (added.structuredContent as { kind: "accepted"; id: string }).id;
   const shown = await client.callTool({ name: "debt_show", arguments: { input: { id } } });
   assert.equal(shown.isError, false);
@@ -172,6 +179,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     ["kei_ls", { limit: 1 }, await Keis.of(repo).list({ limit: 1 })],
     ["aku_ls", { limit: 1 }, catalogue],
     ["aku_names", {}, await listArchetypeDefinitions({ project: world, home: cwd })],
+
     ["kei_status", { id: bound.contractId }, await kanshi({ world, repo, contract: bound.contractId })],
     ["aku_status", { id: worker.id }, await Akumas.of(world).status({ akuma: worker.id, repo })],
     ["status", {}, await kanshi({ world, repo })],
@@ -195,6 +203,49 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(missing._meta?.["keiyaku/disposition"], "refused");
   assert.equal(process.cwd(), processCwd);
   assert.deepEqual({ ...process.env }, processEnv);
+});
+
+test("SDK report records the executing actor and renders its attribution", async (t) => {
+  const root = temporaryDirectory(t, "kei-mcp-report-");
+  const world = await World.at(root);
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
+  const born = await bornBody(world, "feed0022", "2026-10-30T00:00:00.000Z");
+  t.after(() => born.holder.release());
+  const turn = await beginTurn(born.allocated.paths, {
+    bodySequence: born.body.sequence,
+    startedAt: "2026-10-30T00:00:00.000Z",
+  });
+  const adapter = createKeiyakuMcpServer({
+    cwd: root,
+    environment: {
+      HOME: root, USERPROFILE: root, KEIYAKU_HOME: root,
+      KEIYAKU_ACTOR_ID: born.allocated.id, KEIYAKU_ACTOR_WORLD: world,
+    },
+    version: "test",
+  });
+  const client = new Client({ name: "test", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([adapter.server.connect(serverTransport), client.connect(clientTransport)]);
+  t.after(async () => {
+    await client.close();
+    await adapter.close();
+  });
+  await client.listTools();
+  const input = { text: "MCP milestone\n  exact text\n" };
+  const result = await client.callTool({ name: "report", arguments: { input } });
+  assert.equal(result.isError, false);
+  const history = await Akuma.select(world, born.allocated.id).history();
+  const report = history.rows.find((row) => row.kind === "report");
+  assert.ok(report?.kind === "report");
+  assert.equal(report.text, input.text);
+  assert.equal(report.bodySequence, born.body.sequence);
+  assert.equal(report.turnSequence, turn.sequence);
+  assert.deepEqual(result.content, [{
+    type: "text",
+    text: renderVerb("report", input, {
+      kind: "returned", value: { kind: "recorded", reportId: `report/${report.sequence}` },
+    }, { columns: DEFAULT_CLI_COLUMNS, color: false, actor: born.allocated.id }),
+  }]);
 });
 
 test("SDK deliver selects native preview or placement with one text-only tool", async (t) => {
@@ -266,6 +317,21 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([adapter.server.connect(serverTransport), client.connect(clientTransport)]);
   await client.listTools();
+  const reconcileInput = { contract: before.id };
+  const reconciled = await client.callTool({ name: "reconcile", arguments: { input: reconcileInput } });
+  const nativeReconcile = await Keiyaku.at({
+    cwd: repository.path,
+    environment: { HOME: repository.path, USERPROFILE: repository.path, KEIYAKU_HOME: repository.path },
+    home: repository.path,
+  }).run("reconcile", reconcileInput);
+  assert.equal(reconciled.isError, false);
+  assert.equal(reconciled.structuredContent, undefined);
+  assert.deepEqual(reconciled.content, [{
+    type: "text",
+    text: renderVerb("reconcile", reconcileInput, { kind: "returned", value: nativeReconcile }, {
+      columns: DEFAULT_CLI_COLUMNS, color: false,
+    }),
+  }]);
   const guidance = await client.callTool({ name: "show", arguments: { input: { contract: before.id } } });
   const nativeGuidance = await handle.guidance();
   assert.equal(guidance.structuredContent, undefined);

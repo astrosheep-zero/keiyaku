@@ -6,8 +6,10 @@ renderer. It owns neither document interpretation, lifecycle judgment, Git
 adjudication, verification, reconciliation, nor Debt or Akuma authority.
 
 A standalone transport is another invocation edge, not another product surface.
-It discovers the facet's operations without observing or establishing a World,
-and supplies explicit coordinates independently for each call. Protocol validation,
+It publishes the facet's operations except for an edge-owned exclusion of
+administration, ledger diagnosis, and raw-document import, which remain available
+through the CLI. Discovery observes or establishes no World,
+and each call supplies explicit coordinates independently. Protocol validation,
 connection lifetime, and cancellation remain at that edge; the facet and product
 owners retain their native admission, result, and retirement semantics. Text and
 outcome classification are shared with the CLI rather than re-decided by the

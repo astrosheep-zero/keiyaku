@@ -44,7 +44,7 @@ test("packaged stdio server launches from its documented Pi configuration", asyn
   t.after(async () => {
     await client.close();
   });
-  assert.ok((await client.listTools()).tools.some((tool) => tool.name === "nuke"));
+  assert.ok((await client.listTools()).tools.some((tool) => tool.name === "report"));
   const result = await client.callTool({ name: "whoami", arguments: { input: {} } });
   assert.equal(result.isError, false);
   await client.close();

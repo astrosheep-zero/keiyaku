@@ -2,30 +2,26 @@ const marker = "pendingTellDisposition = await runBodyTurns({";
 const idleMarker = "const finished = await finishBodyIfIdle(launch.paths, { sequence: bodySequence, at: runtime.now() });";
 const observationMarker = "await this.refresh();";
 const injected = `
-import { existsSync as __keiyakuBarrierExists, renameSync as __keiyakuBarrierRename, watch as __keiyakuBarrierWatch, writeFileSync as __keiyakuBarrierWrite } from "node:fs";
+import { existsSync as __keiyakuBarrierExists, renameSync as __keiyakuBarrierRename, writeFileSync as __keiyakuBarrierWrite } from "node:fs";
+import { setInterval as __keiyakuBarrierPoll } from "node:timers/promises";
 import { join as __keiyakuBarrierJoin } from "node:path";
 
+// Announce readiness after the first poll reads the durable release predicate.
 async function __keiyakuAwaitEmptyPublicationBarrier(launch) {
   const barrier = process.env.KEIYAKU_TEST_AKUMA_BODY_EMPTY_PUBLICATION_BARRIER;
   if (launch.seed === undefined || launch.initialBody !== undefined || typeof barrier !== "string") return;
   const release = __keiyakuBarrierJoin(barrier, "release");
   if (__keiyakuBarrierExists(release)) return;
-  await new Promise((resolve, reject) => {
-    const watcher = __keiyakuBarrierWatch(barrier, () => {
-      if (__keiyakuBarrierExists(release)) {
-        watcher.close();
-        resolve();
-      }
-    });
-    watcher.once("error", reject);
-    const ready = __keiyakuBarrierJoin(barrier, "ready");
-    __keiyakuBarrierWrite(ready + ".tmp", JSON.stringify({ id: launch.seed.id, pid: process.pid }) + "\\n");
-    __keiyakuBarrierRename(ready + ".tmp", ready);
-    if (__keiyakuBarrierExists(release)) {
-      watcher.close();
-      resolve();
+  let announced = false;
+  for await (const _ of __keiyakuBarrierPoll(25)) {
+    if (__keiyakuBarrierExists(release)) return;
+    if (!announced) {
+      const ready = __keiyakuBarrierJoin(barrier, "ready");
+      __keiyakuBarrierWrite(ready + ".tmp", JSON.stringify({ id: launch.seed.id, pid: process.pid }) + "\\n");
+      __keiyakuBarrierRename(ready + ".tmp", ready);
+      announced = true;
     }
-  });
+  }
 }
 
 async function __keiyakuAwaitIdleFinishBarrier() {
@@ -33,20 +29,14 @@ async function __keiyakuAwaitIdleFinishBarrier() {
   if (typeof barrier !== "string") return;
   const release = __keiyakuBarrierJoin(barrier, "release");
   if (__keiyakuBarrierExists(release)) return;
-  await new Promise((resolve, reject) => {
-    const watcher = __keiyakuBarrierWatch(barrier, () => {
-      if (__keiyakuBarrierExists(release)) {
-        watcher.close();
-        resolve();
-      }
-    });
-    watcher.once("error", reject);
-    __keiyakuBarrierWrite(__keiyakuBarrierJoin(barrier, "idle-ready"), "ready\\n");
-    if (__keiyakuBarrierExists(release)) {
-      watcher.close();
-      resolve();
+  let announced = false;
+  for await (const _ of __keiyakuBarrierPoll(25)) {
+    if (__keiyakuBarrierExists(release)) return;
+    if (!announced) {
+      __keiyakuBarrierWrite(__keiyakuBarrierJoin(barrier, "idle-ready"), "ready\\n");
+      announced = true;
     }
-  });
+  }
 }
 
 async function __keiyakuAwaitPeriodicObservationBarrier() {
@@ -54,20 +44,14 @@ async function __keiyakuAwaitPeriodicObservationBarrier() {
   if (typeof barrier !== "string") return;
   const release = __keiyakuBarrierJoin(barrier, "observation-release");
   if (__keiyakuBarrierExists(release)) return;
-  await new Promise((resolve, reject) => {
-    const watcher = __keiyakuBarrierWatch(barrier, () => {
-      if (__keiyakuBarrierExists(release)) {
-        watcher.close();
-        resolve();
-      }
-    });
-    watcher.once("error", reject);
-    __keiyakuBarrierWrite(__keiyakuBarrierJoin(barrier, "observation-ready"), "ready\\n");
-    if (__keiyakuBarrierExists(release)) {
-      watcher.close();
-      resolve();
+  let announced = false;
+  for await (const _ of __keiyakuBarrierPoll(25)) {
+    if (__keiyakuBarrierExists(release)) return;
+    if (!announced) {
+      __keiyakuBarrierWrite(__keiyakuBarrierJoin(barrier, "observation-ready"), "ready\\n");
+      announced = true;
     }
-  });
+  }
 }
 `;
 

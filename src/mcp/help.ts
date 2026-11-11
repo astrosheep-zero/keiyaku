@@ -7,6 +7,7 @@ Relative cwd is resolved from the server startup directory. Tool results share
 Keiyaku's CLI text. Tools publish native JSON facts when their result selects a
 next call; other tools return text only. Errors return text led by their
 classification. An unsatisfied verification verdict is a normal answer.
+Administration and raw import stay on the CLI.
 
 Pi has built-in MCP. Add a server to ~/.pi/agent/mcp.json or the project's
 .pi/mcp.json, for example:
@@ -21,8 +22,6 @@ Pi has built-in MCP. Add a server to ~/.pi/agent/mcp.json or the project's
   }
 }
 
-Exposure applies to the whole server; direct exposes every tool. The example's
-600-second client request timeout is independent of Keiyaku timeoutMs. Long
-ask, wait, or verify calls may need a larger client timeout. Reload Pi after
-changing configuration. This command never changes configuration.
+Exposure applies to the whole server. The client timeout is independent of Keiyaku
+timeoutMs; ask, wait, or verify may need longer. Reload Pi after configuration changes.
 `;
