@@ -10,13 +10,10 @@ Two plugins form one bridge:
 npm install @astrosheep/keiyaku-plugin-paseo
 ```
 
-Package names resolve from the World, not from the Keiyaku installation. A
-user-level setting selects the observer but does not install it into each World;
-each selected World must be able to resolve the package through ordinary Node
-package resolution. Existing bundled installations must install the forwarder
-separately before upgrading the core. No ledger or permission migration is
-needed. A missing selected package reports an activation diagnostic without
-blocking the Keiyaku operation.
+Packages resolve from each World through ordinary Node resolution. User Settings
+select the observer without installing it; install the forwarder in each selected
+World, including before upgrading an old bundled installation. A missing selected
+package reports an activation diagnostic without blocking Keiyaku.
 
 Enable it with:
 
@@ -34,57 +31,39 @@ is installed. A complete Akuma parent declaration wins. Multiple nonempty native
 host IDs refuse as ambiguous instead of guessing. With no native ID, the existing
 `KEIYAKU_EXTERNAL_CALLER` fallback remains supported.
 
-A born Akuma caller is matched only against Paseo's complete public agent
-directory, including archived and background entries. The bridge compares the
-persisted Keiyaku provider identity and canonical
-caller World/AkuId, then refreshes the sole match and checks identity and
-unarchived state again before creating the child beneath it. Archived, missing,
-ambiguous, changed, or unreadable parent evidence logs non-attachment and does
-not affect birth. Canonical path aliases still match; titles, cwd, ancestry,
-native provider sessions, and aliases never identify a parent. External and
-legacy Paseo callers keep their existing selection behavior.
+Attachment traverses Paseo's complete public directory, including archived and
+background entries. Akuma parents match persisted Keiyaku provider identity and
+canonical World/AkuId. The sole candidate is refreshed and must remain unchanged
+and unarchived. Missing, ambiguous, changed, or unreadable evidence diagnoses
+non-attachment without affecting birth. Path aliases match; titles, cwd, aliases,
+and fork ancestry do not identify parents. A missing parent mirror is first
+repaired from that parent's own frozen caller through the passive public SDK.
+Cyclic or overly deep chains refuse without inventing an external parent.
 
-A born signal carries that frozen caller to Paseo. The bridge enumerates public
-agent snapshots with the supported `includeArchived` filter, never an active-only
-scope, matching only
-the native provider in `persistence.metadata.provider` (falling back to
-`persistence.provider` when absent) plus `persistence.sessionId`, never Pi's
-file-path handle. This preserves native identity for custom providers such as
-`wwz` extending `claude`, without treating a provider alias alone as evidence.
-It refreshes the sole candidate and attaches only if its identity is unchanged
-and it is not archived. Missing, multiple, archived, or stale mappings diagnose
-non-attachment without affecting Keiyaku creation. Stored `paseo` callers retain
-the direct Paseo-ID lookup for compatibility.
+External parents match `persistence.metadata.provider` (or `persistence.provider`
+when absent) plus `persistence.sessionId`, never Pi's file-path handle. This
+preserves native identity for custom providers such as `wwz` extending `claude`;
+a configured alias alone proves nothing. The same fresh unique, unarchived check
+applies. Only `codex`, `pi`, and `claude` external callers attach. Generic `paseo`
+attribution remains readable but never selects a parent or attaches a mirror.
 
-Child creation reuses daemon idempotency for the Akuma's canonical World and
-identity, not an identity registry or duplicate worker. Its creation title stays
-the bare full AkuId so alias moves never change the creation fingerprint. After
-successful attachment and after each successful Turn-start, Turn-outcome and
-Body-end runtime refresh, the forwarder makes one awaited, bounded title attempt
-for that Akuma on a separately owned local client. It renames matching mirrors to
-`@reviewer (aku/elite/1234abcd)` or, with multiple aliases,
-`@audit, @reviewer (aku/elite/1234abcd)`. All aliases retain their markers and
-canonical order. With no aliases the title is the bare full ID. A failed title
-attempt logs a warning and closes its own client, without preventing the ordinary
-runtime refresh, failing a successful attachment, or closing the cached runtime
-client. Body-end still releases the runtime client. No title work is queued or
-detached.
+Creation uses daemon idempotency for canonical World/AkuId and an immutable bare
+AkuId title. Successful attachment and ordinary refresh each attempt a bounded
+title update on a separate owned client. Titles become `@reviewer (aku/elite/1234abcd)`
+or `@audit, @reviewer (aku/elite/1234abcd)`, retaining canonical alias order and
+markers; no aliases means bare full ID. Failure warns and closes only that title
+client, preserving attachment and runtime refresh. Body-end releases the cached
+runtime client. Nothing is queued or detached.
 
-Aliases come from `Akumas.of(world).aliases({ akumaIds })`, with one mapping
-snapshot for the selected exact-World mirror identities after complete directory
-enumeration. Neither a full Kanshi observation, a bounded roster, nor decoded
-storage resolves names. Alias read failure retains prior titles rather than
-treating unavailable bindings as empty.
+Aliases come from one `Akumas.of(world).aliases({ akumaIds })` snapshot after
+complete mirror enumeration, never Kanshi, a bounded roster, or storage decoding.
+An unavailable Alias read preserves known titles.
 
-Mirror matching uses the public Paseo snapshot's Keiyaku provider persistence
-metadata and its canonical World plus AkuId, never the title or an opaque session
-ID. Titles are bridge-owned presentation, including previously customized titles.
-A rename neither creates a child nor reattaches, resumes, or unarchives it.
-Directory enumeration completes before renames, so title changes cannot reorder
-the bridge's own in-flight pagination. Existing mirrors, including archived
-entries, can be backfilled without replaying birth or creation. The Paseo
-directory supports both `includeArchived` and `includeBackground`; title backfill
-intentionally includes archived entries but keeps its existing background scope.
+Title sync matches public Keiyaku persistence by canonical World/AkuId, never
+title or opaque session ID. It owns presentation, including customized titles,
+but only renames: no creation, reattachment, resume, or unarchive. Enumeration
+finishes before renames to preserve pagination. Backfill includes archived
+entries and retains its existing background scope.
 
 An explicit one-shot title sync can also update existing mirrors:
 
@@ -103,20 +82,32 @@ bounds the operation to 30 seconds. Append one full AkuId to limit the backfill:
 node plugins/paseo/forwarder/backfill-titles.mjs /Users/astrosheep/Developer/keiyaku-v4 aku/elite/abcd
 ```
 
-The operation only lists and renames existing matching agents; it is safe to
-repeat and skips already-correct titles. Partial rename failure may leave some
-titles updated; rerunning converges without duplicate creation. An alias move
-alone emits no title update. Each old or new alias target converges on its next
-ordinary runtime refresh, successful attachment, or explicit title sync. Inactive
-mirrors can use the explicit backfill; there is no immediate alias-move signal,
-watcher, or background retry. The provider's timeline refresh alone does not
-update titles.
+It lists and renames only, skips correct titles, and converges after partial
+failure when rerun. Alias moves emit no signal: each target updates on its next
+attachment, ordinary refresh, or explicit backfill. Provider timeline refresh
+alone does not rename. There is no alias watcher or background retry.
 
 Completed creation replay does not reattach a detached child or revive an
-archived child. Unknown and unsupported callers create no automatic mirror. A
-missed birth can remain unattached; there is no creation backfill, polling, or
-retry queue. Registration recovery belongs to the provider-session lifecycle,
-not attachment.
+archived child. Every attachment attempt first completes a public directory
+traversal including archived and background mirrors: an existing exact mapping
+prevents creation, reparenting, or unarchiving. Unknown and unsupported callers
+create no automatic mirror.
+
+A missed birth gets another attachment attempt at Turn-start, Turn-outcome,
+Body-end, or ordinary public status read. Status includes the invocation/CLI/MCP path as well
+as standalone Akuma status, and offers repair for running or asleep Akumas even
+without a retained outcome or new execution. These boundaries first ensure
+attachment using the exact Akuma's retained birth caller, then independently
+attempt runtime refresh and title synchronization. Attachment failure never
+prevents refresh of existing mirrors. Observation is a new bounded opportunity,
+not replayed birth or outcome; there is no polling, retry queue, or repair store.
+Attachment has a four-second local deadline and limits ancestry to 32 identities.
+The installed Paseo RPC handler context supplies no caller cancellation signal.
+Directory requests and SDK reads receive the local deadline; uncancelable host
+refreshes are bounded by waiting only until that deadline, and late reads cannot
+start creation. Host creation already submitted may finish after a timeout; it
+is not recalled or automatically resubmitted. The forwarder separately bounds
+each local RPC hop to 1.5 seconds.
 
 Before a `keiyaku` provider session opens, the plugin establishes and awaits a
 Paseo-owned agent-directory subscription. It includes archived and background
@@ -166,8 +157,8 @@ model settings):
 The Paseo plugin requires host version `>=0.14.0`, which supplies provider
 runtime-safety negotiation and the owned public directory subscription used for
 registration handoff and background mirror discovery. The provider observes
-through the public SDK's one pull-backed stream in a
-dedicated identity-clean worker: every frame is a complete latest bounded
+through the public SDK's one pull-backed stream directly in the plugin process:
+every frame is a complete latest bounded
 window carrying the producer's own coverage metadata, and the next frame is
 pulled only after the previous one settles, so slow consumption bounds what the
 mirror holds instead of growing a queue. An incomplete bounded window is
@@ -175,9 +166,13 @@ distinct from history the producer reports outside retention; projected
 sequence holes are not retention evidence; neither notice nor read failure
 cancels a Turn. The mirror's own publication comes only from its stream.
 Tell and Stop use the same public SDK, not CLI arguments or stdout receipts.
-The worker locates the installed package through `keiyaku` on PATH and loads
-its declared public entry once. Inherited harness, Square and Keiyaku caller
-identities are stripped, not replaced; the host environment is never mutated.
+The transport locates the installed package through `keiyaku` on PATH and loads
+its declared public entry once. Reads use `Akuma.read(world, akuId)`, the public
+passive view over the same owner projections, for both status and stream.
+Passive reads emit no plugin notifications; model correction, recursive parent
+repair, and mirror refresh cannot call back into their own attachment RPC.
+The transport requires this public surface and diagnoses an older installation
+rather than falling back to notifying reads. It never mutates the host environment.
 The same World and Akuma identity reopen on refresh/resume.
 
 At native agent creation, the plugin reads the exact Akuma status from
@@ -257,8 +252,8 @@ reject that prompt operation to prevent host fallback and automatic resubmission
 Each ordinary SDK request is bounded to 30 seconds; an idle stream frame has no
 bound. Cancellation stops waiting and drops
 late responses without terminating other sessions' requests. Public reads that
-lack cancellation may finish in the worker; closing a mirror does not kill the
-Akuma. Plugin teardown retires the worker. Provider-side archive is unsupported.
+lack cancellation may finish in the plugin process; closing a mirror does not
+kill the Akuma. Plugin teardown releases the transport. Provider-side archive is unsupported.
 
 The app defaults to Steer. User-selected Interrupt is explicit replacement and
 is outside ordinary message semantics. Service callers that omit the send mode
@@ -268,7 +263,7 @@ recorded; the tested transition reports the host error without killing or
 resubmitting. This integration makes no absolute race-free UI promise.
 
 An explicit Stop calls the public SDK's kill operation through the same
-bounded, identity-cleaned worker. Only a proven stopped receipt ends its captured
+bounded transport. Only a proven stopped receipt ends its captured
 observed Turn as canceled; refusal or uncertainty retains its diagnostic. A natural
 outcome, including one held during Tell correlation, keeps its own terminal event.
 Overlapping Stops share one attempt, and each request receives its own response.
@@ -301,7 +296,7 @@ a producer record without its own identity is reported as observation and never
 paired by guesswork.
 
 Focused tests use mocked transports and stream frames, a fake public SDK package
-serving the worker protocol (frames, Tell, Stop and status), the real
+serving the public read and execution surfaces (frames, Tell, Stop and status), the real
 built public package for its stream, Tell and Stop, the installed Paseo compiler
 and evaluator running the real plugin bundle through production PATH discovery,
 and installed native consumer tests. A package that declares `Akuma.stream` is
@@ -309,9 +304,9 @@ exercised through that stream end to end: the real open Turn, a mid-turn record
 and a later Turn after an idle stretch, all with no timer in the session.
 `KEIYAKU_PUBLIC_PACKAGE` points those same tests at another built package, which
 is how a lane whose own build predates their prerequisite proves the streaming
-path for real instead of reporting the surface it could not open. The embedded
-worker type-checks against the installed declarations, including the streaming
-shape whenever the package declares it. They do not update or use
+path for real instead of reporting the surface it could not open. SDK transport
+capability probes require the passive read view alongside the streaming surface.
+They do not update or use
 the live daemon/UI. Isolated
 native-host evidence and its limits are retained in
 `plans/paseo-native-subagent-evidence.md`; Claude 2.1.299's native Bash export was

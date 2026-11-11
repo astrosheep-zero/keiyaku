@@ -1,6 +1,7 @@
 import { realpath } from "node:fs/promises";
 import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
 import { z } from "zod";
+import { raceAbort } from "./transport.js";
 
 const PAGE_SIZE = 200;
 const mirrorPersistence = z.object({ version: z.literal(1),
@@ -25,13 +26,14 @@ export async function matchesCanonicalMirror(agent: PaseoAgent, world: string, a
 }
 
 export async function listMirrorCandidates(paseo: PaseoApi, world: string, akuId: string,
-  includeArchived = false): Promise<PaseoAgent[]> {
+  includeArchived = false, signal?: AbortSignal): Promise<PaseoAgent[]> {
   const candidates: PaseoAgent[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
   for (;;) {
-    const page = await paseo.agents.list({ filter: { includeArchived: true, includeBackground: true },
-      page: { limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) } });
+    const list = () => paseo.agents.list({ filter: { includeArchived: true, includeBackground: true },
+      ...(signal ? { signal } : {}), page: { limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) } });
+    const page = await (signal ? raceAbort(signal, list) : list());
     for (const { agent } of page.entries) {
       if (agent.archivedAt && !includeArchived) continue;
       const identity = persistedMirrorIdentity(agent);
@@ -39,7 +41,7 @@ export async function listMirrorCandidates(paseo: PaseoApi, world: string, akuId
       try {
         if (await realpath(identity.world) === world) candidates.push(agent);
       } catch {
-        // An unreadable persisted World cannot prove a mapping.
+        throw new Error(`unreadable mirror World for ${akuId}`);
       }
     }
     if (!page.pageInfo.hasMore) return candidates;

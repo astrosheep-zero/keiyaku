@@ -19,11 +19,10 @@ async function harness(t: TestContext, pages: Parent[][], refreshed: Parent | nu
   const paseo = createPaseoApi({
     async fetchAgents(options: { filter: unknown; page: { limit: number; cursor?: string }; scope?: string }) {
       listed.push(options);
-      assert.deepEqual(options.filter, { includeArchived: true });
+      assert.deepEqual(options.filter, { includeArchived: true, includeBackground: true });
       assert.equal(options.scope, undefined, "do not narrow to active agents");
       assert.equal(options.page.limit, 200);
       const index = options.page.cursor ? Number(options.page.cursor) : 0;
-      assert.equal(index, listed.length - 1);
       return { requestId: "list", entries: pages[index]!.map(agent => ({ agent, project: null })),
         pageInfo: { hasMore: index + 1 < pages.length,
           nextCursor: index + 1 < pages.length ? String(index + 1) : null, prevCursor: null } };
@@ -50,7 +49,7 @@ test("native parents match exact persistence provider/sessionId across every dir
     handleOnly.persistence.nativeHandle = "native-session";
     const h = await harness(t, [[wrongProvider, handleOnly], [selected], []], selected);
     assert.deepEqual(await h.run(provider), { attached: true });
-    assert.equal(h.listed.length, 3, "finish enumeration even after a first match");
+    assert.equal(h.listed.length, 6, "finish child and native-parent directory traversals");
     assert.deepEqual(h.fetched, ["parent"]);
     const world = await realpath(h.world);
     assert.deepEqual(h.created, [{
@@ -139,7 +138,7 @@ test("nested Akuma attaches beneath the unique persisted parent across canonical
     [[mirrorParent("wrong-world", childWorld, parentId)], [matching]], id => id === matching.id ? matching : null);
   assert.deepEqual(await attach({ world: childWorld, akuId: childId,
     caller: { kind: "akuma", world: alias, akuId: parentId } }, { paseo: h.paseo }), { attached: true });
-  assert.equal(h.listed.length, 2, "finish the public directory traversal");
+  assert.equal(h.listed.length, 4, "finish child and parent directory traversals");
   assert.deepEqual(h.fetched, ["parent-mirror"]);
   const canonicalChild = await realpath(childWorld);
   assert.deepEqual(h.create.mock.calls[0]?.arguments[0], {
@@ -162,7 +161,7 @@ test("nested attachment refuses missing, ambiguous, archived, changed, or unread
     { name: "archived", pages: [[archived]], refreshed: () => archived, reason: /is archived/u },
     { name: "disappeared on refresh", pages: [[selected]], refreshed: () => null, reason: /does not exist/u },
     { name: "changed identity on refresh", pages: [[selected]], refreshed: () => mirrorParent("parent-mirror", parentWorld, "aku/other/1234abcd"), reason: /changed identity/u },
-    { name: "unreadable refresh", pages: [[selected]], refreshed: () => { throw new Error("parent read failed"); }, reason: /could not be read: parent read failed/u },
+    { name: "unreadable refresh", pages: [[selected]], refreshed: () => { throw new Error("parent read failed"); }, reason: /parent read failed/u },
   ];
   for (const scenario of scenarios) await t.test(scenario.name, async t => {
     const h = await nestedHarness(t, childWorld, scenario.pages, scenario.refreshed);
@@ -200,26 +199,63 @@ test("missing, duplicate (including archived), archived and stale parent mapping
   });
 });
 
+test("existing detached and archived child mappings suppress creation and parent lookup", async t => {
+  const world = await mkdtemp(join(tmpdir(), "existing-child-world-"));
+  t.after(() => rm(world, { recursive: true, force: true }));
+  const akuId = "aku/child/5678abcd";
+  for (const archivedAt of [null, "2026-11-01T00:00:00Z"]) {
+    const existing = mirrorParent("existing-child", world, akuId, archivedAt);
+    const h = await nestedHarness(t, world, [[existing]], () => { throw new Error("must not look up a parent"); });
+    assert.deepEqual(await attach({ world, akuId,
+      caller: { kind: "external", integration: "pi", id: "new-parent" } }, { paseo: h.paseo }), { attached: true });
+    assert.equal(h.created.length, 0);
+    assert.deepEqual(h.fetched, []);
+  }
+});
+
+test("attachment deadline releases an uncancelable parent refresh and fences late creation", { timeout: 6000 }, async t => {
+  const world = await mkdtemp(join(tmpdir(), "attachment-deadline-"));
+  t.after(() => rm(world, { recursive: true, force: true }));
+  const selected = parent("parent", "pi", "native-session") as unknown as PaseoAgent;
+  let release!: (agent: PaseoAgent) => void;
+  const pending = new Promise<PaseoAgent>(resolve => { release = resolve; });
+  const h = await nestedHarness(t, world, [[selected]], () => pending);
+  const warning = t.mock.method(console, "warn", () => {});
+  const hold = setTimeout(() => {}, 5000);
+  t.after(() => clearTimeout(hold));
+  const attempt = await attach({ world, akuId: "aku/child/5678abcd",
+    caller: { kind: "external", integration: "pi", id: "native-session" } }, { paseo: h.paseo });
+  assert.deepEqual(attempt, { attached: false });
+  assert.deepEqual(h.fetched, ["parent"]);
+  assert.match(String(warning.mock.calls[0]?.arguments[0]), /timeout/u);
+  release(selected);
+  await new Promise<void>(resolve => setImmediate(resolve));
+  assert.equal(h.created.length, 0, "late read cannot acquire creation authority");
+});
+
 test("attachment no longer synchronizes outside the registration handoff", async t => {
-  const h = await harness(t, [], parent("parent", "pi", "native-session"));
+  const selected = parent("parent", "pi", "native-session");
+  const h = await harness(t, [[selected]], selected);
   const input = { world: h.world, akuId: "aku/test/1234abcd",
-    caller: { kind: "external" as const, integration: "paseo", id: "parent" } };
+    caller: { kind: "external" as const, integration: "pi", id: "native-session" } };
   assert.deepEqual(await attach(input, { paseo: h.paseo }), { attached: true });
   assert.equal(h.created.length, 1);
   t.mock.method(h.paseo.agents, "create", async () => { throw new Error("creation failed"); });
-  await assert.rejects(attach(input, { paseo: h.paseo }), /creation failed/u);
+  const warning = t.mock.method(console, "warn", () => {});
+  assert.deepEqual(await attach(input, { paseo: h.paseo }), { attached: false });
+  assert.match(String(warning.mock.calls[0]?.arguments[0]), /creation failed/u);
   assert.equal(h.created.length, 1);
 });
 
-test("legacy Paseo IDs retain direct lookup without the native directory; archive still refuses", async t => {
+test("Paseo and unknown external callers do not attach, even when their ID names a host agent", async t => {
   const selected = parent("legacy-parent", "pi", "native-session");
-  const h = await harness(t, [], selected);
-  assert.deepEqual(await h.run("paseo", "legacy-parent"), { attached: true });
-  assert.equal(h.listed.length, 0);
-  assert.deepEqual(h.fetched, ["legacy-parent"]);
-  selected.archivedAt = "2026-10-15T00:00:00Z";
+  const h = await harness(t, [[selected]], selected);
   const warning = t.mock.method(console, "warn", () => {});
-  assert.deepEqual(await h.run("paseo", "legacy-parent"), { attached: false });
-  assert.equal(h.created.length, 1);
-  assert.match(String(warning.mock.calls[0]?.arguments[0]), /is archived/u);
+  for (const integration of ["paseo", "other"]) {
+    assert.deepEqual(await h.run(integration, "legacy-parent"), { attached: false });
+  }
+  assert.deepEqual(h.fetched, []);
+  assert.equal(h.created.length, 0);
+  assert.equal(warning.mock.callCount(), 2);
+  assert.match(String(warning.mock.calls[0]?.arguments[0]), /unsupported caller integration paseo/u);
 });

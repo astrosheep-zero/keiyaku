@@ -72,22 +72,73 @@ function signalOption(value: unknown): AbortSignal | undefined {
   return value;
 }
 
-class AkumaHandle {
+class AkumaReader {
   constructor(
     readonly id: AkumaId,
-    private readonly root: WorldRoot,
-    private readonly reportDiagnostic: (message: string) => void,
-    private readonly spawn: BodyLauncher,
-  ) {
-    Object.freeze(this);
-  }
+    protected readonly root: WorldRoot,
+    protected readonly reportDiagnostic: (message: string) => void,
+    private readonly notifying = true,
+  ) {}
 
-  private owner(observing = false): AkumaOwner {
+  protected owner(observing = false): AkumaOwner {
     return new AkumaOwner(
       this.id,
       this.root,
-      observing ? outcomePluginObserver({ world: this.root, reportDiagnostic: this.reportDiagnostic }) : undefined,
+      observing && this.notifying
+        ? outcomePluginObserver({ world: this.root, reportDiagnostic: this.reportDiagnostic })
+        : undefined,
     );
+  }
+
+  async status(): Promise<AkumaStatus> {
+    const status = await this.owner(true).status();
+    if (this.notifying)
+      await emitPluginSignal(
+        { world: this.root, reportDiagnostic: this.reportDiagnostic },
+        { kind: "akuma.observed", akumaId: this.id },
+      );
+    return status;
+  }
+
+  async history(options: AkumaHistoryOptions = {}): Promise<ActivityHistory> {
+    if (typeof options !== "object" || options === null || Array.isArray(options)) {
+      throw new TypeError("Akuma history options must be an object");
+    }
+    const unknown = Object.keys(options).find((key) => !["before", "since", "limit"].includes(key));
+    if (unknown !== undefined) throw new TypeError(`Akuma history options has unknown field: ${unknown}`);
+    if (options.before !== undefined && options.since !== undefined) {
+      throw new TypeError("Akuma history before and since are mutually exclusive");
+    }
+    return (await this.owner(true).history({
+      ...(options.before === undefined ? {} : { before: options.before }),
+      ...(options.since === undefined ? {} : { since: options.since }),
+      ...(options.limit === undefined ? {} : { limit: options.limit }),
+    })) as ActivityHistory;
+  }
+
+  stream(options: AkumaSignalOptions = {}): AsyncIterable<AkumaStreamSnapshot> {
+    if (typeof options !== "object" || options === null || Array.isArray(options)) {
+      throw new TypeError("Akuma stream options must be an object");
+    }
+    const unknown = Object.keys(options).find((key) => key !== "signal");
+    if (unknown !== undefined) throw new TypeError(`Akuma stream options has unknown field: ${unknown}`);
+    const signal = signalOption(options.signal);
+    return this.owner(true).stream(signal === undefined ? {} : { signal });
+  }
+}
+
+/** Passive public projection for observers; no plugin delivery or execution capability. */
+export type AkumaRead = Pick<AkumaReader, "id" | "status" | "history" | "stream">;
+
+class AkumaHandle extends AkumaReader {
+  constructor(
+    id: AkumaId,
+    root: WorldRoot,
+    reportDiagnostic: (message: string) => void,
+    private readonly spawn: BodyLauncher,
+  ) {
+    super(id, root, reportDiagnostic);
+    Object.freeze(this);
   }
 
   async tell(text: string, options: AkumaTellOptions = {}): Promise<AkumaTellResult> {
@@ -187,10 +238,6 @@ class AkumaHandle {
     return { kind: "recorded", reportId: `report/${report.sequence}` };
   }
 
-  async status(): Promise<AkumaStatus> {
-    return await this.owner(true).status();
-  }
-
   async idle(options: AkumaIdleOptions = {}): Promise<AkumaIdleResult> {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
       throw new TypeError("Akuma idle options must be an object");
@@ -213,32 +260,6 @@ class AkumaHandle {
         return { reason: waited.reason, status: waited.status };
       },
     );
-  }
-
-  async history(options: AkumaHistoryOptions = {}): Promise<ActivityHistory> {
-    if (typeof options !== "object" || options === null || Array.isArray(options)) {
-      throw new TypeError("Akuma history options must be an object");
-    }
-    const unknown = Object.keys(options).find((key) => !["before", "since", "limit"].includes(key));
-    if (unknown !== undefined) throw new TypeError(`Akuma history options has unknown field: ${unknown}`);
-    if (options.before !== undefined && options.since !== undefined) {
-      throw new TypeError("Akuma history before and since are mutually exclusive");
-    }
-    return (await this.owner(true).history({
-      ...(options.before === undefined ? {} : { before: options.before }),
-      ...(options.since === undefined ? {} : { since: options.since }),
-      ...(options.limit === undefined ? {} : { limit: options.limit }),
-    })) as ActivityHistory;
-  }
-
-  stream(options: AkumaSignalOptions = {}): AsyncIterable<AkumaStreamSnapshot> {
-    if (typeof options !== "object" || options === null || Array.isArray(options)) {
-      throw new TypeError("Akuma stream options must be an object");
-    }
-    const unknown = Object.keys(options).find((key) => key !== "signal");
-    if (unknown !== undefined) throw new TypeError(`Akuma stream options has unknown field: ${unknown}`);
-    const signal = signalOption(options.signal);
-    return this.owner(true).stream(signal === undefined ? {} : { signal });
   }
 
   async kill(options: AkumaSignalOptions = {}): Promise<KillEvidence> {
@@ -291,6 +312,12 @@ export class Akuma extends AkumaHandle {
     );
     if (admitted.failure !== undefined) throw admitted.failure;
     return new Akuma(admitted.id, input.root, reportDiagnostic, spawn);
+  }
+
+  /** Select passive public reads, without invoking observer plugins or execution. */
+  static read(root: WorldRoot, selector: string): AkumaRead {
+    if (typeof root !== "string") throw new TypeError("Akuma.read root must be a WorldRoot");
+    return Object.freeze(new AkumaReader(parseAkumaId(selector).id, root, stderrPluginDiagnostic, false));
   }
 
   static select(root: WorldRoot, selector: string, host?: AkumaHostOptions): Akuma {

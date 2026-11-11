@@ -97,6 +97,25 @@ Square cards retain one consistent event-time name snapshot after alias moves;
 unaddressed notices need no name observation. Alias failure is diagnostic-only
 and cannot prevent an addressed notice from using complete identity.
 
+Paseo attachment is best effort at birth and may be repaired at later ordinary
+execution boundaries or explicit public status observation, even without a new
+Turn or a retained outcome. Repair follows only the exact Akuma's immutable
+birth caller, never the current environment, Turn initiator, alias, execution
+directory, or fork lineage. Missing Akuma parent mirrors may first be repaired
+from their own retained callers; incomplete, unreadable, ambiguous, cyclic, or
+excessively deep ancestry proves no attachment. Recovery creates no external
+parent and recognizes only supported native host identities. Generic external
+attribution remains valid even when the mirror does not support that integration.
+
+Existing mirrors, including detached and archived entries, prevent recreation;
+repair never reparents, unarchives, or executes them. Creation retains its stable
+World and Akuma identity and immutable title fingerprint. Attachment and title
+failure cannot prevent an independent runtime refresh. All attempts stay bounded,
+non-authoritative, and opportunity-driven, without a repair store or retry daemon.
+Mirror-owned public reads use a passive observation composition so attachment,
+model correction, and stream refresh never recursively notify the bridge or wait
+on their own pending attachment.
+
 Paseo native parent matching uses the host's persisted native session identity,
 not a configured provider alias. A custom provider preserves its underlying
 native identity when the host records it; absent that evidence, only its recorded
@@ -225,6 +244,16 @@ answer or failure reason. Signals expose no provider or continuation custody;
 plugins neither participate in providers, lifecycle verbs, inputs, or Settlement,
 nor make birth reversible, add pre-Body listeners, or create rollback or
 cross-process continuations.
+
+A successful explicit public Akuma status read emits `akuma.observed` for that
+exact born identity, independently of retained outcomes or execution state. Native
+and addressed status share this boundary. Incidental owner reads, roster and
+board expansion, and passive public reads emit nothing. One read owns one bounded
+delivery; this is an observation opportunity, never replayed birth, execution,
+or an acknowledgment fact. Observer integrations may select a public passive
+read view over the same owner projections; it delivers no plugin observations
+and grants no execution capability. This breaks recursive observer delivery
+without changing ambient process identity or bypassing the public boundary.
 
 Public Akuma observation emits `akuma.outcome-observed` when it establishes an
 exact retained answered, failed, or canceled outcome. Knowing it exists neither

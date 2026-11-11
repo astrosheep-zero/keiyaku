@@ -14,7 +14,7 @@ export default function contribute(server: PluginServerContext) {
   const mirror = createProvider(transport, handoff);
   server.registerProvider(mirror.provider);
   server.handle(refreshRpc, (input, context) => refreshOrReopen(context.paseo, input, mirror.refresh));
-  server.handle(attachRpc, (input, context) => attach(input, context));
+  server.handle(attachRpc, (input, context) => attach(input, context, transport.status));
   const removeModelCorrection = registerModelCorrection(server, transport.status);
   const removeHooks = registerRegistrationHooks(server, handoff);
   return async () => {

@@ -38,10 +38,12 @@ test("birth and ordinary refresh converge alias titles without changing the crea
     let fingerprint: string | undefined, creates = 0;
     const renames: string[] = [];
     const wire: Parameters<DaemonClient["createAgent"]>[0][] = [];
+    const parent = { id: "parent", cwd: h.world, archivedAt: null, provider: "pi",
+      persistence: { provider: "pi", sessionId: "native-parent" } };
     const client = {
       getLastServerInfoMessage() { return { serverId: "test-server" }; },
-      async fetchAgent() { return { agent: { id: "parent", cwd: h.world, archivedAt: null }, project: null }; },
-      async fetchAgents() { return { entries: child ? [child, nextTarget].map(agent => ({ agent, project: null })) : [], pageInfo }; },
+      async fetchAgent() { return { agent: parent, project: null }; },
+      async fetchAgents() { return { entries: [parent, ...(child ? [child, nextTarget] : [])].map(agent => ({ agent, project: null })), pageInfo }; },
       async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
         const request = JSON.stringify(options);
         if (fingerprint !== undefined) assert.equal(request, fingerprint, "changed idempotent payload would conflict");
@@ -64,7 +66,7 @@ test("birth and ordinary refresh converge alias titles without changing the crea
     const { signals } = await forwarder.activate({ world: h.alias as PluginContext["world"], config: undefined,
       writablePath() { throw new Error("no plugin storage"); } });
     const born = { kind: "akuma.born" as const, akumaId: akuId, bodySequence: 1, origin: { kind: "direct" as const },
-      caller: { kind: "external" as const, integration: "paseo", id: "parent" } };
+      caller: { kind: "external" as const, integration: "pi", id: "native-parent" } };
     await signals?.["akuma.born"]?.(born);
     assert.equal(child!.title, initiallyAliased ? `@reviewer (${akuId})` : akuId);
     await h.bind("reviewer", akuId);
@@ -81,7 +83,7 @@ test("birth and ordinary refresh converge alias titles without changing the crea
     assert.equal(nextTarget.title, `@audit, @reviewer (${other})`, "the new target converges on its own refresh");
     await signals?.["akuma.born"]?.(born);
     assert.equal(creates, 1);
-    assert.equal(wire.length, 2);
+    assert.equal(wire.length, 1, "existing mirrors bypass creation even after rename");
     for (const input of wire) {
       assert.equal(input.config?.title, akuId, "create is always bare ID, even after rename");
       assert.equal(input.idempotencyKey, `keiyaku:${h.world}:${akuId}`);
@@ -163,7 +165,7 @@ test("failed owned title attempts preserve attach, ordinary refresh and runtime 
     world: h.world, config: undefined, writablePath() { throw new Error("no storage"); },
   });
   await signals?.["akuma.born"]?.({ kind: "akuma.born", akumaId: akuId, bodySequence: 1, origin: { kind: "direct" },
-    caller: { kind: "external", integration: "paseo", id: "parent" } });
+    caller: { kind: "external", integration: "pi", id: "native-parent" } });
   assert.equal(titleCloses, 1, "the title attempt is closed before born delivery returns");
   assert.equal(runtimeCloses, 0, "rename failure does not close the successful attach connection");
   assert.equal(warning.mock.callCount(), 1);

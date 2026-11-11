@@ -58,10 +58,11 @@ async function producerRow(root: string, akuId: string, sequence: number): Promi
   return rows.find((row) => row.sequence === sequence);
 }
 /** The model configuration the public status itself admits, if any. */
-async function producerModel(root: string, akuId: string): Promise<Readonly<{ provider?: string; model?: string }>> {
+async function producerModel(root: string, akuId: string): Promise<Readonly<{ provider?: string; model?: string; caller: unknown }>> {
   const fields = await (await producer()).select(root, akuId).status() as Record<string, unknown>;
   return { ...(typeof fields.provider === "string" ? { provider: fields.provider } : {}),
-    ...(typeof fields.model === "string" ? { model: fields.model } : {}) };
+    ...(typeof fields.model === "string" ? { model: fields.model } : {}),
+    caller: (fields.birth as { caller: unknown }).caller };
 }
 
 /** The host-supplied module surface Paseo's evaluator provides to a server bundle. */
@@ -237,19 +238,8 @@ const empty = { rows: [], omitted: 0, hasEarlier: false, hasLater: false, histor
 const wait = (milliseconds, signal) => delay(milliseconds, undefined, { signal });
 export const tellStarted = Promise.withResolvers();
 export const streams = [];
-export class Akuma {
+class Reader {
   constructor(aku) { this.aku = aku; }
-  static select(_world, aku) { return new Akuma(aku); }
-  async tell(text, options) {
-    tellStarted.resolve(options.signal);
-    const values = await control();
-    // A non-cooperative Tell never settles on its own; close owns the outcome.
-    if (values.tellPending === true) await new Promise(() => {});
-    if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
-    if (values.tellMismatch === true) return { akumaId: "aku/other/11111111", tellId: "tell/1" };
-    return values.tell ?? { akumaId: this.aku, tellId: "tell/1", wake: { kind: "pending" } };
-  }
-  async kill() { return (await control()).evidence ?? "already-stopped"; }
   async status() { return (await control()).status ?? {}; }
   stream(options) {
     let opened = false;
@@ -266,6 +256,20 @@ export class Akuma {
       async return() { observation.returned = true; return { done: true, value: undefined }; },
     }) };
   }
+}
+export class Akuma extends Reader {
+  static select(_world, aku) { return new Akuma(aku); }
+  static read(_world, aku) { return new Reader(aku); }
+  async tell(text, options) {
+    tellStarted.resolve(options.signal);
+    const values = await control();
+    // A non-cooperative Tell never settles on its own; close owns the outcome.
+    if (values.tellPending === true) await new Promise(() => {});
+    if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
+    if (values.tellMismatch === true) return { akumaId: "aku/other/11111111", tellId: "tell/1" };
+    return values.tell ?? { akumaId: this.aku, tellId: "tell/1", wake: { kind: "pending" } };
+  }
+  async kill() { return (await control()).evidence ?? "already-stopped"; }
 }
 `;
 
@@ -316,6 +320,8 @@ test("PATH discovery retries failed loads, names incompatible versions, and cach
   await assert.rejects(transport.status("/world", "aku/test/1", signal), /version 0\.0\.1.*Akuma\.select/u);
   await install("0.0.2", "export class Akuma { static select() {} }");
   await assert.rejects(transport.status("/world", "aku/test/1", signal), /version 0\.0\.2.*Akuma\.prototype\.stream/u);
+  await install("0.0.3", "export class Akuma { static select() {} stream() {} }");
+  await assert.rejects(transport.status("/world", "aku/test/1", signal), /version 0\.0\.3.*passive Akuma\.read/u);
   await install("1.0.0", FAKE_SDK);
   assert.deepEqual(await transport.status("/world", "aku/test/1", signal), {});
   process.env.PATH = "";

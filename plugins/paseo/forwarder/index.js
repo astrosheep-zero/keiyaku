@@ -161,10 +161,20 @@ export function createForwarder(openClient = connect) {
                 }
             };
             const refresh = async (event, cancellation) => {
-                await hint(refreshRpc, { world, akuId: event.akumaId }, cancellation);
-                await syncTitles(event.akumaId, cancellation);
+                try {
+                    await hint(attachRpc, { world, akuId: event.akumaId }, cancellation);
+                }
+                finally {
+                    try {
+                        await hint(refreshRpc, { world, akuId: event.akumaId }, cancellation);
+                    }
+                    finally {
+                        await syncTitles(event.akumaId, cancellation);
+                    }
+                }
             };
             return { signals: { "akuma.turn-started": refresh, "akuma.turn-outcome": refresh,
+                    "akuma.observed": refresh,
                     async "akuma.born"(event, cancellation) {
                         const caller = event.caller.kind === "akuma" ? { kind: "akuma", world: event.caller.world, akuId: event.caller.akumaId } : event.caller;
                         const result = await hint(attachRpc, { world, akuId: event.akumaId, caller }, cancellation);

@@ -5,17 +5,24 @@ import { z } from "zod";
 import { createHistorySchema, type History } from "./keiyaku.js";
 import type { TellAdmission } from "./message.js";
 import { stopAttempt } from "./stop.js";
-import type { AkumaTransport } from "./transport.js";
+import { raceAbort, type AkumaTransport } from "./transport.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const PACKAGE_NAME = "@astrosheep/keiyaku";
 const stopEvidence = z.string();
+const birth = z.object({ caller: z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("akuma"), world: z.string(), akumaId: z.string() }),
+  z.object({ kind: z.literal("external"), integration: z.string(), id: z.string() }),
+  z.object({ kind: z.literal("unknown") }),
+]) });
 
-type PublicAkuma = {
-  tell(text: string, options: Readonly<{ signal: AbortSignal }>): Promise<unknown>;
-  kill(options: Readonly<{ signal: AbortSignal }>): Promise<unknown>;
+type PublicReader = {
   status(): Promise<unknown>;
   stream(options: Readonly<{ signal: AbortSignal }>): AsyncIterable<unknown>;
+};
+type PublicAkuma = PublicReader & {
+  tell(text: string, options: Readonly<{ signal: AbortSignal }>): Promise<unknown>;
+  kill(options: Readonly<{ signal: AbortSignal }>): Promise<unknown>;
 };
 type KeiyakuSdk = {
   akumaTellResultSchema: { parse(value: unknown): TellAdmission };
@@ -23,6 +30,7 @@ type KeiyakuSdk = {
   Akuma: {
     prototype: { stream: unknown };
     select(world: string, akuId: string): PublicAkuma;
+    read(world: string, akuId: string): PublicReader;
   };
 };
 type PackageManifest = Record<string, unknown> & { name?: unknown; version?: unknown };
@@ -107,39 +115,12 @@ function assertSdkSurface(sdk: KeiyakuSdk, version: string): void {
     throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose Akuma.select`);
   if (typeof sdk.Akuma.prototype?.stream !== "function")
     throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose Akuma.prototype.stream`);
+  if (typeof sdk.Akuma.read !== "function")
+    throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose passive Akuma.read`);
   if (typeof sdk.akumaTellResultSchema?.parse !== "function")
     throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose akumaTellResultSchema`);
   if (typeof sdk.activityHistorySchema?.unwrap !== "function")
     throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose activityHistorySchema`);
-}
-
-function abortReason(signal: AbortSignal): Error {
-  return signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason ?? "Keiyaku SDK request was cancelled"));
-}
-
-/** Race an SDK operation with its owning signal even when the operation ignores cancellation. */
-function raceAbort<T>(signal: AbortSignal, operation: () => T | PromiseLike<T>): Promise<T> {
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    const finish = (outcome: Readonly<{ value: T }> | Readonly<{ error: unknown }>): void => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener("abort", onAbort);
-      if ("error" in outcome) reject(outcome.error);
-      else resolve(outcome.value);
-    };
-    const onAbort = () => finish({ error: abortReason(signal) });
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) { onAbort(); return; }
-    Promise.resolve().then(() => {
-      signal.throwIfAborted();
-      return operation();
-    }).then(
-      (value) => finish({ value }),
-      (error: unknown) => finish({ error }),
-    );
-  });
 }
 
 /**
@@ -195,8 +176,8 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
   }
 
   async function request<T>(
-    world: string, akuId: string, signal: AbortSignal,
-    operation: (akuma: PublicAkuma, signal: AbortSignal) => T | PromiseLike<T>,
+    signal: AbortSignal,
+    operation: (installed: KeiyakuSdk, signal: AbortSignal) => T | PromiseLike<T>,
   ): Promise<T> {
     const scope = createScope(signal,
       "Keiyaku SDK transport closed while the request was in flight; its outcome is uncertain");
@@ -204,7 +185,7 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
       return await withTimeout(scope, "any admitted work's outcome is uncertain", async () => {
         const installed = await loadSdk();
         scope.signal.throwIfAborted();
-        return await operation(installed.Akuma.select(world, akuId), scope.signal);
+        return await operation(installed, scope.signal);
       });
     } finally {
       scope.dispose();
@@ -212,7 +193,7 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
   }
 
   const tell: AkumaTransport["tell"] = async (world, akuId, signal, text) => {
-    const value = await request(world, akuId, signal, (akuma, requestSignal) => akuma.tell(text, { signal: requestSignal }));
+    const value = await request(signal, (installed, requestSignal) => installed.Akuma.select(world, akuId).tell(text, { signal: requestSignal }));
     const decoded = (await loadSdk()).akumaTellResultSchema.parse(value);
     if (decoded.akumaId !== akuId)
       throw new Error("Keiyaku Tell outcome is uncertain: the admission receipt did not name the selected Akuma");
@@ -220,14 +201,16 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
   };
 
   const stop: AkumaTransport["stop"] = async (world, akuId, signal) => {
-    const value = await request(world, akuId, signal, (akuma, requestSignal) => akuma.kill({ signal: requestSignal }));
+    const value = await request(signal, (installed, requestSignal) => installed.Akuma.select(world, akuId).kill({ signal: requestSignal }));
     return stopAttempt(stopEvidence.parse(value), akuId);
   };
 
   const status: AkumaTransport["status"] = async (world, akuId, signal) => {
-    const value = await request(world, akuId, signal, (akuma) => akuma.status());
+    const value = await request(signal, (installed) => installed.Akuma.read(world, akuId).status());
     const fields = record(value);
+    const retained = birth.safeParse(fields?.birth);
     return {
+      ...(retained.success ? { caller: retained.data.caller } : {}),
       ...(typeof fields?.provider === "string" ? { provider: fields.provider } : {}),
       ...(typeof fields?.model === "string" ? { model: fields.model } : {}),
     };
@@ -275,7 +258,7 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
               await withTimeout(currentScope, "the observation was released", async () => {
                 const installed = await loadSdk();
                 currentScope.signal.throwIfAborted();
-                iterator = installed.Akuma.select(world, akuId).stream({ signal: currentScope.signal })[Symbol.asyncIterator]();
+                iterator = installed.Akuma.read(world, akuId).stream({ signal: currentScope.signal })[Symbol.asyncIterator]();
               });
             }
             const frame = await raceAbort(currentScope.signal, () => iterator!.next());

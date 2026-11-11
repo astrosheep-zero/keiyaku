@@ -7,6 +7,7 @@ export { Akuma } from "./akuma-instance.js";
 export type {
   AkumaAskOptions,
   AkumaBirthInput,
+  AkumaRead,
   AkumaHistoryOptions,
   AkumaHostOptions,
   AkumaIdleOptions,

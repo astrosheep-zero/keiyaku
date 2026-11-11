@@ -85,7 +85,12 @@ Public status, idle, history, and input-bound answer observation may notify
 optional plugins when they establish a retained committed outcome identity.
 That observation is not body consumption, acknowledgment, or an idle judgment;
 its absence or failure changes no Akuma result or fact. Internal reads do not
-inherit this observation responsibility. [plugins.md](plugins.md) owns delivery
+inherit this observation responsibility. An explicit public passive read view
+provides the same status, history, and stream projections through this owner,
+with no execution methods and no plugin notifications. Observer integrations
+use it to avoid recursively observing their own reads. Ordinary explicit status
+also offers a bounded plugin observation opportunity for the exact born identity,
+independent of outcomes or running state. [plugins.md](plugins.md) owns delivery
 and operation-local uniqueness.
 
 History pages the same projected ledger and is the sole public execution-history

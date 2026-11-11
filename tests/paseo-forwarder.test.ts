@@ -21,7 +21,7 @@ async function context(t: { after(fn: () => Promise<void>): void }): Promise<Plu
 }
 const started = { kind: "akuma.turn-started" as const, akumaId: "aku/test/1234abcd", turnSequence: 1 };
 const born = { kind: "akuma.born" as const, akumaId: started.akumaId, bodySequence: 1,
-  origin: { kind: "direct" as const }, caller: { kind: "external" as const, integration: "paseo", id: "parent" } };
+  origin: { kind: "direct" as const }, caller: { kind: "external" as const, integration: "pi", id: "parent" } };
 
 test("born callers and three refresh signals reuse one lazy runtime client with owned title connections", async (t) => {
   const ctx = await context(t);
@@ -45,7 +45,10 @@ test("born callers and three refresh signals reuse one lazy runtime client with 
   const world = await realpath(ctx.world);
   assert.deepEqual(calls, [
     ...callers.map((caller) => ["keiyaku-paseo", "attach", { world, akuId: started.akumaId, caller: caller.kind === "akuma" ? { kind: "akuma", world: caller.world, akuId: caller.akumaId } : caller }]),
-    ...Array.from({ length: 3 }, () => ["keiyaku-paseo", "refresh", { world, akuId: started.akumaId }]),
+    ...Array.from({ length: 3 }, () => [
+      ["keiyaku-paseo", "attach", { world, akuId: started.akumaId }],
+      ["keiyaku-paseo", "refresh", { world, akuId: started.akumaId }],
+    ]).flat(),
   ]);
 });
 
@@ -54,7 +57,8 @@ test("a hung RPC is bounded, closes its connection and permits the next event to
   let connects = 0, closes = 0;
   const plugin = createForwarder(async () => {
     connects++;
-    return { async invokePluginRpc() { if (connects === 1) return await new Promise(() => {}); return { woken: 1 }; },
+    return { async invokePluginRpc(_plugin, method) { if (connects === 1) return await new Promise(() => {});
+      return method === "attach" ? { attached: false } : { woken: 1 }; },
       fetchAgents: emptyDirectory,
       async updateAgent() {}, async close() { closes++; } };
   });
@@ -65,4 +69,24 @@ test("a hung RPC is bounded, closes its connection and permits the next event to
   assert.ok(performance.now() - start < 2800);
   await signals?.["akuma.turn-started"]?.(started);
   assert.equal(connects, 3); assert.equal(closes, 2, "failed runtime and successful title attempt both close");
+});
+
+test("attachment errors still allow independent runtime refresh and title cleanup", async t => {
+  const ctx = await context(t);
+  const calls: string[] = [];
+  let closes = 0;
+  const { signals } = await createForwarder(async () => ({
+    async invokePluginRpc(_plugin, method) {
+      calls.push(method);
+      if (method === "attach") throw new Error("attachment unavailable");
+      return { woken: 1 };
+    },
+    fetchAgents: emptyDirectory,
+    async updateAgent() {},
+    async close() { closes++; },
+  })).activate(ctx);
+  await assert.rejects(async () => signals?.["akuma.observed"]?.({ kind: "akuma.observed", akumaId: started.akumaId }),
+    /attachment unavailable/u);
+  assert.deepEqual(calls, ["attach", "refresh"]);
+  assert.equal(closes, 2, "failed attachment client and independent title client close");
 });

@@ -31,7 +31,12 @@ import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import { observeCreatedDebtObservations } from "../debt/created-observation.js";
 import type { WorldRoot } from "../world.js";
-import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
+import {
+  emitPluginSignal,
+  outcomePluginObserver,
+  stderrPluginDiagnostic,
+  withAkumaWaitDeferrals,
+} from "../plugin/akuma-signals.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
 import { requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
@@ -217,15 +222,16 @@ export async function statusAkuma(
 ): Promise<AkumaObservation> {
   const addressed = await addressAkuma(input);
   try {
-    return await observeAkuma(
-      await new AkumaOwner(
-        addressed.id,
-        addressed.path,
-        outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
-      ).status(),
+    const status = await new AkumaOwner(
+      addressed.id,
       addressed.path,
-      input.repo,
+      outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
+    ).status();
+    await emitPluginSignal(
+      { world: addressed.path, reportDiagnostic },
+      { kind: "akuma.observed", akumaId: addressed.id },
     );
+    return await observeAkuma(status, addressed.path, input.repo);
   } catch (error) {
     throw observationError(addressed.id, error);
   }

@@ -572,7 +572,7 @@ test("native born attach, SDK creation and identity retries share the registered
     persistence: { provider: "codex", sessionId: "native-codex", nativeHandle: "native-codex" } };
   const paseo = createPaseoApi({
     async fetchAgents(options: { filter: unknown }) {
-      assert.deepEqual(options.filter, { includeArchived: true });
+      assert.deepEqual(options.filter, { includeArchived: true, includeBackground: true });
       return { requestId: "list", entries: [{ agent: parent, project: null }],
         pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } };
     },
@@ -623,17 +623,15 @@ test("native born attach, SDK creation and identity retries share the registered
   assert.deepEqual(await handlers.get("attach")!({ world: alias, akuId, caller }), { attached: true });
   assert.equal(created.size, 1, "canonical identity reuses daemon idempotency, not a bridge registry");
   assert.equal(wire[1]?.idempotencyKey, wire[0]?.idempotencyKey);
-  assert.deepEqual(await handlers.get("attach")!({ world, akuId,
-    caller: { kind: "external", integration: "paseo", id: "parent" } }), { attached: true });
-  assert.equal(created.size, 1, "legacy Paseo caller replays the same canonical child");
   const diagnostics = t.mock.method(console, "warn", () => {});
-  for (const other of [undefined, { kind: "unknown" }, { kind: "akuma", world, akuId },
+  for (const other of [{ kind: "unknown" }, { kind: "akuma", world, akuId },
+    { kind: "external", integration: "paseo", id: "parent" },
     { ...caller, integration: "other" }, { ...caller, id: "gone" }]) {
     const before = diagnostics.mock.callCount();
     assert.deepEqual(await handlers.get("attach")!({ world, akuId, caller: other }), { attached: false });
     assert.equal(diagnostics.mock.callCount(), before + 1);
   }
-  assert.equal(create.mock.callCount(), 3, "only the initial attach and its native/legacy retries reach create");
+  assert.equal(create.mock.callCount(), 2, "only the initial native attach and its idempotent retry reach create");
 });
 
 const promptInput = (id = "client-1", text = "change direction"): Extract<ProviderInput, { type: "session.prompt" }> => ({
