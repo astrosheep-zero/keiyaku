@@ -22,7 +22,7 @@ import {
   installAkumaBodyPidReceipt,
   temporaryDirectory,
 } from "./support/process.js";
-import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
+import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { runCli } from "./support/cli-fixtures.js";
 
 test("SDK discovery and real invocation share the verb table and renderer", async (t) => {
@@ -195,6 +195,57 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(missing._meta?.["keiyaku/disposition"], "refused");
   assert.equal(process.cwd(), processCwd);
   assert.deepEqual({ ...process.env }, processEnv);
+});
+
+test("SDK deliver selects native preview or placement with one text-only tool", async (t) => {
+  const home = temporaryDirectory(t, "kei-mcp-deliver-home-");
+  const repository = repositoryWithMain();
+  const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
+    markdown: document(), gates: [],
+  }));
+  assert.ok(bound.worktreePath);
+  commitCandidate(repository, bound.worktreePath);
+  const environment = { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home };
+  const adapter = createKeiyakuMcpServer({ cwd: home, environment, version: "test" });
+  const client = new Client({ name: "test", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([adapter.server.connect(serverTransport), client.connect(clientTransport)]);
+  t.after(async () => { await client.close(); await adapter.close(); });
+  const { tools } = await client.listTools();
+  const tool = tools.find((entry) => entry.name === "deliver");
+  assert.ok(tool);
+  assert.equal(tool.annotations?.readOnlyHint, false);
+  assert.equal(tool.outputSchema, undefined);
+  const input = { contract: bound.contractId, dryRun: true as const, showDiff: true };
+  const native = await bound.kei.previewDelivery({ showDiff: true });
+  const before = {
+    history: await bound.kei.history(),
+    refs: repository.run(["for-each-ref", "--format=%(refname) %(objectname)"]),
+    status: repository.run(["-C", bound.worktreePath, "status", "--porcelain=v1"]),
+  };
+  const preview = await client.callTool({ name: "deliver", arguments: { repo: repository.path, input } });
+  assert.equal(preview.structuredContent, undefined);
+  assert.deepEqual(preview.content, [{ type: "text", text: renderVerb("deliver", input,
+    { kind: "returned", value: native }, { columns: DEFAULT_CLI_COLUMNS, color: false }) }]);
+  assert.equal(preview._meta?.["keiyaku/disposition"], classifyVerb("deliver", input, { kind: "returned", value: native }));
+  const invalid = await client.callTool({ name: "deliver", arguments: {
+    cwd: join(home, "missing"), repo: join(home, "missing-repo"),
+    input: { dryRun: true, message: "unused" },
+  } });
+  assert.equal(invalid._meta?.["keiyaku/disposition"], "usage");
+  assert.deepEqual(await bound.kei.history(), before.history);
+  assert.equal(repository.run(["for-each-ref", "--format=%(refname) %(objectname)"]), before.refs);
+  assert.equal(repository.run(["-C", bound.worktreePath, "status", "--porcelain=v1"]), before.status);
+  const delivered = await client.callTool({ name: "deliver", arguments: {
+    repo: repository.path, input: { contract: bound.contractId },
+  } });
+  assert.equal(delivered.isError, false);
+  assert.equal(delivered._meta?.["keiyaku/disposition"], "accepted");
+  assert.equal(delivered.structuredContent, undefined);
+  assert.ok(native.kind === "ready");
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), native.integration);
+  assert.equal(present(await bound.kei.state()).terminal?.kind, "claimed");
+  assert.equal(existsSync(bound.worktreePath), false);
 });
 
 test("cancelled SDK wait retires without changing its Contract", async (t) => {

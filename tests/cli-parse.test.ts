@@ -205,18 +205,18 @@ test("delivery dry-run parses preview options and rejects unused mutation option
     output: "text",
   });
   assert.deepEqual(command(["deliver", "--dry-run"]), {
-    name: "deliver.preview",
-    input: { includeDirty: false, showDiff: false },
+    name: "deliver",
+    input: { includeDirty: false, dryRun: true, showDiff: false },
     output: "text",
   });
   assert.deepEqual(command(["deliver", "kei/example", "--dry-run", "--show-diff", "--include-dirty"]), {
-    name: "deliver.preview",
-    input: { contract: "kei/example", includeDirty: true, showDiff: true },
+    name: "deliver",
+    input: { contract: "kei/example", includeDirty: true, dryRun: true, showDiff: true },
     output: "text",
   });
   assert.deepEqual(command(["deliver", "@example", "--dry-run", "--show-diff", "--json"]), {
-    name: "deliver.preview",
-    input: { contract: "@example", includeDirty: false, showDiff: true },
+    name: "deliver",
+    input: { contract: "@example", includeDirty: false, dryRun: true, showDiff: true },
     output: "json",
   });
   assert.throws(() => parseArgv(["deliver", "--dry-run", "--diff"]), /option --diff is not valid for deliver/u);

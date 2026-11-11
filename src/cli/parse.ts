@@ -172,18 +172,16 @@ export type ParsedCommand =
 
 export function commandName(command: ParsedCommand) {
   return "name" in command
-    ? command.name === "deliver.preview"
-      ? "deliver"
-      : command.name === "debt.show"
-        ? "show"
-        : command.name === "kei.status" || command.name === "aku.status"
-          ? "status"
-          : command.name === "kei.ls" ||
-              command.name === "aku.ls" ||
-              command.name === "aku.names" ||
-              command.name === "debt.query"
-            ? "ls"
-            : command.name
+    ? command.name === "debt.show"
+      ? "show"
+      : command.name === "kei.status" || command.name === "aku.status"
+        ? "status"
+        : command.name === "kei.ls" ||
+            command.name === "aku.ls" ||
+            command.name === "aku.names" ||
+            command.name === "debt.query"
+          ? "ls"
+          : command.name
     : command.command;
 }
 
@@ -208,7 +206,6 @@ export function commandRepoPolicy(
     case "bind":
     case "amend":
     case "deliver":
-    case "deliver.preview":
     case "verify":
     case "review":
     case "arc":

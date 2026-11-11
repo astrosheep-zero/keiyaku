@@ -32,16 +32,8 @@ import { akumaCallerFromEnvironment } from "./keiyaku-identity.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import { settings } from "../settings.js";
 import { Keis, type ReconcileInput } from "./contract-composition.js";
-import type { MutationObservation, DeliveryPreviewInput } from "./contract-outcomes.js";
-import type {
-  AbandonInput,
-  AmendInput,
-  ArcInput,
-  BindInput,
-  DeliverInput,
-  ReviewInput,
-  VerifyInput,
-} from "./contract-types.js";
+import type { MutationObservation } from "./contract-outcomes.js";
+import type { AbandonInput, AmendInput, ArcInput, BindInput, ReviewInput, VerifyInput } from "./contract-types.js";
 import { validateArcMarkdown } from "./input.js";
 import { KeiyakuError } from "./outcome.js";
 import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
@@ -160,11 +152,6 @@ export class Keiyaku {
         return this.#arc(request.input);
       case "deliver":
         return this.#deliver(
-          { ...request.input, ...signal },
-          observe === undefined ? undefined : { observe: (event) => notify(event) },
-        );
-      case "deliver.preview":
-        return this.#previewDelivery(
           { ...request.input, ...signal },
           observe === undefined ? undefined : { observe: (event) => notify(event) },
         );
@@ -333,11 +320,8 @@ export class Keiyaku {
   arc(input: Selected<ArcInput>) {
     return this.run("arc", input);
   }
-  deliver(input: Omit<Selected<DeliverInput>, "signal">, run?: VerbRunFor<"deliver">) {
+  deliver(input: VerbInput<"deliver">, run?: VerbRunFor<"deliver">) {
     return this.run("deliver", input, run);
-  }
-  previewDelivery(input: Omit<Selected<DeliveryPreviewInput>, "signal">, run?: VerbRunFor<"deliver.preview">) {
-    return this.run("deliver.preview", input, run);
   }
   verify(input: Omit<Selected<VerifyInput>, "signal">, run?: VerbRunFor<"verify">) {
     return this.run("verify", input, run);
@@ -537,12 +521,13 @@ export class Keiyaku {
     return await selected.contract.arc({ ...input, ...selected.actor });
   }
 
-  async #deliver({ contract, ...input }: Selected<DeliverInput>, progress?: MutationObservation) {
-    return await (await this.#selected(contract)).contract.deliver(input, progress);
-  }
-
-  async #previewDelivery({ contract, ...input }: Selected<DeliveryPreviewInput>, progress?: MutationObservation) {
-    return await (await this.#selected(contract)).contract.previewDelivery(input, progress);
+  async #deliver(
+    { contract, ...input }: VerbInput<"deliver"> & Readonly<{ signal?: AbortSignal }>,
+    progress?: MutationObservation,
+  ) {
+    const selected = (await this.#selected(contract)).contract;
+    const { dryRun, ...native } = input;
+    return dryRun ? await selected.previewDelivery(native, progress) : await selected.deliver(native, progress);
   }
 
   async #verify({ contract, ...input }: Selected<VerifyInput>, progress?: MutationObservation) {

@@ -245,7 +245,7 @@ test("native Contract results, verification progress and cancellation pass throu
   controller.abort(new Error("caller cancellation"));
   await assert.rejects(native.verify({ signal: controller.signal }));
   await assert.rejects(facet.verify({ contract: bound.contractId }, { signal: controller.signal }));
-  assert.deepEqual(await facet.previewDelivery({ contract: bound.contractId }), await native.previewDelivery());
+  assert.deepEqual(await facet.deliver({ contract: bound.contractId, dryRun: true }), await native.previewDelivery());
 });
 
 test("report uses the explicit Akuma execution and returns native evidence", async (t) => {

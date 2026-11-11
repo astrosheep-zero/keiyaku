@@ -62,11 +62,12 @@ function missing(operation: string, contract: string | undefined, context: TextR
 }
 
 function contractAnswer(
-  name: ContractMutationName | "deliver.preview",
-  input: VerbInput<ContractMutationName | "deliver.preview">,
-  answer: ContractOutcome | VerbOutput<"deliver.preview">,
+  name: ContractMutationName,
+  input: VerbInput<ContractMutationName>,
+  answer: ContractOutcome | VerbOutput<"deliver">,
   context: TextRenderContext,
 ): string {
+  const operation = name === "deliver" && "dryRun" in input && input.dryRun ? "deliver --dry-run" : name;
   switch (answer.kind) {
     case "ready":
     case "blocked":
@@ -74,9 +75,8 @@ function contractAnswer(
     case "handoff":
       return renderConflictMaterialized(answer, context);
     case "retry":
-      return renderRetry(name, answer, context);
+      return renderRetry(operation, answer, context);
     case "accepted": {
-      if (name === "deliver.preview") throw new Error("Delivery preview returned a mutation receipt");
       return renderAccepted(name, answer, context, {
         ...("verdict" in input ? { verdict: input.verdict } : {}),
         ...("note" in input && input.note !== undefined ? { note: input.note } : {}),
@@ -85,17 +85,14 @@ function contractAnswer(
     }
     case "refused": {
       let refusal: RenderableRefusal = answer.reason;
-      if (
-        (name === "deliver" || name === "deliver.preview" || name === "verify") &&
-        refusal.kind === "dirty-workspace"
-      ) {
+      if ((name === "deliver" || name === "verify") && refusal.kind === "dirty-workspace") {
         refusal = {
           ...refusal,
           option: { flag: "--include-dirty", available: (refusal.submodules?.length ?? 0) === 0 },
         };
       }
       return renderRefusal(
-        { operation: name, ...("contractId" in answer ? { contract: answer.contractId } : {}), refusal },
+        { operation, ...("contractId" in answer ? { contract: answer.contractId } : {}), refusal },
         undefined,
         context,
       );
@@ -302,14 +299,13 @@ export function renderVerb<K extends VerbName>(
     case "amend":
     case "arc":
     case "deliver":
-    case "deliver.preview":
     case "verify":
     case "review":
     case "abandon":
       return contractAnswer(
         name,
-        input as VerbInput<ContractMutationName | "deliver.preview">,
-        value as ContractOutcome | VerbOutput<"deliver.preview">,
+        input as VerbInput<ContractMutationName>,
+        value as ContractOutcome | VerbOutput<"deliver">,
         context,
       );
     case "show":

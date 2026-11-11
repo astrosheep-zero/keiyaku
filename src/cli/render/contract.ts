@@ -487,7 +487,7 @@ export function renderAccepted<K extends ContractMutationName>(
 }
 
 export function renderRetry(
-  operation: ContractMutationName | "deliver.preview",
+  operation: ContractMutationName | "deliver --dry-run",
   result: Extract<ContractOutcome, { kind: "retry" }>,
   context?: TextRenderContext,
 ): string {

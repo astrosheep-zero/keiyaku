@@ -116,7 +116,7 @@ function parseAmend(parts: ContractTokens): CliRequest {
   };
 }
 
-function parseDeliver(parts: ContractTokens): VerbRequest<"deliver" | "deliver.preview"> {
+function parseDeliver(parts: ContractTokens): VerbRequest<"deliver"> {
   const contract = parts.positionals[0];
   const message = optionalFlag(parts.flags, "message");
   const dryRun = parts.flags["dry-run"] === true;
@@ -131,22 +131,18 @@ function parseDeliver(parts: ContractTokens): VerbRequest<"deliver" | "deliver.p
     ...(contract === undefined ? {} : { contract }),
     includeDirty: parts.flags["include-dirty"] === true,
   };
-  return dryRun
-    ? {
-        name: "deliver.preview",
-        input: { ...selected, showDiff: parts.flags["show-diff"] === true },
-        output: parts.output,
-      }
-    : {
-        name: "deliver",
-        input: {
+  return {
+    name: "deliver",
+    input: dryRun
+      ? { ...selected, dryRun: true, showDiff: parts.flags["show-diff"] === true }
+      : {
           ...selected,
           ...(message === undefined ? {} : { message }),
           materializeConflict: parts.flags["materialize-conflict"] === true,
           overwrite: parts.flags.overwrite === true,
         },
-        output: parts.output,
-      };
+    output: parts.output,
+  };
 }
 
 function parseVerify(parts: ContractTokens): VerbRequest<"verify"> {

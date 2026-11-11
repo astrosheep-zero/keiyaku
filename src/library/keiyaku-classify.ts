@@ -144,12 +144,11 @@ export function classifyVerb<K extends VerbName>(
     case "amend":
     case "arc":
     case "deliver":
-    case "deliver.preview":
     case "verify":
     case "review":
     case "abandon": {
       return contractOutcomeDisposition(
-        value as VerbOutput<"bind" | "amend" | "arc" | "deliver" | "deliver.preview" | "verify" | "review" | "abandon">,
+        value as VerbOutput<"bind" | "amend" | "arc" | "deliver" | "verify" | "review" | "abandon">,
       );
     }
     case "spawn":

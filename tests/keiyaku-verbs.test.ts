@@ -110,6 +110,22 @@ test("wire validation and classification reject malformed calls before observati
       assert.equal(classifyVerb("review", input as never, { kind: "threw", error }), "usage");
     }
   }
+  for (const input of [
+    { dryRun: true, message: "unused" },
+    { dryRun: true, materializeConflict: false },
+    { dryRun: true, overwrite: false },
+    { showDiff: false },
+    { dryRun: false, showDiff: true },
+  ]) {
+    assert.equal(Keiyaku.verbs.deliver.input.safeParse(input).success, false);
+    for (const invoke of [() => facet.deliver(input as never), () => facet.run("deliver", input as never)]) {
+      await assert.rejects(invoke, (error: unknown) => {
+        assert.ok(error instanceof KeiyakuUsageError);
+        assert.equal(classifyVerb("deliver", input as never, { kind: "threw", error }), "usage");
+        return true;
+      });
+    }
+  }
   const mixed = { selectors: ["kei/example", "aku/example/12345678"] };
   assert.equal(Keiyaku.verbs.wait.input.safeParse(mixed).success, false);
   await assert.rejects(facet.run("wait", mixed), (error: unknown) => {

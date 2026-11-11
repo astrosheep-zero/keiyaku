@@ -179,26 +179,23 @@ export const verbs = Object.freeze({
     effect: "write",
   },
   deliver: {
-    description: "Deliver a Contract candidate.",
-    input: z
-      .strictObject({
-        ...contract,
-        message: optText,
-        includeDirty: optBool,
-        materializeConflict: optBool,
-        overwrite: optBool,
-      })
-      .readonly(),
-    output: deliverOutcomeSchema,
+    description: "Deliver a Contract candidate or preview it without mutation.",
+    input: z.union([
+      z.strictObject({ ...contract, dryRun: z.literal(true), includeDirty: optBool, showDiff: optBool }).readonly(),
+      z
+        .strictObject({
+          ...contract,
+          dryRun: z.literal(false).exactOptional(),
+          message: optText,
+          includeDirty: optBool,
+          materializeConflict: optBool,
+          overwrite: optBool,
+        })
+        .readonly(),
+    ]),
+    output: z.union([deliverOutcomeSchema, deliveryPreviewOutcomeSchema]),
     progress: executionObservationSchema,
     effect: "write",
-  },
-  "deliver.preview": {
-    description: "Observe a prospective delivery.",
-    input: z.strictObject({ ...contract, includeDirty: optBool, showDiff: optBool }).readonly(),
-    output: deliveryPreviewOutcomeSchema,
-    progress: executionObservationSchema,
-    effect: "read",
   },
   verify: {
     description: "Run declared verification.",

@@ -29,6 +29,13 @@ for model APIs and are the only callable transport names. Read-only annotations
 identify reads; destructive annotations identify destruction alone, not ordinary
 writes.
 
+Delivery has one invocation intent, with an explicit read-only observation mode.
+The facet validates incompatible observation and mutation intents before resolving
+coordinates or observing any product, then selects exactly one native owner.
+Observation uses the dedicated Contract preview operation; submission uses native
+delivery admission. Both return their existing native answers without an envelope,
+and the selected mode supplies presentation context without becoming authority.
+
 The invocation World is distinct from an explicitly selected Contract Repo:
 selecting a Repo never retargets the World. The facet adapts caller-supplied
 coordinates, Contract selection, and environment-derived actor, caller, and

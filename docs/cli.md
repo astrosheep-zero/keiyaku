@@ -69,9 +69,11 @@ The edge resolves the invocation worktree coordinate once and hands that same
 resolved coordinate to the operation, so the Contract owner reads it rather
 than any ambient directory.
 
-Delivery's dry-run form calls the dedicated native preview operation, never the
-mutating delivery path. Unused or mutation-only options are refused before any
-product observation. Explicit verify alone requests Verification execution and
+Delivery's dry-run form selects the read-only mode of the same invocation verb,
+which calls the dedicated native preview owner. Unused or mutation-only options
+are refused before any product observation. Preview and submission retain their
+native answers and share transport presentation and outcome classification.
+Explicit verify alone requests Verification execution and
 uses the same contextual Contract selection as delivery. The edge validates a
 selected declaration position as a positive integer; the owner refuses a
 position outside the current declarations before execution or admission. Dirty

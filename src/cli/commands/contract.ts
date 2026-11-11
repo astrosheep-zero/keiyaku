@@ -55,11 +55,7 @@ export async function acquireContractRequest(
 }
 
 async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime, alias?: string): Promise<CliOutcome> {
-  const progressing =
-    request.name === "deliver" ||
-    request.name === "deliver.preview" ||
-    request.name === "verify" ||
-    request.name === "review";
+  const progressing = request.name === "deliver" || request.name === "verify" || request.name === "review";
   const driver = progressing && request.output === "text" ? await runtime.progress() : undefined;
   const cancellable =
     progressing ||
