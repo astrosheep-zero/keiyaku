@@ -121,36 +121,44 @@ export function createForwarder(openClient = connect) {
         manifest: { id: "paseo", apiVersion: 1 },
         async activate(context) {
             const world = await realpath(context.world);
-            let client;
-            const hint = async (rpc, input, cancellation) => {
-                const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
-                signal.throwIfAborted();
-                const pending = client ??= openClient(signal);
-                let abort;
-                try {
-                    return await Promise.race([
-                        (async () => {
-                            const connected = await pending;
-                            signal.throwIfAborted();
-                            return rpc.output.parse(await connected.invokePluginRpc("keiyaku-paseo", rpc.name, rpc.input.parse(input)));
-                        })(),
-                        new Promise((_, reject) => {
-                            abort = () => reject(signal.reason);
-                            signal.addEventListener("abort", abort, { once: true });
-                        }),
-                    ]);
-                }
-                catch (error) {
-                    if (client === pending)
+            const createHintClient = () => {
+                let client;
+                const hint = async (rpc, input, cancellation) => {
+                    const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
+                    signal.throwIfAborted();
+                    const pending = client ??= openClient(signal);
+                    let abort;
+                    try {
+                        return await Promise.race([
+                            (async () => {
+                                const connected = await pending;
+                                signal.throwIfAborted();
+                                return rpc.output.parse(await connected.invokePluginRpc("keiyaku-paseo", rpc.name, rpc.input.parse(input)));
+                            })(),
+                            new Promise((_, reject) => {
+                                abort = () => reject(signal.reason);
+                                signal.addEventListener("abort", abort, { once: true });
+                            }),
+                        ]);
+                    }
+                    catch (error) {
+                        if (client === pending)
+                            client = undefined;
+                        void pending.then((connected) => connected.close()).catch(() => { });
+                        // The host owns the single diagnostic and non-authoritative silence.
+                        throw error;
+                    }
+                    finally {
+                        signal.removeEventListener("abort", abort);
+                    }
+                };
+                return { hint, async close() {
+                        const previous = client;
                         client = undefined;
-                    void pending.then((connected) => connected.close()).catch(() => { });
-                    // The host owns the single diagnostic and non-authoritative silence.
-                    throw error;
-                }
-                finally {
-                    signal.removeEventListener("abort", abort);
-                }
+                        await previous?.then((connected) => connected.close()).catch(() => { });
+                    } };
             };
+            const runtime = createHintClient();
             const syncTitles = async (akumaId, cancellation) => {
                 const signal = AbortSignal.any([AbortSignal.timeout(1500), ...(cancellation ? [cancellation] : [])]);
                 try {
@@ -160,13 +168,13 @@ export function createForwarder(openClient = connect) {
                     console.warn(`Keiyaku mirror title synchronization failed: ${error instanceof Error ? error.message : String(error)}`);
                 }
             };
-            const refresh = async (event, cancellation) => {
+            const refresh = async (event, cancellation, connection = runtime) => {
                 try {
-                    await hint(attachRpc, { world, akuId: event.akumaId }, cancellation);
+                    await connection.hint(attachRpc, { world, akuId: event.akumaId }, cancellation);
                 }
                 finally {
                     try {
-                        await hint(refreshRpc, { world, akuId: event.akumaId }, cancellation);
+                        await connection.hint(refreshRpc, { world, akuId: event.akumaId }, cancellation);
                     }
                     finally {
                         await syncTitles(event.akumaId, cancellation);
@@ -174,10 +182,18 @@ export function createForwarder(openClient = connect) {
                 }
             };
             return { signals: { "akuma.turn-started": refresh, "akuma.turn-outcome": refresh,
-                    "akuma.observed": refresh,
+                    async "akuma.observed"(event, cancellation) {
+                        const connection = createHintClient();
+                        try {
+                            await refresh(event, cancellation, connection);
+                        }
+                        finally {
+                            await connection.close();
+                        }
+                    },
                     async "akuma.born"(event, cancellation) {
                         const caller = event.caller.kind === "akuma" ? { kind: "akuma", world: event.caller.world, akuId: event.caller.akumaId } : event.caller;
-                        const result = await hint(attachRpc, { world, akuId: event.akumaId, caller }, cancellation);
+                        const result = await runtime.hint(attachRpc, { world, akuId: event.akumaId, caller }, cancellation);
                         if (!("attached" in result) || !result.attached)
                             return;
                         await syncTitles(event.akumaId, cancellation);
@@ -187,9 +203,7 @@ export function createForwarder(openClient = connect) {
                             await refresh(event, cancellation);
                         }
                         finally {
-                            const previous = client;
-                            client = undefined;
-                            await previous?.then((connected) => connected.close()).catch(() => { });
+                            await runtime.close();
                         }
                     }, } };
         },

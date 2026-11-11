@@ -114,7 +114,9 @@ failure cannot prevent an independent runtime refresh. All attempts stay bounded
 non-authoritative, and opportunity-driven, without a repair store or retry daemon.
 Mirror-owned public reads use a passive observation composition so attachment,
 model correction, and stream refresh never recursively notify the bridge or wait
-on their own pending attachment.
+on their own pending attachment. Read-triggered repair retires its own host
+connection before observation completes, without closing another execution's
+connection or retaining the observing process until a future execution ends.
 
 Paseo native parent matching uses the host's persisted native session identity,
 not a configured provider alias. A custom provider preserves its underlying

@@ -71,6 +71,35 @@ test("a hung RPC is bounded, closes its connection and permits the next event to
   assert.equal(connects, 3); assert.equal(closes, 2, "failed runtime and successful title attempt both close");
 });
 
+test("status repair retires its clients without closing a live runtime connection", async t => {
+  const ctx = await context(t);
+  const clients: Array<{ closed: boolean }> = [];
+  const { signals } = await createForwarder(async () => {
+    const state = { closed: false };
+    clients.push(state);
+    return {
+      async invokePluginRpc(_plugin, method) {
+        return method === "attach" ? { attached: true } : { woken: 1 };
+      },
+      fetchAgents: emptyDirectory,
+      async updateAgent() {},
+      async close() { state.closed = true; },
+    };
+  }).activate(ctx);
+  const observed = { kind: "akuma.observed" as const, akumaId: started.akumaId };
+  await signals?.["akuma.observed"]?.(observed);
+  assert.ok(clients.every(client => client.closed), "one status must exit without a future Body end");
+  await signals?.["akuma.turn-started"]?.(started);
+  const runtime = clients.find(client => !client.closed)!;
+  assert.ok(runtime);
+  await signals?.["akuma.observed"]?.(observed);
+  assert.equal(runtime.closed, false, "status owns a separate RPC connection");
+  assert.ok(clients.filter(client => client !== runtime).every(client => client.closed));
+  await signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: started.akumaId,
+    bodySequence: 1, end: "exited" });
+  assert.ok(clients.every(client => client.closed));
+});
+
 test("attachment errors still allow independent runtime refresh and title cleanup", async t => {
   const ctx = await context(t);
   const calls: string[] = [];
@@ -88,5 +117,5 @@ test("attachment errors still allow independent runtime refresh and title cleanu
   await assert.rejects(async () => signals?.["akuma.observed"]?.({ kind: "akuma.observed", akumaId: started.akumaId }),
     /attachment unavailable/u);
   assert.deepEqual(calls, ["attach", "refresh"]);
-  assert.equal(closes, 2, "failed attachment client and independent title client close");
+  assert.equal(closes, 3, "failed attachment, successful refresh and title clients all close");
 });
