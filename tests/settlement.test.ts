@@ -97,7 +97,6 @@ test("placement keeps post-bind Debt edits and changes only state to done", asyn
   const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
     markdown: document("Edited completion"),
-    workspace: "worktree",
     gates: [],
   }));
   const authority = join(world.path, debtPath(debtId));
@@ -122,7 +121,6 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
   const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
     markdown: document("Replay completion"),
-    workspace: "worktree",
     gates: [],
   }));
   writeFileSync(`${world.path}/replay.txt`, "replay\n");
@@ -164,7 +162,6 @@ test(
     const bound = accepted(await Keis.of(repo).bind({
       debt: debtId,
       markdown: document("Settlement cleanup"),
-      workspace: "worktree",
       gates: [],
     }));
     writeFileSync(join(world.path, "cleanup.txt"), "cleanup\n");
@@ -221,7 +218,6 @@ test("Settlement exact-read-backs an unknown DebtHolder release after external s
   const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
     markdown: document("Unknown holder release"),
-    workspace: "worktree",
     gates: [],
   }));
   writeFileSync(`${world.path}/unknown-holder.txt`, "candidate\n");

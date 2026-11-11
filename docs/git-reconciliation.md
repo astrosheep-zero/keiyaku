@@ -34,7 +34,9 @@ Confirmed reset is a separate Git-owned operation, not reconciliation.
 
 Reconciliation lag failure semantics have one source of truth: the owner module's
 exhaustive classifier determines whether a lag is incomplete physical repair or
-observable retained residue. CLI rendering and process exit classification derive
+observable retained residue. This judgment accompanies public diagnostics,
+including retirement failures after completed repair; private custody names are
+not public recovery categories. CLI rendering and process exit classification derive
 from that classifier; they do not infer failure from names or add exceptions.
 Extending the lag union therefore requires an explicit classification and
 rendering decision, and fails typecheck until both are made.

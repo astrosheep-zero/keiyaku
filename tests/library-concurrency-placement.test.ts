@@ -190,7 +190,6 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
     const bound = accepted(await Keis.of(await cachedRepoAt(repository.path)).bind({
       markdown: document(),
       target: "refs/heads/release",
-      workspace: "worktree",
       gates: ["reviewed"],
     }));
     const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), (present(await bound.kei.state())).id);

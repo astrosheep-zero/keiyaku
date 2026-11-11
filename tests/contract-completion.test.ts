@@ -76,7 +76,6 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document(),
         target: "refs/heads/main",
-        workspace: "worktree",
         gates: ["reviewed"],
       }),
     ).kei;
@@ -112,7 +111,6 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const bound = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
         markdown: document("exit 1"),
-        workspace: "worktree",
         gates: [],
         // Continuation fixtures stay targetless like their prerequisite.
         target: null,
@@ -189,7 +187,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     assert.deepEqual(reviewed.continuation?.claimed, undefined);
     const stopped = reviewed.continuation?.stopped?.[0];
     assert.equal(stopped?.contractId, present(await dependent.state()).id);
-    assert.equal(stopped?.kind, "gates-unsatisfied");
+    assert.equal(stopped?.stop.kind, "gates-unsatisfied");
     assert.equal(existsSync(marker), false);
     assert.deepEqual(present(await dependent.state()).attestations, []);
     assert.equal(present(await dependent.state()).terminal, null);
@@ -336,7 +334,6 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       accepted(
         await Keis.of(repo).bind({
           markdown: document().replace("# Library verbs", `# ${title}`),
-          workspace: "worktree",
           gates: [],
           // Continuation fixtures stay targetless like their prerequisite.
           target: null,

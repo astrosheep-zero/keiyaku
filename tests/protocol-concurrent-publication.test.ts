@@ -23,7 +23,6 @@ test("two concurrent private-state binds both publish distinct accepted contract
       (async () =>
         Keis.of(await Repo.at({ path: repository.path })).bind({
           markdown: document(),
-          workspace: "worktree",
           gates: ["reviewed"],
         }))(),
     ),
@@ -111,7 +110,6 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
     async (gitPath) =>
       await Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
         markdown: document(),
-        workspace: "worktree",
         gates: ["reviewed"],
         target: "refs/heads/main",
       }),
@@ -126,7 +124,6 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
   // Another independent bind must publish while the first still waits outside the seat.
   const concurrent = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
     markdown: document(),
-    workspace: "worktree",
     gates: ["reviewed"],
   }));
   assert.equal(concurrent.kind, "accepted");

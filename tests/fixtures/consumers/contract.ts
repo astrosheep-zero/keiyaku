@@ -7,7 +7,7 @@ import {
   KeiyakuError,
   type ContractId,
   type BindInput,
-  type BindResult,
+  type BindOutcome,
   type ReviewOutcome,
   type VerifyInput,
   type VerifyOutcome,
@@ -33,7 +33,7 @@ const input: BindInput = { markdown, after: [id], gates: ["reviewed"] };
 const targetlessInput: BindInput = { markdown, target: null };
 // @ts-expect-error a target is a branch name or an explicit absence, never another value
 const invalidTarget: BindInput = { markdown, target: 7 };
-const bound: BindResult = await Keis.of(repo).bind(input);
+const bound: BindOutcome = await Keis.of(repo).bind(input);
 if (bound.kind === "accepted") {
   const handle: Kei = bound.kei;
   void [handle, bound.contractId, bound.worktreePath];

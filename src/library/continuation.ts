@@ -8,7 +8,7 @@ import {
   completeCandidate,
   compactPlacementStop,
   placementStopSchema,
-  placementStopLeaves,
+  type CompactPlacementStop,
   type CompletionResult,
 } from "../protocol/completion.js";
 import {
@@ -24,26 +24,11 @@ import { contractIdSchema } from "../protocol/operations.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
 
-import { executionIssueSchema } from "../protocol/result-reasons.js";
-const continuationStopSchema = z.union([
-  placementStopSchema,
-  executionIssueSchema,
-  z.strictObject({ kind: z.enum(["already-terminal", "physical-lag"]) }).readonly(),
-]);
-export type ContinuationStop = z.output<typeof continuationStopSchema>;
 export const continuationReportSchema = z
   .strictObject({
     claimed: z.array(contractIdSchema).min(1).readonly().exactOptional(),
     stopped: z
-      .array(
-        z.union(
-          [
-            ...placementStopLeaves,
-            executionIssueSchema,
-            z.strictObject({ kind: z.enum(["already-terminal", "physical-lag"]) }).readonly(),
-          ].map((schema) => schema.unwrap().extend({ contractId: contractIdSchema }).readonly()),
-        ),
-      )
+      .array(z.strictObject({ contractId: contractIdSchema, stop: placementStopSchema }).readonly())
       .min(1)
       .readonly()
       .exactOptional(),
@@ -89,7 +74,7 @@ type ContinuationInput = Readonly<{
 
 type ContinuedCandidate =
   | CompletionResult
-  | Readonly<{ kind: "stopped-before-node"; stop: ContinuationStop | ExecutionStop }>;
+  | Readonly<{ kind: "stopped-before-node"; stop: CompactPlacementStop | ExecutionStop }>;
 
 async function continueCandidate(
   input: ContinuationInput,
@@ -182,15 +167,13 @@ export async function continueDeliveredDependents(input: ContinuationInput): Pro
           queue.push({ contractId: id, target: result.evidence.completion.integration });
         } else {
           const stop = result.stop;
-          const compact: ContinuationStop =
-            "refusal" in stop && stop.refusal.kind === "terminal"
-              ? { kind: "already-terminal" }
-              : "refusal" in stop || "retry" in stop || "failure" in stop
-                ? compactPlacementStop(stop)
-                : stop.kind === "execution-stopped"
-                  ? { kind: stop.kind, reason: stop.reason, diagnostic: stop.diagnostic }
-                  : stop;
-          stopped.push({ contractId: id, ...compact });
+          const compact: CompactPlacementStop =
+            "refusal" in stop || "retry" in stop || "failure" in stop
+              ? compactPlacementStop(stop)
+              : stop.kind === "execution-stopped"
+                ? { kind: stop.kind, reason: stop.reason, diagnostic: stop.diagnostic }
+                : stop;
+          stopped.push({ contractId: id, stop: compact });
           retain();
         }
       }
@@ -200,7 +183,7 @@ export async function continueDeliveredDependents(input: ContinuationInput): Pro
     if (!isOperationalStop(error, input.signal)) throw error;
     const stop = executionStop(primary, error, input.signal);
     input.progress.recordStop(stop);
-    stopped.push({ contractId: primary, kind: stop.kind, reason: stop.reason, diagnostic: stop.diagnostic });
+    stopped.push({ contractId: primary, stop: { kind: stop.kind, reason: stop.reason, diagnostic: stop.diagnostic } });
     retain();
     return report();
   }

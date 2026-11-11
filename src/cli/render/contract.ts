@@ -154,35 +154,25 @@ function retainedIssueRows(issue: RetainedIssue, columns: number): readonly stri
 type ResidualIssue = Extract<
   InvocationIssue,
   {
-    kind:
-      | "decode-channel-retirement"
-      | "verification-cleanup"
-      | "worktree-leak"
-      | "private-state-seat-close"
-      | "execution-stopped"
-      | "settlement-failed";
+    kind: "diagnostic" | "execution-stopped" | "settlement-failed";
   }
 >;
 
 function residualIssueRows(issue: ResidualIssue, columns: number): readonly string[] {
   const lines: string[] = [];
   switch (issue.kind) {
-    case "decode-channel-retirement":
-      receiptPayload(lines, "cleanup", issue.diagnostic);
-      return lines;
-    case "verification-cleanup":
+    case "diagnostic":
       lines.push(...cleanupResourceRows(issue, columns));
-      receiptRow(lines, "!", "cleanup", [{ text: `name ${quotedText(issue.name)}` }], columns);
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-    case "worktree-leak":
-      lines.push(...cleanupResourceRows(issue, columns));
-      if (issue.path === undefined) receiptRow(lines, " ", "verification scratch not retained", [], columns);
-      else receiptRow(lines, " ", "verification scratch kept at", [{ text: issue.path, opaque: true }], columns);
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-    case "private-state-seat-close":
-      receiptRow(lines, "!", "lag", [{ text: "private-state-seat-close-failed", opaque: true }], columns);
+      receiptRow(
+        lines,
+        issue.severity === "required" ? "!" : " ",
+        issue.severity === "required" ? "stopped" : "residue",
+        [
+          ...(issue.name === undefined ? [] : [{ text: `name ${quotedText(issue.name)}` }]),
+          ...(issue.path === undefined ? [] : [{ text: issue.path, opaque: true }]),
+        ],
+        columns,
+      );
       receiptPayload(lines, "reason", issue.diagnostic);
       return lines;
     case "execution-stopped":
@@ -347,19 +337,8 @@ function continuationLines(continuation: CompletionAccepted["continuation"], col
   const lines: string[] = [];
   for (const contractId of continuation.claimed ?? [])
     receiptRow(lines, "✓", "dependent", [{ text: "complete" }, { text: contractId, opaque: true }], columns);
-  for (const stop of continuation.stopped ?? []) {
-    if (stop.kind === "already-terminal")
-      receiptRow(lines, "!", stop.contractId, [{ text: "already terminal" }], columns);
-    else if (stop.kind === "physical-lag")
-      receiptRow(
-        lines,
-        "!",
-        "dependent",
-        [{ text: stop.contractId, opaque: true }, { text: "physical follow stopped" }],
-        columns,
-      );
-    else lines.push(...stopLines(stop, columns, stop.contractId, stop.contractId));
-  }
+  for (const { contractId, stop } of continuation.stopped ?? [])
+    lines.push(...stopLines(stop, columns, contractId, contractId));
   return lines;
 }
 

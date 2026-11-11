@@ -90,9 +90,9 @@ test("physical and seat-close reports accumulate without replay duplication or i
   progress.recordAdmission(next);
   const issues = invocationIssues(progress.snapshot().effects, leading.state.id);
   const lags = issues.filter((issue) => issue.kind === "worktree-retained");
-  assert.deepEqual(lags, [...leading.physical!.lag, ...next.physical!.lag]);
+  assert.deepEqual(lags, [...leading.physical!.lag, ...next.physical!.lag].map((lag) => ({ ...lag, severity: "optional" })));
   assert.deepEqual(
-    issues.filter((issue) => issue.kind === "private-state-seat-close").map((issue) => issue.diagnostic),
+    issues.filter((issue) => issue.kind === "diagnostic").map((issue) => issue.diagnostic),
     ["first", "second"],
   );
   assert.equal(leading.physical!.lag.length, 1);
@@ -146,9 +146,8 @@ test("all verification cleanup and leaks survive repeated candidates and depende
   const issues = invocationIssues(progress.snapshot().effects);
   assert.equal(issues.length, 6);
   assert.deepEqual(
-    issues
-      .filter((issue) => issue.kind === "worktree-leak")
-      .map((issue) => [issue.contractId, issue.snapshot, issue.path]),
+    issues.flatMap((issue) => issue.kind === "diagnostic" && issue.path !== undefined
+      ? [[issue.contractId, issue.snapshot, issue.path]] : []),
     [
       [primary, "one", "/scratch/one"],
       [primary, "two", "/scratch/two"],

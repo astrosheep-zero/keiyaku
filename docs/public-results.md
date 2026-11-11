@@ -26,7 +26,8 @@ without serializing it or reconstructing capabilities from JSON. Schema parity
 is against their wire projection.
 
 Schemas are published for consumers, not enforced again on trusted local
-results. Core does not depend on a schema implementation. The nearest
+results. Shared semantic declarations remain shared in composed answers rather
+than expanding a separate vocabulary for each use. Core does not depend on a schema implementation. The nearest
 schema-using owner projecting a core fact owns its declaration; shared
 declarations live below their consumers without cycles. Caller values are
 validated once at their Library boundary. Structural validation grants no
@@ -92,7 +93,9 @@ from a later read. Missing or disagreeing provenance remains an integrity
 failure.
 
 Placement has one adjudicated conclusion: placed, a semantic stop, or an
-operational stop. Successful placement retains the destination and before and
+operational stop. The addressed Contract and attempted dependents share the same
+stop meaning; dependent ownership never creates a second classification.
+Successful placement retains the destination and before and
 after movement. A Contract destination is named as a Contract, not a branch or private
 reference. Known movement survives later presentation failure. Unmet gates and
 prerequisites retain their ordered actionable identities and distinguish
@@ -159,7 +162,10 @@ semantics by [world.md](world.md), and reconciliation by
 ## Retirement And Failure Evidence
 
 Resource retirement belongs to the invocation, independently of the current
-candidate. Scratch cleanup, intentional failed-scene retention, and worktree
+candidate. Private resource names do not define public failure categories. The
+producing owner explicitly distinguishes required operational stops from optional
+residue; consumers preserve that judgment without inferring severity from a
+diagnosis. Scratch cleanup, intentional failed-scene retention, and worktree
 removal problems keep their diagnostic paths and known owner, candidate, and
 requirement coordinates without repeating enclosing ownership. A process failure
 keeps one bounded diagnosis that distinguishes exit, timeout, cancellation, and

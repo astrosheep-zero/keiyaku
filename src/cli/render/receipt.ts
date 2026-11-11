@@ -1,5 +1,4 @@
 import type {
-  ContinuationReport,
   KeiyakuRetryReason,
   PartialOutcomeEnvelope,
   Placement,
@@ -90,9 +89,8 @@ function words(kind: string): string {
 type PlacementStop = Exclude<Placement, { kind: "placed" }>;
 type TerminalCheck = Extract<VerificationCheck, { kind: "terminal" }>;
 type CheckAdmissionStop = Exclude<NonNullable<TerminalCheck["admission"]>, string>;
-type RuntimeCheck = Exclude<VerificationCheck, { kind: "terminal" }>;
-export type ContinuationStop = NonNullable<ContinuationReport["stopped"]>[number];
-export type ReceiptStop = PlacementStop | CheckAdmissionStop | RuntimeCheck | ContinuationStop;
+type RuntimeCheck = Extract<VerificationCheck, { kind: "stopped" }>["stop"];
+type ReceiptStop = PlacementStop | CheckAdmissionStop | RuntimeCheck;
 
 function unmetRequirementLines(unmet: readonly RequirementProblem[], columns: number): readonly string[] {
   const lines: string[] = [];
@@ -177,7 +175,10 @@ function runtimeStopLines(
   return lines;
 }
 
-type SemanticPlacementStop = Exclude<PlacementStop, { kind: "retry" | "checkout-not-followable" }>;
+type SemanticPlacementStop = Exclude<
+  PlacementStop,
+  { kind: "retry" | "checkout-not-followable" | "execution-stopped" | "physical-lag" }
+>;
 
 function requirementStopRows(
   stop: Extract<SemanticPlacementStop, { kind: "gates-unsatisfied" | "prerequisites-unsatisfied" }>,
@@ -328,8 +329,7 @@ export function stopLines(
   addressed: string,
   dependent?: string,
 ): readonly string[] {
-  const owner = "contractId" in stop ? stop.contractId : undefined;
-  const related = dependent ?? owner;
+  const related = dependent;
   switch (stop.kind) {
     case "execution-stopped": {
       const lines: string[] = [];
@@ -343,9 +343,11 @@ export function stopLines(
       receiptPayload(lines, "reason", stop.diagnostic);
       return lines;
     }
-    case "already-terminal":
-    case "physical-lag":
-      return []; // the continuation renderer owns the caller-facing row
+    case "physical-lag": {
+      const lines: string[] = [];
+      dependentRow(lines, dependent, "physical follow stopped", columns);
+      return lines;
+    }
     case "retry":
       return retryRows(stop, columns, dependent);
     case "refused":
@@ -430,14 +432,20 @@ export function verificationCheckLines(
       columns,
     );
     if (check.kind !== "terminal") {
-      lines.push(...stopLines(check, columns, addressed));
+      lines.push(...stopLines(check.stop, columns, addressed));
     } else {
       receiptRow(lines, check.verdict === "satisfied" ? "✓" : "×", "verdict", [{ text: check.verdict }], columns);
       if (check.verdict === "unsatisfied") receiptPayload(lines, "summary", check.summary);
       const admission = check.admission;
       if (typeof admission === "string")
-        receiptRow(lines, " ", "attestation", [{ text: admission === "reused" ? "reused" : "not recorded" }], columns);
-      else if (admission !== undefined) {
+        receiptRow(
+          lines,
+          " ",
+          "attestation",
+          [{ text: admission === "unrecorded" ? "not recorded" : admission }],
+          columns,
+        );
+      else {
         receiptRow(lines, "!", "admission", [{ text: "stopped" }], columns);
         lines.push(...stopLines(admission, columns, addressed));
       }

@@ -894,7 +894,6 @@ test("Contract association never selects the Akuma execution workdir", async (t)
         Region: "```\nsrc/**\n```",
         Criteria: "### Placement\nThe invocation directory stands without an explicit workdir.",
       }),
-      workspace: "worktree",
     });
     const managedId = present(await accepted(bound).kei.state()).id;
     const appointment = await readManagedWorktreeAppointment(git, managedId);

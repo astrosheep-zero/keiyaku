@@ -43,7 +43,6 @@ test("a resolved Repo reads and binds only its own repository after ambient Git 
     assert.equal(await repo.currentBranch(), "refs/heads/pinned-a");
     const contract = await Keis.of(repo).bind({
       markdown: document(),
-      workspace: "worktree",
       target: null,
       gates: [],
     });

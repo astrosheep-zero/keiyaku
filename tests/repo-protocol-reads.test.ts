@@ -52,7 +52,6 @@ function terms(title: string, after: readonly ContractId[] = []) {
 async function bind(
   repository: TestGitRepository,
   title: string,
-  workspace: "worktree",
   after: readonly ContractId[] = [],
 ): Promise<ContractId> {
   const scope = await scopeOperation({ coordinate: repository.path });
@@ -64,7 +63,6 @@ async function bind(
       terms: terms(title, after),
       targetSelection: { kind: "targetless" },
       verification: prepareVerificationDeclaration(null),
-      workspace,
     }),
   );
   assert.ok(result.kind === "accepted", 'expected result.kind = "accepted"');
@@ -79,11 +77,11 @@ test("git repository resolution rejects omitted and empty coordinates", async ()
 test("public Contract rows select the source entry for every phase", async () => {
   const repository = repositoryWithMain();
   const ids = {
-    fresh: await bind(repository, "Phase fresh", "worktree"),
-    bound: await bind(repository, "Phase bound", "worktree"),
-    delivered: await bind(repository, "Phase delivered", "worktree"),
-    claimed: await bind(repository, "Phase claimed", "worktree"),
-    abandoned: await bind(repository, "Phase abandoned", "worktree"),
+    fresh: await bind(repository, "Phase fresh"),
+    bound: await bind(repository, "Phase bound"),
+    delivered: await bind(repository, "Phase delivered"),
+    claimed: await bind(repository, "Phase claimed"),
+    abandoned: await bind(repository, "Phase abandoned"),
   };
   const times = {
     delivered: "2026-08-12T00:02:00.000Z",
@@ -228,8 +226,8 @@ test("public Contract rows select the source entry for every phase", async () =>
 
 test("counts and selection observe only their membership authority", async () => {
   const repository = repositoryWithMain();
-  const good = await bind(repository, "Selectable", "worktree");
-  const bad = await bind(repository, "Broken target", "worktree");
+  const good = await bind(repository, "Selectable");
+  const bad = await bind(repository, "Broken target");
   const scope = await repositoryAt(repository.path);
   const repo = await Repo.at({ path: repository.path });
   const library = Keis.of(repo);
@@ -307,7 +305,7 @@ test("counts and selection observe only their membership authority", async () =>
 
 test("repo reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {
   const repository = repositoryWithMain();
-  const id = await bind(repository, "Recover foreign worktree", "worktree");
+  const id = await bind(repository, "Recover foreign worktree");
   const git = await repositoryAt(repository.path);
   await appointManagedWorktrees(git, [id]);
   const path = await appointedWorktreePath(git, id);

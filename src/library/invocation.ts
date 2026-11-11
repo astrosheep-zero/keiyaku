@@ -28,12 +28,13 @@ import type {
   ContractConclusion,
   ContractVerb,
   InvocationEffect,
+  InvocationIssue,
   ReconciliationLag,
   ResetCounts,
   admittedEvidenceSchema,
 } from "./outcome.js";
 import type { z } from "zod";
-import { compactEffect, reconcileLagScope } from "./outcome.js";
+import { compactEffect, reconcileLagScope, reconcileLagIsFailure } from "./outcome.js";
 
 type RecordedVerificationCheck = Parameters<ProtocolProgress["recordVerificationCheck"]>[2];
 
@@ -188,30 +189,11 @@ export class InvocationAccumulator implements ProtocolProgress {
     result: VerificationResidue,
     coordinate?: Readonly<{ requirement: string; index: number }>,
   ): void {
+    const resource = { ...(snapshot === undefined ? {} : { snapshot }), ...coordinate };
     if (result.cleanup !== undefined)
-      this.records.push({
-        kind: "issue",
-        contract,
-        issue: {
-          kind: "verification-cleanup",
-          ...(snapshot === undefined ? {} : { snapshot }),
-          ...coordinate,
-          name: result.cleanup.name,
-          diagnostic: result.cleanup.diagnostic,
-        },
-      });
+      this.recordDiagnostic(contract, { ...resource, severity: "optional", ...result.cleanup });
     if (result.leak !== undefined)
-      this.records.push({
-        kind: "issue",
-        contract,
-        issue: {
-          kind: "worktree-leak",
-          ...(snapshot === undefined ? {} : { snapshot }),
-          ...coordinate,
-          ...(result.leak.path === undefined ? {} : { path: result.leak.path }),
-          diagnostic: result.leak.diagnostic,
-        },
-      });
+      this.recordDiagnostic(contract, { ...resource, severity: "optional", ...result.leak });
   }
 
   recordVerificationCheck(
@@ -269,7 +251,7 @@ export class InvocationAccumulator implements ProtocolProgress {
     this.records.push({
       kind: "issue",
       contract: stop.contractId,
-      issue: { kind: "execution-stopped", reason: stop.reason, diagnostic: stop.diagnostic },
+      issue: { kind: "execution-stopped", severity: "required", reason: stop.reason, diagnostic: stop.diagnostic },
     });
   }
 
@@ -300,6 +282,7 @@ export class InvocationAccumulator implements ProtocolProgress {
         contract,
         issue: {
           kind: "settlement-failed",
+          severity: "required",
           ...(lag.debtId === undefined ? {} : { debtId: lag.debtId }),
           diagnostic: `${lag.surface}: ${lag.diagnostic}`,
         },
@@ -308,13 +291,9 @@ export class InvocationAccumulator implements ProtocolProgress {
   }
 
   recordChannelRetirement(contract: ContractId, error: unknown): void {
-    this.records.push({
-      kind: "issue",
-      contract,
-      issue: {
-        kind: "decode-channel-retirement",
-        diagnostic: error instanceof Error ? error.message : String(error),
-      },
+    this.recordDiagnostic(contract, {
+      severity: "optional",
+      diagnostic: error instanceof Error ? error.message : String(error),
     });
   }
 
@@ -359,15 +338,27 @@ export class InvocationAccumulator implements ProtocolProgress {
   private recordSeatClose(contract: ContractId, failure: PrivateStateSeatCloseLag): void {
     if (this.reportedResidue.has(failure)) return;
     this.reportedResidue.add(failure);
-    this.records.push({
-      kind: "issue",
-      contract,
-      issue: { kind: "private-state-seat-close", diagnostic: failure.diagnostic },
-    });
+    this.recordDiagnostic(contract, { severity: "required", diagnostic: failure.diagnostic });
+  }
+
+  private recordDiagnostic(
+    contract: ContractId,
+    issue: Omit<Extract<InvocationIssue, { kind: "diagnostic" }>, "kind" | "contractId">,
+  ): void {
+    const diagnostic =
+      issue.diagnostic.length > 4096 ? `${issue.diagnostic.slice(0, 4096)}\n[diagnostic truncated]` : issue.diagnostic;
+    this.records.push({ kind: "issue", contract, issue: { ...issue, kind: "diagnostic", diagnostic } });
   }
 
   private recordLag(contract: ContractId, lag: ReconciliationLag): void {
     if (reconcileLagScope(lag) !== "none") this.affectedContracts.add(contract);
-    this.records.push({ kind: "issue", contract, issue: lag });
+    this.records.push({
+      kind: "issue",
+      contract,
+      issue: {
+        ...lag,
+        severity: reconcileLagIsFailure(lag) ? "required" : "optional",
+      },
+    });
   }
 }

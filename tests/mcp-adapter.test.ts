@@ -344,7 +344,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"], workspace: "worktree" }),
+    await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"] }),
   );
   const handle = bound.kei;
   const before = present(await handle.state());
@@ -378,7 +378,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   assert.equal(guidance.isError, false);
   assert.ok(nativeGuidance.kind === "present");
   assert.equal((guidance.content as { type: string; text: string }[])[0]?.text, nativeGuidance.guidance);
-  const bindInput = { markdown: document(), target: null, gates: ["reviewed"], workspace: "worktree" as const };
+  const bindInput = { markdown: document(), target: null, gates: ["reviewed"] };
   const boundOverMcp = await client.callTool({ name: "bind", arguments: { input: bindInput } });
   assert.equal(boundOverMcp.isError, false);
   const wire = accepted(Keiyaku.verbs.bind.output.parse(boundOverMcp.structuredContent));
@@ -427,7 +427,7 @@ test("red verification answers normally while infrastructure failure is an error
     const repository = repositoryWithMain();
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo).bind({
-      markdown: document("exit 7"), target: null, gates: ["reviewed"], workspace: "worktree",
+      markdown: document("exit 7"), target: null, gates: ["reviewed"],
     }));
     t.after(async () => {
       await bound.kei.abandon();
@@ -467,7 +467,7 @@ test("red verification answers normally while infrastructure failure is an error
     assert.equal(cli.exit, infrastructure ? 3 : 4);
     const result = JSON.parse(cli.stdout) as VerbOutput<"verify">;
     assert.ok(result.kind === "accepted");
-    assert.equal(result.checks[0]?.kind, infrastructure ? "environment-hook-failure" : "terminal");
+    assert.equal(result.checks[0]?.kind, infrastructure ? "stopped" : "terminal");
     assert.equal(classifyVerb("verify", input, { kind: "returned", value: result }), infrastructure ? "failed" : "unsatisfied");
   });
 });

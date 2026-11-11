@@ -167,6 +167,7 @@ test("native reconcile reports preserve hook, checkout, seat and settlement fail
       issues: [
         {
           kind: "worktree-hook-failed",
+          severity: "required",
           contractId: id,
           phase: "create",
           path: "/tmp/wt",
@@ -181,6 +182,7 @@ test("native reconcile reports preserve hook, checkout, seat and settlement fail
       issues: [
         {
           kind: "target-checkout-retained",
+          severity: "required",
           contractId: id,
           target: "refs/heads/main",
           path: "/repo/file",
@@ -193,7 +195,8 @@ test("native reconcile reports preserve hook, checkout, seat and settlement fail
       contractId: id,
       issues: [
         {
-          kind: "private-state-seat-close",
+          kind: "diagnostic",
+          severity: "required",
           contractId: id,
           diagnostic: "could not close publication seat",
         },
@@ -203,8 +206,8 @@ test("native reconcile reports preserve hook, checkout, seat and settlement fail
       kind: "contract",
       contractId: id,
       issues: [
-        { kind: "contract-file-failed", contractId: id, path: "KEIYAKU.md", diagnostic: "write failed" },
-        { kind: "settlement-failed", contractId: id, diagnostic: "debt failed" },
+        { kind: "contract-file-failed", severity: "required", contractId: id, path: "KEIYAKU.md", diagnostic: "write failed" },
+        { kind: "settlement-failed", severity: "required", contractId: id, diagnostic: "debt failed" },
       ],
     },
   ];

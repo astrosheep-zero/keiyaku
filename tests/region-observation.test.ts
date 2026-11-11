@@ -27,7 +27,6 @@ function document(title: string, region: readonly string[]): string {
 async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
   const result = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
     markdown: document(title, region),
-    workspace: "worktree",
   }));
   return result;
 }
@@ -104,7 +103,6 @@ test("post-admission observation failure preserves the admitted Contract without
     async (gitPath) =>
       Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
         markdown: document("Observed failure", ["docs/**"]),
-        workspace: "worktree",
       }),
   );
   const receipt = accepted(result);

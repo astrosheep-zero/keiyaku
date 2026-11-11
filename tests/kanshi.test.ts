@@ -123,7 +123,6 @@ async function populatedWorld(t: TestContext) {
     await Keis.of(await Repo.at({ path: repository.path })).bind({
       debt: added.id,
       markdown: document(),
-      workspace: "worktree",
       target: "main",
     }),
   );
@@ -241,7 +240,6 @@ test("exact target movement names only the owner-witnessed predecessor", async (
     await Keis.of(repo).bind({
       markdown: document("Target movement"),
       target: "main",
-      workspace: "worktree",
       gates: ["reviewed"],
     }),
   );

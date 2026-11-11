@@ -28,6 +28,7 @@ import {
   retrySchema,
   compactRetry,
   compactReason,
+  executionIssueSchema,
 } from "./result-reasons.js";
 
 const MAX_REINTEGRATION_CYCLES = 3;
@@ -106,34 +107,31 @@ export const placementReasonSchema = z.union([
   checkoutCollisionSchema,
   ...integrationProblemSchema.options,
 ]);
-export const placementFailureSchema = z.union([
-  retrySchema,
-  z.strictObject({ kind: z.literal("failed"), diagnostic: z.string().min(1) }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("target-content-identical"),
-      target: z.string().min(1),
-      expected: snapshotIdSchema,
-      observed: snapshotIdSchema,
-    })
-    .readonly(),
-  z
-    .strictObject({
-      kind: z.literal("target-moved"),
-      target: z.string().min(1),
-      integration: snapshotIdSchema,
-      observed: snapshotIdSchema.nullable(),
-    })
-    .readonly(),
-]);
-export const placementStopLeaves = [
-  ...placementReasonSchema.options,
-  ...retrySchema.options,
-  placementFailureSchema.options[1],
-  placementFailureSchema.options[2],
-  placementFailureSchema.options[3],
-] as const;
-export const placementStopSchema = z.union(placementStopLeaves);
+export const placementStopSchema = z
+  .union([
+    ...placementReasonSchema.options,
+    ...retrySchema.options,
+    z.strictObject({ kind: z.literal("failed"), diagnostic: z.string().min(1) }).readonly(),
+    z
+      .strictObject({
+        kind: z.literal("target-content-identical"),
+        target: z.string().min(1),
+        expected: snapshotIdSchema,
+        observed: snapshotIdSchema,
+      })
+      .readonly(),
+    z
+      .strictObject({
+        kind: z.literal("target-moved"),
+        target: z.string().min(1),
+        integration: snapshotIdSchema,
+        observed: snapshotIdSchema.nullable(),
+      })
+      .readonly(),
+    executionIssueSchema,
+    z.strictObject({ kind: z.literal("physical-lag") }).readonly(),
+  ])
+  .meta({ id: "contractStop" });
 export type CompactPlacementStop = z.output<typeof placementStopSchema>;
 export const compactScopeSchema = z
   .strictObject({

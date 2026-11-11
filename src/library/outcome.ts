@@ -4,8 +4,6 @@ import { contractFileLagSchema } from "../contract-worktree.js";
 import type { ChangeId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { reconcileEffectSchema, gitReconcileLagSchema } from "../git/reconcile.js";
-import { worktreeLeakSchema } from "../git/scratch.js";
-import { verificationCleanupFailureSchema } from "../protocol/progress.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { placementSchema, placedSchema } from "../protocol/completion.js";
 
@@ -58,102 +56,67 @@ export function reconcileLagIsFailure(lag: ReconciliationLag): boolean {
 const scoped = { contractId: contractIdSchema.exactOptional() };
 const diagnostic = z.string().min(1);
 const path = z.string().min(1);
+const severity = z.enum(["required", "optional"]);
 export const reconcileIssueSchema = z.union([
-  ...gitReconcileLagSchema.options.map((schema) => schema.unwrap().extend(scoped).readonly()),
-  contractFileLagSchema.unwrap().extend(scoped).readonly(),
+  ...gitReconcileLagSchema.options.map((schema) =>
+    schema
+      .unwrap()
+      .extend({ ...scoped, severity })
+      .readonly(),
+  ),
+  contractFileLagSchema
+    .unwrap()
+    .extend({ ...scoped, severity })
+    .readonly(),
 ]);
-const checkResource = {
-  snapshot: snapshotIdSchema.exactOptional(),
-  requirement: z.string().min(1).exactOptional(),
-  index: z.number().int().positive().exactOptional(),
-};
-const decodeRetirementIssue = z
-  .strictObject({ ...scoped, kind: z.literal("decode-channel-retirement"), diagnostic })
-  .readonly();
-// Public cleanup leaves retain their published nonempty-string acceptance.
-const verificationCleanupIssue = verificationCleanupFailureSchema
-  .unwrap()
-  .extend({
+const resourceDiagnosticSchema = z
+  .strictObject({
     ...scoped,
-    kind: z.literal("verification-cleanup"),
-    ...checkResource,
-    name: diagnostic,
+    kind: z.literal("diagnostic"),
+    severity,
     diagnostic,
-  })
-  .readonly();
-const worktreeLeakIssue = worktreeLeakSchema
-  .unwrap()
-  .extend({
-    ...scoped,
-    kind: z.literal("worktree-leak"),
-    ...checkResource,
+    snapshot: snapshotIdSchema.exactOptional(),
+    requirement: z.string().min(1).exactOptional(),
+    index: z.number().int().positive().exactOptional(),
+    name: diagnostic.exactOptional(),
     path: path.exactOptional(),
-    diagnostic,
   })
   .readonly();
-const seatCloseIssue = z
-  .strictObject({ ...scoped, kind: z.literal("private-state-seat-close"), diagnostic })
-  .readonly();
-export const cleanupIssueSchema = z.union([
-  decodeRetirementIssue,
-  verificationCleanupIssue,
-  worktreeLeakIssue,
-  seatCloseIssue,
-]);
 
 const settlementIssueSchema = z
   .strictObject({
     ...scoped,
     kind: z.literal("settlement-failed"),
+    severity: z.literal("required"),
     debtId: z.string().min(1).exactOptional(),
     diagnostic,
   })
   .readonly();
-const executionIssue = executionIssueSchema.unwrap().extend(scoped).readonly();
+const executionIssue = executionIssueSchema
+  .unwrap()
+  .extend({ ...scoped, severity: z.literal("required") })
+  .readonly();
 const localReconcileLeaves = reconcileIssueSchema.options.filter(
   (schema): schema is Exclude<typeof schema, z.ZodType<{ kind: "worktree-follow-retained" }>> =>
     schema.unwrap().shape.kind.value !== "worktree-follow-retained",
 );
-export const invocationIssueSchema = z.union([
-  ...reconcileIssueSchema.options,
-  ...cleanupIssueSchema.options,
-  executionIssue,
-  settlementIssueSchema,
-]);
+export const invocationIssueSchema = z
+  .union([...reconcileIssueSchema.options, resourceDiagnosticSchema, executionIssue, settlementIssueSchema])
+  .meta({ id: "contractIssue" });
 export type InvocationIssue = z.output<typeof invocationIssueSchema>;
-export type Issue = InvocationIssue;
 export const localIssueSchema = z.union([
   ...localReconcileLeaves,
-  decodeRetirementIssue,
-  seatCloseIssue,
+  resourceDiagnosticSchema,
   executionIssue,
   settlementIssueSchema,
 ]);
-export const completionIssueSchema = z.union([
-  ...reconcileIssueSchema.options,
-  decodeRetirementIssue,
-  seatCloseIssue,
-  executionIssue,
-  settlementIssueSchema,
-]);
-export const previewIssueSchema = decodeRetirementIssue.unwrap().omit({ contractId: true }).readonly();
-export const reconcilePublicIssueSchema = z.union([...localReconcileLeaves, seatCloseIssue, settlementIssueSchema]);
-
-/** An issue before its containing receipt supplies the owning Contract. */
-type LocalInvocationIssue = InvocationIssue;
+export const previewIssueSchema = resourceDiagnosticSchema.unwrap().omit({ contractId: true }).readonly();
+export const reconcilePublicIssueSchema = z
+  .union([...localReconcileLeaves, resourceDiagnosticSchema, settlementIssueSchema])
+  .meta({ id: "reconcileIssue" });
 
 export function invocationIssueIsFailure(issue: InvocationIssue): boolean {
-  switch (issue.kind) {
-    case "worktree-retained":
-    case "unsealed-bytes":
-    case "worktree-follow-retained":
-    case "verification-cleanup":
-    case "worktree-leak":
-    case "decode-channel-retirement":
-      return false;
-    default:
-      return true;
-  }
+  return issue.severity === "required";
 }
 
 /** Invocation classification consumes owner conclusions, never a fresh authority read. */
@@ -188,7 +151,7 @@ export function contractOutcomeDisposition(
     if (typeof check.admission === "object" && stopped(check.admission)) return "failed";
     if (check.verdict === "unsatisfied") unsatisfied = true;
   }
-  for (const stop of result.continuation?.stopped ?? []) if (stopped(stop)) return "failed";
+  for (const { stop } of result.continuation?.stopped ?? []) if (stopped(stop)) return "failed";
   return retry ? "retryable" : unsatisfied ? "unsatisfied" : "accepted";
 }
 
@@ -216,7 +179,7 @@ type ResetEffect = (Readonly<{ kind: "reset-owner-stopped" }> | Readonly<{ kind:
   Readonly<{ owner: ResetOwner; diagnostic: string; world: string }>;
 /** Internal accumulator carrier, not a published operation answer. */
 export type InvocationEffect =
-  | Readonly<{ kind: "issue"; contract: ContractId; issue: LocalInvocationIssue }>
+  | Readonly<{ kind: "issue"; contract: ContractId; issue: InvocationIssue }>
   | ResetEffect
   | Readonly<{ kind: "movement"; contract: ContractId; effect: MovementEffect }>;
 
@@ -416,7 +379,7 @@ export function invocationIssues(
     const owner = effect.contract === primary ? {} : { contractId: effect.contract };
     const issue = effect.issue;
     if (
-      (issue.kind === "verification-cleanup" || issue.kind === "worktree-leak") &&
+      issue.kind === "diagnostic" &&
       effect.contract === primary &&
       issue.snapshot !== undefined &&
       issue.snapshot === snapshot

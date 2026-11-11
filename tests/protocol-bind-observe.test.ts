@@ -147,7 +147,6 @@ async function boundObservedContract(repository: TestGitRepository) {
   const bound = accepted(
     await Keis.of(await cachedRepoAt(repository.path)).bind({
       markdown: contractBody(),
-      workspace: "worktree",
     }),
   );
   const id = present(await bound.kei.state()).id;
@@ -191,7 +190,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const bound = await bindOperation({
       scope: git,
       terms: terms([]),
-      workspace: "worktree",
     });
     assert.ok(bound.kind === "accepted", 'expected bound.kind = "accepted"');
     assert.equal(bound.facts.length > 0, true);
@@ -214,7 +212,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         scope: await repositoryAt(repository.path),
         terms: terms([]),
         targetSelection: { kind: "current-branch" },
-        workspace: "worktree",
       }),
       { kind: "refused", refusal: { kind: "unborn-head" } },
     );
@@ -476,7 +473,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
           title: "Moving target",
           terms: terms([]),
           targetSelection: { kind: "explicit", target: "refs/heads/release" },
-          workspace: "worktree",
         }),
     );
 
@@ -494,7 +490,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       scope: git,
       contractId: id,
       terms: terms([]),
-      workspace: "worktree",
     });
     assert.ok(first.kind === "accepted", 'expected first.kind = "accepted"');
     assert.equal(first.value.contractId, id);
@@ -503,7 +498,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       scope: git,
       contractId: id,
       terms: terms([]),
-      workspace: "worktree",
     });
     assert.deepEqual(collision, {
       kind: "refused",
@@ -534,7 +528,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
           scope: await productionRepositoryAt(repository.path, gitPath),
           title: "Different OID checkout movement",
           terms: terms([]),
-          workspace: "worktree",
         }),
     );
 
@@ -592,7 +585,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const bound = await bindOperation({
       scope: git,
       terms: terms([missing]),
-      workspace: "worktree",
     });
     assert.ok(bound.kind === "refused", 'expected bound.kind = "refused"');
     assert.equal(bound.refusal.kind, "unknown-prerequisite");
@@ -600,7 +592,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const existing = await bindOperation({
       scope: git,
       terms: terms([]),
-      workspace: "worktree",
     });
     assert.ok(existing.kind === "accepted", 'expected existing.kind = "accepted"');
     const existingState = (await observeContract(git, existing.value.contractId)).state;
@@ -622,20 +613,17 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const activeDependency = await bindOperation({
       scope: await repositoryAt(repository.path),
       terms: terms([]),
-      workspace: "worktree",
     });
     assert.ok(activeDependency.kind === "accepted", 'expected activeDependency.kind = "accepted"');
     const waiting = await bindOperation({
       scope: await repositoryAt(repository.path),
       terms: terms([activeDependency.value.contractId]),
-      workspace: "worktree",
     });
     assert.ok(waiting.kind === "accepted", 'expected waiting.kind = "accepted"');
 
     const claimedDependency = await bindOperation({
       scope: await repositoryAt(repository.path),
       terms: terms([]),
-      workspace: "worktree",
     });
     assert.ok(claimedDependency.kind === "accepted", 'expected claimedDependency.kind = "accepted"');
     const git = await repositoryAt(repository.path);
@@ -674,7 +662,6 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const immediatelyBound = await bindOperation({
       scope: git,
       terms: terms([claimedDependency.value.contractId]),
-      workspace: "worktree",
     });
     assert.ok(immediatelyBound.kind === "accepted", 'expected immediatelyBound.kind = "accepted"');
     assert.deepEqual(

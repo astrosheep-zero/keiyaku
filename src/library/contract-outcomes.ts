@@ -16,7 +16,6 @@ import {
   operationOutcomeSchema,
   invocationIssueSchema,
   localIssueSchema,
-  completionIssueSchema,
   previewIssueSchema,
 } from "./outcome.js";
 import { operationRefusalSchemas } from "./refusal.js";
@@ -70,7 +69,7 @@ export const amendOutcomeSchema = z.union([
   amendOutcomes.options[3],
 ]);
 export const deliverOutcomeSchema = z.union([
-  operationOutcomeSchema(deliveredValueSchema.unwrap().shape, operationRefusalSchemas.deliver, completionIssueSchema),
+  operationOutcomeSchema(deliveredValueSchema.unwrap().shape, operationRefusalSchemas.deliver, invocationIssueSchema),
   handoffOutcomeSchema,
 ]);
 const verifyOutcomes = operationOutcomeSchema(
@@ -82,7 +81,7 @@ export const verifyOutcomeSchema = z.union([verifyOutcomes.options[0], verifyOut
 export const reviewOutcomeSchema = operationOutcomeSchema(
   reviewFields,
   operationRefusalSchemas.review,
-  completionIssueSchema,
+  invocationIssueSchema,
 );
 const arcOutcomes = operationOutcomeSchema(
   { chapter: z.number().int().positive() },
@@ -130,7 +129,6 @@ export type AbandonOutcome = z.output<typeof abandonOutcomeSchema>;
 export type DeliveryPreviewOutcome = z.output<typeof deliveryPreviewOutcomeSchema>;
 export type MutationObservation = Readonly<{ observe?: ExecutionObserver }>;
 export type DeliveryPreviewInput = Readonly<{ includeDirty?: boolean; showDiff?: boolean; signal?: AbortSignal }>;
-export type BindResult = BindOutcome;
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
 export function retainAdmission<Value>(

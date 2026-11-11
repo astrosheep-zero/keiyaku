@@ -23,7 +23,7 @@ const checkCoordinate = {
   requirement: z.string().min(1),
   retainedPath: z.string().exactOptional(),
 };
-export const runtimeStopSchema = z.union([
+const runtimeStopSchema = z.union([
   z
     .strictObject({ kind: z.enum(["unknown-exit", "cancelled"]), diagnostic: z.string().min(1).exactOptional() })
     .readonly(),
@@ -41,15 +41,17 @@ export const runtimeStopSchema = z.union([
     })
     .readonly(),
 ]);
-export const checkAdmissionStopSchema = z.union([
-  z.strictObject({ kind: z.literal("refused"), reason: activeReasonSchema }).readonly(),
-  ...retrySchema.options,
-  z.strictObject({ kind: z.literal("cancelled") }).readonly(),
-]);
-export const verificationStopSchema = z.union([runtimeStopSchema, checkAdmissionStopSchema]);
+const checkAdmissionStopSchema = z
+  .union([
+    z.strictObject({ kind: z.literal("refused"), reason: activeReasonSchema }).readonly(),
+    ...retrySchema.options,
+    z.strictObject({ kind: z.literal("cancelled") }).readonly(),
+  ])
+  .meta({ id: "verificationAdmissionStop" });
+const verificationStopSchema = z.union([runtimeStopSchema, checkAdmissionStopSchema]);
 export type VerificationStop = z.output<typeof verificationStopSchema>;
-const admission = z.union([z.enum(["reused", "unrecorded"]), checkAdmissionStopSchema]).exactOptional();
-export const verificationCheckSchema = z.union([
+const admission = z.union([z.enum(["admitted", "reused", "unrecorded"]), checkAdmissionStopSchema]);
+const verificationCheckSchema = z.union([
   z
     .strictObject({ ...checkCoordinate, kind: z.literal("terminal"), verdict: z.literal("satisfied"), admission })
     .readonly(),
@@ -62,7 +64,7 @@ export const verificationCheckSchema = z.union([
       admission,
     })
     .readonly(),
-  ...runtimeStopSchema.options.map((schema) => schema.unwrap().extend(checkCoordinate).readonly()),
+  z.strictObject({ ...checkCoordinate, kind: z.literal("stopped"), stop: runtimeStopSchema }).readonly(),
 ]);
 
 export const verifyValueSchema = z
@@ -81,7 +83,7 @@ type VerificationCoordinate = Readonly<{
   retainedPath?: string;
 }>;
 
-export function compactVerificationStop(stop: z.output<typeof rawVerificationStopSchema>): VerificationStop {
+function compactVerificationStop(stop: z.output<typeof rawVerificationStopSchema>): VerificationStop {
   if ("refusal" in stop) return { kind: "refused", reason: compactReason(stop.refusal) };
   if ("retry" in stop) return compactRetry(stop.retry);
   switch (stop.failure) {
@@ -177,18 +179,18 @@ function checkReport(
     if (checked.stop === undefined) throw new Error("nonterminal verification requires a stop");
     const stop = compactVerificationStop(checked.stop);
     if (stop.kind === "refused" || stop.kind === "retry") throw new Error("nonterminal check requires a runtime stop");
-    return { ...fields, ...stop };
+    return { ...fields, kind: "stopped", stop };
   }
-  let admission: "reused" | "unrecorded" | z.output<typeof checkAdmissionStopSchema> | undefined;
+  let admission: z.output<typeof checkAdmissionStopSchema> | "admitted" | "reused" | "unrecorded";
   if (checked.reuse !== undefined) admission = "reused";
-  else if (checked.admission !== undefined) admission = undefined;
+  else if (checked.admission !== undefined) admission = "admitted";
   else if (checked.stop !== undefined) {
     const stop = compactVerificationStop(checked.stop);
     if (stop.kind === "refused" || stop.kind === "retry") admission = stop;
     else if (stop.kind === "cancelled") admission = { kind: "cancelled" };
     else throw new Error("terminal check admission can only refuse, retry or cancel");
   } else admission = "unrecorded";
-  const terminal = { ...fields, kind: "terminal" as const, ...(admission === undefined ? {} : { admission }) };
+  const terminal = { ...fields, kind: "terminal" as const, admission };
   if (checked.counts.verdict === "satisfied") return { ...terminal, verdict: "satisfied" };
   if (checked.counts.summary === undefined) throw new Error("unsatisfied terminal check requires its diagnosis");
   return { ...terminal, verdict: "unsatisfied", summary: checked.counts.summary };

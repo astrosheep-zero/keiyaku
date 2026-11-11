@@ -48,7 +48,6 @@ type BindOperationInput = Readonly<{
   terms: BindData["terms"];
   verification: VerificationDeclarationPreparation;
   targetSelection: BindTargetSelection;
-  workspace: "worktree";
   actor?: ActorId;
   decorateOffer?: CompanionDecorator;
   contractId: ContractId;
@@ -171,7 +170,7 @@ async function assembleBindInput(
           coordinates: {
             start: input.coordinates?.start ?? observed.start,
             ...(observed.target === undefined ? {} : { target: observed.target }),
-            workspace: input.workspace,
+            workspace: "worktree",
           },
           terms: input.terms,
         },

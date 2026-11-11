@@ -23,7 +23,6 @@ type BindAttemptInput = Readonly<{
   title: string;
   terms: Parameters<typeof bindOperation>[0]["terms"];
   verification: VerificationDeclarationPreparation;
-  workspace: "worktree";
   targetSelection: BindTargetSelection;
   coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
   source?: Parameters<typeof bindOperation>[0]["source"];
@@ -59,7 +58,6 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
     channel: input.channel,
     terms: input.terms,
     verification: input.verification,
-    workspace: input.workspace,
     targetSelection: input.targetSelection,
     ...(input.coordinates === undefined ? {} : { coordinates: input.coordinates }),
     ...(input.source === undefined ? {} : { source: input.source }),
@@ -155,7 +153,6 @@ export async function admitForkBindWithAppointment(
     title: document.title,
     terms,
     verification: documentDerivation(document).verification,
-    workspace: "worktree",
     targetSelection: forkTargetSelection(input.target, source.coordinates.target),
     coordinates: { start: source.coordinates.start },
     source: {
@@ -177,7 +174,6 @@ export async function prepareMarkdownBind(
     document: ReturnType<typeof decodeContractDocument>;
     gates: readonly import("../core/facts/types.js").Gate[];
     after: readonly ContractId[];
-    workspace: "worktree";
     targetSelection: BindTargetSelection;
     debt?: DebtId;
     progress?: ProtocolProgress;
@@ -192,7 +188,6 @@ export async function prepareMarkdownBind(
       title: input.document.title,
       terms,
       verification: documentDerivation(input.document).verification,
-      workspace: input.workspace,
       targetSelection: input.targetSelection,
       ...(input.debt === undefined ? {} : { debt: input.debt }),
       ...(input.actor === undefined ? {} : { actor: input.actor }),

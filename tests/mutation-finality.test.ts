@@ -57,11 +57,11 @@ test("mutation issues flatten independently owned reconciliation lags without pr
     ],
   });
   assert.deepEqual(outcome(progress).issues, [
-    { kind: "worktree-retained", path: "/tmp/terminal" },
-    { kind: "unsealed-bytes", path: "/tmp/scratch" },
-    { kind: "worktree-follow-retained", path: "/tmp/dependent", reason: "head-moved" },
-    { kind: "target-checkout-retained", path: "/tmp/main", target: "refs/heads/main", diagnostic: "dirty" },
-    { kind: "reconcile-failed", diagnostic: "busy" },
+    { kind: "worktree-retained", severity: "optional", path: "/tmp/terminal" },
+    { kind: "unsealed-bytes", severity: "optional", path: "/tmp/scratch" },
+    { kind: "worktree-follow-retained", severity: "optional", path: "/tmp/dependent", reason: "head-moved" },
+    { kind: "target-checkout-retained", severity: "required", path: "/tmp/main", target: "refs/heads/main", diagnostic: "dirty" },
+    { kind: "reconcile-failed", severity: "required", diagnostic: "busy" },
   ]);
 });
 
@@ -73,8 +73,8 @@ test("diagnosed worktree retention absorbs only its identical plain duplicate", 
   });
   progress.recordReconciliation(other, { lag: [{ kind: "worktree-retained", path: "/tmp/shared-worktree" }] });
   assert.deepEqual(outcome(progress).issues?.filter((issue) => issue.kind === "worktree-retained"), [
-    { kind: "worktree-retained", path: "/tmp/shared-worktree", diagnostic: "primary removal failure" },
-    { kind: "worktree-retained", contractId: other, path: "/tmp/shared-worktree" },
+    { kind: "worktree-retained", severity: "optional", path: "/tmp/shared-worktree", diagnostic: "primary removal failure" },
+    { kind: "worktree-retained", severity: "optional", contractId: other, path: "/tmp/shared-worktree" },
   ]);
 });
 
@@ -124,7 +124,7 @@ test("merged admissions concatenate every confirmed seat-close lag in order", ()
   progress.recordResidue(state.id, merged);
   assert.deepEqual(
     outcome(progress, undefined, "amend").issues?.flatMap((issue) =>
-      issue.kind === "private-state-seat-close" ? [issue.diagnostic] : []),
+      issue.kind === "diagnostic" && issue.severity === "required" ? [issue.diagnostic] : []),
     [first.diagnostic, second.diagnostic],
   );
   assert.deepEqual(
@@ -132,7 +132,7 @@ test("merged admissions concatenate every confirmed seat-close lag in order", ()
       .snapshot()
       .effects.filter((effect) => effect.kind === "issue")
       .map((effect) => effect.issue),
-    [first, second].map((failure) => ({ kind: "private-state-seat-close", diagnostic: failure.diagnostic })),
+    [first, second].map((failure) => ({ kind: "diagnostic", severity: "required", diagnostic: failure.diagnostic })),
   );
 });
 

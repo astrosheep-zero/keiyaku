@@ -35,7 +35,6 @@ async function bind(repository: ReturnType<typeof repositoryWithMain>, title: st
   const result = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: document(title, patterns),
-      workspace: "worktree",
       gates: [],
     }),
   );

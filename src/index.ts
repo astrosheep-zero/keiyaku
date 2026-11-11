@@ -201,7 +201,6 @@ export type {
   DeliveryPreviewInput,
   DeliveryPreviewOutcome,
   BindOutcome,
-  BindResult,
   DeliverOutcome,
   ReviewOutcome,
   VerifyOutcome,
@@ -229,7 +228,6 @@ export { nukeKeiyaku as nuke, nukeResultSchema } from "./library/nuke.js";
 export type { NukeInput, NukeResult } from "./library/nuke.js";
 export type {
   InvocationIssue,
-  Issue,
   ResetIssue,
   KeiyakuErrorCategory,
   PartialOutcomeEnvelope,
@@ -340,4 +338,3 @@ export {
 export type { WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";
 
 export { reconcileCompletionSchema, repoReconcileReportSchema, reconcileResultSchema } from "./library/reconcile.js";
-export type { ReconcileReport, TopologyEffect } from "./library/reconcile.js";

@@ -162,8 +162,9 @@ uses the one generic requirement judgment for completion. Package and CLI
 readers render adjudicated reports without parsing process output or creating a
 timeline, rework count, elapsed-time authority, or derived aggregate attestation.
 
-Each check retains its captured snapshot and stable requirement. Completion
-never executes a replacement check after reintegration. It judges the evidence
+Each check's evidence remains tied to the invocation's captured snapshot and its
+stable requirement. Completion never executes a replacement check after
+reintegration. It judges the evidence
 applicable to its final integration; an older verdict is never attached merely
 because it ran earlier in the invocation.
 

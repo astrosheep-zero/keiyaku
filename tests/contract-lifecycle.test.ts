@@ -31,7 +31,6 @@ async function bindAndCommit(options: {
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: document(options.verification),
-      workspace: "worktree",
       gates: options.gates,
       // These lifecycle fixtures are targetless unless a case names a target.
       target: options.target ?? null,
@@ -53,9 +52,11 @@ async function bindAndCommit(options: {
 
 function assertRuntimeStop(value: unknown): void {
   assert.ok(value !== null && typeof value === "object" && "kind" in value);
-  assert.equal(value.kind, "environment-hook-failure");
-  assert.ok("name" in value);
-  assert.equal(value.name, "reject-candidate");
+  assert.equal(value.kind, "stopped");
+  assert.ok("stop" in value && value.stop !== null && typeof value.stop === "object" && "kind" in value.stop);
+  assert.equal(value.stop.kind, "environment-hook-failure");
+  assert.ok("name" in value.stop);
+  assert.equal(value.stop.name, "reject-candidate");
 }
 
 describe("review actor testimony", () => {
@@ -150,7 +151,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const check = accepted(verified).checks[0];
     assert.ok(check?.kind === "terminal");
     assert.equal(check.verdict, "unsatisfied");
-    assert.equal(check.admission, undefined);
+    assert.equal(check.admission, "admitted");
     const delivered = accepted(await keiyaku.deliver());
     assert.ok(delivered.kind === "accepted", JSON.stringify(delivered));
     const placement = delivered.placement;
@@ -182,7 +183,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const check = verified.checks[0];
     assert.ok(check?.kind === "terminal");
     assert.equal(check.verdict, "satisfied");
-    assert.equal(check.admission, undefined);
+    assert.equal(check.admission, "admitted");
     assert.equal(present(await keiyaku.state()).attestations.length, 1);
     assert.equal(present(await keiyaku.state()).delivery, null);
     assert.equal(verified.placement?.kind, "delivery-missing");
@@ -272,7 +273,7 @@ describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {
     const firstCheck = first.checks[0];
     const repeatedCheck = repeated.checks[0];
     assert.ok(firstCheck?.kind === "terminal" && repeatedCheck?.kind === "terminal");
-    assert.equal(firstCheck.admission, undefined);
+    assert.equal(firstCheck.admission, "admitted");
     assert.equal(repeatedCheck.verdict, "unsatisfied");
     assert.equal(repeatedCheck.admission, "reused");
     const blocked = accepted(await verified.keiyaku.deliver());
@@ -368,7 +369,6 @@ async function targetedCheckoutBinding(files: Readonly<Record<string, string>>, 
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: document(),
-      workspace: "worktree",
       gates: ["reviewed"],
       target: "refs/heads/main",
     }),

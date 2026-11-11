@@ -73,7 +73,6 @@ const contract = { contract: optText };
 const actor = { actor: optText };
 const commonBind = {
   target: text.nullable().exactOptional(),
-  workspace: z.literal("worktree").exactOptional(),
   ...actor,
 };
 type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };

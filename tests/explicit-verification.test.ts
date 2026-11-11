@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keis, KeiyakuError, Repo } from "../src/index.js";
+import { Keis, KeiyakuError, Repo, classifyVerb, verifyOutcomeSchema } from "../src/index.js";
 import { gateReports } from "../src/core/facts/gate.js";
 import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
@@ -28,7 +28,7 @@ test("explicit checks accumulate on the prospective snapshot and unchanged deliv
   assert.equal(first.checks.length, 1);
   assert.equal(first.checks[0]?.index, 1);
   assert.equal(first.checks[0]?.kind, "terminal");
-  assert.equal(first.checks[0]?.admission, undefined);
+  assert.equal(first.checks[0]?.admission, "admitted");
   assert.equal(present(await contract.state()).attestations.length, 1);
   assert.equal(present(await contract.state()).delivery, null);
   const preview = await contract.previewDelivery();
@@ -86,6 +86,35 @@ test("each declaration executes in fresh scratch and terminal failure preserves 
   assert.ok(existsSync(scenes[1]!));
   await contract.abandon();
   assert.ok(scenes.every((scene) => !existsSync(scene)));
+});
+
+test("a later setup stop preserves an earlier red admission and outranks its verdict", async () => {
+  const { repository, contract, worktree } = await fixture(["exit 7", "true", "true"]);
+  const marker = join(repository.path, ".git", "setup-once");
+  mkdirSync(join(worktree, ".keiyaku"), { recursive: true });
+  writeFileSync(join(worktree, ".keiyaku", "settings.json"), JSON.stringify({ worktree: { create: [{
+    name: "prepare-once",
+    argv: [process.execPath, "-e", `const fs=require('node:fs'); const path=${JSON.stringify(marker)}; if(fs.existsSync(path)) process.exit(9); fs.writeFileSync(path,'prepared');`],
+    timeoutMs: 5_000,
+  }] } }));
+  repository.run(["-C", worktree, "add", ".keiyaku/settings.json"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "setup stops after the first declaration"]);
+  const result = accepted(await contract.verify());
+  assert.equal(result.checks.length, 2);
+  const [red, stopped] = result.checks;
+  assert.ok(red?.kind === "terminal" && red.verdict === "unsatisfied");
+  assert.equal(red.admission, "admitted");
+  assert.ok(stopped?.kind === "stopped" && stopped.stop.kind === "environment-hook-failure");
+  assert.equal(stopped.stop.name, "prepare-once");
+  assert.equal(stopped.index, 2);
+  assert.ok(result.checks.every((check) => check.retainedPath !== undefined && existsSync(check.retainedPath)));
+  const testimony = present(await contract.state()).attestations;
+  assert.equal(testimony.length, 1);
+  assert.equal(testimony[0]?.data.requirement, red.requirement);
+  assert.equal(classifyVerb("verify", {}, { kind: "returned", value: result }), "failed");
+  const wire = JSON.parse(JSON.stringify(result));
+  assert.deepEqual(verifyOutcomeSchema.parse(wire), wire);
+  await contract.abandon();
 });
 
 test("verify validates selection and dirty capture before executing or admitting", async () => {
@@ -199,7 +228,7 @@ test("cancellation after terminal execution retains the check and stops its admi
   assert.ok(result && "checks" in result && result.checks);
   assert.deepEqual(result.checks.map((check) => check.kind === "terminal"
     ? [check.index, check.verdict, check.admission] : [check.index, check.kind]),
-  [[1, "satisfied", undefined], [2, "satisfied", { kind: "cancelled" }]]);
+  [[1, "satisfied", "admitted"], [2, "satisfied", { kind: "cancelled" }]]);
   assert.equal(present(await contract.state()).attestations.length, 1);
   assert.equal(thirdExecuted, false);
   await contract.abandon();
@@ -212,12 +241,12 @@ test("changed failure testimony admits a new attestation while identical testimo
   accepted(await contract.amend({ markdown: `## Replace: Verification\n\n\`\`\`bash timeout=1m\ncat '${output}'; exit 1\n\`\`\`\n` }));
   accepted(await contract.deliver());
   const first = accepted(await contract.verify()).checks[0]!;
-  assert.ok(first.kind === "terminal" && first.admission === undefined);
+  assert.ok(first.kind === "terminal" && first.admission === "admitted");
   const firstState = present(await contract.state());
   writeFileSync(output, "second failure");
   const verified = accepted(await contract.verify());
   const second = verified.checks[0]!;
-  assert.ok(second.kind === "terminal" && second.verdict === "unsatisfied" && second.admission === undefined);
+  assert.ok(second.kind === "terminal" && second.verdict === "unsatisfied" && second.admission === "admitted");
   assert.match(second.summary, /second failure/u);
   const state = present(await contract.state());
   assert.equal(state.attestations.length, 2);

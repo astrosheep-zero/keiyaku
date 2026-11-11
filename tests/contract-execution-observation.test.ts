@@ -63,7 +63,7 @@ test("verify observers retain selected coordinates and cannot interrupt repeated
     ),
   );
   const check = first.checks[0];
-  assert.ok(check?.kind === "terminal" && check.admission === undefined);
+  assert.ok(check?.kind === "terminal" && check.admission === "admitted");
   const output = observed.filter((event) => event.kind === "verification" && event.observation.kind === "output");
   assert.ok(
     output.some(
@@ -112,7 +112,7 @@ test("concurrent selected checks admit independent requirements without losing e
   const checks = outcomes.flatMap((outcome) => accepted(outcome).checks);
   assert.equal(new Set(checks.map(({ requirement }) => requirement)).size, 2);
   assert.equal(new Set(outcomes.map((outcome) => accepted(outcome).snapshot)).size, 1);
-  assert.ok(checks.every((check) => check.kind === "terminal" && check.admission === undefined));
+  assert.ok(checks.every((check) => check.kind === "terminal" && check.admission === "admitted"));
   assert.equal(present(await contract.state()).attestations.length, 2);
   const delivered = accepted(await contract.deliver());
   assert.equal(delivered.placement?.kind, "placed");

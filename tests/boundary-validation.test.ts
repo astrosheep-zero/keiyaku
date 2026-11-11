@@ -32,7 +32,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   );
   await assert.rejects(
     () =>
-      withGitShim("exit 99", {}, () => Keis.of(repo).bind({ markdown: null, workspace: "worktree" } as never)),
+      withGitShim("exit 99", {}, () => Keis.of(repo).bind({ markdown: null } as never)),
     invalidInput,
   );
 
@@ -103,7 +103,6 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
         "",
       ].join("\n"),
       target: "bad\0target",
-      workspace: "worktree",
     });
   assert.ok(refused.kind === "refused");
   assert.deepEqual(refused.reason, { kind: "invalid-target" });
@@ -131,7 +130,6 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
       "C",
       "",
     ].join("\n"),
-    workspace: "worktree",
     gates: ["reviewed"],
   }));
   assert.ok(bound.kei instanceof Kei);

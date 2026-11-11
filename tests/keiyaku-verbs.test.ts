@@ -19,7 +19,7 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   const home = temporaryDirectory(t, "keiyaku-verbs-home-");
   const repository = repositoryWithMain();
   const facet = Keiyaku.at({ cwd: repository.path, environment: {}, home });
-  const bindInput = { markdown: document(), workspace: "worktree" as const, target: null, gates: ["reviewed"] };
+  const bindInput = { markdown: document(), target: null, gates: ["reviewed"] };
   assert.equal(Keiyaku.verbs.bind.input.safeParse(bindInput).success, true);
   const bound = accepted(await facet.bind(bindInput));
   assert.equal(classifyVerb("bind", bindInput, { kind: "returned", value: bound }), "accepted");

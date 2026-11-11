@@ -44,7 +44,7 @@ test("CLI and SDK share the one omitted-target default", async () => {
   assert.equal(cli.value.kind, "accepted", JSON.stringify(cli.value));
   assert.ok(cli.value.contractId);
   const sdk = accepted(
-    await Keis.of(await Repo.at({ path: raw.path })).bind({ markdown: document(), workspace: "worktree", gates: [] }),
+    await Keis.of(await Repo.at({ path: raw.path })).bind({ markdown: document(), gates: [] }),
   );
   const sdkState = present(await sdk.kei.state());
   assert.equal(sdkState.coordinates.target, "refs/heads/main");
@@ -131,7 +131,7 @@ test("an omitted target reads the explicit linked worktree coordinate, not the p
   const repo = await Repo.at({ path: linked });
   assert.equal(repo.root, raw.path);
   assert.equal(repo.cwd, await realpath(linked));
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), workspace: "worktree", gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
   assert.equal(present(await bound.kei.state()).coordinates.target, "refs/heads/feature");
   const cli = await cliBind(linked);
   assert.equal(cli.value.kind, "accepted", JSON.stringify(cli.value));

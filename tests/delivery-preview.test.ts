@@ -46,7 +46,6 @@ test("a stale document derivation is refused by the pure decision and restarts t
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: verificationBody(null),
-      workspace: "worktree",
     }),
   );
   const state = present(await bound.kei.state());
@@ -102,7 +101,6 @@ test("preview without Verification still returns an accepted ready candidate", a
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: verificationBody(null),
-      workspace: "worktree",
       // This preview fixture observes a deliberately targetless Contract.
       target: null,
     }),
@@ -140,7 +138,6 @@ test("ungated preview reports undeclared without executing declarations or admit
   const contract = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
       markdown: verificationBody(`touch '${marker}'\nexit 1`),
-      workspace: "worktree",
       gates: ["reviewed"],
     }),
   ).kei;
@@ -362,7 +359,7 @@ test("cancelling invocation dry-run preserves native abort and partial preview i
       assert.ok(error.outcome.preview.candidate);
       assert.equal(error.outcome.preview.target, undefined, "interrupted target observation is not a failed answer");
       assert.equal(error.outcome.admitted, undefined);
-      assert.ok((error.outcome.issues ?? []).every((effect) => effect.kind === "decode-channel-retirement"),
+      assert.ok((error.outcome.issues ?? []).every((effect) => effect.kind === "diagnostic" && effect.severity === "optional"),
         "only native decode-channel retirement diagnostics may accompany cancellation");
       const json = JSON.parse(JSON.stringify(projectFailure(error)));
       assert.equal(json.category, "aborted");

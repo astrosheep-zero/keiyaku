@@ -17,7 +17,7 @@ async function fixture() {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const make = async (name: string) => {
-    const bound = accepted(await Keis.of(repo).bind({ markdown: document().replace("# Library verbs", `# ${name}`), target: null, gates: ["reviewed"], workspace: "worktree" }));
+    const bound = accepted(await Keis.of(repo).bind({ markdown: document().replace("# Library verbs", `# ${name}`), target: null, gates: ["reviewed"] }));
     const handle = bound.kei;
     return { handle, id: present(await handle.state()).id };
   };

@@ -39,7 +39,7 @@ test("bind persists the canonical rendering, so amending one section leaves othe
   const repository = repositoryWithMain();
   const repo = await cachedRepoAt(repository.path);
   const raw = document().replace(/\n## Objective/u, "\n\n\n## Objective");
-  const bound = accepted(await Keis.of(repo).bind({ markdown: raw, workspace: "worktree" }));
+  const bound = accepted(await Keis.of(repo).bind({ markdown: raw }));
   const before = present(await bound.kei.state()).terms.document.bytes;
   assert.equal(before, renderContractBody(decodeContractDocument(document())));
   const amended = accepted(
@@ -82,7 +82,6 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
   const bound = accepted(
     await Keis.of(await cachedRepoAt(repository.path)).bind({
       markdown: document(),
-      workspace: "worktree",
       target: "refs/heads/main",
       gates: ["reviewed"],
     }),
@@ -139,7 +138,6 @@ async function conflictBoardFixture(count: number) {
     const contract = accepted(
       await Keis.of(repo).bind({
         markdown: document().replace("# Library verbs", `# Board handoff ${index}`),
-        workspace: "worktree",
         target: "refs/heads/main",
         gates: ["reviewed"],
       }),
@@ -464,7 +462,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const bound = accepted(
       await Keis.of(await cachedRepoAt(repository.path)).bind({
         markdown: document("exit 1"),
-        workspace: "worktree",
         gates: [],
       }),
     );

@@ -413,7 +413,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         ...outcomeOwner.allow,
         types("library/outcome.ts"),
-        runtime("library/outcome.ts", ["compactEffect", "reconcileLagScope"]),
+        runtime("library/outcome.ts", ["compactEffect", "reconcileLagScope", "reconcileLagIsFailure"]),
         runtime("protocol/completion.ts", ["compactPlacement"]),
         any("protocol/deliver.ts", ["compactDelivery", "DeliveryIdentity"]),
         types("protocol/completion.ts", ["CandidateCompletion", "CompletionEvidence"]),

@@ -19,7 +19,7 @@ test("public Keis.bind omitted target names the Repo worktree branch", async () 
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
 
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), workspace: "worktree", gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
   const state = present(await bound.kei.state());
   assert.equal(state.coordinates.target, "refs/heads/main");
   const json = JSON.parse(JSON.stringify(bound));
@@ -44,14 +44,13 @@ test("public Keis.bind target:null stays targetless and a string target stays li
   const repo = await Repo.at({ path: raw.path });
 
   const targetless = accepted(
-    await Keis.of(repo).bind({ markdown: document(), workspace: "worktree", target: null, gates: [] }),
+    await Keis.of(repo).bind({ markdown: document(), target: null, gates: [] }),
   );
   assert.equal(present(await targetless.kei.state()).coordinates.target, undefined);
 
   const explicit = accepted(
     await Keis.of(repo).bind({
       markdown: document(),
-      workspace: "worktree",
       target: "release",
       gates: [],
     }),
@@ -59,7 +58,7 @@ test("public Keis.bind target:null stays targetless and a string target stays li
   assert.equal(present(await explicit.kei.state()).coordinates.target, "refs/heads/release");
 
   await assert.rejects(
-    () => Keis.of(repo).bind({ markdown: document(), workspace: "worktree", target: 7 } as never),
+    () => Keis.of(repo).bind({ markdown: document(), target: 7 } as never),
     /target must be a string or null/u,
   );
 });

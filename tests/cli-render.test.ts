@@ -954,11 +954,13 @@ test("reconcile reports retained workspace and failed cleanup in human words", (
     issues: [
       {
         kind: "worktree-retained",
+        severity: "optional",
         path: "/tmp/wt",
         diagnostic: "scratch removal failed",
       },
       {
         kind: "worktree-hook-failed",
+        severity: "required",
         phase: "destroy",
         path: "/tmp/wt",
         name: "cleanup",
@@ -979,10 +981,10 @@ test("Verification receipts expose retained scratch and its cleanup diagnostic",
     contractId: contractId("kei/residue"),
     snapshot: snapshotId("verified-snapshot"),
     checks: [],
-    issues: [{ kind: "worktree-leak", path: "/tmp/scratch", diagnostic: "cleanup failed" }],
+    issues: [{ kind: "diagnostic", severity: "optional", path: "/tmp/scratch", diagnostic: "cleanup failed" }],
   });
   const text = renderAccepted("verify", result);
-  assert.match(text, /verification scratch kept at\s+\/tmp\/scratch/u);
+  assert.match(text, /residue\s+\/tmp\/scratch/u);
   assert.match(text, /cleanup failed/u);
 });
 
@@ -1148,6 +1150,7 @@ test("reconcile failure renders mark and facts", () => {
     issues: [
       {
         kind: "reconcile-failed",
+        severity: "required",
         diagnostic: "git failed",
       },
     ],
@@ -1160,6 +1163,7 @@ test("reconcile renders worktree hook failure as attention", () => {
     issues: [
       {
         kind: "worktree-hook-failed",
+        severity: "required",
         phase: "create",
         path: "/tmp/wt",
         name: "prepare",
@@ -1177,6 +1181,7 @@ test("reconcile renders target checkout retention as attention", () => {
     issues: [
       {
         kind: "target-checkout-retained",
+        severity: "required",
         target: "refs/heads/main",
         path: "/repo/file",
         diagnostic: "checkout failed",
@@ -1192,13 +1197,14 @@ test("reconcile renders private-state seat-close failure and diagnostic", () => 
   const result = reconcile({
     issues: [
       {
-        kind: "private-state-seat-close",
+        kind: "diagnostic",
+        severity: "required",
         diagnostic: "could not close publication seat",
       },
     ],
   });
   const text = renderReconcile(result);
-  assert.match(text, /! lag  private-state-seat-close-failed/u);
+  assert.match(text, /! stopped/u);
   assert.match(text, /  reason\n  could not close publication seat/u);
 });
 
@@ -1207,6 +1213,7 @@ test("reconcile hook payloads preserve lines and remain bounded", () => {
     issues: [
       {
         kind: "worktree-hook-failed",
+        severity: "required",
         phase: "destroy",
         path: "/tmp/wt",
         name: "cleanup",
@@ -1230,10 +1237,11 @@ test("reconcile renders contract-file and settlement failures", () => {
     issues: [
       {
         kind: "contract-file-failed",
+        severity: "required",
         path: ".keiyaku/KEIYAKU.md",
         diagnostic: "write failed",
       },
-      { kind: "settlement-failed", diagnostic: "debt failed" },
+      { kind: "settlement-failed", severity: "required", diagnostic: "debt failed" },
     ],
   });
   const text = renderReconcile(result);
@@ -1255,11 +1263,10 @@ test("Verification create action names are safe in text receipts", () => {
     snapshot: snapshotId("snapshot"),
     checks: [
       {
-        kind: "environment-hook-failure",
+        kind: "stopped",
         index: 1,
         requirement: "check-one",
-        name,
-        diagnostic: "exit 17",
+        stop: { kind: "environment-hook-failure", name, diagnostic: "exit 17" },
       },
     ],
   });
@@ -1269,7 +1276,7 @@ test("Verification create action names are safe in text receipts", () => {
   assert.doesNotMatch(text, /\nINJECT/u);
   assert.doesNotMatch(text, /\u001b/u);
   const check = result.checks[0];
-  assert.equal(check?.kind === "environment-hook-failure" ? check.name : undefined, name);
+  assert.equal(check?.kind === "stopped" && check.stop.kind === "environment-hook-failure" ? check.stop.name : undefined, name);
 });
 
 test("Verification cleanup action names are safe in text receipts", () => {
@@ -1281,7 +1288,8 @@ test("Verification cleanup action names are safe in text receipts", () => {
     checks: [],
     issues: [
       {
-        kind: "verification-cleanup",
+        kind: "diagnostic",
+        severity: "optional",
         name,
         diagnostic: "timeout",
       },
@@ -1292,14 +1300,15 @@ test("Verification cleanup action names are safe in text receipts", () => {
   assert.equal(text.includes('name "destroy\\rINJECT\\u001b[2J"'), true);
   assert.doesNotMatch(text, /\rINJECT/u);
   assert.doesNotMatch(text, /\u001b/u);
-  const cleanup = result.issues?.find((issue) => issue.kind === "verification-cleanup");
-  assert.equal(cleanup?.kind === "verification-cleanup" ? cleanup.name : undefined, name);
+  const cleanup = result.issues?.find((issue) => issue.kind === "diagnostic");
+  assert.equal(cleanup?.kind === "diagnostic" ? cleanup.name : undefined, name);
 });
 
 test("accepted results preserve reconciliation lag without telemetry", () => {
   const contract = contractId("kei/followed");
   const lag = {
     kind: "worktree-follow-retained" as const,
+    severity: "optional" as const,
     path: "/tmp/wt",
     reason: "head-moved" as const,
   };
@@ -1317,7 +1326,8 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
     worktreePath: "/tmp/wt",
     issues: [
       {
-        kind: "private-state-seat-close",
+        kind: "diagnostic",
+        severity: "required",
         diagnostic: "seat close failed after publication",
       },
     ],
@@ -1328,7 +1338,7 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
       "✓ bound  kei/bound",
       "  worktree  /tmp/wt",
       "  no target",
-      "! lag  private-state-seat-close-failed",
+      "! stopped",
       "  reason",
       "  seat close failed after publication",
       "",
@@ -1578,10 +1588,12 @@ test("continuation checkout stop keeps its exact block after the dependent conte
         stopped: [
           {
             contractId: dependent,
-            kind: "checkout-not-followable",
-            target: "refs/heads/main",
-            path: "/repo/checkout",
-            paths: ['quote"path.ts'],
+            stop: {
+              kind: "checkout-not-followable",
+              target: "refs/heads/main",
+              path: "/repo/checkout",
+              paths: ['quote"path.ts'],
+            },
           },
         ],
       },
@@ -1736,7 +1748,7 @@ test("a deliver receipt keeps candidate, integration and content identities dist
 test("a terminal receipt names a retained worktree in place of the obituary", () => {
   const retainedAbandon = contractId("kei/retained-abandon");
   const retained = abandonText(retainedAbandon, {
-    issues: [{ kind: "worktree-retained", path: "/repo/.keiyaku/wt/fridge" }],
+    issues: [{ kind: "worktree-retained", severity: "optional", path: "/repo/.keiyaku/wt/fridge" }],
   });
   assert.match(retained, /^! lag  worktree retained  \/repo\/\.keiyaku\/wt\/fridge$/mu);
   assert.doesNotMatch(retained, /retired/u);
@@ -1745,6 +1757,7 @@ test("a terminal receipt names a retained worktree in place of the obituary", ()
     issues: [
       {
         kind: "worktree-retained",
+        severity: "optional",
         path: "/tmp/wt",
       },
     ],
@@ -1758,6 +1771,7 @@ test("a terminal receipt names each checkout its own follow left behind", () => 
     placement: movement(),
     issues: ["/repo", "/repo/.keiyaku/wt/fridge"].map((path) => ({
       kind: "target-checkout-retained" as const,
+      severity: "required" as const,
       path,
       target: "refs/heads/main",
       diagnostic: "kept",
@@ -1772,6 +1786,7 @@ test("a terminal receipt names each checkout its own follow left behind", () => 
     issues: [
       {
         kind: "target-checkout-retained",
+        severity: "required",
         path: "/repo",
         target: "refs/heads/main",
         diagnostic: "kept",
@@ -1793,8 +1808,10 @@ test("deliver renders accepted and stopped continuations from the accepted resul
         stopped: [
           {
             contractId: stopped,
-            kind: "gates-unsatisfied",
-            unmet: [{ gate: gate("reviewed"), requirement: requirementId("gate:reviewed"), state: "missing" }],
+            stop: {
+              kind: "gates-unsatisfied",
+              unmet: [{ gate: gate("reviewed"), requirement: requirementId("gate:reviewed"), state: "missing" }],
+            },
           },
         ],
       },

@@ -11,6 +11,7 @@ import {
   Keis,
   classifyVerb,
   deliveryPreviewOutcomeSchema,
+  deliverOutcomeSchema,
 } from "../src/index.js";
 import { createKeiHandle } from "../src/library/kei.js";
 import { withOutcomeReceipt } from "../src/library/outcome.js";
@@ -35,7 +36,7 @@ test("a frozen native KeiyakuError keeps its identity, category and cause while 
     kind: "contract",
     contractId: contractId("kei/frozen-error"),
     effects: [effect, { kind: "worktree-removed", path: "/tmp/frozen-removal" }],
-    issues: [{ kind: "decode-channel-retirement", diagnostic: "frozen retirement" }],
+    issues: [{ kind: "diagnostic", severity: "optional", diagnostic: "frozen retirement" }],
   });
   assert.equal(returned, original);
   assert.equal(returned.category, "internal");
@@ -46,8 +47,33 @@ test("a frozen native KeiyakuError keeps its identity, category and cause while 
     contractId: contractId("kei/frozen-error"),
     admitted: [admitted],
     effects: [effect, { kind: "worktree-removed", path: "/tmp/frozen-removal" }],
-    issues: [{ kind: "decode-channel-retirement", diagnostic: "frozen retirement" }],
+    issues: [{ kind: "diagnostic", severity: "optional", diagnostic: "frozen retirement" }],
   });
+});
+
+test("accepted delivery preserves its identities and required retirement failure", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: ["reviewed"], target: "main" }));
+  commitCandidate(repository, bound.worktreePath);
+  let first = true;
+  const native = createKeiHandle(bound.contractId, {
+    ...scopeForRepo(repo),
+    onPrivateStateSeatClose: () => {
+      if (!first) return;
+      first = false;
+      throw new Error("publication retirement failed");
+    },
+  }, captureLocalContractComposition());
+  const result = accepted(await native.deliver());
+  assert.equal(result.contractId, bound.contractId);
+  assert.equal(result.placement?.kind, "gates-unsatisfied");
+  assert.ok(result.issues?.some((issue) => issue.kind === "diagnostic" &&
+    issue.severity === "required" && issue.diagnostic === "publication retirement failed"));
+  assert.equal(classifyVerb("deliver", {}, { kind: "returned", value: result }), "failed");
+  assert.equal(present(await bound.kei.state()).delivery?.data.integration.snapshot, result.integration);
+  const wire = JSON.parse(JSON.stringify(result));
+  assert.deepEqual(deliverOutcomeSchema.parse(wire), wire);
 });
 
 test("native delivery propagates lower programming and corruption failures after confirmed publication", async () => {
@@ -523,10 +549,11 @@ test("native bind retains its complete accepted value when its owned decode chan
       assert.ok(result.worktreePath);
       const healthy = Keis.of(await Repo.at({ path: repository.path })).kei({ id: result.contractId });
       assert.equal(present(await healthy.state()).id, result.contractId);
-      assert.ok((result.issues ?? []).some((effect) => effect.kind === "decode-channel-retirement"));
+      assert.ok((result.issues ?? []).some((effect) => effect.kind === "diagnostic" && effect.severity === "optional"));
+      assert.equal(classifyVerb("bind", { markdown: document() }, { kind: "returned", value: result }), "accepted");
       const preview = await result.kei.previewDelivery();
       assert.ok(preview.kind === "ready");
-      assert.ok(preview.issues?.some((issue) => issue.kind === "decode-channel-retirement"));
+      assert.ok(preview.issues?.some((issue) => issue.kind === "diagnostic" && issue.severity === "optional"));
       const previewWire = JSON.parse(JSON.stringify(preview));
       assert.deepEqual(deliveryPreviewOutcomeSchema.parse(previewWire), previewWire);
     },
@@ -562,9 +589,9 @@ test("a no-admission cleanup failure keeps its native cause without claiming del
         assert.ok(error.outcome?.kind === "contract");
         assert.equal(error.outcome.contractId, id);
         assert.equal(error.outcome.admitted, undefined);
-        const cleanup = error.outcome.issues?.filter((issue) => issue.kind === "decode-channel-retirement");
+        const cleanup = error.outcome.issues?.filter((issue) => issue.kind === "diagnostic");
         assert.equal(cleanup?.length, 1);
-        assert.ok(cleanup?.[0]?.kind === "decode-channel-retirement");
+        assert.ok(cleanup?.[0]?.kind === "diagnostic" && cleanup[0].severity === "optional");
         assert.match(cleanup[0].diagnostic, /did not close cleanly/u);
         assert.equal(classifyVerb("deliver", { contract: id }, { kind: "threw", error }), "failed");
         return true;
@@ -726,9 +753,9 @@ test("native delivery independently bounds stalled EOF retirement and proves the
         assert.equal(watchdogFired, false);
         assert.equal(controller.signal.aborted, false);
         assert.ok(finishedAt !== undefined && performance.now() - finishedAt < 10_000);
-        const cleanup = (result.issues ?? []).filter((effect) => effect.kind === "decode-channel-retirement");
+        const cleanup = (result.issues ?? []).filter((effect) => effect.kind === "diagnostic");
         assert.equal(cleanup.length, 1);
-        assert.ok(cleanup[0]?.kind === "decode-channel-retirement");
+        assert.ok(cleanup[0]?.kind === "diagnostic" && cleanup[0].severity === "optional");
         assert.match(cleanup[0].diagnostic, /retirement exceeded its EOF close bound/u);
         const pid = Number(readFileSync(marker, "utf8").trim());
         assert.ok(Number.isSafeInteger(pid) && pid > 0);

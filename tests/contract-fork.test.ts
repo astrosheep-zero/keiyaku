@@ -13,7 +13,6 @@ test("fork bind copies the source target and does not substitute the caller bran
   repository.run(["branch", "release"]);
   const source = accepted(await Keis.of(repo).bind({
     markdown: document().replace("# Library verbs", "# Targeted source"),
-    workspace: "worktree",
     target: "release",
     gates: [],
   }));
@@ -34,7 +33,6 @@ test("fork bind target:null clears the source target and a string overrides it",
   const source = accepted(
     await Keis.of(repo).bind({
       markdown: document().replace("# Library verbs", "# Targeted source"),
-      workspace: "worktree",
       target: "release",
       gates: [],
     }),
@@ -65,7 +63,6 @@ test("fork CLI reads no stdin and keeps its form disjoint", async () => {
   const repo = await Repo.at({ path: repository.path });
   const source = accepted(await Keis.of(repo).bind({
     markdown: document().replace("# Library verbs", "# CLI source"),
-    workspace: "worktree",
     gates: [],
   }));
   const sourceId = (present(await source.kei.state())).id;
@@ -100,7 +97,6 @@ test("fork admission rejects a source amend interleaved at the state transaction
   const repo = await Repo.at({ path: repository.path });
   const source = accepted(await Keis.of(repo).bind({
     markdown: document().replace("# Library verbs", "# Race source"),
-    workspace: "worktree",
     gates: [],
   }));
   const sourceState = present(await source.kei.state());

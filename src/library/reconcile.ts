@@ -30,13 +30,15 @@ import {
 export { reconcileLagScope, reconcileLagIsFailure, reconciliationLagSchema } from "./outcome.js";
 export type { ReconcileLagScope } from "./outcome.js";
 
-const reconcileEffectSchema = z.union([
-  meaningfulEffectSchema.options[0],
-  meaningfulEffectSchema.options[2],
-  meaningfulEffectSchema.options[3],
-  meaningfulEffectSchema.options[4],
-  meaningfulEffectSchema.options[5],
-]);
+const reconcileEffectSchema = z
+  .union([
+    meaningfulEffectSchema.options[0],
+    meaningfulEffectSchema.options[2],
+    meaningfulEffectSchema.options[3],
+    meaningfulEffectSchema.options[4],
+    meaningfulEffectSchema.options[5],
+  ])
+  .meta({ id: "reconcileEffect" });
 
 const contractReconcileSchema = z
   .strictObject({
@@ -63,10 +65,8 @@ export const repoReconcileReportSchema = z.union([
 ]);
 export const reconcileResultSchema = z.union([reconcileCompletionSchema, repoReconcileReportSchema]);
 export type MeaningfulEffect = z.output<typeof reconcileEffectSchema>;
-export type TopologyEffect = MeaningfulEffect;
 export type ReconcileCompletion = z.output<typeof reconcileCompletionSchema>;
 export type RepoContractReconcileReport = z.output<typeof contractReconcileSchema>;
-export type ReconcileReport = RepoContractReconcileReport;
 export type RepoReconcileReport = z.output<typeof repoReconcileReportSchema>;
 
 // Physical custody remains local to reconciliation and the invocation accumulator.
@@ -413,10 +413,7 @@ function compactReconcile(
   const issues = invocationIssues(own, contractId).map((issue) => {
     switch (issue.kind) {
       case "worktree-follow-retained":
-      case "verification-cleanup":
-      case "worktree-leak":
       case "execution-stopped":
-      case "decode-channel-retirement":
         throw new Error(`unreachable explicit reconcile issue: ${issue.kind}`);
       default:
         return issue;

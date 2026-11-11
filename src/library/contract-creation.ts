@@ -38,13 +38,12 @@ function bindInput(scope: RepositoryScope, input: BindInput, composition: LocalC
   const fields = validated(() => requireInput(input, "Keis.bind input"));
   const allowed =
     fields.forkOf === undefined
-      ? ["markdown", "debt", "target", "workspace", "actor", "after", "gates"]
-      : ["forkOf", "target", "workspace", "actor"];
+      ? ["markdown", "debt", "target", "actor", "after", "gates"]
+      : ["forkOf", "target", "actor"];
   requireInput(input, "Keis.bind input", allowed);
   return validated(() => {
     const values = fields;
     const forkOf = values.forkOf;
-    if ((values.workspace ?? "worktree") !== "worktree") throw new TypeError("workspace must be worktree");
     if (values.target !== undefined && values.target !== null && typeof values.target !== "string")
       throw new TypeError("target must be a string or null");
     const actor = actorOption(values.actor);
@@ -199,7 +198,6 @@ async function markdownBind(
     gates,
     progress: accumulator,
     after,
-    workspace: "worktree",
     targetSelection,
     ...(debt === undefined ? {} : { debt }),
     ...actor,
