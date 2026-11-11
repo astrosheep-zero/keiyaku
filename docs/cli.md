@@ -9,7 +9,13 @@ A standalone transport is another invocation edge, not another product surface.
 It publishes the facet's operations except for an edge-owned exclusion of
 administration, ledger diagnosis, and raw-document import, which remain available
 through the CLI. Discovery observes or establishes no World,
-and each call supplies explicit coordinates independently. Protocol validation,
+and each call supplies explicit coordinates independently. The transport composes
+those coordinates with the invocation owner's business declaration without an
+extra business envelope or another tool inventory. Coordinate names cannot
+shadow business intent, and composition preserves each input alternative's
+restrictions. Pure caller contradictions are refused before coordinate or product
+observation through the same owner validation used by native invocation.
+Protocol validation,
 connection lifetime, and cancellation remain at that edge; the facet and product
 owners retain their native admission, result, and retirement semantics. Text and
 outcome classification are shared with the CLI rather than re-decided by the

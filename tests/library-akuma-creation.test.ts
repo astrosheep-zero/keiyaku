@@ -227,7 +227,7 @@ test("prompt-free Akumas.spawn refuses wait options", async () => {
 
   await assert.rejects(
     () => Akumas.of(world).spawn({ akumaName: "worker", ...configured.placement, mode: "wait" }),
-    /wait and timeoutMs require body/u,
+    /body/u,
   );
 });
 

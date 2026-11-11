@@ -4,7 +4,7 @@ import type { PendingRequest, VerbRequest } from "../parse.js";
 import { CliUsageError, isBlankInput } from "../usage.js";
 import { readFile } from "node:fs/promises";
 import { canonicalDocument } from "../../akuma/schema.js";
-import { classifyVerb } from "../../library/keiyaku-verbs.js";
+import { classifyVerb, verbs } from "../../library/keiyaku-verbs.js";
 import type { AskProgress } from "../../akuma/akuma-selection-execution.js";
 import type { SpawnProgress } from "../../library/akuma-creation.js";
 import { ActivityDriver } from "../activity.js";
@@ -49,21 +49,19 @@ export async function acquireAkumaRequest(
     request.acquire.prompt === undefined ? undefined : await promptBody(request.name, request.acquire.prompt, runtime);
   if (request.name === "tell")
     return { name: "tell", input: { ...request.input, prompt: prompt! }, output: request.output };
-  return request.name === "ask"
-    ? {
-        name: "ask",
-        input: { ...request.input, schema: await schemaFromFile(request.acquire.schema), prompt: prompt! },
-        output: request.output,
-      }
-    : {
-        name: "spawn",
-        input: {
-          ...request.input,
-          ...(prompt === undefined ? {} : { prompt }),
-          ...(workdir === undefined ? {} : { workdir }),
-        },
-        output: request.output,
-      };
+  if (request.name === "ask")
+    return {
+      name: "ask",
+      input: { ...request.input, schema: await schemaFromFile(request.acquire.schema), prompt: prompt! },
+      output: request.output,
+    };
+  const parsed = verbs.spawn.input.safeParse({
+    ...request.input,
+    ...(prompt === undefined ? {} : { prompt }),
+    ...(workdir === undefined ? {} : { workdir }),
+  });
+  if (!parsed.success) throw new CliUsageError(parsed.error.message);
+  return { name: "spawn", input: parsed.data, output: request.output };
 }
 
 function emitAnswer(body: string, exact: boolean): void {

@@ -264,10 +264,12 @@ export class Keiyaku {
     }
   }
 
-  bind(input: BindInvocation) {
-    return this.#bind(input);
+  async bind(input: VerbInput<"bind">) {
+    const parsed = verbs.bind.input.safeParse(input);
+    if (!parsed.success) throw new KeiyakuUsageError(parsed.error.message);
+    return this.#bind(parsed.data);
   }
-  amend(input: Selected<AmendInvocation>) {
+  amend(input: VerbInput<"amend">) {
     return this.run("amend", input);
   }
   arc(input: Selected<ArcInput>) {
@@ -291,13 +293,13 @@ export class Keiyaku {
   reconcile(input: ReconcileInput = {}) {
     return this.run("reconcile", input);
   }
-  spawn(input: Omit<SpawnInvocation, "signal" | "observe">, run?: VerbRun<SpawnProgress>) {
+  spawn(input: VerbInput<"spawn">, run?: VerbRun<SpawnProgress>) {
     return this.run("spawn", input, run);
   }
   fork(input: ForkInvocation) {
     return this.run("fork", input);
   }
-  tell(input: Omit<TellInvocation, "signal" | "observe">, run?: VerbRun<AskProgress>) {
+  tell(input: VerbInput<"tell">, run?: VerbRun<AskProgress>) {
     return this.run("tell", input, run);
   }
   ask(input: Omit<AskInvocation, "signal" | "observe">, run?: VerbRun<AskProgress>) {
@@ -309,7 +311,7 @@ export class Keiyaku {
   wait(input: Omit<WaitInvocation, "signal">, run?: VerbRun) {
     return this.run("wait", input, run);
   }
-  history(input: HistoryInvocation) {
+  history(input: VerbInput<"history">) {
     return this.run("history", input);
   }
   report(input: Readonly<{ text: string }>, run?: VerbRun) {
@@ -327,11 +329,11 @@ export class Keiyaku {
   debtUpdate({ signal, ...input }: DebtUpdateInvocation) {
     return this.run("debt.update", input, signal === undefined ? {} : { signal });
   }
-  debtDoctor() {
-    return this.run("debt.doctor", {});
+  debtDoctor(input: VerbInput<"debt.doctor">) {
+    return this.run("debt.doctor", input);
   }
-  kanshi() {
-    return this.run("kanshi", {});
+  kanshi(input: VerbInput<"kanshi">) {
+    return this.run("kanshi", input);
   }
   status(input: VerbInput<"status">) {
     return this.run("status", input);
@@ -339,11 +341,11 @@ export class Keiyaku {
   region(input: VerbInput<"region"> = {}) {
     return this.run("region", input);
   }
-  whoami() {
-    return this.run("whoami", {});
+  whoami(input: VerbInput<"whoami">) {
+    return this.run("whoami", input);
   }
-  settings() {
-    return this.#settings();
+  settings(input: VerbInput<"settings">) {
+    return this.run("settings", input);
   }
   nuke(input: Readonly<{ confirm?: string }> = {}) {
     return this.run("nuke", input);
@@ -493,7 +495,6 @@ export class Keiyaku {
   }
 
   async #spawn({ prompt, contract, workdir, writableDirectories, observe, ...input }: SpawnInvocation) {
-    if (prompt !== undefined && prompt.trim() === "") throw new KeiyakuUsageError("spawn requires a nonblank prompt");
     const at = await this.#coordinates(contract === undefined ? "none" : "required");
     const cwd =
       workdir === undefined
@@ -571,7 +572,6 @@ export class Keiyaku {
   }
 
   async #tell({ prompt, ...input }: TellInvocation) {
-    if (prompt.trim() === "") throw new KeiyakuUsageError("tell requires a nonblank prompt");
     const { at, akumas } = await this.#akumas();
     const initiator = deliveryOwner(this.#input.environment);
     return await akumas.tell({
@@ -583,7 +583,6 @@ export class Keiyaku {
   }
 
   async #ask({ prompt, ...input }: AskInvocation) {
-    if (prompt.trim() === "") throw new KeiyakuUsageError("ask requires a nonblank prompt");
     const { at, akumas } = await this.#akumas();
     const initiator = deliveryOwner(this.#input.environment);
     return await akumas.ask({
@@ -601,8 +600,6 @@ export class Keiyaku {
 
   async #wait({ selectors, ...input }: WaitInvocation) {
     const contracts = selectors.filter((selector) => selector.startsWith("kei/"));
-    if (contracts.length > 0 && contracts.length !== selectors.length)
-      throw new KeiyakuUsageError("wait cannot mix Contract and Akuma selectors");
     if (contracts.length > 0) {
       const at = await this.#coordinates("required", true);
       if (at.repo === undefined) throw new KeiyakuUsageError("Contract wait requires a repository");
@@ -628,8 +625,6 @@ export class Keiyaku {
   async #report(input: Readonly<{ text: string; signal?: AbortSignal }>) {
     await this.#coordinates("none");
     const environment = this.#input.environment;
-    if (typeof input.text !== "string" || input.text.trim() === "")
-      throw new KeiyakuUsageError("report requires nonblank text");
     if (environment.KEIYAKU_ACTOR_ID === undefined || environment.KEIYAKU_ACTOR_WORLD === undefined)
       throw new KeiyakuUsageError("report requires explicit KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD");
     let caller;

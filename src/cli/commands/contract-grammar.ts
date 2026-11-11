@@ -102,15 +102,16 @@ function parseAmend(parts: ContractTokens): CliRequest {
   if (!parts.stdin && parts.flags.after === undefined && parts.flags["clear-after"] !== true && gates === undefined) {
     refuse("amend", "amend requires stdin or --after, --clear-after, or --gates");
   }
+  const input = {
+    ...(contract === undefined ? {} : { contract }),
+    ...(parts.flags["clear-after"] === true ? { after: [] } : parts.flags.after === undefined ? {} : { after }),
+    ...(gates === undefined ? {} : { gates }),
+    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
+  };
+  if (parts.stdin) return { name: "amend", input, acquire: { markdown: true }, output: parts.output };
   return {
     name: "amend",
-    input: {
-      ...(contract === undefined ? {} : { contract }),
-      ...(parts.flags["clear-after"] === true ? { after: [] } : parts.flags.after === undefined ? {} : { after }),
-      ...(gates === undefined ? {} : { gates }),
-      ...(parts.actor === undefined ? {} : { actor: parts.actor }),
-    },
-    ...(parts.stdin ? { acquire: { markdown: true as const } } : {}),
+    input: gates === undefined ? { ...input, after } : { ...input, gates },
     output: parts.output,
   };
 }

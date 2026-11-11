@@ -5,7 +5,8 @@ import { activityRowSchema, outcomeRowSchema, reportRowSchema } from "../akuma/p
 import { projectCurrentWork } from "../akuma/status-projection.js";
 import { withoutReportedChanges } from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { AkumaOwner } from "../akuma/akuma-owner.js";
+import { AkumaOwner, historyInputSchemas } from "../akuma/akuma-owner.js";
+import { durationSchema, validateTellObservation, validateAkumaInput } from "../akuma/call-input.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import {
   executeAskAkuma,
@@ -16,7 +17,6 @@ import {
 import { executeWaitAkuma } from "../akuma/akuma-wait.js";
 import type { LiveStatusObservation } from "../akuma/akuma-observe.js";
 import { type AkumaStatus } from "../akuma/akuma.js";
-import { parseExactHistorySelector } from "../akuma/identity.js";
 import { type ActivityHistory } from "../akuma/projection.js";
 import { canonicalDocument, type JsonSchemaDocument } from "../akuma/schema.js";
 import type {
@@ -71,6 +71,12 @@ export type AkumaHistoryInput = AkumaAddressInput &
     limit?: number;
     last?: boolean;
   }>;
+export const historySelectionSchemas = [
+  ...historyInputSchemas.map((branch) => branch.extend({ last: z.literal(false).exactOptional() })),
+  z.strictObject({ last: z.literal(true) }),
+] as const;
+const historySelectionSchema = z.union(historySelectionSchemas);
+
 const historyCommon = { akumaId: akumaIdSchema };
 export const akumaHistoryResultSchema = z.union([
   z
@@ -181,11 +187,7 @@ async function observeAkuma(
 }
 
 function timeout(value: unknown): number | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new TypeError("timeoutMs must be a nonnegative finite number");
-  }
-  return value;
+  return validateAkumaInput(durationSchema.optional(), value);
 }
 
 function signal(value: unknown): AbortSignal | undefined {
@@ -336,9 +338,7 @@ export async function tellAkuma(
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
     throw new TypeError("interrupt must be a boolean");
-  if (values.wait !== undefined && typeof values.wait !== "boolean") throw new TypeError("wait must be a boolean");
-  if (values.timeoutMs !== undefined && values.wait !== true) throw new TypeError("timeoutMs requires wait");
-  const timeoutMs = timeout(values.timeoutMs);
+  validateTellObservation(values);
   const callerSignal = signal(values.signal);
   const addressed = await addressAkuma(directAddress(values));
   const execution = {
@@ -347,7 +347,7 @@ export async function tellAkuma(
     id: addressed.id,
     body: input.body,
     ...(input.wait === undefined ? {} : { wait: input.wait }),
-    ...(timeoutMs === undefined ? {} : { timeoutMs }),
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
     ...(input.observe === undefined ? {} : { onObserve: input.observe }),
     outcomeObserved: outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
     ...(input.interrupt === true ? { interrupt: true } : {}),
@@ -377,15 +377,7 @@ function validateAskInput(
     }
   }
   if (typeof values.body !== "string") throw new TypeError("body must be a string");
-  if (
-    values.timeoutMs !== undefined &&
-    (typeof values.timeoutMs !== "number" ||
-      !Number.isFinite(values.timeoutMs) ||
-      !Number.isInteger(values.timeoutMs) ||
-      values.timeoutMs < 0)
-  ) {
-    throw new TypeError("timeoutMs must be a nonnegative finite millisecond duration");
-  }
+  timeout(values.timeoutMs);
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
     throw new TypeError("interrupt must be a boolean");
 }
@@ -423,25 +415,6 @@ export async function askAkuma(
   );
 }
 
-function validateHistoryInput(values: Record<string, unknown>): void {
-  for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "id", "before", "since", "limit", "last", "repo"].includes(key))
-      throw new TypeError(`Akumas.history input has unknown field: ${key}`);
-  }
-  if (values.last !== undefined && typeof values.last !== "boolean") throw new TypeError("last must be a boolean");
-  if (values.id !== undefined && (typeof values.id !== "string" || values.id.trim() === ""))
-    throw new TypeError("id must be a nonblank string");
-  if (values.id !== undefined && parseExactHistorySelector(values.id as string) === null)
-    throw new TypeError(
-      "id must be a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
-    );
-  if (
-    values.id !== undefined &&
-    (values.last === true || values.before !== undefined || values.since !== undefined || values.limit !== undefined)
-  )
-    throw new TypeError("id cannot be combined with last, before, since, or limit");
-}
-
 function historyPage(subject: HistorySubject, page: ActivityHistory): AkumaHistoryResult {
   return {
     kind: "akuma",
@@ -460,7 +433,8 @@ export async function historyAkuma(
   reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
 ): Promise<AkumaHistoryResult> {
   const values = requireInput(input, "Akumas.history input");
-  validateHistoryInput(values);
+  const { path: _path, akuma: _akuma, repo: _repo, ...selection } = values;
+  const { last, ...options } = validateAkumaInput(historySelectionSchema, selection);
   const addressed = await addressAkuma(directAddress(values));
   try {
     const handle = new AkumaOwner(
@@ -469,19 +443,14 @@ export async function historyAkuma(
       outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
     );
     const subject: HistorySubject = { akumaId: addressed.id };
-    if (values.last === true) {
+    if (last === true) {
       const answer = await handle.lastAnswer();
       return answer.kind === "answer"
         ? { kind: "akuma-last", ...subject, answer: answer.answer }
         : { kind: "akuma-no-answer", ...subject };
     }
-    const history = await handle.history({
-      ...(values.id === undefined ? {} : { id: values.id as string }),
-      ...(values.before === undefined ? {} : { before: values.before as number }),
-      ...(values.since === undefined ? {} : { since: values.since as number }),
-      ...(values.limit === undefined ? {} : { limit: values.limit as number }),
-    });
-    if (values.id !== undefined) {
+    const history = await handle.history(options);
+    if ("id" in options) {
       if ("kind" in history && history.kind === "exact-activity")
         return { kind: "akuma", ...subject, events: [history.row] };
       if ("kind" in history && history.kind === "exact") {

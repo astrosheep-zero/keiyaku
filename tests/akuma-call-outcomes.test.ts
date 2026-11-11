@@ -36,7 +36,7 @@ async function mcpCall(t: TestContext, cwd: string, name: "spawn" | "tell", inpu
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([adapter.server.connect(serverTransport), client.connect(clientTransport)]);
   const run = t.mock.method(Keiyaku.prototype, "run", async () => value);
-  try { return await client.callTool({ name, arguments: { input } }); }
+  try { return await client.callTool({ name, arguments: input }); }
   finally { run.mock.restore(); await client.close(); await adapter.close(); }
 }
 

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { durationSchema, validateAkumaInput, validateTellObservation } from "./call-input.js";
 import { akumaStatusSchema } from "./akuma.js";
 import type { AkumaCaller } from "./caller.js";
 import type { Settings } from "../settings.js";
@@ -99,11 +100,8 @@ class AkumaHandle {
     const unknown = Object.keys(options).find(
       (key) => !["interrupt", "initiator", "signal", "timeoutMs", "wait"].includes(key),
     );
-    if (options.timeoutMs !== undefined && (!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs < 0))
-      throw new TypeError("Akuma tell timeoutMs must be a nonnegative finite millisecond duration");
     if (unknown !== undefined) throw new TypeError(`Akuma tell options has unknown field: ${unknown}`);
-    if (options.wait !== undefined && typeof options.wait !== "boolean") throw new TypeError("wait must be a boolean");
-    if (options.timeoutMs !== undefined && options.wait !== true) throw new TypeError("timeoutMs requires wait");
+    validateTellObservation(options);
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     const input = {
@@ -132,11 +130,7 @@ class AkumaHandle {
       (key) => !["schema", "timeoutMs", "interrupt", "initiator", "signal"].includes(key),
     );
     if (unknown !== undefined) throw new TypeError(`Akuma ask options has unknown field: ${unknown}`);
-    if (
-      options.timeoutMs !== undefined &&
-      (!Number.isFinite(options.timeoutMs) || !Number.isInteger(options.timeoutMs) || options.timeoutMs < 0)
-    )
-      throw new TypeError("Akuma ask timeoutMs must be a nonnegative finite millisecond duration");
+    validateAkumaInput(durationSchema.optional(), options.timeoutMs);
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     const schema = canonicalDocument(options.schema);
@@ -199,9 +193,7 @@ class AkumaHandle {
     }
     const unknown = Object.keys(options).find((key) => key !== "timeoutMs" && key !== "signal");
     if (unknown !== undefined) throw new TypeError(`Akuma idle options has unknown field: ${unknown}`);
-    if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
-      throw new TypeError("Akuma idle timeoutMs must be a nonnegative finite millisecond duration");
-    }
+    validateAkumaInput(durationSchema.optional(), options.timeoutMs);
     const signal = signalOption(options.signal);
     return await withAkumaWaitDeferrals(
       { world: this.root, reportDiagnostic: this.reportDiagnostic },
@@ -224,9 +216,6 @@ class AkumaHandle {
     }
     const unknown = Object.keys(options).find((key) => !["before", "since", "limit"].includes(key));
     if (unknown !== undefined) throw new TypeError(`Akuma history options has unknown field: ${unknown}`);
-    if (options.before !== undefined && options.since !== undefined) {
-      throw new TypeError("Akuma history before and since are mutually exclusive");
-    }
     return (await this.owner(true).history({
       ...(options.before === undefined ? {} : { before: options.before }),
       ...(options.since === undefined ? {} : { since: options.since }),

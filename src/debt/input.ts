@@ -1,5 +1,6 @@
-import { type DebtPriority, type DebtState } from "./document.js";
-import { canonicalDebtId, type DebtId } from "./identity.js";
+import { z } from "zod";
+import { debtPrioritySchema, debtStateSchema } from "./document.js";
+import { canonicalDebtId, debtIdSchema, type DebtId } from "./identity.js";
 import type { AddDebtDocumentInput, AddDebtInput, UpdateDebtInput } from "./operations.js";
 
 export function record(value: unknown, label: string): Record<string, unknown> {
@@ -26,22 +27,6 @@ export function signal(value: unknown): AbortSignal | undefined {
   return value;
 }
 
-function strings(value: unknown, label: string): readonly string[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
-    throw new TypeError(`${label} must be an array of strings`);
-  }
-  return value;
-}
-
-export function debtIds(value: unknown, label: string): readonly DebtId[] | undefined {
-  const values = strings(value, label)?.map(debtId);
-  if (values !== undefined && new Set(values).size !== values.length) {
-    throw new TypeError(`${label} must not contain duplicates`);
-  }
-  return values;
-}
-
 export function text(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
@@ -56,58 +41,68 @@ export function actor(value: unknown): string | undefined {
   return value;
 }
 
-function priority(value: unknown): DebtPriority | undefined {
-  if (value === undefined) return undefined;
-  if (!Number.isInteger(value) || typeof value !== "number" || value < 0 || value > 3) {
-    throw new TypeError("priority must be 0..3");
-  }
-  return value as DebtPriority;
-}
+const optionalText = z.string().exactOptional();
+const titleSchema = z.string().regex(/\S/u, "title must be nonblank");
+const idsSchema = z
+  .array(debtIdSchema)
+  .readonly()
+  .refine((ids) => new Set(ids).size === ids.length, {
+    message: "Debt relationships must not contain duplicates",
+  })
+  .exactOptional();
+const debtFields = {
+  title: titleSchema.exactOptional(),
+  body: optionalText,
+  note: optionalText,
+  state: debtStateSchema.exactOptional(),
+  priority: debtPrioritySchema.exactOptional(),
+  needs: idsSchema,
+  parent: debtIdSchema.nullable().exactOptional(),
+  supersedes: idsSchema,
+  relates: idsSchema,
+};
+export const addDebtInputSchema = z.strictObject({
+  ...debtFields,
+  title: titleSchema,
+  actor: z.string().regex(/\S/u, "actor must be a nonblank string").exactOptional(),
+});
+const updateDebtFields = {
+  ...debtFields,
+  appendBody: optionalText,
+  addNeeds: idsSchema,
+  dropNeeds: idsSchema,
+  addSupersedes: idsSchema,
+  dropSupersedes: idsSchema,
+  addRelates: idsSchema,
+  dropRelates: idsSchema,
+};
+const patchFields = z
+  .strictObject(updateDebtFields)
+  .omit({ body: true, appendBody: true })
+  .refine(
+    (value) =>
+      Object.entries(value).some(([key, field]) => {
+        if (!Object.hasOwn(updateDebtFields, key) || field === undefined) return false;
+        if (key === "appendBody") return field !== "";
+        if (key.startsWith("add") || key.startsWith("drop")) return Array.isArray(field) && field.length > 0;
+        return true;
+      }),
+    { message: "update requires at least one field change" },
+  );
+export const updateDebtInputSchemas = [
+  patchFields.safeExtend({ body: optionalText }),
+  patchFields.safeExtend({ appendBody: optionalText }),
+];
+const signalSchema = z.instanceof(AbortSignal).exactOptional();
 
-function state(value: unknown): DebtState | undefined {
-  if (value === undefined) return undefined;
-  if (value !== "open" && value !== "done" && value !== "drop") {
-    throw new TypeError("state is invalid");
-  }
-  return value;
-}
-
-function nullableId(value: unknown): DebtId | null | undefined {
-  return value === undefined || value === null ? value : debtId(value);
+function parseDebtInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
+  const result = schema.safeParse(input);
+  if (!result.success) throw new TypeError(result.error.message);
+  return result.data;
 }
 
 export function addInput(input: unknown): AddDebtInput {
-  const value = record(input, "add input");
-  closed(
-    value,
-    ["title", "body", "note", "state", "priority", "needs", "parent", "supersedes", "relates", "actor", "signal"],
-    "add input",
-  );
-  const title = text(value.title, "title");
-  if (title === undefined || title.trim() === "") throw new TypeError("title is required");
-  const body = text(value.body, "body");
-  const note = text(value.note, "note");
-  const initialState = state(value.state);
-  const selectedPriority = priority(value.priority);
-  const needs = debtIds(value.needs, "needs");
-  const parent = nullableId(value.parent);
-  const supersedes = debtIds(value.supersedes, "supersedes");
-  const relates = debtIds(value.relates, "relates");
-  const createdBy = actor(value.actor);
-  const abort = signal(value.signal);
-  return {
-    title,
-    ...(body === undefined ? {} : { body }),
-    ...(note === undefined ? {} : { note }),
-    ...(initialState === undefined ? {} : { state: initialState }),
-    ...(selectedPriority === undefined ? {} : { priority: selectedPriority }),
-    ...(needs === undefined ? {} : { needs }),
-    ...(parent === undefined ? {} : { parent }),
-    ...(supersedes === undefined ? {} : { supersedes }),
-    ...(relates === undefined ? {} : { relates }),
-    ...(createdBy === undefined ? {} : { actor: createdBy }),
-    ...(abort === undefined ? {} : { signal: abort }),
-  };
+  return parseDebtInput(addDebtInputSchema.extend({ signal: signalSchema }), input);
 }
 
 export function addDocumentInput(input: unknown): AddDebtDocumentInput {
@@ -125,67 +120,8 @@ export function addDocumentInput(input: unknown): AddDebtDocumentInput {
 }
 
 export function updateInput(input: unknown): UpdateDebtInput {
-  const value = record(input, "update input");
-  closed(
-    value,
-    [
-      "title",
-      "body",
-      "appendBody",
-      "note",
-      "state",
-      "priority",
-      "needs",
-      "addNeeds",
-      "dropNeeds",
-      "parent",
-      "supersedes",
-      "addSupersedes",
-      "dropSupersedes",
-      "relates",
-      "addRelates",
-      "dropRelates",
-      "signal",
-    ],
-    "update input",
+  return parseDebtInput(
+    z.union(updateDebtInputSchemas.map((branch) => branch.safeExtend({ signal: signalSchema }))),
+    input,
   );
-  if (value.body !== undefined && value.appendBody !== undefined) {
-    throw new TypeError("body and appendBody are mutually exclusive");
-  }
-  const result: Record<string, unknown> = {};
-  const title = text(value.title, "title");
-  if (title !== undefined) {
-    if (title.trim().length === 0) throw new TypeError("title must be nonblank");
-    result.title = title;
-  }
-  const body = text(value.body, "body");
-  if (body !== undefined) result.body = body;
-  const appendBody = text(value.appendBody, "appendBody");
-  if (appendBody !== undefined) result.appendBody = appendBody;
-  const note = text(value.note, "note");
-  if (note !== undefined) result.note = note;
-  const selectedState = state(value.state);
-  if (selectedState !== undefined) result.state = selectedState;
-  const selectedPriority = priority(value.priority);
-  if (selectedPriority !== undefined) result.priority = selectedPriority;
-  for (const [key, ids] of [
-    ["needs", debtIds(value.needs, "needs")],
-    ["addNeeds", debtIds(value.addNeeds, "addNeeds")],
-    ["dropNeeds", debtIds(value.dropNeeds, "dropNeeds")],
-    ["supersedes", debtIds(value.supersedes, "supersedes")],
-    ["addSupersedes", debtIds(value.addSupersedes, "addSupersedes")],
-    ["dropSupersedes", debtIds(value.dropSupersedes, "dropSupersedes")],
-    ["relates", debtIds(value.relates, "relates")],
-    ["addRelates", debtIds(value.addRelates, "addRelates")],
-    ["dropRelates", debtIds(value.dropRelates, "dropRelates")],
-  ] as const)
-    if (ids !== undefined) result[key] = ids;
-  const parent = nullableId(value.parent);
-  if (parent !== undefined) result.parent = parent;
-  const abort = signal(value.signal);
-  if (abort !== undefined) result.signal = abort;
-  if (Object.keys(result).filter((key) => key !== "signal").length === 0) {
-    throw new TypeError("update requires at least one field change");
-  }
-  return result as UpdateDebtInput;
 }

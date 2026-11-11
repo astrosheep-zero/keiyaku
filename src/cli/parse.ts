@@ -146,7 +146,7 @@ export type VerbRequest<K extends CliVerb = CliVerb> = {
 type DocumentBind = Extract<VerbInput<"bind">, { markdown: string }>;
 type Acquisitions = {
   bind: { input: Omit<DocumentBind, "markdown">; acquire: { markdown: true } };
-  amend: { input: VerbInput<"amend">; acquire: { markdown: true } };
+  amend: { input: Omit<VerbInput<"amend">, "markdown">; acquire: { markdown: true } };
   arc: { input: Omit<VerbInput<"arc">, "markdown">; acquire: { markdown: true } };
   review: { input: Omit<VerbInput<"review">, "summary">; acquire: { summary: true } };
   spawn: {

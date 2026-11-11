@@ -2,6 +2,9 @@
 import { z } from "zod";
 export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
 import { akumaCallerSchema } from "../akuma/caller.js";
+import { durationSchema, tellObservationSchemas } from "../akuma/call-input.js";
+import { addDebtInputSchema, updateDebtInputSchemas } from "../debt/input.js";
+import { amendInputSchemas } from "./input.js";
 import { askProgressSchema } from "../akuma/akuma-selection-execution.js";
 import { akumaReportResultSchema } from "../akuma/akuma-instance.js";
 import { akumaIdSchema } from "../akuma/identity.js";
@@ -27,6 +30,7 @@ import { settingsSchema } from "../settings.js";
 import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
 import {
+  spawnModeSchemas,
   spawnProgressSchema,
   spawnResultSchema,
   spawnNormalResultSchema,
@@ -47,9 +51,13 @@ import {
 } from "./contract-outcomes.js";
 import { contractHistorySchema } from "./contract-types.js";
 import { guidanceSchema, guidanceNormalSchema } from "./kei.js";
-import { contractWaitResultSchema, contractWaitNormalResultSchema } from "./contract-wait.js";
+import {
+  contractWaitDurationSchema,
+  contractWaitResultSchema,
+  contractWaitNormalResultSchema,
+} from "./contract-wait.js";
 import { reconcileResultSchema } from "./reconcile.js";
-import { akumaHistoryResultSchema } from "./selection.js";
+import { akumaHistoryResultSchema, historySelectionSchemas } from "./selection.js";
 import { whoamiFactsSchema } from "./keiyaku-identity.js";
 import { resetOutcomeSchema } from "./outcome.js";
 import {
@@ -63,7 +71,6 @@ import {
   debtListSchema,
   debtUpdateResultSchema,
 } from "../debt/index.js";
-import { debtPrioritySchema, debtStateSchema } from "../debt/document.js";
 import { debtIdSchema } from "../debt/identity.js";
 
 export type VerbEntry = Readonly<{
@@ -82,7 +89,7 @@ const optText = text.exactOptional();
 const optBool = z.boolean().exactOptional();
 const strings = z.array(text).readonly();
 const positive = z.number().int().positive();
-const timeout = z.number().finite().nonnegative().exactOptional();
+const timeout = durationSchema.exactOptional();
 const contract = { contract: optText };
 const actor = { actor: optText };
 const commonBind = {
@@ -122,12 +129,15 @@ const lsInputSchema = z.union([
     })
     .readonly(),
 ]);
-const debtRelations = {
-  needs: z.array(debtIdSchema).readonly().exactOptional(),
-  parent: debtIdSchema.nullable().exactOptional(),
-  supersedes: z.array(debtIdSchema).readonly().exactOptional(),
-  relates: z.array(debtIdSchema).readonly().exactOptional(),
+const spawnFields = {
+  akumaName: nonblank,
+  ...contract,
+  workdir: optText,
+  alias: optText,
+  writableDirectories: strings.exactOptional(),
+  bare: optBool,
 };
+const tellFields = { akuma: text, prompt: nonblank, interrupt: optBool };
 export const verbs = Object.freeze({
   bind: {
     description: "Bind Contract terms or fork existing terms.",
@@ -149,15 +159,7 @@ export const verbs = Object.freeze({
   },
   amend: {
     description: "Amend Contract terms.",
-    input: z
-      .strictObject({
-        ...contract,
-        markdown: optText,
-        after: strings.exactOptional(),
-        gates: strings.exactOptional(),
-        ...actor,
-      })
-      .readonly(),
+    input: z.union(amendInputSchemas.map((branch) => branch.extend(contract).readonly())),
     output: amendOutcomeSchema,
     effect: "write",
   },
@@ -229,19 +231,16 @@ export const verbs = Object.freeze({
   },
   spawn: {
     description: "Spawn an Akuma.",
-    input: z
-      .strictObject({
-        akumaName: text,
-        prompt: optText,
-        ...contract,
-        workdir: optText,
-        alias: optText,
-        mode: z.enum(["wait", "detach"]).exactOptional(),
-        timeoutMs: timeout,
-        writableDirectories: strings.exactOptional(),
-        bare: optBool,
-      })
-      .readonly(),
+    input: z.union([
+      spawnModeSchemas[0]
+        .omit({ body: true })
+        .extend({ ...spawnFields, prompt: nonblank })
+        .readonly(),
+      spawnModeSchemas[1]
+        .omit({ body: true })
+        .extend({ ...spawnFields, prompt: nonblank.exactOptional() })
+        .readonly(),
+    ]),
     output: spawnResultSchema,
     normal: spawnNormalResultSchema,
     progress: spawnProgressSchema,
@@ -256,9 +255,7 @@ export const verbs = Object.freeze({
   },
   tell: {
     description: "Send an Akuma a prompt.",
-    input: z
-      .strictObject({ akuma: text, prompt: text, interrupt: optBool, wait: optBool, timeoutMs: timeout })
-      .readonly(),
+    input: z.union(tellObservationSchemas.map((branch) => branch.extend(tellFields).readonly())),
     output: akumaTellResultSchema,
     progress: askProgressSchema,
     effect: "write",
@@ -268,7 +265,7 @@ export const verbs = Object.freeze({
     input: z
       .strictObject({
         akuma: text,
-        prompt: text,
+        prompt: nonblank,
         timeoutMs: timeout,
         schema: jsonDocument,
         interrupt: optBool,
@@ -292,7 +289,7 @@ export const verbs = Object.freeze({
         .strictObject({
           selectors: z.array(contractSelector).min(1).readonly(),
           completion: z.enum(["any", "all"]).exactOptional(),
-          timeoutMs: timeout,
+          timeoutMs: contractWaitDurationSchema.exactOptional(),
         })
         .readonly(),
       z
@@ -311,16 +308,7 @@ export const verbs = Object.freeze({
     description: "Read Contract or Akuma history.",
     input: z.union([
       z.strictObject({ selector: contractSelector, full: optBool }).readonly(),
-      z
-        .strictObject({
-          selector: akumaSelector,
-          id: optText,
-          before: positive.exactOptional(),
-          since: positive.exactOptional(),
-          limit: positive.exactOptional(),
-          last: optBool,
-        })
-        .readonly(),
+      ...historySelectionSchemas.map((branch) => branch.extend({ selector: akumaSelector }).readonly()),
     ]),
     output: z.union([contractHistorySchema, akumaHistoryResultSchema]),
     effect: "read",
@@ -381,17 +369,7 @@ export const verbs = Object.freeze({
   },
   "debt.add": {
     description: "Create a Debt.",
-    input: z
-      .strictObject({
-        title: text,
-        body: optText,
-        note: optText,
-        state: debtStateSchema.exactOptional(),
-        priority: debtPrioritySchema.exactOptional(),
-        ...debtRelations,
-        ...actor,
-      })
-      .readonly(),
+    input: addDebtInputSchema.readonly(),
     output: debtMutationResultSchema,
     normal: debtMutationNormalResultSchema,
     effect: "write",
@@ -404,24 +382,7 @@ export const verbs = Object.freeze({
   },
   "debt.update": {
     description: "Update a Debt.",
-    input: z
-      .strictObject({
-        id: debtIdSchema,
-        title: optText,
-        body: optText,
-        appendBody: optText,
-        note: optText,
-        state: debtStateSchema.exactOptional(),
-        priority: debtPrioritySchema.exactOptional(),
-        ...debtRelations,
-        addNeeds: z.array(debtIdSchema).readonly().exactOptional(),
-        dropNeeds: z.array(debtIdSchema).readonly().exactOptional(),
-        addSupersedes: z.array(debtIdSchema).readonly().exactOptional(),
-        dropSupersedes: z.array(debtIdSchema).readonly().exactOptional(),
-        addRelates: z.array(debtIdSchema).readonly().exactOptional(),
-        dropRelates: z.array(debtIdSchema).readonly().exactOptional(),
-      })
-      .readonly(),
+    input: z.union(updateDebtInputSchemas.map((branch) => branch.safeExtend({ id: debtIdSchema }).readonly())),
     output: debtUpdateResultSchema,
     effect: "write",
   },

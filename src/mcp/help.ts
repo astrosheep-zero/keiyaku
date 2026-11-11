@@ -2,8 +2,10 @@ export const MCP_HELP = `keiyaku-mcp — standalone Keiyaku MCP server over stdi
 
 usage  keiyaku-mcp [--help]
 
-Each tool accepts { cwd?, repo?, input }. Input is required, even when empty.
-Relative cwd is resolved from the server startup directory. Tool results share
+Each tool accepts { cwd?, repo?, ...businessFields } as one object.
+Kanshi has no business fields; status requires id. Unknown fields and incompatible
+options are usage errors. Relative cwd is resolved from the server startup
+directory; repo independently selects the Contract repository. Tool results share
 Keiyaku's CLI text. Tools publish native JSON facts when their result selects a
 next call; other tools return text only. Errors return text led by their
 classification. An unsatisfied verification verdict is a normal answer.

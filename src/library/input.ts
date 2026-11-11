@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
 import { validated } from "./outcome.js";
@@ -7,6 +8,19 @@ import { actorId, type ActorId, type ContractId, type ContractTerms, type Gate }
 import { canonicalDebtId, type DebtId } from "../debt/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";
 import { gateRequirements, prepareVerificationDeclaration } from "../verification/declaration.js";
+
+const amendFields = z.strictObject({
+  markdown: z.string().exactOptional(),
+  after: z.array(z.string()).readonly().exactOptional(),
+  gates: z.array(z.string()).readonly().exactOptional(),
+  actor: z.string().regex(/\S/u, "actor must be nonblank").exactOptional(),
+});
+export const amendInputSchemas = [
+  amendFields.required({ markdown: true }),
+  amendFields.required({ after: true }),
+  amendFields.required({ gates: true }),
+] as const;
+export const amendInputSchema = z.union(amendInputSchemas);
 
 export function actorOption(actor: unknown): Readonly<{ actor?: ActorId }> {
   if (actor === undefined) return {};

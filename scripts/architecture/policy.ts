@@ -357,6 +357,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         ...libraryOwner.allow.filter((rule) => rule.target !== "library/**"),
         any("library/keiyaku-classify.ts"),
+        any("library/input.ts", ["amendInputSchemas"]),
         any("library/contract-outcomes.ts"),
         any("library/contract-types.ts"),
         any("library/kei.ts", ["Guidance", "guidanceSchema", "guidanceNormalSchema"]),
@@ -366,6 +367,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/keiyaku-identity.ts"),
         any("library/outcome.ts"),
         any("library/akuma-creation.ts", [
+          "spawnModeSchemas",
           "spawnProgressSchema",
           "spawnResultSchema",
           "spawnNormalResultSchema",

@@ -35,6 +35,7 @@ import {
 import {
   optionalBoolean,
   requireInput,
+  amendInputSchema,
   actorOption,
   contractTerms,
   documentDerivation,
@@ -244,7 +245,7 @@ export class Kei {
 
   private amendInput(input: AmendInput) {
     return validated(() => {
-      const values = requireInput(input, "amend input", ["actor", "markdown", "gates", "after"]);
+      const values = amendInputSchema.parse(input);
       const derived = values.gates === undefined ? undefined : derivedGates(this.composition, gateNames(values.gates));
       return {
         markdown: values.markdown === undefined ? undefined : requireMarkdown(values.markdown),
@@ -258,10 +259,6 @@ export class Kei {
     const { markdown, gates, prerequisites, actor } = this.amendInput(input);
     const hooks = derivedHooks(this.composition);
     const amendmentPlan = markdown === undefined ? undefined : validated(() => prepareAmendDocument(markdown));
-    validated(() => {
-      if (markdown === undefined && gates === undefined && prerequisites === undefined)
-        throw new TypeError("amend requires markdown, after, or gates");
-    });
     let changedSections: ReadonlySet<string> | undefined;
     return await this.local("amend", async (accumulator, channel, scope): Promise<AmendOutcome> => {
       const admission = await amendOperation({

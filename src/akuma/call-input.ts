@@ -1,5 +1,31 @@
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
+import { z } from "zod";
+
+const durationDiagnostic = "timeoutMs must be a nonnegative finite millisecond duration";
+export const durationSchema = z
+  .number({ error: durationDiagnostic })
+  .nonnegative({ error: durationDiagnostic })
+  .multipleOf(1, { error: durationDiagnostic });
+export const tellObservationSchemas = [
+  z.strictObject({ wait: z.literal(true), timeoutMs: durationSchema.max(Number.MAX_SAFE_INTEGER).exactOptional() }),
+  z.strictObject({ wait: z.literal(false).exactOptional() }),
+] as const;
+const tellObservationSchema = z.union(tellObservationSchemas);
+
+export function validateTellObservation(input: Readonly<{ wait?: unknown; timeoutMs?: unknown }>): void {
+  validateAkumaInput(tellObservationSchema, {
+    ...(input.wait === undefined ? {} : { wait: input.wait }),
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+  });
+}
+
+/** Native input errors stay caller errors; invocation translates its own schema errors to usage. */
+export function validateAkumaInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) throw new TypeError(parsed.error.message);
+  return parsed.data;
+}
 
 export function bareOption(value: unknown): boolean | undefined {
   if (value !== undefined && typeof value !== "boolean") throw new TypeError("bare must be a boolean");

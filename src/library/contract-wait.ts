@@ -8,6 +8,12 @@ import type { RepositoryScope } from "../protocol/operations.js";
 import { optionalSignal, requireInput } from "./input.js";
 import { readContractValue } from "./outcome.js";
 
+const waitDurationDiagnostic = "timeoutMs must be a nonnegative finite integer millisecond duration";
+export const contractWaitDurationSchema = z
+  .number({ error: waitDurationDiagnostic })
+  .nonnegative({ error: waitDurationDiagnostic })
+  .multipleOf(1, { error: waitDurationDiagnostic });
+
 export type ContractWaitOptions = Readonly<{ completion?: "any" | "all"; timeoutMs?: number; signal?: AbortSignal }>;
 export type ContractWaitInput = ContractWaitOptions & Readonly<{ contracts: readonly string[] }>;
 
@@ -90,9 +96,9 @@ function validateContractWaitValues(values: Record<string, unknown>, scope: Repo
   ];
   const completion = values.completion === undefined ? "any" : values.completion;
   if (completion !== "any" && completion !== "all") throw new TypeError("completion must be any or all");
-  const timeoutMs = values.timeoutMs;
-  if (timeoutMs !== undefined && (typeof timeoutMs !== "number" || !Number.isFinite(timeoutMs) || timeoutMs < 0))
-    throw new TypeError("timeoutMs must be a nonnegative finite number");
+  const parsedTimeout = contractWaitDurationSchema.optional().safeParse(values.timeoutMs);
+  if (!parsedTimeout.success) throw new TypeError(parsedTimeout.error.message);
+  const timeoutMs = parsedTimeout.data;
   const signal = optionalSignal(values.signal);
   return {
     scope,

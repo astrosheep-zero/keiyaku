@@ -30,7 +30,7 @@ import {
 } from "../akuma/akuma-selection-execution.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
 import type { TellResult } from "../akuma/body.js";
-import { bareOption, canonicalBirthCwd } from "../akuma/call-input.js";
+import { bareOption, canonicalBirthCwd, durationSchema, validateAkumaInput } from "../akuma/call-input.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "../akuma/identity.js";
 import { moveAlias } from "../alias/index.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -145,6 +145,16 @@ type SpawnWaitObserver = Omit<AskObserver, "admitted"> &
     admitted?: (tell: TellResult, id: AkumaStatus["id"], head: SpawnWaitHead) => void | Promise<void>;
   }>;
 
+export const spawnModeSchemas = [
+  z.strictObject({
+    mode: z.literal("wait"),
+    body: z.string(),
+    timeoutMs: durationSchema.exactOptional(),
+  }),
+  z.strictObject({ mode: z.literal("detach").exactOptional(), body: z.string().exactOptional() }),
+] as const;
+const spawnModeSchema = z.union(spawnModeSchemas);
+
 export type SpawnInput = Readonly<{
   akumaName: string;
   body?: string;
@@ -196,23 +206,6 @@ function integrationFailure(error: unknown): IntegrationFailure {
     kind: error instanceof AuthorityCorruptionError ? "authority-corruption" : "infrastructure",
     diagnostic: error instanceof Error ? error.message : String(error),
   };
-}
-
-function callMode(value: unknown): "wait" | "detach" {
-  if (value === undefined || value === "detach") return "detach";
-  if (value === "wait") return "wait";
-  throw new TypeError("mode must be wait or detach");
-}
-
-function callTimeout(value: unknown, mode: "wait" | "detach"): number {
-  if (mode === "detach" && value !== undefined) {
-    throw new TypeError("timeoutMs is not valid in detach mode");
-  }
-  if (value === undefined) return 300_000;
-  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
-    throw new TypeError("timeoutMs must be a nonnegative finite number");
-  }
-  return value;
 }
 
 function callSeat(contract: unknown) {
@@ -327,19 +320,30 @@ type ParsedCallInput = Omit<SpawnInput, "body" | "contract" | "mode" | "timeoutM
     initialTell?: InitialCallTell;
   }>;
 
+function initialCallTell(body: string | undefined, initiator: string | undefined): InitialCallTell | undefined {
+  if (body === undefined) return undefined;
+  return {
+    tellId: randomUUID(),
+    body,
+    ...(initiator === undefined ? {} : { initiator }),
+  };
+}
+
 async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>): Promise<ParsedCallInput> {
   const values = requireInput(input, "Akumas.spawn input", CALL_INPUT_KEYS);
+  const options = validateAkumaInput(spawnModeSchema, {
+    ...(values.body === undefined ? {} : { body: values.body }),
+    ...(values.mode === undefined ? {} : { mode: values.mode }),
+    ...(values.timeoutMs === undefined ? {} : { timeoutMs: values.timeoutMs }),
+  });
   const path = await World.prove(nonblank(values.path, "path"));
   const akumaName = nonblank(values.akumaName, "akumaName");
-  const body = values.body === undefined ? undefined : text(values.body, "body");
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
   const caller = decodeAkumaCaller(values.caller);
   const bare = bareOption(values.bare);
   const cwd = optionalNonblank(values.cwd, "cwd");
-  const mode = callMode(values.mode);
-  if (body === undefined && (mode === "wait" || values.timeoutMs !== undefined))
-    throw new TypeError("wait and timeoutMs require body");
-  const timeoutMs = callTimeout(values.timeoutMs, mode);
+  const mode = options.mode ?? "detach";
+  const timeoutMs = options.mode === "wait" ? (options.timeoutMs ?? 300_000) : 300_000;
   const signal = optionalSignal(values.signal);
   const home = optionalNonblank(values.home, "home");
   const settings = settingsOption(values.settings);
@@ -347,14 +351,7 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
   const seat = callSeat(values.contract);
   const observe = values.observe as AskObserver | undefined;
-  const initialTell =
-    body === undefined
-      ? undefined
-      : {
-          tellId: randomUUID(),
-          body,
-          ...(initiator === undefined ? {} : { initiator }),
-        };
+  const initialTell = initialCallTell(options.body, initiator);
   return {
     path,
     akumaName,

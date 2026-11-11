@@ -28,7 +28,7 @@ test("Debt facet preserves native lifecycle, flat World listing, and absent Worl
   const facet = Keiyaku.at({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
   assert.deepEqual(await facet.show({ id: "debt/missing" }), { kind: "absent" });
   assert.deepEqual(await facet.ls({ selector: "debt/" }), { kind: "debt-catalogue", absent: true });
-  assert.deepEqual(await facet.debtDoctor(), { kind: "absent" });
+  assert.deepEqual(await facet.debtDoctor({}), { kind: "absent" });
   assert.equal((await facet.debtUpdate({ id: "debt/missing", note: "note" })).kind, "refused");
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" }));
@@ -72,7 +72,7 @@ test("construction captures explicit inputs synchronously without observing cwd"
   const environment: Record<string, string> = { PI_SESSION_ID: "captured" };
   const captured = Keiyaku.at({ cwd: home, environment, home });
   environment.PI_SESSION_ID = "changed";
-  assert.deepEqual((await captured.whoami()).self, { kind: "external", id: "pi:captured" });
+  assert.deepEqual((await captured.whoami({})).self, { kind: "external", id: "pi:captured" });
 });
 
 test("facet delegates reads and mutations using selected Repo but invocation World", async (t) => {
@@ -126,7 +126,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   );
   const contractStatus = await kanshi({ world: worldA, repo: repoB, contract });
   assert.deepEqual(withoutObservationTimes(await facet.status({ id: contract })), withoutObservationTimes(contractStatus));
-  assert.deepEqual(withoutObservationTimes(await facet.kanshi()), withoutObservationTimes(await kanshi({ world: worldA, repo: repoB })));
+  assert.deepEqual(withoutObservationTimes(await facet.kanshi({})), withoutObservationTimes(await kanshi({ world: worldA, repo: repoB })));
   assert.deepEqual(
     await facet.wait({ selectors: [contract], timeoutMs: 0 }),
     await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 }),

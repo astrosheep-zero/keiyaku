@@ -921,7 +921,7 @@ test("creation actor persists as createdBy and later mutations leave it unchange
     assert.equal((await debts.debt({ id: "debt/legacy" }).update({ state: "done" })).kind, "accepted");
     assert.equal("createdBy" in (await readDetail(debts, "debt/legacy")), false);
     assert.throws(() => debts.add({ title: "Blank", actor: "  " }), /actor must be a nonblank string/u);
-    assert.throws(() => debts.debt({ id: added.id }).update({ actor: "nope" } as never), /unknown field/u);
+    assert.throws(() => debts.debt({ id: added.id }).update({ actor: "nope" } as never), /Unrecognized key/u);
   } finally {
     if (previous === undefined) delete process.env[envKey];
     else process.env[envKey] = previous;
@@ -961,14 +961,14 @@ test("accepted mutation retains a lock-release warning from its own invocation",
 test("public inputs reject unknown fields before observing authority", async () => {
   const { debts } = await world();
   assert.throws(() => debts.debt({ id: "debt/one/two" }), /debt ID must be debt\/<id>/u);
-  assert.throws(() => debts.add({ title: "Bad", needs: ["debt/one/two"] }), /debt ID must be debt\/<id>/u);
-  assert.throws(() => debts.add({ title: "Bad", extra: true } as never), /unknown field/u);
+  assert.throws(() => debts.add({ title: "Bad", needs: ["debt/one/two"] }), /expected flat DebtId/u);
+  assert.throws(() => debts.add({ title: "Bad", extra: true } as never), /Unrecognized key/u);
   assert.throws(() => debts.add({ title: "Bad", needs: ["debt/a", "debt/a"] }), /must not contain duplicates/u);
-  assert.throws(() => debts.add({ title: "Bad", state: "started" as never }), /state is invalid/u);
+  assert.throws(() => debts.add({ title: "Bad", state: "started" as never }), /Invalid option/u);
   const id = acceptedId(await debts.add({ title: "Valid" }));
   assert.throws(() => debts.debt({ id }).update({ title: "   " }), /title must be nonblank/u);
-  assert.throws(() => debts.debt({ id }).update({ state: "started" } as never), /state is invalid/u);
-  assert.throws(() => debts.debt({ id }).update({ state: "done", extra: true } as never), /unknown field/u);
+  assert.throws(() => debts.debt({ id }).update({ state: "started" } as never), /Invalid option/u);
+  assert.throws(() => debts.debt({ id }).update({ state: "done", extra: true } as never), /Unrecognized key/u);
   await assert.rejects(debts.list({ extra: true } as never), /unknown field/u);
   await assert.rejects(debts.list({ selection: "paused" } as never), /selection must be active, closed, or all/u);
   assert.throws(() => Debts.of({ root: debts.root } as never), /Debts.of world/u);

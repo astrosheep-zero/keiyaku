@@ -41,13 +41,27 @@ const SCHEMA_TOOLS = new Set<VerbName>([
 ]);
 const excluded = new Set<VerbName>(["nuke", "settings", "debt.doctor", "debt.addDocument"]);
 
+const coordinates = {
+  cwd: z.string().regex(/\S/u).exactOptional(),
+  repo: z.string().regex(/\S/u).exactOptional(),
+};
+
+/** Compose at the declaration boundary so every strict business alternative stays strict. */
+export function mcpInputSchema(input: z.core.$ZodType): z.ZodType {
+  if (input instanceof z.ZodReadonly) return mcpInputSchema(input.unwrap()).readonly();
+  if (input instanceof z.ZodUnion) return z.union(input.options.map((branch) => mcpInputSchema(branch)));
+  if (!(input instanceof z.ZodObject) || !(input.def.catchall instanceof z.ZodNever))
+    throw new Error("MCP business inputs must be strict objects or unions of strict objects");
+  for (const key of Object.keys(coordinates)) {
+    if (Object.hasOwn(input.shape, key)) throw new Error(`MCP coordinate collides with business field: ${key}`);
+  }
+  return input.safeExtend(coordinates);
+}
+
 function describeTools(): Tool[] {
   const entries = Object.entries(Keiyaku.verbs).filter(([name]) => !excluded.has(name as VerbName));
   return entries.map(([name, entry]) => {
-    const schema = z.toJSONSchema(
-      z.object({ cwd: z.string().min(1).optional(), repo: z.string().min(1).optional(), input: entry.input }).strict(),
-      { io: "input" },
-    );
+    const schema = z.toJSONSchema(mcpInputSchema(entry.input), { io: "input" });
     let outputSchema: Tool["outputSchema"];
     if (SCHEMA_TOOLS.has(name as VerbName)) {
       if (!("normal" in entry)) throw new Error(`Missing normal output schema: ${name}`);
@@ -62,27 +76,11 @@ function describeTools(): Tool[] {
     return {
       name: name.replaceAll(".", "_"),
       description: entry.description,
-      inputSchema: schema as Tool["inputSchema"],
+      inputSchema: { ...schema, type: "object" } as Tool["inputSchema"],
       ...(outputSchema === undefined ? {} : { outputSchema }),
       annotations: { readOnlyHint: entry.effect === "read", destructiveHint: entry.effect === "destroy" },
     };
   });
-}
-
-function validateArguments(args: Record<string, unknown> | undefined): asserts args is {
-  cwd?: string;
-  repo?: string;
-  input: unknown;
-} {
-  if (
-    args === undefined ||
-    !Object.hasOwn(args, "input") ||
-    Object.keys(args).some((key) => !["cwd", "repo", "input"].includes(key)) ||
-    (args.cwd !== undefined && (typeof args.cwd !== "string" || !args.cwd.trim())) ||
-    (args.repo !== undefined && (typeof args.repo !== "string" || !args.repo.trim()))
-  ) {
-    throw new KeiyakuUsageError("expected input and optional nonblank cwd and repo");
-  }
 }
 
 export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ server: Server; close(): Promise<void> }> {
@@ -109,14 +107,19 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
     args: Record<string, unknown> | undefined,
     signal: AbortSignal,
   ): Promise<CallToolResult> {
-    const value = args?.input as VerbInput<VerbName>;
+    const { cwd: callCwd, repo, ...business } = args ?? {};
+    const value = business as VerbInput<VerbName>;
     let completion: VerbCompletion<VerbOutput<VerbName>>;
     try {
-      validateArguments(args);
+      const parsed = z.strictObject(coordinates).safeParse({
+        ...(callCwd === undefined ? {} : { cwd: callCwd }),
+        ...(repo === undefined ? {} : { repo }),
+      });
+      if (!parsed.success) throw new KeiyakuUsageError(parsed.error.message);
       const facet = Keiyaku.at({
-        cwd: resolve(cwd, args.cwd ?? "."),
+        cwd: resolve(cwd, parsed.data.cwd ?? "."),
         environment,
-        ...(args.repo === undefined ? {} : { repo: args.repo }),
+        ...(parsed.data.repo === undefined ? {} : { repo: parsed.data.repo }),
         ...(home === undefined ? {} : { home }),
       });
       completion = { kind: "returned", value: await facet.run(name, value, { signal }) };

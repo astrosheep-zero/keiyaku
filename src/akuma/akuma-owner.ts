@@ -1,4 +1,4 @@
-import { bareOption } from "./call-input.js";
+import { bareOption, durationSchema, validateAkumaInput } from "./call-input.js";
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { randomUUID } from "node:crypto";
 import type { WorldRoot } from "../world.js";
@@ -51,6 +51,23 @@ import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
 import { z } from "zod";
 import { publicSessionCoordinate, publicSessionCoordinateSchema, type PublicSessionCoordinate } from "./coordinate.js";
+
+const historySequence = z.number().int().positive();
+const historyLimit = historySequence.max(5_000).exactOptional();
+export const historyInputSchemas = [
+  z.strictObject({
+    id: z
+      .string()
+      .regex(/^(?:(?:turn|report)\/)?[1-9][0-9]*$/u)
+      .refine((id) => parseExactHistorySelector(id) !== null, {
+        message:
+          "id must be a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
+      }),
+  }),
+  z.strictObject({ before: historySequence.exactOptional(), limit: historyLimit }),
+  z.strictObject({ since: historySequence, limit: historyLimit }),
+] as const;
+const historyInputSchema = z.union(historyInputSchemas);
 
 export type InterruptReceipt = TellResult | Extract<InterruptTellAdmission, { kind: "unavailable" }>;
 
@@ -209,14 +226,8 @@ export class AkumaOwner {
     return projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest });
   }
 
-  private async exactHistory(
-    input: Readonly<{ id?: string; before?: number; since?: number; limit?: number }>,
-  ): Promise<ExactHistory> {
-    if (typeof input.id !== "string" || input.id.trim() === "")
-      throw new TypeError("Akuma history id must be a nonblank string");
-    if (input.before !== undefined || input.since !== undefined || input.limit !== undefined)
-      throw new TypeError("Akuma history id cannot be combined with before, since, or limit");
-    const selector = parseExactHistorySelector(input.id);
+  private async exactHistory(id: string): Promise<ExactHistory> {
+    const selector = parseExactHistorySelector(id);
     if (selector === null)
       throw new TypeError(
         "Akuma history id must be a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
@@ -230,7 +241,7 @@ export class AkumaOwner {
       ledger.rows.find((row) => row.sequence === selector.sequence) ??
       (fact === undefined ? undefined : projectTurns([fact]).rows.find((row) => row.sequence === selector.sequence));
     return row === undefined || row.kind === "turn" || row.kind === "outcome"
-      ? { kind: "unknown-history", id: input.id }
+      ? { kind: "unknown-history", id }
       : { kind: "exact-activity", row };
   }
 
@@ -247,26 +258,13 @@ export class AkumaOwner {
   async history(
     input: Readonly<{ id?: string; before?: number; since?: number; limit?: number }> = {},
   ): Promise<ActivityHistory | ExactHistory> {
+    validateAkumaInput(historyInputSchema, input);
     if (input.id !== undefined) {
-      const exact = await this.exactHistory(input);
+      const exact = await this.exactHistory(input.id);
       if (exact.kind === "exact") await this.outcomeObserved?.(this.id, [`turn/${exact.outcome.turnSequence}`]);
       return exact;
     }
-    if (input.before !== undefined && input.since !== undefined) {
-      throw new TypeError("Akuma history before and since are mutually exclusive");
-    }
-    for (const [name, value] of [
-      ["before", input.before],
-      ["since", input.since],
-    ] as const) {
-      if (value !== undefined && (!Number.isSafeInteger(value) || value <= 0)) {
-        throw new TypeError(`Akuma history ${name} must be a positive safe integer`);
-      }
-    }
     const limit = input.limit ?? 12;
-    if (!Number.isSafeInteger(limit) || limit <= 0 || limit > 5_000) {
-      throw new TypeError("Akuma history limit must be a positive safe integer no greater than 5000");
-    }
     const history = selectHistory(await this.projectHistoryTurns(), {
       ...(input.before === undefined ? {} : { before: input.before }),
       ...(input.since === undefined ? {} : { since: input.since }),
@@ -289,9 +287,7 @@ export class AkumaOwner {
     predicate: (status: LiveStatusObservation["status"]) => boolean = defaultWaitComplete,
     options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
   ): Promise<Readonly<{ reason: WaitReason; status: LiveStatusObservation["status"] }>> {
-    if (options.timeoutMs !== undefined && (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 0)) {
-      throw new TypeError("Akuma wait timeoutMs must be a nonnegative finite millisecond duration");
-    }
+    validateAkumaInput(durationSchema.optional(), options.timeoutMs);
     const waited = await executeWaitAkuma({
       path: this.worldPath,
       ids: [this.id],

@@ -21,6 +21,13 @@ accompany text rendering without being echoed in that answer, and adapters
 consume the owner's outcome judgment rather than reconstructing authority from
 omitted implementation evidence.
 
+An owner supplies each described verb's business input as one object, including
+operations with no business fields. Typed calls and generic execution cross that
+same boundary. Pure caller constraints are declared with their producing owner
+and checked before coordinate discovery, World establishment, or product
+observation; validation never resolves a product merely to judge input shape.
+Contradictory caller intent remains usage, distinct from an execution failure.
+
 MCP publishes the facet's operations subject to the administration and raw-import
 exclusion owned by [cli.md](cli.md). It publishes an owner's object-rooted output
 schema when a caller reads the result to choose its next call; other tools return
