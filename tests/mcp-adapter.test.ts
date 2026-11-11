@@ -117,12 +117,13 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.deepEqual(plural.structuredContent, JSON.parse(JSON.stringify(
     await Keiyaku.at({ cwd, environment, home: cwd }).run("debt.show", { ids: [id] }),
   )));
-  const done = await client.callTool({ name: "debt_done", arguments: { input: { ids: [id] } } });
+  const done = await client.callTool({ name: "debt_update", arguments: { input: { id, state: "done", note: "finished" } } });
   assert.equal(done.isError, false);
   assert.equal(done.structuredContent, undefined);
   const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("debt.show", { id });
   assert.ok(completed.kind === "present" && completed.items[0]?.kind === "found");
   assert.equal(completed.items[0].state, "done");
+  assert.equal(completed.items[0].note, "finished");
 
   const first = mkdtempSync(join(tmpdir(), "kei-mcp-first-"));
   const second = mkdtempSync(join(tmpdir(), "kei-mcp-second-"));

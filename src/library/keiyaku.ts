@@ -52,18 +52,12 @@ import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
-import type {
-  DebtQueryInvocation,
-  DebtUpdateInvocation,
-  DebtCloseInvocation,
-  DebtShowInvocation,
-} from "./keiyaku-debt.js";
+import type { DebtQueryInvocation, DebtUpdateInvocation, DebtShowInvocation } from "./keiyaku-debt.js";
 export type {
   DebtSelection,
   DebtReadScope,
   DebtQueryInvocation,
   DebtUpdateInvocation,
-  DebtCloseInvocation,
   DebtShowInvocation,
 } from "./keiyaku-debt.js";
 export { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
@@ -321,10 +315,6 @@ export class Keiyaku {
         return debt.debtUpdate(this.#input, { ...request.input, ...signal } as DebtUpdateInvocation);
       case "debt.show":
         return debt.debtShow(this.#input, request.input);
-      case "debt.done":
-        return debt.debtClose(this.#input, { ...request.input, ...signal }, "done");
-      case "debt.drop":
-        return debt.debtClose(this.#input, { ...request.input, ...signal }, "drop");
       case "debt.query":
         return debt.debtQuery(this.#input, request.input as DebtQueryInvocation);
       case "debt.tree":
@@ -414,12 +404,6 @@ export class Keiyaku {
   }
   debtShow(input: DebtShowInvocation) {
     return this.run("debt.show", input);
-  }
-  debtDone({ signal, ...input }: DebtCloseInvocation) {
-    return this.run("debt.done", input, signal === undefined ? {} : { signal });
-  }
-  debtDrop({ signal, ...input }: DebtCloseInvocation) {
-    return this.run("debt.drop", input, signal === undefined ? {} : { signal });
   }
   debtQuery(input: DebtQueryInvocation = {}) {
     return this.run("debt.query", input);

@@ -98,6 +98,7 @@ async function updateDebt(
     ...optional("body", command.stdin === "body" ? stdin : value(command, "body")),
     ...optional("appendBody", command.stdin === "append" ? stdin : value(command, "append")),
     ...optional("note", command.stdin === "note" ? stdin : value(command, "note")),
+    ...optional("state", value(command, "state") as DebtState | undefined),
     ...optional(
       "priority",
       value(command, "priority") === undefined ? undefined : (Number(value(command, "priority")) as DebtPriority),
@@ -134,11 +135,6 @@ export async function runDebtCommand(command: ParsedDebtCommand, runtime: CliRun
       return addDebt(command, runtime, stdin);
     case "update":
       return updateDebt(command, runtime, stdin);
-    case "done":
-    case "drop": {
-      const input = { ids: command.positionals, ...optional("note", value(command, "note")) };
-      return execute(command.action === "done" ? "debt.done" : "debt.drop", input, command, runtime);
-    }
     case "query":
       return execute(
         "debt.query",

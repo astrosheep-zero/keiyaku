@@ -53,7 +53,6 @@ export type {
   DebtReadScope,
   DebtQueryInvocation,
   DebtUpdateInvocation,
-  DebtCloseInvocation,
   DebtShowInvocation,
 } from "./library/keiyaku.js";
 export { classifyVerb } from "./library/keiyaku-verbs.js";
@@ -325,7 +324,6 @@ export {
   debtReadyListSchema,
   readyDebtRowSchema,
   debtParentReadRefusalSchema,
-  debtLifecycleResultSchema,
   debtTreeRootSchema,
   blockedDebtListSchema,
   debtQueryResultSchema,
@@ -333,7 +331,6 @@ export {
   debtTreeResultSchema,
   debtMutationResultSchema,
   debtUpdateResultSchema,
-  debtBatchResultSchema,
 } from "./debt/index.js";
 export {
   World,

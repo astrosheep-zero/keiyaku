@@ -43,7 +43,6 @@ import { whoamiFactsSchema } from "./keiyaku-identity.js";
 import { resetOutcomeSchema } from "./outcome.js";
 import {
   debtAbsentSchema,
-  debtBatchResultSchema,
   debtTreeResultSchema,
   debtShowResultSchema,
   debtDoctorReportSchema,
@@ -413,6 +412,7 @@ export const verbs = Object.freeze({
         body: optText,
         appendBody: optText,
         note: optText,
+        state: debtStateSchema.exactOptional(),
         priority: debtPrioritySchema.exactOptional(),
         ...debtRelations,
         addNeeds: strings.exactOptional(),
@@ -434,18 +434,6 @@ export const verbs = Object.freeze({
     ]),
     output: z.union([debtShowResultSchema, debtAbsentSchema]),
     effect: "read",
-  },
-  "debt.done": {
-    description: "Complete Debts in caller order.",
-    input: z.strictObject({ ids: z.array(text).min(1).readonly(), note: optText }).readonly(),
-    output: debtBatchResultSchema,
-    effect: "write",
-  },
-  "debt.drop": {
-    description: "Drop Debts in caller order.",
-    input: z.strictObject({ ids: z.array(text).min(1).readonly(), note: optText }).readonly(),
-    output: debtBatchResultSchema,
-    effect: "write",
   },
   "debt.query": {
     description: "Query Debts using the owner expression.",

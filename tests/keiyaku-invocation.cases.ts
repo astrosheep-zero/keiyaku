@@ -29,20 +29,19 @@ test("Debt facet preserves native lifecycle, explicit namespaces, and absent Wor
   assert.deepEqual(await facet.debtShow({ id: "debt/missing" }), { kind: "absent" });
   assert.deepEqual(await facet.debtShow({ ids: ["debt/missing", "debt/missing"] }), { kind: "absent" });
   await assert.rejects(facet.debtShow({ ids: [] }), TypeError);
-  await assert.rejects(facet.debtDone({ ids: ["debt/missing", "debt/missing"] }), TypeError);
   assert.deepEqual(await facet.debtQuery(), { kind: "absent" });
   assert.deepEqual(await facet.debtDoctor(), { kind: "absent" });
   assert.equal((await facet.debtTree({ id: "debt/missing" })).kind, "absent");
   assert.equal((await facet.debtUpdate({ id: "debt/missing", note: "note" })).kind, "refused");
-  assert.equal((await facet.debtDone({ ids: ["debt/missing"] })).items[0]?.kind, "refused");
-  assert.equal((await facet.debtDrop({ ids: ["debt/missing"] })).items[0]?.kind, "refused");
+  assert.equal((await facet.debtUpdate({ id: "debt/missing", state: "done" })).kind, "refused");
+  assert.equal((await facet.debtUpdate({ id: "debt/missing", state: "drop" })).kind, "refused");
   const reason = new Error("cancelled"),
     controller = new AbortController();
   controller.abort(reason);
   for (const operation of [
     () => facet.debtUpdate({ id: "debt/missing", note: "note", signal: controller.signal }),
-    () => facet.debtDone({ ids: ["debt/missing"], signal: controller.signal }),
-    () => facet.debtDrop({ ids: ["debt/missing"], signal: controller.signal }),
+    () => facet.debtUpdate({ id: "debt/missing", state: "done", signal: controller.signal }),
+    () => facet.debtUpdate({ id: "debt/missing", state: "drop", signal: controller.signal }),
   ])
     await assert.rejects(operation, (error: unknown) => error === reason);
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
@@ -74,12 +73,9 @@ test("Debt facet preserves native lifecycle, explicit namespaces, and absent Wor
     assert.deepEqual(firstDetail, detail);
   }
   assert.equal((await facet.debtUpdate({ id: first.id, note: "changed" })).kind, "accepted");
-  const batch = await facet.debtDone({ ids: [first.id, second.id] });
-  assert.deepEqual(
-    batch.items.map((item) => item.kind),
-    ["accepted", "accepted"],
-  );
-  assert.equal((await facet.debtDrop({ ids: [third.id] })).items[0]?.kind, "accepted");
+  assert.equal((await facet.debtUpdate({ id: first.id, state: "done", note: "finished" })).kind, "accepted");
+  assert.equal((await facet.debtUpdate({ id: second.id, state: "done" })).kind, "accepted");
+  assert.equal((await facet.debtUpdate({ id: third.id, state: "drop" })).kind, "accepted");
   const active = await facet.debtQuery({ namespace: ["nested"] });
   const closed = await facet.debtQuery({ namespace: ["nested"], selection: "closed" });
   assert.equal(active.kind, "present");

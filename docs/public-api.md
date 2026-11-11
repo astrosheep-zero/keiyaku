@@ -227,8 +227,10 @@ that owner's bounded catalogue and its native error; no public definition
 loader joins the root. The independent Debt product
 likewise captures World and does not read or write Contract authority except
 through the settlement owner. Its collection offers creation, bounded list,
-readiness, blocked and query views, diagnosis, and terminal batches. Addressed
-Debt handles offer reads, relationship trees, updates, completion, and dropping.
+readiness, blocked and query views, and diagnosis. Addressed Debt handles offer
+reads, relationship trees, and atomic updates of facts and disposition. Explicit
+completion and dropping belong to that addressed update, with no public batch
+lifecycle operation. Settlement alone retains internal idempotent completion.
 Board observation remains read-only. There is no planning or execution-progress
 operation; [debt.md](debt.md) owns the three-state ledger and its dependencies.
 

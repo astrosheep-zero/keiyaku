@@ -13,13 +13,11 @@ import {
   kanshiCounts as countsWorld,
   kanshiCountsReportSchema as countsSchema,
   debtMutationResultSchema as mutationSchema,
-  debtLifecycleResultSchema as lifecycleSchema,
   debtListSchema as listSchema,
   debtReadyListSchema as readySchema,
   blockedDebtListSchema as blockedSchema,
   debtQueryResultSchema as querySchema,
   debtDoctorReportSchema as doctorSchema,
-  debtBatchResultSchema as batchSchema,
   debtReadResultSchema as readSchema,
   debtTreeResultSchema as treeSchema,
   debtUpdateResultSchema as updateSchema,
@@ -109,10 +107,9 @@ test("Debt, Settings, World, region and reset schemas describe real wire results
   assertWireRoundTrip(blockedSchema, await debts.blocked());
   assertWireRoundTrip(querySchema, await debts.query());
   assertWireRoundTrip(doctorSchema, await debts.doctor());
-  assertWireRoundTrip(lifecycleSchema, await debt.done());
-  assertWireRoundTrip(lifecycleSchema, await debt.drop());
-  assertWireRoundTrip(lifecycleSchema, await debts.debt({ id: second.id }).drop());
-  assertWireRoundTrip(batchSchema, await debts.batch({ verb: "done", ids: ["debt/missing"] }));
+  assertWireRoundTrip(updateSchema, await debt.update({ state: "done" }));
+  assertWireRoundTrip(updateSchema, await debt.update({ state: "drop" }));
+  assertWireRoundTrip(updateSchema, await debts.debt({ id: second.id }).update({ state: "drop" }));
   assertWireRoundTrip(regionSchema, selectRegionValue({ declarations: [], selection: { kind: "declarations" } }));
   assertWireRoundTrip(
     regionSchema,

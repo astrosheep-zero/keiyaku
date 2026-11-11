@@ -167,6 +167,7 @@ export function updateInput(input: unknown): UpdateDebtInput {
       "body",
       "appendBody",
       "note",
+      "state",
       "priority",
       "needs",
       "addNeeds",
@@ -197,6 +198,8 @@ export function updateInput(input: unknown): UpdateDebtInput {
   if (appendBody !== undefined) result.appendBody = appendBody;
   const note = text(value.note, "note");
   if (note !== undefined) result.note = note;
+  const selectedState = state(value.state);
+  if (selectedState !== undefined) result.state = selectedState;
   const selectedPriority = priority(value.priority);
   if (selectedPriority !== undefined) result.priority = selectedPriority;
   for (const [key, ids] of [

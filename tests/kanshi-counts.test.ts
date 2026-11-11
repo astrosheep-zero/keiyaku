@@ -23,8 +23,8 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   for (let i = 0; i < 12; i++) accepted(await debts.add({ title: `Open ${i}`, namespace: i % 2 ? ["nested"] : [] }));
   const done = accepted(await debts.add({ title: "Done" })).id;
   const drop = accepted(await debts.add({ title: "Drop" })).id;
-  accepted(await debts.debt({ id: done }).done());
-  accepted(await debts.debt({ id: drop }).drop());
+  accepted(await debts.debt({ id: done }).update({ state: "done" }));
+  accepted(await debts.debt({ id: drop }).update({ state: "drop" }));
   for (let i = 0; i < 12; i++) {
     accepted(await Keis.of(repo).bind({ target: "main", markdown: contractMarkdown(`Count ${i}`, {
       Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",

@@ -37,7 +37,6 @@ import { advanceDebtTimestamp } from "./view.js";
 export type {
   AddDebtDocumentInput,
   AddDebtInput,
-  DebtBatchResult,
   DebtMutationResult,
   DebtReadPage,
   DebtRefusal,
@@ -183,6 +182,7 @@ function updateDocument(
     body:
       input.body ?? (input.appendBody === undefined ? current.body : appendDebtBody(current.body, input.appendBody)),
     ...(input.note === undefined ? {} : { note: input.note }),
+    ...(input.state === undefined ? {} : { state: input.state }),
     ...(input.priority === undefined ? {} : { priority: input.priority }),
     needs: listChange(current.needs, input.needs, input.addNeeds, input.dropNeeds),
     ...(input.parent === undefined ? {} : { parent: input.parent }),
@@ -193,7 +193,17 @@ function updateDocument(
 
 function updateFieldChanges(current: DebtDocument, next: DebtDocument): readonly DebtChange[] {
   const changes: DebtChange[] = [];
-  for (const field of ["title", "body", "note", "priority", "needs", "parent", "supersedes", "relates"] as const) {
+  for (const field of [
+    "title",
+    "body",
+    "note",
+    "state",
+    "priority",
+    "needs",
+    "parent",
+    "supersedes",
+    "relates",
+  ] as const) {
     const before = current[field];
     const after = next[field];
     if (Array.isArray(before) && Array.isArray(after) ? before.join("\0") === after.join("\0") : before === after)
@@ -210,35 +220,32 @@ export async function updateDebt(world: WorldRoot, id: DebtId, input: UpdateDebt
       const snapshot = await readBoard(world),
         current = snapshot.board.debts.get(id);
       if (current === undefined) return { kind: "refused", reason: "debt-missing" };
+      if (input.state !== undefined && input.state !== current.state && current.state !== "open")
+        return { kind: "refused", reason: "invalid-lifecycle-transition", state: current.state };
       const candidate = updateDocument(snapshot.board, current, input);
       if ("kind" in candidate) return candidate;
       const problem = relationProblem(boardWith(snapshot.board, candidate), current, candidate);
       if (problem !== null) return { kind: "refused", reason: "invalid-graph", diagnostic: problem } as const;
-      const predecessor = snapshot.bytes.get(id)!;
-      const changed = !Buffer.from(serializeDebtDocument(candidate)).equals(Buffer.from(predecessor));
-      let next = candidate;
-      if (changed) {
-        const at = currentTimestamp();
-        next = { ...candidate, updatedAt: advanceDebtTimestamp(current.updatedAt, at) };
-      }
-      const afterBytes = serializeDebtDocument(next);
+      const changes = nonEmptyDebtValues(updateFieldChanges(current, candidate));
+      if (changes === undefined) return { kind: "accepted" };
+      const next = { ...candidate, updatedAt: advanceDebtTimestamp(current.updatedAt, currentTimestamp()) };
       if (
-        !Buffer.from(predecessor).equals(Buffer.from(afterBytes)) &&
-        (await replaceAuthority({ world, id, expected: predecessor, next: afterBytes })) !== "replaced"
+        (await replaceAuthority({
+          world,
+          id,
+          expected: snapshot.bytes.get(id)!,
+          next: serializeDebtDocument(next),
+        })) !== "replaced"
       ) {
         return { kind: "retry", reason: "concurrent-modification" };
       }
-      const changes = nonEmptyDebtValues(updateFieldChanges(current, next));
-      return {
-        kind: "accepted",
-        ...(changes === undefined ? {} : { changes }),
-      };
+      return { kind: "accepted", changes };
     },
   );
   return result === "busy" ? { kind: "retry", reason: "busy" } : result;
 }
 
-export { batchDebts, lifecycleDebt, settleDebt } from "./lifecycle-operations.js";
+export { settleDebt } from "./lifecycle-operations.js";
 
 function readScope(
   namespace: readonly string[] | undefined,

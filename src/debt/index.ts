@@ -30,10 +30,8 @@ import {
   debtParentReadRefusalSchema,
   nonEmptyDebtValues,
   nonEmptyDebtArraySchema,
-  debtLifecycleResultSchema,
   debtMutationResultSchema,
   debtUpdateResultSchema,
-  debtBatchResultSchema,
   debtChangeSchema,
   type DebtWarning,
   type DebtRefusal,
@@ -41,25 +39,19 @@ import {
   type DebtReadRefusal,
   type DebtReadPage,
   type DebtMutationResult,
-  type DebtLifecycleResult,
   type DebtParentReadRefusal,
   type DebtUpdateResult,
-  type DebtBatchResult,
-  type DebtBatchItem,
   type DebtChange,
 } from "./operation-types.js";
 import { debtQueryRowSchema, type DebtQueryRow } from "./query.js";
 import type { WorldRoot } from "../world.js";
-import type { DebtLifecycleVerb } from "./operation-types.js";
 export type { WorldRoot } from "../world.js";
 import { DebtAuthorityCorruptionError, type DebtPriority, type DebtState } from "./document.js";
 import { type DebtId } from "./identity.js";
 import {
   addDebt,
   addDebtDocument,
-  batchDebts,
   blockedDebts,
-  lifecycleDebt,
   listDebts,
   queryDebts,
   readDebtDetail,
@@ -71,19 +63,7 @@ import {
 } from "./operations.js";
 import { boundedListLimit } from "../bounded-list.js";
 import { readBoard } from "./store.js";
-import {
-  addDocumentInput,
-  addInput,
-  closed,
-  namespace,
-  record,
-  signal,
-  sort,
-  debtId as id,
-  debtIds,
-  text,
-  updateInput,
-} from "./input.js";
+import { addDocumentInput, addInput, closed, namespace, record, sort, debtId as id, updateInput } from "./input.js";
 import {
   normalizeDebtQuery,
   debtQuerySelection,
@@ -142,13 +122,11 @@ export type BlockedDebtList = DebtReadPage<BlockedDebtRow, DebtParentReadRefusal
 export type DebtQueryResult = DebtReadPage<DebtQueryRow>;
 export { debtWarningSchema, debtRefusalSchema, debtRetrySchema, debtReadRefusalSchema, debtReadPageSchema };
 export {
-  debtLifecycleResultSchema,
   debtParentReadRefusalSchema,
   readyDebtRowSchema,
   debtTreeRootSchema,
   debtMutationResultSchema,
   debtUpdateResultSchema,
-  debtBatchResultSchema,
   debtChangeSchema,
   debtDetailSchema,
   debtSummarySchema,
@@ -163,8 +141,6 @@ export type {
   AddDebtDocumentInput,
   AddDebtInput,
   BlockedDebtRow,
-  DebtBatchItem,
-  DebtBatchResult,
   DebtChange,
   DebtDetail,
   DebtDoctorIssue,
@@ -181,7 +157,6 @@ export type {
   DebtTreeNode,
   DebtTreeRoot,
   ReadyDebtRow,
-  DebtLifecycleResult,
   DebtParentReadRefusal,
   DebtUpdateResult,
   DebtWarning,
@@ -213,18 +188,6 @@ class DebtHandle {
   }
   update(input: UpdateDebtInput): Promise<DebtUpdateResult> {
     return updateDebt(this.world, this.id, updateInput(input));
-  }
-  private lifecycle(verb: DebtLifecycleVerb, input: unknown): Promise<DebtLifecycleResult> {
-    const value = record(input ?? {}, `${verb} input`);
-    closed(value, ["note", "signal"], `${verb} input`);
-    const note = text(value.note, "note");
-    return lifecycleDebt(this.world, this.id, verb, signal(value.signal), note);
-  }
-  done(input?: { note?: string; signal?: AbortSignal }): Promise<DebtLifecycleResult> {
-    return this.lifecycle("done", input);
-  }
-  drop(input?: { note?: string; signal?: AbortSignal }): Promise<DebtLifecycleResult> {
-    return this.lifecycle("drop", input);
   }
 }
 export type Debt = DebtHandle;
@@ -340,24 +303,6 @@ class DebtsHandle {
   async doctor(): Promise<DebtDoctorReport> {
     const issues = nonEmptyDebtValues(diagnoseBoard((await readBoard(this.world)).board));
     return { kind: "present", ...(issues === undefined ? {} : { issues }) };
-  }
-  batch(
-    input: Readonly<{
-      verb: "done" | "drop";
-      ids: readonly string[];
-      note?: string;
-      signal?: AbortSignal;
-    }>,
-  ): Promise<DebtBatchResult> {
-    const v = record(input, "batch input");
-    closed(v, ["verb", "ids", "note", "signal"], "batch input");
-    const verb = v.verb;
-    if (verb !== "done" && verb !== "drop") throw new TypeError("batch verb is invalid");
-    const ids = debtIds(v.ids, "ids");
-    if (ids === undefined || ids.length === 0) throw new TypeError("ids requires at least one DebtId");
-    const note = text(v.note, "note");
-
-    return batchDebts(this.world, verb, ids, signal(v.signal), note);
   }
 }
 export type Debts = DebtsHandle;

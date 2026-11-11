@@ -1,12 +1,9 @@
 import type {
   DebtAbsent,
-  DebtBatchItem,
-  DebtBatchResult,
   DebtCatalogue,
   DebtDetail,
   DebtDoctorIssue,
   DebtDoctorReport,
-  DebtLifecycleResult,
   DebtMutationResult,
   DebtReadPage,
   DebtReadRefusal,
@@ -36,9 +33,7 @@ export { debtMark } from "./marks.js";
 
 /** Presentation-only list scope the leaf acquired; never part of a product value. */
 export type DebtListScope = "world" | Readonly<{ namespace: string }>;
-type DebtFailure =
-  | Extract<DebtMutationResult | DebtUpdateResult | DebtLifecycleResult, { kind: "refused" | "retry" }>
-  | DebtReadRefusal;
+type DebtFailure = Extract<DebtMutationResult | DebtUpdateResult, { kind: "refused" | "retry" }> | DebtReadRefusal;
 type DebtEntity = Readonly<{
   id: string;
   priority: number;
@@ -187,7 +182,7 @@ export function renderDoctor(report: DebtDoctorReport | DebtAbsent): string {
   return [`! doctor  ${report.issues.length} ${noun}`, ...report.issues.map(doctorIssue)].join("\n");
 }
 
-const PAST_VERBS: Readonly<Record<string, string>> = { add: "added", done: "done", drop: "dropped", update: "updated" };
+const PAST_VERBS: Readonly<Record<string, string>> = { add: "added", update: "updated" };
 
 export function renderDebtUpdate(
   id: string | undefined,
@@ -201,14 +196,6 @@ export function renderDebtUpdate(
   for (const field of result.changes ?? []) lines.push(`  ${field}  changed`);
   if (result.warning !== undefined) lines.push(...warningLines(result.warning, columns));
   return lines.join("\n");
-}
-
-function renderBatchItem(verb: string, id: string, item: DebtBatchItem, columns: number): readonly string[] {
-  if (item.kind !== "accepted") return renderFailure(verb, item, columns, id).split("\n");
-  return [
-    `✓ ${PAST_VERBS[verb] ?? verb}  ${id}`,
-    ...(item.warning === undefined ? [] : warningLines(item.warning, columns)),
-  ];
 }
 
 export function renderDebtTree(
@@ -233,13 +220,4 @@ export function renderDebtMutation(
   receiptRow(lines, "✓", PAST_VERBS[verb] ?? verb, [{ text: result.id, opaque: true }], context.columns);
   if (result.warning !== undefined) lines.push(...warningLines(result.warning, context.columns));
   return lines.join("\n");
-}
-
-export function renderDebtLifecycle(
-  verb: string,
-  ids: readonly string[],
-  result: DebtBatchResult,
-  context: TextRenderContext = DEFAULT_CONTEXT,
-): string {
-  return result.items.flatMap((item, index) => renderBatchItem(verb, ids[index]!, item, context.columns)).join("\n");
 }

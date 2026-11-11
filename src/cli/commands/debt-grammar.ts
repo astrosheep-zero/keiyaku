@@ -9,7 +9,7 @@ import { scanArgs, type ScanFlagKind, type ScanSpec, type ScannedArgs } from "..
 import { parseDebtId } from "../../debt/identity.js";
 import { parseDebtQueryExpression, validateDebtLimit, type DebtQueryExpression } from "./debt-query.js";
 
-export type DebtAction = "add" | "tree" | "doctor" | "update" | "query" | "done" | "drop";
+export type DebtAction = "add" | "tree" | "doctor" | "update" | "query";
 type DebtFlagValue = string | true | readonly string[];
 type DebtStdin = "document" | "body" | "append" | "note";
 
@@ -107,6 +107,7 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
       body: "value",
       append: "value",
       note: "value",
+      state: "value",
       priority: "value",
       needs: "repeat",
       "drop-needs": "repeat",
@@ -118,28 +119,16 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
       "drop-relates": "repeat",
     },
     usage: `debt update <debt/...> [--title <text>] [--body <text>|- | --append <text>]
-  [--note <text>]
+  [--note <text>] [--state open|done|drop]
   [--priority 0..3] [--needs <debt/...>]... [--drop-needs <debt/...>]...
   [--parent <debt/...> | --no-parent]
   [--supersedes <debt/...>]... [--drop-supersedes <debt/...>]...
   [--relates <debt/...>]... [--drop-relates <debt/...>]...`,
-    purpose: "Change a Debt's fields and relationships.",
+    purpose: "Change a Debt's fields, relationships, and state.",
     details: [
       "--body replaces the body; --append adds text after it, separated by a newline when needed.",
       "--body - reads replacement body text from stdin.",
     ].join("\n"),
-  },
-  done: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: { ...COMMON, note: "value" },
-    usage: "debt done <debt/...>... [--note <text>]",
-    purpose: "Mark one or more Debts done.",
-  },
-  drop: {
-    arity: [1, Number.POSITIVE_INFINITY],
-    flags: { ...COMMON, note: "value" },
-    usage: "debt drop <debt/...>... [--note <text>]",
-    purpose: "Mark one or more Debts as no longer needed.",
   },
 };
 
@@ -232,7 +221,7 @@ function validateDebtReadFlags(
 }
 
 /** Actions whose positionals are all addressed DebtIds validated by the native owner. */
-const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["tree", "update", "done", "drop"]);
+const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["tree", "update"]);
 
 /** Validate every addressed DebtId positional through the native owner before any read or write. */
 function validateDebtIdPositionals(positionals: readonly string[], fail: (message: string) => never): void {

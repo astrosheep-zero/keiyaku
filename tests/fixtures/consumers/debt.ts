@@ -5,13 +5,11 @@ import {
   type AddDebtInput,
   type Debt,
   type DebtAbsent,
-  type DebtBatchResult,
   type DebtQueryResult,
   type DebtDetail,
   type DebtId,
   type DebtQueryInvocation,
   type DebtMutationResult,
-  type DebtLifecycleResult,
   type DebtReadResult,
   type DebtShowItem,
   type DebtShowResult,
@@ -25,11 +23,11 @@ const listing: DebtQueryInvocation = { namespace: [], selection: "all" };
 const catalogue: Promise<DebtQueryResult> = facet.debtQuery(listing);
 const one: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ id: "debt/example" });
 const many: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ ids: ["debt/example"] });
-const batch: Promise<DebtBatchResult> = facet.debtDone({ ids: ["debt/example"] });
+const completed: Promise<DebtUpdateResult> = facet.debtUpdate({ id: "debt/example", state: "done" });
 const created: Promise<DebtMutationResult> = facet.debtAdd({ title: "Example" });
 void facet.debtAddDocument({ markdown: "# Example" });
 void facet.debtUpdate({ id: "debt/example", note: "updated" });
-void facet.debtDrop({ ids: ["debt/example"] });
+void facet.debtUpdate({ id: "debt/example", state: "drop" });
 void facet.debtQuery();
 void facet.debtDoctor();
 const selectedTree: Promise<DebtTreeResult | DebtAbsent> = facet.debtTree({ id: "debt/example" });
@@ -41,7 +39,7 @@ const read: Promise<DebtReadResult> = debt.read();
 const tree: Promise<DebtTreeResult> = debt.tree();
 const update: Promise<DebtUpdateResult> = debt.update({ note: "replacement" });
 const node = null as unknown as DebtTreeNode;
-void debt.drop({ note: "obsolete" });
+void debt.update({ state: "drop", note: "obsolete" });
 
 function firstFound(items: readonly DebtShowItem[]): DebtDetail | undefined {
   const first = items[0];
@@ -53,16 +51,13 @@ function foundTitles(shown: DebtShowResult | DebtAbsent): readonly string[] {
 function acceptedId(mutation: DebtMutationResult): DebtId | undefined {
   return mutation.kind === "accepted" ? mutation.id : undefined;
 }
-function batchKinds(completed: DebtBatchResult) {
-  return completed.items.map((item) => item.kind);
-}
 function treeRoot(decomposition: DebtTreeResult) {
   return decomposition.kind === "present" ? decomposition : undefined;
 }
-const closedDebt: Promise<DebtLifecycleResult> = debt.done();
+const closedDebt: Promise<DebtUpdateResult> = debt.update({ state: "done" });
 const defaultAdd: AddDebtInput = { title: "Example" };
-void [catalogue, one, many, batch, created, selectedTree, read, update];
-void [firstFound, foundTitles, acceptedId, batchKinds, treeRoot, defaultAdd, closedDebt];
+void [catalogue, one, many, completed, created, selectedTree, read, update];
+void [firstFound, foundTitles, acceptedId, treeRoot, defaultAdd, closedDebt];
 
 // @ts-expect-error Debt has no static construction surface
 Debt.at({ path: "." });
@@ -72,10 +67,6 @@ debts.add({ id: "debt/chosen", title: "Chosen" });
 void debt.tree({ full: true });
 // @ts-expect-error the removed execution carrier is not a public input
 Debts.of(world, { execution: {} });
-function batchOutcome(completed: DebtBatchResult) {
-  // @ts-expect-error batch items are flat; there is no nested outcome
-  return completed.items[0].outcome;
-}
 // @ts-expect-error show is one native result, not a bare detail or null
 const bareShow: Promise<DebtDetail | null> = facet.debtShow({ id: "debt/example" });
 // @ts-expect-error DAG residue type is not exported
@@ -89,5 +80,4 @@ void id;
 void result;
 void tree;
 void node;
-void batchOutcome;
 void bareShow;

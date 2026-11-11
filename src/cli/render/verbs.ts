@@ -28,7 +28,6 @@ import {
 import { renderDeliveryPreview } from "./delivery-preview.js";
 import { contractWaitText } from "./contract-wait.js";
 import {
-  renderDebtLifecycle,
   renderDebtList,
   renderDebtMutation,
   renderDebtShow,
@@ -227,14 +226,6 @@ function renderDebtVerb(
       const query = input as VerbInput<"debt.show">;
       return renderDebtShow("ids" in query ? query.ids : [query.id], value as VerbOutput<"debt.show">, context);
     }
-    case "debt.done":
-    case "debt.drop":
-      return renderDebtLifecycle(
-        name === "debt.done" ? "done" : "drop",
-        (input as VerbInput<"debt.done">).ids,
-        value as VerbOutput<"debt.done">,
-        context,
-      );
     case "debt.query": {
       const query = input as VerbInput<"debt.query">;
       return renderDebtList("query", debtScope(query), value as VerbOutput<"debt.query">, context);

@@ -80,6 +80,7 @@ export const debtChangeSchema = z.enum([
   "title",
   "body",
   "note",
+  "state",
   "priority",
   "needs",
   "parent",
@@ -97,32 +98,18 @@ export const debtUpdateResultSchema = z.union([
   missingRefusalSchema,
   graphRefusalSchema,
   ownershipRefusalSchema,
-  retryResultSchema,
-]);
-export const debtLifecycleResultSchema = z.union([
-  z.strictObject({ kind: z.literal("accepted"), warning: debtWarningSchema.exactOptional() }).readonly(),
-  missingRefusalSchema,
   terminalRefusalSchema,
   retryResultSchema,
 ]);
-export const debtBatchResultSchema = z
-  .strictObject({
-    items: nonEmptyDebtArraySchema(debtLifecycleResultSchema),
-  })
-  .readonly();
 
 export type DebtRetry = z.output<typeof debtRetrySchema>;
 export type DebtMutationResult = z.output<typeof debtMutationResultSchema>;
 export type DebtChange = z.output<typeof debtChangeSchema>;
 export type DebtUpdateResult = z.output<typeof debtUpdateResultSchema>;
-export type DebtLifecycleResult = z.output<typeof debtLifecycleResultSchema>;
-export type DebtBatchItem = DebtLifecycleResult;
-export type DebtBatchResult = z.output<typeof debtBatchResultSchema>;
-export type DebtLifecycleVerb = "done" | "drop";
 export type SettledDebtResult =
   | Readonly<{ kind: "changed"; cleanup?: DebtWarning }>
   | Readonly<{ kind: "unchanged" }>
-  | Extract<DebtLifecycleResult, { kind: "refused" | "retry" }>;
+  | Extract<DebtUpdateResult, { kind: "refused" | "retry" }>;
 export type AddDebtInput = Readonly<{
   title: string;
   namespace?: readonly string[];
@@ -148,6 +135,7 @@ export type UpdateDebtInput = Readonly<{
   body?: string;
   appendBody?: string;
   note?: string;
+  state?: DebtState;
   priority?: DebtPriority;
   needs?: readonly DebtId[];
   addNeeds?: readonly DebtId[];

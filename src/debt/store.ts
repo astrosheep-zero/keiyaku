@@ -251,10 +251,6 @@ export async function replaceAuthority(
   }
 }
 
-export async function authorityBytesMatch(world: WorldRoot, id: DebtId, expected: Uint8Array | null): Promise<boolean> {
-  return equal(await currentBytes(world, id), expected);
-}
-
 function lockPath(world: WorldRoot, id: DebtId): string {
   const coordinate = parseDebtId(id);
   return resolve(

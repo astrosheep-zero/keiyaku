@@ -10,7 +10,6 @@ import type { RegionRead } from "../kanshi/report.js";
 import type {
   BlockedDebtList,
   DebtAbsent,
-  DebtBatchResult,
   DebtTreeResult,
   DebtShowResult,
   DebtCatalogue,
@@ -41,7 +40,6 @@ export type VerbCompletion<O> = Readonly<{ kind: "returned"; value: O }> | Reado
 type DebtNativeResult =
   | DebtMutationResult
   | DebtUpdateResult
-  | DebtBatchResult
   | DebtShowResult
   | DebtCatalogue
   | DebtList
@@ -54,8 +52,7 @@ type DebtNativeResult =
 
 function classifyDebt(result: DebtNativeResult): VerbDisposition {
   if ("items" in result) {
-    if (result.items.some((item) => item.kind === "retry")) return "retryable";
-    return result.items.some((item) => item.kind === "refused" || item.kind === "missing") ? "refused" : "accepted";
+    return result.items.some((item) => item.kind === "missing") ? "refused" : "accepted";
   }
   if (result.kind === "retry") return "retryable";
   if (result.kind === "refused" || result.kind === "absent" || result.kind === "missing") return "refused";
@@ -139,8 +136,6 @@ export function classifyVerb<K extends VerbName>(
     case "debt.addDocument":
     case "debt.update":
     case "debt.show":
-    case "debt.done":
-    case "debt.drop":
     case "debt.query":
     case "debt.tree":
     case "debt.doctor":

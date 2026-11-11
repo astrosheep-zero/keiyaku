@@ -11,19 +11,7 @@ import {
   type DebtShowItem,
 } from "../debt/index.js";
 import { addDebt, addDebtDocument } from "../debt/operations.js";
-import {
-  addInput,
-  addDocumentInput,
-  closed,
-  record,
-  namespace,
-  debtId,
-  debtIds,
-  text,
-  signal,
-  updateInput,
-  sort,
-} from "../debt/input.js";
+import { addInput, addDocumentInput, closed, record, namespace, debtId, updateInput, sort } from "../debt/input.js";
 import { parseDebtCreationDocument } from "../debt/document.js";
 import { debtQuerySelection, normalizeDebtQuery } from "../debt/query.js";
 import { invocationCoordinates } from "./keiyaku-coordinates.js";
@@ -35,7 +23,6 @@ export type DebtReadScope = Readonly<{ scope?: "namespace" | "world"; namespace?
 export type DebtQueryInvocation = DebtReadScope &
   Readonly<{ selection?: DebtSelection; where?: DebtQueryExpression; sort?: DebtQuerySort }>;
 export type DebtUpdateInvocation = UpdateDebtInput & Readonly<{ id: string }>;
-export type DebtCloseInvocation = Readonly<{ ids: readonly string[]; note?: string; signal?: AbortSignal }>;
 export type DebtShowInvocation =
   | Readonly<{ id: string; ids?: never }>
   | Readonly<{ ids: readonly string[]; id?: never }>;
@@ -99,17 +86,6 @@ export async function debtShow(at: KeiyakuAt, input: DebtShowInvocation): Promis
     items.push(result.kind === "present" ? { ...result, kind: "found" } : result);
   }
   return { kind: "present", items };
-}
-export async function debtClose(at: KeiyakuAt, input: DebtCloseInvocation, verb: "done" | "drop") {
-  const v = record(input, "close input");
-  closed(v, ["ids", "note", "signal"], "close input");
-  const coord = await coordinates(at);
-  if (coord.world !== null) return Debts.of(coord.world).batch({ ...input, verb });
-  const ids = debtIds(v.ids, "ids");
-  if (ids === undefined || ids.length === 0) throw new TypeError("ids requires at least one DebtId");
-  text(v.note, "note");
-  signal(v.signal)?.throwIfAborted();
-  return { items: ids.map(() => missing()) };
 }
 export async function debtQuery(at: KeiyakuAt, input: DebtQueryInvocation) {
   const v = readInput(input, "query", ["selection", "where", "sort"]);

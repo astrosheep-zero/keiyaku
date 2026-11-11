@@ -11,8 +11,7 @@ leaf help and the parser, not this chapter.
 
 | Verb family | Purpose | Refusal and result boundary |
 | --- | --- | --- |
-| add, update | Create or change a Debt fact. | The Debt product decides identity, validation, no-op, and authority corruption; creation preserves its minted identity, while an addressed change preserves the fields whose authority meaning actually changed. |
-| done, drop | Close resolved work or work that is no longer owed. | The Debt product decides legal transition, target availability, and batch outcomes; a refusal or retry remains visible per requested Debt. |
+| add, update | Create or change a Debt fact, including an addressed lifecycle judgment. | The Debt product decides identity, validation, legal transition, no-op, and authority corruption; an addressed update changes its requested facts and disposition atomically or writes neither on refusal. |
 | query, tree | Read Debt authority or a derived Debt view. | Missing World, empty result, unavailable observation, and corrupt authority are never collapsed together. |
 | doctor | Diagnose Debt authority and relationship health. | It reports; it never repairs. |
 
@@ -38,9 +37,9 @@ or another traversal interface.
 Debt text makes accepted work, a substantive refusal, retryable contention,
 absence, and infrastructure failure distinguishable. JSON remains the same
 public Debt value, not a reduced text-derived format. Addressed receipts use the
-caller's selection for identity and correlate batch members in that selection's
-order. Update receipts identify actual semantic field changes, including a
-known unchanged result; they do not carry a projection-file difference.
+caller's selection for identity. Update receipts identify actual semantic field
+changes, including a known unchanged result; they do not carry a projection-file
+difference.
 Catalogue presentation keeps work selection concise; exact activity testimony
 belongs to targeted detail and decomposition belongs to the tree view.
 

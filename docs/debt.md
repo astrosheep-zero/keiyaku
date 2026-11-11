@@ -58,14 +58,13 @@ Terminal Debts release their dependents. Readiness means an open Debt has no
 unfinished prerequisites; blocked views show open work waiting on at least one
 unfinished prerequisite.
 
-One batch lifecycle request observes the board once, then judges its requested
-Debts in caller order against that observation as advanced by its own accepted
-changes. A concurrent authority change remains a retry for its addressed Debt;
-it does not make later batch members silently observe a different board.
-Batch cancellation stops at an item boundary; already completed items remain
-durable and are observed through the board. Ordinary batch answers retain each
-requested position and its independent judgment in caller order; completed
-members are not discarded when another member refuses or needs a retry.
+An addressed update owns both ordinary fact changes and explicit lifecycle
+judgment as one indivisible Debt mutation. Omitted state preserves disposition;
+repeating the current state is unchanged. Open work may become terminal, while
+a terminal Debt cannot move to another state. Other facts retain their ordinary
+edit legality even on terminal work. A refused transition or relationship leaves
+the whole requested change unwritten. Settlement retains its internal,
+idempotent completion judgment; there is no public terminal batch operation.
 
 Debt owns dependency, parentage, supersession, and related-work relationships.
 They name complete Debt identities and retain their declared order. Newly

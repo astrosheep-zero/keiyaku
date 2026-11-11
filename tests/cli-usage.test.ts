@@ -103,7 +103,7 @@ test("debt query defaults to active rows and opts into terminal rows", () => {
     const closed = runCli(root, ["debt", "add", "Closed", "--json"]);
     assert.equal(closed.status, 0, closed.stderr);
     const id = JSON.parse(closed.stdout).id as string;
-    assert.equal(runCli(root, ["debt", "done", id]).status, 0);
+    assert.equal(runCli(root, ["debt", "update", id, "--state", "done"]).status, 0);
     const query = (flags: readonly string[]) => {
       const result = runCli(root, ["debt", "query", "--world", "--where", "priority >= 0", ...flags, "--json"]);
       assert.equal(result.status, 0, result.stderr);
@@ -504,27 +504,15 @@ test("usage refusal exits 64 without touching an absent world", async () => {
   assert.doesNotMatch(result.stderr, /no Keiyaku world/u);
 });
 
-test("a worldless lifecycle request refuses every requested Debt in its native shape", () => {
+test("a worldless addressed terminal update returns the native missing refusal", () => {
   const cwd = mkdtempSync(join(tmpdir(), "keiyaku-usage-worldless-"));
   try {
-    const single = runCli(cwd, ["debt", "drop", "debt/alpha"]);
+    const single = runCli(cwd, ["debt", "update", "debt/alpha", "--state", "drop"]);
     assert.equal(single.status, 1);
-    assert.match(single.stdout, /^× drop refused$/mu);
-    assert.match(single.stdout, /^  reason  debt missing$/mu);
-    assert.match(single.stdout, /^  debt  debt\/alpha$/mu);
-    const plural = runCli(cwd, ["debt", "done", "debt/alpha", "debt/beta", "--json"]);
-    assert.equal(plural.status, 1);
-    assert.deepEqual(JSON.parse(plural.stdout), {
-      items: [
-        { kind: "refused", reason: "debt-missing" },
-        { kind: "refused", reason: "debt-missing" },
-      ],
-    });
-    const pluralText = runCli(cwd, ["debt", "done", "debt/alpha", "debt/beta"]);
-    assert.equal(pluralText.status, 1);
-    assert.match(pluralText.stdout, /^  debt  debt\/alpha$/mu);
-    assert.match(pluralText.stdout, /^  debt  debt\/beta$/mu);
-    assert.ok(pluralText.stdout.indexOf("debt/alpha") < pluralText.stdout.indexOf("debt/beta"));
+    const json = runCli(cwd, ["debt", "update", "debt/alpha", "--state", "done", "--json"]);
+    assert.equal(json.status, 1);
+    assert.deepEqual(JSON.parse(json.stdout), { kind: "refused", reason: "debt-missing" });
+    assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

@@ -580,7 +580,7 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["debt", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
     [["debt", "add", "Title", "--actor", " "], /--actor requires a nonblank value/],
     [["debt", "update", "debt/a", "--title", " "], /--title requires a nonblank value/],
-    [["debt", "done", "debt/a", "--note", ""], /--note requires a nonblank value/],
+    [["debt", "update", "debt/a", "--state", "done", "--note", ""], /--note requires a nonblank value/],
     [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],
     [["bind", "--after", "kei/one", "--after", " ", "-"], /--after requires a nonblank value/],
     [["spawn", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],

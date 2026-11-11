@@ -73,7 +73,6 @@ import type { TimelineFact } from "../src/akuma/heart/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import {
-  renderDebtLifecycle,
   renderDebtList,
   renderDebtMutation,
   renderDebtShow,
@@ -81,7 +80,7 @@ import {
   renderDebtUpdate,
   renderDoctor,
 } from "../src/cli/render/debt.js";
-import type { DebtBatchResult, DebtDetail, DebtReadPage, DebtSummary } from "../src/debt/index.js";
+import type { DebtDetail, DebtReadPage, DebtSummary } from "../src/debt/index.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { progressStrip } from "../src/cli/render/contract-observation.js";
 import type { ContractHistoryEvent } from "../src/index.js";
@@ -505,23 +504,6 @@ test("Debt receipts name identity, preserve exact content, and report field chan
   assert.match(partial, /^× show refused\n  reason  debt missing\n  debt  debt\/gone/mu);
   assert.match(partial, /debt\/alpha · open · P2 — Alpha/u);
   assert.equal(renderDebtShow([id], { kind: "absent" }), "debt world absent");
-});
-
-test("Debt lifecycle batches preserve order, verdicts, and accepted warnings", () => {
-  const batch: DebtBatchResult = {
-    items: [
-      { kind: "accepted", warning: "still locked" },
-      { kind: "refused", reason: "debt-missing" },
-      { kind: "retry", reason: "busy" },
-    ],
-  };
-  const text = renderDebtLifecycle("done", ["debt/alpha", "debt/beta", "debt/gamma"], batch, {
-    columns: 120,
-    color: false,
-  });
-  assert.match(text, /^✓ done  debt\/alpha\n  ! warning\n    still locked$/mu);
-  assert.match(text, /^× done refused\n  debt  debt\/beta\n  reason  debt missing$/mu);
-  assert.match(text, /^\? done retry  debt\/gamma\nbusy$/mu);
 });
 
 test("Debt tree and doctor render their native relationship facts", () => {
