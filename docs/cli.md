@@ -11,8 +11,9 @@ and supplies explicit coordinates independently for each call. Protocol validati
 connection lifetime, and cancellation remain at that edge; the facet and product
 owners retain their native admission, result, and retirement semantics. Text and
 outcome classification are shared with the CLI rather than re-decided by the
-transport. A transport's structured owner-result contract does not describe a
-thrown failure; failure evidence remains available without claiming it is an
+transport. Where a transport publishes a structured owner-result contract, it
+describes normal answers, including unsatisfied verdicts, rather than thrown
+failures; failure evidence remains available without claiming it is an
 owner result. A disconnected caller cannot be promised a late receipt, even when
 an owner has admitted facts that remain available through ordinary reads.
 

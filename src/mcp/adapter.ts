@@ -27,23 +27,43 @@ type McpAdapterInput = Readonly<{
   version: string;
 }>;
 
+const SCHEMA_TOOLS = new Set<VerbName>([
+  "bind",
+  "wait",
+  "kei.status",
+  "aku.status",
+  "kei.ls",
+  "aku.ls",
+  "debt.query",
+  "verify",
+  "spawn",
+  "fork",
+  "debt.add",
+  "ask",
+  "debt.show",
+]);
+
 function describeTools(): Tool[] {
   return Object.entries(Keiyaku.verbs).map(([name, entry]) => {
     const schema = z.toJSONSchema(
       z.object({ cwd: z.string().min(1).optional(), repo: z.string().min(1).optional(), input: entry.input }).strict(),
       { io: "input" },
     );
-    const output = z.toJSONSchema(entry.output, { io: "input" });
-    const branches: z.core.JSONSchema.BaseSchema[] = [output];
-    for (const branch of branches) {
-      if (branch.anyOf !== undefined) branches.push(...branch.anyOf);
-      else if (branch.type !== "object") throw new Error(`Non-object output schema: ${name}`);
+    let outputSchema: Tool["outputSchema"];
+    if (SCHEMA_TOOLS.has(name as VerbName)) {
+      const output = z.toJSONSchema(entry.output, { io: "input" });
+      const branches: z.core.JSONSchema.BaseSchema[] = [output];
+      for (const branch of branches) {
+        if (branch.anyOf !== undefined) branches.push(...branch.anyOf);
+        else if (branch.type !== "object") throw new Error(`Non-object output schema: ${name}`);
+      }
+      outputSchema = { ...output, type: "object" } as Tool["inputSchema"];
     }
     return {
       name: name.replaceAll(".", "_"),
       description: entry.description,
       inputSchema: schema as Tool["inputSchema"],
-      outputSchema: { ...output, type: "object" } as Tool["inputSchema"],
+      ...(outputSchema === undefined ? {} : { outputSchema }),
       annotations: { readOnlyHint: entry.effect === "read", destructiveHint: entry.effect === "destroy" },
     };
   });
@@ -116,20 +136,18 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
           ? { actor: environment.KEIYAKU_ACTOR_ID }
           : {}),
       });
-      const projected: unknown =
-        completion.kind === "threw" ? projectFailure(completion.error) : JSON.parse(JSON.stringify(completion.value));
+      const isError = disposition !== "accepted" && disposition !== "unsatisfied";
       return {
         content: [
-          { type: "text", text },
-          ...(completion.kind === "threw" ? [{ type: "text" as const, text: JSON.stringify(projected) }] : []),
+          { type: "text", text: isError ? `${disposition}\n${text}` : text },
+          ...(completion.kind === "threw"
+            ? [{ type: "text" as const, text: JSON.stringify(projectFailure(completion.error)) }]
+            : []),
         ],
-        isError: disposition !== "accepted",
+        isError,
         _meta: { "keiyaku/disposition": disposition },
-        ...(completion.kind === "returned" &&
-        typeof projected === "object" &&
-        projected !== null &&
-        !Array.isArray(projected)
-          ? { structuredContent: projected as Record<string, unknown> }
+        ...(!isError && SCHEMA_TOOLS.has(name) && completion.kind === "returned"
+          ? { structuredContent: JSON.parse(JSON.stringify(completion.value)) }
           : {}),
       };
     } catch (error) {

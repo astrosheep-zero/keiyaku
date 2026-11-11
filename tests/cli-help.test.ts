@@ -12,9 +12,9 @@ import { renderAkumaHelp } from "../src/cli/commands/akuma.js";
 import { renderInstallHelp } from "../src/cli/commands/install.js";
 import { renderDebtHelp } from "../src/cli/commands/debt-grammar.js";
 
-test("the runtime maps the five process outcomes", () => {
-  const outcomes = ["accepted", "refused", "retryable", "failed", "usage"] as const;
-  assert.deepEqual(outcomes.map(cliExitCode), [0, 1, 2, 3, 64]);
+test("the runtime maps the six process outcomes", () => {
+  const outcomes = ["accepted", "refused", "retryable", "failed", "unsatisfied", "usage"] as const;
+  assert.deepEqual(outcomes.map(cliExitCode), [0, 1, 2, 3, 4, 64]);
 });
 
 test("help resolves the longest legal command-word prefix before syntax scanning", () => {

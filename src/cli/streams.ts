@@ -1,7 +1,15 @@
+import type { VerbDisposition } from "../library/keiyaku-verbs.js";
 import { DEFAULT_CLI_COLUMNS, type TextRenderContext } from "./render/terminal.js";
 
-const EXIT_CODES = { accepted: 0, refused: 1, retryable: 2, failed: 3, usage: 64 } as const;
-export type CliOutcome = keyof typeof EXIT_CODES;
+const EXIT_CODES = {
+  accepted: 0,
+  refused: 1,
+  retryable: 2,
+  failed: 3,
+  unsatisfied: 4,
+  usage: 64,
+} as const satisfies Record<VerbDisposition, number>;
+export type CliOutcome = VerbDisposition;
 
 export function cliExitCode(outcome: CliOutcome): number {
   return EXIT_CODES[outcome];

@@ -34,7 +34,7 @@ import {
   spawnFailureReceipt,
 } from "./outcome.js";
 
-export type VerbDisposition = "accepted" | "refused" | "retryable" | "failed" | "usage";
+export type VerbDisposition = "accepted" | "unsatisfied" | "refused" | "retryable" | "failed" | "usage";
 
 export type VerbCompletion<O> = Readonly<{ kind: "returned"; value: O }> | Readonly<{ kind: "threw"; error: unknown }>;
 

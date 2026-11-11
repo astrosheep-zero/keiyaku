@@ -14,8 +14,10 @@ refusal retains its specific cause and exposes the smallest applicable usage
 and help handles without trying the command or appending a complete help page.
 Explicit help remains complete, including supported invocation coordinates.
 
-Process outcomes form a fixed five-way classification — accepted, refused,
-retryable, failed, usage — shared with other invocation adapters by the facet.
+Process outcomes form a fixed six-way classification -- accepted, unsatisfied,
+refused, retryable, failed, usage -- shared with other invocation adapters by the
+facet. An unsatisfied verdict answers the requested check negatively; it remains
+distinct from a failure to complete the operation.
 The CLI owns its numeric exit projection; changing either the classification or
 its exit mapping is a product change, and ordinary receipt text never carries
 the numeric map. Final text rendering is shared, pure projection of native

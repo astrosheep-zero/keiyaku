@@ -57,9 +57,11 @@ requested preview is the sole presentation diff surface.
 
 Classification belongs to the owner judgment. Invocation adapters consume it
 without rereading authority or reconstructing required work from an incomplete
-receipt. Acceptance, refusal, retryable stop, operational failure, and caller
-usage remain distinct. Optional retained residue stays observable without
-becoming required work or reversing admission. Structured recovery describes
+receipt. Acceptance, an answered unsatisfied verdict, refusal, retryable stop,
+operational failure, and caller usage remain distinct. A terminal unsatisfied
+check alone is a negative answer; an operational stop still makes the invocation
+failed, and retains precedence over that answer. Optional retained residue stays
+observable without becoming required work or reversing admission. Structured recovery describes
 semantic capabilities and coordinates; only leaf CLI presentation supplies
 command grammar.
 

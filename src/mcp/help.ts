@@ -4,7 +4,9 @@ usage  keiyaku-mcp [--help]
 
 Each tool accepts { cwd?, repo?, input }. Input is required, even when empty.
 Relative cwd is resolved from the server startup directory. Tool results share
-Keiyaku's CLI text and native JSON facts.
+Keiyaku's CLI text. Tools publish native JSON facts when their result selects a
+next call; other tools return text only. Errors return text led by their
+classification. An unsatisfied verification verdict is a normal answer.
 
 Pi has built-in MCP. Add a server to ~/.pi/agent/mcp.json or the project's
 .pi/mcp.json, for example:

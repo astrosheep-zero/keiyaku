@@ -167,10 +167,11 @@ export function contractOutcomeDisposition(
     checks?: readonly import("../protocol/verify.js").VerificationCheck[];
     continuation?: ContinuationReport;
   }>,
-): "accepted" | "refused" | "retryable" | "failed" {
+): "accepted" | "unsatisfied" | "refused" | "retryable" | "failed" {
   if (result.kind === "refused") return "refused";
   if (result.kind === "retry") return "retryable";
   let retry = false;
+  let unsatisfied = false;
   const stopped = (stop: Readonly<{ kind: string }>): boolean => {
     if (stop.kind === "retry") {
       retry = true;
@@ -183,11 +184,12 @@ export function contractOutcomeDisposition(
   if (result.issues?.some(invocationIssueIsFailure)) return "failed";
   if (result.placement !== undefined && stopped(result.placement)) return "failed";
   for (const check of result.checks ?? []) {
-    if (check.kind !== "terminal" || check.verdict === "unsatisfied") return "failed";
+    if (check.kind !== "terminal") return "failed";
     if (typeof check.admission === "object" && stopped(check.admission)) return "failed";
+    if (check.verdict === "unsatisfied") unsatisfied = true;
   }
   for (const stop of result.continuation?.stopped ?? []) if (stopped(stop)) return "failed";
-  return retry ? "retryable" : "accepted";
+  return retry ? "retryable" : unsatisfied ? "unsatisfied" : "accepted";
 }
 
 const resetOwnerSchema = z.enum(["akuma", "git", "debt", "world"]);
