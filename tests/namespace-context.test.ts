@@ -39,10 +39,10 @@ test("managed worktrees share the Debt World and select namespaces explicitly", 
     ["-C", nested, "ls", `debt/${bound.value.contractId}/`], { environment },
   );
   assert.deepEqual(scopedListing.value.rows.map(({ id }) => id), [scoped.value.id]);
-  const queried = await cliJson<{ rows: { id: string }[] }>(
-    ["-C", nested, "debt", "query", "--where", "ready"], { environment },
+  const nestedRoot = await cliJson<{ rows: { id: string }[] }>(
+    ["-C", nested, "ls", "debt/"], { environment },
   );
-  assert.deepEqual(queried.value.rows.map(({ id }) => id), [added.value.id]);
+  assert.deepEqual(nestedRoot.value.rows.map(({ id }) => id), [added.value.id]);
   const shown = await cliJson<{ items: { kind: string; title: string }[] }>(
     ["-C", repository.path, "show", scoped.value.id, added.value.id], { environment },
   );

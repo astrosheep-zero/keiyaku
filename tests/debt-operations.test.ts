@@ -20,12 +20,12 @@ import { parseDebtDocument, serializeDebtDocument, type DebtDocument } from "../
 import { parseDebtId } from "../src/debt/identity.js";
 import { settleDebt } from "../src/debt/operations.js";
 import { observeCreatedDebtObservations } from "../src/debt/created-observation.js";
+import { Keiyaku } from "../src/library/keiyaku.js";
 import { projectDebtBoardObservation } from "../src/debt/board.js";
 import { readBoard, nukeDebtAuthority, replaceAuthority, withDebtLocks } from "../src/debt/store.js";
 import { debtAuthorityFile } from "./support/debt.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { runCli, cliJson } from "./support/cli-fixtures.js";
-import { parseDebtQueryExpression } from "../src/cli/commands/debt-query.js";
 
 async function world(): Promise<{ root: WorldRoot; debts: ReturnType<typeof Debts.of> }> {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-debts-"));
@@ -425,57 +425,49 @@ test("appendBody supplies one missing LF boundary without duplicating caller del
   assert.equal((await readDetail(debts, terminated)).body, "first\nsecond");
 });
 
-test("bounded Debt query filters before limit and parent views recurse", async () => {
-  const { debts } = await world();
+test("parent-scoped ready and blocked views traverse before bounding", async (t) => {
+  const { root, debts } = await world();
+  t.after(() => rmSync(root, { recursive: true, force: true }));
   const parent = acceptedId(await debts.add({ title: "Area", priority: 3 }));
   const need = acceptedId(await debts.add({ title: "Need", priority: 0, parent }));
   const ready = acceptedId(await debts.add({ title: "Ready auth", priority: 1, parent }));
   const nested = acceptedId(await debts.add({ title: "Nested", priority: 2, parent: ready, needs: [need] }));
+  const other = acceptedId(await debts.add({ title: "Other blocked", priority: 3, parent, needs: [need] }));
+  acceptedId(await debts.add({ title: "Unrelated ready", priority: 0 }));
+  acceptedId(await debts.add({ title: "Unrelated blocked", priority: 0, needs: [need] }));
 
-  const selected = await debts.query({
-    scope: "world",
-    where: {
-      kind: "and",
-      terms: [
-        { kind: "predicate", predicate: { field: "under", operator: "=", value: parent } },
-        { kind: "predicate", predicate: { field: "priority", operator: "<=", value: 1 } },
-      ],
-    },
-    limit: 1,
+  assert.deepEqual(await debts.ready({ scope: "world", parent, limit: 1 }), {
+    kind: "present",
+    rows: [{ id: need, title: "Need", priority: 0 }],
+    more: true,
   });
-  assert.equal(selected.kind, "present");
-  if (selected.kind === "present") {
-    assert.deepEqual(
-      selected.rows!.map((row) => row.id),
-      [need],
-    );
-    assert.equal(selected.more, true);
-  }
-
   const descendants = await debts.ready({ scope: "world", parent });
   assert.equal(descendants.kind, "present");
   if (descendants.kind === "present")
-    assert.deepEqual(
-      descendants.rows!.map((row) => row.id),
-      [need, ready],
-    );
+    assert.deepEqual(descendants.rows!.map((row) => row.id), [need, ready]);
+  assert.deepEqual(await debts.blocked({ scope: "world", parent, limit: 1 }), {
+    kind: "present",
+    rows: [{ id: nested, title: "Nested", priority: 2, blockers: [{ id: need }] }],
+    more: true,
+  });
   const blocked = await debts.blocked({ scope: "world", parent });
   assert.equal(blocked.kind, "present");
-  if (blocked.kind === "present")
-    assert.deepEqual(
-      blocked.rows!.map((row) => row.id),
-      [nested],
-    );
-  assert.deepEqual(await debts.ready({ parent: "debt/missing" }), {
-    kind: "refused",
-    reason: "debt-missing",
+  if (blocked.kind === "present") assert.deepEqual(blocked.rows!.map((row) => row.id), [nested, other]);
+  assert.deepEqual(await debts.ready({ parent: "debt/missing" }), { kind: "refused", reason: "debt-missing" });
+  assert.deepEqual(await debts.blocked({ parent: "debt/missing" }), { kind: "refused", reason: "debt-missing" });
+
+  const bridge = acceptedId(await debts.add({ title: "Foreign bridge", namespace: ["team"], parent: ready, state: "done" }));
+  const beyond = acceptedId(await debts.add({ title: "Beyond bridge", parent: bridge, priority: 1 }));
+  const waiting = acceptedId(await debts.add({ title: "Waiting beyond bridge", parent: bridge, priority: 1, needs: [need] }));
+  assert.deepEqual(await debts.ready({ namespace: [], parent: ready, limit: 1 }), {
+    kind: "present",
+    rows: [{ id: beyond, title: "Beyond bridge", priority: 1 }],
   });
-  assert.deepEqual(
-    await debts.query({
-      where: { kind: "predicate", predicate: { field: "under", operator: "=", value: "debt/missing" } },
-    }),
-    { kind: "refused", reason: "debt-missing", debtId: "debt/missing" },
-  );
+  assert.deepEqual(await debts.blocked({ namespace: [], parent: ready, limit: 1 }), {
+    kind: "present",
+    rows: [{ id: waiting, title: "Waiting beyond bridge", priority: 1, blockers: [{ id: need }] }],
+    more: true,
+  });
 });
 
 test("Debt row views share the bounded-list contract and complete their graph judgment first", async () => {
@@ -503,7 +495,6 @@ test("Debt row views share the bounded-list contract and complete their graph ju
     await debts.list({ scope: "world", selection: "all" }),
     await debts.ready({ scope: "world" }),
     await debts.blocked({ scope: "world" }),
-    await debts.query({ scope: "world" }),
   ];
   for (const view of views) {
     assert.equal(view.kind, "present");
@@ -521,11 +512,10 @@ test("Debt row views share the bounded-list contract and complete their graph ju
   await assert.rejects(() => debts.list({ scope: "world", limit: 501 }), /integer from 1 to 500/u);
 });
 
-test("targeted reads expose outbound relations only; board projections derive reverse edges", async () => {
+test("targeted reads expose outbound relations only", async () => {
   const { debts } = await world();
   const blocker = acceptedId(await debts.add({ title: "A" }));
   const blocked = acceptedId(await debts.add({ title: "B", needs: [blocker] }));
-  const other = acceptedId(await debts.add({ title: "C" }));
   const relatedFrom = acceptedId(await debts.add({ title: "D", relates: [blocker] }));
 
   const shown = await readDetail(debts, blocker);
@@ -545,138 +535,75 @@ test("targeted reads expose outbound relations only; board projections derive re
     [blocker],
   );
   assert.equal(shownRelatedFrom.needs, undefined);
-
-  const selectsBlocker = await debts.query({
-    scope: "world",
-    where: { kind: "predicate", predicate: { field: "blocks", operator: "=", value: blocked } },
-  });
-  assert.equal(selectsBlocker.kind, "present");
-  if (selectsBlocker.kind === "present") {
-    assert.deepEqual(
-      selectsBlocker.rows!.map((row) => row.id),
-      [blocker],
-    );
-    assert.equal("blocks" in selectsBlocker.rows![0]!, false, "query rows omit bulky reverse relations");
-  }
-
-  const doesNotSelectBlocked = await debts.query({
-    scope: "world",
-    where: { kind: "predicate", predicate: { field: "blocks", operator: "=", value: blocker } },
-  });
-  assert.deepEqual(doesNotSelectBlocked, { kind: "present" });
-
-  const complement = await debts.query({
-    scope: "world",
-    where: { kind: "predicate", predicate: { field: "blocks", operator: "!=", value: blocked } },
-  });
-  assert.equal(complement.kind, "present");
-  if (complement.kind === "present") {
-    assert.deepEqual(
-      complement.rows!.map((row) => row.id),
-      [blocked, other, relatedFrom],
-    );
-  }
 });
 
-test("Debt query defaults to active Debts", async () => {
-  const { debts } = await world();
-  const active = acceptedId(await debts.add({ title: "Active" }));
-  acceptedId(await debts.add({ title: "Finished", state: "done" }));
-  acceptedId(await debts.add({ title: "Dropped", state: "drop" }));
-  const result = await debts.query();
-  assert.equal(result.kind, "present");
-  if (result.kind === "present")
-    assert.deepEqual(
-      result.rows!.map((row) => row.id),
-      [active],
-    );
-});
-
-test("CLI Debt selection and parsed filters retain native query semantics", async (context) => {
+test("native, invocation and CLI listings select lifecycle and namespace before bounding", async (t) => {
   const { root, debts } = await world();
-  context.after(() => rmSync(root, { recursive: true, force: true }));
-  const active = acceptedId(await debts.add({ title: "Selected active", priority: 3 }));
-  const done = acceptedId(await debts.add({ title: "Selected done", state: "done", priority: 0 }));
-  const dropped = acceptedId(await debts.add({ title: "Other dropped", state: "drop", priority: 1 }));
-  const rows = async (args: readonly string[]) => {
-    const result = await cliJson<{ kind: string; rows?: readonly { id: string }[]; more?: true }>(
-      ["-C", root, "debt", "query", "--world", ...args],
-      { environment: {} },
-    );
-    assert.equal(result.exit, 0, result.stdout + result.stderr);
-    return (result.value.rows ?? []).map((row) => row.id);
-  };
-  assert.deepEqual(await rows([]), [active]);
-  assert.deepEqual(await rows(["--closed"]), [done, dropped]);
-  assert.deepEqual(await rows(["--all"]), [done, dropped, active]);
-  assert.deepEqual(await rows(["--where", 'title ~ "Selected"']), [active]);
-  assert.deepEqual(await rows(["--closed", "--where", 'title ~ "Selected"']), [done]);
-  assert.deepEqual(await rows(["--all", "--where", 'title ~ "Selected"']), [done, active]);
-  // Explicit native filters do not implicitly acquire the CLI's active default.
-  const native = await debts.query({
-    where: parseDebtQueryExpression("state = done or priority = 3 and not state = done"),
-  });
-  assert.equal(native.kind, "present");
-  if (native.kind === "present")
-    assert.deepEqual(
-      native.rows!.map((row) => row.id),
-      [done, active],
-    );
-  const relation = await rows([
-    "--all",
-    "--where",
-    `id = ${active} and parent = none and created >= "2000-01-01T00:00:00.000Z"`,
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const done = acceptedId(await debts.add({ title: "Finished", state: "done", priority: 0 }));
+  const dropped = acceptedId(await debts.add({ title: "Dropped", state: "drop", priority: 1 }));
+  const zebra = acceptedId(await debts.add({ title: "Zebra", priority: 2 }));
+  const alpha = acceptedId(await debts.add({ title: "Alpha", priority: 2, needs: [zebra] }));
+  const outside = acceptedId(await debts.add({ title: "Outside", namespace: ["team"], priority: 0 }));
+  const nested = acceptedId(await debts.add({ title: "Nested", namespace: ["team", "sub"], priority: 1 }));
+  const teamDone = acceptedId(await debts.add({ title: "Team done", namespace: ["team"], state: "done", priority: 1 }));
+  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  const cases = [
+    { input: {}, ids: [alpha, zebra] },
+    { input: { selection: "closed" }, ids: [done, dropped] },
+    { input: { selection: "all" }, ids: [done, dropped, alpha, zebra] },
+    { input: { namespace: ["team"] }, ids: [outside] },
+    { input: { namespace: ["team", "sub"] }, ids: [nested] },
+    { input: { namespace: ["team"], selection: "closed" }, ids: [teamDone] },
+    { input: { namespace: ["missing"] }, ids: [] },
+    { input: { scope: "world" }, ids: [outside, nested, alpha, zebra] },
+    { input: { scope: "world", selection: "all" }, ids: [done, outside, dropped, nested, teamDone, alpha, zebra] },
+  ] as const;
+  for (const { input, ids } of cases) {
+    const native = await debts.list(input);
+    assert.deepEqual(native.rows?.map((row) => row.id) ?? [], ids);
+    assert.equal(native.more, undefined);
+    assert.deepEqual(await facet.debtLs(input), native);
+    const bounded = await debts.list({ ...input, limit: 1 });
+    assert.deepEqual(bounded.rows?.map((row) => row.id) ?? [], ids.slice(0, 1));
+    assert.equal(bounded.more, ids.length > 1 ? true : undefined);
+    assert.deepEqual(await facet.run("debt.ls", { ...input, limit: 1 }), bounded);
+    if (!("scope" in input)) {
+      const selector = `debt/${"namespace" in input ? input.namespace.join("/") + "/" : ""}`;
+      const flags = "selection" in input ? [input.selection === "closed" ? "--closed" : "--all"] : [];
+      const cli = await cliJson(["-C", root, "ls", selector, ...flags, "--limit", "1"], { environment: {} });
+      assert.equal(cli.exit, 0, cli.stderr);
+      assert.deepEqual(cli.value, bounded);
+    }
+  }
+  assert.deepEqual((await debts.list()).rows, [
+    { id: alpha, title: "Alpha", priority: 2, disposition: "blocked" },
+    { id: zebra, title: "Zebra", priority: 2, disposition: "ready" },
   ]);
-  assert.deepEqual(relation, [active]);
-  const child = acceptedId(await debts.add({ title: 'Child "quoted"', parent: active, needs: [active] }));
-  assert.deepEqual(
-    await rows(["--where", `under = ${active} and parent = ${active} and needs = ${active} and blocked`]),
-    [child],
-  );
-  assert.deepEqual(await rows(["--where", `blocks = ${child} and not (state = done or state = drop)`]), [active]);
-  assert.deepEqual(await rows(["--where", 'title = "Child \\"quoted\\""']), [child]);
-  assert.deepEqual(await rows(["--where", "ready"]), [active]);
+  assert.deepEqual(await debts.list({ namespace: ["team"], selection: "closed", limit: 1 }), {
+    kind: "present",
+    rows: [{ id: teamDone, title: "Team done", priority: 1, disposition: "done" }],
+  });
 });
 
-test("Debt query rejects direct JavaScript semantics and CLI reports the responsible source column", async (context) => {
+test("listing failures retain corrupt authority and unavailable custody rather than empty pages", async (t) => {
   const { root, debts } = await world();
-  context.after(() => rmSync(root, { recursive: true, force: true }));
-  // Deliberately cross the JS boundary, rather than trusting TypeScript's public union.
-  const query = debts.query.bind(debts) as (input: { where: unknown }) => ReturnType<typeof debts.query>;
-  await assert.rejects(
-    query({ where: { kind: "predicate", predicate: { field: "priority", operator: "=", value: "1" } } }),
-    /priority value must be 0\.\.3/u,
-  );
-  await assert.rejects(
-    query({ where: { kind: "predicate", predicate: { field: "state", operator: "~", value: "open" } } }),
-    /state supports only = and !=/u,
-  );
-  await assert.rejects(
-    query({ where: { kind: "predicate", predicate: { field: "needs", operator: "=", value: "debt/team//item" } } }),
-    /canonical DebtId/u,
-  );
-  await assert.rejects(
-    query({ where: { kind: "predicate", predicate: { field: "updated", operator: "=", value: "2026-01-01" } } }),
-    /canonical UTC ISO timestamp/u,
-  );
-  await assert.rejects(
-    query({ where: { kind: "predicate", predicate: { field: "unknown", operator: "=", value: true } } }),
-    TypeError,
-  );
-  await assert.rejects(query({ where: { kind: "and", terms: [] } }), /and query requires terms/u);
-  await assert.rejects(
-    query({ where: { kind: "predicate", predicate: { field: "ready", operator: "=", value: "true" } } }),
-    /ready value must be boolean/u,
-  );
-  assert.throws(() => parseDebtQueryExpression("unknown = 1"), /unknown query field: unknown at column 1/u);
-  assert.throws(() => parseDebtQueryExpression("state ~ open"), /state supports only = and != at column 7/u);
-  assert.throws(() => parseDebtQueryExpression("priority = 4"), /priority value must be 0\.\.3 at column 12/u);
-  assert.throws(() => parseDebtQueryExpression("title = unquoted"), /double quotes at column 9/u);
-  assert.throws(() => parseDebtQueryExpression("(ready"), /missing closing parenthesis at column 1/u);
-  assert.throws(() => parseDebtQueryExpression("needs = debt/team//item"), /canonical DebtId at column 9/u);
-  assert.throws(() => parseDebtQueryExpression("ready = maybe"), /ready value must be boolean at column 9/u);
-  assert.throws(() => parseDebtQueryExpression("state = finished"), /state value is invalid at column 9/u);
-  assert.throws(() => parseDebtQueryExpression('updated = "2026-01-01"'), /canonical UTC ISO timestamp at column 11/u);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  assert.deepEqual(await facet.debtLs(), { kind: "present" });
+  const id = acceptedId(await debts.add({ title: "Readable" }));
+  const corrupt = join(root, ".keiyaku", "debts", "broken.md");
+  writeFileSync(corrupt, "not Debt authority\n");
+  await assert.rejects(debts.list({ namespace: ["missing"], limit: 1 }), DebtAuthorityCorruptionError);
+  await assert.rejects(facet.debtLs({ limit: 1 }), DebtAuthorityCorruptionError);
+  const failed = await cliJson(["-C", root, "ls", "debt/", "--limit", "1"], { environment: {} });
+  assert.equal(failed.exit, 3, failed.stderr);
+  unlinkSync(corrupt);
+  const link = join(root, ".keiyaku", "debts", "linked");
+  symlinkSync(root, link, "dir");
+  await assert.rejects(debts.list({ limit: 1 }), /custody violation/u);
+  await assert.rejects(facet.debtLs({ limit: 1 }), /custody violation/u);
+  assert.equal((await debts.debt({ id }).read()).kind, "present");
 });
 
 test("concurrent same-title creation allocates stable unique suffixes", async () => {
@@ -900,6 +827,12 @@ test("debt tree renders a parent cycle as a terminal cycle node", async () => {
   if (child.kind === "node") assert.deepEqual(child.children, [{ kind: "cycle", id: first }]);
   const doctor = await debts.doctor();
   assert.deepEqual(doctor.issues, [{ kind: "cycle", relation: "parent", debts: [first, second] }]);
+  assert.deepEqual(await debts.ready({ parent: first, limit: 1 }), {
+    kind: "present",
+    rows: [{ id: first, title: "First", priority: 2 }],
+    more: true,
+  });
+  assert.deepEqual(await debts.blocked({ parent: first }), { kind: "present" });
 });
 
 test("creation actor persists as createdBy and later mutations leave it unchanged", async () => {
@@ -1018,6 +951,7 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => debts.debt({ id }).update({ state: "started" } as never), /state is invalid/u);
   assert.throws(() => debts.debt({ id }).update({ state: "done", extra: true } as never), /unknown field/u);
   await assert.rejects(debts.list({ scope: "nearby" } as never), /scope must be namespace or world/u);
+  await assert.rejects(debts.list({ selection: "paused" } as never), /selection must be active, closed, or all/u);
   assert.throws(() => Debts.of({ root: debts.root } as never), /Debts.of world/u);
 });
 

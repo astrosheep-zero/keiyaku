@@ -84,14 +84,17 @@ authority, so a synthetic history would be dishonest.
 
 ## Views
 
-Invocation listing and query default to open work; callers may explicitly select
-terminal work or all work. Catalogues summarize current work rather than repeat
+Invocation listing defaults to open work; callers may explicitly select terminal
+work or all work. Namespace and lifecycle selection precede the bound, and rows
+are ordered by priority and then canonical identity. Debt offers native listing
+and graph views without an expression language or caller-selected sorting.
+Catalogues summarize current work rather than repeat
 its full document, activity testimony, or decomposition. A targeted Debt read
 retains requested author testimony and resolved Debt-owned outbound relations;
 relationship endpoints retain availability and lifecycle judgment without
 repeating their work summaries. Blocked views identify every unresolved
 prerequisite and distinguish missing endpoints. Reverse relations are derived
-only by named board projections. Debt's board, readiness, blocked, query, tree, and
+only by named board projections. Debt's board, readiness, blocked, tree, and
 diagnostic views are read-only interpretations of current Debt authority. Growing row catalogues
 are bounded observations: they retain the selected rows and whether the same
 observation establishes another matching row, without becoming a traversal or

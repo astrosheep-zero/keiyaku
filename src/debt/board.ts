@@ -152,22 +152,30 @@ function freezeRefs(
 }
 export type DebtRelationProjection = Readonly<{
   children(id: DebtId): readonly DebtRef[];
-  blocks(id: DebtId): readonly DebtRef[];
 }>;
 export function createDebtRelations(board: DebtBoard): DebtRelationProjection {
   const children = new Map<DebtId, DebtId[]>();
-  const blocks = new Map<DebtId, DebtId[]>();
   for (const debt of board.debts.values()) {
     if (debt.parent !== null) append(children, debt.parent, debt.id);
-    for (const need of debt.needs) append(blocks, need, debt.id);
   }
   const childRefs = freezeRefs(board, children);
-  const blockRefs = freezeRefs(board, blocks);
   return {
     children: (id) => childRefs.get(id) ?? none,
-    blocks: (id) => blockRefs.get(id) ?? none,
   };
 }
+export function debtDescendants(relations: DebtRelationProjection, parent: DebtId): ReadonlySet<DebtId> {
+  const result = new Set<DebtId>();
+  const pending = [parent];
+  for (let index = 0; index < pending.length; index += 1) {
+    for (const child of relations.children(pending[index]!)) {
+      if (result.has(child.id)) continue;
+      result.add(child.id);
+      pending.push(child.id);
+    }
+  }
+  return result;
+}
+
 function needReleased(board: DebtBoard, id: DebtId): boolean {
   const target = board.debts.get(id);
   return target !== undefined && terminal(target.state);

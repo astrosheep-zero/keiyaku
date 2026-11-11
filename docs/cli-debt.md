@@ -12,12 +12,14 @@ leaf help and the parser, not this chapter.
 | Verb family | Purpose | Refusal and result boundary |
 | --- | --- | --- |
 | add, update | Create or change a Debt fact, including an addressed lifecycle judgment. | The Debt product decides identity, validation, legal transition, no-op, and authority corruption; an addressed update changes its requested facts and disposition atomically or writes neither on refusal. |
-| query, tree | Read Debt authority or a derived Debt view. | Missing World, empty result, unavailable observation, and corrupt authority are never collapsed together. |
+| tree | Read a Debt relationship view. | Missing World, missing Debt, unavailable observation, and corrupt authority are never collapsed together. |
 | doctor | Diagnose Debt authority and relationship health. | It reports; it never repairs. |
 
 The Debt CLI adapts through the invocation facet, preserving native answers.
-Root listing uses the existing Debt query's ordinary listing selection, and
-addressed reads use the same Debt owner; listing defaults to open work. Readiness and blocking are query predicates.
+Root listing calls Debt's native list, and addressed reads use the same Debt
+owner. Listing defaults to open work, with explicit terminal or complete
+selection applied before bounding. Readiness and blocking remain Debt-owned
+graph views. The CLI offers no expression language or custom catalogue order.
 The Debt CLI acquires only the input a selected verb permits and refuses an
 ambiguous, surplus, or ill-formed request before invoking Debt. An explicit
 namespace or complete identity selects its named coordinate; omission selects

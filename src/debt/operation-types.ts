@@ -46,8 +46,6 @@ export const debtRefusalSchema = z.union([
   terminalRefusalSchema,
 ]);
 export type DebtRefusal = z.output<typeof debtRefusalSchema>;
-export const debtReadRefusalSchema = missingRefusalSchema.unwrap().extend({ debtId: debtIdSchema }).readonly();
-export type DebtReadRefusal = z.output<typeof debtReadRefusalSchema>;
 export const debtParentReadRefusalSchema = missingRefusalSchema;
 export type DebtParentReadRefusal = z.output<typeof debtParentReadRefusalSchema>;
 
@@ -61,10 +59,9 @@ export function debtReadPageSchema<Row extends z.ZodType>(row: Row) {
       })
       .readonly(),
     z.strictObject({ kind: z.literal("absent") }).readonly(),
-    debtReadRefusalSchema,
   ]);
 }
-export type DebtReadPage<Row, Refusal = DebtReadRefusal> =
+export type DebtReadPage<Row, Refusal = never> =
   | Readonly<{ kind: "present"; rows?: readonly Row[]; more?: true }>
   | Readonly<{ kind: "absent" }>
   | Refusal;

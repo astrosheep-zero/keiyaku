@@ -16,7 +16,6 @@ import {
   debtListSchema as listSchema,
   debtReadyListSchema as readySchema,
   blockedDebtListSchema as blockedSchema,
-  debtQueryResultSchema as querySchema,
   debtDoctorReportSchema as doctorSchema,
   debtReadResultSchema as readSchema,
   debtTreeResultSchema as treeSchema,
@@ -105,7 +104,6 @@ test("Debt, Settings, World, region and reset schemas describe real wire results
   assertWireRoundTrip(listSchema, await debts.list());
   assertWireRoundTrip(readySchema, await debts.ready());
   assertWireRoundTrip(blockedSchema, await debts.blocked());
-  assertWireRoundTrip(querySchema, await debts.query());
   assertWireRoundTrip(doctorSchema, await debts.doctor());
   assertWireRoundTrip(updateSchema, await debt.update({ state: "done" }));
   assertWireRoundTrip(updateSchema, await debt.update({ state: "drop" }));

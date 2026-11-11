@@ -27,12 +27,12 @@ test("show routes complete Debt addresses to the native Debt operation", () => {
 
 test("root Debt listings select closed or all only for Debt", () => {
   assert.deepEqual(command(["ls", "debt/", "--closed"]), {
-    name: "debt.query",
+    name: "debt.ls",
     output: "text",
     input: { namespace: [], selection: "closed" },
   });
   assert.deepEqual(command(["ls", "debt/ns/", "--all"]), {
-    name: "debt.query",
+    name: "debt.ls",
     output: "text",
     input: { namespace: ["ns"], selection: "all" },
   });
@@ -79,7 +79,7 @@ test("persisted removed workspace bytes are authority corruption", () => {
 test("global coordinates are independent of command position", () => {
   assert.deepEqual(parseArgv(["ls", "debt/", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
-    command: { name: "debt.query", input: { namespace: [] }, output: "text" },
+    command: { name: "debt.ls", input: { namespace: [] }, output: "text" },
   });
   assert.deepEqual(parseArgv(["settings", "--cwd", "/repo/caller"]), {
     cwd: "/repo/caller",
@@ -270,11 +270,11 @@ test("bare ls requires a selector rather than opening help", () => {
 test("ls parses only canonical identity directories", () => {
   for (const path of ["debt", "debt/"]) {
     assert.deepEqual(parseArgv(["ls", path]), {
-      command: { name: "debt.query", input: { namespace: [] }, output: "text" },
+      command: { name: "debt.ls", input: { namespace: [] }, output: "text" },
     });
   }
   assert.deepEqual(parseArgv(["ls", "debt/feature/sub/", "--json"]), {
-    command: { name: "debt.query", input: { namespace: ["feature", "sub"] }, output: "json" },
+    command: { name: "debt.ls", input: { namespace: ["feature", "sub"] }, output: "json" },
   });
   for (const path of ["debt/feature", "debt//", "debt/feature//"]) {
     assert.throws(() => parseArgv(["ls", path]), /Debt namespace selector/);

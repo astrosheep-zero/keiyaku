@@ -5,12 +5,9 @@ import type {
   DebtDoctorIssue,
   DebtDoctorReport,
   DebtMutationResult,
-  DebtReadPage,
-  DebtReadRefusal,
   DebtRef,
   DebtRefusal,
   DebtShowResult,
-  DebtSummary,
   DebtTreeNode,
   DebtTreeRoot,
   DebtTreeResult,
@@ -33,7 +30,7 @@ export { debtMark } from "./marks.js";
 
 /** Presentation-only list scope the leaf acquired; never part of a product value. */
 export type DebtListScope = "world" | Readonly<{ namespace: string }>;
-type DebtFailure = Extract<DebtMutationResult | DebtUpdateResult, { kind: "refused" | "retry" }> | DebtReadRefusal;
+type DebtFailure = Extract<DebtMutationResult | DebtUpdateResult, { kind: "refused" | "retry" }>;
 type DebtEntity = Readonly<{
   id: string;
   priority: number;
@@ -62,10 +59,9 @@ function entityLines(entity: DebtEntity, columns: number, indent = ""): readonly
   return [scan, ...renderTextBlock(title, `${indent}  `, columns, "—")];
 }
 
-function projectRefusal(refusal: DebtRefusal | DebtReadRefusal): RefusalProjection {
+function projectRefusal(refusal: DebtRefusal): RefusalProjection {
   const diagnostic = refusal.reason.replaceAll("-", " ");
-  if (refusal.reason === "debt-missing")
-    return { diagnostic, ...("debtId" in refusal ? { facts: [`debt  ${refusal.debtId}`] } : {}) };
+  if (refusal.reason === "debt-missing") return { diagnostic };
   if (refusal.reason === "invalid-lifecycle-transition")
     return { diagnostic, facts: [`state  ${dispositionText(refusal.state)}`] };
   if (refusal.reason === "relation-owned-by-other") return { diagnostic, facts: [`related debt  ${refusal.related}`] };
@@ -96,17 +92,15 @@ export function debtFrameHead(view: string, scope: string): string {
 }
 
 export function renderDebtList(
-  action: "ls" | "query",
   scope: DebtListScope,
-  result: DebtCatalogue | DebtReadPage<DebtSummary>,
+  result: DebtCatalogue,
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
   const page = result;
   const columns = context.columns;
   if (page.kind === "absent") return "debt world absent";
-  if (page.kind === "refused") return renderFailure(action, page, columns);
   const rows = page.rows ?? [];
-  const view = action === "ls" ? "debts" : action;
+  const view = "debts";
   if (rows.length === 0) return emptyCatalogue(view);
   const scopeText =
     scope === "world" ? "world" : `namespace ${scope.namespace.replace(/^debt\//u, "").replace(/\/$/u, "") || "root"}`;

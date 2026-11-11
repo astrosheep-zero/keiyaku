@@ -1,7 +1,6 @@
 import { type DebtPriority, type DebtState } from "./document.js";
 import { isDebtSegment, parseDebtId, type DebtId } from "./identity.js";
 import type { AddDebtDocumentInput, AddDebtInput, UpdateDebtInput } from "./operations.js";
-import type { DebtQuerySort } from "./query.js";
 
 export function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -71,14 +70,6 @@ function priority(value: unknown): DebtPriority | undefined {
     throw new TypeError("priority must be 0..3");
   }
   return value as DebtPriority;
-}
-
-export function sort(value: unknown): DebtQuerySort | undefined {
-  if (value === undefined) return undefined;
-  if (value !== "priority" && value !== "created" && value !== "updated" && value !== "id") {
-    throw new TypeError("sort is invalid");
-  }
-  return value;
 }
 
 function state(value: unknown): DebtState | undefined {

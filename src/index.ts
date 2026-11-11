@@ -51,7 +51,7 @@ export type {
   KeiyakuAt,
   DebtSelection,
   DebtReadScope,
-  DebtQueryInvocation,
+  DebtListInvocation,
   DebtUpdateInvocation,
   DebtShowInvocation,
 } from "./library/keiyaku.js";
@@ -309,7 +309,6 @@ export type {
 export type { SettlementAction, SettlementLag, SettlementReport } from "./settlement/settle.js";
 export type * from "./debt/index.js";
 export {
-  DEBT_RELATION_PREDICATE_FIELDS,
   DebtAuthorityCorruptionError,
   Debts,
   debtAbsentSchema,
@@ -326,7 +325,6 @@ export {
   debtParentReadRefusalSchema,
   debtTreeRootSchema,
   blockedDebtListSchema,
-  debtQueryResultSchema,
   debtDoctorReportSchema,
   debtTreeResultSchema,
   debtMutationResultSchema,

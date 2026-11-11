@@ -1,5 +1,5 @@
 import { CliUsageError, isBlankInput } from "../usage.js";
-import type { DebtId, DebtPriority, DebtQuerySort, DebtState } from "../../debt/index.js";
+import type { DebtId, DebtPriority, DebtState } from "../../debt/index.js";
 import type { ParsedDebtCommand } from "./debt-grammar.js";
 import type { CliRuntime } from "../runtime.js";
 import { displayContext, emit, type CliOutcome } from "../streams.js";
@@ -42,21 +42,6 @@ function namespace(raw: string | undefined): readonly string[] | undefined {
 function optional<K extends string, T>(key: K, val: T | undefined): { [P in K]?: T } {
   return val === undefined ? {} : ({ [key]: val } as { [P in K]: T });
 }
-function scope(command: ParsedDebtCommand) {
-  const raw = value(command, "limit");
-  return {
-    ...(command.flags.world === true ? { scope: "world" as const } : {}),
-    ...(raw === undefined ? {} : { limit: Number(raw) }),
-  };
-}
-function selection(command: ParsedDebtCommand) {
-  return command.flags.all === true
-    ? ("all" as const)
-    : command.flags.closed === true
-      ? ("closed" as const)
-      : ("active" as const);
-}
-
 async function addDebt(
   command: ParsedDebtCommand,
   runtime: CliRuntime,
@@ -135,18 +120,6 @@ export async function runDebtCommand(command: ParsedDebtCommand, runtime: CliRun
       return addDebt(command, runtime, stdin);
     case "update":
       return updateDebt(command, runtime, stdin);
-    case "query":
-      return execute(
-        "debt.query",
-        {
-          ...scope(command),
-          selection: selection(command),
-          ...optional("where", command.where),
-          ...optional("sort", value(command, "sort") as DebtQuerySort | undefined),
-        },
-        command,
-        runtime,
-      );
     case "tree":
       return execute("debt.tree", { id: command.positionals[0]! }, command, runtime);
     case "doctor":

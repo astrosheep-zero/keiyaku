@@ -47,12 +47,10 @@ import {
   debtShowResultSchema,
   debtDoctorReportSchema,
   debtMutationResultSchema,
-  debtQueryResultSchema,
+  debtCatalogueSchema,
   debtUpdateResultSchema,
-  type DebtQueryExpression,
 } from "../debt/index.js";
 import { debtPrioritySchema, debtStateSchema } from "../debt/document.js";
-import { debtIdSchema } from "../debt/identity.js";
 
 export type VerbEntry = Readonly<{
   description: string;
@@ -103,43 +101,6 @@ const debtRelations = {
   supersedes: strings.exactOptional(),
   relates: strings.exactOptional(),
 };
-const debtPredicate = z.union([
-  z.strictObject({ field: z.literal("state"), operator: z.enum(["=", "!="]), value: debtStateSchema }).readonly(),
-  z
-    .strictObject({
-      field: z.literal("priority"),
-      operator: z.enum(["=", "!=", "<", "<=", ">", ">="]),
-      value: debtPrioritySchema,
-    })
-    .readonly(),
-  z.strictObject({ field: z.enum(["title", "id"]), operator: z.enum(["=", "!=", "~"]), value: text }).readonly(),
-  z
-    .strictObject({ field: z.literal("parent"), operator: z.enum(["=", "!="]), value: debtIdSchema.nullable() })
-    .readonly(),
-  z
-    .strictObject({ field: z.enum(["under", "needs", "blocks"]), operator: z.enum(["=", "!="]), value: debtIdSchema })
-    .readonly(),
-  z.strictObject({ field: z.enum(["ready", "blocked"]), operator: z.enum(["=", "!="]), value: z.boolean() }).readonly(),
-  z
-    .strictObject({
-      field: z.enum(["created", "updated"]),
-      operator: z.enum(["=", "!=", "<", "<=", ">", ">="]),
-      value: text,
-    })
-    .readonly(),
-]);
-type DebtQueryWire =
-  | Readonly<{ kind: "and" | "or"; terms: readonly DebtQueryWire[] }>
-  | Readonly<{ kind: "not"; term: DebtQueryWire }>
-  | Readonly<{ kind: "predicate"; predicate: z.input<typeof debtPredicate> }>;
-const debtQueryExpression: z.ZodType<DebtQueryExpression, DebtQueryWire> = z.lazy(() =>
-  z.union([
-    z.strictObject({ kind: z.enum(["and", "or"]), terms: z.array(debtQueryExpression).readonly() }).readonly(),
-    z.strictObject({ kind: z.literal("not"), term: debtQueryExpression }).readonly(),
-    z.strictObject({ kind: z.literal("predicate"), predicate: debtPredicate }).readonly(),
-  ]),
-);
-
 export const verbs = Object.freeze({
   bind: {
     description: "Bind Contract terms or fork existing terms.",
@@ -432,17 +393,10 @@ export const verbs = Object.freeze({
     output: z.union([debtShowResultSchema, debtAbsentSchema]),
     effect: "read",
   },
-  "debt.query": {
-    description: "Query Debts using the owner expression.",
-    input: z
-      .strictObject({
-        ...debtReadScope,
-        selection: debtSelection,
-        where: debtQueryExpression.exactOptional(),
-        sort: z.enum(["priority", "created", "updated", "id"]).exactOptional(),
-      })
-      .readonly(),
-    output: debtQueryResultSchema,
+  "debt.ls": {
+    description: "List Debts by namespace and lifecycle.",
+    input: z.strictObject({ ...debtReadScope, selection: debtSelection }).readonly(),
+    output: debtCatalogueSchema,
     effect: "read",
   },
   "debt.tree": {

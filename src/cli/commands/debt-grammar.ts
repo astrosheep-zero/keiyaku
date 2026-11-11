@@ -7,9 +7,8 @@ import {
 } from "../usage.js";
 import { scanArgs, type ScanFlagKind, type ScanSpec, type ScannedArgs } from "../scan.js";
 import { parseDebtId } from "../../debt/identity.js";
-import { parseDebtQueryExpression, validateDebtLimit, type DebtQueryExpression } from "./debt-query.js";
 
-export type DebtAction = "add" | "tree" | "doctor" | "update" | "query";
+export type DebtAction = "add" | "tree" | "doctor" | "update";
 type DebtFlagValue = string | true | readonly string[];
 type DebtStdin = "document" | "body" | "append" | "note";
 
@@ -20,7 +19,6 @@ export type ParsedDebtCommand = Readonly<{
   positionals: readonly string[];
   flags: Readonly<Record<string, DebtFlagValue>>;
   stdin?: DebtStdin;
-  where?: DebtQueryExpression;
 }>;
 
 type DebtCommandSpec = Readonly<{
@@ -60,32 +58,6 @@ debt add [--namespace <ns>] [--actor <actor>] -`,
     purpose: "Create a Debt from flags or a Debt document on stdin.",
     details:
       "The stdin document is YAML front matter (title, state, priority, needs, parent, supersedes, relates, note) followed by a Markdown body.",
-  },
-  query: {
-    arity: [0, 0],
-    flags: {
-      ...COMMON,
-      where: "value",
-      world: "boolean",
-      closed: "boolean",
-      all: "boolean",
-      sort: "value",
-      limit: "value",
-    },
-    usage: `debt query [--where <expression>] [--closed | --all] [--world]
-  [--sort priority|created|updated|id] [--limit <count>]`,
-    purpose: "Filter and sort Debts with a boolean expression.",
-    details: [
-      "fields: state priority title id parent under needs blocks ready blocked created updated",
-      "operators: = != < > <= >= ~ and or not ( )",
-      "sort: priority and created ascend; updated descends; id is lexical. Default: priority.",
-      "--world lists every namespace in the current Debt world.",
-      "By default only active Debts match; --closed selects terminal Debts, --all includes both.",
-      "examples:",
-      "  keiyaku debt query --where 'priority <= 1 and ready' --world",
-      "  keiyaku debt query --where 'blocked and under = debt/release' --world",
-      "  keiyaku debt query --where 'updated < 2026-08-06T00:00:00.000Z' --world",
-    ].join("\n"),
   },
   tree: {
     arity: [1, 1],
@@ -195,31 +167,6 @@ function validateUpdate(scanned: ScannedDebt, fail: (message: string) => never):
   if (Object.keys(flags).every((name) => name === "json")) fail("debt update requires at least one patch option");
 }
 
-function validateDebtReadFlags(
-  action: DebtAction,
-  flags: Readonly<Record<string, DebtFlagValue>>,
-  fail: (message: string) => never,
-): void {
-  if (action === "query" && flags.closed === true && flags.all === true)
-    fail("--closed and --all are mutually exclusive");
-  if (typeof flags.limit === "string") {
-    try {
-      validateDebtLimit(flags.limit);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : String(error));
-    }
-  }
-  if (
-    typeof flags.sort === "string" &&
-    flags.sort !== "priority" &&
-    flags.sort !== "created" &&
-    flags.sort !== "updated" &&
-    flags.sort !== "id"
-  ) {
-    fail("--sort must be priority, created, updated, or id");
-  }
-}
-
 /** Actions whose positionals are all addressed DebtIds validated by the native owner. */
 const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["tree", "update"]);
 
@@ -254,7 +201,6 @@ function validateDebtScan(action: DebtAction, scanned: ScannedDebt, fail: (messa
   )
     fail("debt add document input owns its creation fields");
   if (DEBT_ID_ACTIONS.has(action)) validateDebtIdPositionals(positionals, fail);
-  validateDebtReadFlags(action, flags, fail);
   if (action === "update") validateUpdate(scanned, fail);
 }
 
@@ -272,19 +218,10 @@ export function parseDebtCommand(argv: readonly string[]): ParsedDebtCommand {
   };
   const scanned = scanArgs(argv, scanSpec(action, DEBT_COMMAND_SPECS[action]), fail);
   validateDebtScan(action, scanned, fail);
-  let where: DebtQueryExpression | undefined;
-  if (action === "query" && typeof scanned.flags.where === "string") {
-    try {
-      where = parseDebtQueryExpression(scanned.flags.where);
-    } catch (error) {
-      fail(error instanceof Error ? error.message : String(error));
-    }
-  }
   return {
     command: "debt",
     action,
     output: scanned.flags.json === true ? "json" : "text",
     ...scanned,
-    ...(where === undefined ? {} : { where }),
   };
 }

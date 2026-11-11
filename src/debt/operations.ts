@@ -1,6 +1,7 @@
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import {
   createDebtRelations,
+  debtDescendants,
   projectDebtBoardObservation,
   projectDebtDetail,
   relationProblem,
@@ -24,15 +25,6 @@ import { allocateLocalId, deriveLocalStem, formatDebtId, type DebtId } from "./i
 import { nukeDebtAuthority, readBoard, readDebtDocument, replaceAuthority, withDebtLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
 import { boundedListLimit, projectBoundedList } from "../bounded-list.js";
-import {
-  projectQuery,
-  projectQueryRows,
-  queryUnderTargets,
-  type DebtQueryExpression,
-  type DebtQueryRow,
-  type DebtQuerySort,
-  underExpression,
-} from "./query.js";
 import { advanceDebtTimestamp } from "./view.js";
 export type {
   AddDebtDocumentInput,
@@ -292,37 +284,26 @@ export async function readDebtDetail(world: WorldRoot, id: DebtId): Promise<Debt
   }
   return projectDebtDetail({ debts: selected }, id);
 }
-/** One board observation and predicate projection shared by the ready and blocked views. */
-async function readDebtQueryContext(
+/** Select descendants from the complete graph before bounding either native view. */
+async function readDebtGraphContext(
   input: Readonly<{
     world: WorldRoot;
-    field: "ready" | "blocked";
     namespace?: readonly string[] | undefined;
     scope?: "namespace" | "world" | undefined;
     parent?: DebtId | undefined;
     limit?: number | undefined;
   }>,
 ) {
+  const limit = boundedListLimit(input.limit);
   const board = (await readBoard(input.world)).board;
   if (input.parent !== undefined && !board.debts.has(input.parent))
     return { kind: "refused", reason: "debt-missing" } as const;
-  const relations = createDebtRelations(board);
-  const scope = readScope(input.namespace, input.scope);
-  const predicate: DebtQueryExpression = {
-    kind: "predicate",
-    predicate: { field: input.field, operator: "=", value: true },
-  };
   return {
     kind: "ready",
-    limit: boundedListLimit(input.limit),
+    limit,
     board,
-    scope,
-    relations,
-    rows: projectQueryRows(board, relations, {
-      scope,
-      expression:
-        input.parent === undefined ? predicate : { kind: "and", terms: [predicate, underExpression(input.parent)] },
-    }),
+    scope: readScope(input.namespace, input.scope),
+    descendants: input.parent === undefined ? undefined : debtDescendants(createDebtRelations(board), input.parent),
   } as const;
 }
 export async function readyDebts(
@@ -332,14 +313,12 @@ export async function readyDebts(
   parent?: DebtId,
   limit?: number,
 ): Promise<DebtReadPage<ReadyDebtRow, DebtParentReadRefusal>> {
-  const queried = await readDebtQueryContext({ world, field: "ready", namespace, scope, parent, limit });
-  if (queried.kind === "refused") return queried;
-  return readPage(
-    projectBoundedList(
-      queried.rows.map(({ id, title, priority }) => ({ id, title, priority })),
-      queried.limit,
-    ),
-  );
+  const context = await readDebtGraphContext({ world, namespace, scope, parent, limit });
+  if (context.kind === "refused") return context;
+  const rows = projectRows(context.board, context.scope, "active")
+    .filter((row) => row.disposition === "ready" && (context.descendants?.has(row.id) ?? true))
+    .map(({ id, title, priority }) => ({ id, title, priority }));
+  return readPage(projectBoundedList(rows, context.limit));
 }
 export async function blockedDebts(
   world: WorldRoot,
@@ -348,43 +327,10 @@ export async function blockedDebts(
   parent?: DebtId,
   limit?: number,
 ): Promise<DebtReadPage<BlockedDebtRow, DebtParentReadRefusal>> {
-  const queried = await readDebtQueryContext({ world, field: "blocked", namespace, scope, parent, limit });
-  if (queried.kind === "refused") return queried;
-  const { board, scope: selected, limit: selectedLimit, rows } = queried;
-  const ids = new Set(rows.map((row) => row.id));
-  return readPage(
-    projectBoundedList(
-      projectBlocked(board, selected).filter((row) => ids.has(row.id)),
-      selectedLimit,
-    ),
-  );
-}
-export async function queryDebts(
-  input: Readonly<{
-    world: WorldRoot;
-    namespace?: readonly string[];
-    expression: DebtQueryExpression;
-    scope?: "namespace" | "world";
-    sort?: DebtQuerySort;
-    limit?: number;
-  }>,
-): Promise<DebtReadPage<DebtQueryRow>> {
-  const selectedLimit = boundedListLimit(input.limit);
-  const selected = readScope(input.namespace, input.scope);
-  const board = (await readBoard(input.world)).board;
-  const relations = createDebtRelations(board);
-  for (const target of queryUnderTargets(input.expression))
-    if (!board.debts.has(target)) {
-      return { kind: "refused", reason: "debt-missing", debtId: target };
-    }
-  return readPage(
-    projectQuery(board, relations, {
-      scope: selected as readonly string[] | null,
-      expression: input.expression,
-      sort: input.sort ?? "priority",
-      limit: selectedLimit,
-    }),
-  );
+  const context = await readDebtGraphContext({ world, namespace, scope, parent, limit });
+  if (context.kind === "refused") return context;
+  const rows = projectBlocked(context.board, context.scope).filter((row) => context.descendants?.has(row.id) ?? true);
+  return readPage(projectBoundedList(rows, context.limit));
 }
 export async function observeDebtBoard(world: WorldRoot): Promise<DebtBoardObservation> {
   return projectDebtBoardObservation((await readBoard(world)).board);

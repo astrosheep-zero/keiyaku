@@ -448,7 +448,6 @@ test("full Contract history renders supplied historical terms rather than a curr
 test("a debt title wraps its em-dash and title as one unit", () => {
   const context = { columns: 60, color: false } as const;
   const text = renderDebtList(
-    "ls",
     { namespace: "debt/" },
     debtPage([
       debtSummary({
@@ -546,7 +545,6 @@ test("Debt tree and doctor render their native relationship facts", () => {
 test("catalog text renders only the selected identity layer", () => {
   assert.match(
     renderDebtList(
-      "ls",
       { namespace: "debt/" },
       debtPage([debtSummary({ id: "debt/catalog-row", title: "Catalog row" })], true),
     ),
@@ -591,7 +589,7 @@ test("root Debt catalogue marks every disposition with its own state", () => {
       }),
     ),
   );
-  const text = renderDebtList("ls", { namespace: "debt/" }, catalog);
+  const text = renderDebtList({ namespace: "debt/" }, catalog);
   for (const [state, mark] of cases) assert.ok(text.includes(`${mark} debt/${state}`));
 });
 
@@ -610,7 +608,7 @@ test("empty World status has one explicit empty row", () => {
   );
 });
 test("empty catalogues share a surface-named none state", () => {
-  assert.equal(renderDebtList("ls", { namespace: "debt/" }, { kind: "present" }), "debts  none");
+  assert.equal(renderDebtList({ namespace: "debt/" }, { kind: "present" }), "debts  none");
   assert.equal(renderContractCatalogue(contractCatalog([])), "contracts  none");
   assert.equal(renderVerb("aku.ls", {}, { kind: "returned", value: { observedAt: "2026-08-12T00:00:00.000Z" } }, { columns: 120, color: false }), "akuma  none");
 });
@@ -636,11 +634,10 @@ test("World roster names a bound Contract once without a bare unavailable parent
 test("Debt listings retain empty and absent observations", () => {
   const context = { columns: 120, color: false } as const;
   const empty = { kind: "present" as const };
-  assert.equal(renderDebtList("ls", { namespace: "debt/" }, empty, context), "debts  none");
-  assert.equal(renderDebtList("query", "world", empty, context), "query  none");
-  assert.equal(renderDebtList("query", "world", { kind: "absent" }, context), "debt world absent");
+  assert.equal(renderDebtList({ namespace: "debt/" }, empty, context), "debts  none");
+  assert.equal(renderDebtList("world", empty, context), "debts  none");
+  assert.equal(renderDebtList("world", { kind: "absent" }, context), "debt world absent");
   const text = renderDebtList(
-    "ls",
     { namespace: "debt/" },
     debtPage([debtSummary({ id: "debt/one-row", title: "One row" })], true),
     context,
@@ -652,7 +649,6 @@ test("Debt listings retain empty and absent observations", () => {
 
 test("Debt catalogue rows render the compact native summary", () => {
   const text = renderDebtList(
-    "ls",
     { namespace: "debt/" },
     debtPage([debtSummary({ id: "debt/no-body", title: "No body", priority: 1 })]),
   );
@@ -1030,14 +1026,14 @@ test("refusals use reason and option for missing contract and nuke confirmation"
   assert.match(nuke, /option  keiyaku nuke --confirm '\/repo'/u);
 });
 
-test("query displays dropped while the native disposition remains drop", () => {
+test("Debt listing displays dropped while the native disposition remains drop", () => {
   const row = debtSummary({
     id: "debt/dropped",
     title: "Retired",
     priority: 1,
     disposition: "drop",
   });
-  const text = renderDebtList("query", { namespace: "debt/" }, debtPage([row]));
+  const text = renderDebtList({ namespace: "debt/" }, debtPage([row]));
   assert.match(text, /debt\/dropped · dropped · P1/u);
   assert.equal(row.disposition, "drop");
 });

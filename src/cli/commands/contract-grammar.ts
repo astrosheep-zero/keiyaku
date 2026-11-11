@@ -227,7 +227,7 @@ function listLimit(parts: ContractTokens): number | undefined {
   return limit === undefined ? undefined : Number(limit);
 }
 
-function debtCatalogQuery(path: string, limit: number | undefined): VerbInput<"debt.query"> | null {
+function debtCatalogInput(path: string, limit: number | undefined): VerbInput<"debt.ls"> | null {
   if (path === "debt" || path === "debt/") return { namespace: [], ...(limit === undefined ? {} : { limit }) };
   if (!path.startsWith("debt/")) return null;
   if (!path.endsWith("/")) refuse("ls", `invalid Debt namespace selector: ${path}`);
@@ -298,7 +298,7 @@ function parseAkumaLs(
   }
 }
 
-function parseLs(parts: ContractTokens): VerbRequest<"kei.ls" | "aku.ls" | "aku.names" | "debt.query"> {
+function parseLs(parts: ContractTokens): VerbRequest<"kei.ls" | "aku.ls" | "aku.names" | "debt.ls"> {
   const path = parts.positionals[0];
   const limit = listLimit(parts);
   const caller = parseCallerSelector(parts);
@@ -307,12 +307,12 @@ function parseLs(parts: ContractTokens): VerbRequest<"kei.ls" | "aku.ls" | "aku.
     closed = parts.flags.closed === true;
   if (all && closed) refuse("ls", "--all and --closed are mutually exclusive");
   if (path !== undefined) {
-    const debtQuery = debtCatalogQuery(path, limit);
-    if (debtQuery !== null) {
+    const debtList = debtCatalogInput(path, limit);
+    if (debtList !== null) {
       if (caller !== undefined) refuse("ls", callerRefusal);
       return {
-        name: "debt.query",
-        input: { ...debtQuery, ...(all ? { selection: "all" } : closed ? { selection: "closed" } : {}) },
+        name: "debt.ls",
+        input: { ...debtList, ...(all ? { selection: "all" } : closed ? { selection: "closed" } : {}) },
         output: parts.output,
       };
     }

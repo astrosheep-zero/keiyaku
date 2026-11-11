@@ -223,9 +223,9 @@ function renderDebtVerb(
       const query = input as VerbInput<"debt.show">;
       return renderDebtShow("ids" in query ? query.ids : [query.id], value as VerbOutput<"debt.show">, context);
     }
-    case "debt.query": {
-      const query = input as VerbInput<"debt.query">;
-      return renderDebtList("query", debtScope(query), value as VerbOutput<"debt.query">, context);
+    case "debt.ls": {
+      const listing = input as VerbInput<"debt.ls">;
+      return renderDebtList(debtScope(listing), value as VerbOutput<"debt.ls">, context);
     }
     case "debt.tree":
       return renderDebtTree((input as VerbInput<"debt.tree">).id, value as VerbOutput<"debt.tree">, context);

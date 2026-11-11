@@ -46,7 +46,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     Object.keys(Keiyaku.verbs).filter((name) => !excluded.includes(name)).map((name) => name.replaceAll(".", "_")),
   );
   const schemaTools = new Set([
-    "bind", "wait", "kei_status", "aku_status", "kei_ls", "aku_ls", "debt_query",
+    "bind", "wait", "kei_status", "aku_status", "kei_ls", "aku_ls", "debt_ls",
     "verify", "spawn", "fork", "debt_add", "ask", "debt_show",
   ]);
   let unknown: McpError | undefined;
@@ -78,7 +78,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const name of ["debt_query", "report", "reconcile"])
+  for (const name of ["debt_ls", "report", "reconcile"])
     assert.ok(tools.some((tool) => tool.name === name));
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   const native = await Keiyaku.at({ cwd, environment, home: cwd }).run("whoami", {});
@@ -117,7 +117,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const id = (added.structuredContent as { kind: "accepted"; id: string }).id;
   const shown = await client.callTool({ name: "debt_show", arguments: { input: { id } } });
   assert.equal(shown.isError, false);
-  const list = await client.callTool({ name: "debt_query", arguments: { input: {} } });
+  const list = await client.callTool({ name: "debt_ls", arguments: { input: {} } });
   assert.equal(list.isError, false);
   assert.match(JSON.stringify(list.structuredContent), /Fix the roof/);
   const plural = await client.callTool({ name: "debt_show", arguments: { input: { ids: [id] } } });
@@ -131,6 +131,23 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.ok(completed.kind === "present" && completed.items[0]?.kind === "found");
   assert.equal(completed.items[0].state, "done");
   assert.equal(completed.items[0].note, "finished");
+  const facet = Keiyaku.at({ cwd, environment, home: cwd });
+  await facet.debtAdd({ title: "Root active", priority: 3 });
+  await facet.debtAdd({ title: "Team active", namespace: ["team"], priority: 0 });
+  await facet.debtAdd({ title: "Team terminal", namespace: ["team"], state: "drop", priority: 1 });
+  for (const input of [
+    { limit: 1 },
+    { selection: "closed", limit: 1 },
+    { selection: "all", limit: 1 },
+    { namespace: ["team"], limit: 1 },
+    { namespace: ["team"], selection: "closed", limit: 1 },
+    { namespace: ["missing"], limit: 1 },
+    { scope: "world", selection: "all", limit: 1 },
+  ] as const) {
+    const listed = await client.callTool({ name: "debt_ls", arguments: { input } });
+    assert.equal(listed.isError, false);
+    assert.deepEqual(listed.structuredContent, await facet.debtLs(input));
+  }
 
   const first = mkdtempSync(join(tmpdir(), "kei-mcp-first-"));
   const second = mkdtempSync(join(tmpdir(), "kei-mcp-second-"));
@@ -147,8 +164,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(a.isError, false);
   assert.equal(b.isError, false);
   const [listA, listB] = await Promise.all([
-    client.callTool({ name: "debt_query", arguments: { cwd: first, input: {} } }),
-    client.callTool({ name: "debt_query", arguments: { cwd: second, input: {} } }),
+    client.callTool({ name: "debt_ls", arguments: { cwd: first, input: {} } }),
+    client.callTool({ name: "debt_ls", arguments: { cwd: second, input: {} } }),
   ]);
   assert.match(JSON.stringify(listA.structuredContent), /First world/);
   assert.doesNotMatch(JSON.stringify(listA.structuredContent), /Second world/);
@@ -157,10 +174,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   t.after(() => rmSync(otherRepo.path, { recursive: true, force: true }));
   const foreign = await Keiyaku.at({ cwd: otherRepo.path, environment, home: cwd }).run("debt.add", { title: "Foreign repo world" });
   assert.equal(foreign.kind, "accepted");
-  const badCoordinate = await client.callTool({ name: "debt_query", arguments: { cwd: " ", input: {} } });
+  const badCoordinate = await client.callTool({ name: "debt_ls", arguments: { cwd: " ", input: {} } });
   assert.equal(badCoordinate._meta?.["keiyaku/disposition"], "usage");
   const explicitRepo = await client.callTool({
-    name: "debt_query",
+    name: "debt_ls",
     arguments: { cwd: first, repo: otherRepo.path, input: {} },
   });
   assert.equal(explicitRepo.isError, false);

@@ -139,7 +139,7 @@ export function renderHelp(coordinate: CliHelpCoordinate, columns?: number): str
 }
 
 type RequestOutput = Readonly<{ output: "text" | "json" }>;
-export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami"> | "debt.show" | "debt.query";
+export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami"> | "debt.show" | "debt.ls";
 export type VerbRequest<K extends CliVerb = CliVerb> = {
   [P in K]: RequestOutput & Readonly<{ name: P; input: VerbInput<P> }>;
 }[K];
@@ -179,7 +179,7 @@ export function commandName(command: ParsedCommand) {
         : command.name === "kei.ls" ||
             command.name === "aku.ls" ||
             command.name === "aku.names" ||
-            command.name === "debt.query"
+            command.name === "debt.ls"
           ? "ls"
           : command.name
     : command.command;
@@ -215,7 +215,7 @@ export function commandRepoPolicy(
     case "show":
       return { use: "required", acceptsExplicit: true };
     case "debt.show":
-    case "debt.query":
+    case "debt.ls":
     case "aku.names":
       return { use: "none", acceptsExplicit: false };
     case "kei.ls":

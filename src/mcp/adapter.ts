@@ -34,7 +34,7 @@ const SCHEMA_TOOLS = new Set<VerbName>([
   "aku.status",
   "kei.ls",
   "aku.ls",
-  "debt.query",
+  "debt.ls",
   "verify",
   "spawn",
   "fork",

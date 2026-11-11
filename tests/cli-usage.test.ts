@@ -87,16 +87,16 @@ test("debt owner failures use the shared verb failure projection", async (contex
   context.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, ".keiyaku", "debts"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "debts", "broken.md"), "not a Debt document\n");
-  const text = await captureOutput(() => main(["-C", root, "debt", "query", "--where", "ready", "--world"]));
+  const text = await captureOutput(() => main(["-C", root, "ls", "debt/"]));
   assert.equal(text.exit, 3);
-  assert.match(text.stderr, /debt\.query failed/u);
-  const json = await captureOutput(() => main(["-C", root, "debt", "query", "--where", "ready", "--world", "--json"]));
+  assert.match(text.stderr, /debt\.ls failed/u);
+  const json = await captureOutput(() => main(["-C", root, "ls", "debt/", "--json"]));
   assert.equal(json.exit, 3);
   assert.ok(JSON.parse(json.stdout));
 });
 
-test("debt query defaults to active rows and opts into terminal rows", () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-query-"));
+test("Debt listing defaults to active rows and opts into terminal rows", () => {
+  const root = mkdtempSync(join(tmpdir(), "keiyaku-list-"));
   try {
     const added = runCli(root, ["debt", "add", "Active", "--json"]);
     assert.equal(added.status, 0, added.stderr);
@@ -104,14 +104,14 @@ test("debt query defaults to active rows and opts into terminal rows", () => {
     assert.equal(closed.status, 0, closed.stderr);
     const id = JSON.parse(closed.stdout).id as string;
     assert.equal(runCli(root, ["debt", "update", id, "--state", "done"]).status, 0);
-    const query = (flags: readonly string[]) => {
-      const result = runCli(root, ["debt", "query", "--world", "--where", "priority >= 0", ...flags, "--json"]);
+    const list = (flags: readonly string[]) => {
+      const result = runCli(root, ["ls", "debt/", ...flags, "--json"]);
       assert.equal(result.status, 0, result.stderr);
       return (JSON.parse(result.stdout).rows as readonly { id: string }[]).map((row) => row.id);
     };
-    assert.equal(query([]).length, 1);
-    assert.deepEqual(query(["--closed"]), [id]);
-    assert.equal(query(["--all"]).length, 2);
+    assert.equal(list([]).length, 1);
+    assert.deepEqual(list(["--closed"]), [id]);
+    assert.equal(list(["--all"]).length, 2);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

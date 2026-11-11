@@ -25,7 +25,6 @@ import {
   debtWarningSchema,
   debtRefusalSchema,
   debtRetrySchema,
-  debtReadRefusalSchema,
   debtReadPageSchema,
   debtParentReadRefusalSchema,
   nonEmptyDebtValues,
@@ -36,14 +35,12 @@ import {
   type DebtWarning,
   type DebtRefusal,
   type DebtRetry,
-  type DebtReadRefusal,
   type DebtReadPage,
   type DebtMutationResult,
   type DebtParentReadRefusal,
   type DebtUpdateResult,
   type DebtChange,
 } from "./operation-types.js";
-import { debtQueryRowSchema, type DebtQueryRow } from "./query.js";
 import type { WorldRoot } from "../world.js";
 export type { WorldRoot } from "../world.js";
 import { DebtAuthorityCorruptionError, type DebtPriority, type DebtState } from "./document.js";
@@ -53,7 +50,6 @@ import {
   addDebtDocument,
   blockedDebts,
   listDebts,
-  queryDebts,
   readDebtDetail,
   readyDebts,
   updateDebt,
@@ -63,16 +59,7 @@ import {
 } from "./operations.js";
 import { boundedListLimit } from "../bounded-list.js";
 import { readBoard } from "./store.js";
-import { addDocumentInput, addInput, closed, namespace, record, sort, debtId as id, updateInput } from "./input.js";
-import {
-  normalizeDebtQuery,
-  debtQuerySelection,
-  DEBT_RELATION_PREDICATE_FIELDS,
-  type DebtQueryExpression,
-  type DebtQueryPredicate,
-  type DebtQuerySort,
-  type DebtRelationPredicateField,
-} from "./query.js";
+import { addDocumentInput, addInput, closed, namespace, record, debtId as id, updateInput } from "./input.js";
 
 export const debtAbsentSchema = z.strictObject({ kind: z.literal("absent") }).readonly();
 export type DebtAbsent = z.output<typeof debtAbsentSchema>;
@@ -113,14 +100,12 @@ export const blockedDebtListSchema = z.union([
   debtAbsentSchema,
   debtParentReadRefusalSchema,
 ]);
-export const debtQueryResultSchema = debtReadPageSchema(debtQueryRowSchema);
 export const debtCatalogueSchema = z.union([debtListSchema, debtAbsentSchema]);
 export type DebtCatalogue = z.output<typeof debtCatalogueSchema>;
 export type DebtList = z.output<typeof debtListSchema>;
 export type DebtReadyList = DebtReadPage<ReadyDebtRow, DebtParentReadRefusal>;
 export type BlockedDebtList = DebtReadPage<BlockedDebtRow, DebtParentReadRefusal>;
-export type DebtQueryResult = DebtReadPage<DebtQueryRow>;
-export { debtWarningSchema, debtRefusalSchema, debtRetrySchema, debtReadRefusalSchema, debtReadPageSchema };
+export { debtWarningSchema, debtRefusalSchema, debtRetrySchema, debtReadPageSchema };
 export {
   debtParentReadRefusalSchema,
   readyDebtRowSchema,
@@ -133,7 +118,6 @@ export {
   debtDispositionSchema,
   blockedDebtRowSchema,
   debtRefSchema,
-  debtQueryRowSchema,
   debtTreeNodeSchema,
   debtDoctorIssueSchema,
 };
@@ -148,7 +132,6 @@ export type {
   DebtMutationResult,
   DebtPriority,
   DebtReadPage,
-  DebtReadRefusal,
   DebtRef,
   DebtRefusal,
   DebtRetry,
@@ -161,13 +144,8 @@ export type {
   DebtUpdateResult,
   DebtWarning,
   UpdateDebtInput,
-  DebtQueryExpression,
-  DebtQueryPredicate,
-  DebtQueryRow,
-  DebtQuerySort,
-  DebtRelationPredicateField,
 };
-export { DebtAuthorityCorruptionError, DEBT_RELATION_PREDICATE_FIELDS };
+export { DebtAuthorityCorruptionError };
 export { observeRecentDebtStatus, type RecentDebtSummary } from "./catalog.js";
 export { boundedListLimit as debtRowViewLimit } from "../bounded-list.js";
 
@@ -274,31 +252,6 @@ class DebtsHandle {
       parent,
       selectedLimit,
     );
-  }
-  async query(
-    input: Readonly<{
-      where?: DebtQueryExpression;
-      scope?: "namespace" | "world";
-      namespace?: readonly string[];
-      sort?: DebtQuerySort;
-      limit?: number;
-    }> = {},
-  ): Promise<DebtQueryResult> {
-    const v = record(input, "query input");
-    closed(v, ["where", "scope", "namespace", "sort", "limit"], "query input");
-    if (v.scope !== undefined && v.scope !== "namespace" && v.scope !== "world")
-      throw new TypeError("scope must be namespace or world");
-    const expression = v.where === undefined ? debtQuerySelection() : normalizeDebtQuery(v.where);
-    const selected = namespace(v.namespace);
-    const selectedLimit = boundedListLimit(v.limit);
-    return queryDebts({
-      world: this.world,
-      ...(selected === undefined ? {} : { namespace: selected }),
-      expression,
-      ...(v.scope === undefined ? {} : { scope: v.scope as "namespace" | "world" }),
-      sort: sort(v.sort) ?? "priority",
-      limit: selectedLimit,
-    });
   }
   async doctor(): Promise<DebtDoctorReport> {
     const issues = nonEmptyDebtValues(diagnoseBoard((await readBoard(this.world)).board));

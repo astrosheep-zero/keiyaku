@@ -57,7 +57,7 @@ test("CLI list and status families preserve their native owner answers", async (
     [["ls", "kei/", "--limit", "1"], await Keis.of(repo).list({ limit: 1 })],
     [["ls", "aku/*/*", "--limit", "1"], await Akumas.of(world).list({ repo, limit: 1 })],
     [["ls", "aku/"], await listArchetypeDefinitions({ project: world, home: world })],
-    [["ls", "debt/"], await Keiyaku.at({ cwd: world, environment: {}, home: world }).debtQuery()],
+    [["ls", "debt/"], await Keiyaku.at({ cwd: world, environment: {}, home: world }).debtLs()],
     [["status", bound.contractId], await kanshi({ world, repo, contract: bound.contractId })],
     [["status", worker.id], await Akumas.of(world).status({ akuma: worker.id, repo })],
     [["status"], await kanshi({ world, repo })],

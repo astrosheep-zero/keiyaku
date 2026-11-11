@@ -5,10 +5,10 @@ import {
   type AddDebtInput,
   type Debt,
   type DebtAbsent,
-  type DebtQueryResult,
+  type DebtCatalogue,
   type DebtDetail,
   type DebtId,
-  type DebtQueryInvocation,
+  type DebtListInvocation,
   type DebtMutationResult,
   type DebtReadResult,
   type DebtShowItem,
@@ -19,8 +19,8 @@ import {
 } from "@astrosheep/keiyaku";
 const world = null as unknown as import("@astrosheep/keiyaku").WorldRoot;
 const facet = Keiyaku.at({ cwd: "/tmp", environment: {} });
-const listing: DebtQueryInvocation = { namespace: [], selection: "all" };
-const catalogue: Promise<DebtQueryResult> = facet.debtQuery(listing);
+const listing: DebtListInvocation = { namespace: [], selection: "all" };
+const catalogue: Promise<DebtCatalogue> = facet.debtLs(listing);
 const one: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ id: "debt/example" });
 const many: Promise<DebtShowResult | DebtAbsent> = facet.debtShow({ ids: ["debt/example"] });
 const completed: Promise<DebtUpdateResult> = facet.debtUpdate({ id: "debt/example", state: "done" });
@@ -28,7 +28,7 @@ const created: Promise<DebtMutationResult> = facet.debtAdd({ title: "Example" })
 void facet.debtAddDocument({ markdown: "# Example" });
 void facet.debtUpdate({ id: "debt/example", note: "updated" });
 void facet.debtUpdate({ id: "debt/example", state: "drop" });
-void facet.debtQuery();
+void facet.debtLs();
 void facet.debtDoctor();
 const selectedTree: Promise<DebtTreeResult | DebtAbsent> = facet.debtTree({ id: "debt/example" });
 const debts = Debts.of(world);

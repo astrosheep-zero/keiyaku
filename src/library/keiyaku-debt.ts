@@ -4,24 +4,20 @@ import {
   type AddDebtInput,
   type AddDebtDocumentInput,
   type UpdateDebtInput,
-  type DebtQueryExpression,
-  type DebtQuerySort,
   type DebtAbsent,
   type DebtShowResult,
   type DebtShowItem,
 } from "../debt/index.js";
 import { addDebt, addDebtDocument } from "../debt/operations.js";
-import { addInput, addDocumentInput, closed, record, namespace, debtId, updateInput, sort } from "../debt/input.js";
+import { addInput, addDocumentInput, closed, record, namespace, debtId, updateInput } from "../debt/input.js";
 import { parseDebtCreationDocument } from "../debt/document.js";
-import { debtQuerySelection, normalizeDebtQuery } from "../debt/query.js";
 import { invocationCoordinates } from "./keiyaku-coordinates.js";
 import { resolveActor } from "./keiyaku-attribution.js";
 import type { KeiyakuAt } from "./keiyaku.js";
 
 export type DebtSelection = "active" | "closed" | "all";
 export type DebtReadScope = Readonly<{ scope?: "namespace" | "world"; namespace?: readonly string[]; limit?: number }>;
-export type DebtQueryInvocation = DebtReadScope &
-  Readonly<{ selection?: DebtSelection; where?: DebtQueryExpression; sort?: DebtQuerySort }>;
+export type DebtListInvocation = DebtReadScope & Readonly<{ selection?: DebtSelection }>;
 export type DebtUpdateInvocation = UpdateDebtInput & Readonly<{ id: string }>;
 export type DebtShowInvocation =
   | Readonly<{ id: string; ids?: never }>
@@ -87,18 +83,14 @@ export async function debtShow(at: KeiyakuAt, input: DebtShowInvocation): Promis
   }
   return { kind: "present", items };
 }
-export async function debtQuery(at: KeiyakuAt, input: DebtQueryInvocation) {
-  const v = readInput(input, "query", ["selection", "where", "sort"]);
+export async function debtLs(at: KeiyakuAt, input: DebtListInvocation) {
+  const v = readInput(input, "list", ["selection"]);
   const selected = selection(v.selection);
-  if (v.where !== undefined) normalizeDebtQuery(v.where);
-  sort(v.sort);
   const coord = await coordinates(at);
   if (coord.world === null) return absent;
-  const scope = selectedScope(input);
-  return Debts.of(coord.world).query({
-    ...scope,
-    where: debtQuerySelection(selected, input.where),
-    ...(input.sort === undefined ? {} : { sort: input.sort }),
+  return Debts.of(coord.world).list({
+    ...selectedScope(input),
+    selection: selected,
     ...(input.limit === undefined ? {} : { limit: input.limit }),
   });
 }

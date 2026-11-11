@@ -44,11 +44,11 @@ import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
 import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
-import type { DebtQueryInvocation, DebtUpdateInvocation, DebtShowInvocation } from "./keiyaku-debt.js";
+import type { DebtListInvocation, DebtUpdateInvocation, DebtShowInvocation } from "./keiyaku-debt.js";
 export type {
   DebtSelection,
   DebtReadScope,
-  DebtQueryInvocation,
+  DebtListInvocation,
   DebtUpdateInvocation,
   DebtShowInvocation,
 } from "./keiyaku-debt.js";
@@ -302,8 +302,8 @@ export class Keiyaku {
         return debt.debtUpdate(this.#input, { ...request.input, ...signal } as DebtUpdateInvocation);
       case "debt.show":
         return debt.debtShow(this.#input, request.input);
-      case "debt.query":
-        return debt.debtQuery(this.#input, request.input as DebtQueryInvocation);
+      case "debt.ls":
+        return debt.debtLs(this.#input, request.input);
       case "debt.tree":
         return debt.debtTree(this.#input, request.input);
       case "debt.doctor":
@@ -389,8 +389,8 @@ export class Keiyaku {
   debtShow(input: DebtShowInvocation) {
     return this.run("debt.show", input);
   }
-  debtQuery(input: DebtQueryInvocation = {}) {
-    return this.run("debt.query", input);
+  debtLs(input: DebtListInvocation = {}) {
+    return this.run("debt.ls", input);
   }
   debtTree(input: Readonly<{ id: string }>) {
     return this.run("debt.tree", input);

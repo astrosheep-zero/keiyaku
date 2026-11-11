@@ -17,7 +17,6 @@ import type {
   DebtList,
   DebtReadyList,
   DebtMutationResult,
-  DebtQueryResult,
   DebtUpdateResult,
 } from "../debt/index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
@@ -45,7 +44,6 @@ type DebtNativeResult =
   | DebtList
   | DebtReadyList
   | BlockedDebtList
-  | DebtQueryResult
   | DebtTreeResult
   | DebtDoctorReport
   | DebtAbsent;
@@ -136,7 +134,7 @@ export function classifyVerb<K extends VerbName>(
     case "debt.addDocument":
     case "debt.update":
     case "debt.show":
-    case "debt.query":
+    case "debt.ls":
     case "debt.tree":
     case "debt.doctor":
       return classifyDebt(value as DebtNativeResult);
