@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { soulFixture } from "./support/akuma-fixtures.js";
+import { bornLineageAkuma, soulFixture } from "./support/akuma-fixtures.js";
 import { akumaId } from "../src/akuma/identity.js";
 import { World } from "../src/world.js";
 import { appendActivity, beginTurn, endTurn, HeldAkumaLeash } from "../src/akuma/heart/index.js";
@@ -560,12 +560,16 @@ test("close during a pull releases the observation and never publishes its late 
   assert.deepEqual(h.events.map((e) => e.type), ["session.opened", "session.config", "session.closed", "request.completed"]);
 });
 
-test("native born attach, SDK creation and identity retries share the registered plugin seam without env injection", async (t) => {
+test("native execution attach, SDK creation and identity retries share the registered plugin seam", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "paseo-attach-"));
   await World.at(root);
   t.after(() => rm(root, { recursive: true, force: true }));
   const alias = join(root, "alias"); await symlink(root, alias);
-  const world = await realpath(root), akuId = "aku/test/1";
+  const caller = await akumaCallerFromEnvironment({ CODEX_THREAD_ID: "native-codex" });
+  assert.deepEqual(caller, { kind: "external", integration: "codex", id: "native-codex" });
+  await writeFile(join(root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
+  const child = await bornLineageAkuma({ root, akumaName: "test", draw: "1234abcd", createdAt: at, caller });
+  const world = await realpath(root), akuId = child.id;
   const wire: Parameters<DaemonClient["createAgent"]>[0][] = [];
   const created = new Map<string, { id: string; cwd: string }>();
   const parent = { id: "parent", cwd: root, archivedAt: null,
@@ -611,9 +615,7 @@ test("native born attach, SDK creation and identity retries share the registered
   }));
   const { signals } = await forwarder.activate({ world: alias as PluginContext["world"], config: undefined,
     writablePath() { throw new Error("no writes"); } });
-  const caller = await akumaCallerFromEnvironment({ CODEX_THREAD_ID: "native-codex" });
-  assert.deepEqual(caller, { kind: "external", integration: "codex", id: "native-codex" });
-  await signals?.["akuma.born"]?.({ kind: "akuma.born", akumaId: akuId, bodySequence: 1, origin: { kind: "direct" }, caller });
+  await signals?.["akuma.turn-started"]?.({ kind: "akuma.turn-started", akumaId: akuId, turnSequence: 1 });
   assert.deepEqual(create.mock.calls[0]?.arguments[0], { parent: "parent", cwd: root, title: akuId,
     config: { provider: "keiyaku/mirror", options: { world, akuId } }, idempotencyKey: `keiyaku:${world}:${akuId}` });
   assert.equal(created.size, 1);

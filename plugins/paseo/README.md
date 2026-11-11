@@ -37,7 +37,7 @@ canonical World/AkuId. The sole candidate is refreshed and must remain unchanged
 and unarchived. Missing, ambiguous, changed, or unreadable evidence diagnoses
 non-attachment without affecting birth. Path aliases match; titles, cwd, aliases,
 and fork ancestry do not identify parents. A missing parent mirror is first
-repaired from that parent's own frozen caller through the passive public SDK.
+repaired from that parent's own frozen caller through the public SDK.
 Cyclic or overly deep chains refuse without inventing an external parent.
 
 External parents match `persistence.metadata.provider` (or `persistence.provider`
@@ -93,14 +93,12 @@ traversal including archived and background mirrors: an existing exact mapping
 prevents creation, reparenting, or unarchiving. Unknown and unsupported callers
 create no automatic mirror.
 
-A missed birth gets another attachment attempt at Turn-start, Turn-outcome,
-Body-end, or ordinary public status read. Status includes the invocation/CLI/MCP path as well
-as standalone Akuma status, and offers repair for running or asleep Akumas even
-without a retained outcome or new execution. These boundaries first ensure
-attachment using the exact Akuma's retained birth caller, then independently
-attempt runtime refresh and title synchronization. Attachment failure never
-prevents refresh of existing mirrors. Observation is a new bounded opportunity,
-not replayed birth or outcome; there is no polling, retry queue, or repair store.
+Turn-start, Turn-outcome, and Body-end use the same ensure-and-refresh operation:
+first attempt attachment using the exact Akuma's retained birth caller, then
+independently attempt runtime refresh and title synchronization. Birth and public
+status/history/stream reads do not attach mirrors. Attachment failure never
+prevents refresh of existing mirrors. There is no polling, retry queue, repair
+store, or replayed birth.
 Attachment has a four-second local deadline and limits ancestry to 32 identities.
 The installed Paseo RPC handler context supplies no caller cancellation signal.
 Directory requests and SDK reads receive the local deadline; uncancelable host
@@ -167,12 +165,10 @@ sequence holes are not retention evidence; neither notice nor read failure
 cancels a Turn. The mirror's own publication comes only from its stream.
 Tell and Stop use the same public SDK, not CLI arguments or stdout receipts.
 The transport locates the installed package through `keiyaku` on PATH and loads
-its declared public entry once. Reads use `Akuma.read(world, akuId)`, the public
-passive view over the same owner projections, for both status and stream.
-Passive reads emit no plugin notifications; model correction, recursive parent
-repair, and mirror refresh cannot call back into their own attachment RPC.
-The transport requires this public surface and diagnoses an older installation
-rather than falling back to notifying reads. It never mutates the host environment.
+its declared public entry once. Status and stream use the existing
+`Akuma.select(world, akuId)` handle. Public reads do not trigger attachment, so
+model correction and recursive parent reads cannot reenter the attachment RPC.
+The transport never mutates the host environment.
 The same World and Akuma identity reopen on refresh/resume.
 
 At native agent creation, the plugin reads the exact Akuma status from
@@ -305,7 +301,7 @@ and a later Turn after an idle stretch, all with no timer in the session.
 `KEIYAKU_PUBLIC_PACKAGE` points those same tests at another built package, which
 is how a lane whose own build predates their prerequisite proves the streaming
 path for real instead of reporting the surface it could not open. SDK transport
-capability probes require the passive read view alongside the streaming surface.
+capability probes require the existing streaming surface.
 They do not update or use
 the live daemon/UI. Isolated
 native-host evidence and its limits are retained in

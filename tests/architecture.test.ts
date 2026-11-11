@@ -89,7 +89,6 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["contract-worktree.ts", ["library/keiyaku.ts", "Keiyaku"], false],
   ["git/repository.ts", ["git/owner-state.ts", "readOwnerState"], true],
   ["git/repository.ts", ["git/internal/owner-state.ts", "readOwnerState"], true],
-  ["library/selection.ts", ["plugin/akuma-signals.ts", "emitPluginSignal"], true],
   ["library/selection.ts", ["plugin/akuma-signals.ts", "outcomePluginObserver"], true],
   ["library/selection.ts", ["plugin/akuma-signals.ts", "withAkumaWaitDeferrals"], true],
   ["akuma/akuma-instance.ts", ["plugin/akuma-signals.ts", "emitPluginSignal"], true],

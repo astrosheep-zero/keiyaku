@@ -513,12 +513,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/selection.ts",
       allow: [
         ...libraryOwner.allow,
-        any("plugin/akuma-signals.ts", [
-          "emitPluginSignal",
-          "outcomePluginObserver",
-          "stderrPluginDiagnostic",
-          "withAkumaWaitDeferrals",
-        ]),
+        any("plugin/akuma-signals.ts", ["outcomePluginObserver", "stderrPluginDiagnostic", "withAkumaWaitDeferrals"]),
       ],
       deny: [...libraryOwner.deny, any("akuma/detached-body.ts")],
     },

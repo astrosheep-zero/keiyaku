@@ -29,7 +29,7 @@ function snapshot(id: string, world: string, akuId: string, title: string | null
 }
 const pageInfo = { hasMore: false, nextCursor: null, prevCursor: null };
 
-test("birth and ordinary refresh converge alias titles without changing the creation fingerprint", async t => {
+test("execution refreshes converge alias titles without changing the creation fingerprint", async t => {
   for (const initiallyAliased of [true, false]) await t.test(initiallyAliased ? "aliased" : "bare", async t => {
     const h = await fixture(t), akuId = "aku/elite/1234abcd", other = "aku/elite/8765abcd";
     if (initiallyAliased) await h.bind("reviewer", akuId);
@@ -56,7 +56,9 @@ test("birth and ordinary refresh converge alias titles without changing the crea
         target.title = update.name!; renames.push(update.name!);
       },
       async invokePluginRpc(_plugin: string, method: string, input: unknown) {
-        return method === "attach" ? await attach(input as Parameters<typeof attach>[0], { paseo }) : { woken: 0 };
+        return method === "attach" ? await attach(input as Parameters<typeof attach>[0], { paseo }, async () => ({
+          caller: { kind: "external", integration: "pi", id: "native-parent" },
+        })) : { woken: 0 };
       },
       async close() {},
     };
@@ -65,9 +67,8 @@ test("birth and ordinary refresh converge alias titles without changing the crea
     const forwarder = createForwarder(async () => client as unknown as DaemonClient);
     const { signals } = await forwarder.activate({ world: h.alias as PluginContext["world"], config: undefined,
       writablePath() { throw new Error("no plugin storage"); } });
-    const born = { kind: "akuma.born" as const, akumaId: akuId, bodySequence: 1, origin: { kind: "direct" as const },
-      caller: { kind: "external" as const, integration: "pi", id: "native-parent" } };
-    await signals?.["akuma.born"]?.(born);
+    const started = { kind: "akuma.turn-started" as const, akumaId: akuId, turnSequence: 1 };
+    await signals?.["akuma.turn-started"]?.(started);
     assert.equal(child!.title, initiallyAliased ? `@reviewer (${akuId})` : akuId);
     await h.bind("reviewer", akuId);
     await h.bind("audit", akuId);
@@ -81,7 +82,7 @@ test("birth and ordinary refresh converge alias titles without changing the crea
     assert.equal(nextTarget.title, other, "refresh does not globally rename other mirrors");
     await signals?.["akuma.turn-started"]?.({ kind: "akuma.turn-started", akumaId: other, turnSequence: 1 });
     assert.equal(nextTarget.title, `@audit, @reviewer (${other})`, "the new target converges on its own refresh");
-    await signals?.["akuma.born"]?.(born);
+    await signals?.["akuma.turn-started"]?.(started);
     assert.equal(creates, 1);
     assert.equal(wire.length, 1, "existing mirrors bypass creation even after rename");
     for (const input of wire) {
@@ -164,9 +165,8 @@ test("failed owned title attempts preserve attach, ordinary refresh and runtime 
   const { signals } = await createForwarder(async () => (++opens === 1 ? runtime : title)).activate({
     world: h.world, config: undefined, writablePath() { throw new Error("no storage"); },
   });
-  await signals?.["akuma.born"]?.({ kind: "akuma.born", akumaId: akuId, bodySequence: 1, origin: { kind: "direct" },
-    caller: { kind: "external", integration: "pi", id: "native-parent" } });
-  assert.equal(titleCloses, 1, "the title attempt is closed before born delivery returns");
+  await signals?.["akuma.turn-started"]?.({ kind: "akuma.turn-started", akumaId: akuId, turnSequence: 1 });
+  assert.equal(titleCloses, 1, "the title attempt is closed before execution refresh returns");
   assert.equal(runtimeCloses, 0, "rename failure does not close the successful attach connection");
   assert.equal(warning.mock.callCount(), 1);
   assert.match(String(warning.mock.calls[0]?.arguments[0]), /title synchronization failed: rename unavailable/u);
@@ -179,10 +179,10 @@ test("failed owned title attempts preserve attach, ordinary refresh and runtime 
   assert.equal(runtimeCloses, 0);
   assert.equal(warning.mock.callCount(), 3);
   assert.match(String(warning.mock.calls[2]?.arguments[0]), /invalid Alias JSON/u);
-  assert.equal(refreshes, 2);
+  assert.equal(refreshes, 3);
   await signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: akuId, bodySequence: 1, end: "exited" });
   assert.equal(runtimeCloses, 1, "Body end still owns normal runtime cleanup");
-  assert.equal(refreshes, 3);
+  assert.equal(refreshes, 4);
   assert.equal(titleCloses, 4);
 });
 

@@ -92,7 +92,6 @@ export type {
   AkumaAskOptions,
   AkumaAskResult,
   AkumaBirthInput,
-  AkumaRead,
   AkumaHistoryOptions,
   AkumaHostOptions,
   AkumaIdleOptions,
