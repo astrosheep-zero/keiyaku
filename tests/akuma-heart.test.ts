@@ -550,12 +550,13 @@ test("wake names both missing pieces when the executable and frozen directory ar
   }
 });
 
-test("Tell reports held only from its spawned child's private leash refusal", async () => {
+test("Tell reports held when the refused launch leaves a Body owning the leash", async () => {
   const value = await fixture();
   let spawned = 0;
   try {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await leash.birth(value.allocated.paths, value.soul);
+    await leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
     const result = await tellFixture(value, {
       body: "continue",
       tellId: "tell-held",

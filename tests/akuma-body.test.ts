@@ -1840,11 +1840,7 @@ test("interrupt supervises an answered Turn until Attempt closure proof", async 
     const interrupted = await new AkumaOwner(allocated.id, await World.at(root)).interrupt("continue", {
       runtime: {
         async spawn() {
-          return {
-            completed: Promise.resolve({ diagnostic: "fixture leash held", held: true }),
-            async cancel() {},
-            release() {},
-          } satisfies LiveBodyLaunch;
+          throw new Error("fixture successor unavailable");
         },
       },
     });
@@ -1856,7 +1852,7 @@ test("interrupt supervises an answered Turn until Attempt closure proof", async 
     assert.deepEqual(await outcomes(allocated.paths), [{ kind: "canceled" }]);
     assert.equal((await readHeart(allocated.paths)).latestBody?.end, "put-down");
     assert.equal((await readHeart(allocated.paths)).pending.length, 1);
-    assert.equal(interrupted.wake.kind, "held");
+    assert.deepEqual(interrupted.wake, { kind: "failed", diagnostic: "fixture successor unavailable" });
   } finally {
     releaseClosed();
     await body?.catch(() => undefined);

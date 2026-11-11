@@ -748,6 +748,7 @@ test("the real public package admits one Tell through the transport while custod
   t.after(async () => { await transport.close(); release(); value.close(); });
   await writeFile(join(value.root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
   await leash.birth(value.allocated.paths, value.soul);
+  await leash.recordBody(value.allocated.paths, { leashTakenAt: at });
   const root = await realpath(value.root);
 
   const admitted = await transport.tell(root, value.allocated.id, new AbortController().signal, "change direction");

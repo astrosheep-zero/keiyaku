@@ -96,12 +96,16 @@ the current provider attempt's closure proof. If owned provider custody cannot
 retire, the Body records hung evidence, ends unsuccessfully, and releases its
 leash; it never sleeps holding custody or calls this an ordinary stop. No public timeout or local recovery manufactures hung.
 
-Wake is level-triggered by pending Tell plus absence of a live Body. It starts a
-successor only through the leash and reports only durable delivery, a successor
-Body, held custody, or an honest failure. Reboot or failed launch can leave a
-Tell pending for a later ordinary interaction; no daemon guarantees recovery.
-Successors never reconstruct predecessor custody. They may continue from clean
-history, but hung permanently refuses them and untidy remains conservative.
+Wake is level-triggered by pending Tell plus absence of a live Body. The leash
+alone admits a successor, but a held leash is not proof that a Body services the
+input: observation may briefly hold that same custody. An owned wake that loses
+only to observation rechecks durable Tell and Body custody and retries within its
+existing cancellation boundary. It reports only durable delivery, a successor
+Body, held execution or control custody, or an honest failure. Reboot or failed
+launch can leave a Tell pending for a later ordinary interaction; no daemon
+guarantees recovery. Successors never reconstruct predecessor custody. They may
+continue from clean history, but hung permanently refuses them and untidy
+remains conservative.
 
 The runtime a wake launches is the waking process's own executable, resolved at
 use time. There is no recorded path and no re-resolution chain. When the spawn

@@ -1899,15 +1899,11 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   held.release();
   const receipt = await owner.completeInterruptAdmission(admission, {
     async spawn() {
-      return {
-        completed: Promise.resolve({ diagnostic: "fixture leash held", held: true }),
-        async cancel() {},
-        release() {},
-      };
+      throw new Error("fixture successor unavailable");
     },
   });
   assert.equal(receipt.interruption?.kind, "completed");
-  assert.equal(receipt.wake.kind, "held");
+  assert.deepEqual(receipt.wake, { kind: "failed", diagnostic: "fixture successor unavailable" });
   assert.equal((await readHeart(allocated.paths)).pause, null);
   assert.deepEqual(
     (await readHeart(allocated.paths)).pending.map((tell) => tell.id),

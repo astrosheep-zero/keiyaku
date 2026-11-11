@@ -651,33 +651,6 @@ async function settledWake(
   return null;
 }
 
-async function awaitWake(
-  paths: AkumaPaths,
-  input: Readonly<{
-    tellId?: string;
-    after: number;
-    child: LiveBodyLaunch;
-    schedule: (milliseconds: number, signal: AbortSignal) => Promise<void>;
-    signal?: AbortSignal;
-  }>,
-): Promise<TellWake> {
-  const { tellId, after, child, schedule, signal } = input;
-  try {
-    const result = await observeBodyLaunch(
-      child,
-      async () => await settledWake(paths, tellId, after),
-      schedule,
-      signal,
-    );
-    if (result.kind === "completed") return launchEndWake(result.end);
-    child.release();
-    return result.value;
-  } catch (error) {
-    child.release();
-    throw error;
-  }
-}
-
 async function wakePendingTells(
   paths: AkumaPaths,
   tellId: string | undefined,
@@ -685,17 +658,36 @@ async function wakePendingTells(
   signal?: AbortSignal,
 ): Promise<TellWake | null> {
   try {
-    signal?.throwIfAborted();
-    const beforeHeart = await readHeart(paths);
-    if (tellId === undefined && beforeHeart.pending.length === 0) return null;
-    const before = beforeHeart.latestBody?.sequence ?? 0;
-    return await awaitWake(paths, {
-      ...(tellId === undefined ? {} : { tellId }),
-      after: before,
-      child: await runtime.spawn(paths),
-      schedule: runtime.schedule ?? abortableDelay,
-      ...(signal === undefined ? {} : { signal }),
-    });
+    for (;;) {
+      signal?.throwIfAborted();
+      const before = await readHeart(paths);
+      if (tellId === undefined && before.pending.length === 0) return null;
+      const child = await runtime.spawn(paths);
+      try {
+        const result = await observeBodyLaunch(
+          child,
+          async () => await settledWake(paths, tellId, before.latestBody?.sequence ?? 0),
+          runtime.schedule ?? abortableDelay,
+          signal,
+        );
+        if (result.kind === "observed") {
+          child.release();
+          return result.value;
+        }
+        const wake = launchEndWake(result.end);
+        if (wake.kind !== "held") return wake;
+        const heart = await readHeart(paths);
+        if (tellId !== undefined && !heart.pending.some((tell) => tell.id === tellId)) return { kind: "told" };
+        if (
+          heart.pause !== null ||
+          (heart.latestBody !== null && heart.latestBody.end === undefined && (await probeLeash(paths)) === "held")
+        )
+          return wake;
+      } catch (error) {
+        child.release();
+        throw error;
+      }
+    }
   } catch (error) {
     if (signal?.aborted) throw error;
     return { kind: "failed", diagnostic: diagnostic(error) };
