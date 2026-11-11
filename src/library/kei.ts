@@ -106,14 +106,14 @@ import { releaseDebtHolder, releaseDebtHolderWithFence, debtHolderObservationSel
 import { continueDeliveredDependents } from "./continuation.js";
 import { InvocationAccumulator } from "./invocation.js";
 import { reconcileAffectedContracts } from "./reconcile.js";
-import { compactDeliverRefusal, compactPreviewRefusal, compactVerifyRefusal } from "./refusal.js";
 import { observeChangedRegion } from "./region.js";
 import { compactReason, compactRetry } from "../protocol/result-reasons.js";
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
 
+export const guidanceNormalSchema = z.strictObject({ kind: z.literal("present"), guidance: z.string() }).readonly();
 export const guidanceSchema = z.union([
-  z.strictObject({ kind: z.literal("present"), guidance: z.string() }).readonly(),
+  guidanceNormalSchema,
   z.strictObject({ kind: z.literal("missing") }).readonly(),
 ]);
 export type Guidance = z.output<typeof guidanceSchema>;
@@ -350,7 +350,7 @@ export class Kei {
               handoffBase: outcome.handoffBase,
             };
           if (outcome.kind === "refused")
-            return { kind: "refused", contractId: this.id, reason: compactDeliverRefusal(outcome.refusal) };
+            return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
           if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
           requireMatchingDeliveryLeading(outcome.value.leading, accumulator, this.id);
           await advanceAndContinue(accumulator, scope, localChannel, this.id, this.composition, outcome, values.signal);
@@ -414,7 +414,7 @@ export class Kei {
           ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
         });
         if (outcome.kind === "refused")
-          return { kind: "refused", contractId: this.id, reason: compactVerifyRefusal(outcome.refusal) };
+          return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
         accumulator.extendConclusions(this.id, outcome.value);
         try {
           if (!signal?.aborted && outcome.checkpoint !== undefined)
@@ -606,7 +606,7 @@ export class Kei {
           ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
         });
         if (admission.kind === "refused")
-          return { kind: "refused", contractId: this.id, reason: compactPreviewRefusal(admission.refusal) };
+          return { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) };
         accumulator.recordDeliveryPreview(this.id, admission.value);
         return admission.value;
       },

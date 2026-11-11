@@ -31,6 +31,7 @@ import {
   nonEmptyDebtValues,
   nonEmptyDebtArraySchema,
   debtMutationResultSchema,
+  debtMutationNormalResultSchema,
   debtUpdateResultSchema,
   debtChangeSchema,
   type DebtWarning,
@@ -81,10 +82,11 @@ export const debtShowItemSchema = z.union([
   z.strictObject({ kind: z.literal("missing"), id: debtIdSchema }).readonly(),
 ]);
 export type DebtShowItem = z.output<typeof debtShowItemSchema>;
+export const debtShowNormalResultSchema = z
+  .strictObject({ kind: z.literal("debt-complete"), items: nonEmptyDebtArraySchema(debtShowItemSchema.options[0]) })
+  .readonly();
 export const debtShowResultSchema = z.union([
-  z
-    .strictObject({ kind: z.literal("debt-complete"), items: nonEmptyDebtArraySchema(debtShowItemSchema.options[0]) })
-    .readonly(),
+  debtShowNormalResultSchema,
   z.strictObject({ kind: z.literal("debt-partial"), items: nonEmptyDebtArraySchema(debtShowItemSchema) }).readonly(),
   z
     .strictObject({ kind: z.literal("debt-missing"), items: nonEmptyDebtArraySchema(debtShowItemSchema.options[1]) })
@@ -131,6 +133,7 @@ export {
   readyDebtRowSchema,
   debtTreeRootSchema,
   debtMutationResultSchema,
+  debtMutationNormalResultSchema,
   debtUpdateResultSchema,
   debtChangeSchema,
   debtDetailSchema,

@@ -26,7 +26,7 @@ import { runCli } from "./support/cli-fixtures.js";
 import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
-import { assertWireRoundTrip } from "./support/schema-parity.js";
+import { assertWireRoundTrip, assertWireConformance } from "./support/schema-parity.js";
 
 const context = { columns: 100, color: false };
 
@@ -186,6 +186,7 @@ test("Tell failure and exact Ask precedence retain answer and historical wake re
   if (asked.kind !== "answered") assert.fail("exact answer must win");
   assert.deepEqual(asked.answer, { ok: true });
   assertWireRoundTrip(akumaAskResultSchema, asked);
+  assertWireConformance(Keiyaku.verbs.ask.normal, asked);
   assert.equal(classifyVerb("ask", input, { kind: "returned", value: asked }), "accepted");
   const askText = renderVerb("ask", input, { kind: "returned", value: asked }, context);
   for (const text of [toldText, askText]) for (const evidence of [original.tellId, fixture.allocated.id, "historical wake failed", logPath, '{"ok":true}']) assert.ok(text.includes(evidence), text);

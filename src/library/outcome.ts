@@ -112,6 +112,16 @@ export const localIssueSchema = z.union([
   executionIssue,
   settlementIssueSchema,
 ]);
+const optionalSeverity = { severity: z.literal("optional") };
+const optionalResourceIssue = resourceDiagnosticSchema.unwrap().extend(optionalSeverity).readonly();
+export const optionalInvocationIssueSchema = z.union([
+  ...reconcileIssueSchema.options.map((schema) => schema.unwrap().extend(optionalSeverity).readonly()),
+  optionalResourceIssue,
+]);
+export const optionalLocalIssueSchema = z.union([
+  ...localReconcileLeaves.map((schema) => schema.unwrap().extend(optionalSeverity).readonly()),
+  optionalResourceIssue,
+]);
 export const previewIssueSchema = resourceDiagnosticSchema.unwrap().omit({ contractId: true }).readonly();
 export const reconcilePublicIssueSchema = z
   .union([...localReconcileLeaves, resourceDiagnosticSchema, settlementIssueSchema])
@@ -268,21 +278,27 @@ type PartialEvidence = Readonly<{
 }>;
 type ReceiptFields = Readonly<{ contractId?: ContractId; issues?: readonly InvocationIssue[] }>;
 
+export function acceptedOutcomeSchema<Fields extends z.ZodRawShape, Issues extends z.ZodType>(
+  fields: Fields,
+  issues: Issues,
+) {
+  return z
+    .strictObject({
+      kind: z.literal("accepted"),
+      contractId: contractIdSchema,
+      issues: z.array(issues).min(1).readonly().exactOptional(),
+      recoverySnapshots: z.array(recoverySnapshotSchema).min(1).readonly().exactOptional(),
+      ...fields,
+    })
+    .readonly();
+}
 export function operationOutcomeSchema<
   Fields extends z.ZodRawShape,
   Refusal extends z.ZodType,
   Issues extends z.ZodType,
 >(fields: Fields, refusal: Refusal, issues: Issues) {
   return z.union([
-    z
-      .strictObject({
-        kind: z.literal("accepted"),
-        contractId: contractIdSchema,
-        issues: z.array(issues).min(1).readonly().exactOptional(),
-        recoverySnapshots: z.array(recoverySnapshotSchema).min(1).readonly().exactOptional(),
-        ...fields,
-      })
-      .readonly(),
+    acceptedOutcomeSchema(fields, issues),
     z.strictObject({ kind: z.literal("refused"), contractId: contractIdSchema, reason: refusal }).readonly(),
     retrySchema.options[0].unwrap().extend({ contractId: contractIdSchema }).readonly(),
     retrySchema.options[1].unwrap().extend({ contractId: contractIdSchema }).readonly(),

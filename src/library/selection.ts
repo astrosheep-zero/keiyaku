@@ -84,19 +84,13 @@ export const akumaHistoryResultSchema = z.union([
       highestSequence: z.number().int().positive().exactOptional(),
     })
     .readonly(),
-  z
-    .strictObject({
-      ...outcomeRowSchema.unwrap().omit({ kind: true }).shape,
-      kind: z.literal("akuma-exact"),
-      ...historyCommon,
-    })
+  outcomeRowSchema
+    .unwrap()
+    .extend({ kind: z.literal("akuma-exact"), ...historyCommon })
     .readonly(),
-  z
-    .strictObject({
-      ...reportRowSchema.unwrap().omit({ kind: true }).shape,
-      kind: z.literal("akuma-report"),
-      ...historyCommon,
-    })
+  reportRowSchema
+    .unwrap()
+    .extend({ kind: z.literal("akuma-report"), ...historyCommon })
     .readonly(),
   z.strictObject({ kind: z.literal("akuma-unknown-history"), ...historyCommon }).readonly(),
   z.strictObject({ kind: z.literal("akuma-last"), ...historyCommon, answer: z.string() }).readonly(),

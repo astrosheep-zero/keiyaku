@@ -112,62 +112,40 @@ const journalFields = {
   at: z.string(),
   actor: actorIdSchema.exactOptional(),
 };
-export const bindEntrySchema = z
-  .strictObject({
-    ...journalFields,
-    kind: z.literal("bind"),
-    data: z.strictObject({ coordinates: contractCoordinatesSchema, terms: contractTermsSchema }).readonly(),
-  })
-  .readonly();
-export const amendEntrySchema = z
-  .strictObject({ ...journalFields, kind: z.literal("amend"), data: contractTermsSchema })
-  .readonly();
-export const deliverEntrySchema = z
-  .strictObject({ ...journalFields, kind: z.literal("deliver"), data: deliverDataSchema })
-  .readonly();
-export const reintegratedEntrySchema = z
-  .strictObject({
-    ...journalFields,
-    kind: z.literal("reintegrated"),
-    data: z.strictObject({ predecessor: snapshotIdSchema, snapshot: snapshotIdSchema }).readonly(),
-  })
-  .readonly();
-export const attestationEntrySchema = z
-  .strictObject({
-    ...journalFields,
-    kind: z.literal("attestation"),
-    data: z
-      .strictObject({
-        gate: gateSchema,
-        requirement: requirementIdSchema,
-        subject: dependencyKeySetSchema,
-        verdict: verdictSchema,
-        summary: z.string().exactOptional(),
-      })
-      .readonly(),
-  })
-  .readonly();
-export const claimedEntrySchema = z
-  .strictObject({
-    ...journalFields,
-    kind: z.literal("claimed"),
-    data: z.strictObject({ delivery: entryUlidSchema }).readonly(),
-  })
-  .readonly();
-export const arcEntrySchema = z
-  .strictObject({
-    ...journalFields,
-    kind: z.literal("arc"),
-    data: z.strictObject({ seq: z.number(), title: z.string(), body: z.string() }).readonly(),
-  })
-  .readonly();
-export const abandonedEntrySchema = z
-  .strictObject({
-    ...journalFields,
-    kind: z.literal("abandoned"),
-    data: z.strictObject({ note: z.string().exactOptional() }).readonly(),
-  })
-  .readonly();
+function factSchema<Kind extends string, Data extends z.ZodType>(kind: Kind, data: Data) {
+  return z.strictObject({ ...journalFields, kind: z.literal(kind), data }).readonly();
+}
+export const bindEntrySchema = factSchema(
+  "bind",
+  z.strictObject({ coordinates: contractCoordinatesSchema, terms: contractTermsSchema }).readonly(),
+);
+export const amendEntrySchema = factSchema("amend", contractTermsSchema);
+export const deliverEntrySchema = factSchema("deliver", deliverDataSchema);
+export const reintegratedEntrySchema = factSchema(
+  "reintegrated",
+  z.strictObject({ predecessor: snapshotIdSchema, snapshot: snapshotIdSchema }).readonly(),
+);
+export const attestationEntrySchema = factSchema(
+  "attestation",
+  z
+    .strictObject({
+      gate: gateSchema,
+      requirement: requirementIdSchema,
+      subject: dependencyKeySetSchema,
+      verdict: verdictSchema,
+      summary: z.string().exactOptional(),
+    })
+    .readonly(),
+);
+export const claimedEntrySchema = factSchema("claimed", z.strictObject({ delivery: entryUlidSchema }).readonly());
+export const arcEntrySchema = factSchema(
+  "arc",
+  z.strictObject({ seq: z.number(), title: z.string(), body: z.string() }).readonly(),
+);
+export const abandonedEntrySchema = factSchema(
+  "abandoned",
+  z.strictObject({ note: z.string().exactOptional() }).readonly(),
+);
 export const journalEntrySchema = z.union([
   bindEntrySchema,
   amendEntrySchema,

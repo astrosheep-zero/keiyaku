@@ -50,7 +50,8 @@ function describeTools(): Tool[] {
     );
     let outputSchema: Tool["outputSchema"];
     if (SCHEMA_TOOLS.has(name as VerbName)) {
-      const output = z.toJSONSchema(entry.output, { io: "input", reused: "ref" });
+      if (!("normal" in entry)) throw new Error(`Missing normal output schema: ${name}`);
+      const output = z.toJSONSchema(entry.normal, { io: "input", reused: "ref" });
       const branches: z.core.JSONSchema.BaseSchema[] = [output];
       for (const branch of branches) {
         if (branch.anyOf !== undefined) branches.push(...branch.anyOf);

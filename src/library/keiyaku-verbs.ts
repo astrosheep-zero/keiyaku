@@ -11,28 +11,43 @@ import {
   akumaCatalogueSchema,
   akumaObservationSchema,
   akumaAskResultSchema,
+  akumaAskNormalResultSchema,
   akumaKillResultSchema,
   akumaTellResultSchema,
   akumaWaitResultSchema,
+  akumaWaitNormalResultSchema,
 } from "../akuma/selection-observation.js";
-import { regionResultSchema, kanshiReportSchema, contractStatusSchema } from "../kanshi/report.js";
+import {
+  regionResultSchema,
+  kanshiReportSchema,
+  contractStatusSchema,
+  contractNormalStatusSchema,
+} from "../kanshi/report.js";
 import { settingsSchema } from "../settings.js";
 import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
-import { spawnProgressSchema, spawnResultSchema, forkResultSchema } from "./akuma-creation.js";
+import {
+  spawnProgressSchema,
+  spawnResultSchema,
+  spawnNormalResultSchema,
+  forkResultSchema,
+  forkNormalResultSchema,
+} from "./akuma-creation.js";
 import {
   bindOutcomeSchema,
+  bindNormalOutcomeSchema,
   amendOutcomeSchema,
   arcOutcomeSchema,
   deliverOutcomeSchema,
   deliveryPreviewOutcomeSchema,
   verifyOutcomeSchema,
+  verifyNormalOutcomeSchema,
   reviewOutcomeSchema,
   abandonOutcomeSchema,
 } from "./contract-outcomes.js";
 import { contractHistorySchema } from "./contract-types.js";
-import { guidanceSchema } from "./kei.js";
-import { contractWaitResultSchema } from "./contract-wait.js";
+import { guidanceSchema, guidanceNormalSchema } from "./kei.js";
+import { contractWaitResultSchema, contractWaitNormalResultSchema } from "./contract-wait.js";
 import { reconcileResultSchema } from "./reconcile.js";
 import { akumaHistoryResultSchema } from "./selection.js";
 import { whoamiFactsSchema } from "./keiyaku-identity.js";
@@ -40,9 +55,12 @@ import { resetOutcomeSchema } from "./outcome.js";
 import {
   debtAbsentSchema,
   debtShowResultSchema,
+  debtShowNormalResultSchema,
   debtDoctorReportSchema,
   debtMutationResultSchema,
+  debtMutationNormalResultSchema,
   debtCatalogueSchema,
+  debtListSchema,
   debtUpdateResultSchema,
 } from "../debt/index.js";
 import { debtPrioritySchema, debtStateSchema } from "../debt/document.js";
@@ -52,6 +70,7 @@ export type VerbEntry = Readonly<{
   description: string;
   input: z.ZodType;
   output: z.ZodType;
+  normal?: z.ZodType;
   progress?: z.ZodType;
   effect: "read" | "write" | "destroy";
 }>;
@@ -125,6 +144,7 @@ export const verbs = Object.freeze({
       z.strictObject({ forkOf: text, ...commonBind }).readonly(),
     ]),
     output: bindOutcomeSchema,
+    normal: bindNormalOutcomeSchema,
     effect: "write",
   },
   amend: {
@@ -170,6 +190,7 @@ export const verbs = Object.freeze({
     description: "Run declared verification.",
     input: z.strictObject({ ...contract, index: positive.exactOptional(), includeDirty: optBool }).readonly(),
     output: verifyOutcomeSchema,
+    normal: verifyNormalOutcomeSchema,
     progress: executionObservationSchema,
     effect: "write",
   },
@@ -197,6 +218,7 @@ export const verbs = Object.freeze({
       z.strictObject({ ids: z.array(debtIdSchema).nonempty().readonly() }).readonly(),
     ]),
     output: z.union([guidanceSchema, debtShowResultSchema, debtAbsentSchema]),
+    normal: z.union([guidanceNormalSchema, debtShowNormalResultSchema]),
     effect: "read",
   },
   reconcile: {
@@ -221,6 +243,7 @@ export const verbs = Object.freeze({
       })
       .readonly(),
     output: spawnResultSchema,
+    normal: spawnNormalResultSchema,
     progress: spawnProgressSchema,
     effect: "write",
   },
@@ -228,6 +251,7 @@ export const verbs = Object.freeze({
     description: "Fork an Akuma at a history point.",
     input: z.strictObject({ akuma: text, at: text, bare: optBool }).readonly(),
     output: forkResultSchema,
+    normal: forkNormalResultSchema,
     effect: "write",
   },
   tell: {
@@ -251,6 +275,7 @@ export const verbs = Object.freeze({
       })
       .readonly(),
     output: akumaAskResultSchema,
+    normal: akumaAskNormalResultSchema,
     progress: askProgressSchema,
     effect: "write",
   },
@@ -279,6 +304,7 @@ export const verbs = Object.freeze({
         .readonly(),
     ]),
     output: z.union([contractWaitResultSchema, akumaWaitResultSchema]),
+    normal: z.union([contractWaitNormalResultSchema, akumaWaitNormalResultSchema]),
     effect: "read",
   },
   history: {
@@ -333,12 +359,14 @@ export const verbs = Object.freeze({
     description: "Observe one Contract or Akuma by complete identity.",
     input: z.strictObject({ id: z.union([contractIdSchema, akumaIdSchema]) }).readonly(),
     output: z.union([contractStatusSchema, akumaObservationSchema]),
+    normal: z.union([contractNormalStatusSchema, akumaObservationSchema]),
     effect: "read",
   },
   ls: {
     description: "List Contracts, Debts, Akuma instances or Archetypes by selector.",
     input: lsInputSchema,
     output: z.union([contractCatalogueSchema, akumaCatalogueSchema, archetypeCatalogSchema, debtCatalogueSchema]),
+    normal: z.union([contractCatalogueSchema, akumaCatalogueSchema, archetypeCatalogSchema, debtListSchema]),
     effect: "read",
   },
   region: {
@@ -365,6 +393,7 @@ export const verbs = Object.freeze({
       })
       .readonly(),
     output: debtMutationResultSchema,
+    normal: debtMutationNormalResultSchema,
     effect: "write",
   },
   "debt.addDocument": {

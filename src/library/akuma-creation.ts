@@ -93,8 +93,9 @@ const spawnAnswer = {
     .exactOptional(),
   input: completedTextObservationSchema.exactOptional(),
 };
+export const spawnNormalResultSchema = z.strictObject({ kind: z.literal("spawned"), ...spawnAnswer }).readonly();
 export const spawnResultSchema = z.union([
-  z.strictObject({ kind: z.literal("spawned"), ...spawnAnswer }).readonly(),
+  spawnNormalResultSchema,
   z
     .strictObject({
       kind: z.literal("failed"),
@@ -104,15 +105,16 @@ export const spawnResultSchema = z.union([
     .readonly(),
 ]);
 const parentFields = { parentAkumaId: akumaIdSchema.exactOptional() };
+export const forkNormalResultSchema = z
+  .strictObject({
+    kind: z.literal("forked"),
+    childAkumaId: akumaIdSchema,
+    ...parentFields,
+    dispatchWarning: publicationFields.dispatchWarning,
+  })
+  .readonly();
 export const forkResultSchema = z.union([
-  z
-    .strictObject({
-      kind: z.literal("forked"),
-      childAkumaId: akumaIdSchema,
-      ...parentFields,
-      dispatchWarning: publicationFields.dispatchWarning,
-    })
-    .readonly(),
+  forkNormalResultSchema,
   z
     .strictObject({
       kind: z.literal("failed"),

@@ -79,27 +79,32 @@ const waitOutcomeSchema = z.union([
   z.strictObject({ kind: z.literal("canceled"), historyId: turnHistoryIdSchema }).readonly(),
 ]);
 export type AkumaWaitOutcome = z.output<typeof waitOutcomeSchema>;
+const observedWaitItemSchema = z
+  .strictObject({
+    kind: z.literal("observed"),
+    id: akumaIdSchema,
+    life: akumaStatusSchema.unwrap().shape.life,
+    pending: z.literal(true).exactOptional(),
+    outcome: waitOutcomeSchema.exactOptional(),
+    strandedReason: z.literal("resume-unsupported").exactOptional(),
+  })
+  .readonly();
 export const akumaWaitItemSchema = z.union([
-  z
-    .strictObject({
-      kind: z.literal("observed"),
-      id: akumaIdSchema,
-      life: akumaStatusSchema.unwrap().shape.life,
-      pending: z.literal(true).exactOptional(),
-      outcome: waitOutcomeSchema.exactOptional(),
-      strandedReason: z.literal("resume-unsupported").exactOptional(),
-    })
-    .readonly(),
+  observedWaitItemSchema,
   z.strictObject({ kind: z.literal("unobserved"), id: akumaIdSchema, diagnostic: z.string() }).readonly(),
   z.strictObject({ kind: z.literal("missing"), id: akumaIdSchema }).readonly(),
 ]);
-export const akumaWaitResultSchema = z
-  .strictObject({
-    kind: z.literal("akuma"),
-    reason: z.enum(["completed", "deadline"]),
-    results: z.array(akumaWaitItemSchema).readonly(),
-  })
-  .readonly();
+function waitResultSchema<Item extends z.ZodType>(item: Item) {
+  return z
+    .strictObject({
+      kind: z.literal("akuma"),
+      reason: z.enum(["completed", "deadline"]),
+      results: z.array(item).readonly(),
+    })
+    .readonly();
+}
+export const akumaWaitNormalResultSchema = waitResultSchema(observedWaitItemSchema);
+export const akumaWaitResultSchema = waitResultSchema(akumaWaitItemSchema);
 export const akumaKillResultSchema = z
   .strictObject({
     results: z.array(z.strictObject({ id: akumaIdSchema, outcome: killEvidenceSchema }).readonly()).readonly(),
@@ -161,12 +166,15 @@ export const akumaAskObservationSchema = z.union([
 ]);
 const settledAskSubject = { ...askSubject, wake: failedWakeSchema.exactOptional() };
 const pendingAskSubject = { ...askSubject, wake: z.union([pendingWakeSchema, failedWakeSchema]).exactOptional() };
-export const akumaAskResultSchema = z.union([
+export const akumaAskNormalResultSchema = z.union([
   akumaAskObservationSchema.options[0].unwrap().extend(settledAskSubject).readonly(),
-  akumaAskObservationSchema.options[1].unwrap().extend(settledAskSubject).readonly(),
-  akumaAskObservationSchema.options[2].unwrap().extend(settledAskSubject).readonly(),
   akumaAskObservationSchema.options[3].unwrap().extend(pendingAskSubject).readonly(),
   akumaAskObservationSchema.options[4].unwrap().extend(pendingAskSubject).readonly(),
+]);
+export const akumaAskResultSchema = z.union([
+  ...akumaAskNormalResultSchema.options,
+  akumaAskObservationSchema.options[1].unwrap().extend(settledAskSubject).readonly(),
+  akumaAskObservationSchema.options[2].unwrap().extend(settledAskSubject).readonly(),
 ]);
 
 export type AkumaObservation = z.output<typeof akumaObservationSchema>;

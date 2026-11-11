@@ -23,83 +23,43 @@ const historyTarget = z.union([
 ]);
 const historyGates = z.array(gateSchema).readonly().exactOptional();
 const historyAfter = z.array(contractIdSchema).readonly().exactOptional();
+function historyEvent<Kind extends string, Fields extends z.ZodRawShape>(kind: Kind, fields: Fields) {
+  return z.strictObject({ ...historyCommon, kind: z.literal(kind), ...fields }).readonly();
+}
 export const contractHistoryEventSchema = z.union([
-  z
-    .strictObject({
-      ...historyCommon,
-      kind: z.literal("bind"),
-      start: snapshotIdSchema,
-      target: historyTarget.exactOptional(),
-      gates: historyGates,
-      after: historyAfter,
-      document: z.string().exactOptional(),
-      targetIncarnation: z.strictObject({ id: z.string(), identity: z.string() }).readonly().exactOptional(),
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...historyCommon,
-      kind: z.literal("amend"),
-      changedSections: z.array(z.string()).readonly().exactOptional(),
-      gates: historyGates,
-      after: historyAfter,
-      document: z.string().exactOptional(),
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...historyCommon,
-      kind: z.literal("deliver"),
-      candidate: snapshotIdSchema,
-      integration: snapshotIdSchema,
-      contentId: z.string(),
-      predecessor: snapshotIdSchema,
-      note: z.string().exactOptional(),
-      requireBranchesToBeUpToDate: z.boolean().exactOptional(),
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...historyCommon,
-      kind: z.literal("reintegrated"),
-      predecessor: snapshotIdSchema,
-      integration: snapshotIdSchema,
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...historyCommon,
-      kind: z.literal("attestation"),
-      gate: gateSchema,
-      requirement: requirementIdSchema,
-      verdict: verdictSchema,
-      subject: z.string(),
-      summary: z.string().exactOptional(),
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...historyCommon,
-      kind: z.literal("claimed"),
-      deliveryId: entryUlidSchema,
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...historyCommon,
-      kind: z.literal("arc"),
-      chapter: z.number().int().positive(),
-      title: z.string(),
-      body: z.string().exactOptional(),
-    })
-    .readonly(),
-  z
-    .strictObject({
-      ...historyCommon,
-      kind: z.literal("abandoned"),
-      note: z.string().exactOptional(),
-    })
-    .readonly(),
+  historyEvent("bind", {
+    start: snapshotIdSchema,
+    target: historyTarget.exactOptional(),
+    gates: historyGates,
+    after: historyAfter,
+    document: z.string().exactOptional(),
+    targetIncarnation: z.strictObject({ id: z.string(), identity: z.string() }).readonly().exactOptional(),
+  }),
+  historyEvent("amend", {
+    changedSections: z.array(z.string()).readonly().exactOptional(),
+    gates: historyGates,
+    after: historyAfter,
+    document: z.string().exactOptional(),
+  }),
+  historyEvent("deliver", {
+    candidate: snapshotIdSchema,
+    integration: snapshotIdSchema,
+    contentId: z.string(),
+    predecessor: snapshotIdSchema,
+    note: z.string().exactOptional(),
+    requireBranchesToBeUpToDate: z.boolean().exactOptional(),
+  }),
+  historyEvent("reintegrated", { predecessor: snapshotIdSchema, integration: snapshotIdSchema }),
+  historyEvent("attestation", {
+    gate: gateSchema,
+    requirement: requirementIdSchema,
+    verdict: verdictSchema,
+    subject: z.string(),
+    summary: z.string().exactOptional(),
+  }),
+  historyEvent("claimed", { deliveryId: entryUlidSchema }),
+  historyEvent("arc", { chapter: z.number().int().positive(), title: z.string(), body: z.string().exactOptional() }),
+  historyEvent("abandoned", { note: z.string().exactOptional() }),
   z
     .strictObject({
       kind: z.literal("dispatch"),

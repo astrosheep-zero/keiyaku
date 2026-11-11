@@ -10,8 +10,10 @@ cancellation, and observation semantics. A single described verb surface offers
 both typed methods and generic execution over the same caller boundary. The
 facet also owns the shared interpretation of returned and thrown outcomes for
 adapters; this classification does not replace or alter the native answer.
-Structural descriptions expose wire inputs and owner result and progress schemas
-without validating trusted owner values as they flow through execution. Every
+Structural descriptions expose wire inputs and complete owner results alongside
+their owner-declared normal subsets and progress, without validating trusted
+owner values as they flow through execution. Routing composes these descriptions
+without narrowing the native return value. Every
 described verb's output type is its producing owner's schema output; native
 process-local capabilities stay outside that wire description. Each result uses
 the native owner's single object answer. Invocation context can
@@ -22,8 +24,11 @@ omitted implementation evidence.
 MCP publishes the facet's operations subject to the administration and raw-import
 exclusion owned by [cli.md](cli.md). It publishes an owner's object-rooted output
 schema when a caller reads the result to choose its next call; other tools return
-rendered text. An alternative that cannot describe an object is a programmer
-error for a tool publishing a schema. Error results are text led by their
+rendered text. The published declaration is the owner's normal subset. Every
+normal answer of a schema-publishing tool carries its unchanged native value;
+selection cannot silently suppress structured output. An alternative that cannot
+describe an object is a programmer error for a tool publishing a schema. Error
+results are text led by their
 classification. An unsatisfied verification verdict is an answered negative,
 distinct from an operation failure, and is not a transport error. Published names are safe
 for model APIs and are the only callable transport names. Read-only annotations

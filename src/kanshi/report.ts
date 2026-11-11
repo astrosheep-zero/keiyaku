@@ -75,10 +75,13 @@ const contractDetail = contractDetailSchema
       .exactOptional(),
   })
   .readonly();
-export const contractStatusSchema = z.union([
+export const contractNormalStatusSchema = z.union([
   contractDetail,
-  z.strictObject({ kind: z.literal("contract-missing"), id: contractIdSchema }).readonly(),
   z.strictObject({ kind: z.literal("contract-failed"), id: contractIdSchema, diagnostic: z.string() }).readonly(),
+]);
+export const contractStatusSchema = z.union([
+  ...contractNormalStatusSchema.options,
+  z.strictObject({ kind: z.literal("contract-missing"), id: contractIdSchema }).readonly(),
 ]);
 // Standalone Kanshi can be constructed without a Repo; the invocation Contract read requires one.
 export const kanshiContractReportSchema = z.union([

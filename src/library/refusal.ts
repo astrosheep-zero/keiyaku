@@ -6,15 +6,8 @@ import {
   targetWorkspaceReasonSchema,
   preparationReasonSchema,
   type Retry,
-  compactReason,
 } from "../protocol/result-reasons.js";
 import { placementReasonSchema } from "../protocol/completion.js";
-import type {
-  deliveryPreparationRefusalSchema,
-  deliverRefusalSchema,
-  deliverConflictRefusalSchema,
-  verificationDeclarationRefusalSchema,
-} from "../protocol/operations.js";
 
 export const nukeConfirmationRefusalSchema = z.strictObject({
   kind: z.literal("nuke-confirmation-mismatch"),
@@ -103,25 +96,3 @@ export type KeiyakuRefusal =
   | NukeConfirmationRefusal
   | NukeConfirmationRequiredRefusal
   | z.output<typeof placementReasonSchema>;
-type RawDeliverRefusal =
-  | z.output<typeof deliverRefusalSchema>
-  | z.output<typeof deliveryPreparationRefusalSchema>
-  | z.output<typeof deliverConflictRefusalSchema>
-  | z.output<typeof verificationDeclarationRefusalSchema>;
-export function compactDeliverRefusal(reason: RawDeliverRefusal): OperationRefusals["deliver"] {
-  return compactReason(reason);
-}
-export function compactPreviewRefusal(
-  reason: z.output<typeof deliverRefusalSchema> | z.output<typeof verificationDeclarationRefusalSchema>,
-): OperationRefusals["deliver-preview"] {
-  return compactReason(reason);
-}
-export function compactVerifyRefusal(
-  reason:
-    | z.output<typeof deliverRefusalSchema>
-    | import("../protocol/operations.js").MechanicalPreparationRefusal
-    | z.output<typeof verificationDeclarationRefusalSchema>
-    | z.output<typeof import("../protocol/operations.js").verifyRefusalSchema>,
-): OperationRefusals["verify"] {
-  return compactReason(reason);
-}

@@ -359,7 +359,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/keiyaku-classify.ts"),
         any("library/contract-outcomes.ts"),
         any("library/contract-types.ts"),
-        any("library/kei.ts", ["Guidance", "guidanceSchema"]),
+        any("library/kei.ts", ["Guidance", "guidanceSchema", "guidanceNormalSchema"]),
         any("library/contract-wait.ts"),
         any("library/reconcile.ts"),
         any("library/selection.ts"),
@@ -368,7 +368,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/akuma-creation.ts", [
           "spawnProgressSchema",
           "spawnResultSchema",
+          "spawnNormalResultSchema",
           "forkResultSchema",
+          "forkNormalResultSchema",
           "SpawnProgress",
           "SpawnResult",
           "ForkResult",

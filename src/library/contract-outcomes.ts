@@ -4,16 +4,19 @@ import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { retrySchema } from "../protocol/result-reasons.js";
 import { deliveryPreviewReportSchema } from "../protocol/delivery-preview.js";
 import { placementSchema } from "../protocol/completion.js";
-import { verifyValueSchema } from "../protocol/verify.js";
+import { verifyValueSchema, verifyNormalValueSchema } from "../protocol/verify.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
 import type { IntentOutcome } from "../protocol/operations.js";
 import { deliveredValueSchema } from "./delivery.js";
-import { continuationReportSchema } from "./continuation.js";
+import { continuationReportSchema, continuationNormalReportSchema } from "./continuation.js";
 import type { InvocationAccumulator } from "./invocation.js";
 import type { Kei } from "./kei.js";
 import {
   handoffOutcomeSchema,
   operationOutcomeSchema,
+  acceptedOutcomeSchema,
+  optionalInvocationIssueSchema,
+  optionalLocalIssueSchema,
   invocationIssueSchema,
   localIssueSchema,
   previewIssueSchema,
@@ -55,19 +58,21 @@ const amendValueSchema = z.strictObject(amendFields).readonly();
 export type BindValue = z.output<typeof bindValueSchema> & Readonly<{ kei: Kei }>;
 export type AmendValue = z.output<typeof amendValueSchema>;
 const localRecoveries = { recoverySnapshots: z.array(snapshotIdSchema).min(1).readonly().exactOptional() };
+export const bindNormalOutcomeSchema = acceptedOutcomeSchema(
+  { ...bindFields, ...localRecoveries },
+  optionalLocalIssueSchema,
+);
 const bindOutcomes = operationOutcomeSchema(bindFields, operationRefusalSchemas.bind, localIssueSchema);
 export const bindOutcomeSchema = z.union([
   bindOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
   bindOutcomes.options[1].unwrap().omit({ contractId: true }).readonly(),
   ...retrySchema.options,
 ]);
-const amendOutcomes = operationOutcomeSchema(amendFields, operationRefusalSchemas.amend, localIssueSchema);
-export const amendOutcomeSchema = z.union([
-  amendOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
-  amendOutcomes.options[1],
-  amendOutcomes.options[2],
-  amendOutcomes.options[3],
-]);
+export const amendOutcomeSchema = operationOutcomeSchema(
+  { ...amendFields, ...localRecoveries },
+  operationRefusalSchemas.amend,
+  localIssueSchema,
+);
 export const deliverOutcomeSchema = z.union([
   operationOutcomeSchema(deliveredValueSchema.unwrap().shape, operationRefusalSchemas.deliver, invocationIssueSchema),
   handoffOutcomeSchema,
@@ -77,30 +82,26 @@ const verifyOutcomes = operationOutcomeSchema(
   operationRefusalSchemas.verify,
   invocationIssueSchema,
 );
+export const verifyNormalOutcomeSchema = acceptedOutcomeSchema(
+  { ...verifyNormalValueSchema.unwrap().shape, continuation: continuationNormalReportSchema.exactOptional() },
+  optionalInvocationIssueSchema,
+);
 export const verifyOutcomeSchema = z.union([verifyOutcomes.options[0], verifyOutcomes.options[1]]);
 export const reviewOutcomeSchema = operationOutcomeSchema(
   reviewFields,
   operationRefusalSchemas.review,
   invocationIssueSchema,
 );
-const arcOutcomes = operationOutcomeSchema(
-  { chapter: z.number().int().positive() },
+export const arcOutcomeSchema = operationOutcomeSchema(
+  { chapter: z.number().int().positive(), ...localRecoveries },
   operationRefusalSchemas.arc,
   localIssueSchema,
 );
-export const arcOutcomeSchema = z.union([
-  arcOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
-  arcOutcomes.options[1],
-  arcOutcomes.options[2],
-  arcOutcomes.options[3],
-]);
-const abandonOutcomes = operationOutcomeSchema({}, operationRefusalSchemas.abandon, localIssueSchema);
-export const abandonOutcomeSchema = z.union([
-  abandonOutcomes.options[0].unwrap().extend(localRecoveries).readonly(),
-  abandonOutcomes.options[1],
-  abandonOutcomes.options[2],
-  abandonOutcomes.options[3],
-]);
+export const abandonOutcomeSchema = operationOutcomeSchema(
+  localRecoveries,
+  operationRefusalSchemas.abandon,
+  localIssueSchema,
+);
 const previewIssues = { issues: z.array(previewIssueSchema).min(1).readonly().exactOptional() };
 export const deliveryPreviewOutcomeSchema = z.union([
   deliveryPreviewReportSchema.options[0].unwrap().extend(previewIssues).readonly(),

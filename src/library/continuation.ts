@@ -8,6 +8,7 @@ import {
   completeCandidate,
   compactPlacementStop,
   placementStopSchema,
+  normalContinuationStopSchema,
   type CompactPlacementStop,
   type CompletionResult,
 } from "../protocol/completion.js";
@@ -24,16 +25,20 @@ import { contractIdSchema } from "../protocol/operations.js";
 import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
 
-export const continuationReportSchema = z
-  .strictObject({
-    claimed: z.array(contractIdSchema).min(1).readonly().exactOptional(),
-    stopped: z
-      .array(z.strictObject({ contractId: contractIdSchema, stop: placementStopSchema }).readonly())
-      .min(1)
-      .readonly()
-      .exactOptional(),
-  })
-  .readonly();
+function continuationSchema<Stop extends z.ZodType>(stop: Stop) {
+  return z
+    .strictObject({
+      claimed: z.array(contractIdSchema).min(1).readonly().exactOptional(),
+      stopped: z
+        .array(z.strictObject({ contractId: contractIdSchema, stop }).readonly())
+        .min(1)
+        .readonly()
+        .exactOptional(),
+    })
+    .readonly();
+}
+export const continuationNormalReportSchema = continuationSchema(normalContinuationStopSchema);
+export const continuationReportSchema = continuationSchema(placementStopSchema);
 export type ContinuationReport = z.infer<typeof continuationReportSchema>;
 
 type RetainedDependent = Readonly<{ state: ContractState; journal: readonly JournalEntry[] }>;

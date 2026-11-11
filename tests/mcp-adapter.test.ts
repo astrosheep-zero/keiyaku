@@ -7,6 +7,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { classifyVerb, type VerbInput, type VerbOutput } from "../src/library/keiyaku-verbs.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { Keiyaku, KeiyakuUsageError } from "../src/library/keiyaku.js";
@@ -17,7 +18,8 @@ import { Akuma, Akumas, Keis, Repo, World, kanshi, listArchetypeDefinitions } fr
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { bornBody, bornDirectAkuma, bornLineageAkuma } from "./support/akuma-fixtures.js";
-import { beginTurn } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn } from "../src/akuma/heart/index.js";
+import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import {
   cleanupSpawnCapableFixtureForTest,
@@ -26,6 +28,7 @@ import {
 } from "./support/process.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { runCli } from "./support/cli-fixtures.js";
+import { assertWireConformance } from "./support/schema-parity.js";
 
 test("SDK discovery and real invocation share the verb table and renderer", async (t) => {
   const cwd = mkdtempSync(join(tmpdir(), "kei-mcp-"));
@@ -72,8 +75,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.inputSchema.type, "object");
     assert.ok(tool.inputSchema.required?.includes("input"));
     if (schemaTools.has(tool.name)) {
-      const output = z.toJSONSchema(entry.output, { io: "input", reused: "ref" });
+      assert.ok("normal" in entry);
+      const output = z.toJSONSchema(entry.normal, { io: "input", reused: "ref" });
       assert.deepEqual(tool.outputSchema, { ...output, type: "object" });
+      new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.outputSchema)));
     } else assert.equal(tool.outputSchema, undefined);
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
@@ -112,7 +117,6 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const published = tools.find((tool) => tool.name === "debt_add")?.outputSchema;
   assert.ok(published);
   // Client.callTool validates successful structuredContent against the tools/list outputSchema.
-  assert.ok(published.anyOf);
   assert.equal(added.isError, false);
   const id = (added.structuredContent as { kind: "accepted"; id: string }).id;
   assert.match(id, /^debt\/fix-the-roof-[0-9a-f]{4}$/u);
@@ -294,7 +298,7 @@ test("direct text and codemode consumers each recover complete guidance and Debt
   const codeResult = async (input: VerbInput<"show">) => {
     const response = await client.callTool({ name: "show", arguments: { input } });
     assert.equal(response.isError, false);
-    return Keiyaku.verbs.show.output.parse(response.structuredContent);
+    return Keiyaku.verbs.show.normal.parse(response.structuredContent);
   };
   // These are separate client projections: each contributes only its chosen representation to its caller.
   assert.equal(await directText({ id: bound.contractId }), nativeGuidance.guidance);
@@ -319,7 +323,10 @@ test("direct text and codemode consumers each recover complete guidance and Debt
   assert.equal(partial.isError, true);
   assert.equal(partial.structuredContent, undefined);
   assert.match(JSON.stringify(partial.content), /Complete parent/u);
-  assert.equal((await facet.show({ ids: [parent, "debt/missing"] })).kind, "debt-partial");
+  const partialNative = await facet.show({ ids: [parent, "debt/missing"] });
+  assert.equal(partialNative.kind, "debt-partial");
+  assertWireConformance(Keiyaku.verbs.show.output, partialNative);
+  assertWireConformance(Keiyaku.verbs.show.normal, partialNative, false);
   const contextual = await client.callTool({ name: "show", arguments: { cwd: bound.worktreePath, input: {} } });
   assert.equal(contextual.isError, false);
   assert.deepEqual(contextual.structuredContent, nativeGuidance);
@@ -552,6 +559,42 @@ test("red verification answers normally while infrastructure failure is an error
   });
 });
 
+test("SDK waits distinguish observed failed/canceled work from an unreadable peer", async (t) => {
+  const cwd = temporaryDirectory(t, "mcp-wait-outcomes-");
+  const world = await World.at(cwd);
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
+  const born = await bornBody(world, "feed0023", "2026-10-30T00:00:00.000Z");
+  t.after(() => born.holder.release());
+  const environment = { HOME: cwd, USERPROFILE: cwd, KEIYAKU_HOME: cwd };
+  const adapter = createKeiyakuMcpServer({ cwd, environment, version: "test" });
+  const client = new Client({ name: "wait-outcomes", version: "1" });
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  await Promise.all([adapter.server.connect(serverTransport), client.connect(clientTransport)]);
+  t.after(async () => { await client.close(); await adapter.close(); });
+  await client.listTools();
+  for (const outcome of [{ kind: "failed", diagnostic: "native failed Turn" }, { kind: "canceled" }] as const) {
+    const turn = await beginTurn(born.allocated.paths, { bodySequence: born.body.sequence, startedAt: "2026-10-30T00:00:00.000Z" });
+    await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:01.000Z", outcome });
+    const response = await client.callTool({ name: "wait", arguments: { input: { selectors: [born.allocated.id], timeoutMs: 0 } } });
+    assert.equal(response.isError, false);
+    const value = Keiyaku.verbs.wait.normal.parse(response.structuredContent);
+    assert.ok(value.kind === "akuma" && value.results[0]?.kind === "observed");
+    assert.equal(value.results[0].outcome?.kind, outcome.kind);
+  }
+  const peer = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "feed0024", createdAt: "2026-10-30T00:00:00.000Z" });
+  writeFileSync(peer.paths.heart, "not a Heart database\n");
+  const input = { selectors: [born.allocated.id, peer.id], completion: "all" as const, timeoutMs: 150 };
+  const response = await client.callTool({ name: "wait", arguments: { input } });
+  assert.equal(response.isError, true);
+  assert.equal(response.structuredContent, undefined);
+  assert.match(JSON.stringify(response.content), /not a database/u);
+  const { reason, results } = await executeWaitAkuma({ path: world, ids: [born.allocated.id, peer.id], completion: "all", timeoutMs: 150 });
+  const native = { kind: "akuma" as const, reason, results };
+  assert.ok(native.results.some(item => item.kind === "unobserved"));
+  assertWireConformance(Keiyaku.verbs.wait.normal, native, false);
+  assert.deepEqual(Keiyaku.verbs.wait.output.parse(native), native);
+});
+
 test("SDK wire ask passes JSON Schema and returns identity-decoded answer", async (t) => {
   const root = temporaryDirectory(t, "kei-mcp-ask-");
   const home = temporaryDirectory(t, "kei-mcp-ask-home-");
@@ -583,6 +626,17 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
   try {
     await Promise.all([adapter.server.connect(serverTransport), client.connect(clientTransport)]);
     await client.listTools();
+    const spawned = await client.callTool({
+      name: "spawn",
+      arguments: { input: { akumaName: "acp-worker", prompt: "structured", bare: true, mode: "wait", timeoutMs: 30_000 } },
+    });
+    assert.equal(spawned.isError, false, JSON.stringify(spawned));
+    const child = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
+    assert.deepEqual(child.input, { kind: "answered", answer: '{"ok":true}' });
+    const waited = await client.callTool({ name: "wait", arguments: { input: { selectors: [child.akumaId], timeoutMs: 30_000 } } });
+    assert.equal(waited.isError, false);
+    const completion = Keiyaku.verbs.wait.normal.parse(waited.structuredContent);
+    assert.ok(completion.kind === "akuma" && completion.results[0]?.kind === "observed");
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] };
     const result = await client.callTool({
       name: "ask",

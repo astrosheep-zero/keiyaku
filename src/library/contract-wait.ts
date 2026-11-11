@@ -20,13 +20,25 @@ export const contractWaitMemberSchema = z
     terminal: z.enum(["claimed", "abandoned"]).exactOptional(),
   })
   .readonly();
-export const contractWaitResultSchema = z
-  .strictObject({
-    kind: z.literal("contract"),
-    reason: z.enum(["changed", "terminal", "deadline", "missing"]),
-    contracts: z.array(contractWaitMemberSchema).readonly(),
-  })
-  .readonly();
+function waitResultSchema<Reason extends z.ZodType, Members extends z.ZodType>(reason: Reason, contracts: Members) {
+  return z.strictObject({ kind: z.literal("contract"), reason, contracts }).readonly();
+}
+export const contractWaitResultSchema = waitResultSchema(
+  z.enum(["changed", "terminal", "deadline", "missing"]),
+  z.array(contractWaitMemberSchema).readonly(),
+);
+const presentMember = contractWaitMemberSchema.unwrap().omit({ presence: true });
+const terminalMember = presentMember.omit({ changed: true });
+const unknownMember = presentMember.pick({ id: true }).extend({ presence: z.literal("unknown") });
+const presentMembers = z.array(presentMember.readonly()).nonempty().readonly();
+export const contractWaitNormalResultSchema = z.union([
+  waitResultSchema(z.literal("changed"), presentMembers),
+  waitResultSchema(z.literal("terminal"), z.array(terminalMember.readonly()).nonempty().readonly()),
+  waitResultSchema(
+    z.literal("deadline"),
+    z.union([presentMembers, z.array(unknownMember.readonly()).nonempty().readonly()]),
+  ),
+]);
 type WaitObservation = Readonly<{
   id: ContractId;
   baseline: ContractState["head"];

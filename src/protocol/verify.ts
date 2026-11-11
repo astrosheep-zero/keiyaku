@@ -15,7 +15,7 @@ import {
   deliverRefusalSchema,
   verificationDeclarationRefusalSchema,
 } from "./operations.js";
-import { placementSchema } from "./completion.js";
+import { placementSchema, normalPlacementSchema } from "./completion.js";
 import { activeReasonSchema, retrySchema, compactRetry, compactReason } from "./result-reasons.js";
 
 const checkCoordinate = {
@@ -48,32 +48,31 @@ const checkAdmissionStopSchema = z
     z.strictObject({ kind: z.literal("cancelled") }).readonly(),
   ])
   .meta({ id: "verificationAdmissionStop" });
-const verificationStopSchema = z.union([runtimeStopSchema, checkAdmissionStopSchema]);
-export type VerificationStop = z.output<typeof verificationStopSchema>;
-const admission = z.union([z.enum(["admitted", "reused", "unrecorded"]), checkAdmissionStopSchema]);
+export type VerificationStop = z.output<typeof runtimeStopSchema | typeof checkAdmissionStopSchema>;
+const normalAdmissionSchema = z.enum(["admitted", "reused", "unrecorded"]);
+function terminalCheckSchemas<Admission extends z.ZodType>(admission: Admission) {
+  const terminal = { ...checkCoordinate, kind: z.literal("terminal"), admission };
+  return [
+    z.strictObject({ ...terminal, verdict: z.literal("satisfied") }).readonly(),
+    z.strictObject({ ...terminal, verdict: z.literal("unsatisfied"), summary: z.string() }).readonly(),
+  ] as const;
+}
+const normalVerificationCheckSchema = z.union(terminalCheckSchemas(normalAdmissionSchema));
 const verificationCheckSchema = z.union([
-  z
-    .strictObject({ ...checkCoordinate, kind: z.literal("terminal"), verdict: z.literal("satisfied"), admission })
-    .readonly(),
-  z
-    .strictObject({
-      ...checkCoordinate,
-      kind: z.literal("terminal"),
-      verdict: z.literal("unsatisfied"),
-      summary: z.string(),
-      admission,
-    })
-    .readonly(),
+  ...terminalCheckSchemas(z.union([normalAdmissionSchema, checkAdmissionStopSchema])),
   z.strictObject({ ...checkCoordinate, kind: z.literal("stopped"), stop: runtimeStopSchema }).readonly(),
 ]);
-
-export const verifyValueSchema = z
-  .strictObject({
-    snapshot: snapshotIdSchema,
-    checks: z.array(verificationCheckSchema).readonly(),
-    placement: placementSchema.exactOptional(),
-  })
-  .readonly();
+function verifyValue<Check extends z.ZodType, Placement extends z.ZodType>(check: Check, placement: Placement) {
+  return z
+    .strictObject({
+      snapshot: snapshotIdSchema,
+      checks: z.array(check).readonly(),
+      placement: placement.exactOptional(),
+    })
+    .readonly();
+}
+export const verifyNormalValueSchema = verifyValue(normalVerificationCheckSchema, normalPlacementSchema);
+export const verifyValueSchema = verifyValue(verificationCheckSchema, placementSchema);
 export type VerificationCheck = z.output<typeof verificationCheckSchema>;
 export type VerifyValue = z.output<typeof verifyValueSchema>;
 

@@ -90,11 +90,8 @@ export const unmetPrerequisiteSchema = z
     state: z.enum(["missing", "active", "abandoned"]),
   })
   .readonly();
-export const placementReasonSchema = z.union([
-  activeReasonSchema,
-  targetLifecycleReasonSchema,
-  targetWorkspaceReasonSchema,
-  z.strictObject({ kind: z.enum(["delivery-missing", "target-missing"]) }).readonly(),
+const normalPlacementReasonSchema = z.union([
+  z.strictObject({ kind: z.literal("delivery-missing") }).readonly(),
   z
     .strictObject({
       kind: z.literal("prerequisites-unsatisfied"),
@@ -104,8 +101,19 @@ export const placementReasonSchema = z.union([
   z
     .strictObject({ kind: z.literal("gates-unsatisfied"), unmet: z.array(requirementProblemSchema).min(1).readonly() })
     .readonly(),
+]);
+export const placementReasonSchema = z.union([
+  ...normalPlacementReasonSchema.options,
+  activeReasonSchema,
+  targetLifecycleReasonSchema,
+  targetWorkspaceReasonSchema,
+  z.strictObject({ kind: z.literal("target-missing") }).readonly(),
   checkoutCollisionSchema,
   ...integrationProblemSchema.options,
+]);
+export const normalContinuationStopSchema = z.union([
+  ...normalPlacementReasonSchema.options,
+  z.strictObject({ kind: z.literal("physical-lag") }).readonly(),
 ]);
 export const placementStopSchema = z
   .union([
@@ -129,7 +137,7 @@ export const placementStopSchema = z
       })
       .readonly(),
     executionIssueSchema,
-    z.strictObject({ kind: z.literal("physical-lag") }).readonly(),
+    normalContinuationStopSchema.options[3],
   ])
   .meta({ id: "contractStop" });
 export type CompactPlacementStop = z.output<typeof placementStopSchema>;
@@ -149,6 +157,7 @@ export const placedSchema = z
     predecessor: snapshotIdSchema.exactOptional(),
   })
   .readonly();
+export const normalPlacementSchema = z.union([placedSchema, ...normalPlacementReasonSchema.options]);
 export const placementSchema = z.union([placedSchema, placementStopSchema]);
 export type Placement = z.output<typeof placementSchema>;
 export type Placed = z.output<typeof placedSchema>;

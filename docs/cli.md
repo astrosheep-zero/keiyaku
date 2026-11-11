@@ -14,9 +14,12 @@ connection lifetime, and cancellation remain at that edge; the facet and product
 owners retain their native admission, result, and retirement semantics. Text and
 outcome classification are shared with the CLI rather than re-decided by the
 transport. Where a transport publishes a structured owner-result contract, it
-describes normal answers, including unsatisfied verdicts, rather than thrown
-failures; failure evidence remains available without claiming it is an
-owner result. A disconnected caller cannot be promised a late receipt, even when
+describes exactly the producing owner's normal answers, including unsatisfied
+verdicts and normal nested observations. It converts the owner's declaration
+without filtering business alternatives, projecting returned values, or keeping
+another result inventory. Returned refusals and operational stops, like thrown
+failures, retain their classification-led text and known effects and causes
+without structured output. Kanshi is always text-only at this edge. A disconnected caller cannot be promised a late receipt, even when
 an owner has admitted facts that remain available through ordinary reads.
 
 ## Invocation and scope

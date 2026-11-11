@@ -7,8 +7,16 @@ belong to the producing owners and executable specifications.
 
 ## Structural Boundary
 
-Every described verb returns an object with one structural schema beside its
-producing native owner, not a transport adapter or test. Heterogeneous object answers
+Every described verb retains its complete structural schema beside its producing
+native owner. An owner also declares the normal subset used by structured
+invocation consumers, sharing the same structural leaves with the complete
+answer. Normality constrains nested required work as well as the outer decision;
+it is a description of the owner's existing judgment, never a second classifier
+or a runtime parse of trusted results. Observation declarations preserve the
+reason-specific evidence and consistent availability of their members without
+proving completion over a selected set; that judgment remains with the native
+producer. Native callers retain the complete answer,
+including refusal, retry, and stops after confirmed effects. Heterogeneous object answers
 and nested observations identify their alternatives explicitly. Each catalogue
 retains its owner-family identity through empty, absent, and unavailable answers;
 World observation has its own family and is not an addressed-status alternative.
@@ -72,7 +80,10 @@ without rereading authority or reconstructing required work from an incomplete
 receipt. Acceptance, an answered unsatisfied verdict, refusal, retryable stop,
 operational failure, and caller usage remain distinct. A terminal unsatisfied
 check alone is a negative answer; an operational stop still makes the invocation
-failed, and retains precedence over that answer. Optional retained residue stays
+failed, and retains precedence over that answer. A structured normal declaration
+excludes required issues, unfinished checks, stopped testimony admission, and
+operational placement or continuation while retaining ordinary waiting and
+terminal negative verdicts. Optional retained residue stays
 observable without becoming required work or reversing admission. Structured recovery describes
 semantic capabilities and coordinates; only leaf CLI presentation supplies
 command grammar.

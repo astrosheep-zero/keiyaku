@@ -66,10 +66,11 @@ export type DebtReadPage<Row, Refusal = never> =
   | Readonly<{ kind: "absent" }>
   | Refusal;
 
+export const debtMutationNormalResultSchema = z
+  .strictObject({ kind: z.literal("accepted"), id: debtIdSchema, warning: debtWarningSchema.exactOptional() })
+  .readonly();
 export const debtMutationResultSchema = z.union([
-  z
-    .strictObject({ kind: z.literal("accepted"), id: debtIdSchema, warning: debtWarningSchema.exactOptional() })
-    .readonly(),
+  debtMutationNormalResultSchema,
   graphRefusalSchema,
   retryResultSchema,
 ]);

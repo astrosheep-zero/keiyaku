@@ -19,7 +19,7 @@ import { debtSummarySchema } from "../src/debt/board.js";
 import { bornBody } from "./support/akuma-fixtures.js";
 import { bornWorld, fixtureAdapter, fixtureLauncher, answering, settleFixtureBodies } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory } from "./support/process.js";
-import { assertWireRoundTrip } from "./support/schema-parity.js";
+import { assertWireRoundTrip, assertWireConformance } from "./support/schema-parity.js";
 
 test("Akuma result wire schemas preserve real observations and mutations", async (context) => {
   const directory = temporaryDirectory(context, "akuma-wire-");
@@ -317,6 +317,7 @@ test("spawn and fork results describe real creation and refusal", async (context
   assert.equal(spawned.kind, "spawned");
   assert.equal(spawned.input, undefined);
   assertWireRoundTrip(root.spawnResultSchema, spawned);
+  assertWireConformance(root.Keiyaku.verbs.spawn.normal, spawned);
   let admitted = false;
   const observed = await akumas.spawn({
     akumaName: "worker",
@@ -337,6 +338,7 @@ test("spawn and fork results describe real creation and refusal", async (context
   assert.equal(admitted, true);
   assert.equal(observed.input?.kind, "answered");
   assertWireRoundTrip(root.spawnResultSchema, observed);
+  assertWireConformance(root.Keiyaku.verbs.spawn.normal, observed);
   assertWireRoundTrip(root.forkResultSchema, await akumas.fork({ akuma: observed.akumaId, at: "turn/999" }));
   await settleFixtureBodies(bodies);
   const mutable = claudeProvider as { fork?: ProviderAdapter["fork"] };
@@ -351,6 +353,7 @@ test("spawn and fork results describe real creation and refusal", async (context
     const forked = await akumas.fork({ akuma: observed.akumaId, at: `turn/${outcome.turnSequence}` });
     assert.equal(forked.kind, "forked");
     assertWireRoundTrip(root.forkResultSchema, forked);
+    assertWireConformance(root.Keiyaku.verbs.fork.normal, forked);
     await settleFixtureBodies(bodies);
   } finally {
     if (original === undefined) delete mutable.fork;

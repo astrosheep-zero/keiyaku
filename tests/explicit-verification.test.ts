@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keis, KeiyakuError, Repo, classifyVerb, verifyOutcomeSchema } from "../src/index.js";
+import { Keis, Keiyaku, KeiyakuError, Repo, classifyVerb, verifyOutcomeSchema } from "../src/index.js";
+import { assertWireConformance } from "./support/schema-parity.js";
+import { InvocationAccumulator } from "../src/library/invocation.js";
+import { project } from "../src/library/outcome.js";
 import { gateReports } from "../src/core/facts/gate.js";
 import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
+
+const verifyNormalOutcomeSchema = Keiyaku.verbs.verify.normal;
 
 function declarations(scripts: readonly string[]): string {
   return document() + "\n## Verification\n\n" +
@@ -25,6 +30,7 @@ async function fixture(scripts: readonly string[], gates = ["reviewed", "verifie
 test("explicit checks accumulate on the prospective snapshot and unchanged delivery consumes them", async () => {
   const { contract } = await fixture(["true", "test -f candidate.txt"]);
   const first = accepted(await contract.verify({ index: 1 }));
+  assertWireConformance(verifyNormalOutcomeSchema, first);
   assert.equal(first.checks.length, 1);
   assert.equal(first.checks[0]?.index, 1);
   assert.equal(first.checks[0]?.kind, "terminal");
@@ -72,6 +78,7 @@ test("review-only Contracts without declarations refuse verify and retain the de
 test("each declaration executes in fresh scratch and terminal failure preserves later evidence and scenes", async () => {
   const { contract } = await fixture(["echo created > scratch-only", "test -f scratch-only", "exit 7", "true"]);
   const verified = accepted(await contract.verify());
+  assertWireConformance(verifyNormalOutcomeSchema, verified);
   assert.deepEqual(verified.checks.map((check) => check.kind === "terminal" ? check.verdict : check.kind),
     ["satisfied", "unsatisfied", "unsatisfied", "satisfied"]);
   assert.equal(present(await contract.state()).attestations.length, 4);
@@ -80,6 +87,7 @@ test("each declaration executes in fresh scratch and terminal failure preserves 
   assert.notEqual(scenes[0], scenes[1]);
   assert.ok(scenes.every(existsSync));
   const repeated = accepted(await contract.verify({ index: 2 }));
+  assertWireConformance(verifyNormalOutcomeSchema, repeated);
   assert.equal(repeated.checks[0]?.kind, "terminal");
   if (repeated.checks[0]?.kind === "terminal") assert.equal(repeated.checks[0].admission, "reused");
   assert.equal(present(await contract.state()).attestations.length, 4);
@@ -114,7 +122,37 @@ test("a later setup stop preserves an earlier red admission and outranks its ver
   assert.equal(classifyVerb("verify", {}, { kind: "returned", value: result }), "failed");
   const wire = JSON.parse(JSON.stringify(result));
   assert.deepEqual(verifyOutcomeSchema.parse(wire), wire);
+  assertWireConformance(verifyNormalOutcomeSchema, result, false);
   await contract.abandon();
+});
+
+test("normal red checks retain optional retirement residue while required retirement remains an error", async () => {
+  const { repository, contract, worktree } = await fixture(["exit 7"]);
+  mkdirSync(join(worktree, ".keiyaku"), { recursive: true });
+  writeFileSync(join(worktree, ".keiyaku", "settings.json"), JSON.stringify({ worktree: { destroy: [{
+    name: "diagnostic-cleanup", argv: [process.execPath, "-e", "process.exit(9)"], timeoutMs: 5_000,
+  }] } }));
+  repository.run(["-C", worktree, "add", ".keiyaku/settings.json"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "retain cleanup diagnosis"]);
+  try {
+    const normal = accepted(await contract.verify());
+    assert.ok(normal.issues?.some(issue => issue.severity === "optional" && issue.kind === "diagnostic"));
+    assert.equal(classifyVerb("verify", {}, { kind: "returned", value: normal }), "unsatisfied");
+    assertWireConformance(verifyNormalOutcomeSchema, normal);
+    const trailing = new InvocationAccumulator();
+    trailing.recordResidue(normal.contractId, { seatClose: [{
+      kind: "private-state-seat-close-failed", diagnostic: "required admission retirement failed",
+    }] });
+    const { issues: _residue, ...conclusion } = normal;
+    const projected = project<typeof normal>("verify", trailing.snapshot(), conclusion);
+    assert.ok(projected.kind === "returned");
+    const stopped = projected.outcome;
+    assert.ok(stopped.checks.some(check => check.kind === "terminal" && check.verdict === "unsatisfied"));
+    assert.ok(stopped.issues?.some(issue => issue.severity === "required"));
+    assert.equal(classifyVerb("verify", {}, { kind: "returned", value: stopped }), "failed");
+    assertWireConformance(verifyOutcomeSchema, stopped);
+    assertWireConformance(verifyNormalOutcomeSchema, stopped, false);
+  } finally { await contract.abandon(); }
 });
 
 test("verify validates selection and dirty capture before executing or admitting", async () => {
@@ -231,6 +269,7 @@ test("cancellation after terminal execution retains the check and stops its admi
   [[1, "satisfied", "admitted"], [2, "satisfied", { kind: "cancelled" }]]);
   assert.equal(present(await contract.state()).attestations.length, 1);
   assert.equal(thirdExecuted, false);
+  assertWireConformance(verifyNormalOutcomeSchema, result, false);
   await contract.abandon();
 });
 

@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Akumas, Kei, Keis, Repo, World, type ContractWaitResult } from "../src/index.js";
+import { Akumas, Kei, Keis, Keiyaku, Repo, World, type ContractWaitResult } from "../src/index.js";
+import { assertWireConformance } from "./support/schema-parity.js";
 import { contractJournalPaths } from "../src/git/identity.js";
 import { readGitPaths, repositoryAt, updateGitTree, writeCommit } from "../src/git/repository.js";
 import { publishDispatch } from "../src/dispatch/index.js";
@@ -28,6 +29,7 @@ async function amend(handle: Kei, objective: string) {
   accepted(await handle.amend({ markdown: `## Replace: Objective\n\n${objective}\n` }));
 }
 
+const contractWaitNormalResultSchema = Keiyaku.verbs.wait.normal;
 const changed = (result: ContractWaitResult): boolean[] => result.contracts.map((member) => member.changed === true);
 
 test("Contract waits witness their own journal changes and preserve plural progress", async () => {
@@ -44,6 +46,8 @@ test("Contract waits witness their own journal changes and preserve plural progr
     const result = await pending;
     assert.equal(result.kind, "contract");
     assert.equal(result.reason, "changed");
+    assertWireConformance(contractWaitNormalResultSchema, result);
+    assertWireConformance(contractWaitNormalResultSchema, { ...result, reason: "terminal" }, false);
     assert.deepEqual(result.contracts.map((item) => item.id), [first.id, second.id]);
     assert.ok(result.contracts.every((item) => item.changed === true && item.presence === undefined && item.terminal === undefined));
 
@@ -62,10 +66,12 @@ test("Contract waits witness their own journal changes and preserve plural progr
     const deadline = await progress;
     assert.equal(deadline.reason, "deadline");
     assert.deepEqual(changed(deadline), [true, false]);
+    assertWireConformance(contractWaitNormalResultSchema, deadline);
   });
   assert.equal((await first.handle.wait({ timeoutMs: 0 })).reason, "deadline");
   const missing = await Keis.of(repo).wait({ contracts: [first.id, "kei/not-present"], timeoutMs: 0 });
   assert.equal(missing.reason, "missing");
+  assertWireConformance(contractWaitNormalResultSchema, missing, false);
   assert.equal(missing.contracts[1]?.presence, "missing");
   accepted(await second.handle.abandon());
   const terminal = await second.handle.wait({ timeoutMs: 0 });
@@ -82,6 +88,7 @@ test("terminal baselines satisfy any and all without inventing changes", async (
   for (const [handle, terminal] of [[claimed.contract, "claimed"], [second.handle, "abandoned"]] as const) {
     const result = await handle.wait({ timeoutMs: 0 });
     assert.equal(result.reason, "terminal");
+    assertWireConformance(contractWaitNormalResultSchema, result);
     assert.equal(result.contracts[0]?.terminal, terminal);
     assert.equal(result.contracts[0]?.changed, undefined);
     assert.equal(result.contracts[0]?.presence, undefined);
@@ -96,6 +103,7 @@ test("terminal baselines satisfy any and all without inventing changes", async (
   assert.equal(missing.reason, "missing");
   const partial = await Keis.of(repo).wait({ contracts: [second.id, first.id], completion: "all", timeoutMs: 0 });
   assert.equal(partial.reason, "deadline");
+  assertWireConformance(contractWaitNormalResultSchema, partial);
   assert.equal(partial.contracts[0]?.terminal, "abandoned");
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const observingRepo = await Repo.at({ path: repository.path, gitPath: barrier.gitPath });
@@ -167,13 +175,15 @@ test("disappearance after baseline is missing, never change success", async () =
 });
 
 test("initial reads honor deadlines and cancellation; inputs and Akuma selectors are validated", async () => {
-  const { repository, repo, first } = await fixture();
+  const { repository, repo, first, second } = await fixture();
   await withGitShim('if [ "$1 $2" = "cat-file --batch" ]; then exec sleep 30; fi\nexec "$KEIYAKU_REAL_GIT" "$@"', {}, async (gitPath) => {
     const slow = await Repo.at({ path: repository.path, gitPath });
     const started = performance.now();
-    const result = await Keis.of(slow).wait({ contracts: [first.id], timeoutMs: 150 });
+    const result = await Keis.of(slow).wait({ contracts: [first.id, second.id], timeoutMs: 150 });
     assert.equal(result.reason, "deadline");
-    assert.deepEqual(result.contracts, [{ id: first.id, presence: "unknown" }]);
+    assert.deepEqual(result.contracts, [{ id: first.id, presence: "unknown" }, { id: second.id, presence: "unknown" }]);
+    assertWireConformance(contractWaitNormalResultSchema, result);
+    assertWireConformance(contractWaitNormalResultSchema, { ...result, contracts: [{ id: first.id }, result.contracts[1]] }, false);
     assert.ok(performance.now() - started < 5000);
     const cli = await runCli(["--repo", repository.path, "wait", first.id, "--timeout", "150ms"], {
       cwd: repository.path, environment: { KEIYAKU_GIT_PATH: gitPath },
