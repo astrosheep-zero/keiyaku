@@ -188,6 +188,7 @@ const genericLines = (rows: readonly GenericFixture[], columns: number) =>
   );
 function callObservation(observation: NonNullable<SpawnResult["input"]>): SpawnResult {
   return {
+    kind: "spawned",
     akumaId: parseAkumaId("aku/worker/abcd0044").id,
     tellId: "tell/call-render",
     input: observation,
@@ -2869,7 +2870,8 @@ test("a streamed observing call concludes truthfully when its stream never opene
   now = 40_000;
   const opened = runningStream.conclude(callObservation({ kind: "deadline" })).split("\n");
   assert.deepEqual(opened.slice(0, 2), [id, frameRule([id])]);
-  assert.equal(opened.at(-3), "⧗ pending tell — waited 30s");
+  assert.ok(opened.includes("⧗ pending tell — waited 30s"));
+  assert.ok(opened.includes("  input tell/call-render"), "deadline keeps the admitted input coordinate");
   assert.ok(runningStream.opened());
 
   const observedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
@@ -2885,9 +2887,8 @@ test("a streamed observing call concludes truthfully when its stream never opene
   );
   now = 55_000;
   const observed = observedStream.conclude(callObservation({ kind: "deadline" })).split("\n");
-  assert.equal(
-    observed.at(-3),
-    "● running — waited 15s",
+  assert.ok(
+    observed.includes("● running — waited 15s"),
     "a caller deadline states the observed life rather than naming the deadline",
   );
 
@@ -2896,16 +2897,16 @@ test("a streamed observing call concludes truthfully when its stream never opene
     .conclude({
       akumaId: parseAkumaId(id).id,
       tellId: "tell/call-render",
-      failure: { kind: "infrastructure", diagnostic: "window lost" },
+      kind: "failed", failures: [{ stage: "observation", diagnostic: "window lost" }],
     })
     .split("\n");
   assert.deepEqual(failed.slice(0, 2), [id, frameRule([id])]);
-  assert.equal(failed.at(-3), "! window lost");
+  assert.ok(failed.includes("! observation failed window lost"));
 
   const outcomeStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
-  const outcomeText = outcomeStream.conclude(callObservation({ kind: "failed", diagnostic: "provider 503" }));
-  assert.match(outcomeText, /! failed\n! provider 503/u);
-  assert.match(outcomeText, /! provider 503/u);
+  const outcomeText = outcomeStream.conclude({ kind: "failed", akumaId: parseAkumaId(id).id,
+    tellId: "tell/call-render", failures: [{ stage: "observation", diagnostic: "provider 503" }] });
+  assert.match(outcomeText, /! observation failed provider 503/u);
 });
 
 test("failed sections preserve each owner diagnostic", () => {

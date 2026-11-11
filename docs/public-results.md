@@ -15,7 +15,11 @@ different answers; an omitted optional collection means known empty, not a
 failed or skipped observation. An omitted catalogue remainder means the
 observation is known complete.
 
-The owner emits its decision in that form. Private custody may retain independent
+The owner emits its decision in that form. Creation and Tell admission distinguish
+ordinary completion from a later operational stop explicitly; a normal completion
+cannot carry a failed required stage. A stopped answer preserves irreversible
+birth and admission and every independently observed failure in causal order.
+Private custody may retain independent
 facts required by admission, recovery, or another owner; it does not retain a
 parallel result merely for presentation to discard later.
 
@@ -181,4 +185,6 @@ an earlier exceptional receipt was already attached to the native cause.
 Ephemeral progress is separate from the final answer. It may expose confirmed
 admission before trailing work settles, but observer failure, gaps, or absence
 cannot affect execution, custody, cancellation, admission, or cleanup. Only the
-final owner answer adjudicates the invocation's conclusion.
+final owner answer adjudicates the invocation's conclusion. An exact input-bound
+Ask answer retains precedence over historical wake failure; that failure remains
+diagnostic recovery evidence rather than changing the answered judgment.

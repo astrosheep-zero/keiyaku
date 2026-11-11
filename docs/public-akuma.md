@@ -40,7 +40,12 @@ existing Dispatch relation to its child but never inherits an Alias or invents a
 provider fork capability. The submitting process writes its spawn wiring after
 spawn admission -- including any exact first Tell -- and before it observes the
 spawn outcome. Dispatch and Alias remain independent cross-product authority,
-not child identity, and each keeps its own integration result. Bounded-spawn
+not child identity. Creation completes only when its requested association work
+completes. Later stops retain all independently observed stage failures in their
+operation order, including an observation failure after failed association; none
+can replace earlier evidence. A first Tell precedes Dispatch, requested Alias
+follows successful Dispatch, and requested answer observation follows association.
+Bounded-spawn
 observation starts only after native validation and child allocation, with that
 exact coordinate's notification suppression established before publication and
 first input. The same allocated child is published by the ordinary birth owner;

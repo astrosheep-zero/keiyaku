@@ -34,6 +34,7 @@ import { DatabaseSync } from "node:sqlite";
 import { insertActivityFact, finishBodyFact } from "../src/akuma/heart/rows.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { executeAskAkuma } from "../src/akuma/akuma-selection-execution.js";
+import { projectFailure } from "../src/library/outcome.js";
 import {
   deferred,
   installAkumaBodyPidReceipt,
@@ -232,7 +233,7 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
     const finish = deferred<string>();
     const canceled = await born("a1000015", gatedAnswer(finish.promise, started.resolve));
     const controller = new AbortController();
-    const reason = new Error("stop observing the admitted Tell");
+    const reason = Object.freeze(new Error("stop observing the admitted Tell"));
     const tellId = "waited-cancel-tell";
     const pending = waitTell(canceled, { body: "finish later", tellId, timeoutMs: 5_000, signal: controller.signal });
     await started.promise;
@@ -241,7 +242,12 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
       async () => (await readTell(canceled.allocated.paths, tellId))?.binding !== undefined,
     );
     controller.abort(reason);
-    await assert.rejects(pending, (error: unknown) => error === reason);
+    await assert.rejects(pending, (error: unknown) => {
+      assert.equal(error, reason);
+      assert.equal(projectFailure(error).tell?.tellId, tellId);
+      assert.equal(projectFailure(error).tell?.akumaId, canceled.allocated.id);
+      return true;
+    });
     const admitted = await readTell(canceled.allocated.paths, tellId);
     assert.equal(admitted?.body, "finish later");
     assert.notEqual(admitted?.binding, undefined, "cancellation does not retract the admitted Tell");

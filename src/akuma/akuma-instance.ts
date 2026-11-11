@@ -13,7 +13,7 @@ import { abortable } from "./abort.js";
 import { admitAkumaCall } from "./akuma-call.js";
 import { defaultWaitComplete } from "./akuma-observe.js";
 import type { AkumaStreamSnapshot } from "./akuma-stream.js";
-import { AkumaOwner, type InterruptReceipt } from "./akuma-owner.js";
+import { AkumaOwner } from "./akuma-owner.js";
 import { executeAskAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
 import { type AkumaStatus } from "./akuma.js";
 import { type KillEvidence } from "./heart/index.js";
@@ -65,7 +65,7 @@ export type AkumaTellOptions = AkumaSignalOptions &
   Readonly<{ interrupt?: boolean; initiator?: string; wait?: boolean; timeoutMs?: number }>;
 export type AkumaAskOptions = Omit<AkumaTellOptions, "wait"> & Readonly<{ schema: JsonSchemaDocument }>;
 
-export type { AkumaAskResult, AkumaTellResult, InterruptReceipt, KillEvidence };
+export type { AkumaAskResult, AkumaTellResult, KillEvidence };
 
 function signalOption(value: unknown): AbortSignal | undefined {
   if (value === undefined) return undefined;

@@ -37,9 +37,9 @@ const turn = (n: number): Row => ({ kind: "turn", sequence: n, bodySequence: n, 
 const answer = (n: number, sequence: number, text = "done"): Row => ({ kind: "outcome", sequence, turnSequence: n, at, outcome: { kind: "answered", answer: text } });
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
 function receipt(_text: string, id: string, launch?: number, failed = false): TellAdmission {
-  return { akumaId: AKUMA_ID, tellId: id,
-    ...(failed ? { wake: { kind: "failed" as const, diagnostic: "test wake failed" } }
-      : launch === undefined ? {} : { wake: { kind: "pending" as const } }) };
+  const subject = { akumaId: AKUMA_ID, tellId: id };
+  return failed ? { kind: "failed", ...subject, failures: [{ stage: "wake", diagnostic: "test wake failed" }] }
+    : { kind: "admitted", ...subject, ...(launch === undefined ? {} : { wake: { kind: "pending" as const } }) };
 }
 
 /** One bridge mutation as the typed transport sees it; there is no command line left to record. */

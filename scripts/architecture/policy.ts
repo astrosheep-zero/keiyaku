@@ -152,6 +152,8 @@ const outcomeOwner = {
     any("library/refusal.ts"),
     types("library/contract-outcomes.ts"),
     types("library/akuma-creation.ts", ["SpawnResult"]),
+    runtime("akuma/akuma-errors.ts", ["tellFailure"]),
+    types("akuma/selection-observation.ts", ["AkumaTellResult"]),
     types("library/kei.ts"),
     types("library/invocation.ts"),
 

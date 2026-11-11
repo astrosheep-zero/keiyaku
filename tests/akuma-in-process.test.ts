@@ -329,7 +329,9 @@ test(
         nativeEvents(world).some((event) => event.event === "stall-finished"),
         false,
       );
-      assert.equal((await asking).input?.kind, "failed");
+      const stopped = await asking;
+      assert.equal(stopped.kind, "failed");
+      if (stopped.kind === "failed") assert.equal(stopped.failures[0].stage, "observation");
     } finally {
       writeFileSync(join(world, "stall.release"), "release");
       await waitForCondition("native tool's actual retirement", () =>
@@ -601,8 +603,8 @@ export default pi => {
     assert.equal(existsSync(join(world, "late-prompt")), false);
     assert.equal(await probeLeash(pathsForAkumaId(world, called.akumaId)), "free");
     const retained = await api.tell({ akuma: called.akumaId, body: "retained, but no host launch" });
-    assert.equal(retained.wake?.kind, "failed");
-    if (retained.wake?.kind === "failed") assert.match(retained.wake.diagnostic, /scope is closed/u);
+    assert.equal(retained.kind, "failed");
+    if (retained.kind === "failed") assert.match(retained.failures[0].diagnostic, /scope is closed/u);
     assert.ok(
       (await readHeart(pathsForAkumaId(world, called.akumaId))).pending.length > 0,
       "scope closure is not Tell rollback",

@@ -11,6 +11,8 @@ import { worldRootSchema, type WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { ReviewOutcome, VerifyOutcome } from "./contract-outcomes.js";
 import type { SpawnResult } from "./akuma-creation.js";
+import { tellFailure } from "../akuma/akuma-errors.js";
+import type { AkumaTellResult } from "../akuma/selection-observation.js";
 import type { InvocationSnapshot } from "./invocation.js";
 import { retrySchema, executionIssueSchema } from "../protocol/result-reasons.js";
 export { executionIssueSchema } from "../protocol/result-reasons.js";
@@ -637,16 +639,21 @@ export type FailureProjection = Readonly<{
   causeDiagnostic?: string;
   outcome?: PartialOutcomeEnvelope;
   spawn?: SpawnResult;
+  tell?: AkumaTellResult;
 }>;
 export function projectFailure(error: unknown): FailureProjection {
-  const cause = error instanceof KeiyakuError ? error.cause : error;
-  const spawn = spawnFailureReceipt(error) ?? spawnFailureReceipt(cause);
+  const thrown = error instanceof KeiyakuError ? error.cause : error;
+  const spawn = spawnFailureReceipt(error) ?? spawnFailureReceipt(thrown);
+  const tell = tellFailure(error) ?? tellFailure(thrown);
+  const classified = tell?.cause ?? error;
+  const cause = classified instanceof KeiyakuError ? classified.cause : classified;
   return {
     kind: "failed",
-    category: error instanceof KeiyakuError ? error.category : errorCategory(error),
+    category: classified instanceof KeiyakuError ? classified.category : errorCategory(classified),
     diagnostic: errorDiagnostic(error),
     ...(cause instanceof Error ? { causeClass: cause.name, causeDiagnostic: cause.message } : {}),
     ...(spawn === undefined ? {} : { spawn }),
+    ...(tell === undefined ? {} : { tell: tell.receipt }),
     ...(error instanceof KeiyakuError && error.outcome !== undefined ? { outcome: error.outcome } : {}),
   };
 }

@@ -39,6 +39,7 @@ export type AdmittedAkumaCall = Readonly<{
   tell?: TellResult;
   /** The native failure after a confirmed birth. */
   failure?: unknown;
+  failureStage?: "birth" | "tell" | "wake";
 }>;
 
 type AkumaCallLaunchInput = Omit<AkumaCallInput, "body"> &
@@ -130,6 +131,7 @@ export async function publishAkumaCall(prepared: PreparedAkumaCall): Promise<Adm
     execution: prepared.execution,
     ...(result.tell === undefined ? {} : { tell: result.tell }),
     ...(result.failure === undefined ? {} : { failure: result.failure }),
+    ...(result.failureStage === undefined ? {} : { failureStage: result.failureStage }),
   };
 }
 

@@ -72,20 +72,20 @@ function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
   return "failed";
 }
 
-function classifySpawn(result: SpawnResult): VerbDisposition {
-  return result.failure !== undefined ||
-    result.dispatchFailure !== undefined ||
-    (result.alias !== undefined && result.alias.kind !== "moved") ||
-    result.wake?.kind === "failed" ||
-    result.input?.kind === "failed"
-    ? "failed"
-    : "accepted";
-}
-
-function classifyFork(result: ForkResult): VerbDisposition {
-  if (result.kind === "forked") return result.dispatchFailure === undefined ? "accepted" : "failed";
-  return result.kind === "fork-failed" || result.kind === "provider-forked-local-birth-failed" ? "failed" : "refused";
-}
+const akumaCallDisposition = {
+  spawned: "accepted",
+  admitted: "accepted",
+  forked: "accepted",
+  answered: "accepted",
+  unanswered: "accepted",
+  deadline: "accepted",
+  failed: "failed",
+  "invalid-output": "failed",
+  "fork-failed": "failed",
+  "provider-forked-local-birth-failed": "failed",
+  "provider-cannot-fork": "refused",
+  "unknown-history": "refused",
+} as const;
 
 function classifyRegion(value: RegionRead): VerbDisposition {
   return value.kind === "contract-missing" || value.kind === "contract-terminal" ? "refused" : "accepted";
@@ -150,17 +150,10 @@ export function classifyVerb<K extends VerbName>(
       );
     }
     case "spawn":
-      return classifySpawn(value as SpawnResult);
     case "fork":
-      return classifyFork(value as ForkResult);
-    case "tell": {
-      const result = value as AkumaTellResult;
-      return result.wake?.kind === "failed" || result.input?.kind === "failed" ? "failed" : "accepted";
-    }
-    case "ask": {
-      const reason = (value as AkumaAskResult).kind;
-      return reason === "failed" || reason === "invalid-output" ? "failed" : "accepted";
-    }
+    case "tell":
+    case "ask":
+      return akumaCallDisposition[(value as SpawnResult | ForkResult | AkumaTellResult | AkumaAskResult).kind];
     case "kill":
       return (value as AkumaKillResult).results.some(
         ({ outcome }) => outcome === "unavailable" || outcome === "hung" || outcome === "untidy",

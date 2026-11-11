@@ -11,7 +11,6 @@ import {
 } from "./keiyaku-verbs.js";
 import type { AskProgress } from "../akuma/akuma-selection-execution.js";
 import type { SpawnProgress } from "./akuma-creation.js";
-import type { TellResult } from "../akuma/call-initial-tell.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { World, WorldError, type WorldRoot } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
@@ -24,7 +23,6 @@ import {
   type AkumaTellInput,
   type AkumaKillInput,
   type AkumaHistoryInput,
-  type SpawnWaitHead,
 } from "./akumas.js";
 import type { ContractWaitInput } from "./contract-wait.js";
 import { deliveryOwner, resolveActor } from "./keiyaku-attribution.js";
@@ -41,7 +39,7 @@ import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
 import { listArchetypeDefinitions } from "../akuma/archetype.js";
 import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
-import { parseAkumaId, type AkumaId } from "../akuma/identity.js";
+import { parseAkumaId } from "../akuma/identity.js";
 import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
 import type { DebtListInvocation, DebtUpdateInvocation, DebtShowInvocation } from "./keiyaku-debt.js";
@@ -61,22 +59,11 @@ type BindInvocation =
   | (Omit<Extract<BindInput, { markdown: string }>, "after"> & Readonly<{ after?: readonly string[] }>)
   | (Omit<Extract<BindInput, { forkOf: ContractId }>, "forkOf"> & Readonly<{ forkOf: string }>);
 type AmendInvocation = Omit<AmendInput, "after"> & Readonly<{ after?: readonly string[] }>;
-type SpawnInvocation = Omit<
-  SpawnInput,
-  "body" | "cwd" | "contract" | "home" | "settings" | "caller" | "initiator" | "observe"
-> &
+type SpawnInvocation = Omit<SpawnInput, "body" | "cwd" | "contract" | "home" | "settings" | "caller" | "initiator"> &
   Readonly<{
     prompt?: string;
     contract?: string;
     workdir?: string;
-    observe?: Omit<NonNullable<SpawnInput["observe"]>, "admitted"> &
-      Readonly<{
-        admitted?: (
-          tell: TellResult,
-          id: AkumaId,
-          head: SpawnWaitHead & Readonly<{ cwd: string }>,
-        ) => void | Promise<void>;
-      }>;
   }>;
 type TellInvocation = Omit<AkumaTellInput, "body" | "repo" | "initiator"> & Readonly<{ prompt: string }>;
 type AskInvocation = Omit<AkumaAskInput, "body" | "repo" | "initiator"> & Readonly<{ prompt: string }>;

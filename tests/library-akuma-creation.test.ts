@@ -133,7 +133,7 @@ test("prompt-free bare Akumas.spawn reports born without admitting a Tell", asyn
       writableDirectories: [world, world],
       ...configured.placement,
     });
-    assert.equal(result.failure, undefined);
+    assert.equal(result.kind, "spawned");
     assert.equal(result.tellId, undefined);
     const handle = PublicAkuma.select(world, result.akumaId);
     assert.deepEqual((await handle.status()).birth, { origin: { kind: "direct" }, caller: { kind: "unknown" } });
@@ -524,7 +524,7 @@ test("call without a host preserves log-only diagnostics", async (t) => {
       home: configured.home,
       settings: await settings({ root: world, home: configured.home }),
     });
-    assert.equal(result.failure, undefined);
+    assert.equal(result.kind, "spawned");
     assert.equal(result.tellId, undefined);
     const log = pathsForAkumaId(world, result.akumaId).log;
     await waitForCondition(
@@ -692,8 +692,11 @@ test("Akumas.spawn preserves its child when initial Tell admission fails", async
       mode: "detach",
     });
     akumaId = result.akumaId;
-    assert.equal(result.failure?.kind, "infrastructure");
-    assert.match(result.failure?.diagnostic ?? "", /did not settle cleanly/u);
+    assert.equal(result.kind, "failed");
+    if (result.kind !== "failed") assert.fail("expected initial Tell failure");
+    assert.equal(result.failures[0].stage, "tell");
+    if (result.failures[0].stage !== "tell") assert.fail("expected Tell stage");
+    assert.match(result.failures[0].diagnostic, /did not settle cleanly/u);
     assert.equal(admissionCalls, 1);
     const history = await PublicAkuma.select(world, result.akumaId).history();
     assert.equal(history.rows.filter((row) => row.kind === "tell").length, 0);
@@ -906,7 +909,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       environment: { ...environment, KEIYAKU_HOME: configured.home },
       readStdin: async () => "implicit placement",
     });
-    assert.equal(implicit.value.failure, undefined);
+    assert.equal(implicit.value.kind, "spawned");
     const implicitSoul = await readSoul(pathsForAkumaId(world, implicit.value.akumaId));
     assert.equal(implicitSoul?.cwd, invocationCwd);
     assert.notEqual(implicitSoul?.cwd, appointment.path);
@@ -935,7 +938,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
         },
       },
     );
-    assert.equal(explicit.value.failure, undefined);
+    assert.equal(explicit.value.kind, "spawned");
     assert.equal(
       (await readSoul(pathsForAkumaId(world, explicit.value.akumaId)))?.cwd,
       realpathSync(explicitDir),

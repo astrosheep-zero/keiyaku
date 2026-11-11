@@ -10,13 +10,13 @@ import type {
   InitialTellAdmissionInput,
   TellResult,
 } from "./call-initial-tell.js";
+import { BIRTH_TIMEOUT_MS, pendingTellReceipt } from "./call-initial-tell.js";
 import { resolveProviderExecution, withWritableDirectories } from "./providers/index.js";
 import { writableDirectoriesOption } from "./call-input.js";
 import type { WorldRoot } from "../world.js";
 
 const POLL_MS = 100;
 const CUSTODY_HANDOFF_MS = 1_000;
-export const BIRTH_TIMEOUT_MS = 30_000;
 
 class LaunchCompletedError extends Error {}
 
@@ -324,6 +324,7 @@ type PreparedCallResult = Readonly<{
   tell?: TellResult;
   /** The native launch or initial-Tell failure that stopped after a confirmed birth. */
   failure?: unknown;
+  failureStage?: "birth" | "tell" | "wake";
 }>;
 
 type PreparedCallInput = Readonly<{
@@ -423,7 +424,7 @@ export async function publishPreparedCall(prepared: PreparedCall): Promise<Prepa
     });
   } catch (error) {
     if (!(await durablyBorn(allocated))) throw error;
-    return { child: allocated, failure: error };
+    return { child: allocated, failure: error, failureStage: "birth" };
   }
   if (input.initialTell === undefined) return { child };
   let told: TellResult | undefined;
@@ -435,10 +436,15 @@ export async function publishPreparedCall(prepared: PreparedCall): Promise<Prepa
     });
     if (admitted.kind === "birth-failed") throw new Error(admitted.diagnostic);
     if (admitted.kind === "not-born") throw new Error(`Akuma ${child.id} was not born for its initial Tell`);
+    told = pendingTellReceipt(admitted.tell);
     told = await admitted.wake;
     return { child, tell: told };
   } catch (error) {
-    if (told !== undefined) return { child, tell: told };
-    return { child, failure: error };
+    return {
+      child,
+      ...(told === undefined ? {} : { tell: told }),
+      failure: error,
+      failureStage: told === undefined ? "tell" : "wake",
+    };
   }
 }

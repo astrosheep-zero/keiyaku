@@ -151,7 +151,14 @@ operation that reads Heart, leash, or filesystem state is asynchronous. The
 surface contains no owner, born, Turn, spawn, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
-A Tell is the admitted message. `tell` returns its admission receipt and may explicitly observe the text answer to that exact admission. The receipt identifies the resolved Akuma and admitted input once, omitting repeated input and routine successful mechanics while retaining actionable wake and interruption evidence. `ask` admits a Tell under a required JSON Schema document and observes its parsed JSON answer. Only Ask distinguishes invalid output from execution failure; a text observer of invalid schema output sees the same failure diagnostic as the timeline. Both observations distinguish an answer, failure, absence of an answer, and a deadline. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A spawn composes prompt-free birth with optional first ordinary Tell admission; bounded spawn observation awaits that first text answer without changing admission. Schema belongs only to ask. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy and recovery semantics.
+A Tell is the admitted message. `tell` distinguishes admitted completion from a
+wake or requested-observation stop, preserving that same admission in either
+case. It may explicitly observe the text answer to that exact admission. The
+receipt identifies the resolved Akuma and admitted input once, omitting routine
+successful wake and interruption mechanics. It retains pending or unavailable
+interruption only when that evidence changes whether the admitted input can
+advance, including the known hung or untidy cause, without exposing Body identity.
+`ask` admits a Tell under a required JSON Schema document and observes its parsed JSON answer. Only Ask distinguishes invalid output from execution failure; a text observer of invalid schema output sees the same failure diagnostic as the timeline. Both observations distinguish an answer, failure, absence of an answer, and a deadline. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A spawn composes prompt-free birth with optional first ordinary Tell admission; bounded spawn observation awaits that first text answer without changing admission. Schema belongs only to ask. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy and recovery semantics.
 Wait observes status until its Akuma-owned completion judgment or a caller
 deadline. Running execution keeps observation open. Normally sleeping execution
 completes only without pending Tell, preserving ordinary successor handoff.
@@ -183,7 +190,9 @@ flagship's next action.
 
 Input-bound answer observation shares the execution-progress judgment, but never
 substitutes another input's outcome. An exact retained answer or failure wins;
-without one, stopped execution returns unanswered and retains the input. An exact
+a historical failed wake remains visible with its usable diagnostic and log
+coordinates even when an exact Ask answer wins the invocation judgment.
+Without one, stopped execution returns unanswered and retains the input. An exact
 canceled Turn likewise returns unanswered immediately, even when successor work
 is already running; that later work never supplies the canceled Ask's answer.
 Cancellation is a retained terminal in status, history, and stream, with its own

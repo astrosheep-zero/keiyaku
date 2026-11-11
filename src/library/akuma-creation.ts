@@ -2,7 +2,13 @@
 import { z } from "zod";
 import { contractIdSchema } from "../git/identity.js";
 import { tellResultSchema } from "../akuma/call-initial-tell.js";
-import { akumaTextObservationSchema, publicWakeSchema, compactTellResult } from "../akuma/selection-observation.js";
+import {
+  completedTextObservationSchema,
+  operationDiagnosticSchema,
+  tellFailureSchema,
+  completeTell,
+  tellAdmissionEvidence,
+} from "../akuma/selection-observation.js";
 import { akumaIdSchema } from "../akuma/identity.js";
 import { forkFailureSchemas } from "../akuma/akuma-owner.js";
 import { randomUUID } from "node:crypto";
@@ -34,56 +40,69 @@ import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals }
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import { addressAkuma } from "./address.js";
-import { requireInput } from "./input.js";
+import { requireInput, requireMarkdown as text, optionalNonblank, optionalSignal } from "./input.js";
 import type { Kei } from "./kei.js";
 import { seatForKei } from "./kei.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 import { withSpawnFailureReceipt } from "./outcome.js";
 
-const integrationFailureSchema = z
-  .strictObject({ kind: z.enum(["authority-corruption", "infrastructure"]), diagnostic: z.string() })
-  .readonly();
-type IntegrationFailure = z.output<typeof integrationFailureSchema>;
-const dispatchFailure = z.union([
+type IntegrationFailure = z.output<typeof operationDiagnosticSchema>;
+const dispatchFailureSchema = z.union([
   z.strictObject({ kind: z.literal("conflict"), currentContractId: contractIdSchema }).readonly(),
   z.strictObject({ kind: z.literal("publication-failed"), diagnostic: z.string() }).readonly(),
-  integrationFailureSchema,
+  operationDiagnosticSchema,
 ]);
-const dispatchFields = {
-  dispatchFailure: dispatchFailure.exactOptional(),
-  dispatchWarning: z.string().exactOptional(),
-};
+const dispatchStageSchema = z.strictObject({ stage: z.literal("dispatch"), failure: dispatchFailureSchema }).readonly();
+const aliasStageSchema = operationDiagnosticSchema
+  .unwrap()
+  .extend({ stage: z.literal("alias") })
+  .readonly();
+const spawnFailureSchema = z.union([
+  operationDiagnosticSchema
+    .unwrap()
+    .extend({ stage: z.enum(["birth", "tell"]), attemptedTellId: z.string().exactOptional() })
+    .readonly(),
+  dispatchStageSchema,
+  aliasStageSchema,
+  ...tellFailureSchema.options,
+]);
+type SpawnFailure = z.output<typeof spawnFailureSchema>;
 const publicationFields = {
-  ...dispatchFields,
+  dispatchWarning: z.string().exactOptional(),
   alias: z
-    .union([
-      z.strictObject({ kind: z.literal("moved"), previousAkumaId: akumaIdSchema }).readonly(),
-      integrationFailureSchema,
-    ])
+    .strictObject({ kind: z.literal("moved"), previousAkumaId: akumaIdSchema })
+    .readonly()
     .exactOptional(),
 };
 export const spawnWaitHeadSchema = z
   .strictObject({
     cwd: z.string(),
     ...publicationFields,
+    failures: z.array(spawnFailureSchema).nonempty().readonly().exactOptional(),
     contractId: contractIdSchema.exactOptional(),
     aliasName: akumaAliasSchema.exactOptional(),
   })
   .readonly();
-export const spawnResultSchema = z
-  .strictObject({
-    akumaId: akumaIdSchema,
-    ...publicationFields,
-    tellId: z.string().exactOptional(),
-    wake: publicWakeSchema.exactOptional(),
-    input: akumaTextObservationSchema.exactOptional(),
-    failure: integrationFailureSchema
-      .unwrap()
-      .extend({ attemptedTellId: z.string().exactOptional() })
-      .readonly()
-      .exactOptional(),
-  })
-  .readonly();
+const spawnAnswer = {
+  akumaId: akumaIdSchema,
+  ...publicationFields,
+  tellId: z.string().exactOptional(),
+  wake: z
+    .strictObject({ kind: z.literal("pending") })
+    .readonly()
+    .exactOptional(),
+  input: completedTextObservationSchema.exactOptional(),
+};
+export const spawnResultSchema = z.union([
+  z.strictObject({ kind: z.literal("spawned"), ...spawnAnswer }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("failed"),
+      ...spawnAnswer,
+      failures: z.tuple([spawnFailureSchema], spawnFailureSchema).readonly(),
+    })
+    .readonly(),
+]);
 const parentFields = { parentAkumaId: akumaIdSchema.exactOptional() };
 export const forkResultSchema = z.union([
   z
@@ -91,7 +110,15 @@ export const forkResultSchema = z.union([
       kind: z.literal("forked"),
       childAkumaId: akumaIdSchema,
       ...parentFields,
-      ...dispatchFields,
+      dispatchWarning: publicationFields.dispatchWarning,
+    })
+    .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("failed"),
+      childAkumaId: akumaIdSchema,
+      ...parentFields,
+      failure: dispatchStageSchema,
     })
     .readonly(),
   forkFailureSchemas.unsupported.unwrap().extend(parentFields).readonly(),
@@ -105,21 +132,16 @@ export type ForkResult = z.output<typeof forkResultSchema>;
 
 export const spawnProgressSchema = z.union([
   z
-    .strictObject({
-      kind: z.literal("admitted"),
-      tell: tellResultSchema,
-      id: akumaIdSchema,
-      head: spawnWaitHeadSchema,
-    })
+    .strictObject({ kind: z.literal("admitted"), tell: tellResultSchema, id: akumaIdSchema, head: spawnWaitHeadSchema })
     .readonly(),
   z.strictObject({ kind: z.literal("live"), observation: liveStatusObservationSchema }).readonly(),
 ]);
 export type SpawnProgress = z.output<typeof spawnProgressSchema>;
 
-type SpawnWaitObserver = Readonly<{
-  admitted?: (tell: TellResult, id: AkumaStatus["id"], head: SpawnWaitHead) => void | Promise<void>;
-  observe?: AskObserver["observe"];
-}>;
+type SpawnWaitObserver = Omit<AskObserver, "admitted"> &
+  Readonly<{
+    admitted?: (tell: TellResult, id: AkumaStatus["id"], head: SpawnWaitHead) => void | Promise<void>;
+  }>;
 
 export type SpawnInput = Readonly<{
   akumaName: string;
@@ -139,8 +161,6 @@ export type SpawnInput = Readonly<{
   observe?: SpawnWaitObserver;
 }>;
 
-type CallExecution = Readonly<{ cwd: string }>;
-
 export type ForkInput = Readonly<{
   akuma: string;
   at: string;
@@ -157,11 +177,6 @@ function nonblank(value: unknown, label: string): string {
   return value;
 }
 
-function text(value: unknown, label: string): string {
-  if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
-  return value;
-}
-
 function settingsOption(value: unknown): Settings | undefined {
   if (value === undefined) return undefined;
   if (
@@ -172,18 +187,6 @@ function settingsOption(value: unknown): Settings | undefined {
     throw new TypeError("settings must be a Settings");
   }
   return value as Settings;
-}
-
-function homeOption(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  return nonblank(value, "home");
-}
-
-function onlyKeys(values: Record<string, unknown>, allowed: readonly string[], label: string): void {
-  const accepted = new Set(allowed);
-  for (const key of Object.keys(values)) {
-    if (!accepted.has(key)) throw new TypeError(`${label} has unknown field: ${key}`);
-  }
 }
 
 function integrationFailure(error: unknown): IntegrationFailure {
@@ -199,19 +202,6 @@ function callMode(value: unknown): "wait" | "detach" {
   throw new TypeError("mode must be wait or detach");
 }
 
-function callBody(value: unknown): string | undefined {
-  return value === undefined ? undefined : text(value, "body");
-}
-
-function validateCallBodyOptions(
-  body: string | undefined,
-  values: Record<string, unknown>,
-  mode: "wait" | "detach",
-): void {
-  if (body === undefined && (mode === "wait" || values.timeoutMs !== undefined))
-    throw new TypeError("wait and timeoutMs require body");
-}
-
 function callTimeout(value: unknown, mode: "wait" | "detach"): number {
   if (mode === "detach" && value !== undefined) {
     throw new TypeError("timeoutMs is not valid in detach mode");
@@ -220,12 +210,6 @@ function callTimeout(value: unknown, mode: "wait" | "detach"): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     throw new TypeError("timeoutMs must be a nonnegative finite number");
   }
-  return value;
-}
-
-function callSignal(value: unknown): AbortSignal | undefined {
-  if (value === undefined) return undefined;
-  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
   return value;
 }
 
@@ -261,9 +245,8 @@ function callDiagnosticSink(
   };
 }
 
-async function callDispatch(
-  input: Parameters<typeof publishDispatch>[0],
-): Promise<Pick<SpawnResult, "dispatchFailure" | "dispatchWarning">> {
+type DispatchAnswer = Readonly<{ failure?: z.output<typeof dispatchStageSchema>; dispatchWarning?: string }>;
+async function callDispatch(input: Parameters<typeof publishDispatch>[0]): Promise<DispatchAnswer> {
   try {
     const published = await publishDispatch(input);
     if (published.kind === "dispatched") {
@@ -272,11 +255,14 @@ async function callDispatch(
     }
     const failure = published.failure;
     return {
-      dispatchFailure:
-        failure.kind === "conflict" ? { kind: "conflict", currentContractId: failure.current.contractId } : failure,
+      failure: {
+        stage: "dispatch",
+        failure:
+          failure.kind === "conflict" ? { kind: "conflict", currentContractId: failure.current.contractId } : failure,
+      },
     };
   } catch (error) {
-    return { dispatchFailure: integrationFailure(error) };
+    return { failure: { stage: "dispatch", failure: integrationFailure(error) } };
   }
 }
 
@@ -284,37 +270,30 @@ async function forkDispatch(
   repository: Parameters<typeof readDispatch>[0],
   parent: AkumaId,
   child: AkumaId,
-): Promise<Pick<SpawnResult, "dispatchFailure" | "dispatchWarning">> {
+): Promise<DispatchAnswer> {
   try {
     const association = await readDispatch(repository, parent);
     return association === null
       ? {}
       : await callDispatch({ repository, akumaId: child, contractId: association.contractId });
   } catch (error) {
-    return { dispatchFailure: integrationFailure(error) };
+    return { failure: { stage: "dispatch", failure: integrationFailure(error) } };
   }
-}
-
-async function resolveCallExecution(input: Readonly<{ cwd?: string }>): Promise<CallExecution | undefined> {
-  return input.cwd === undefined ? undefined : { cwd: await canonicalBirthCwd(input.cwd) };
 }
 
 async function callAlias(
   path: WorldRoot,
   alias: AkumaAlias | undefined,
-  dispatchFailure: SpawnResult["dispatchFailure"],
   akuma: AkumaId,
-): Promise<Pick<SpawnWaitHead, "alias">> {
-  if (alias === undefined || dispatchFailure !== undefined) return {};
+): Promise<Readonly<{ alias?: SpawnResult["alias"]; failure?: z.output<typeof aliasStageSchema> }>> {
+  if (alias === undefined) return {};
   try {
     const moved = await moveAlias({ world: path, alias, akumaId: akuma });
     return moved.previous === null || moved.previous === akuma
       ? {}
-      : {
-          alias: { kind: "moved", previousAkumaId: moved.previous },
-        };
+      : { alias: { kind: "moved", previousAkumaId: moved.previous } };
   } catch (error) {
-    return { alias: integrationFailure(error) };
+    return { failure: { stage: "alias", ...integrationFailure(error) } };
   }
 }
 
@@ -337,40 +316,30 @@ const CALL_INPUT_KEYS = [
   "observe",
 ] as const;
 
-type ParsedCallInput = Readonly<{
-  path: WorldRoot;
-  akumaName: string;
-  cwd?: string;
-  mode: "wait" | "detach";
-  timeoutMs: number;
-  signal?: AbortSignal;
-  home?: string;
-  settings?: Settings;
-  alias?: AkumaAlias;
-  writableDirectories?: readonly string[];
-  bare?: boolean;
-  seat: ReturnType<typeof callSeat>;
-  caller?: AkumaCaller;
-  initiator?: string;
-  initialTell?: InitialCallTell;
-  observe?: SpawnWaitObserver;
-}>;
+type ParsedCallInput = Omit<SpawnInput, "body" | "contract" | "mode" | "timeoutMs"> &
+  Readonly<{
+    path: WorldRoot;
+    mode: "wait" | "detach";
+    timeoutMs: number;
+    seat: ReturnType<typeof callSeat>;
+    initialTell?: InitialCallTell;
+  }>;
 
 async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>): Promise<ParsedCallInput> {
-  const values = requireInput(input, "Akumas.spawn input");
-  onlyKeys(values, CALL_INPUT_KEYS, "Akumas.spawn input");
+  const values = requireInput(input, "Akumas.spawn input", CALL_INPUT_KEYS);
   const path = await World.prove(nonblank(values.path, "path"));
   const akumaName = nonblank(values.akumaName, "akumaName");
-  const body = callBody(values.body);
+  const body = values.body === undefined ? undefined : text(values.body, "body");
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
   const caller = decodeAkumaCaller(values.caller);
   const bare = bareOption(values.bare);
-  const cwd = values.cwd === undefined ? undefined : nonblank(values.cwd, "cwd");
+  const cwd = optionalNonblank(values.cwd, "cwd");
   const mode = callMode(values.mode);
-  validateCallBodyOptions(body, values, mode);
+  if (body === undefined && (mode === "wait" || values.timeoutMs !== undefined))
+    throw new TypeError("wait and timeoutMs require body");
   const timeoutMs = callTimeout(values.timeoutMs, mode);
-  const signal = callSignal(values.signal);
-  const home = homeOption(values.home);
+  const signal = optionalSignal(values.signal);
+  const home = optionalNonblank(values.home, "home");
   const settings = settingsOption(values.settings);
   const alias: AkumaAlias | undefined =
     values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
@@ -406,90 +375,30 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
   };
 }
 
-function callConfiguration(input: ParsedCallInput) {
-  return {
-    ...(input.home === undefined ? {} : { home: input.home }),
-    ...(input.settings === undefined ? {} : { settings: input.settings }),
-  };
-}
-
-function callAdmissionInput(input: ParsedCallInput, execution: CallExecution | undefined) {
-  return {
-    akumaName: input.akumaName,
-    ...(input.caller === undefined ? {} : { caller: input.caller }),
-    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-    ...(input.initialTell === undefined ? {} : { initialTell: input.initialTell }),
-    ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
-    ...(input.bare === undefined ? {} : { bare: input.bare }),
-    ...(execution === undefined ? {} : { cwd: execution.cwd }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  };
-}
-
-function failedCall(result: SpawnResult, error: unknown, attemptedTellId?: string): SpawnResult {
-  return {
-    ...result,
-    failure: {
-      ...integrationFailure(error),
-      ...(attemptedTellId === undefined ? {} : { attemptedTellId }),
-    },
-  };
-}
-
-async function observeCall(
-  input: Readonly<{
-    path: WorldRoot;
-    akuma: AkumaId;
-    result: SpawnResult;
-    head: SpawnWaitHead;
-    initialTell: NonNullable<ParsedCallInput["initialTell"]>;
-    receipt: TellResult;
-    timeoutMs: number;
-    settings?: Settings;
-    signal?: AbortSignal;
-    observe?: SpawnWaitObserver;
-  }>,
-  reportDiagnostic?: (message: string) => void,
-): Promise<SpawnResult> {
-  const onObserve: AskObserver = {
-    admitted: async (receipt, id) => {
-      await input.observe?.admitted?.(receipt, id, input.head);
-    },
-    ...(input.observe?.observe === undefined ? {} : { observe: input.observe.observe }),
-  };
-  try {
-    const observed = await observeAdmittedAskAkuma({
-      path: input.path,
-      id: input.akuma,
-      tellId: input.initialTell.tellId,
-      timeoutMs: input.timeoutMs,
-      receipt: input.receipt,
-      outcomeObserved: outcomePluginObserver({
-        world: input.path,
-        ...(input.settings === undefined ? {} : { settings: input.settings }),
-        reportDiagnostic: callDiagnosticSink(
-          pathsForAkumaId(input.path, input.akuma),
-          "outcome observation",
-          reportDiagnostic,
-        ),
-      }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      onObserve,
-    });
-    const { akumaId: _id, tellId: _tell, wake: _wake, interrupt: _interrupt, ...outcome } = observed;
-    return {
-      ...input.result,
-      input: outcome.kind === "invalid-output" ? { kind: "failed", diagnostic: outcome.diagnostic } : outcome,
-    };
-  } catch (error) {
-    if (input.signal?.aborted) throw withSpawnFailureReceipt(error, input.result);
-    return failedCall(input.result, error);
-  }
-}
-
-/** Preserve a native failure identity; only an unknown shape becomes a fresh Error. */
-function asError(failure: unknown): Error {
-  return failure instanceof Error ? failure : new Error(failure === undefined ? "spawn failed" : String(failure));
+/** Project native birth and initial-Tell stops before association work. */
+function callAdmissionFailures(admitted: AdmittedAkumaCall, initialTell: InitialCallTell | undefined): SpawnFailure[] {
+  if (admitted.failure !== undefined)
+    return [
+      admitted.failureStage === "wake"
+        ? { stage: "wake", diagnostic: integrationFailure(admitted.failure).diagnostic }
+        : {
+            stage: admitted.failureStage ?? "birth",
+            ...integrationFailure(admitted.failure),
+            ...(initialTell === undefined || admitted.tell !== undefined
+              ? {}
+              : { attemptedTellId: initialTell.tellId }),
+          },
+    ];
+  return initialTell !== undefined && admitted.tell === undefined
+    ? [
+        {
+          stage: "tell",
+          kind: "infrastructure",
+          attemptedTellId: initialTell.tellId,
+          diagnostic: `Akuma ${admitted.id} returned no exact initial Tell receipt`,
+        },
+      ]
+    : [];
 }
 
 /** Settle one admitted birth: detach, observe, or report the exact initial-Tell failure. */
@@ -500,45 +409,68 @@ async function settleCall(
   reportDiagnostic?: (message: string) => void,
 ): Promise<SpawnResult> {
   const receipt = admitted.tell;
-  const { cwd: _cwd, contractId: _contract, aliasName: _alias, ...publication } = head;
-  const compact = receipt === undefined ? undefined : compactTellResult(admitted.id, receipt);
-  const result: SpawnResult = {
+  const { cwd: _cwd, contractId: _contract, aliasName: _alias, failures: associationFailures, ...publication } = head;
+  const compact = receipt === undefined ? undefined : completeTell(tellAdmissionEvidence(admitted.id, receipt));
+  const failures = callAdmissionFailures(admitted, parsed.initialTell);
+  if (compact?.kind === "failed") failures.push(...compact.failures);
+  failures.push(...(associationFailures ?? []));
+  const answer = {
     akumaId: admitted.id,
     ...publication,
     ...(compact === undefined
       ? {}
       : { tellId: compact.tellId, ...(compact.wake === undefined ? {} : { wake: compact.wake }) }),
   };
-  if (parsed.initialTell === undefined) {
-    // A durable child does not turn a later native birth failure into success.
-    if (admitted.failure !== undefined) throw withSpawnFailureReceipt(admitted.failure, result);
-    return result;
+  let input: SpawnResult["input"];
+  const result = (): SpawnResult => {
+    const [first, ...rest] = failures;
+    const observed = { ...answer, ...(input === undefined ? {} : { input }) };
+    return first === undefined
+      ? { kind: "spawned", ...observed }
+      : { kind: "failed", ...observed, failures: [first, ...rest] };
+  };
+  if (parsed.signal?.aborted === true && admitted.failure !== undefined)
+    throw withSpawnFailureReceipt(parsed.signal.reason, result());
+  if (admitted.failure !== undefined && (parsed.initialTell === undefined || admitted.failureStage === "wake"))
+    throw withSpawnFailureReceipt(admitted.failure, result());
+  if (receipt !== undefined && parsed.mode === "wait") {
+    try {
+      const {
+        akumaId: _id,
+        tellId: _tell,
+        wake: _wake,
+        interrupt: _interrupt,
+        ...observation
+      } = await observeAdmittedAskAkuma({
+        ...parsed,
+        id: admitted.id,
+        tellId: receipt.admission.tellId,
+        receipt,
+        onObserve: {
+          ...parsed.observe,
+          admitted: async (tell, id) => {
+            await parsed.observe?.admitted?.(tell, id, head);
+          },
+        },
+        outcomeObserved: outcomePluginObserver({
+          ...parsed,
+          world: parsed.path,
+          reportDiagnostic: callDiagnosticSink(
+            pathsForAkumaId(parsed.path, admitted.id),
+            "outcome observation",
+            reportDiagnostic,
+          ),
+        }),
+      });
+      if (observation.kind === "failed" || observation.kind === "invalid-output")
+        failures.push({ stage: "observation", diagnostic: observation.diagnostic });
+      else input = observation;
+    } catch (error) {
+      if (parsed.signal?.aborted) throw withSpawnFailureReceipt(error, result());
+      failures.push({ stage: "observation", diagnostic: integrationFailure(error).diagnostic });
+    }
   }
-  if (receipt === undefined) {
-    if (parsed.signal?.aborted === true && admitted.failure !== undefined)
-      throw withSpawnFailureReceipt(parsed.signal.reason, result);
-    const failure =
-      admitted.failure === undefined
-        ? new Error(`Akuma ${admitted.id} returned no exact initial Tell receipt`)
-        : asError(admitted.failure);
-    return failedCall(result, failure, parsed.initialTell.tellId);
-  }
-  if (parsed.mode === "detach") return result;
-  return await observeCall(
-    {
-      path: parsed.path,
-      akuma: admitted.id,
-      result,
-      head,
-      initialTell: parsed.initialTell,
-      receipt,
-      timeoutMs: parsed.timeoutMs,
-      ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
-      ...(parsed.signal === undefined ? {} : { signal: parsed.signal }),
-      ...(parsed.observe === undefined ? {} : { observe: parsed.observe }),
-    },
-    reportDiagnostic,
-  );
+  return result();
 }
 
 export async function callAkumas(
@@ -547,23 +479,20 @@ export async function callAkumas(
   reportDiagnostic?: (message: string) => void,
 ): Promise<SpawnResult> {
   const parsed = await parseCallInput(input);
-  const selectedExecution = await resolveCallExecution(parsed.cwd === undefined ? {} : { cwd: parsed.cwd });
+  const cwd = parsed.cwd === undefined ? undefined : await canonicalBirthCwd(parsed.cwd);
   const seat = parsed.seat;
   const prepared = await prepareAkumaCall(
     parsed.path,
-    callConfiguration(parsed),
-    {
-      ...callAdmissionInput(parsed, selectedExecution),
-      ...(seat === undefined ? {} : { contractId: seat.id }),
-    },
-    selectedExecution === undefined ? {} : { cwdCanonical: true },
+    parsed,
+    { ...parsed, ...(cwd === undefined ? {} : { cwd }), ...(seat === undefined ? {} : { contractId: seat.id }) },
+    cwd === undefined ? {} : { cwdCanonical: true },
     spawn,
   );
   let publishing = false;
   const run = async (): Promise<SpawnResult> => {
     publishing = true;
     const admitted = await publishAkumaCall(prepared);
-    const dispatch =
+    const dispatch: DispatchAnswer =
       seat === undefined
         ? {}
         : await callDispatch({
@@ -571,15 +500,15 @@ export async function callAkumas(
             akumaId: admitted.id,
             contractId: seat.id,
           });
-    const alias = await callAlias(parsed.path, parsed.alias, dispatch.dispatchFailure, admitted.id);
+    const alias = dispatch.failure === undefined ? await callAlias(parsed.path, parsed.alias, admitted.id) : {};
+    const failures = [dispatch.failure, alias.failure].filter((failure) => failure !== undefined);
     const head: SpawnWaitHead = {
       cwd: admitted.cwd,
-      ...dispatch,
-      ...alias,
-      ...(seat === undefined || dispatch.dispatchFailure !== undefined ? {} : { contractId: seat.id }),
-      ...(parsed.alias === undefined ||
-      dispatch.dispatchFailure !== undefined ||
-      (alias.alias !== undefined && alias.alias.kind !== "moved")
+      ...(dispatch.dispatchWarning === undefined ? {} : { dispatchWarning: dispatch.dispatchWarning }),
+      ...(alias.alias === undefined ? {} : { alias: alias.alias }),
+      ...(failures.length === 0 ? {} : { failures }),
+      ...(seat === undefined || dispatch.failure !== undefined ? {} : { contractId: seat.id }),
+      ...(parsed.alias === undefined || dispatch.failure !== undefined || alias.failure !== undefined
         ? {}
         : { aliasName: parsed.alias }),
     };
@@ -589,8 +518,8 @@ export async function callAkumas(
     return parsed.mode === "wait" && parsed.initialTell !== undefined
       ? await withAkumaWaitDeferrals(
           {
+            ...parsed,
             world: parsed.path,
-            ...(parsed.settings === undefined ? {} : { settings: parsed.settings }),
             reportDiagnostic: reportDiagnostic ?? stderrPluginDiagnostic,
           },
           { akumaIds: [prepared.publication.allocated.id] },
@@ -608,8 +537,15 @@ export async function forkAkumas(
   input: ForkInput & Readonly<{ path: WorldRoot }>,
   spawn: BodyLauncher,
 ): Promise<ForkResult> {
-  const values = requireInput(input, "Akumas.fork input");
-  onlyKeys(values, ["path", "akuma", "at", "bare", "repo", "caller", "initiator"], "Akumas.fork input");
+  const values = requireInput(input, "Akumas.fork input", [
+    "path",
+    "akuma",
+    "at",
+    "bare",
+    "repo",
+    "caller",
+    "initiator",
+  ]);
   const bare = bareOption(values.bare);
   const caller = decodeAkumaCaller(values.caller);
   const initiator = values.initiator === undefined ? undefined : text(values.initiator, "initiator");
@@ -629,10 +565,13 @@ export async function forkAkumas(
     spawn,
   );
   if (receipt.kind !== "forked") return { ...receipt, ...parent };
-  const dispatch = repository === undefined ? {} : await forkDispatch(repository, akuma, receipt.childAkumaId);
-  return {
-    ...receipt,
-    ...parent,
-    ...dispatch,
-  };
+  const dispatch: DispatchAnswer =
+    repository === undefined ? {} : await forkDispatch(repository, akuma, receipt.childAkumaId);
+  return dispatch.failure === undefined
+    ? {
+        ...receipt,
+        ...parent,
+        ...(dispatch.dispatchWarning === undefined ? {} : { dispatchWarning: dispatch.dispatchWarning }),
+      }
+    : { kind: "failed", childAkumaId: receipt.childAkumaId, ...parent, failure: dispatch.failure };
 }

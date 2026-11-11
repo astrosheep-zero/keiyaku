@@ -247,8 +247,8 @@ export class Akuma {
     // A non-cooperative Tell never settles on its own; close owns the outcome.
     if (values.tellPending === true) await new Promise(() => {});
     if (values.tellDelayMs !== undefined) await wait(values.tellDelayMs, options.signal);
-    if (values.tellMismatch === true) return { akumaId: "aku/other/11111111", tellId: "tell/1" };
-    return values.tell ?? { akumaId: this.aku, tellId: "tell/1", wake: { kind: "pending" } };
+    if (values.tellMismatch === true) return { kind: "admitted", akumaId: "aku/other/11111111", tellId: "tell/1" };
+    return values.tell ?? { kind: "admitted", akumaId: this.aku, tellId: "tell/1", wake: { kind: "pending" } };
   }
   async kill() { return (await control()).evidence ?? "already-stopped"; }
   async status() { return (await control()).status ?? {}; }
@@ -386,7 +386,7 @@ test("SDK isolates bad records within trusted windows and continues to a real ou
 });
 
 const AKU = "aku/test/11111111";
-const RECEIPT = { akumaId: AKU, tellId: "tell/7" };
+const RECEIPT = { kind: "admitted", akumaId: AKU, tellId: "tell/7" };
 
 test("the transport carries typed Tell admission, Stop evidence, and status", async (t) => {
   const { transport, set } = await fakeTransport(t);
@@ -403,7 +403,7 @@ test("the transport carries typed Tell admission, Stop evidence, and status", as
     "steering correlates the captured Turn, not a removed delivery inference");
 
   const warned = t.mock.method(console, "warn", () => {});
-  await set({ tell: { ...RECEIPT, wake: { kind: "failed", diagnostic: "no provider" } } });
+  await set({ tell: { ...RECEIPT, kind: "failed", failures: [{ stage: "wake", diagnostic: "no provider" }] } });
   const failedWake = await transport.tell("/world", AKU, signal, "change direction");
   assert.deepEqual(tellPresentation(failedWake, "change direction"),
     { row: { tellId: "tell/7", text: "change direction" }, result: { type: "completed" } },

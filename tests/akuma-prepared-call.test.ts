@@ -420,6 +420,9 @@ test("a failed initial Tell wake keeps the born child and the native failure", a
   const result = await publishPreparedCall(prepared);
   assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
   assert.equal(result.failure, failure);
+  assert.equal(result.failureStage, "wake");
+  assert.equal(result.tell?.admission.tellId, prepared.input.initialTell?.tellId);
+  assert.equal(result.tell?.row.sequence, 1);
 });
 
 for (const corruptInitialization of [false, true]) {

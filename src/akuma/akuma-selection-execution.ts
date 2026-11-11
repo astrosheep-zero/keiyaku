@@ -1,17 +1,18 @@
 import { z } from "zod";
 import { akumaStatusSchema } from "./akuma.js";
 import { activityRowSchema, activitySnapshotSchema } from "./projection.js";
-import { tellResultSchema } from "./call-initial-tell.js";
+import { tellResultSchema, pendingTellReceipt } from "./call-initial-tell.js";
 import { akumaIdSchema } from "./identity.js";
 import type { WorldRoot } from "../world.js";
-import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
+import { AkumaNotBornError, AkumaProviderError, withTellFailureReceipt } from "./akuma-errors.js";
 import type { LiveStatusObservation, OutcomeObserver } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import type { AkumaStatus } from "./akuma.js";
 import { tellWakeRuntime, type TellResult } from "./body.js";
 import type { BodyLauncher } from "./body-launch.js";
 import {
-  compactTellResult,
+  tellAdmissionEvidence,
+  completeTell,
   type AkumaAskObservation,
   type AkumaAskResult,
   type AkumaKillResult,
@@ -57,38 +58,35 @@ type AskExecutionInput = TellExecutionInput & Readonly<{ timeoutMs?: number; sch
 export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
   if (input.wait === true) {
     const { akumaId, tellId, wake, interrupt, ...observation } = await executeAskAkuma(input);
-    return {
-      akumaId,
-      tellId,
-      ...(wake === undefined ? {} : { wake }),
-      ...(interrupt === undefined ? {} : { interrupt }),
-      input:
-        observation.kind === "invalid-output" ? { kind: "failed", diagnostic: observation.diagnostic } : observation,
-    };
+    return completeTell(
+      { akumaId, tellId, ...(wake === undefined ? {} : { wake }), ...(interrupt === undefined ? {} : { interrupt }) },
+      observation.kind === "invalid-output" ? { kind: "failed", diagnostic: observation.diagnostic } : observation,
+    );
   }
   input.signal?.throwIfAborted();
   const owner = new AkumaOwner(input.id, input.path);
-  let tell;
-  if (input.interrupt === true) {
-    const interrupted = await owner.interrupt(input.body, {
-      runtime: tellWakeRuntime(input.spawn),
-      ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
-      ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
-      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
-    if ("kind" in interrupted) throw new AkumaProviderError(`Tell interrupt unavailable: ${interrupted.evidence}`);
-    tell = interrupted;
-  } else {
-    tell = await owner.tell(input.body, input.tellId, input.recordedAt, tellWakeRuntime(input.spawn), {
-      ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-    });
+  const admission =
+    input.interrupt === true
+      ? await owner.admitInterrupt(input.body, input)
+      : await owner.admitTell(input.body, input.tellId, input.recordedAt, tellWakeRuntime(input.spawn), input);
+  if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
+  if (admission.kind === "unavailable")
+    throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
+  let tell: TellResult = {
+    ...pendingTellReceipt(admission.tell),
+    ...("barrier" in admission && admission.barrier !== undefined
+      ? { interruption: { kind: "pending", bodySequence: admission.barrier.bodySequence } }
+      : {}),
+  };
+  try {
+    tell = await ("wake" in admission
+      ? admission.wake
+      : owner.completeInterruptAdmission(admission, tellWakeRuntime(input.spawn), input.signal));
+    input.signal?.throwIfAborted();
+    return completeTell(tellAdmissionEvidence(input.id, tell));
+  } catch (error) {
+    throw withTellFailureReceipt(error, completeTell(tellAdmissionEvidence(input.id, tell)));
   }
-  input.signal?.throwIfAborted();
-  const { interrupt, ...compact } = compactTellResult(input.id, tell);
-  if (interrupt?.kind === "pending") throw new Error("Tell returned an unsettled interruption");
-  return { ...compact, ...(interrupt === undefined ? {} : { interrupt }) };
 }
 
 function askObservation(
@@ -150,16 +148,21 @@ export async function observeAdmittedAskAkuma(
         ? Math.max(0, observedAt - admittedAt)
         : 0
       : Math.max(0, performance.now() - input.startedAt);
-  const observed = await owner.tellOutcome(input.tellId, {
-    wake: () => {
-      if (wakeError !== undefined) throw wakeError.error;
-      return wakeState;
-    },
-    ...(input.timeoutMs === undefined ? {} : { timeoutMs: Math.max(0, input.timeoutMs - elapsed) }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
-  });
-  const receipt = compactTellResult(input.id, settled ?? tell);
+  let observed;
+  try {
+    observed = await owner.tellOutcome(input.tellId, {
+      wake: () => {
+        if (wakeError !== undefined) throw wakeError.error;
+        return wakeState;
+      },
+      ...(input.timeoutMs === undefined ? {} : { timeoutMs: Math.max(0, input.timeoutMs - elapsed) }),
+      ...(input.signal === undefined ? {} : { signal: input.signal }),
+      ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
+    });
+  } catch (error) {
+    throw withTellFailureReceipt(error, completeTell(tellAdmissionEvidence(input.id, settled ?? tell)));
+  }
+  const receipt = tellAdmissionEvidence(input.id, settled ?? tell);
   const observation = askObservation(observed);
   const { wake, ...subject } = receipt;
   return observation.kind === "unanswered" || observation.kind === "deadline"
@@ -167,76 +170,43 @@ export async function observeAdmittedAskAkuma(
     : { ...subject, ...(wake?.kind === "failed" ? { wake } : {}), ...observation };
 }
 
-/**
- * The interrupt half of Ask: admit the Tell together with its yield request,
- * then observe the answer bound to that same admission. Kept out of the public
- * operation so ordinary and interrupted admission each read as one flow; both
- * share `observeAdmittedAskAkuma`.
- */
-async function executeInterruptAskAkuma(
-  input: AskExecutionInput,
-  owner: AkumaOwner,
-): Promise<AkumaAskResult & { answer?: string }> {
-  const admission = await owner.admitInterrupt(input.body, {
-    ...(input.tellId === undefined ? {} : { tellId: input.tellId }),
-    ...(input.recordedAt === undefined ? {} : { recordedAt: input.recordedAt }),
-    ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
-    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
+export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAskResult & { answer?: string }> {
+  input.signal?.throwIfAborted();
+  const owner = new AkumaOwner(input.id, input.path);
+  const admission =
+    input.interrupt === true
+      ? await owner.admitInterrupt(input.body, input)
+      : await owner.admitTell(input.body, input.tellId, input.recordedAt, tellWakeRuntime(input.spawn), input);
+  if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
   if (admission.kind === "unavailable")
     throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
   const observing = new AbortController();
   const signal = input.signal === undefined ? observing.signal : AbortSignal.any([input.signal, observing.signal]);
-  const wake = owner.completeInterruptAdmission(admission, tellWakeRuntime(input.spawn), signal);
+  const wake =
+    "wake" in admission
+      ? admission.wake
+      : owner.completeInterruptAdmission(admission, tellWakeRuntime(input.spawn), signal);
+  const receipt: TellResult = {
+    ...pendingTellReceipt(admission.tell),
+    ...("barrier" in admission && admission.barrier !== undefined
+      ? { interruption: { kind: "pending", bodySequence: admission.barrier.bodySequence } }
+      : {}),
+  };
   try {
-    const receipt =
-      admission.barrier === undefined
-        ? undefined
-        : {
-            ...(await owner.admittedReceipt(admission.tell.id)),
-            interruption: { kind: "pending" as const, bodySequence: admission.barrier.bodySequence },
-          };
     return await observeAdmittedAskAkuma({
-      path: input.path,
-      id: input.id,
+      ...input,
       tellId: admission.tell.id,
-      ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-      startedAt: performance.now(),
+      receipt,
       wake,
-      ...(receipt === undefined ? {} : { receipt }),
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      ...(input.onObserve === undefined ? {} : { onObserve: input.onObserve }),
-      ...(input.outcomeObserved === undefined ? {} : { outcomeObserved: input.outcomeObserved }),
+      signal,
+      startedAt: performance.now(),
     });
   } finally {
-    if (!observing.signal.aborted) observing.abort(new Error("interrupt observation ended"));
-    await wake.catch(() => undefined);
+    if (!("wake" in admission)) {
+      observing.abort(new Error("interrupt observation ended"));
+      await wake.catch(() => undefined);
+    }
   }
-}
-
-export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAskResult & { answer?: string }> {
-  input.signal?.throwIfAborted();
-  const owner = new AkumaOwner(input.id, input.path);
-  if (input.interrupt === true) return await executeInterruptAskAkuma(input, owner);
-
-  const admission = await owner.admitTell(input.body, input.tellId, input.recordedAt, tellWakeRuntime(input.spawn), {
-    ...(input.schemaJson === undefined ? {} : { schemaJson: input.schemaJson }),
-    ...(input.initiator === undefined ? {} : { initiator: input.initiator }),
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
-  if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
-  return await observeAdmittedAskAkuma({
-    path: input.path,
-    id: input.id,
-    tellId: admission.tell.id,
-    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-    startedAt: performance.now(),
-    wake: admission.wake,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-    ...(input.onObserve === undefined ? {} : { onObserve: input.onObserve }),
-    ...(input.outcomeObserved === undefined ? {} : { outcomeObserved: input.outcomeObserved }),
-  });
 }
 
 type KillExecutionInput = Readonly<{

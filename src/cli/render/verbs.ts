@@ -11,6 +11,7 @@ import {
   historyRawAnswer,
   historyText,
   snapshotText,
+  tellControlLines,
   tellText,
   waitText,
 } from "./akuma-activity.js";
@@ -108,6 +109,18 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
       context,
       name === "spawn" ? spawnPresentation(input as VerbInput<"spawn">) : {},
     );
+  if (failure.tell !== undefined)
+    return [
+      `× ${name} failed`,
+      tellText(
+        failure.tell,
+        "prompt" in input && typeof input.prompt === "string" ? input.prompt : "",
+        undefined,
+        context,
+      ),
+      `  input ${failure.tell.tellId}`,
+      `  reason ${safeText(failure.diagnostic)}`,
+    ].join("\n");
   if (error instanceof KeiyakuArcDocumentError) {
     return renderRefusal(
       { operation: "arc", contract: error.contract, refusal: { kind: "invalid-document", diagnostic: error.message } },
@@ -145,8 +158,9 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
       ...(absent ? ["available  keiyaku ls aku/"] : []),
     ]);
   }
-  const diagnostic = error instanceof Error ? error.message : String(error);
-  return error instanceof KeiyakuUsageError ? diagnostic : `× ${name} failed\n  reason  ${safeText(diagnostic)}`;
+  return error instanceof KeiyakuUsageError
+    ? failure.diagnostic
+    : `× ${name} failed\n  reason  ${safeText(failure.diagnostic)}`;
 }
 
 function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">, context: TextRenderContext): string {
@@ -238,16 +252,16 @@ function renderAsk(
   context: TextRenderContext,
 ): string {
   const selectedAlias = alias(input.akuma);
-  if (!("kind" in result) && result.input === undefined) return tellText(result, input.prompt, selectedAlias, context);
-  return "kind" in result && result.kind === "answered"
-    ? (askRawAnswer(result) ?? "")
-    : !("kind" in result) && result.input?.kind === "answered"
-      ? result.input.answer
-      : waitedTellProgress(
-          result,
-          { prompt: input.prompt, ...(selectedAlias === undefined ? {} : { alias: selectedAlias }) },
-          context,
-        );
+  if ((result.kind === "admitted" || (result.kind === "failed" && "failures" in result)) && result.input === undefined)
+    return tellText(result, input.prompt, selectedAlias, context);
+  const answer = askRawAnswer(result);
+  return answer !== undefined && tellControlLines(result, context).length === 0
+    ? answer
+    : waitedTellProgress(
+        result,
+        { prompt: input.prompt, ...(selectedAlias === undefined ? {} : { alias: selectedAlias }) },
+        context,
+      );
 }
 
 function spawnPresentation(input: VerbInput<"spawn">) {

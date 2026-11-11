@@ -655,7 +655,7 @@ export type ObservedCallHead = Readonly<{
 export type InputWaitConclusion =
   | Readonly<{
       kind: "failed";
-      diagnostic: string;
+      diagnostic?: string;
       /** Already-decided evidence rows, such as a Tell admitted before the failure. */
       evidence?: readonly string[];
     }>
@@ -752,8 +752,9 @@ export function inputWaitStream(
     open(lines, result.kind === "failed");
     if (result.kind === "failed" && result.evidence !== undefined) lines.push(...result.evidence);
     lines.push(...activity.flush());
-    if (result.kind === "failed") lines.push(`! ${safeText(result.diagnostic)}`);
-    else {
+    if (result.kind === "failed") {
+      if (result.diagnostic !== undefined) lines.push(`! ${safeText(result.diagnostic)}`);
+    } else {
       const currentTime = now();
       lines.push(
         ...inputWaitConclusion(result.observation, {
@@ -773,7 +774,7 @@ export function inputWaitStream(
 export function callObservationStream(
   context: TextRenderContext,
   head: ObservedCallHead,
-  options: Readonly<{ now?: () => number; admittedAt?: string; prompt?: string }> = {},
+  options: Readonly<{ now?: () => number | undefined; admittedAt?: string; prompt?: string }> = {},
 ): CallObservationStream {
   const stream = inputWaitStream(context, () => head, {
     cursor: "empty",
@@ -781,7 +782,6 @@ export function callObservationStream(
     ...(options.now === undefined ? {} : { now: options.now }),
   });
   stream.admitted({ ...(options.admittedAt === undefined ? {} : { at: options.admittedAt }), rows: [] });
-  /** Tell rows already settled on the timeline, so a failed close never replays one. */
   const settledTells = new Set<string>();
   return {
     ...stream,
@@ -790,18 +790,29 @@ export function callObservationStream(
       return stream.observe(observation);
     },
     conclude: (result) => {
-      if (result.failure !== undefined) {
-        const evidence =
-          result.tellId === undefined || settledTells.has(result.tellId) || options.prompt === undefined
+      const failures = result.kind === "failed" ? callFailureLines(result.failures, context) : [];
+      const controls = [
+        ...(result.tellId === undefined || callRawAnswer(result, false) !== undefined
+          ? []
+          : [`input ${result.tellId}`]),
+        ...tellControlLines(result.wake === undefined ? {} : { wake: result.wake }, context),
+      ];
+      if (result.input !== undefined)
+        return [
+          stream.conclude({ kind: "observed", observation: result.input }),
+          ...subordinateLines([...failures, ...controls]),
+        ].join("\n");
+      if (result.kind !== "failed") return "";
+      return stream.conclude({
+        kind: "failed",
+        evidence: [
+          ...(result.tellId === undefined || settledTells.has(result.tellId) || options.prompt === undefined
             ? []
-            : [tellAdmissionRow(options.prompt, context, result.wake)];
-        return stream.conclude({
-          kind: "failed",
-          diagnostic: result.failure.diagnostic,
-          ...(evidence.length === 0 ? {} : { evidence }),
-        });
-      }
-      return result.input === undefined ? "" : stream.conclude({ kind: "observed", observation: result.input });
+            : [tellAdmissionRow(options.prompt, context, result.wake)]),
+          ...failures,
+          ...controls,
+        ],
+      });
     },
   };
 }
@@ -929,12 +940,30 @@ type AkumaPresentation = Readonly<{
   alias?: string;
 }>;
 
-export function askRawAnswer(result: AkumaAskResult): string | undefined {
-  return result.kind === "answered" ? JSON.stringify(result.answer) : "";
+export function inputObservation(result: AkumaAskResult | AkumaTellResult): AkumaAskObservation {
+  if (result.kind === "admitted") return result.input ?? { kind: "unanswered" };
+  if (result.kind === "failed" && "failures" in result)
+    return result.input ?? { kind: "failed", diagnostic: result.failures[0].diagnostic };
+  return result;
+}
+
+export function askRawAnswer(result: AkumaAskResult | AkumaTellResult): string | undefined {
+  if (result.kind === "admitted" || (result.kind === "failed" && "failures" in result))
+    return result.input?.kind === "answered" ? result.input.answer : undefined;
+  return result.kind === "answered" ? JSON.stringify(result.answer) : undefined;
 }
 
 export function callRawAnswer(result: SpawnResult, streamed: boolean): string | undefined {
-  return result.input?.kind === "answered" ? result.input.answer : streamed ? "" : undefined;
+  if (result.input?.kind !== "answered") return streamed ? "" : undefined;
+  if (
+    !streamed &&
+    (result.kind === "failed" ||
+      result.wake !== undefined ||
+      result.alias !== undefined ||
+      result.dispatchWarning !== undefined)
+  )
+    return undefined;
+  return result.input.answer;
 }
 
 export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {
@@ -1109,25 +1138,44 @@ export function tellAdmissionRow(
   })[0]!;
 }
 
-export function tellControlLines(
-  result: Pick<AkumaAskResult, "wake" | "interrupt">,
+export function callFailureLines(
+  failures: readonly Extract<SpawnResult, { kind: "failed" }>["failures"][number][],
   context: TextRenderContext,
 ): readonly string[] {
-  const lines: string[] = [];
+  return failures.flatMap((failure) => {
+    if (failure.stage === "dispatch")
+      return [
+        failure.failure.kind === "conflict"
+          ? `! dispatch failed conflict ${failure.failure.currentContractId}`
+          : `! dispatch failed ${failure.failure.kind} ${safeText(failure.failure.diagnostic)}`,
+      ];
+    if (failure.stage === "wake")
+      return diagnosticLines("tell delivery", failure.diagnostic, context.columns - SUBORDINATE_INDENT.length, {
+        state: "failed",
+        suffix: failure.logPath === undefined ? "" : ` · log ${failure.logPath}`,
+      });
+    return [
+      `! ${failure.stage} failed ${"kind" in failure ? `${failure.kind} ` : ""}${safeText(failure.diagnostic)}`,
+      ...("attemptedTellId" in failure && failure.attemptedTellId !== undefined
+        ? [`attempted input ${safeText(failure.attemptedTellId)}`]
+        : []),
+    ];
+  });
+}
+
+export function tellControlLines(
+  result: Pick<AkumaAskResult, "wake" | "interrupt"> &
+    Readonly<{ failures?: Extract<AkumaTellResult, { kind: "failed" }>["failures"] }>,
+  context: TextRenderContext,
+): readonly string[] {
+  const lines: string[] = [...callFailureLines(result.failures ?? [], context)];
   const wake = result.wake;
   if (wake?.kind === "failed") {
-    lines.push(
-      ...diagnosticLines("tell delivery", wake.diagnostic, context.columns - SUBORDINATE_INDENT.length, {
-        state: "failed",
-        suffix: wake.logPath === undefined ? "" : ` · log ${wake.logPath}`,
-      }),
-    );
+    lines.push(...callFailureLines([{ ...wake, stage: "wake" }], context));
   } else if (wake?.kind === "pending") lines.push("wake pending");
   const interrupt = result.interrupt;
   if (interrupt !== undefined)
-    lines.push(
-      `interrupt ${interrupt.kind} · body/${interrupt.bodySequence}${interrupt.kind === "unavailable" ? ` · ${interrupt.evidence}` : ""}`,
-    );
+    lines.push(`interrupt ${interrupt.kind}${interrupt.kind === "unavailable" ? ` · ${interrupt.evidence}` : ""}`);
   return lines;
 }
 
@@ -1144,8 +1192,8 @@ export function tellText(
   context: TextRenderContext,
 ): string {
   const wake = result.wake;
-  const mark = wake?.kind === "failed" ? "!" : wake?.kind === "pending" ? "⧗" : "✓";
-  const verb = wake?.kind === "failed" || wake?.kind === "pending" ? "tell" : "told";
+  const mark = result.kind === "failed" ? "!" : wake?.kind === "pending" ? "⧗" : "✓";
+  const verb = result.kind === "failed" || wake?.kind === "pending" ? "tell" : "told";
   const head = actionReceipt({
     mark,
     verb,

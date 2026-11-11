@@ -10,6 +10,9 @@ import {
   killResultText,
   subordinateLines,
   tellAdmissionRow,
+  callFailureLines,
+  askRawAnswer,
+  inputObservation,
   tellControlLines,
   tellPayloadLines,
   type ObservedCallHead,
@@ -51,13 +54,16 @@ export function askProgressStream(
     observe: (observation) => stream.observe(observation),
     frame: () => stream.frame(),
     flush: () => stream.flush(),
-    conclude: (result) => [
-      stream.conclude({
-        kind: "observed",
-        observation: "kind" in result ? result : (result.input ?? { kind: "unanswered" }),
-      }),
-      ...subordinateLines(tellControlLines(result, context)),
-    ],
+    conclude: (result) => {
+      const controls = tellControlLines(result, context);
+      return [
+        stream.conclude({ kind: "observed", observation: inputObservation(result) }),
+        ...subordinateLines([
+          ...(controls.length === 0 && askRawAnswer(result) !== undefined ? [] : [`input ${result.tellId}`]),
+          ...controls,
+        ]),
+      ];
+    },
   };
 }
 
@@ -81,16 +87,12 @@ export function waitedTellProgress(
     ...admitted,
     stream.conclude({
       kind: "observed",
-      observation: "kind" in result ? result : (result.input ?? { kind: "unanswered" }),
+      observation: inputObservation(result),
     }),
-    ...subordinateLines(tellControlLines(result, context)),
+    ...subordinateLines([`input ${result.tellId}`, ...tellControlLines(result, context)]),
+    ...(askRawAnswer(result) === undefined ? [] : [askRawAnswer(result)!]),
+    ...(result.kind === "invalid-output" ? ["invalid answer", result.answer] : []),
   ].join("\n");
-}
-
-function dispatchFailureLine(failure: NonNullable<SpawnResult["dispatchFailure"]>): string {
-  return failure.kind === "conflict"
-    ? `! dispatch failed conflict ${failure.currentContractId}`
-    : `! dispatch failed ${failure.kind} ${safeText(failure.diagnostic)}`;
 }
 
 type SpawnPresentation = Readonly<{ prompt?: string; cwd?: string; alias?: string; contractId?: string }>;
@@ -99,26 +101,21 @@ export function callObservationHead(
   input: SpawnResult | (SpawnWaitHead & Readonly<{ akumaId: string }>),
   presentation: SpawnPresentation = {},
 ): ObservedCallHead {
-  const alias =
-    input.alias !== undefined && input.alias.kind !== "moved"
-      ? undefined
-      : "aliasName" in input
-        ? input.aliasName
-        : presentation.alias;
-  const contractId =
-    input.dispatchFailure !== undefined
-      ? undefined
-      : "contractId" in input
-        ? input.contractId
-        : presentation.contractId;
+  const failures = "failures" in input ? (input.failures ?? []) : [];
+  const alias = failures.some((failure) => failure.stage === "dispatch" || failure.stage === "alias")
+    ? undefined
+    : "aliasName" in input
+      ? input.aliasName
+      : presentation.alias;
+  const contractId = failures.some((failure) => failure.stage === "dispatch")
+    ? undefined
+    : "contractId" in input
+      ? input.contractId
+      : presentation.contractId;
   const cwd = "cwd" in input ? input.cwd : presentation.cwd;
   const facts = [
-    ...(input.dispatchFailure === undefined ? [] : [dispatchFailureLine(input.dispatchFailure)]),
     ...(input.dispatchWarning === undefined ? [] : [`dispatch lag ${safeText(input.dispatchWarning)}`]),
-    ...(input.alias !== undefined && input.alias.kind !== "moved"
-      ? [`! alias failed ${input.alias.kind} ${safeText(input.alias.diagnostic)}`]
-      : []),
-    ...(input.alias?.kind === "moved" ? [`alias moved · previous ${input.alias.previousAkumaId}`] : []),
+    ...(input.alias === undefined ? [] : [`alias moved · previous ${input.alias.previousAkumaId}`]),
   ];
   return {
     id: input.akumaId,
@@ -135,18 +132,12 @@ function spawnEvidence(result: SpawnResult, context: TextRenderContext, input: S
     ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
     ...(head.cwd === undefined ? [] : [safeText(head.cwd)]),
     ...head.facts,
-    ...tellControlLines(result, context),
+    ...tellControlLines(result.wake === undefined ? {} : { wake: result.wake }, context),
+    ...(result.tellId === undefined ? [] : [`input ${result.tellId}`]),
     ...(result.tellId === undefined || input.prompt === undefined
       ? []
       : tellPayloadLines(input.prompt, context).map((line) => line.trimStart())),
-    ...(result.failure === undefined
-      ? []
-      : [
-          `! ${result.failure.kind} · ${safeText(result.failure.diagnostic)}`,
-          ...(result.failure.attemptedTellId === undefined
-            ? []
-            : [`attempted input ${safeText(result.failure.attemptedTellId)}`]),
-        ]),
+    ...(result.kind === "failed" ? callFailureLines(result.failures, context) : []),
   ];
 }
 
@@ -158,20 +149,12 @@ export function renderCallText(
 ): string {
   if (streamed) return "";
   const head = callObservationHead(result, input);
-  if (result.input !== undefined && result.failure === undefined) {
-    const stream = inputWaitStream(context, () => head, { cursor: "empty", now: () => context.now });
-    stream.admitted({ rows: [] });
-    return [
-      stream.conclude({ kind: "observed", observation: result.input }),
-      ...subordinateLines(tellControlLines(result, context)),
-    ].join("\n");
+  if (result.input !== undefined) {
+    const stream = callObservationStream(context, head, { now: () => context.now });
+    return [stream.conclude(result), ...(result.input.kind === "answered" ? [result.input.answer] : [])].join("\n");
   }
-  const failed =
-    result.failure !== undefined ||
-    result.dispatchFailure !== undefined ||
-    (result.alias !== undefined && result.alias.kind !== "moved");
   return actionReceipt({
-    mark: failed ? "!" : "✓",
+    mark: result.kind === "failed" ? "!" : "✓",
     verb: "spawned",
     id: result.akumaId,
     ...(head.alias === undefined ? {} : { alias: head.alias }),
@@ -206,7 +189,7 @@ export function renderFailedCallObservation(
 
 export function renderForkText(receipt: ForkResult, input: Readonly<{ akuma: string; at: string }>): string {
   const parent = receipt.parentAkumaId ?? input.akuma;
-  if (receipt.kind !== "forked") {
+  if (receipt.kind !== "forked" && receipt.kind !== "failed") {
     const reason =
       receipt.kind === "unknown-history"
         ? `${input.at} has no matching retained answered turn`
@@ -218,13 +201,16 @@ export function renderForkText(receipt: ForkResult, input: Readonly<{ akuma: str
     return actionReceipt({ mark: "!", verb: "fork", id: parent, evidence: [reason, ...session] }).join("\n");
   }
   return actionReceipt({
-    mark: receipt.dispatchFailure === undefined ? "✓" : "!",
+    mark: receipt.kind === "forked" ? "✓" : "!",
     verb: "forked",
     id: receipt.childAkumaId,
     evidence: [
       `from ${parent}`,
-      ...(receipt.dispatchFailure === undefined ? [] : [dispatchFailureLine(receipt.dispatchFailure)]),
-      ...(receipt.dispatchWarning === undefined ? [] : [`dispatch lag ${safeText(receipt.dispatchWarning)}`]),
+      ...(receipt.kind === "failed"
+        ? callFailureLines([receipt.failure], { columns: 100, color: false })
+        : receipt.dispatchWarning === undefined
+          ? []
+          : [`dispatch lag ${safeText(receipt.dispatchWarning)}`]),
     ],
   }).join("\n");
 }

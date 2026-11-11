@@ -122,7 +122,7 @@ class AkumasHandle {
   fork(input: ForkInput): Promise<ForkResult> {
     const pending = forkAkumas(this.withWorld(input, "Akumas.fork input"), this.#spawn);
     return pending.then(async (result) => {
-      if (result.kind === "forked") await this.maintain(this.#world);
+      if ("childAkumaId" in result) await this.maintain(this.#world);
       return result;
     });
   }

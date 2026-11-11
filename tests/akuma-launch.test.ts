@@ -216,9 +216,11 @@ test("detached wake retains native exit, signal, and bounded log evidence", asyn
       process.env.NODE_OPTIONS = appendNodeOptionsImport(pathToFileURL(preload).href, priorOptions ?? "");
       writeFileSync(allocated.paths.log, "prior log\n");
       const result = await Akuma.select(world, allocated.id).tell("pending");
-      const wake = result.wake;
-      assert.equal(wake?.kind, "failed");
-      if (wake?.kind !== "failed") throw new Error("missing detached evidence");
+      assert.equal(result.kind, "failed");
+      if (result.kind !== "failed") throw new Error("missing detached evidence");
+      const wake = result.failures[0];
+      assert.equal(wake.stage, "wake");
+      if (wake.stage !== "wake") throw new Error("missing wake evidence");
       assert.equal(wake.diagnostic, `pre-admission ${scenario.status}`);
       assert.equal(wake.logPath, allocated.paths.log, "the failed wake names its retained run-log evidence");
       const log = readFileSync(allocated.paths.log);

@@ -154,7 +154,11 @@ Gate evidence keeps its compact visual
 state beside each gate and requirement's identity across status, board, history,
 preview, receipts, and JSON; current declarations may be labeled by current one-based
 position while removed historical requirements retain stable identity. A raw
-caller answer remains raw when that operation promises answer bytes. Recording
+caller answer remains raw when that operation promises answer bytes and has no
+meaningful failure, control, or recovery evidence. Otherwise the shared receipt
+presents the answer together with confirmed admission, association, wake,
+observation, and recovery evidence. An answered Ask's accepted judgment does not
+hide its historical wake diagnostic. Recording
 review testimony and completing placement remain distinct facts; absence of
 completion does not establish a candidate.
 

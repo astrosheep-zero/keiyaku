@@ -643,7 +643,7 @@ const promptInput = (id = "client-1", text = "change direction"): Extract<Provid
   },
 });
 function tellReceipt(wake?: TellAdmission["wake"], tellId = "new-tell"): TellAdmission {
-  return { akumaId: akumaId({ akumaName: "test", suffix: "00000001" }), tellId, ...(wake === undefined ? {} : { wake }) };
+  return { kind: "admitted", akumaId: akumaId({ akumaName: "test", suffix: "00000001" }), tellId, ...(wake === undefined ? {} : { wake }) };
 }
 const promptResults = (events: ProviderEvent[]) => events.filter((event) => event.type === "session.prompt_result");
 const notices = (events: ProviderEvent[]) => items(events).flatMap((event) => event.item.type === "notification" ? [event.item.message] : []);
@@ -696,7 +696,7 @@ test("pending admission and failed wake acknowledge success without inventing Ak
   assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "completed" });
   assert.deepEqual(notices(h.events), []);
   assert.equal(turns(h.events).length, 0, "admission does not start or finish an Akuma Turn");
-  receipt = tellReceipt({ kind: "failed", diagnostic: "frozen directory is missing" }, "failed-wake");
+  receipt = { kind: "failed", akumaId: receipt.akumaId, tellId: "failed-wake", failures: [{ stage: "wake", diagnostic: "frozen directory is missing" }] };
   const second = request(); second.prompt.clientMessageId = "client-2";
   await h.connection.send(second);
   assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "completed" });

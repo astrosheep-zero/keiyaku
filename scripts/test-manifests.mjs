@@ -62,6 +62,7 @@ export const LOCAL_TEST_FILES = [
 export const INTEGRATION_TEST_FILES = [
   "tests/akuma-api.test.ts",
   "tests/akuma-body.test.ts",
+  "tests/akuma-call-outcomes.test.ts",
   "tests/akuma-caller-native.test.ts",
   "tests/akuma-heart-admission.test.ts",
   "tests/akuma-heart-observation.test.ts",

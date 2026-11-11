@@ -172,7 +172,7 @@ test("a successful call runs the maintenance pass while read-only observations n
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(called.failure, undefined);
+  assert.equal(called.kind, "spawned");
   assert.equal(existsSync(old.paths.directory), false);
   assert.equal(existsSync(recent.paths.heart), true);
   assert.deepEqual(await sweepInactiveAkumas(world), [], "removal is idempotent and the recent entry survives");
@@ -196,7 +196,7 @@ test("a same-handle later call reruns maintenance after a sweep failure", async 
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(one.failure, undefined);
+  assert.equal(one.kind, "spawned");
   assert.equal(existsSync(first.paths.heart), true, "a failed sweep is retried by a later call");
 
   unlinkSync(aliasAuthority);
@@ -209,7 +209,7 @@ test("a same-handle later call reruns maintenance after a sweep failure", async 
     home: settingsFixture.home,
     settings: settingsFixture.value,
   });
-  assert.equal(two.failure, undefined);
+  assert.equal(two.kind, "spawned");
   assert.equal(existsSync(first.paths.heart), false);
   assert.equal(existsSync(second.paths.heart), false);
 });

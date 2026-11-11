@@ -340,7 +340,7 @@ test("spawn and fork results describe real creation and refusal", async (context
     fixtureLauncher(bodies, new Map([[launch.paths.directory, { adapter, now: "2026-08-10T00:00:00.000Z" }]]))(launch);
   const akumas = akumasWithLauncher(fixture.world, launcher);
   const spawned = await akumas.spawn({ akumaName: "worker", home, cwd: directory });
-  assert.equal(spawned.failure, undefined);
+  assert.equal(spawned.kind, "spawned");
   assert.equal(spawned.input, undefined);
   assertWireRoundTrip(root.spawnResultSchema, spawned);
   let admitted = false;

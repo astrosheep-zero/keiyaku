@@ -220,7 +220,7 @@ test("a released Akuma Body completes through Pi and an OpenAI chat completion e
       home,
       mode: "detach",
     });
-    assert.equal(spawned.failure, undefined);
+    assert.equal(spawned.kind, "spawned");
     const handle = Akuma.select(worldRoot, spawned.akumaId);
     const { status } = await handle.idle({ timeoutMs: 15_000 });
     assert.deepEqual(

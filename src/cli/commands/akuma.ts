@@ -95,7 +95,7 @@ export async function runSpawn(request: VerbRequest<"spawn">, runtime: CliRuntim
     });
     let streamed = stream !== undefined;
     if (stream !== undefined) driver.conclude(stream.conclude(result));
-    else if (observing && result.failure !== undefined) {
+    else if (observing && result.kind === "failed") {
       writeStderr(
         renderFailedCallObservation(
           result,
@@ -144,11 +144,7 @@ export async function runAsk(request: VerbRequest<"ask" | "tell">, runtime: CliR
     if (progress !== undefined) driver.conclude(progress.conclude(result).join("\n"));
     const completion = { kind: "returned" as const, value: result };
     if (output === "json") writeJson(result);
-    else
-      emitAnswer(
-        "kind" in result ? (askRawAnswer(result) ?? "") : result.input?.kind === "answered" ? result.input.answer : "",
-        true,
-      );
+    else emitAnswer(askRawAnswer(result) ?? "", true);
     return classifyVerb(request.name, input, completion);
   } finally {
     driver.close(progress?.flush() ?? []);

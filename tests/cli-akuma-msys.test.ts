@@ -20,8 +20,8 @@ function parseExecution(argv: readonly string[]): ParsedCommandInvocation {
 
 const command = parseExecution(["spawn", "worker", "prompt"]).command;
 
-function spawned(extra: Partial<SpawnResult> = {}): SpawnResult {
-  return { akumaId: akuma, ...extra };
+function spawned(extra: Omit<Extract<SpawnResult, { kind: "spawned" }>, "kind" | "akumaId"> | Omit<Extract<SpawnResult, { kind: "failed" }>, "akumaId"> = {}): SpawnResult {
+  return { kind: "spawned", akumaId: akuma, ...extra };
 }
 
 test("spawn defaults to detached birth and rejects removed detach flags", () => {
@@ -86,7 +86,7 @@ test("a detached call keeps its born child, execution directory, and native fail
   const text = renderCallText(
     spawned({
       tellId: "tell/msys",
-      failure: { kind: "infrastructure", diagnostic: "window lost" },
+      kind: "failed", failures: [{ stage: "tell", kind: "infrastructure", diagnostic: "window lost" }],
     }),
     false,
     context,
@@ -97,8 +97,9 @@ test("a detached call keeps its born child, execution directory, and native fail
     [
       `! spawned ${akuma}`,
       `  ${world}`,
+      "  input tell/msys",
       '  "prompt"',
-      "  ! infrastructure · window lost",
+      "  ! tell failed infrastructure window lost",
     ].join("\n"),
     "a failed Tell stage stays an action receipt over the admitted child, its directory, and its Tell input",
   );
@@ -114,11 +115,11 @@ test("detached spawn keeps alias and independent partial failures", () => {
 
   const failures = [
     {
-      result: spawned({ dispatchFailure: { kind: "infrastructure", diagnostic: "busy" } }),
+      result: spawned({ kind: "failed", failures: [{ stage: "dispatch", failure: { kind: "infrastructure", diagnostic: "busy" } }] }),
       diagnostic: "! dispatch failed infrastructure busy",
     },
     {
-      result: spawned({ alias: { kind: "infrastructure", diagnostic: "locked" } }),
+      result: spawned({ kind: "failed", failures: [{ stage: "alias", kind: "infrastructure", diagnostic: "locked" }] }),
       diagnostic: "! alias failed infrastructure locked",
     },
   ];

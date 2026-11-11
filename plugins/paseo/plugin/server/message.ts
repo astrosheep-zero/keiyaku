@@ -33,6 +33,7 @@ export function messageText(prompt: ProviderPrompt): string {
  */
 export function tellPresentation(admitted: TellAdmission, text: string, steerTurnId?: string): { row: AdmittedMessage; result: PromptResult } {
   const row = { tellId: admitted.tellId, text };
-  if (admitted.wake?.kind === "failed") console.warn(`Keiyaku Tell ${admitted.tellId} recorded; wake failed: ${admitted.wake.diagnostic}`);
+  if (admitted.kind === "failed") for (const failure of admitted.failures)
+    console.warn(`Keiyaku Tell ${admitted.tellId} recorded; ${failure.stage} failed: ${failure.diagnostic}`);
   return { row, result: steerTurnId === undefined ? { type: "completed" } : { type: "steer", turnId: steerTurnId } };
 }

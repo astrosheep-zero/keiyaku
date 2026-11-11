@@ -4,7 +4,7 @@ import type { WorldRoot } from "../world.js";
 import { bornStatus, defaultWaitComplete, readWaitComplete, waitForObservation } from "./akuma-observe.js";
 import { recordTell, type TellFact } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId } from "./identity.js";
-import { BIRTH_TIMEOUT_MS } from "./publication.js";
+export const BIRTH_TIMEOUT_MS = 30_000;
 
 export type CallInitialTell = Readonly<{
   tellId: string;
@@ -61,6 +61,15 @@ export type TellWake = z.output<typeof tellWakeSchema>;
 
 /** The progress receipt carries only the Tell coordinates progress needs; Heart keeps the native row. */
 export type TellResult = z.output<typeof tellResultSchema>;
+
+/** Freeze known admission before waiting for wake; no later read can replace it. */
+export function pendingTellReceipt(tell: TellFact): TellResult {
+  return {
+    admission: { tellId: tell.id },
+    row: { sequence: tell.sequence, at: tell.recordedAt, text: tell.body },
+    wake: { kind: "pursuing" },
+  };
+}
 
 export type CallInitialTellAdmission =
   | Readonly<{ kind: "admitted"; tell: TellFact; wake: Promise<TellResult> }>

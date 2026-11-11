@@ -79,44 +79,53 @@ export const akumaKillResultSchema = z
     results: z.array(z.strictObject({ id: akumaIdSchema, outcome: killEvidenceSchema }).readonly()).readonly(),
   })
   .readonly();
-const bodyPositionSchema = z.number().int().positive();
-const failedWakeSchema = z
-  .strictObject({
-    kind: z.literal("failed"),
-    diagnostic: z.string(),
-    logPath: z.string().exactOptional(),
-  })
+export const operationDiagnosticSchema = z
+  .strictObject({ kind: z.enum(["authority-corruption", "infrastructure"]), diagnostic: z.string() })
   .readonly();
-export const publicWakeSchema = z.union([z.strictObject({ kind: z.literal("pending") }).readonly(), failedWakeSchema]);
-const settledInterruptSchema = z.union([
-  z.strictObject({ kind: z.literal("interrupted"), bodySequence: bodyPositionSchema }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("unavailable"),
-      bodySequence: bodyPositionSchema,
-      evidence: z.enum(["hung", "untidy"]),
-    })
-    .readonly(),
-]);
+const failedWakeSchema = z
+  .strictObject({ kind: z.literal("failed"), diagnostic: z.string(), logPath: z.string().exactOptional() })
+  .readonly();
+const pendingWakeSchema = z.strictObject({ kind: z.literal("pending") }).readonly();
 const interruptSchema = z.union([
-  ...settledInterruptSchema.options,
-  z.strictObject({ kind: z.literal("pending"), bodySequence: bodyPositionSchema }).readonly(),
+  z.strictObject({ kind: z.literal("pending") }).readonly(),
+  z.strictObject({ kind: z.literal("unavailable"), evidence: z.enum(["hung", "untidy"]) }).readonly(),
 ]);
-export const akumaTextObservationSchema = z.union([
+export const tellFailureSchema = z.union([
+  failedWakeSchema
+    .unwrap()
+    .omit({ kind: true })
+    .extend({ stage: z.literal("wake") })
+    .readonly(),
+  z.strictObject({ stage: z.literal("observation"), diagnostic: z.string() }).readonly(),
+]);
+type TellFailure = z.output<typeof tellFailureSchema>;
+const akumaTextObservationSchema = z.union([
   z.strictObject({ kind: z.literal("answered"), answer: z.string() }).readonly(),
   z.strictObject({ kind: z.literal("failed"), diagnostic: z.string() }).readonly(),
   z.strictObject({ kind: z.literal("unanswered") }).readonly(),
   z.strictObject({ kind: z.literal("deadline") }).readonly(),
 ]);
-export const akumaTellResultSchema = z
-  .strictObject({
-    akumaId: akumaIdSchema,
-    tellId: z.string(),
-    wake: publicWakeSchema.exactOptional(),
-    interrupt: interruptSchema.exactOptional(),
-    input: akumaTextObservationSchema.exactOptional(),
-  })
-  .readonly();
+export const completedTextObservationSchema = z.union([
+  akumaTextObservationSchema.options[0],
+  akumaTextObservationSchema.options[2],
+  akumaTextObservationSchema.options[3],
+]);
+const askSubject = { akumaId: akumaIdSchema, tellId: z.string(), interrupt: interruptSchema.exactOptional() };
+const tellAnswer = {
+  ...askSubject,
+  wake: pendingWakeSchema.exactOptional(),
+  input: completedTextObservationSchema.exactOptional(),
+};
+export const akumaTellResultSchema = z.union([
+  z.strictObject({ kind: z.literal("admitted"), ...tellAnswer }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("failed"),
+      ...tellAnswer,
+      failures: z.tuple([tellFailureSchema], tellFailureSchema).readonly(),
+    })
+    .readonly(),
+]);
 export const akumaAskObservationSchema = z.union([
   z.strictObject({ kind: z.literal("answered"), answer: z.json() }).readonly(),
   akumaTextObservationSchema.options[1],
@@ -124,9 +133,8 @@ export const akumaAskObservationSchema = z.union([
   akumaTextObservationSchema.options[2],
   akumaTextObservationSchema.options[3],
 ]);
-const askSubject = { akumaId: akumaIdSchema, tellId: z.string(), interrupt: interruptSchema.exactOptional() };
 const settledAskSubject = { ...askSubject, wake: failedWakeSchema.exactOptional() };
-const pendingAskSubject = { ...askSubject, wake: publicWakeSchema.exactOptional() };
+const pendingAskSubject = { ...askSubject, wake: z.union([pendingWakeSchema, failedWakeSchema]).exactOptional() };
 export const akumaAskResultSchema = z.union([
   akumaAskObservationSchema.options[0].unwrap().extend(settledAskSubject).readonly(),
   akumaAskObservationSchema.options[1].unwrap().extend(settledAskSubject).readonly(),
@@ -145,10 +153,7 @@ export type AkumaAskObservation = z.output<typeof akumaAskObservationSchema>;
 export type AkumaAskResult = z.output<typeof akumaAskResultSchema>;
 
 /** Project this invocation's already observed admission, never reread it. */
-export function compactTellResult(
-  akumaId: AkumaId,
-  tell: TellResult,
-): Omit<AkumaTellResult, "interrupt"> & Readonly<{ interrupt?: z.output<typeof interruptSchema> }> {
+export function tellAdmissionEvidence(akumaId: AkumaId, tell: TellResult) {
   const interruption = tell.interruption;
   const wake = tell.wake;
   return {
@@ -166,13 +171,36 @@ export function compactTellResult(
                 }
               : { kind: "pending" as const },
         }),
-    ...(interruption === undefined
+    ...(interruption === undefined || interruption.kind === "completed"
       ? {}
       : {
           interrupt:
-            interruption.kind === "completed"
-              ? { kind: "interrupted" as const, bodySequence: interruption.bodySequence }
-              : interruption,
+            interruption.kind === "pending"
+              ? { kind: "pending" as const }
+              : { kind: "unavailable" as const, evidence: interruption.evidence },
         }),
   };
+}
+
+/** Tell judges wake and observation together; an answer cannot erase a failed wake. */
+export function completeTell(
+  receipt: ReturnType<typeof tellAdmissionEvidence>,
+  observation?: z.output<typeof akumaTextObservationSchema>,
+): AkumaTellResult {
+  const { wake, ...subject } = receipt;
+  const failures: TellFailure[] = [];
+  if (wake?.kind === "failed") {
+    const { kind: _kind, ...failure } = wake;
+    failures.push({ stage: "wake", ...failure });
+  }
+  if (observation?.kind === "failed") failures.push({ stage: "observation", diagnostic: observation.diagnostic });
+  const answer = {
+    ...subject,
+    ...(wake?.kind === "pending" ? { wake } : {}),
+    ...(observation === undefined || observation.kind === "failed" ? {} : { input: observation }),
+  };
+  const [first, ...rest] = failures;
+  return first === undefined
+    ? { kind: "admitted", ...answer }
+    : { kind: "failed", ...answer, failures: [first, ...rest] };
 }

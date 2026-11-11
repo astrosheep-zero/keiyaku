@@ -36,7 +36,7 @@ import type { CreatedDebtObservation, DispatchAssociation } from "../src/index.j
 import type { ForkResult, SpawnResult } from "../src/library/akuma-creation.js";
 import { contractId } from "../src/core/facts/types.js";
 import { debtIdSchema } from "../src/debt/identity.js";
-import { classifyVerb, type VerbOutput } from "../src/library/keiyaku-verbs.js";
+import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import {
   activeTool,
@@ -426,14 +426,14 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   const context = { columns: 80, color: false };
   const answer = { akumaId: id, tellId: "tell-id", kind: "answered" as const, answer: "exact answer" };
   assert.equal(askRawAnswer(answer), JSON.stringify("exact answer"));
-  const tell = { akumaId: id, tellId: "tell-id" };
+  const tell = { kind: "admitted" as const, akumaId: id, tellId: "tell-id" };
   const standalone = tellText(tell, "continue", undefined, context);
   assert.equal(standalone, "✓ told aku/worker/deadbeef — continue", "verdict, subject, and input on one line");
   const progress = waitedTellProgress(answer, { prompt: "continue" }, context);
   assert.match(progress, /▸ continue/u, "the panel keeps its timeline input row for admitted input");
   assert.equal(progress.match(/^aku\/worker\/deadbeef$/gmu)?.length, 1, "one identity frame");
   assert.equal(progress.match(/▸ continue/gu)?.length, 1, "the admission row is not replayed");
-  assert.match(progress, /✓ answered\n\n$/u, "the progress conclusion separates stdout answer bytes");
+  assert.ok(progress.endsWith(JSON.stringify("exact answer")), "the shared final rendering retains the answer bytes");
   const longPrompt = "one line of caller input ".repeat(20);
   const receipt = tellText(tell, longPrompt, undefined, context).split("\n");
   assert.equal(receipt.length, 1, "one receipt line even past the terminal width");
@@ -449,7 +449,7 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
     "a pending Tell keeps neutral vocabulary and the pending mark",
   );
   assert.equal(
-    tellText({ ...tell, wake: { kind: "failed", diagnostic: "wake refused" } }, "continue", undefined, context),
+    tellText({ ...tell, kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }, "continue", undefined, context),
     ["! tell aku/worker/deadbeef — continue", "  ! tell delivery failed", "    wake refused"].join("\n"),
     "an admitted Tell stays admitted and its failed wake keeps its own diagnosis",
   );
@@ -485,6 +485,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
   const call = callObservationStream(context, { id, contract: { kind: "none" }, facts: [] }, { now: () => startedAt });
   const callFrame = call.observe({ status, rows: [tell.row] });
   const callConclusion = call.conclude({
+    kind: "spawned",
     akumaId: id,
     tellId: "tell-bound",
     input: { kind: "answered", answer: "exact answer" },
@@ -751,16 +752,12 @@ function tellSpecimenRow(text: string, state: "told" | "pending") {
   };
 }
 
-function compactTell(wake?: AkumaTellResult["wake"]) {
-  return {
-    akumaId: SPECIMEN_ID,
-    tellId: "tell/specimen",
-    ...(wake === undefined ? {} : { wake }),
-  };
+function compactTell(extra: Omit<Extract<AkumaTellResult, { kind: "admitted" }>, "kind" | "akumaId" | "tellId"> | Omit<Extract<AkumaTellResult, { kind: "failed" }>, "akumaId" | "tellId"> = {}): AkumaTellResult {
+  return { kind: "admitted", akumaId: SPECIMEN_ID, tellId: "tell/specimen", ...extra };
 }
 
-function spawned(extra: Partial<VerbOutput<"spawn">> = {}): VerbOutput<"spawn"> {
-  return { akumaId: SPECIMEN_ID, ...extra };
+function spawned(extra: Omit<Extract<SpawnResult, { kind: "spawned" }>, "kind" | "akumaId"> | Omit<Extract<SpawnResult, { kind: "failed" }>, "akumaId"> = {}): SpawnResult {
+  return { kind: "spawned", akumaId: SPECIMEN_ID, ...extra };
 }
 
 function forkReceipt(
@@ -788,7 +785,7 @@ test("Akuma outcomes distinguish admission from failed execution", () => {
   assert.equal(
     classifyVerb("tell", input, {
       kind: "returned",
-      value: compactTell({ kind: "failed", diagnostic: "wake refused" }),
+      value: compactTell({ kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }),
     }),
     "failed",
   );
@@ -796,7 +793,7 @@ test("Akuma outcomes distinguish admission from failed execution", () => {
     classifyVerb("spawn", spawn, {
       kind: "returned",
       value: spawned({
-        failure: { kind: "infrastructure", diagnostic: "provider stopped" },
+        kind: "failed", failures: [{ stage: "birth", kind: "infrastructure", diagnostic: "provider stopped" }],
       }),
     }),
     "failed",
@@ -868,7 +865,7 @@ test("every action receipt leads with a verdict and subject, then indented evide
   );
   assert.deepEqual(
     renderCallText(
-      spawned({ dispatchFailure: { kind: "infrastructure", diagnostic: "busy" } }),
+      spawned({ kind: "failed", failures: [{ stage: "dispatch", failure: { kind: "infrastructure", diagnostic: "busy" } }] }),
       false,
       context,
       { cwd: "/work/repo" },
@@ -878,19 +875,19 @@ test("every action receipt leads with a verdict and subject, then indented evide
   );
   assert.deepEqual(
     renderCallText(
-      spawned({ failure: { kind: "infrastructure", diagnostic: "window lost" } }),
+      spawned({ kind: "failed", failures: [{ stage: "birth", kind: "infrastructure", diagnostic: "window lost" }] }),
       false,
       context,
       { cwd: "/work/repo" },
     ).split("\n"),
-    ["! spawned aku/worker/1234abcd", "  /work/repo", "  ! infrastructure · window lost"],
+    ["! spawned aku/worker/1234abcd", "  /work/repo", "  ! birth failed infrastructure window lost"],
     "a detached failure without an admitted Tell stays an action receipt over the born child",
   );
   assert.deepEqual(
     renderCallText(
       spawned({
         tellId: "tell/specimen",
-        failure: { kind: "infrastructure", diagnostic: "window lost", attemptedTellId: "tell/attempted" },
+        kind: "failed", failures: [{ stage: "tell", kind: "infrastructure", diagnostic: "window lost", attemptedTellId: "tell/attempted" }],
       }),
       false,
       context,
@@ -899,8 +896,9 @@ test("every action receipt leads with a verdict and subject, then indented evide
     [
       "! spawned aku/worker/1234abcd",
       "  /work/repo",
+      "  input tell/specimen",
       '  "exact prompt"',
-      "  ! infrastructure · window lost",
+      "  ! tell failed infrastructure window lost",
       "  attempted input tell/attempted",
     ],
     "an attempted Tell coordinate survives beneath the failed spawn verdict",
@@ -930,9 +928,8 @@ test("every action receipt leads with a verdict and subject, then indented evide
   );
   assert.deepEqual(
     renderForkText(
-      forkReceipt("aku/worker/9999beef", "aku/worker/5678abcd", {
-        dispatchFailure: { kind: "publication-failed", diagnostic: "read-only mirror" },
-      }),
+      { kind: "failed", parentAkumaId: parseAkumaId("aku/worker/9999beef").id, childAkumaId: parseAkumaId("aku/worker/5678abcd").id,
+        failure: { stage: "dispatch", failure: { kind: "publication-failed", diagnostic: "read-only mirror" } } },
       { akuma: "aku/worker/9999beef", at: "turn/1" },
     ).split("\n"),
     [
@@ -984,12 +981,12 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
     "a verdict and identity wider than the terminal stay whole and the input keeps its visible ellipsis",
   );
   assert.deepEqual(
-    tellText(compactTell({ kind: "pending" }), "go", undefined, context).split("\n"),
+    tellText(compactTell({ wake: { kind: "pending" } }), "go", undefined, context).split("\n"),
     ["⧗ tell aku/worker/1234abcd — go", "  wake pending"],
     "a pending Tell keeps the pending mark and asserts no delivery",
   );
   assert.deepEqual(
-    tellText(compactTell({ kind: "failed", diagnostic: "wake refused" }), "go", undefined, context).split("\n"),
+    tellText(compactTell({ kind: "failed", failures: [{ stage: "wake", diagnostic: "wake refused" }] }), "go", undefined, context).split("\n"),
     ["! tell aku/worker/1234abcd — go", "  ! tell delivery failed", "    wake refused"],
     "an admitted Tell stays admitted and its failed wake keeps its concrete cause",
   );
@@ -1020,9 +1017,9 @@ test("Tell delivery keeps copyable log coordinates on its subject and bounds the
   const path = "/work/long-execution-directory/body.log";
   const lines = tellText(
     compactTell({
-      kind: "failed",
+      kind: "failed", failures: [{ stage: "wake",
       diagnostic: `  wake\nrefused\t\u001b ${"👩‍💻".repeat(100)}`,
-      logPath: path,
+      logPath: path }],
     }),
     "go",
     undefined,
@@ -1144,7 +1141,7 @@ test("a failed observing call keeps a known directory and its admitted Tell inpu
   };
   const failedObservation = (wake?: AkumaTellResult["wake"]): SpawnResult => ({
     ...spawned({ tellId: "tell/specimen", ...(wake === undefined ? {} : { wake }) }),
-    failure: { kind: "infrastructure", diagnostic: "window lost" },
+    kind: "failed", failures: [{ stage: "observation", diagnostic: "window lost" }],
   });
   const stream = callObservationStream(context, { ...head, cwd: "/work/repo" }, { prompt: "exact prompt" });
   const lines = stream.conclude(failedObservation()).split("\n");
@@ -1155,7 +1152,7 @@ test("a failed observing call keeps a known directory and its admitted Tell inpu
     "the failure panel states the known directory above the boundary and fabricates nothing",
   );
   assert.match(lines[3]!, /^▸ exact prompt$/u, "the admitted input is the panel's first evidence");
-  assert.equal(lines[4], "! window lost");
+  assert.equal(lines[4], "! observation failed window lost");
 
   // A Tell row that already settled on the timeline is that evidence; the close must not replay it.
   const observedStream = callObservationStream(context, head, { prompt: "exact prompt" });
@@ -1163,7 +1160,8 @@ test("a failed observing call keeps a known directory and its admitted Tell inpu
   const settled = observedStream.observe({ status: running(SPECIMEN_ID, [settledRow]), rows: [settledRow] });
   const observedText = [...settled, observedStream.conclude(failedObservation())].join("\n");
   assert.equal((observedText.match(/exact prompt/gu) ?? []).length, 1, "a settled admission row is never replayed");
-  assert.match(observedText, /! window lost\n*$/u);
+  assert.match(observedText, /! observation failed window lost/u);
+  assert.ok(observedText.includes("input tell/specimen"), "stream close retains the admitted input coordinate");
 
   // An admission that never settled was never printed, so closing on it prints it once.
   const pendingRow = tellSpecimenRow("exact prompt", "pending");
