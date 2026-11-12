@@ -7,7 +7,7 @@ import { allocateAkumaDirectory, pathsForAkumaId } from "../src/akuma/identity.j
 import { initializeHeart, probeLeash, readHeart, readSeal, readTell, readLatestTurnForBody } from "../src/akuma/heart/index.js";
 import { launchInProcessBody } from "../src/akuma/in-process-body.js";
 import { publishAkuma } from "../src/akuma/publication.js";
-import { projectFailure, spawnFailureReceipt } from "../src/library/outcome.js";
+import { KeiyakuError } from "../src/index.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import type { BodyLauncher, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
@@ -473,14 +473,14 @@ test(
       observation.abort(reason);
       const errors = await Promise.all(calls);
       const identities = errors.map((error, index) => {
-        const receipt = spawnFailureReceipt(error);
+        assert.ok(error instanceof KeiyakuError);
+        const receipt = error.spawn;
         assert.ok(receipt !== undefined && typeof receipt.akumaId === "string");
-        assert.match((error as Error).message, /stop these observations/u);
+        assert.match(error.message, /stop these observations/u);
         assert.ok(receipt.tellId, "cancellation retains the exact confirmed input");
-        const projection = projectFailure(error);
-        assert.equal(projection.category, "aborted");
-        assert.ok(error === reason || (error as Error).cause === reason);
-        assert.deepEqual(projection.spawn, receipt);
+        assert.equal(error.category, "aborted");
+        assert.ok(error.cause instanceof KeiyakuError);
+        assert.equal(error.cause.cause, reason);
         const body = prompt(holdingCommand(world, ["left", "right"][index]!));
         const text = renderVerb("spawn", { akumaName: "worker", prompt: body }, { kind: "threw", error }, { columns: 120, color: false });
         assert.ok(text.includes(receipt.akumaId) && text.includes("command"));
@@ -494,7 +494,9 @@ test(
           world,
           "the retained birth keeps its frozen execution directory",
         );
-        const receipt = spawnFailureReceipt(errors[index])!;
+        const error = errors[index];
+        assert.ok(error instanceof KeiyakuError);
+        const receipt = error.spawn!;
         assert.equal((await readTell(pathsForAkumaId(world, id), receipt.tellId!))?.body,
           prompt(holdingCommand(world, ["left", "right"][index]!)));
       }

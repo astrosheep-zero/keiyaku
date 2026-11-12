@@ -94,11 +94,12 @@ answer observation stays with the submitting observer. Composition never
 rereads later state to infer the identity of an earlier observed answer. Ordinary
 creation answers omit routine stage inventories and repeated input, while a later
 integration or observation failure retains the born child, admitted input and
-usable recovery coordinates with its native failure. That exceptional evidence
-is recognized only by its producing owner and survives shared failure projection.
-Public consumers can inspect that owner-confirmed evidence without changing the
-native exception or acquiring an execution capability; foreign error properties
-cannot claim confirmed creation or admission.
+usable recovery coordinates with its native failure. Attaching that evidence
+throws a fresh KeiyakuError with immutable, directly readable creation or Tell
+evidence and the previous native failure as its cause. This preserves frozen
+causes and gives independent invocations separate receipts. Public consumers
+need no adapter projection or execution capability to inspect that evidence;
+an arbitrary foreign error property does not establish confirmed admission.
 
 A spawn composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a spawn without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a spawn awaits the text answer to that first Tell without withdrawing it at the deadline.
 Akuma execution owns that admission and wake. Library composes surrounding
@@ -155,7 +156,10 @@ owner operations or one shared set-observation algorithm. Addressed status
 projects the native life and current actionable work, adding separate read-only
 Dispatch and Debt associations where available; it never intersects them into
 Akuma state or re-evaluates lifecycle. Execution history preserves requested
-historical content and correlation independently of current associations. Selection uses one verb per meaning on both faces: `tell` admits a Tell and may observe its text answer; `ask` requires a JSON Schema document and observes the parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide work. Ask alone distinguishes invalid output; text observation reports it as failure with the same diagnostic. Bounds are optional and limit observation only, never admission. Schema belongs only to ask. Interrupt is a flag on tell or ask: it durably admits the Tell with a request for the current Body to yield, then observes completion before waking a successor; if completion is not proven, the Tell remains admitted and recoverable. Cancellation after admission stops observation, not admission. Kill is the pure stop. Tell and ask address one Akuma directly; set selection remains for wait and kill. Standalone `idle` and plural or CLI `wait` name the same
+historical content and correlation independently of current associations. Selection uses one verb per meaning on both faces: `tell` admits a Tell and may observe its text answer; `ask` requires a JSON Schema document and observes the parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide work. Ask alone distinguishes invalid output; text observation reports it as failure with the same diagnostic. Bounds are optional and limit observation only, never admission. Schema belongs only to ask. Interrupt is a flag on tell or ask: it durably admits the Tell with a request for the current Body to yield, then observes completion before waking a successor; if completion is not proven, the Tell remains admitted and recoverable. Cancellation after admission stops observation, not admission. Kill is the pure stop. Tell and ask address one Akuma directly; set selection remains for wait and kill.
+Cancellation before admission preserves the native reason unchanged. After
+admission, exceptional Tell evidence remains directly readable on KeiyakuError
+with that reason retained in its cause chain. Standalone `idle` and plural or CLI `wait` name the same
 Akuma-owned completion judgment in their respective caller contexts. Wait and
 kill freeze their subject set at entry in the caller's deduplicated selection
 order. An

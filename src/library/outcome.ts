@@ -11,7 +11,9 @@ import { worldRootSchema, type WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { ReviewOutcome, VerifyOutcome } from "./contract-outcomes.js";
 import type { SpawnResult } from "./akuma-creation.js";
-import { tellFailure } from "../akuma/akuma-errors.js";
+import { KeiyakuError, errorCategory, type KeiyakuErrorCategory } from "../errors.js";
+import { SettingsError } from "../settings.js";
+export { KeiyakuError, errorCategory } from "../errors.js";
 import type { AkumaTellResult } from "../akuma/selection-observation.js";
 import type { InvocationSnapshot } from "./invocation.js";
 import { retrySchema, executionIssueSchema } from "../protocol/result-reasons.js";
@@ -454,7 +456,7 @@ function partialEvidence(snapshot: InvocationSnapshot, primary: ContractId | und
   };
 }
 
-function acceptedRecoveries(operation: ContractVerb, snapshot: InvocationSnapshot, contract: ContractId) {
+function acceptedRecoveries(operation: OutcomeOperation, snapshot: InvocationSnapshot, contract: ContractId) {
   const recoveries = snapshot.effects.flatMap((record) =>
     record.kind === "movement" && record.effect.kind === "recovery-snapshot"
       ? [{ snapshot: record.effect.snapshot, ...(record.contract === contract ? {} : { contractId: record.contract }) }]
@@ -517,35 +519,35 @@ export function project<Answer extends Readonly<{ kind: string; contractId?: Con
   operation: ContractVerb,
   snapshot: InvocationSnapshot,
   conclusion: Answer | InvocationFailure,
-): Readonly<{ kind: "returned"; outcome: Answer }> | Readonly<{ kind: "failed"; error: KeiyakuError }>;
+  signal?: AbortSignal,
+): Readonly<{ kind: "returned"; outcome: Answer }> | InvocationFailure;
 export function project<Answer extends Readonly<{ kind: string; contractId?: ContractId }>>(
   operation: OutcomeOperation,
   snapshot: InvocationSnapshot,
   conclusion: Answer | InvocationFailure | ResetProjection,
-): Readonly<{ kind: "returned"; outcome: Answer | ResetOutcome }> | Readonly<{ kind: "failed"; error: KeiyakuError }> {
-  if ("world" in conclusion) {
-    if (operation !== "nuke") throw new Error("reset projection requires nuke");
-    return projectReset(snapshot, conclusion);
-  }
-  if (operation === "nuke") throw new Error("nuke requires a World projection");
-  const contract =
-    "contract" in conclusion ? conclusion.contract : "contractId" in conclusion ? conclusion.contractId : undefined;
+  signal?: AbortSignal,
+): Readonly<{ kind: "returned"; outcome: Answer | ResetOutcome }> | InvocationFailure {
+  if ("world" in conclusion) return projectReset(snapshot, conclusion);
+  const contract = "error" in conclusion ? conclusion.contract : conclusion.contractId;
   const current = contract === undefined ? undefined : snapshot.conclusions.get(contract);
   const issues = invocationIssues(snapshot.effects, contract, current?.snapshot);
   const base = {
     ...(contract === undefined ? {} : { contractId: contract }),
     ...(issues.length === 0 ? {} : { issues }),
   };
-  if ("error" in conclusion)
+  if ("error" in conclusion) {
+    const evidence = { ...current, ...partialEvidence(snapshot, contract) };
+    const cancelled = signal?.aborted
+      ? conclusion.error === signal.reason
+      : errorCategory(conclusion.error) === "aborted";
     return {
       kind: "failed",
-      error: withOutcomeReceipt(conclusion.error, {
-        kind: "contract",
-        ...base,
-        ...current,
-        ...partialEvidence(snapshot, contract),
-      }),
+      error:
+        cancelled && issues.length === 0 && Object.keys(evidence).length === 0
+          ? conclusion.error
+          : withOutcomeReceipt(conclusion.error, { kind: "contract", ...base, ...evidence }, signal),
     };
+  }
   if (conclusion.kind === "refused" || conclusion.kind === "retry") {
     const evidence = partialEvidence(snapshot, contract);
     if (Object.keys(evidence).length > 0 || issues.length > 0)
@@ -564,7 +566,7 @@ export function project<Answer extends Readonly<{ kind: string; contractId?: Con
       : {}),
     ...value,
   };
-  if (operation === "bind" && "kei" in conclusion)
+  if ("kei" in conclusion)
     Object.defineProperty(outcome, "kei", {
       value: conclusion.kei,
       enumerable: false,
@@ -572,26 +574,26 @@ export function project<Answer extends Readonly<{ kind: string; contractId?: Con
   return { kind: "returned", outcome: outcome as Answer };
 }
 
-export type KeiyakuErrorCategory = "invalid-input" | "authority-corruption" | "aborted" | "internal";
-type KeiyakuErrorOptions = Readonly<{ cause?: unknown; outcome?: PartialOutcomeEnvelope }>;
-const errorOutcomes = new WeakMap<KeiyakuError, PartialOutcomeEnvelope>();
-export class KeiyakuError extends Error {
-  readonly category: KeiyakuErrorCategory;
-  get outcome(): PartialOutcomeEnvelope | undefined {
-    return errorOutcomes.get(this);
+declare module "../errors.js" {
+  interface KeiyakuError {
+    readonly outcome?: PartialOutcomeEnvelope;
+    readonly spawn?: SpawnResult;
+    readonly tell?: AkumaTellResult;
   }
-  constructor(category: KeiyakuErrorCategory, message: string, options: KeiyakuErrorOptions = {}) {
-    super(message);
-    this.name = "KeiyakuError";
-    this.category = category;
-    if (options.cause !== undefined) this.cause = options.cause;
-    if (options.outcome !== undefined) errorOutcomes.set(this, options.outcome);
+  interface KeiyakuErrorOptions {
+    readonly outcome?: PartialOutcomeEnvelope | undefined;
+    readonly spawn?: SpawnResult | undefined;
+    readonly tell?: AkumaTellResult | undefined;
   }
 }
 export function validated<Value>(phase: () => Value): Value {
   try {
     return phase();
   } catch (error) {
+    if (error instanceof AuthorityCorruptionError || error instanceof SettingsError)
+      throw new KeiyakuError(error instanceof SettingsError ? "invalid-input" : error.category, error.message, {
+        cause: error,
+      });
     if (error instanceof KeiyakuError) throw error;
     const message = error instanceof Error ? error.message : String(error);
     throw new KeiyakuError("invalid-input", message, {
@@ -599,23 +601,27 @@ export function validated<Value>(phase: () => Value): Value {
     });
   }
 }
-export function errorCategory(error: unknown): KeiyakuErrorCategory {
-  if (error instanceof AuthorityCorruptionError) return "authority-corruption";
-  if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) return "aborted";
-  return "internal";
-}
 export async function readContractValue<Value>(operation: () => Promise<Value>): Promise<Value> {
   try {
     return await operation();
   } catch (error) {
-    if (error instanceof KeiyakuError) throw error;
+    if (
+      error instanceof KeiyakuError &&
+      !(error instanceof AuthorityCorruptionError) &&
+      !(error instanceof SettingsError)
+    )
+      throw error;
     throw new KeiyakuError(errorCategory(error), errorDiagnostic(error), { cause: error });
   }
 }
 function errorDiagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
-export function withOutcomeReceipt(error: unknown, outcome: PartialOutcomeEnvelope): KeiyakuError {
+export function withOutcomeReceipt(
+  error: unknown,
+  outcome: PartialOutcomeEnvelope,
+  signal?: AbortSignal,
+): KeiyakuError {
   if (error instanceof KeiyakuError) {
     const previous = error.outcome;
     if (previous?.kind === "contract" && outcome.kind === "contract") {
@@ -629,26 +635,21 @@ export function withOutcomeReceipt(error: unknown, outcome: PartialOutcomeEnvelo
       }
       outcome = merged;
     }
-    errorOutcomes.set(error, outcome);
-    return error;
   }
-  return new KeiyakuError(errorCategory(error), errorDiagnostic(error), { cause: error, outcome });
-}
-const confirmedSpawnFailures = new WeakMap<Error, SpawnResult>();
-
-/** Native creation evidence cannot be supplied by an arbitrary error property. */
-export function spawnFailureReceipt(error: unknown): SpawnResult | undefined {
-  return error instanceof Error ? confirmedSpawnFailures.get(error) : undefined;
+  return new KeiyakuError(errorCategory(error, signal), errorDiagnostic(error), {
+    ...(error instanceof KeiyakuError ? { spawn: error.spawn, tell: error.tell } : {}),
+    cause: error,
+    outcome,
+  });
 }
 
-/** Retain the native error, including frozen failures, without losing confirmed birth. */
-export function withSpawnFailureReceipt(reason: unknown, result: SpawnResult): Error {
-  const cause = reason instanceof Error ? reason : new Error(reason === undefined ? "spawn aborted" : String(reason));
-  // A shared cancellation reason cannot carry two different invocations' births.
-  const error = confirmedSpawnFailures.has(cause) ? new Error(cause.message, { cause }) : cause;
-  if (error !== cause) error.name = cause.name;
-  confirmedSpawnFailures.set(error, result);
-  return error;
+/** Confirmed birth is attached without mutating a shared or frozen native failure. */
+export function withSpawnFailureReceipt(reason: unknown, spawn: SpawnResult, signal?: AbortSignal): KeiyakuError {
+  return new KeiyakuError(errorCategory(reason, signal), errorDiagnostic(reason), {
+    ...(reason instanceof KeiyakuError ? { outcome: reason.outcome, tell: reason.tell } : {}),
+    cause: reason,
+    spawn,
+  });
 }
 
 export type FailureProjection = Readonly<{
@@ -662,18 +663,15 @@ export type FailureProjection = Readonly<{
   tell?: AkumaTellResult;
 }>;
 export function projectFailure(error: unknown): FailureProjection {
-  const thrown = error instanceof KeiyakuError ? error.cause : error;
-  const spawn = spawnFailureReceipt(error) ?? spawnFailureReceipt(thrown);
-  const tell = tellFailure(error) ?? tellFailure(thrown);
-  const classified = tell?.cause ?? error;
-  const cause = classified instanceof KeiyakuError ? classified.cause : classified;
+  let cause = error;
+  while (cause instanceof KeiyakuError && cause.constructor === KeiyakuError) cause = cause.cause;
   return {
     kind: "failed",
-    category: classified instanceof KeiyakuError ? classified.category : errorCategory(classified),
+    category: errorCategory(error),
     diagnostic: errorDiagnostic(error),
     ...(cause instanceof Error ? { causeClass: cause.name, causeDiagnostic: cause.message } : {}),
-    ...(spawn === undefined ? {} : { spawn }),
-    ...(tell === undefined ? {} : { tell: tell.receipt }),
+    ...(error instanceof KeiyakuError && error.spawn !== undefined ? { spawn: error.spawn } : {}),
+    ...(error instanceof KeiyakuError && error.tell !== undefined ? { tell: error.tell } : {}),
     ...(error instanceof KeiyakuError && error.outcome !== undefined ? { outcome: error.outcome } : {}),
   };
 }

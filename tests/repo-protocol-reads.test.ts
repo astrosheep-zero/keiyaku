@@ -25,6 +25,7 @@ import { observeNamedAddress, resolveNamedAddress } from "../src/library/address
 import { contractJournalPath, contractJournalPaths } from "../src/git/identity.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
 import { bindOperation } from "../src/protocol/bind.js";
+import { InvocationAccumulator } from "../src/library/invocation.js";
 import { completeRepoReconcile } from "../src/library/reconcile.js";
 import {
   contractCatalogueOperation,
@@ -319,7 +320,13 @@ test("repo reconcile leaves a refused foreign worktree untouched until recovery 
   const refused = await withGitDecodeChannel(
     scope,
     async (channel) =>
-      await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
+      await completeRepoReconcile({
+        scope,
+        channel,
+        hooks: { create: [], destroy: [] },
+        retryHooks: false,
+        accumulator: new InvocationAccumulator(),
+      }),
   );
   assert.ok(refused.kind === "world");
   const issue = refused.contracts?.[0]?.issues?.[0];
@@ -333,7 +340,13 @@ test("repo reconcile leaves a refused foreign worktree untouched until recovery 
   const recovered = await withGitDecodeChannel(
     scope,
     async (channel) =>
-      await completeRepoReconcile({ scope, channel, hooks: { create: [], destroy: [] }, retryHooks: false }),
+      await completeRepoReconcile({
+        scope,
+        channel,
+        hooks: { create: [], destroy: [] },
+        retryHooks: false,
+        accumulator: new InvocationAccumulator(),
+      }),
   );
   assert.ok(recovered.kind === "world");
   assert.equal(recovered.contracts?.[0]?.issues, undefined);

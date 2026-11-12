@@ -34,7 +34,7 @@ import { DatabaseSync } from "node:sqlite";
 import { insertActivityFact, finishBodyFact } from "../src/akuma/heart/rows.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import { executeAskAkuma } from "../src/akuma/akuma-selection-execution.js";
-import { projectFailure } from "../src/library/outcome.js";
+import { KeiyakuError } from "../src/index.js";
 import {
   deferred,
   installAkumaBodyPidReceipt,
@@ -77,6 +77,7 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
       "AkumaBusyError",
       "AkumaDecodeError",
       "AkumaNotBornError",
+      "AkumaObservationError",
       "AkumaProviderError",
       "listArchetypeDefinitions",
     ].sort(),
@@ -243,9 +244,13 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
     );
     controller.abort(reason);
     await assert.rejects(pending, (error: unknown) => {
-      assert.equal(error, reason);
-      assert.equal(projectFailure(error).tell?.tellId, tellId);
-      assert.equal(projectFailure(error).tell?.akumaId, canceled.allocated.id);
+      assert.ok(error instanceof KeiyakuError);
+      assert.equal(error.cause, reason);
+      assert.equal(error.category, "aborted");
+      assert.equal(error.tell?.tellId, tellId);
+      assert.equal(error.tell?.akumaId, canceled.allocated.id);
+      assert.ok(Object.isFrozen(error.tell));
+      assert.throws(() => Object.assign(error, { tell: undefined }), TypeError);
       return true;
     });
     const admitted = await readTell(canceled.allocated.paths, tellId);

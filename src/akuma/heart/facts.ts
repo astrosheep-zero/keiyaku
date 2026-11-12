@@ -1,4 +1,5 @@
 import type { AkumaCaller } from "../caller.js";
+import { KeiyakuError } from "../../errors.js";
 import { z } from "zod";
 import { akumaIdSchema, type AkumaId } from "../identity.js";
 import type { ResumeCoordinate } from "../coordinate.js";
@@ -168,11 +169,10 @@ export function projectTell(fact: TellFact): TellRow {
   };
 }
 
-export class AkumaBusyError extends Error {
+export class AkumaBusyError extends KeiyakuError {
   readonly kind = "akuma-busy";
   constructor() {
-    super("Akuma is busy");
-    this.name = "AkumaBusyError";
+    super("internal", "Akuma is busy");
   }
 }
 

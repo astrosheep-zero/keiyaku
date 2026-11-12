@@ -1,3 +1,4 @@
+import { KeiyakuError } from "./errors.js";
 import { z } from "zod";
 import { lstat, mkdir, realpath, stat } from "node:fs/promises";
 import { dirname, join, parse, resolve } from "node:path";
@@ -21,13 +22,11 @@ export type WorldResolution = Readonly<{
   establish: () => Promise<WorldRoot>;
 }>;
 
-export class WorldError extends Error {
+export class WorldError extends KeiyakuError {
   readonly kind = "invalid-world" as const;
 
   constructor(message: string) {
-    super(message);
-    this.name = "WorldError";
-    this.kind = "invalid-world";
+    super("internal", message);
   }
 }
 

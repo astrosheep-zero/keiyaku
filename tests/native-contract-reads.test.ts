@@ -1,3 +1,4 @@
+import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
@@ -28,7 +29,6 @@ import {
   Keiyaku,
   KeiyakuError,
   Repo,
-  classifyVerb,
   contractHistorySchema,
   guidanceSchema,
 } from "../src/index.js";

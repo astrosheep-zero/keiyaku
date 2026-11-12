@@ -16,8 +16,10 @@ const protocolOperations = [
 
 const invocationFacet = [any("library/keiyaku.ts"), any("library/keiyaku-*.ts")] as const;
 
+const errorBase = any("errors.ts");
 const contractOwner = {
   allow: [
+    errorBase,
     runtime("akuma/identity.ts", ["akumaIdSchema"]),
     any("body/**"),
     any("contract-guidance.ts"),
@@ -76,6 +78,7 @@ const boundedList = any("bounded-list.ts");
 const targetPlacementRuntime = runtime("git/target-placement.ts");
 const libraryOwner = {
   allow: [
+    errorBase,
     any("akuma/**"),
     any("alias/**"),
     any("body/**"),
@@ -139,6 +142,8 @@ const leadingAdmissionOwner = {
 
 const outcomeOwner = {
   allow: [
+    errorBase,
+    any("settings.ts"),
     any("core/facts/**"),
     any("contract-worktree.ts"),
     any("git/reconcile.ts"),
@@ -152,7 +157,6 @@ const outcomeOwner = {
     any("library/refusal.ts"),
     types("library/contract-outcomes.ts"),
     types("library/akuma-creation.ts", ["SpawnResult"]),
-    runtime("akuma/akuma-errors.ts", ["tellFailure"]),
     types("akuma/selection-observation.ts", ["AkumaTellResult"]),
     types("library/kei.ts"),
     types("library/invocation.ts"),
@@ -185,6 +189,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
   ],
   zones: [
+    { source: "errors.ts", allow: [] },
     {
       source: "mcp/**",
       allow: [
@@ -199,7 +204,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "scripts/**", allow: [any("scripts/**")] },
     { source: "core/verbs/**", allow: [any("core/decide.ts"), any("core/facts/**"), any("core/subject.ts")] },
-    { source: "core/facts/**", allow: [any("core/facts/**"), any("core/subject.ts"), any("identity/coordinates.ts")] },
+    {
+      source: "core/facts/**",
+      allow: [errorBase, any("core/facts/**"), any("core/subject.ts"), any("identity/coordinates.ts")],
+    },
     { source: "core/**", allow: [any("core/**")] },
     {
       source: "body/**",
@@ -225,6 +233,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "git/**",
       allow: [
+        errorBase,
         any("contract-worktree.ts"),
         any("coordination/**"),
         any("core/**"),
@@ -526,6 +535,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "debt/**",
       allow: [
+        errorBase,
         any("coordination/**"),
         boundedList,
         any("core/facts/types.ts"),
@@ -632,6 +642,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "akuma/heart/**",
       allow: [
+        errorBase,
         any("akuma/coordinate.ts"),
         any("akuma/caller.ts"),
         any("akuma/heart/**"),
@@ -742,6 +753,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "akuma/**",
       allow: [
+        errorBase,
         any("akuma/**"),
         boundedList,
         any("alias/**"),
@@ -798,6 +810,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "index.ts",
       allow: [
+        any("errors.ts", ["KeiyakuError", "KeiyakuErrorCategory", "KeiyakuErrorOptions"]),
         any("body-host.ts", ["AkumaHost", "AkumaHostScope"]),
         any("akuma/index.ts"),
         any("akuma/akuma.ts", ["akumaStatusSchema"]),
@@ -841,7 +854,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/kei.ts", ["Kei", "Guidance", "guidanceSchema"]),
         any("library/keiyaku.ts"),
         any("library/keiyaku-verbs.ts", [
-          "classifyVerb",
           "VerbEntry",
           "VerbName",
           "VerbInput",
@@ -856,7 +868,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ]),
         runtime("library/contract-composition.ts", ["Keis"]),
         any("library/delivery.ts", ["Delivery", "deliverySchema"]),
-        any("library/outcome.ts", ["KeiyakuError", "projectFailure"]),
         types("library/outcome.ts"),
         any("library/repo.ts", ["Repo", "NoGitWorldError", "RepoAtInput"]),
         any("library/nuke.ts", ["nukeKeiyaku", "nukeResultSchema", "NukeInput", "NukeResult"]),
@@ -917,6 +928,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "*.ts",
       deny: invocationFacet,
       allow: [
+        errorBase,
         any("akuma/**"),
         any("contract-worktree.ts"),
         any("coordination/**"),
@@ -934,6 +946,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "cli/**",
       allow: [
+        errorBase,
         runtime("core/facts/types.ts", ["targetName", "contractId"]),
         any("akuma/**"),
         any("cli/**"),

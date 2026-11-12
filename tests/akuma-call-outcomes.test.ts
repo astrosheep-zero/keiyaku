@@ -18,7 +18,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { classifyVerb, type VerbInput, type VerbOutput, type VerbRun } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
-import { KeiyakuError, projectFailure } from "../src/library/outcome.js";
+import { KeiyakuError } from "../src/index.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import type { SpawnProgress } from "../src/library/akuma-creation.js";
 import type { AskProgress } from "../src/akuma/akuma-selection-execution.js";
@@ -151,8 +151,9 @@ test("Tell failure and exact Ask precedence retain answer and historical wake re
   const nativeFailure = Object.freeze(new TypeError("unexpected wake rejection"));
   const rejected = t.mock.method(AkumaOwner.prototype, "admitTell", async () => ({ kind: "admitted", tell: fact, wake: Promise.reject(nativeFailure) }));
   await assert.rejects(api.tell({ akuma: fixture.allocated.id, body: "answer" }), (error: unknown) => {
-    assert.equal(error, nativeFailure);
-    assert.equal(projectFailure(error).tell?.tellId, original.tellId);
+    assert.ok(error instanceof KeiyakuError);
+    assert.equal(error.cause, nativeFailure);
+    assert.equal(error.tell?.tellId, original.tellId);
     return true;
   });
   rejected.mock.restore();
@@ -211,31 +212,27 @@ test("shared frozen Tell failures keep native cause and each invocation's admiss
     Object.freeze(new AuthorityCorruptionError("shared native authority failure")),
     Object.freeze(new KeiyakuError("invalid-input", "shared caller reason", { cause: new TypeError("native caller cause") })),
   ];
-  let reason: Error = reasons[0]!;
+  let reason: KeiyakuError = reasons[0]!;
   let controller = new AbortController();
   const { akuma, allocated } = await bornWorld(root, "feeda111", async () => {
     controller.abort(reason);
     throw reason;
   });
   for (reason of reasons) {
-    const native = projectFailure(reason);
-    const errors: Error[] = [];
+    const errors: KeiyakuError[] = [];
     for (const body of ["first", "second"]) {
       controller = new AbortController();
       await assert.rejects(akuma.tell(body, { signal: controller.signal }), (error: unknown) => {
-        assert.ok(error instanceof Error);
+        assert.ok(error instanceof KeiyakuError);
         errors.push(error);
         return true;
       });
     }
-    assert.equal(errors[0], reason);
-    assert.equal(errors[1]!.cause, reason);
-    const failures = errors.map(projectFailure);
-    assert.notEqual(failures[0]!.tell?.tellId, failures[1]!.tell?.tellId);
-    for (const [index, failure] of failures.entries()) {
-      assert.equal(failure.category, native.category);
-      assert.equal(failure.causeClass, native.causeClass);
-      assert.equal(failure.causeDiagnostic, native.causeDiagnostic);
+    assert.notEqual(errors[0], errors[1]);
+    assert.notEqual(errors[0]!.tell?.tellId, errors[1]!.tell?.tellId);
+    for (const [index, failure] of errors.entries()) {
+      assert.equal(failure.cause, reason);
+      assert.equal(failure.category, reason.category);
       assert.equal(failure.tell?.akumaId, akuma.id);
       assert.ok(failure.tell?.tellId);
       assert.equal((await readTell(allocated.paths, failure.tell.tellId))?.body, ["first", "second"][index]);

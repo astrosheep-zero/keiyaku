@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { isAbsolute, resolve } from "node:path";
 import { realpath } from "node:fs/promises";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
@@ -47,12 +48,11 @@ export type GitSnapshot = Readonly<{
   readonly tree: GitOid | null;
   readonly paths: ReadonlyMap<string, TreeEntry>;
 }>;
-export class NoGitWorldError extends Error {
+export class NoGitWorldError extends KeiyakuError {
   readonly path: string;
 
   constructor(path: string) {
-    super(`no Git world at: ${path}`);
-    this.name = "NoGitWorldError";
+    super("internal", `no Git world at: ${path}`);
     this.path = path;
   }
 }

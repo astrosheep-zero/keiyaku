@@ -33,8 +33,11 @@ Malformed caller input and Markdown fail before repository observation. Domain
 non-admission is a returned refusal or retry, never an expected exception.
 Exceptional failures distinguish caller mistakes, corrupt authority, uncertain
 publication, cancellation before admission, and unexpected internal failures.
-They retain the native cause and any known invocation evidence. Exact input and
-error shapes belong to generated declarations, leaf help, and executable specifications.
+Distinguished public SDK errors share the KeiyakuError base and retain their
+owner's category. Contract boundaries still wrap lower-owner corruption and
+selected Settings failures with the native error as their cause; shared
+inheritance does not remove that boundary. Exact input and error shapes belong
+to generated declarations, leaf help, and executable specifications.
 
 ## Contract Surface
 
@@ -251,4 +254,7 @@ that publication did not occur. Once a leading act has been accepted, cancellati
 preserves its receipt and identifies the unfinished stage. An unknown Git
 publication is still adjudicated under independent, bounded read custody before
 reporting the known outcome. Resource retirement is not skipped merely because
-the execution signal has already been cancelled.
+the execution signal has already been cancelled. Attaching confirmed effects
+creates a fresh KeiyakuError with immutable, directly readable evidence and the
+previous failure as its standard cause. Frozen or shared causes remain intact;
+cancellation before admission retains the caller's original reason.

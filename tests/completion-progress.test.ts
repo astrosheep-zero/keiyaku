@@ -59,18 +59,14 @@ test("an observed checkpoint cannot manufacture an invocation receipt", () => {
   assert.deepEqual(progress.snapshot().facts, []);
   assert.equal(progress.head(captured.state.id), undefined);
   assert.equal(progress.snapshot().checkpoints.size, 0);
+  const original = new DOMException("stopped", "AbortError");
   const projected = project("arc", progress.snapshot(), {
     kind: "failed",
     contract: captured.state.id,
-    error: new Error("stopped"),
+    error: original,
   });
-  assert.equal(projected.kind, "failed");
-  if (projected.kind === "failed") {
-    assert.equal(
-      projected.error.outcome && "head" in projected.error.outcome ? projected.error.outcome.head : undefined,
-      undefined,
-    );
-  }
+  assert.ok(projected.kind === "failed");
+  assert.equal(projected.error, original);
 });
 
 test("physical and seat-close reports accumulate without replay duplication or input mutation", () => {

@@ -46,9 +46,8 @@ export {
   contractHistorySchema,
   contractHistoryEventSchema,
 } from "./library/contract-types.js";
-export { Keiyaku, KeiyakuUsageError } from "./library/keiyaku.js";
+export { Keiyaku, KeiyakuArcDocumentError, KeiyakuUsageError } from "./library/keiyaku.js";
 export type { KeiyakuAt, DebtUpdateInvocation } from "./library/keiyaku.js";
-export { classifyVerb } from "./library/keiyaku-verbs.js";
 export type {
   VerbEntry,
   VerbName,
@@ -61,7 +60,8 @@ export type {
   VerbCompletion,
 } from "./library/keiyaku-verbs.js";
 export { Keis } from "./library/contract-composition.js";
-export { KeiyakuError, projectFailure } from "./library/outcome.js";
+export { KeiyakuError } from "./errors.js";
+export type { KeiyakuErrorCategory, KeiyakuErrorOptions } from "./errors.js";
 export { NoGitWorldError, Repo } from "./library/repo.js";
 export { actorId } from "./core/facts/types.js";
 export { z } from "zod";
@@ -71,6 +71,7 @@ export {
   AkumaBusyError,
   AkumaDecodeError,
   AkumaNotBornError,
+  AkumaObservationError,
   AkumaProviderError,
   listArchetypeDefinitions,
 } from "./akuma/index.js";
@@ -223,7 +224,6 @@ export type { NukeInput, NukeResult } from "./library/nuke.js";
 export type {
   InvocationIssue,
   ResetIssue,
-  KeiyakuErrorCategory,
   PartialOutcomeEnvelope,
   HandoffOutcome,
   ReconciliationLag,

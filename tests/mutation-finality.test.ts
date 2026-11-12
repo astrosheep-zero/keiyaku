@@ -231,6 +231,7 @@ test("the local failure projector never decodes partial owner evidence or masks 
   progress.recordDeliveryPreview(id, { scope });
   const first = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: native });
   assert.ok(first.kind === "failed");
+  assert.ok(first.error instanceof KeiyakuError);
   assert.equal(first.error.cause, native);
   assert.equal(first.error.category, "internal");
   assert.equal(first.error.message, native.message);
@@ -238,7 +239,8 @@ test("the local failure projector never decodes partial owner evidence or masks 
   const final = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: first.error });
   assert.ok(final.kind === "failed");
   assert.ok(final.error instanceof KeiyakuError);
-  assert.equal(final.error.cause, native);
+  assert.equal(final.error.cause, first.error);
+  assert.equal(first.error.cause, native);
   assert.equal(final.error.category, "internal");
   assert.equal(final.error.message, native.message);
   assert.ok(final.error.outcome?.kind === "contract");
@@ -246,7 +248,9 @@ test("the local failure projector never decodes partial owner evidence or masks 
   assert.equal(final.error.outcome.admitted, undefined);
   assert.equal(final.error.outcome.issues?.length, 1);
   assert.ok(first.error.outcome?.kind === "contract");
-  assert.equal(final.error, first.error);
-  assert.deepEqual(first.error.outcome, final.error.outcome);
+  assert.notEqual(final.error, first.error);
+  assert.notEqual(first.error.outcome, final.error.outcome);
+  assert.equal(first.error.outcome.issues, undefined);
+  assert.deepEqual(first.error.outcome.preview, { scope });
   assert.deepEqual(final.error.outcome.preview, { scope });
 });

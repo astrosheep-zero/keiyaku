@@ -6,15 +6,17 @@ import { candidatePinRefFor, deliveryRefFor, withGitShim } from "./support/git.j
 import {
   KeiyakuError,
   AuthorityCorruptionError,
+  SettingsError,
   Repo,
   Kei,
   Keis,
-  classifyVerb,
   deliveryPreviewOutcomeSchema,
   deliverOutcomeSchema,
 } from "../src/index.js";
+import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { createKeiHandle } from "../src/library/kei.js";
-import { withOutcomeReceipt } from "../src/library/outcome.js";
+import { withOutcomeReceipt, projectFailure } from "../src/library/outcome.js";
+import { parseAkumaId } from "../src/akuma/identity.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
 import { scopeForRepo } from "../src/library/repo.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
@@ -23,12 +25,14 @@ import { actorId, contractId } from "../src/core/facts/types.js";
 import { bind, commitCandidate, repositoryWithMain, present, accepted, document } from "./support/library-verbs.js";
 
 // The captured native owner uses this repository-local capability; no global/module monkeypatch.
-test("a frozen native KeiyakuError keeps its identity, category and cause while confirmed receipts merge", () => {
+test("frozen KeiyakuError receipts merge into a fresh error retaining the original cause chain", () => {
   const cause = new TypeError("original frozen failure");
   const admitted = { kind: "attestation" as const, requirement: "requirement:original", verdict: "satisfied" as const };
   const effect = { kind: "worktree-created" as const, path: "/tmp/frozen-effect" };
   const original = new KeiyakuError("internal", "frozen failure", {
     cause,
+    spawn: { kind: "spawned", akumaId: parseAkumaId("aku/worker/11111111").id },
+    tell: { kind: "admitted", akumaId: parseAkumaId("aku/worker/11111111").id, tellId: "original-tell" },
     outcome: { kind: "contract", contractId: contractId("kei/frozen-error"), admitted: [admitted], effects: [effect] },
   });
   Object.freeze(original);
@@ -38,9 +42,20 @@ test("a frozen native KeiyakuError keeps its identity, category and cause while 
     effects: [effect, { kind: "worktree-removed", path: "/tmp/frozen-removal" }],
     issues: [{ kind: "diagnostic", severity: "optional", diagnostic: "frozen retirement" }],
   });
-  assert.equal(returned, original);
+  assert.notEqual(returned, original);
   assert.equal(returned.category, "internal");
-  assert.equal(returned.cause, cause);
+  assert.equal(returned.cause, original);
+  assert.equal(original.cause, cause);
+  assert.equal(returned.spawn, original.spawn);
+  assert.equal(returned.tell, original.tell);
+  assert.equal(projectFailure(new KeiyakuError("internal", "no native cause")).causeClass, undefined);
+  const corruption = new AuthorityCorruptionError("native authority", { cause });
+  assert.equal(projectFailure(withOutcomeReceipt(corruption, { kind: "contract" })).causeClass, corruption.name);
+  assert.equal(projectFailure(returned).causeClass, "TypeError");
+  assert.equal(projectFailure(returned).causeDiagnostic, cause.message);
+  assert.ok(Object.isFrozen(returned.outcome));
+  assert.throws(() => Object.assign(returned, { outcome: undefined }), TypeError);
+  assert.deepEqual(original.outcome?.kind === "contract" ? original.outcome.effects : undefined, [effect]);
   assert.equal(returned.message, "frozen failure");
   assert.deepEqual(returned.outcome, {
     kind: "contract",
@@ -118,6 +133,33 @@ test("native delivery propagates lower programming and corruption failures after
       return true;
     });
   }
+});
+
+test("native delivery wraps lower-owner failures before publication", async () => {
+  const repository = repositoryWithMain();
+  const bound = await bind(repository);
+  const before = present(await bound.state());
+  const base = scopeForRepo(await Repo.at({ path: repository.path }));
+  for (const original of [
+    new AuthorityCorruptionError("pre-admission authority failure"),
+    new SettingsError("pre-admission settings failure"),
+  ]) {
+    const native = createKeiHandle(before.id, {
+      ...base,
+      get gitPath(): string {
+        throw original;
+      },
+    }, captureLocalContractComposition());
+    await assert.rejects(native.deliver(), (error: unknown) => {
+      assert.ok(error instanceof KeiyakuError);
+      assert.notEqual(error, original);
+      assert.equal(error.cause, original);
+      assert.equal(error.category, original.category);
+      assert.equal(error.outcome?.kind === "contract" ? error.outcome.admitted : undefined, undefined);
+      return true;
+    });
+  }
+  assert.deepEqual(present(await bound.state()), before);
 });
 
 test("native delivery never treats an aborted signal as proof that an independent programming failure was cancellation", async () => {
@@ -311,20 +353,65 @@ test("native review retains an earlier claimed sibling when a later continuation
   );
 });
 
-test("a pre-admission custom caller abort keeps its exact reason and aborted category", async () => {
+test("a pre-admission custom caller abort rejects with the exact raw reason without publication", async () => {
   const repository = repositoryWithMain();
   const native = await bind(repository);
+  const before = present(await native.state());
   const controller = new AbortController();
-  const reason = new Error("caller stopped");
+  const reason = Object.freeze(new Error("caller stopped"));
   controller.abort(reason);
   await assert.rejects(native.deliver({ signal: controller.signal }), (error: unknown) => {
+    assert.equal(error, reason);
+    return true;
+  });
+  assert.deepEqual(present(await native.state()), before);
+});
+
+test("native cancellation preserves an existing category and any partial observation", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
+  const before = present(await bound.kei.state());
+  const cause = new TypeError("original caller cause");
+  const reason = Object.freeze(new KeiyakuError("authority-corruption", "categorized caller stop", { cause }));
+  const preAdmission = new AbortController();
+  preAdmission.abort(reason);
+  await assert.rejects(bound.kei.deliver({ signal: preAdmission.signal }), (error: unknown) => {
+    assert.equal(error, reason);
     assert.ok(error instanceof KeiyakuError);
-    assert.equal(error.category, "aborted");
+    assert.equal(error.category, "authority-corruption");
+    assert.equal(error.outcome, undefined);
+    return true;
+  });
+  assert.deepEqual(present(await bound.kei.state()), before);
+
+  const controller = new AbortController();
+  const base = scopeForRepo(repo);
+  const native = createKeiHandle(before.id, {
+    ...base,
+    signal: controller.signal,
+    get gitPath() {
+      if (new Error().stack?.includes("observeTargetLag")) {
+        controller.abort(reason);
+        throw reason;
+      }
+      return base.gitPath;
+    },
+  }, captureLocalContractComposition());
+  await assert.rejects(native.previewDelivery(), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuError);
+    assert.notEqual(error, reason);
+    assert.equal(error.category, reason.category);
     assert.equal(error.cause, reason);
     assert.ok(error.outcome?.kind === "contract");
+    assert.ok(error.outcome.preview?.kind === "ready");
+    assert.ok(error.outcome.preview.candidate);
     assert.equal(error.outcome.admitted, undefined);
     return true;
   });
+  assert.deepEqual(present(await bound.kei.state()), before);
+  assert.equal(reason.cause, cause);
+  assert.equal(reason.outcome, undefined);
 });
 
 test("read observation preserves exact exceptional identity and thrown undefined", async () => {
@@ -484,7 +571,8 @@ test("native Contract reads tag lawful absence while corrupt fork terms remain e
   await assert.rejects(Keis.of(repo).bind({ forkOf: id }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "authority-corruption");
-    assert.ok(error.cause instanceof TypeError);
+    assert.ok(error.cause instanceof KeiyakuError);
+    assert.ok(error.cause.cause instanceof TypeError);
     assert.ok(error.message.includes(id));
     return true;
   });

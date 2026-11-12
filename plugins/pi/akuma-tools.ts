@@ -6,7 +6,7 @@ import {
   Repo,
   World,
   listArchetypeDefinitions,
-  projectFailure,
+  KeiyakuError,
   type SpawnResult,
   type AkumaHostScope,
   type AkumaCaller,
@@ -121,7 +121,22 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
             world,
           );
         } catch (error) {
-          result = projectFailure(error);
+          let cause = error;
+          while (cause instanceof KeiyakuError && cause.constructor === KeiyakuError) cause = cause.cause;
+          result = {
+            kind: "failed",
+            category: error instanceof KeiyakuError
+              ? error.category
+              : error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")
+                ? "aborted" : "internal",
+            diagnostic: error instanceof Error ? error.message : String(error),
+            ...(cause instanceof Error ? { causeClass: cause.name, causeDiagnostic: cause.message } : {}),
+            ...(error instanceof KeiyakuError ? {
+              ...(error.outcome === undefined ? {} : { outcome: error.outcome }),
+              ...(error.spawn === undefined ? {} : { spawn: error.spawn }),
+              ...(error.tell === undefined ? {} : { tell: error.tell }),
+            } : {}),
+          };
           failed = true;
         }
         const text = JSON.stringify(result);

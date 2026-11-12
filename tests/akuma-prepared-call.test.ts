@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLauncher, ChildBodyLaunch } from "../src/akuma/body-launch.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { projectFailure, spawnFailureReceipt } from "../src/library/outcome.js";
+import { KeiyakuError, type SpawnResult } from "../src/index.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
-import { classifyVerb } from "../src/index.js";
+import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { settings } from "../src/settings.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering } from "./support/akuma-tell.js";
@@ -290,7 +290,7 @@ test("a durably born child survives a later launch failure and returns the nativ
   assert.equal(result.tell, undefined);
 });
 
-test("native spawn failure after Soul durability preserves TypeError identity and projected birth", async (t) => {
+test("native spawn failure after Soul durability retains TypeError cause and direct birth evidence", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-native-born-failure-"));
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
@@ -305,18 +305,19 @@ test("native spawn failure after Soul durability preserves TypeError identity an
     await birth({ paths: launch.paths, seed: launch.seed });
     throw failure;
   });
-  let confirmed: ReturnType<typeof spawnFailureReceipt>;
+  let confirmed: SpawnResult | undefined;
   await assert.rejects(api.spawn({ akumaName: "worker", cwd: world, settings: selected }), (error: unknown) => {
-    assert.equal(error, failure);
+    assert.ok(error instanceof KeiyakuError);
+    assert.equal(error.cause, failure);
     assert.equal(failure.cause, cause);
-    const receipt = spawnFailureReceipt(error);
+    const receipt = error.spawn;
     assert.ok(receipt);
     confirmed = receipt;
     assert.equal(receipt.tellId, undefined);
-    const projected = projectFailure(error);
-    assert.equal(projected.category, "internal");
-    assert.equal(projected.causeClass, "TypeError");
-    assert.deepEqual(JSON.parse(JSON.stringify(projected)).spawn, receipt);
+    assert.equal(error.category, "internal");
+    assert.equal(error.cause.name, "TypeError");
+    assert.ok(Object.isFrozen(receipt));
+    assert.throws(() => Object.assign(error, { spawn: undefined }), TypeError);
     const completion = { kind: "threw" as const, error };
     const input = { akumaName: "worker", workdir: world };
     assert.equal(classifyVerb("spawn", input, completion), "failed");
@@ -334,7 +335,6 @@ test("native spawn failure after Soul durability preserves TypeError identity an
   const [directory] = await childRuns(world);
   assert.ok(directory);
   assert.ok((await api.list()).rows?.some(row => row.id === confirmedBirth.akumaId && row.life !== "unborn" && row.life !== "stillborn"));
-  assert.equal(projectFailure(Object.assign(new Error("foreign"), { spawn: { akumaId: "forged" } })).spawn, undefined);
 });
 
 test("an abort after confirmed birth keeps the child and its native reason", async (context) => {

@@ -19,13 +19,7 @@ import type { ForkResult, SpawnResult } from "./akuma-creation.js";
 import type { ContractWaitResult } from "./contract-wait.js";
 import { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import type { VerbInput, VerbName, VerbOutput } from "./keiyaku-verbs.js";
-import {
-  KeiyakuError,
-  contractOutcomeDisposition,
-  invocationIssueIsFailure,
-  resetIssueIsRequired,
-  spawnFailureReceipt,
-} from "./outcome.js";
+import { contractOutcomeDisposition, invocationIssueIsFailure, resetIssueIsRequired } from "./outcome.js";
 
 export type VerbDisposition = "accepted" | "unsatisfied" | "refused" | "retryable" | "failed" | "usage";
 
@@ -41,8 +35,6 @@ function classifyDebt(result: DebtNativeResult): VerbDisposition {
 }
 
 function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
-  if (spawnFailureReceipt(error) !== undefined || (error instanceof KeiyakuError && error.outcome !== undefined))
-    return "failed";
   if (error instanceof KeiyakuUsageError) return "usage";
   if (
     error instanceof AkumaAddressError ||

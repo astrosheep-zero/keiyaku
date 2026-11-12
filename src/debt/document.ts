@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { isMap, parseDocument, stringify } from "yaml";
 import { z } from "zod";
 import { debtIdSchema, canonicalDebtId, type DebtId } from "./identity.js";
@@ -28,13 +29,12 @@ export const debtDocumentSchema = z
 export type DebtDocument = z.output<typeof debtDocumentSchema>;
 export type DebtCreationDocument = Omit<DebtDocument, "id" | "createdBy" | "createdAt" | "updatedAt">;
 
-export class DebtAuthorityCorruptionError extends Error {
+export class DebtAuthorityCorruptionError extends KeiyakuError {
   /** The Debt document whose bytes failed decode, when the reader knew its coordinate. */
   readonly coordinate?: DebtId;
 
   constructor(message: string, options?: ErrorOptions & { coordinate?: DebtId }) {
-    super(message, options);
-    this.name = "DebtAuthorityCorruptionError";
+    super("internal", message, options);
     if (options?.coordinate !== undefined) this.coordinate = options.coordinate;
   }
 }

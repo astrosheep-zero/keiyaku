@@ -85,7 +85,7 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
     input.signal?.throwIfAborted();
     return completeTell(tellAdmissionEvidence(input.id, tell));
   } catch (error) {
-    throw withTellFailureReceipt(error, completeTell(tellAdmissionEvidence(input.id, tell)));
+    throw withTellFailureReceipt(error, completeTell(tellAdmissionEvidence(input.id, tell)), input.signal);
   }
 }
 
@@ -160,7 +160,7 @@ export async function observeAdmittedAskAkuma(
       ...(input.onObserve?.observe === undefined ? {} : { observe: input.onObserve.observe }),
     });
   } catch (error) {
-    throw withTellFailureReceipt(error, completeTell(tellAdmissionEvidence(input.id, settled ?? tell)));
+    throw withTellFailureReceipt(error, completeTell(tellAdmissionEvidence(input.id, settled ?? tell)), input.signal);
   }
   const receipt = tellAdmissionEvidence(input.id, settled ?? tell);
   const observation = askObservation(observed);

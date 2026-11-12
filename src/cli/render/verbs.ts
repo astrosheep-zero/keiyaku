@@ -121,13 +121,6 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
       context,
     );
   }
-  if (error instanceof KeiyakuError) {
-    if (error.outcome === undefined) return `× ${name} failed\n  reason  ${safeText(error.message)}`;
-    return [
-      ...executionFailureLines(name, error.outcome, failure, context.columns),
-      ...(error.outcome.kind === "contract" ? contractIssueLines(error.outcome, context.columns) : []),
-    ].join("\n");
-  }
   if (error instanceof AkumaNotBornError)
     return renderStructuredRefusal(name, "Akuma not found", [`id  ${safeText(error.id)}`]);
   if (error instanceof AkumaAddressError) {
@@ -151,9 +144,13 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
       ...(absent ? ["available  keiyaku ls aku/"] : []),
     ]);
   }
-  return error instanceof KeiyakuUsageError
-    ? failure.diagnostic
-    : `× ${name} failed\n  reason  ${safeText(failure.diagnostic)}`;
+  if (error instanceof KeiyakuUsageError) return failure.diagnostic;
+  if (error instanceof KeiyakuError && error.outcome !== undefined)
+    return [
+      ...executionFailureLines(name, error.outcome, failure, context.columns),
+      ...(error.outcome.kind === "contract" ? contractIssueLines(error.outcome, context.columns) : []),
+    ].join("\n");
+  return `× ${name} failed\n  reason  ${safeText(failure.diagnostic)}`;
 }
 
 function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">, context: TextRenderContext): string {

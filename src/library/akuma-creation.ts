@@ -429,9 +429,9 @@ async function settleCall(
       : { kind: "failed", ...observed, failures: [first, ...rest] };
   };
   if (parsed.signal?.aborted === true && admitted.failure !== undefined)
-    throw withSpawnFailureReceipt(parsed.signal.reason, result());
+    throw withSpawnFailureReceipt(parsed.signal.reason, result(), parsed.signal);
   if (admitted.failure !== undefined && (parsed.initialTell === undefined || admitted.failureStage === "wake"))
-    throw withSpawnFailureReceipt(admitted.failure, result());
+    throw withSpawnFailureReceipt(admitted.failure, result(), parsed.signal);
   if (receipt !== undefined && parsed.mode === "wait") {
     try {
       const {
@@ -465,7 +465,7 @@ async function settleCall(
         failures.push({ stage: "observation", diagnostic: observation.diagnostic });
       else input = observation;
     } catch (error) {
-      if (parsed.signal?.aborted) throw withSpawnFailureReceipt(error, result());
+      if (parsed.signal?.aborted) throw withSpawnFailureReceipt(error, result(), parsed.signal);
       failures.push({ stage: "observation", diagnostic: integrationFailure(error).diagnostic });
     }
   }

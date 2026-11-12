@@ -38,7 +38,11 @@ Private custody may retain independent
 facts required by admission, recovery, or another owner; it does not retain a
 parallel result merely for presentation to discard later.
 
-Thrown errors are not ordinary results. Schemas describe the JSON wire form:
+Thrown errors are not ordinary results. Distinguished SDK failures share
+KeiyakuError; native failures and cancellation reasons may still escape lower
+boundaries unchanged when no confirmed evidence needs attaching. Exceptional
+evidence is readable directly from the thrown error rather than through an
+adapter projection or hidden receipt store. Schemas describe the JSON wire form:
 round-tripping a native result through JSON and its owner schema preserves that
 form. Native Contract capabilities retain their process-local custody
 without serializing it or reconstructing capabilities from JSON. Schema parity
@@ -98,7 +102,10 @@ A normal refusal or retry is returned only before the leading act has confirmed
 an effect. Later stops remain on the accepted answer or thrown exception.
 An exceptional receipt retains the native category and cause together with the
 known admitted work, resource creation, movement, and issues at its actual
-failure point. Ephemeral recovery snapshots survive accepted cleanup because a
+failure point. Its category retains an existing owner's judgment, and diagnostics
+retain the underlying native cause through any evidence wrappers. Adapter
+classification consumes these judgments without introducing another severity
+authority. Ephemeral recovery snapshots survive accepted cleanup because a
 later read cannot recover their unpinned identities.
 A later successful read is not a substitute for evidence an invocation already
 confirmed. Cancellation requests a stop; it cannot erase publication or skip
@@ -204,7 +211,10 @@ a required operational stop remains actionable.
 Resource problems accumulate across attempts and dependents. Newer candidate
 conclusions cannot overwrite an earlier resource problem. A failure during
 retirement keeps every previously confirmed admission and effect, including when
-an earlier exceptional receipt was already attached to the native cause.
+an earlier exceptional receipt was already attached to the native cause. Merging
+evidence creates a fresh error with immutable receipt properties and preserves
+the prior error and its complete cause chain. Independent invocations sharing a
+frozen reason retain independent receipts without changing that reason.
 
 Ephemeral progress is separate from the final answer. It may expose confirmed
 admission before trailing work settles, but observer failure, gaps, or absence

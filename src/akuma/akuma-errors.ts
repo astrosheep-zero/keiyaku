@@ -1,53 +1,46 @@
+import { KeiyakuError, errorCategory } from "../errors.js";
 import type { AkumaId } from "./identity.js";
 import type { AkumaTellResult } from "./selection-observation.js";
 
-const confirmedTellFailures = new WeakMap<Error, Readonly<{ cause: Error; receipt: AkumaTellResult }>>();
-export function tellFailure(error: unknown) {
-  return error instanceof Error ? confirmedTellFailures.get(error) : undefined;
-}
-export function withTellFailureReceipt(reason: unknown, receipt: AkumaTellResult): Error {
-  const cause = reason instanceof Error ? reason : new Error(String(reason));
-  const previous = confirmedTellFailures.get(cause);
-  const error = previous === undefined ? cause : new Error(cause.message, { cause: previous.cause });
-  confirmedTellFailures.set(error, { cause: previous?.cause ?? cause, receipt });
-  return error;
+export function withTellFailureReceipt(reason: unknown, tell: AkumaTellResult, signal?: AbortSignal): KeiyakuError {
+  return new KeiyakuError(errorCategory(reason, signal), reason instanceof Error ? reason.message : String(reason), {
+    ...(reason instanceof KeiyakuError ? { outcome: reason.outcome, spawn: reason.spawn } : {}),
+    cause: reason,
+    tell,
+  });
 }
 export { AkumaBusyError } from "./heart/facts.js";
 
-export class AkumaNotBornError extends Error {
+export class AkumaNotBornError extends KeiyakuError {
   readonly kind = "akuma-not-born";
   constructor(readonly id: AkumaId) {
-    super(`Akuma ${id} is not born`);
-    this.name = "AkumaNotBornError";
+    super("internal", `Akuma ${id} is not born`);
   }
 }
 
-export class AkumaObservationError extends Error {
+export class AkumaObservationError extends KeiyakuError {
   readonly kind = "akuma-observation";
   constructor(
     readonly id: AkumaId,
     readonly diagnostic: string,
   ) {
-    super(`Akuma ${id} observation failed: ${diagnostic}`);
-    this.name = "AkumaObservationError";
+    super("internal", `Akuma ${id} observation failed: ${diagnostic}`);
   }
 }
 
-export class AkumaDecodeError extends Error {
+export class AkumaDecodeError extends KeiyakuError {
   readonly kind = "akuma-decode";
   constructor(
     readonly diagnostic: string,
     readonly answer?: string,
   ) {
-    super(diagnostic);
-    this.name = "AkumaDecodeError";
+    super("internal", diagnostic);
   }
 }
 
-export class AkumaProviderError extends Error {
+export class AkumaProviderError extends KeiyakuError {
   readonly kind = "akuma-provider";
   constructor(readonly diagnostic: string) {
-    super(diagnostic);
-    this.name = "AkumaProviderError";
+    super("internal", diagnostic);
   }
 }

@@ -2,7 +2,13 @@ export type { AkumaCaller } from "./caller.js";
 export type { AkumaOrigin } from "./heart/index.js";
 export { AkumaArchetypeError, listArchetypeDefinitions } from "./archetype.js";
 export type { ArchetypeCatalog, ArchetypeCatalogInput, ArchetypeCatalogRow } from "./archetype.js";
-export { AkumaBusyError, AkumaDecodeError, AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
+export {
+  AkumaBusyError,
+  AkumaDecodeError,
+  AkumaNotBornError,
+  AkumaObservationError,
+  AkumaProviderError,
+} from "./akuma-errors.js";
 export { Akuma } from "./akuma-instance.js";
 export type {
   AkumaAskOptions,

@@ -1,3 +1,4 @@
+import { KeiyakuError } from "./errors.js";
 import { z } from "zod";
 import { readFile, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -82,11 +83,10 @@ export const settingsSchema = z
 
 export type SettingsInput = Readonly<{ root?: string; home?: string }>;
 
-export class SettingsError extends Error {
+export class SettingsError extends KeiyakuError {
   readonly kind = "settings";
   constructor(message: string) {
-    super(message);
-    this.name = "SettingsError";
+    super("internal", message);
   }
 }
 

@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -64,7 +65,7 @@ type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
     provider: ProviderExecution;
   }>;
 
-export class AkumaArchetypeError extends Error {
+export class AkumaArchetypeError extends KeiyakuError {
   readonly kind = "akuma-archetype";
   constructor(
     readonly akumaName: string,
@@ -72,8 +73,7 @@ export class AkumaArchetypeError extends Error {
     readonly reason: string,
     guidance?: string,
   ) {
-    super([`\`${akumaName}\` ${reason}`, ...(guidance === undefined ? [] : [guidance])].join("\n"));
-    this.name = "AkumaArchetypeError";
+    super("internal", [`\`${akumaName}\` ${reason}`, ...(guidance === undefined ? [] : [guidance])].join("\n"));
   }
 }
 

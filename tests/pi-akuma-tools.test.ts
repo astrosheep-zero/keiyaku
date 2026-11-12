@@ -364,6 +364,9 @@ test(
     await host.invoke("akuma_spawn", { akumaName: "worker", body: "x", detach: "yes" }, true);
     const invalid = await host.invoke("akuma_spawn", { akumaName: "worker", body: "x", timeoutMs: 0 }, true);
     assert.match(JSON.stringify(invalid), /requires wait/u);
+    assert.equal(invalid.structuredContent.kind, "failed");
+    assert.equal(invalid.structuredContent.category, "internal");
+    assert.equal(invalid.structuredContent.causeClass, "TypeError");
     const deadlineCall = await native("akuma_spawn", {
       akumaName: "worker",
       body: command(holding(world, "deadline")),
@@ -392,6 +395,8 @@ test(
       "string",
       "aborted observation keeps its leading birth in structured error data",
     );
+    assert.equal(aborted.structuredContent.tell.akumaId, aborted.structuredContent.spawn.akumaId);
+    assert.equal(aborted.structuredContent.tell.tellId, aborted.structuredContent.spawn.tellId);
     assert.equal((await api.status({ akuma: aborted.structuredContent.spawn.akumaId })).life, "running");
     await native("akuma_kill", { akuma: [aborted.structuredContent.spawn.akumaId] });
 

@@ -1,4 +1,5 @@
 /** @architectureCompositionRoot */
+import { KeiyakuError } from "../errors.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { readAkumaCompleteRoster } from "../akuma/akuma.js";
 import { akumaAddressability, requireBornAkuma } from "../akuma/akuma-probe.js";
@@ -45,23 +46,22 @@ export type AkumaAddressRefusal =
   | Readonly<{ kind: "akuma-alias-not-found"; alias: AkumaAlias }>
   | Readonly<{ kind: "invalid-akuma"; selector: string }>;
 
-export class AkumaAddressError extends Error {
+export class AkumaAddressError extends KeiyakuError {
   constructor(readonly refusal: AkumaAddressRefusal) {
     super(
+      "internal",
       refusal.kind === "akuma-alias-not-found"
         ? `unknown Akuma alias: ${refusal.alias}`
         : `invalid Akuma: ${refusal.selector}`,
     );
-    this.name = "AkumaAddressError";
   }
 }
 
-export class AkumaWorldScopeError extends TypeError {
+export class AkumaWorldScopeError extends KeiyakuError {
   readonly refusal: AkumaWorldScopeRefusal;
 
   constructor(refusal: AkumaWorldScopeRefusal) {
-    super(`akuma-not-in-world ${refusal.world} ${refusal.ids.join(" ")}`);
-    this.name = "AkumaWorldScopeError";
+    super("internal", `akuma-not-in-world ${refusal.world} ${refusal.ids.join(" ")}`);
     this.refusal = refusal;
   }
 }

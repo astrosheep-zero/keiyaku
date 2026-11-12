@@ -645,9 +645,9 @@ export class Kei {
         (completed.kind === "accepted" || completed.kind === "ready" || completed.kind === "blocked") &&
         isOperationalFailure(error)
           ? completed
-          : { kind: "failed", contract: this.id, error: invocationFailure(error, scope.signal) };
+          : { kind: "failed", contract: this.id, error };
     }
-    const projected = project<Answer>(operation, accumulator.snapshot(), projection);
+    const projected = project<Answer>(operation, accumulator.snapshot(), projection, scope.signal);
     if (projected.kind === "failed") throw projected.error;
     return projected.outcome;
   }
@@ -926,14 +926,4 @@ function requireMatchingDeliveryLeading(
   if (witnessed === undefined) throw new Error("confirmed delivery requires its own receipt");
   if (leading.fact !== witnessed || leading.kind !== (fact === undefined ? "already-admitted" : "admitted-now"))
     throw new Error("accepted delivery leading disagrees with its admitted fact");
-}
-
-function invocationFailure(error: unknown, signal?: AbortSignal): unknown {
-  return signal?.aborted === true && error === signal.reason
-    ? new KeiyakuError("aborted", errorMessage(error), { cause: error })
-    : error;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

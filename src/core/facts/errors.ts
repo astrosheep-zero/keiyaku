@@ -1,6 +1,7 @@
-export class AuthorityCorruptionError extends Error {
+import { KeiyakuError } from "../../errors.js";
+
+export class AuthorityCorruptionError extends KeiyakuError {
   constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "AuthorityCorruptionError";
+    super("authority-corruption", message, options);
   }
 }
