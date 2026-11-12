@@ -133,8 +133,8 @@ test("wire validation and classification reject malformed calls before observati
   for (const [name, inputs] of [
     ["show", [{ ids: [] }, { id: "debt/a", ids: ["debt/a"] }, { ids: ["debt/a", "kei/b"] },
       { ids: ["kei/a"] }, { ids: ["kei/a", "kei/b"] }, { id: "aku/worker/1234abcd" }, { id: "debt/" }, { id: "@*" }, { id: "@" }]],
-    ["ls", [{ selector: "kei/", selection: "all" }, { selector: "debt/", caller: { kind: "mine" } },
-      { selector: "aku/", caller: { kind: "mine" } }, { selector: "aku/*", selection: "closed" }]],
+    ["ls", [{ selector: "kei/", selection: "all" }, { selector: "debt/", mine: true },
+      { selector: "aku/", mine: true }, { selector: "aku/*", caller: "aku/intern/00000001" }, { selector: "aku/*", selection: "closed" }]],
     ["status", [{}, { id: "debt/a" }, { id: "aku/*" }, { ids: ["kei/a", "kei/b"] }]],
   ] as const) for (const input of inputs) {
     await assert.rejects(facet.run(name, input as never), KeiyakuUsageError);

@@ -197,7 +197,11 @@ function rowPrefix(
 ): Readonly<{ first: string; continuation: string }> {
   if (row.kind === "tool") return actionPrefix(toolMargin(row, view.live === true), tool!.label, columns);
   if (row.kind === "thought") return actionPrefix(ACTION_MARGIN, "think", columns);
-  if (row.kind === "report") return actionPrefix(ACTION_MARGIN, "report", columns);
+  if (row.kind === "report") {
+    if (view.history !== true) return actionPrefix(ACTION_MARGIN, "report", columns);
+    const first = `${ACTION_MARGIN}report/${row.sequence} `;
+    return { first, continuation: " ".repeat(displayColumns(first)) };
+  }
   if (row.kind === "note") return actionPrefix(ACTION_MARGIN, "note", columns);
   if (row.kind === "outcome")
     return {
@@ -219,6 +223,25 @@ function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {
   const { first, continuation } = rowPrefix(row, tool, context.columns, view);
   const value = row.kind === "tool" ? undefined : rowText(row);
   const text = tool === undefined ? value!.text : tool.text;
+  if (view.history === true && row.kind === "outcome") {
+    const heading = `${first}turn/${row.turnSequence}`;
+    if (row.outcome.kind === "canceled") return [`${heading} · canceled`];
+    return [
+      heading,
+      ...(text === ""
+        ? []
+        : renderBoundedPayload({
+            text,
+            first: TOP_CONTINUATION,
+            continuation: TOP_CONTINUATION,
+            columns: context.columns,
+            maxLines: Number.MAX_SAFE_INTEGER,
+            quote: "",
+            preserveLines: true,
+            truncated: "truncated" in row && row.truncated === true,
+          })),
+    ];
+  }
   const singleLine = tool !== undefined || row.kind === "call" || row.kind === "tell" || row.kind === "turn";
   return renderBoundedPayload({
     text,

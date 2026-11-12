@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
@@ -9,14 +9,15 @@ import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { classifyVerb, type VerbInput, type VerbName, type VerbOutput } from "../src/library/keiyaku-verbs.js";
-import { createKeiyakuMcpServer, mcpInputSchema } from "../src/mcp/adapter.js";
+import { createKeiyakuMcpServer, mcpInputSchema, normalizeMcpSchema } from "../src/mcp/adapter.js";
 import { Keiyaku, KeiyakuUsageError } from "../src/library/keiyaku.js";
 import { projectFailure } from "../src/library/outcome.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { DEFAULT_CLI_COLUMNS } from "../src/cli/render/terminal.js";
 import { Akuma, Akumas, Keis, Repo, World, kanshi, listArchetypeDefinitions } from "../src/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
-import { repositoryAt } from "../src/git/repository.js";
+import { repositoryAt, updateGitTree, writeBlob, writeStateCommit, updateRefsAtomically } from "../src/git/repository.js";
+import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { bornBody, bornDirectAkuma, bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { beginTurn, endTurn } from "../src/akuma/heart/index.js";
 import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
@@ -45,6 +46,21 @@ test("flat discovery preserves strict business branches and rejects coordinate c
   assert.throws(() => mcpInputSchema(z.strictObject({ cwd: z.string() })), /coordinate collides.*cwd/u);
 });
 
+test("schema cleanup retains authored property names and values", () => {
+  const schema = normalizeMcpSchema(JSON.parse(JSON.stringify({
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object", readOnly: true,
+    properties: {
+      readOnly: { type: "boolean", readOnly: true },
+      payload: { const: { readOnly: true, $schema: "authored" } },
+    },
+  })));
+  assert.deepEqual(schema, {
+    type: "object",
+    properties: { readOnly: { type: "boolean" }, payload: { const: { readOnly: true, $schema: "authored" } } },
+  });
+});
+
 test("real flat and native calls reject contradictory intent before coordinate I/O or Akuma allocation", async (t) => {
   const cwd = temporaryDirectory(t, "mcp-pre-io-");
   const environment = { HOME: cwd, USERPROFILE: cwd, KEIYAKU_HOME: cwd };
@@ -56,6 +72,8 @@ test("real flat and native calls reject contradictory intent before coordinate I
   const { tools } = await client.listTools();
   const facet = Keiyaku.at({ cwd, environment, home: cwd });
   const invalid: readonly (readonly [VerbName, Record<string, unknown>])[] = [
+    ["bind", { markdown: "terms", forkOf: "kei/source" }],
+    ["ls", { selector: "kei/", mine: true }],
     ["spawn", { akumaName: "worker", mode: "wait" }],
     ["spawn", { akumaName: "worker", prompt: "work", mode: "detach", timeoutMs: 0 }],
     ["spawn", { akumaName: "worker", prompt: "work", mode: "wait", timeoutMs: 0.5 }],
@@ -70,7 +88,8 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["amend", { contract: "kei/example" }],
     ["whoami", { input: {} }],
     ["kanshi", { extra: true }],
-    ["ls", { selector: "aku/", caller: { kind: "mine" } }],
+    ["ls", { selector: "aku/", mine: true }],
+    ["ls", { selector: "aku/*", caller: "aku/intern/00000001" }],
   ];
   for (const [name, input] of invalid) {
     const args = { cwd, ...input };
@@ -79,6 +98,17 @@ test("real flat and native calls reject contradictory intent before coordinate I
     assert.equal(response._meta?.["keiyaku/disposition"], "usage", name);
     assert.equal(response.structuredContent, undefined, name);
     await assert.rejects(facet.run(name, input as never), KeiyakuUsageError);
+    const tool = tools.find(tool => tool.name === name.replaceAll(".", "_"))!;
+    // Native refinements also own effective Debt changes; structural contradictions must be honest on the wire.
+    if (!(name === "debt.update" && !Object.hasOwn(input, "body"))) {
+      const validate = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.inputSchema)));
+      assert.equal(validate(args).valid, false, `${name} published schema: ${JSON.stringify(args)}`);
+    }
+  }
+  for (const name of ["debt_add", "debt_update", "report"]) {
+    const result = await client.callTool({ name, arguments: { cwd: join(cwd, "missing"), repo: "/invalid", ...(name === "debt_add" ? { title: "unwritten" } : name === "debt_update" ? { id: "debt/example", note: "unwritten" } : { text: "unwritten" }) } });
+    assert.equal(result._meta?.["keiyaku/disposition"], "usage");
+    assert.match(JSON.stringify(result.content), /repo/u);
   }
   // Discovery and the invalid spawn in this existing directory leave no marker or allocated child.
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
@@ -110,7 +140,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     Object.keys(Keiyaku.verbs).filter((name) => !excluded.includes(name)).map((name) => name.replaceAll(".", "_")),
   );
   const schemaTools = new Set([
-    "bind", "wait", "status", "ls", "show",
+    "bind", "wait", "status", "ls",
     "verify", "spawn", "fork", "debt_add", "ask",
   ]);
   let unknown: McpError | undefined;
@@ -137,8 +167,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.inputSchema)));
     if (schemaTools.has(tool.name)) {
       assert.ok("normal" in entry);
-      const output = z.toJSONSchema(entry.normal, { io: "input", reused: "ref" });
-      assert.deepEqual(tool.outputSchema, { ...output, type: "object" });
+      assert.ok(tool.outputSchema);
       new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.outputSchema)));
     } else assert.equal(tool.outputSchema, undefined);
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
@@ -192,16 +221,14 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.match(JSON.stringify(tree.content), /Check the repair/u);
   const shown = await client.callTool({ name: "show", arguments: { id: child } });
   assert.equal(shown.isError, false);
-  const childDetail = Keiyaku.verbs.show.output.parse(shown.structuredContent);
-  assert.ok(childDetail.kind === "debt-complete" && childDetail.items[0]?.kind === "found");
-  assert.deepEqual(childDetail.items[0].needs, [{ id, state: "open" }]);
+  assert.equal(shown.structuredContent, undefined);
+  assert.ok(JSON.stringify(shown.content).includes(`needs ${id}`));
   const list = await client.callTool({ name: "ls", arguments: { selector: "debt/" } });
   assert.equal(list.isError, false);
   assert.match(JSON.stringify(list.structuredContent), /Fix the roof/);
   const plural = await client.callTool({ name: "show", arguments: { ids: [id] } });
-  assert.deepEqual(plural.structuredContent, JSON.parse(JSON.stringify(
-    await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { ids: [id] }),
-  )));
+  assert.equal(plural.structuredContent, undefined);
+  assert.match(JSON.stringify(plural.content), /Check the repair/u);
   const done = await client.callTool({ name: "debt_update", arguments: { id, state: "done", note: "finished" } });
   assert.equal(done.isError, false);
   assert.equal(done.structuredContent, undefined);
@@ -304,9 +331,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     const response = await client.callTool({ name, arguments: { cwd: first, repo: otherRepo.path, ...input } });
     assert.equal(response.isError, false, name);
     if (schemaTools.has(name)) {
+      const stripPanels = (key: string, value: unknown) => ["observedAt", "targetObservation", "createdDebts"].includes(key) ? undefined : value;
       assert.deepEqual(
-        JSON.parse(JSON.stringify(response.structuredContent, (key, value: unknown) => key === "observedAt" ? undefined : value)),
-        JSON.parse(JSON.stringify(expected, (key, value: unknown) => key === "observedAt" ? undefined : value)),
+        JSON.parse(JSON.stringify(response.structuredContent, stripPanels)),
+        JSON.parse(JSON.stringify(expected, stripPanels)),
         name,
       );
     } else assert.equal(response.structuredContent, undefined);
@@ -322,15 +350,70 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.deepEqual({ ...process.env }, processEnv);
   otherRepo.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
   const failedStatus = await client.callTool({ name: "status", arguments: { repo: otherRepo.path, id: bound.contractId } });
-  assert.equal(failedStatus.isError, false);
-  assert.equal((failedStatus.structuredContent as { kind: string }).kind, "contract-failed");
+  assert.equal(failedStatus.isError, true);
+  assert.equal(failedStatus._meta?.["keiyaku/disposition"], "failed");
+  assert.equal(failedStatus.structuredContent, undefined);
+  const cliFailedStatus = await runCli(["-C", otherRepo.path, "status", bound.contractId, "--json"], { environment });
+  assert.equal(cliFailedStatus.exit, 3);
+  assert.equal(JSON.parse(cliFailedStatus.stdout).kind, "contract-failed");
   const failedWorld = await client.callTool({ name: "kanshi", arguments: { repo: otherRepo.path } });
   assert.equal(failedWorld.isError, false);
   assert.equal(failedWorld.structuredContent, undefined);
   assert.match(JSON.stringify(failedWorld.content), /unavailable/u);
 });
 
-test("direct text and codemode consumers each recover complete guidance and Debt decomposition", async (t) => {
+test("SDK routing keeps optional panel failures in text without publishing unavailable wrappers", async (t) => {
+  const repository = repositoryWithMain();
+  const world = await World.at(repository.path);
+  const environment = { HOME: repository.path, USERPROFILE: repository.path, KEIYAKU_HOME: repository.path };
+  const facet = Keiyaku.at({ cwd: repository.path, environment });
+  const bound = accepted(await facet.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  const worker = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a2000031", createdAt: "2026-08-10T00:00:00.000Z" });
+  const git = await repositoryAt(repository.path);
+  assert.equal((await publishDispatch({ repository: git, akumaId: worker.id, contractId: bound.contractId })).kind, "dispatched");
+  const snapshot = await withGitDecodeChannel(git, channel => withGitReadObservation(git, channel, observation => observation.snapshot));
+  const dispatchPath = [...snapshot.paths.keys()].find(path => path.startsWith("dispatch/"))!;
+  const blob = await writeBlob(git, "unavailable optional authority\n");
+  const tree = await updateGitTree(git, snapshot.tree, new Map([[dispatchPath, { oid: blob }], ["settlement/task-holders", { oid: blob }]]));
+  const commit = await writeStateCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal((await updateRefsAtomically(git, [{ ref: "refs/heads/keiyaku-state", newOid: commit, expectedOid: snapshot.commit }])).kind, "published");
+  mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "unavailable aliases\n");
+  rmSync(bound.worktreePath!, { recursive: true, force: true });
+  const adapter = createKeiyakuMcpServer({ cwd: repository.path, environment, version: "test" });
+  const client = new Client({ name: "degraded-routing", version: "1" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([client.connect(a), adapter.server.connect(b)]);
+  t.after(async () => { await client.close(); await adapter.close(); });
+  await client.listTools();
+  for (const id of [bound.contractId, worker.id]) {
+    const response = await client.callTool({ name: "status", arguments: { id } });
+    assert.equal(response.isError, false, JSON.stringify(response));
+    const projected = response.structuredContent!;
+    assert.equal(Object.hasOwn(projected, "holder"), false);
+    assert.equal(Object.hasOwn(projected, "roster"), false);
+    assert.equal(Object.hasOwn(projected, "contract"), false);
+    assert.match(JSON.stringify(response.content), /association unavailable/u);
+    const native = await facet.status({ id });
+    if (native.kind === "contract") {
+      assert.deepEqual(native.holder, { kind: "unavailable" });
+      assert.deepEqual(native.roster, { kind: "unavailable" });
+    } else {
+      assert.ok(native.kind === "akuma" && native.contract?.kind === "failed");
+    }
+  }
+  const contracts = await client.callTool({ name: "ls", arguments: { selector: "kei/" } });
+  const rows = (contracts.structuredContent as { rows: { id: string; hasAttention: true }[] }).rows;
+  assert.deepEqual(rows.map(({ id, hasAttention }) => ({ id, hasAttention })), [{ id: bound.contractId, hasAttention: true }]);
+  assert.equal(Object.hasOwn(rows[0]!, "attention"), false);
+  const akumas = await client.callTool({ name: "ls", arguments: { selector: "aku/*" } });
+  assert.equal(akumas.isError, false);
+  assert.equal(Object.hasOwn(akumas.structuredContent!, "aliasesError"), false);
+  assert.equal(Object.hasOwn((akumas.structuredContent as { rows: object[] }).rows[0]!, "contract"), false);
+  assert.match(JSON.stringify(akumas.content), /aliases unavailable/u);
+});
+
+test("MCP show is complete text while native and CLI JSON retain owner detail", async (t) => {
   const repository = repositoryWithMain();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   const environment = { HOME: repository.path, USERPROFILE: repository.path, KEIYAKU_HOME: repository.path };
@@ -366,18 +449,10 @@ test("direct text and codemode consumers each recover complete guidance and Debt
   const directText = async (input: VerbInput<"show">): Promise<string> => {
     const response = await client.callTool({ name: "show", arguments: input });
     assert.equal(response.isError, false);
+    assert.equal(response.structuredContent, undefined);
     return (response.content as { type: string; text?: string }[]).filter(item => item.type === "text").map(item => item.text).join("\n");
   };
-  const codeResult = async (input: VerbInput<"show">) => {
-    const response = await client.callTool({ name: "show", arguments: input });
-    assert.equal(response.isError, false);
-    return Keiyaku.verbs.show.normal.parse(response.structuredContent);
-  };
-  // These are separate client projections: each contributes only its chosen representation to its caller.
   assert.equal(await directText({ id: bound.contractId }), nativeGuidance.guidance);
-  const scriptGuidance = await codeResult({ id: bound.contractId });
-  assert.ok(scriptGuidance.kind === "present");
-  assert.equal(scriptGuidance.guidance, nativeGuidance.guidance);
   const nativeDebt = await facet.show({ id: parent });
   const textDebt = await directText({ id: parent });
   assert.equal(textDebt, renderVerb("show", { id: parent }, { kind: "returned", value: nativeDebt }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
@@ -386,7 +461,9 @@ test("direct text and codemode consumers each recover complete guidance and Debt
   assert.equal(cliDebt.stdout.trimEnd(), textDebt.trimEnd());
   for (const evidence of [...body.split("\n"), ...note.split("\n"), child, "Complete child"])
     assert.ok(textDebt.includes(evidence), evidence);
-  const scriptDebt = await codeResult({ ids: [parent, child] });
+  const jsonDebt = await runCli(["-C", repository.path, "show", parent, child, "--json"], { environment });
+  assert.equal(jsonDebt.exit, 0, jsonDebt.stderr);
+  const scriptDebt = Keiyaku.verbs.show.normal.parse(JSON.parse(jsonDebt.stdout));
   assert.ok(scriptDebt.kind === "debt-complete");
   assert.equal(scriptDebt.items[0]?.body, body);
   assert.equal(scriptDebt.items[0]?.note, note);
@@ -402,7 +479,8 @@ test("direct text and codemode consumers each recover complete guidance and Debt
   assertWireConformance(Keiyaku.verbs.show.normal, partialNative, false);
   const contextual = await client.callTool({ name: "show", arguments: { cwd: bound.worktreePath } });
   assert.equal(contextual.isError, false);
-  assert.deepEqual(contextual.structuredContent, nativeGuidance);
+  assert.equal(contextual.structuredContent, undefined);
+  assert.equal((contextual.content as { text: string }[])[0]?.text, nativeGuidance.guidance);
 });
 
 test("SDK report records the executing actor and renders its attribution", async (t) => {
@@ -440,6 +518,15 @@ test("SDK report records the executing actor and renders its attribution", async
   assert.equal(report.text, input.text);
   assert.equal(report.bodySequence, born.body.sequence);
   assert.equal(report.turnSequence, turn.sequence);
+  for (const [id, expected] of [[`report/${report.sequence}`, input.text], [String(report.sequence), `report: ${input.text}`]] as const) {
+    const exact = await client.callTool({ name: "history", arguments: { selector: born.allocated.id, id } });
+    assert.deepEqual(exact.content, [{ type: "text", text: expected }]);
+    const cli = await runCli(["-C", root, "history", born.allocated.id, "--id", id], {
+      environment: { HOME: root, USERPROFILE: root, KEIYAKU_HOME: root },
+    });
+    assert.equal(cli.exit, 0, cli.stderr);
+    assert.equal(cli.stdout, expected);
+  }
   assert.deepEqual(result.content, [{
     type: "text",
     text: renderVerb("report", input, {
@@ -534,7 +621,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   }]);
   const guidance = await client.callTool({ name: "show", arguments: { id: before.id } });
   const nativeGuidance = await handle.guidance();
-  assert.deepEqual(guidance.structuredContent, nativeGuidance);
+  assert.equal(guidance.structuredContent, undefined);
   assert.equal(guidance.isError, false);
   assert.ok(nativeGuidance.kind === "present");
   assert.equal((guidance.content as { type: string; text: string }[])[0]?.text, nativeGuidance.guidance);
@@ -583,12 +670,13 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   assert.deepEqual(present(await handle.state()), before);
 });
 
-test("red verification answers normally while infrastructure failure is an error", async (t) => {
-  for (const infrastructure of [false, true]) await t.test(infrastructure ? "setup failure" : "negative verdict", async (t) => {
+test("verification keeps positive and terminal-negative answers distinct from infrastructure failure", async (t) => {
+  for (const scenario of ["satisfied", "unsatisfied", "infrastructure"] as const) await t.test(scenario, async (t) => {
+    const infrastructure = scenario === "infrastructure";
     const repository = repositoryWithMain();
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo).bind({
-      markdown: document("exit 7"), target: null, gates: ["reviewed"],
+      markdown: document(scenario === "satisfied" ? "exit 0" : "exit 7"), target: null, gates: scenario === "satisfied" ? ["reviewed", "verified"] : ["reviewed"],
     }));
     t.after(async () => {
       await bound.kei.abandon();
@@ -613,23 +701,27 @@ test("red verification answers normally while infrastructure failure is an error
     const input = { contract: bound.contractId };
     const response = await client.callTool({ name: "verify", arguments: input });
     assert.equal(response.isError, infrastructure);
-    assert.equal(response._meta?.["keiyaku/disposition"], infrastructure ? "failed" : "unsatisfied");
+    assert.equal(response._meta?.["keiyaku/disposition"], infrastructure ? "failed" : scenario === "satisfied" ? "accepted" : "unsatisfied");
     if (infrastructure) {
       assert.equal(response.structuredContent, undefined);
       assert.equal((response.content as { text: string }[])[0]?.text.split("\n")[0], "failed");
     } else {
-      const value = response.structuredContent as VerbOutput<"verify">;
-      assert.ok(value.kind === "accepted");
-      assert.equal(value.checks[0]?.kind, "terminal");
-      assert.ok(value.checks[0]?.kind === "terminal" && value.checks[0].verdict === "unsatisfied");
-      assert.equal(value.checks[0].admission, "unrecorded");
+      const value = response.structuredContent as { kind: string; checks: { verdict: string; admission: string; kind?: string }[] };
+      assert.equal(value.kind, "accepted");
+      assert.equal(value.checks[0]?.kind, undefined);
+      assert.equal(value.checks[0]?.verdict, scenario);
+      assert.equal(value.checks[0]?.admission, scenario === "satisfied" ? "admitted" : "unrecorded");
     }
     const cli = await runCli(["-C", repository.path, "verify", bound.contractId, "--json"], { environment });
-    assert.equal(cli.exit, infrastructure ? 3 : 4);
+    assert.equal(cli.exit, infrastructure ? 3 : scenario === "satisfied" ? 0 : 4);
     const result = JSON.parse(cli.stdout) as VerbOutput<"verify">;
     assert.ok(result.kind === "accepted");
     assert.equal(result.checks[0]?.kind, infrastructure ? "stopped" : "terminal");
-    assert.equal(classifyVerb("verify", input, { kind: "returned", value: result }), infrastructure ? "failed" : "unsatisfied");
+    if (scenario === "satisfied") {
+      assert.ok(result.checks[0]?.kind === "terminal");
+      assert.equal(result.checks[0].admission, "reused");
+    }
+    assert.equal(classifyVerb("verify", input, { kind: "returned", value: result }), infrastructure ? "failed" : scenario === "satisfied" ? "accepted" : "unsatisfied");
   });
 });
 
@@ -669,6 +761,74 @@ test("SDK waits distinguish observed failed/canceled work from an unreadable pee
   assert.deepEqual(Keiyaku.verbs.wait.output.parse(native), native);
 });
 
+test("SDK fork consumes the answered Turn coordinate through a real provider process", async (t) => {
+  const root = temporaryDirectory(t, "mcp-fork-");
+  const home = temporaryDirectory(t, "mcp-fork-home-");
+  const world = await World.at(root);
+  const answer = " fork source answer\n  exact\n";
+  const executable = join(root, "codex.cjs");
+  writeFileSync(executable, `#!/usr/bin/env node
+const readline = require("node:readline");
+const send = value => process.stdout.write(JSON.stringify(value) + "\\n");
+const lines = readline.createInterface({ input: process.stdin });
+lines.on("line", line => {
+  const message = JSON.parse(line);
+  const reply = result => send({ id: message.id, result });
+  if (message.method === "initialize") return reply({});
+  if (message.method === "thread/start") return reply({ thread: { id: "source-thread" } });
+  if (message.method === "thread/resume") return reply({ thread: { id: message.params.threadId } });
+  if (message.method === "thread/fork") return reply({ thread: { id: "child-thread" } });
+  if (message.method !== "turn/start") return;
+  reply({ turn: { id: "provider-turn" } });
+  send({ method: "item/completed", params: { item: { id: "answer", type: "agentMessage", text: ${JSON.stringify(answer)} } } });
+  send({ method: "turn/completed", params: { threadId: message.params.threadId, turn: { id: "provider-turn", status: "completed" } } });
+});
+`);
+  chmodSync(executable, 0o755);
+  mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "akumas", "worker.md"), "---\nprovider: fixture-codex\n---\nWorker.\n");
+  writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ providers: { "fixture-codex": { kind: "codex-app-server", executable } }, plugins: {} }));
+  const receipt = join(root, "body-pids");
+  const restore = installAkumaBodyPidReceipt(receipt);
+  const adapter = createKeiyakuMcpServer({ cwd: root, environment: { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home }, version: "test" });
+  const client = new Client({ name: "fork-routing", version: "1" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  let operationFailed = true;
+  try {
+    await Promise.all([adapter.server.connect(b), client.connect(a)]);
+    await client.listTools();
+    const spawned = await client.callTool({ name: "spawn", arguments: { akumaName: "worker", prompt: "work", mode: "wait", timeoutMs: 30_000 } });
+    assert.equal(spawned.isError, false, JSON.stringify(spawned));
+    const source = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
+    assert.equal((await Akuma.select(world, source.akumaId).idle({ timeoutMs: 30_000 })).reason, "completed");
+    const history = await client.callTool({ name: "history", arguments: { selector: source.akumaId } });
+    const page = (history.content as { text: string }[])[0]!.text;
+    const coordinate = /✓ (turn\/\d+)/u.exec(page)?.[1];
+    assert.ok(coordinate, page);
+    for (const selection of [{ id: coordinate }, { last: true }] as const) {
+      const exact = await client.callTool({ name: "history", arguments: { selector: source.akumaId, ...selection } });
+      assert.deepEqual(exact.content, [{ type: "text", text: answer }]);
+      const cli = await runCli(["-C", root, "history", source.akumaId, ...("id" in selection ? ["--id", selection.id] : ["--last"])], {
+        environment: { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home },
+      });
+      assert.equal(cli.exit, 0, cli.stderr);
+      assert.equal(cli.stdout, answer);
+    }
+    const forked = await client.callTool({ name: "fork", arguments: { akuma: source.akumaId, at: coordinate } });
+    assert.equal(forked.isError, false, JSON.stringify(forked));
+    const child = Keiyaku.verbs.fork.normal.parse(forked.structuredContent);
+    assert.deepEqual(forked.structuredContent, { kind: "forked", childAkumaId: child.childAkumaId });
+    assert.equal((await Akuma.select(world, child.childAkumaId).idle({ timeoutMs: 30_000 })).reason, "completed");
+    operationFailed = false;
+  } finally {
+    await client.close();
+    await adapter.close();
+    try {
+      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: root, pidReceiptPath: receipt, timeoutMs: 30_000, operationFailed });
+    } finally { restore(); }
+  }
+});
+
 test("SDK wire ask passes JSON Schema and returns identity-decoded answer", async (t) => {
   const root = temporaryDirectory(t, "kei-mcp-ask-");
   const home = temporaryDirectory(t, "kei-mcp-ask-home-");
@@ -677,7 +837,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
   const agent = join(root, "host-acp.mjs");
   const source = readFileSync(agent, "utf8");
   assert.ok(source.includes('text: "acp-answer"'));
-  writeFileSync(agent, source.replace('text: "acp-answer"', `text: text.includes("empty") ? "" : text.includes("null") ? "null" : text.includes("invalid") ? "not-json" : ${JSON.stringify('{"ok":true}')}`));
+  writeFileSync(agent, source.replace('text: "acp-answer"', `text: text.includes("empty") ? "" : text.includes("null") ? "null" : text.includes("invalid") ? "not-json" : text.includes("scalar") ? "42" : ${JSON.stringify('{"ok":true}')}`));
   const allocated = await bornDirectAkuma({
     root: world,
     akumaName: "acp-worker",
@@ -725,6 +885,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     assert.equal((await Akuma.select(world, allocated.id).idle({ timeoutMs: 30_000 })).reason, "completed");
     for (const [prompt, extra, expectedKind, expectedAnswer, expectedText] of [
       ["empty", { schema: { type: "string" } }, "invalid-output", "", undefined],
+      ["scalar", { schema: { type: "number" } }, "answered", 42, "42"],
       ["null", { schema: { type: "null" } }, "answered", null, "null"],
       ["invalid", { schema }, "invalid-output", "not-json", undefined],
     ] as const) {

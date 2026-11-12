@@ -115,11 +115,15 @@ export const localIssueSchema = z.union([
 const optionalSeverity = { severity: z.literal("optional") };
 const optionalResourceIssue = resourceDiagnosticSchema.unwrap().extend(optionalSeverity).readonly();
 export const optionalInvocationIssueSchema = z.union([
-  ...reconcileIssueSchema.options.map((schema) => schema.unwrap().extend(optionalSeverity).readonly()),
+  ...reconcileIssueSchema.options
+    .filter((schema) => !reconcileLagIsFailure({ kind: schema.unwrap().shape.kind.value } as ReconciliationLag))
+    .map((schema) => schema.unwrap().extend(optionalSeverity).readonly()),
   optionalResourceIssue,
 ]);
 export const optionalLocalIssueSchema = z.union([
-  ...localReconcileLeaves.map((schema) => schema.unwrap().extend(optionalSeverity).readonly()),
+  ...localReconcileLeaves
+    .filter((schema) => !reconcileLagIsFailure({ kind: schema.unwrap().shape.kind.value } as ReconciliationLag))
+    .map((schema) => schema.unwrap().extend(optionalSeverity).readonly()),
   optionalResourceIssue,
 ]);
 export const previewIssueSchema = resourceDiagnosticSchema.unwrap().omit({ contractId: true }).readonly();

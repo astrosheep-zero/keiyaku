@@ -4,9 +4,10 @@ import { debtIdSchema, canonicalDebtId, type DebtId } from "./identity.js";
 
 export const debtNonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 export const debtStateSchema = z.enum(["open", "done", "drop"]);
-export const debtPrioritySchema = z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]);
+export type DebtPriority = 0 | 1 | 2 | 3;
+// Integer bounds prove the finite priority type without a four-branch wire union.
+export const debtPrioritySchema = z.number().int().min(0).max(3) as z.ZodType<DebtPriority, DebtPriority>;
 export type DebtState = z.infer<typeof debtStateSchema>;
-export type DebtPriority = z.infer<typeof debtPrioritySchema>;
 export const debtDocumentSchema = z
   .strictObject({
     id: debtIdSchema,

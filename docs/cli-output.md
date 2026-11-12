@@ -84,18 +84,12 @@ claiming a world-wide transaction.
 
 ## Shared rendering
 
-Each domain-state-to-mark mapping and refusal receipt assembly has one
-definition site; render surfaces consume that shared definition and never
-re-derive it. The checkbox trio `[ ]`, `[✓]`, and `[×]` belongs only to state
-surfaces: it names the current requirement fill-state, including delivery and
-gates against the current candidate. Event surfaces such as history, timelines,
-and receipts use bare marks instead; in a causal history skeleton the mark
-itself carries the verdict, without a satisfied/unsatisfied word. A settled
-successful action row spends no mark; `!` is failure; `●` reports an observed
-in-motion state such as a running Akuma, and asserts continuing liveness only
-inside a redrawable live frame; `?` is unresolved activity. Voice rows carry
-their own rail and told inputs their input mark, so neither borrows an action
-verdict. History never contains `●`.
+Domain-state marks and refusal receipt assembly each have one definition site.
+State surfaces show requirement fill against the current candidate; event
+surfaces use bare verdict marks. A settled successful action spends no mark;
+failure, unresolved activity, and witnessed motion remain distinct. Only a
+redrawable live frame may assert continuing liveness. Voice and input carry
+their own marks. History never asserts current motion.
 
 Renderers show complete public identity and decision-relevant evidence without
 inventing status, hiding section failure as zero, or turning unknown evidence
@@ -107,11 +101,10 @@ attention. Facts are labeled human facts, joined with one separator; key-value
 notation, banners, and bracket state alphabets are not text vocabulary. Git
 identities are short in text and full in JSON. Paths stay absolute and
 copyable where they are the answer, and stay out of board and catalogue rows
-where they are not. Absent facts are absent rows: an empty catalogue prints
-one shared surface-named `none` state without a bare header, while an empty
-world keeps its blessed world state; neither shape prints an observed timestamp,
-a zero count, or an empty container, and a present-but-empty section omits its
-header. The whoami identity observation leads with self and names requested
+where they are not. An empty standalone catalogue names its surface once.
+Empty World sections omit their header; a wholly empty World retains its shared
+empty state. Empty views print no observed timestamp, count, or container.
+The whoami identity observation leads with self and names requested
 absence and unknowns explicitly. Non-Akuma identity is marked as such and omits
 Akuma-only details. The Akuma head carries identity, aliases, Dispatch and the
 execution directory when known, as in status. Its current initiator, birth
@@ -231,7 +224,12 @@ and name their omission; status and World carry outcome coordinates and verdicts
 rather than answer previews. An exact
 activity text read returns the full retained authored content or neutral tool
 summary without terminal framing or payload clipping; exact typed output keeps
-the complete retained native row. Capture and retention limits remain honest.
+the complete retained native row. Paged Akuma history exposes each retained
+report and Turn outcome's exact address directly, keeping those coordinates
+copyable even in a narrow terminal. Outcome payloads follow their address and
+preserve multiline relative indentation. Live observation keeps its existing
+presentation; exact item and latest-answer reads remain raw retained bytes.
+Capture and retention limits remain honest.
 
 Selected Contract status foregrounds current work or the terminal outcome,
 without repeating settled mechanics. A delivered integration observed before

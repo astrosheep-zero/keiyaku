@@ -182,6 +182,24 @@ test("history retains input, speech, actions, outcomes, and omission evidence", 
     assert.ok(text.includes(evidence), evidence);
 });
 
+test("paged history exposes copyable report and Turn coordinates with indented payloads", () => {
+  const events: ActivityHistory["rows"] = [
+    { kind: "report", sequence: 123456789, bodySequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "progress\n  detail" },
+    { ...answeredOutcome(10, "answer\n  nested"), turnSequence: 123456789 },
+    { ...answeredOutcome(11, ""), turnSequence: 2 },
+    { kind: "outcome", sequence: 12, turnSequence: 3, at: AKUMA_ACTIVITY_AT, outcome: { kind: "failed", diagnostic: "failed\n  cause" } },
+    { kind: "outcome", sequence: 13, turnSequence: 4, at: AKUMA_ACTIVITY_AT, outcome: { kind: "canceled" } },
+  ];
+  const page = { kind: "akuma" as const, akumaId: SPECIMEN_ID, events };
+  const wide = historyText(page, {}, { columns: 100, color: false });
+  assert.ok(wide.includes("   report/123456789 progress\n"));
+  assert.ok(wide.includes("✓ turn/123456789\n  answer\n    nested"));
+  assert.ok(wide.includes("✓ turn/2\n! turn/3\n  failed\n    cause\n○ turn/4 · canceled"));
+  const narrow = historyText(page, {}, { columns: 10, color: false });
+  for (const coordinate of ["report/123456789", "turn/123456789", "turn/2", "turn/3", "turn/4"])
+    assert.ok(narrow.includes(coordinate), coordinate);
+});
+
 test("history renders the full exact report without confusing it with an outcome", () => {
   const text = " report\n  complete\n";
   assert.equal(

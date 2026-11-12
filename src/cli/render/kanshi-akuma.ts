@@ -1,4 +1,3 @@
-import type { VerbInput } from "../../library/keiyaku-verbs.js";
 import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, BoardSection } from "../../kanshi/report.js";
 import { currentWorkLines } from "./akuma-activity.js";
 import { akumaMark } from "./marks.js";
@@ -132,7 +131,7 @@ function akumaBoardRows(
 function renderAkumaBoard(
   section: BoardSection<AkumaKanshiWorld>,
   observedAt: string,
-  context: TextRenderContext & Readonly<{ caller?: Extract<VerbInput<"ls">, { caller?: unknown }>["caller"] }>,
+  context: TextRenderContext & Readonly<{ caller?: string }>,
   emptyRows: readonly string[] = [emptyCatalogue("akuma")],
 ): readonly string[] {
   if (section.kind === "absent") return ["AKUMA // absent"];
@@ -150,14 +149,7 @@ function renderAkumaBoard(
       tone(`! aliases unavailable · ${aliasFailure}`, "alert", context.color),
     ];
   }
-  const caller = context.caller?.kind === "external" ? context.caller.caller : context.caller;
-  return akumaBoardRows(
-    board,
-    rows,
-    observedAt,
-    context,
-    caller?.kind === "akuma" ? caller.akumaId : caller?.kind === "external" ? "external" : undefined,
-  );
+  return akumaBoardRows(board, rows, observedAt, context, context.caller);
 }
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {

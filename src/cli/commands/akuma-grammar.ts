@@ -132,7 +132,7 @@ const AKUMA_COMMAND_SPECS = {
     usage: "fork <aku/...|@name> --at <historyId> [--bare] [--repo <path>]",
     purpose: "Create a new Akuma from an answered turn.",
     details: [
-      "--at takes a retained answered turn id (turn/<n>); find its historyId in paged keiyaku history <aku/...|@name> --json. Fork also requires a retained provider fork point.",
+      "--at takes a retained answered turn id (turn/<n>); find it in paged keiyaku history <aku/...|@name>. Fork also requires a retained provider fork point.",
       "A fork inherits bare; --bare additionally omits only the child's Keiyaku runtime instructions.",
     ].join("\n"),
   },

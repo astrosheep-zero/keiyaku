@@ -242,9 +242,9 @@ export const CONTRACT_COMMAND_SPECS = {
   ls: {
     positional: "optional",
     stdin: "none",
-    flags: { limit: "value", json: "boolean", mine: "boolean", caller: "value", closed: "boolean", all: "boolean" },
+    flags: { limit: "value", json: "boolean", mine: "boolean", closed: "boolean", all: "boolean" },
     usage:
-      'ls debt[/] [--closed | --all] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] (--mine | --caller (<integration>:<id> | aku/<name>/<suffix>)) [--limit <count>]',
+      'ls debt[/] [--closed | --all] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] --mine [--limit <count>]',
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
       "Debt lists open work by default; --closed selects terminal work and --all selects both.",
@@ -252,7 +252,7 @@ export const CONTRACT_COMMAND_SPECS = {
       "ls aku/ lists the spawnable Akuma-name catalog; ls aku/<name> lists recent retained Akuma instances under one name.",
       'ls "aku/<name>/*" is the same roster in glob form; ls "aku/*/*" lists recent retained Akuma instances across names.',
       "--mine selects the caller identity of this process and lists that caller's direct and transitive descendants in this World.",
-      "--caller selects an explicit caller instead; both selectors are World-local and refuse for Contract, Debt, or Akuma-name catalogues.",
+      "Caller scoping is World-local and refuses for Contract, Debt, or Akuma-name catalogues.",
       "Descendant rows name their immediate calling Akuma beside the row.",
     ].join("\n"),
   },

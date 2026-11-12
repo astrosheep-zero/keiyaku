@@ -1,14 +1,10 @@
 import { validateAkumaName } from "../../identity/normalize.js";
-import { decodeAkumaCaller } from "../../akuma/caller.js";
 import { parseAkumaId } from "../../akuma/identity.js";
 import { canonicalDebtId } from "../../debt/identity.js";
-import type { VerbInput } from "../../library/keiyaku-verbs.js";
 import { contractId } from "../../core/facts/types.js";
 import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
-
-type AkumaCallerSelector = Extract<VerbInput<"ls">, { caller?: unknown }>["caller"];
 
 export type ContractTokens = Readonly<{
   command: ContractCommand;
@@ -227,35 +223,6 @@ function listLimit(parts: ContractTokens): number | undefined {
   return limit === undefined ? undefined : Number(limit);
 }
 
-function parseCallerSelector(parts: ContractTokens): AkumaCallerSelector {
-  const mine = parts.flags.mine === true;
-  const value = optionalFlag(parts.flags, "caller");
-  if (mine && value !== undefined) refuse("ls", "--mine and --caller are mutually exclusive");
-  if (mine) return { kind: "mine" };
-  if (value === undefined) return undefined;
-  const text = value.trim();
-  if (text.startsWith("aku/")) {
-    try {
-      return { kind: "akuma", akumaId: parseAkumaId(text).id };
-    } catch (error) {
-      refuse("ls", `--caller has an invalid Akuma identity: ${error instanceof Error ? error.message : text}`);
-    }
-  }
-  const colon = text.indexOf(":");
-  if (colon < 0) refuse("ls", "--caller requires <integration>:<id> or aku/<name>/<suffix>");
-  try {
-    const caller = decodeAkumaCaller({
-      kind: "external",
-      integration: text.slice(0, colon),
-      id: text.slice(colon + 1),
-    });
-    if (caller === undefined) refuse("ls", "--caller requires <integration>:<id> or aku/<name>/<suffix>");
-    return { kind: "external", caller };
-  } catch (error) {
-    refuse("ls", `--caller is invalid: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
 function validateInstanceCatalogue(selector: string): void {
   const match = /^aku\/([^/]+)(?:\/\*|\/)?$/u.exec(selector);
   if (match === null || (match[1] === "*" && selector === "aku/*/"))
@@ -269,17 +236,16 @@ function validateInstanceCatalogue(selector: string): void {
 }
 
 function parseLs(parts: ContractTokens): VerbRequest<"ls"> {
-  const selector =
-    parts.positionals[0] ?? (parts.flags.mine !== undefined || parts.flags.caller !== undefined ? "aku/*" : undefined);
+  const selector = parts.positionals[0] ?? (parts.flags.mine === true ? "aku/*" : undefined);
   if (selector === undefined) refuse("ls", "ls requires a selector");
   const limit = listLimit(parts);
   const bound = limit === undefined ? {} : { limit };
-  const caller = parseCallerSelector(parts);
+  const mine = parts.flags.mine === true;
   const all = parts.flags.all === true,
     closed = parts.flags.closed === true;
   if (all && closed) refuse("ls", "--all and --closed are mutually exclusive");
   if (selector === "debt" || selector === "debt/") {
-    if (caller !== undefined) refuse("ls", "--mine and --caller select Akuma instances only");
+    if (mine) refuse("ls", "--mine selects Akuma instances only");
     return {
       name: "ls",
       input: { selector, ...bound, ...(all ? { selection: "all" } : closed ? { selection: "closed" } : {}) },
@@ -288,11 +254,11 @@ function parseLs(parts: ContractTokens): VerbRequest<"ls"> {
   }
   if (all || closed) refuse("ls", "--all and --closed select Debts only");
   if (["kei", "kei/", "aku", "aku/"].includes(selector)) {
-    if (caller !== undefined) refuse("ls", "--mine and --caller select Akuma instances only");
+    if (mine) refuse("ls", "--mine selects Akuma instances only");
   } else validateInstanceCatalogue(selector);
   return {
     name: "ls",
-    input: { selector, ...bound, ...(caller === undefined ? {} : { caller }) },
+    input: { selector, ...bound, ...(mine ? { mine: true } : {}) },
     output: parts.output,
   };
 }

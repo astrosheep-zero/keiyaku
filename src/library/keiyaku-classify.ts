@@ -153,8 +153,10 @@ export function classifyVerb<K extends VerbName>(
       const result = value as VerbOutput<"ls">;
       return result.kind === "debt-catalogue" && "absent" in result ? "refused" : "accepted";
     }
-    case "status":
-      return (value as VerbOutput<"status">).kind === "contract-missing" ? "refused" : "accepted";
+    case "status": {
+      const result = value as VerbOutput<"status">;
+      return result.kind === "contract-missing" ? "refused" : result.kind === "contract-failed" ? "failed" : "accepted";
+    }
     case "region":
       return classifyRegion(value as RegionRead);
     case "reconcile":

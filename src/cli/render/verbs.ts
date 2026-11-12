@@ -322,7 +322,7 @@ export function renderVerb<K extends VerbName>(
       const query = input as VerbInput<"ls">;
       return renderAkumaBoard({ ...result, kind: "present" }, result.observedAt, {
         ...context,
-        ...("caller" in query && query.caller !== undefined ? { caller: query.caller } : {}),
+        ...("mine" in query && query.mine === true ? { caller: context.actor ?? "external" } : {}),
       }).join("\n");
     }
     case "kanshi":

@@ -79,6 +79,12 @@ async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime, alias?
       renderVerb(request.name, request.input, completion, {
         ...displayContext(),
         ...(alias === undefined ? {} : { alias }),
+        ...(request.name === "ls" &&
+        "mine" in request.input &&
+        request.input.mine === true &&
+        runtime.environment.KEIYAKU_ACTOR_ID !== undefined
+          ? { actor: runtime.environment.KEIYAKU_ACTOR_ID }
+          : {}),
       }),
     classifyVerb(request.name, request.input, completion),
   );

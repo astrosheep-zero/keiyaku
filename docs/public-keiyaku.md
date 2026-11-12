@@ -29,13 +29,13 @@ observation; validation never resolves a product merely to judge input shape.
 Contradictory caller intent remains usage, distinct from an execution failure.
 
 MCP publishes the facet's operations subject to the administration and raw-import
-exclusion owned by [cli.md](cli.md). It publishes an owner's object-rooted output
-schema when a caller reads the result to choose its next call; other tools return
-rendered text. The published declaration is the owner's normal subset. Every
-normal answer of a schema-publishing tool carries its unchanged native value;
-selection cannot silently suppress structured output. An alternative that cannot
-describe an object is a programmer error for a tool publishing a schema. Error
-results are text led by their
+exclusion owned by [cli.md](cli.md). Structured output is reserved for routing
+operations: it projects normal owner answers onto compact facts needed to choose
+the next call. Every normal answer of such a tool carries that projection,
+including an answered negative verdict. Native callers and CLI JSON retain the
+full owner value. Guidance and Debt detail return complete unclipped text at the
+transport edge. These projections supply no new classification or authority.
+Error results are text led by their
 classification. An unsatisfied verification verdict is an answered negative,
 distinct from an operation failure, and is not a transport error. Published names are safe
 for model APIs and are the only callable transport names. Read-only annotations
@@ -61,6 +61,8 @@ The diagnostic names every conflicting environment variable so the caller can
 identify the competing declarations without disclosing their values.
 
 Debt invocation resolves the caller's World independently of a selected Repo.
+World-only Debt mutations and Akuma progress reports do not accept repository
+selection at the standalone transport edge.
 Every Debt catalogue covers that World's flat ledger. Creation alone
 derives actor testimony and establishes a missing World.
 Debt reads retain native absence and refusal distinctions; listing defaults to
@@ -69,10 +71,13 @@ open work.
 Each list and addressed status operation selects one producing owner before
 observation. The independent selector-free Kanshi read owns the World report;
 status requires one complete Contract or Akuma identity and never falls back to
-World observation. It preserves that owner's missing and failed observations.
-Catalogues identify their Contract, Akuma-instance, Archetype, or Debt family even
+World observation. A missing Contract is refused; a failed exact Contract read
+is an operational failure. Catalogues identify their Contract, Akuma-instance, Archetype, or Debt family even
 when empty or unavailable. Instance caller selection and Debt lifecycle selection
-belong only to their respective owners and precede bounding. There is no
+belong only to their respective owners and precede bounding. Invocation caller
+scoping selects only this invocation's environment-derived identity; absent or
+ambiguous identity is usage. The native Akumas composition independently retains
+explicit caller selection. There is no
 cross-family catalogue, category status, or plural status result.
 
 Guidance selection reuses the Contract context resolver when omitted. Singular

@@ -15,8 +15,12 @@ it is a description of the owner's existing judgment, never a second classifier
 or a runtime parse of trusted results. Observation declarations preserve the
 reason-specific evidence and consistent availability of their members without
 proving completion over a selected set; that judgment remains with the native
-producer. Native callers retain the complete answer,
-including refusal, retry, and stops after confirmed effects. Heterogeneous object answers
+producer. Native callers and CLI JSON retain the complete answer,
+including refusal, retry, and stops after confirmed effects. A standalone
+transport may project normal routing answers onto compact decision facts with
+its own structural declaration. This pure projection consumes the existing owner
+judgment, never reparses trusted answers or narrows the native schema.
+Heterogeneous object answers
 and nested observations identify their alternatives explicitly. Each catalogue
 retains its owner-family identity through empty, absent, and unavailable answers;
 World observation has its own family and is not an addressed-status alternative.
@@ -61,10 +65,10 @@ observation producer owns its lossy text projection and visible clipping;
 correlated retained activity remains independently exact-readable through its
 native owner. Consumers share that projection rather than rebuilding native
 facts or declaring a second result authority. Exact guidance and addressed Debt
-detail remain complete native values. A structured transport retains both their
-complete shared text rendering and native structured answer, serving direct text
-and script consumers independently. Wire duplication alone establishes no claim
-about a consumer's model context.
+detail remain complete native values. At the standalone transport edge they
+remain complete unclipped shared text, without a duplicate structured answer.
+Structured routing projections omit presentation-only detail and optional
+residue while leaving both the full text and native answer intact.
 
 The caller already knows the operation and supplied context. A renderer may
 receive that context explicitly; it never scrapes stored facts to recover an
@@ -80,7 +84,9 @@ without rereading authority or reconstructing required work from an incomplete
 receipt. Acceptance, an answered unsatisfied verdict, refusal, retryable stop,
 operational failure, and caller usage remain distinct. A terminal unsatisfied
 check alone is a negative answer; an operational stop still makes the invocation
-failed, and retains precedence over that answer. A structured normal declaration
+failed, and retains precedence over that answer. An exact Contract status read
+that fails is operational failure; missing Contract authority is refusal.
+A structured normal declaration
 excludes required issues, unfinished checks, stopped testimony admission, and
 operational placement or continuation while retaining ordinary waiting and
 terminal negative verdicts. Optional retained residue stays

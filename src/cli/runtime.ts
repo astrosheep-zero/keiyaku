@@ -223,7 +223,7 @@ function invocationCoordinates(
 async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput): Promise<CliOutcome> {
   const command = invocation.command;
   assertExplicitRepoUse(command, invocation.repo);
-  const environment = input.environment ?? process.env;
+  const environment = { ...(input.environment ?? process.env) };
   const home = homeFromEnvironment(environment);
   const cancellation = cliCancellation(input.signal);
   let progress: Promise<ExecutionProgressDriver> | undefined;
@@ -283,12 +283,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
   } catch (error) {
     if (error instanceof KeiyakuUsageError) {
       const usage = new CliUsageError(error.message, usageGuideForCommand(command));
-      if (
-        "name" in command &&
-        command.name === "ls" &&
-        "caller" in command.input &&
-        command.input.caller?.kind === "mine"
-      )
+      if ("name" in command && command.name === "ls" && "mine" in command.input && command.input.mine === true)
         return await writeFailure(usage, command);
       throw usage;
     }

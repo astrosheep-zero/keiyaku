@@ -52,7 +52,8 @@ test("packaged stdio server launches from its documented Pi configuration", asyn
   const id = (created.structuredContent as { id: string }).id;
   const detail = await client.callTool({ name: "show", arguments: { id } });
   assert.equal(detail.isError, false, JSON.stringify(detail));
-  assert.match(JSON.stringify(detail.structuredContent), /Stdio flat business input/u);
+  assert.equal(detail.structuredContent, undefined);
+  assert.match(JSON.stringify(detail.content), /Stdio flat business input/u);
   await client.close();
   const processOnEof = spawn(process.execPath, [bin], { cwd: root, stdio: ["pipe", "pipe", "pipe"] });
   let stdout = "";

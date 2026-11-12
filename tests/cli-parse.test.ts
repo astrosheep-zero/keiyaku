@@ -318,39 +318,16 @@ test("ls parses only canonical identity directories", () => {
 
 test("ls parses caller-scoped Akuma selection", () => {
   assert.deepEqual(parseArgv(["ls", "--mine"]), {
-    command: { name: "ls", input: { selector: "aku/*", caller: { kind: "mine" } }, output: "text" },
+    command: { name: "ls", input: { selector: "aku/*", mine: true }, output: "text" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/*/*", "--mine", "--json"]), {
-    command: { name: "ls", input: { selector: "aku/*/*", caller: { kind: "mine" } }, output: "json" },
+    command: { name: "ls", input: { selector: "aku/*/*", mine: true }, output: "json" },
   });
   assert.deepEqual(parseArgv(["ls", "aku/intern", "--mine"]), {
-    command: { name: "ls", input: { selector: "aku/intern", caller: { kind: "mine" } }, output: "text" },
-  });
-  assert.deepEqual(parseArgv(["ls", "aku/*/*", "--caller", "slack:channel:thread"]), {
-    command: {
-      name: "ls",
-      input: {
-        selector: "aku/*/*",
-        caller: { kind: "external", caller: { kind: "external", integration: "slack", id: "channel:thread" } },
-      },
-      output: "text",
-    },
-  });
-  assert.deepEqual(parseArgv(["ls", "aku/worker/*", "--caller", "aku/lead/1234abcd", "--limit", "5"]), {
-    command: {
-      name: "ls",
-      input: {
-        selector: "aku/worker/*",
-        caller: { kind: "akuma", akumaId: "aku/lead/1234abcd" },
-        limit: 5,
-      },
-      output: "text",
-    },
+    command: { name: "ls", input: { selector: "aku/intern", mine: true }, output: "text" },
   });
   for (const argv of [
-    ["ls", "aku/*/*", "--mine", "--caller", "slack:channel"],
-    ["ls", "aku/*/*", "--caller", "missing-colon"],
-    ["ls", "aku/*/*", "--caller", "aku/lead/nothex"],
+    ["ls", "aku/*/*", "--caller", "slack:channel"],
     ["ls", "aku/", "--mine"],
     ["ls", "kei", "--mine"],
     ["ls", "debt", "--mine"],

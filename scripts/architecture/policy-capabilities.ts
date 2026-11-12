@@ -15,6 +15,7 @@ export const capabilityPolicy = {
       owners: [
         { source: "index.ts" },
         { source: "mcp/adapter.ts", symbols: ["z"] },
+        { source: "mcp/output.ts", symbols: ["z"] },
         { source: "bounded-list.ts", symbols: ["z"] },
         { source: "region.ts", symbols: ["z"] },
         { source: "settings.ts", symbols: ["z"] },

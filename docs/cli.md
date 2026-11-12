@@ -19,11 +19,11 @@ Protocol validation,
 connection lifetime, and cancellation remain at that edge; the facet and product
 owners retain their native admission, result, and retirement semantics. Text and
 outcome classification are shared with the CLI rather than re-decided by the
-transport. Where a transport publishes a structured owner-result contract, it
-describes exactly the producing owner's normal answers, including unsatisfied
-verdicts and normal nested observations. It converts the owner's declaration
-without filtering business alternatives, projecting returned values, or keeping
-another result inventory. Returned refusals and operational stops, like thrown
+transport. Structured output is reserved for routing operations and projects normal
+owner answers onto compact facts used to select another call. It does not judge
+normality or replace the complete native answer, which remains available to
+native callers and CLI JSON consumers. Guidance and Debt detail remain complete,
+unclipped text at this edge. Returned refusals and operational stops, like thrown
 failures, retain their classification-led text and known effects and causes
 without structured output. Kanshi is always text-only at this edge. A disconnected caller cannot be promised a late receipt, even when
 an owner has admitted facts that remain available through ordinary reads.
@@ -35,7 +35,9 @@ between an omitted selector and an explicit one. Leaf help and the executable
 parser are the only owners of that grammar. A parse or acquisition refusal
 performs no product operation and does not create runtime state. The edge
 supplies explicit invocation inputs to [public-keiyaku.md](public-keiyaku.md),
-which owns coordinate discovery, selection, and caller attribution. When draft
+which owns coordinate discovery, selection, and caller attribution. Standalone
+coordinate composition omits repository selection for World-only Debt mutations
+and Akuma progress reporting. When draft
 preservation fails, the edge presents that failure's diagnostic without
 replacing the original operation outcome or claiming the draft was saved.
 
@@ -133,13 +135,12 @@ matching; a bounded display never narrows selector meaning. Complete identities
 retain the requested operation's missing-Contract refusal. Parsing selects each
 catalogue's described owner operation directly.
 
-An Akuma-instance `ls` may additionally select one caller: `--mine` uses the
-invocation's own caller identity, and `--caller` names an external
-`<integration>:<id>` or an `aku/<name>/<suffix>` coordinate in this World. Both
-select the same caller-scoped roster and stay World-local. Absent or ambiguous
-identity, a conflicting or invalid selector, and any Contract, Debt, or
-Akuma-name catalogue query refuse at the usage boundary rather than returning a
-misleading empty list.
+An Akuma-instance `ls` may restrict its roster to the invocation's own caller,
+derived from its captured environment. This selection stays World-local and
+includes direct and transitive descendants. Explicit selection of another caller
+belongs to the independent native Akumas surface. Absent or ambiguous identity,
+and caller scoping on a Contract, Debt, or Archetype catalogue, refuse at the
+usage boundary rather than returning a misleading empty list.
 
 The ask edge acquires a required JSON Schema from a caller-selected file and
 passes its document to the public Akuma surface. Schema acquisition failures are

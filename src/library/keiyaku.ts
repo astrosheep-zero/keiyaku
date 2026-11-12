@@ -12,7 +12,7 @@ import {
 import type { AskProgress } from "../akuma/akuma-selection-execution.js";
 import type { SpawnProgress } from "./akuma-creation.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";
-import { World, WorldError, type WorldRoot } from "../world.js";
+import { World, WorldError } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
 import { kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
 import {
@@ -38,8 +38,7 @@ import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } fro
 import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
 import { listArchetypeDefinitions } from "../akuma/archetype.js";
-import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
-import { parseAkumaId } from "../akuma/identity.js";
+import type { AkumaCaller } from "../akuma/caller.js";
 import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
 import { validateAkumaName } from "../identity/normalize.js";
@@ -54,7 +53,6 @@ export type KeiyakuAt = Readonly<{
   repo?: string;
 }>;
 
-type LsCaller = Extract<VerbInput<"ls">, { caller?: unknown }>["caller"];
 type Selected<T> = T & Readonly<{ contract?: string }>;
 type BindInvocation =
   | (Omit<Extract<BindInput, { markdown: string }>, "after"> & Readonly<{ after?: readonly string[] }>)
@@ -641,10 +639,8 @@ export class Keiyaku {
     );
   }
 
-  async #resolveLsCaller(selection: LsCaller | undefined, world: WorldRoot): Promise<AkumaCaller | undefined> {
-    if (selection === undefined) return undefined;
-    if (selection.kind === "external") return decodeAkumaCaller(selection.caller);
-    if (selection.kind === "akuma") return { kind: "akuma", world, akumaId: parseAkumaId(selection.akumaId).id };
+  async #resolveLsCaller(mine: boolean | undefined): Promise<AkumaCaller | undefined> {
+    if (mine !== true) return undefined;
     let caller: AkumaCaller | undefined;
     try {
       caller = await akumaCallerFromEnvironment(this.#input.environment);
@@ -681,7 +677,7 @@ export class Keiyaku {
     const name = input.selector.split("/")[1]!;
     const akumaName = name === "*" ? undefined : validateAkumaName(name);
     const { at, akumas } = await this.#akumas();
-    const caller = await this.#resolveLsCaller("caller" in input ? input.caller : undefined, at.world!);
+    const caller = await this.#resolveLsCaller("mine" in input ? input.mine : undefined);
     return akumas.list({
       ...bound,
       ...(akumaName === undefined ? {} : { akumaName }),
