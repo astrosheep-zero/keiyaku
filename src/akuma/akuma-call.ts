@@ -1,6 +1,5 @@
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
-import type { Settings } from "../settings.js";
-import { settings as readSettings } from "../settings.js";
+import { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import { AkumaArchetypeError, loadPreparedArchetype } from "./archetype.js";
@@ -70,8 +69,8 @@ export async function prepareAkumaCall(
   decodeAkumaCaller(input.caller);
   const name = validateAkumaName(input.akumaName);
   const home = configuration.home === undefined ? {} : { home: configuration.home };
-  const settings = configuration.settings ?? (await readSettings({ root: path, ...home }));
-  const akumaName = await loadPreparedArchetype({ name, project: path, ...home, settings });
+  const settings = configuration.settings ?? (await Settings.load({ cwd: path, ...home }));
+  const akumaName = await loadPreparedArchetype({ name, cwd: path, ...home, settings });
   const writableDirectories = await writableDirectoriesOption(input.writableDirectories);
   if (writableDirectories.length > 0 && akumaName.provider.kind !== "codex-app-server")
     throw new TypeError(`writableDirectories is unsupported by provider ${akumaName.provider.kind}`);

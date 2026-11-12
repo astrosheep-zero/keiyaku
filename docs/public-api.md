@@ -3,8 +3,9 @@
 The ESM package exposes exactly two entries: the package root and the plugin
 entry. The root exposes Kei as the native Contract handle and Keis as the
 Repo-bound Contract collection, Akuma as the standalone single-Akuma product, Akumas as the World-bound
-plural Akuma composition, Debt as its independent product, Kanshi as composite
-World, addressed Contract, and Region observation, Settings, Plugin types,
+plural Akuma composition, Debt as its independent product, Kanshi as an immutable
+coordinate-bound composition for World, addressed Contract, count and Region
+observation, Settings as a loader and immutable loaded value, Plugin types,
 Repo, World, and the named `nuke` operation. No other subpath, compatibility
 alias, or other generic mixed orchestration facade exists. The one invocation
 facet is `Keiyaku`, owned by [public-keiyaku.md](public-keiyaku.md). No private
@@ -194,8 +195,12 @@ an ordinary refusal.
 
 ## Product Boundaries
 
-Settings are an explicit shared resource captured once at Contract
-construction. Contract operations retain derived values, not a live Settings
+Settings owns explicit configuration loading; its resolved project directory
+coordinate is named cwd consistently with standalone Archetype catalogue access.
+Omission selects no project scope: the loader never substitutes the ambient
+working directory or discovers an ancestor project. Loaded Settings are an
+explicit shared resource captured once at Contract construction. Contract
+operations retain derived values, not a live Settings
 observation, and read a namespace only at the operation that consumes it.
 Omitted Settings selects no bind gates by default, accepts only built-in gate
 names, keeps hooks empty, and leaves branch freshness false. Supplied Settings
@@ -226,8 +231,9 @@ handle. `Akumas.of(world)` captures a World for selector, selection, creation, a
 operations; callers do not repeat that World on each
 operation. It retains an explicit Repo only for Contract selection or Dispatch
 association and never infers Repo from World or World from Repo. Archetype
-definitions remain an archetype-owner listing, reachable through the root as
-that owner's bounded catalogue and its native error; no public definition
+catalogues are grouped on Akumas, with captured-World access and standalone
+explicit configuration coordinates over the same archetype owner. Its bounded
+catalogue and native error remain public; no public definition
 loader joins the root. The independent Debt product
 likewise captures World and does not read or write Contract authority except
 through the settlement owner. Its collection offers creation, bounded list,

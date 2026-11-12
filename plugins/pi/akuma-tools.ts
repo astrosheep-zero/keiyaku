@@ -5,7 +5,6 @@ import {
   Akumas,
   Repo,
   World,
-  listArchetypeDefinitions,
   KeiyakuError,
   type SpawnResult,
   type AkumaHostScope,
@@ -223,7 +222,7 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
     "List visible spawnable Akuma definitions for all configured providers (not running instances).",
     { limit },
     [],
-    async (input, _akumas, _ctx, _signal, world) => listArchetypeDefinitions({ project: world, ...input }),
+    async (input, akumas) => akumas.archetypes(input),
   );
   register<ToolAddress<AkumaTellInput> & LaunchChoice>(
     "akuma_tell",

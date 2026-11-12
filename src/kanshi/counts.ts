@@ -3,12 +3,12 @@ import { countRunningAkuma } from "../akuma/akuma.js";
 import { DebtAuthorityCorruptionError } from "../debt/index.js";
 import { observeDebtBoard } from "../debt/operations.js";
 import { withGitDecodeChannel, withGitTargetedReadObservation } from "../git/read-observation.js";
-import { Repo, scopeForRepo } from "../library/repo.js";
+import { scopeForRepo } from "../library/repo.js";
 import { readContractCount } from "../protocol/read/status.js";
-import { World, worldRootSchema, type WorldRoot } from "../world.js";
+import { World, worldRootSchema } from "../world.js";
 import { sectionSchema, type Section } from "./report.js";
+import type { KanshiCoordinates } from "./read.js";
 
-export type KanshiCountsInput = Readonly<{ world: WorldRoot | null; repo?: Repo }>;
 export type KanshiCountsReport = z.output<typeof kanshiCountsReportSchema>;
 
 export const kanshiCountsReportSchema = z
@@ -38,14 +38,7 @@ async function section(read: () => Promise<number>): Promise<Section<number>> {
   }
 }
 
-export async function kanshiCounts(input: KanshiCountsInput): Promise<KanshiCountsReport> {
-  if (typeof input !== "object" || input === null || Array.isArray(input))
-    throw new TypeError("kanshi counts input must be an object");
-  for (const key of Object.keys(input))
-    if (key !== "world" && key !== "repo") throw new TypeError(`kanshi counts input has unknown field: ${key}`);
-  if (input.world !== null && (typeof input.world !== "string" || input.world.trim().length === 0))
-    throw new TypeError("kanshi world must be a WorldRoot or null");
-  if (input.repo !== undefined && !(input.repo instanceof Repo)) throw new TypeError("kanshi repo must be a Repo");
+export async function kanshiCounts(input: KanshiCoordinates): Promise<KanshiCountsReport> {
   const world = input.world === null ? null : await World.prove(input.world);
   const observedAt = new Date().toISOString();
   const absent = { kind: "absent" } as const;

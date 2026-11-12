@@ -622,6 +622,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
     },
     {
+      source: "kanshi/index.ts",
+      allow: [any("kanshi/**"), any("core/facts/types.ts", ["contractId", "ContractId"])],
+    },
+    {
       source: "kanshi/**",
       allow: [
         any("akuma/akuma.ts"),

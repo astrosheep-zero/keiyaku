@@ -3,14 +3,15 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { selectRegion as selectRegionValue } from "../src/kanshi/select.js";
+import { observeKanshi as observeComposite } from "../src/kanshi/read.js";
 import {
   Debts as DebtCollection,
   debtAbsentSchema,
   World as WorldValue,
-  settings as loadSettings,
-  selectRegion as selectRegionValue,
+  Settings,
   nuke as nukeWorld,
-  kanshiCounts as countsWorld,
+  Kanshi,
   kanshiCountsReportSchema as countsSchema,
   debtMutationResultSchema as mutationSchema,
   debtListSchema as listSchema,
@@ -39,8 +40,6 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import {
   Keis,
   Repo,
-  kanshi as observeWorld,
-  observeKanshi as observeComposite,
   kanshiReportSchema as reportSchema,
   kanshiContractReportSchema as contractReportSchema,
   kanshiResultSchema as resultSchema,
@@ -67,17 +66,17 @@ test("Debt, Settings, World, region and reset schemas describe real wire results
   assertWireRoundTrip(rootSchema, await WorldValue.prove(world));
   assertWireRoundTrip(establishedSchema, await WorldValue.established(world));
   assertWireRoundTrip(resolutionSchema, await WorldValue.resolve(project));
-  const emptySettings = await loadSettings({ root: world, home });
+  const emptySettings = await Settings.load({ cwd: world, home });
   assertWireRoundTrip(settingsResultSchema, emptySettings);
   assertWireRoundTrip(namespaceSchema, emptySettings.namespace("agents"));
   writeFileSync(join(home, "settings.json"), JSON.stringify({ agents: { one: { model: "x" } } }));
-  const loaded = await loadSettings({ root: world, home });
+  const loaded = await Settings.load({ cwd: world, home });
   assertWireRoundTrip(settingsResultSchema, loaded);
   assertWireRoundTrip(namespaceSchema, loaded.namespace("agents"));
   writeFileSync(join(world, ".keiyaku", "settings.json"), "{");
-  assertWireRoundTrip(namespaceSchema, (await loadSettings({ root: world, home })).namespace("agents"));
-  assertWireRoundTrip(countsSchema, await countsWorld({ world: null }));
-  assertWireRoundTrip(countsSchema, await countsWorld({ world }));
+  assertWireRoundTrip(namespaceSchema, (await Settings.load({ cwd: world, home })).namespace("agents"));
+  assertWireRoundTrip(countsSchema, await Kanshi.of({ world: null }).counts());
+  assertWireRoundTrip(countsSchema, await Kanshi.of({ world }).counts());
   const debts = DebtCollection.of(world);
   const first = await debts.add({ title: "First" });
   assert.equal(first.kind, "accepted");
@@ -148,13 +147,13 @@ test("Kanshi schemas cover live Contract, Debt, Akuma, Alias, region and absent 
   await breakBody(born.paths, { sequence: body.sequence, end: "put-down", at: born.soul.createdAt });
   born.leash.release();
   await moveAlias({ world, alias: parseAkumaAlias("@wire"), akumaId: born.id });
-  const empty = await observeWorld({ world: null });
+  const empty = await Kanshi.of({ world: null }).board();
   assertWireRoundTrip(reportSchema, empty);
   assertWireRoundTrip(observationSchema, await observeComposite({ world: null }));
-  const report = await observeWorld({ world, repo });
+  const report = await Kanshi.of({ world, repo }).board();
   assertWireRoundTrip(resultSchema, report);
   assertWireRoundTrip(reportSchema, report);
-  assertWireRoundTrip(contractReportSchema, await observeWorld({ world, repo, contract: bound.contractId }));
+  assertWireRoundTrip(contractReportSchema, await Kanshi.of({ world, repo }).contract(bound.contractId));
   assertWireRoundTrip(observationSchema, await observeComposite({ world, repo }));
   const declarations = [{ id: bound.contractId, patterns: ["src/**"] }];
   assertWireRoundTrip(

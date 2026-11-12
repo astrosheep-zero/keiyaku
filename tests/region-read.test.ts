@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { runCli } from "./support/cli-fixtures.js";
 import { Keis, Repo } from "../src/index.js";
-import { kanshi } from "../src/kanshi/index.js";
+import { Kanshi } from "../src/kanshi/index.js";
 import type { KanshiRegionSelection, KanshiReport, RegionRead } from "../src/kanshi/index.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import { World } from "../src/world.js";
@@ -49,7 +49,7 @@ async function read(
 ): Promise<KanshiReport | RegionRead> {
   const world = await World.at(repository.path);
   const repo = await Repo.at({ path: repository.path });
-  return region === undefined ? kanshi({ world, repo }) : kanshi({ world, repo, region });
+  return region === undefined ? Kanshi.of({ world, repo }).board() : Kanshi.of({ world, repo }).region(region);
 }
 
 // Each case owns its repository, fault injector and cleanup; no process-global mocks.
@@ -119,7 +119,7 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     const { id } = await bind(repository, "Literal paths", ["docs/**"]);
     const world = await World.at(repository.path);
     const repo = await Repo.at({ path: repository.path });
-    const invalid = (region: unknown): Promise<unknown> => Reflect.apply(kanshi, undefined, [{ world, repo, region }]);
+    const invalid = (region: unknown): Promise<unknown> => Kanshi.of({ world, repo }).region(region as never);
 
     await assert.rejects(
       invalid({ kind: "bogus" }),
@@ -178,10 +178,10 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
     const region = await read(repository, { kind: "declarations" });
     assert.equal(region.kind, "failed");
     if (region.kind === "failed") assert.match(region.diagnostic, /malformed|Markdown|title|document/u);
-    const report = await kanshi({
+    const report = await Kanshi.of({
       world: await World.at(repository.path),
       repo: await Repo.at({ path: repository.path }),
-    });
+    }).board();
     assert.ok("contracts" in report, "the bare World read still answers the World board");
     if (!("contracts" in report)) return;
     assert.ok(report.contracts.kind === "present", 'expected report.contracts.kind = "present"');

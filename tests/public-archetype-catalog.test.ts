@@ -5,7 +5,8 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import {
   AkumaArchetypeError,
-  listArchetypeDefinitions,
+  Akumas,
+  World,
   type ArchetypeCatalog,
   type ArchetypeCatalogInput,
   type ArchetypeCatalogRow,
@@ -52,8 +53,11 @@ test("a root-only caller lists the same callable definitions the CLI shows", asy
     },
   });
 
-  const input: ArchetypeCatalogInput = { project: root, home };
-  const catalog: ArchetypeCatalog = await listArchetypeDefinitions(input);
+  const input: ArchetypeCatalogInput = { cwd: root, home };
+  const catalog: ArchetypeCatalog = await Akumas.archetypes(input);
+  const akumas = Akumas.of(await World.at(root));
+  assert.deepEqual(await akumas.archetypes({ home }), catalog);
+  await assert.rejects(akumas.archetypes({ cwd: home } as never), TypeError);
   const rows: readonly ArchetypeCatalogRow[] = catalog.rows ?? [];
   assert.deepEqual(rows, [
     { name: "child" },
@@ -61,18 +65,20 @@ test("a root-only caller lists the same callable definitions the CLI shows", asy
     { name: "project-only" },
     { name: "shared", description: "Project" },
   ]);
-  assert.deepEqual(await listArchetypeDefinitions({ project: root, home, limit: 2 }), {
+  assert.deepEqual(await Akumas.archetypes({ cwd: root, home, limit: 2 }), {
     kind: "archetype-catalogue",
     rows: [{ name: "child" }, { name: "home-only" }],
     more: true,
   });
 
   // Omitted project keeps no project scope: the shared name falls back to Home.
-  assert.deepEqual(await listArchetypeDefinitions({ home }), {
+  assert.deepEqual(await Akumas.archetypes({ home }), {
     kind: "archetype-catalogue",
     rows: [{ name: "child" }, { name: "home-only" }, { name: "shared", description: "Home" }],
   });
 
+  const bounded = await akumas.archetypes({ home, limit: 1 });
+  assert.deepEqual(bounded, { kind: "archetype-catalogue", rows: [{ name: "child" }], more: true });
   const cli = await cliJson<ArchetypeCatalog>(["-C", root, "ls", "aku/"], { environment: { KEIYAKU_HOME: home } });
   assert.deepEqual(cli.value, catalog);
 });
@@ -83,36 +89,36 @@ test("the public catalogue rejects malformed caller input before observing any d
   });
 
   for (const malformed of [null, "aku/", []]) {
-    await assert.rejects(listArchetypeDefinitions(malformed as never), /Akuma catalogue input must be an object/u);
+    await assert.rejects(Akumas.archetypes(malformed as never), /Akuma catalogue input must be an object/u);
   }
   await assert.rejects(
-    listArchetypeDefinitions({ project: root, home, akumaName: "worker" } as never),
+    Akumas.archetypes({ cwd: root, home, akumaName: "worker" } as never),
     /Akuma catalogue input has unknown field: akumaName/u,
   );
   await assert.rejects(
-    listArchetypeDefinitions({ project: 7 } as never),
-    /Akuma catalogue project must be a nonblank string/u,
+    Akumas.archetypes({ cwd: 7 } as never),
+    /Akuma catalogue cwd must be a nonblank string/u,
   );
   await assert.rejects(
-    listArchetypeDefinitions({ home: "   " } as never),
+    Akumas.archetypes({ home: "   " } as never),
     /Akuma catalogue home must be a nonblank string/u,
   );
   await assert.rejects(
-    listArchetypeDefinitions({ home: "relative/home" } as never),
+    Akumas.archetypes({ home: "relative/home" } as never),
     /Akuma catalogue home must be absolute: relative\/home/u,
   );
   await assert.rejects(
-    listArchetypeDefinitions({ project: root, limit: 0 } as never),
+    Akumas.archetypes({ cwd: root, limit: 0 } as never),
     /limit must be an integer from 1 to 500/u,
   );
 
   // The boundary wins over the invalid definition the same request would have read.
-  await assert.rejects(listArchetypeDefinitions({ project: root, home: 7 } as never), (error: unknown) => {
+  await assert.rejects(Akumas.archetypes({ cwd: root, home: 7 } as never), (error: unknown) => {
     assert.ok(error instanceof TypeError);
     assert.equal(error.message, "Akuma catalogue home must be a nonblank string");
     return true;
   });
-  await assert.rejects(listArchetypeDefinitions({ project: root, home }), (error: unknown) => {
+  await assert.rejects(Akumas.archetypes({ cwd: root, home }), (error: unknown) => {
     assert.ok(error instanceof AkumaArchetypeError);
     return true;
   });
@@ -123,7 +129,7 @@ test("the native Archetype error keeps its class, kind, reason and searched path
     root: { broken: '---\nprovider: claude\nhidden: "true"\n---\n' },
   });
 
-  await assert.rejects(listArchetypeDefinitions({ project: root, home }), (error: unknown) => {
+  await assert.rejects(Akumas.archetypes({ cwd: root, home }), (error: unknown) => {
     assert.ok(error instanceof AkumaArchetypeError);
     assert.ok(error instanceof Error);
     assert.equal(error.name, "AkumaArchetypeError");

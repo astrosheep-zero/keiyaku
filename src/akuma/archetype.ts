@@ -52,9 +52,9 @@ export type ArchetypeCatalogRow = Readonly<{
 
 export type ArchetypeCatalog = z.output<typeof archetypeCatalogSchema>;
 
-/** One closed catalogue request: omitted project means no project scope, never ambient discovery. */
+/** One closed catalogue request: omitted cwd means no project scope, never ambient discovery. */
 export type ArchetypeCatalogInput = Readonly<{
-  project?: string;
+  cwd?: string;
   home?: string;
   limit?: number;
 }>;
@@ -77,7 +77,7 @@ export class AkumaArchetypeError extends KeiyakuError {
   }
 }
 
-type ArchetypeCoordinates = Readonly<{ project?: string; home?: string }>;
+type ArchetypeCoordinates = Pick<ArchetypeCatalogInput, "cwd" | "home">;
 
 function projectArchetypeDirectory(project?: string): string | undefined {
   return project === undefined ? undefined : join(project, ".keiyaku", "akumas");
@@ -88,7 +88,7 @@ function homeArchetypeDirectory(home?: string): string {
 }
 
 function archetypeDirectories(input: ArchetypeCoordinates): readonly string[] {
-  return [projectArchetypeDirectory(input.project), homeArchetypeDirectory(input.home)].filter(
+  return [projectArchetypeDirectory(input.cwd), homeArchetypeDirectory(input.home)].filter(
     (directory): directory is string => directory !== undefined,
   );
 }
@@ -127,17 +127,13 @@ type ArchetypeSource = "project" | "home";
 type ArchetypeLookup = Readonly<{ path: string; source: ArchetypeSource }>;
 
 function sourceLookups(name: string, input: ArchetypeCoordinates, source: ArchetypeSource): readonly ArchetypeLookup[] {
-  if (source === "home" || input.project === undefined) {
+  if (source === "home" || input.cwd === undefined) {
     return [{ path: join(homeArchetypeDirectory(input.home), `${name}.md`), source: "home" }];
   }
   return [
-    { path: join(projectArchetypeDirectory(input.project)!, `${name}.md`), source: "project" },
+    { path: join(projectArchetypeDirectory(input.cwd)!, `${name}.md`), source: "project" },
     { path: join(homeArchetypeDirectory(input.home), `${name}.md`), source: "home" },
   ];
-}
-
-function rootLookups(name: string, input: ArchetypeCoordinates): readonly ArchetypeLookup[] {
-  return input.project === undefined ? sourceLookups(name, input, "home") : sourceLookups(name, input, "project");
 }
 
 function chainText(chain: readonly string[]): string {
@@ -293,8 +289,8 @@ async function resolveArchetype(
   source: ArchetypeSource | undefined,
   chain: readonly string[] = [],
 ): Promise<DecodedArchetype> {
+  const lookups = sourceLookups(name, input, source ?? "project");
   if (chain.includes(name)) {
-    const lookups = source === undefined ? rootLookups(name, input) : sourceLookups(name, input, source);
     throw archetypeError(
       name,
       lookups.map(({ path }) => path),
@@ -302,7 +298,6 @@ async function resolveArchetype(
       [...chain, name],
     );
   }
-  const lookups = source === undefined ? rootLookups(name, input) : sourceLookups(name, input, source);
   const searched = lookups.map(({ path }) => path);
   for (const lookup of lookups) {
     let markdown: string;
@@ -353,7 +348,7 @@ async function resolveArchetype(
   );
 }
 
-function catalogueCoordinate(value: unknown, field: "project" | "home"): string | undefined {
+function catalogueCoordinate(value: unknown, field: "cwd" | "home"): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new TypeError(`Akuma catalogue ${field} must be a nonblank string`);
@@ -368,12 +363,12 @@ function catalogueInput(value: unknown): ArchetypeCatalogInput {
     throw new TypeError("Akuma catalogue input must be an object");
   }
   const input = value as Readonly<Record<string, unknown>>;
-  const unknown = Object.keys(input).find((key) => !["project", "home", "limit"].includes(key));
+  const unknown = Object.keys(input).find((key) => !["cwd", "home", "limit"].includes(key));
   if (unknown !== undefined) throw new TypeError(`Akuma catalogue input has unknown field: ${unknown}`);
-  const project = catalogueCoordinate(input.project, "project");
+  const cwd = catalogueCoordinate(input.cwd, "cwd");
   const home = catalogueCoordinate(input.home, "home");
   return {
-    ...(project === undefined ? {} : { project }),
+    ...(cwd === undefined ? {} : { cwd }),
     ...(home === undefined ? {} : { home }),
     ...(input.limit === undefined ? {} : { limit: boundedListLimit(input.limit) }),
   };
@@ -491,7 +486,7 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
 
 /** Resolve one akumaName and decode its provider execution, leaving option admission to the caller. */
 export async function loadPreparedArchetype(
-  input: Readonly<{ name: string; project?: string; home?: string; settings: Settings }>,
+  input: Readonly<{ name: string; settings: Settings }> & ArchetypeCoordinates,
 ): Promise<PreparedArchetype> {
   const name = validateAkumaName(input.name);
   const definition = await resolveArchetype(name, input, undefined);

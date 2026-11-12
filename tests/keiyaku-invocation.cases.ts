@@ -11,12 +11,12 @@ import {
   KeiyakuUsageError,
   Repo,
   World,
-  kanshi,
+  Kanshi,
   type ExecutionObservation,
 } from "../src/index.js";
 import { beginTurn } from "../src/akuma/heart/index.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
-import { settings } from "../src/settings.js";
+import { Settings } from "../src/settings.js";
 import { bornBody, bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { repositoryWithCommit } from "./support/git.js";
 import { accepted, commitCandidate, document } from "./support/library-verbs.js";
@@ -82,7 +82,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   const worldA = await World.at(first.path);
   const worldB = await World.at(second.path);
   writeFileSync(join(worldA, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  await pluginRuntime({ world: worldA, settings: await settings({ root: worldA, home }) });
+  await pluginRuntime({ world: worldA, settings: await Settings.load({ cwd: worldA, home }) });
   const repoA = await Repo.at({ path: first.path });
   const repoB = await Repo.at({ path: second.path });
   const debtA = accepted(await Debts.of(worldA).add({ title: "Debt in invocation world" })).id;
@@ -124,9 +124,9 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
     await facet.history({ selector: worker.id }),
     await Akumas.of(worldA).history({ akuma: worker.id, repo: repoB }),
   );
-  const contractStatus = await kanshi({ world: worldA, repo: repoB, contract });
+  const contractStatus = await Kanshi.of({ world: worldA, repo: repoB }).contract(contract);
   assert.deepEqual(withoutObservationTimes(await facet.status({ id: contract })), withoutObservationTimes(contractStatus));
-  assert.deepEqual(withoutObservationTimes(await facet.kanshi({})), withoutObservationTimes(await kanshi({ world: worldA, repo: repoB })));
+  assert.deepEqual(withoutObservationTimes(await facet.kanshi({})), withoutObservationTimes(await Kanshi.of({ world: worldA, repo: repoB }).board()));
   assert.deepEqual(
     await facet.wait({ selectors: [contract], timeoutMs: 0 }),
     await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 }),
@@ -202,7 +202,7 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
   const home = temporaryDirectory(t, "keiyaku-invocation-report-home-");
   const world = await World.at(root);
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  await pluginRuntime({ world, settings: await settings({ root: world, home }) });
+  await pluginRuntime({ world, settings: await Settings.load({ cwd: world, home }) });
   const born = await bornBody(world, "feed0021", "2026-10-30T00:00:00.000Z");
   try {
     await beginTurn(born.allocated.paths, {

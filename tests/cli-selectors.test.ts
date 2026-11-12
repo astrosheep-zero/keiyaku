@@ -3,7 +3,18 @@ import test from "node:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CliUsageError, parseArgv } from "../src/cli/parse.js";
-import { Akumas, Debts, Keis, Keiyaku, KeiyakuUsageError, Repo, World, kanshi, listArchetypeDefinitions, type AkumaList, type KanshiContractReport } from "../src/index.js";
+import {
+  Akumas,
+  Debts,
+  Keis,
+  Keiyaku,
+  KeiyakuUsageError,
+  Repo,
+  World,
+  Kanshi,
+  type AkumaList,
+  type KanshiContractReport,
+} from "../src/index.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { bornLineageAkuma } from "./support/akuma-fixtures.js";
@@ -56,11 +67,11 @@ test("CLI list and status families preserve their native owner answers", async (
   for (const [args, expected] of [
     [["ls", "kei/", "--limit", "1"], await Keis.of(repo).list({ limit: 1 })],
     [["ls", "aku/*/*", "--limit", "1"], await Akumas.of(world).list({ repo, limit: 1 })],
-    [["ls", "aku/"], await listArchetypeDefinitions({ project: world, home: world })],
+    [["ls", "aku/"], await Akumas.archetypes({ cwd: world, home: world })],
     [["ls", "debt/"], await Keiyaku.at({ cwd: world, environment: {}, home: world }).ls({ selector: "debt/" })],
-    [["status", bound.contractId], await kanshi({ world, repo, contract: bound.contractId })],
+    [["status", bound.contractId], await Kanshi.of({ world, repo }).contract(bound.contractId)],
     [["status", worker.id], await Akumas.of(world).status({ akuma: worker.id, repo })],
-    [["kanshi"], await kanshi({ world, repo })],
+    [["kanshi"], await Kanshi.of({ world, repo }).board()],
   ] as const) {
     const response = await cliJson(["-C", world, ...args], { environment: { HOME: world, USERPROFILE: world, KEIYAKU_HOME: world } });
     assert.equal(response.exit, 0, response.stderr);

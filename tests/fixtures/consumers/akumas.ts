@@ -7,7 +7,6 @@ import {
   actorId,
   akumaStatusSchema,
   akumaCatalogueSchema,
-  listArchetypeDefinitions,
   nuke,
   type AkumaId,
   type AkumaAliasesInput,
@@ -29,8 +28,8 @@ declare const aku: AkumaId;
 declare const repo: Repo;
 declare const nativeError: unknown;
 
-const catalogueInput: ArchetypeCatalogInput = { project: world, home: "/tmp/keiyaku-consumer-home", limit: 25 };
-const catalogue: Promise<ArchetypeCatalog> = listArchetypeDefinitions(catalogueInput);
+const catalogueInput: ArchetypeCatalogInput = { cwd: world, home: "/tmp/keiyaku-consumer-home", limit: 25 };
+const catalogue: Promise<ArchetypeCatalog> = Akumas.archetypes(catalogueInput);
 const catalogueRows: readonly ArchetypeCatalogRow[] = [];
 if (nativeError instanceof AkumaArchetypeError) {
   const kind: "akuma-archetype" = nativeError.kind;
@@ -50,6 +49,8 @@ void [scoped, scopedSingle, closed];
 
 const host: AkumaHostOptions = { reportDiagnostic: (message) => console.error(message) };
 const plural = Akumas.of(world, host);
+const scopedCatalogue: Promise<ArchetypeCatalog> = plural.archetypes({ home: catalogueInput.home!, limit: 25 });
+void scopedCatalogue;
 const rosterInput: AkumaListInput = { limit: 25, repo };
 const roster: Promise<AkumaList> = plural.list(rosterInput);
 const row = akumaCatalogueSchema.parse(await roster).rows?.[0];

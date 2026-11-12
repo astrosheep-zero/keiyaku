@@ -55,8 +55,8 @@ import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId } f
 import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
-import { settings } from "../src/settings.js";
-import { AkumaArchetypeError, Akumas, listArchetypeDefinitions } from "../src/index.js";
+import { Settings } from "../src/settings.js";
+import { AkumaArchetypeError, Akumas } from "../src/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { projectCurrentWork } from "../src/akuma/status-projection.js";
 import { World, type WorldRoot } from "../src/world.js";
@@ -2216,8 +2216,8 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     );
     writeFileSync(join(home, "akumas", "shared.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
 
-    const settingsValue = await settings({ root, home });
-    const catalog = await listArchetypeDefinitions({ project: root, home });
+    const settingsValue = await Settings.load({ cwd: root, home });
+    const catalog = await Akumas.archetypes({ cwd: root, home });
     assert.deepEqual(catalog, {
       kind: "archetype-catalogue",
       rows: [{ name: "home-only" }, { name: "project-only" }, { name: "shared", description: "Project" }],
@@ -2229,14 +2229,14 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     );
     assert.deepEqual(cli.value, catalog);
 
-    const shared = await loadPreparedArchetype({ name: "shared", project: root, home, settings: settingsValue });
+    const shared = await loadPreparedArchetype({ name: "shared", cwd: root, home, settings: settingsValue });
     assert.equal(shared.path, join(root, ".keiyaku", "akumas", "shared.md"));
     assert.equal(shared.description, "Project");
-    const fallback = await loadPreparedArchetype({ name: "home-only", project: root, home, settings: settingsValue });
+    const fallback = await loadPreparedArchetype({ name: "home-only", cwd: root, home, settings: settingsValue });
     assert.equal(fallback.path, join(home, "akumas", "home-only.md"));
 
     await assert.rejects(
-      loadPreparedArchetype({ name: "missing", project: root, home, settings: settingsValue }),
+      loadPreparedArchetype({ name: "missing", cwd: root, home, settings: settingsValue }),
       (error: unknown) =>
         error instanceof AkumaArchetypeError &&
         error.searched.join("\n") ===
@@ -2258,11 +2258,11 @@ test("dotted akumaName file stems join the catalogue as canonical names", async 
     writeFileSync(join(home, "akumas", "bad..stem.md"), "---\nprovider: claude\n---\nNot canonical.\n");
     writeFileSync(join(home, "akumas", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
 
-    const catalog = await listArchetypeDefinitions({ project: root, home });
+    const catalog = await Akumas.archetypes({ cwd: root, home });
     assert.deepEqual(catalog, { kind: "archetype-catalogue", rows: [{ name: "review.v2" }] });
 
-    const settingsValue = await settings({ root, home });
-    const dotted = await loadPreparedArchetype({ name: "review.v2", project: root, home, settings: settingsValue });
+    const settingsValue = await Settings.load({ cwd: root, home });
+    const dotted = await loadPreparedArchetype({ name: "review.v2", cwd: root, home, settings: settingsValue });
     assert.equal(dotted.path, join(home, "akumas", "review.v2.md"));
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -2280,20 +2280,20 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
     writeFileSync(join(home, "akumas", "secret.md"), "---\nprovider: claude\nhidden: true\n---\nSecret.\n");
     writeFileSync(join(home, "akumas", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
 
-    const catalog = await listArchetypeDefinitions({ project: root, home });
+    const catalog = await Akumas.archetypes({ cwd: root, home });
     assert.deepEqual(catalog, { kind: "archetype-catalogue", rows: [{ name: "child" }, { name: "visible" }] });
-    assert.deepEqual(await listArchetypeDefinitions({ project: root, home, limit: 1 }), {
+    assert.deepEqual(await Akumas.archetypes({ cwd: root, home, limit: 1 }), {
       kind: "archetype-catalogue",
       rows: [{ name: "child" }],
       more: true,
     });
 
-    const settingsValue = await settings({ root, home });
-    const hidden = await loadPreparedArchetype({ name: "secret", project: root, home, settings: settingsValue });
+    const settingsValue = await Settings.load({ cwd: root, home });
+    const hidden = await loadPreparedArchetype({ name: "secret", cwd: root, home, settings: settingsValue });
     assert.equal(hidden.path, join(home, "akumas", "secret.md"));
 
     writeFileSync(join(home, "akumas", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');
-    await assert.rejects(listArchetypeDefinitions({ project: root, home }), /hidden must be a boolean/u);
+    await assert.rejects(Akumas.archetypes({ cwd: root, home }), /hidden must be a boolean/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });

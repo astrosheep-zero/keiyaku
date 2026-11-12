@@ -7,7 +7,7 @@ import type { VerificationDeclaration } from "../src/verification/declaration.js
 import { executeVerification, type ExecuteVerificationInput } from "../src/verification/execution.js";
 import { verificationObservationSchema, type VerificationObservation } from "../src/verification/observation.js";
 import type { MaterializedScratchCandidate } from "../src/git/scratch.js";
-import { settings } from "../src/settings.js";
+import { Settings } from "../src/settings.js";
 import { contractId, snapshotId } from "../src/core/facts/types.js";
 
 function declaration(
@@ -37,7 +37,7 @@ function input(
     total: 1,
     requirement: "opaque requirement",
     materializeScratchCandidate: async () => scratch,
-    projectSettings: async () => await settings({ root }),
+    projectSettings: async () => await Settings.load({ cwd: root }),
     ...overrides,
   };
 }

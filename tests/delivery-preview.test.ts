@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync, readlinkSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import test from "node:test";
-import { Keis, Keiyaku, KeiyakuError, Repo, settings, World, type ExecutionObservation } from "../src/index.js";
+import { Keis, Keiyaku, KeiyakuError, Repo, Settings, World, type ExecutionObservation } from "../src/index.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { waitForFixtureFile } from "./support/process.js";
@@ -228,7 +228,7 @@ test("native, invocation and CLI preview preserve authority, refs, real indexes 
   mkdirSync(join(worktree, ".keiyaku"), { recursive: true });
   writeFileSync(join(worktree, ".keiyaku", "settings.json"), hookSettings);
   repository.run(["-C", worktree, "add", ".keiyaku/settings.json"]);
-  const configured = await settings({ root: await World.at(repository.path) });
+  const configured = await Settings.load({ cwd: await World.at(repository.path) });
   const native = Keis.of(repo, { settings: configured }).kei({ id: bound.contractId });
   const before = custodySnapshot(repository, worktree);
   const history = await native.history();

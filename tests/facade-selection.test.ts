@@ -2,7 +2,6 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { accepted, present } from "./support/library-verbs.js";
 import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
-import { listArchetypeDefinitions } from "../src/index.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
@@ -989,7 +988,7 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
         disposition: "ready",
       },
     ]);
-    assert.deepEqual(await listArchetypeDefinitions({ home }), {
+    assert.deepEqual(await Akumas.archetypes({ home }), {
       kind: "archetype-catalogue",
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
     });

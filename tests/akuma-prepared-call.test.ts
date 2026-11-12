@@ -8,7 +8,7 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { KeiyakuError, type SpawnResult } from "../src/index.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
-import { settings } from "../src/settings.js";
+import { Settings } from "../src/settings.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering } from "./support/akuma-tell.js";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
@@ -162,7 +162,7 @@ test(
         },
       }),
     );
-    const selected = await settings({ root: world, home: join(world, "empty-home") });
+    const selected = await Settings.load({ cwd: world, home: join(world, "empty-home") });
     let bounded = true;
     const spawn: BodyLauncher = async (launch) => {
       if (bounded) {
@@ -297,7 +297,7 @@ test("native spawn failure after Soul durability retains TypeError cause and dir
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
     providers: { claude: { kind: "claude-agent-sdk" } }, plugins: {},
   }));
-  const selected = await settings({ root: world, home: join(world, "empty-home") });
+  const selected = await Settings.load({ cwd: world, home: join(world, "empty-home") });
   const cause = new Error("original launcher cause");
   const failure = Object.freeze(new TypeError("launcher failed after durable Soul", { cause }));
   const api = akumasWithLauncher(world, async (launch) => {
@@ -456,7 +456,7 @@ for (const corruptInitialization of [false, true]) {
         return result;
       },
     );
-    const selected = await settings({ root: world, home: join(world, "empty-home") });
+    const selected = await Settings.load({ cwd: world, home: join(world, "empty-home") });
     const api = akumasWithLauncher(world, async () => assert.fail("canceled observation cannot launch a Body"));
     await assert.rejects(
       api.spawn({ akumaName: "worker", body: "begin", mode: "wait", settings: selected, signal: controller.signal }),

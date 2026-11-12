@@ -1,5 +1,6 @@
 /** @architectureCompositionRoot */
 import { captureAkumaHostDiagnostic, type AkumaHostOptions } from "../akuma/akuma-instance.js";
+import { listArchetypeDefinitions, type ArchetypeCatalog, type ArchetypeCatalogInput } from "../akuma/archetype.js";
 import type { AkumaCaller } from "../akuma/caller.js";
 import type { AkumaRosterInput } from "../akuma/akuma.js";
 import { observeAkumaRoster, readAkumaTimeline, rosterInput } from "../akuma/akuma.js";
@@ -69,6 +70,7 @@ export type Akumas = AkumasHandle;
 export type AkumaAliasesInput = Readonly<{ akumaIds: readonly string[] }>;
 export type AkumaListInput = AkumaRosterInput & Readonly<{ repo?: Repo }>;
 export type AkumaList = z.output<typeof akumaCatalogueSchema>;
+export type AkumaArchetypesInput = Omit<ArchetypeCatalogInput, "cwd">;
 
 class AkumasHandle {
   #world: WorldRoot;
@@ -81,6 +83,11 @@ class AkumasHandle {
     this.#spawn = spawn;
     this.#reportDiagnostic = captureAkumaHostDiagnostic(host);
     Object.freeze(this);
+  }
+
+  async archetypes(input: AkumaArchetypesInput = {}): Promise<ArchetypeCatalog> {
+    const values = requireInput(input, "Akumas.archetypes input", ["home", "limit"]);
+    return listArchetypeDefinitions({ ...values, cwd: this.#world });
   }
 
   async list(input: AkumaListInput = {}): Promise<AkumaList> {
@@ -268,6 +275,7 @@ export function akumasWithLauncher(world: WorldRoot, spawn: BodyLauncher, host?:
 }
 
 export const Akumas = Object.freeze({
+  archetypes: listArchetypeDefinitions,
   of(world: WorldRoot, host?: AkumaHostOptions): Akumas {
     const { spawn, reportDiagnostic } = captureAkumaHost(host);
     return akumasWithLauncher(world, spawn, reportDiagnostic === undefined ? undefined : { reportDiagnostic });

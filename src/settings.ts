@@ -81,7 +81,7 @@ export const settingsSchema = z
   })
   .readonly();
 
-export type SettingsInput = Readonly<{ root?: string; home?: string }>;
+export type SettingsInput = Readonly<{ cwd?: string; home?: string }>;
 
 export class SettingsError extends KeiyakuError {
   readonly kind = "settings";
@@ -218,16 +218,16 @@ async function canonicalCoordinate(path: string): Promise<string> {
   }
 }
 
-export async function settings(input: SettingsInput = {}): Promise<Settings> {
+async function loadSettings(input: SettingsInput = {}): Promise<Settings> {
   if (!object(input)) throw new TypeError("settings input must be an object");
-  if (input.root !== undefined && (typeof input.root !== "string" || input.root.trim().length === 0)) {
-    throw new TypeError("settings root must be a nonblank string");
+  for (const key of Object.keys(input))
+    if (key !== "cwd" && key !== "home") throw new TypeError(`settings input has unknown field: ${key}`);
+  for (const field of ["cwd", "home"] as const) {
+    const value = input[field];
+    if (value !== undefined && (typeof value !== "string" || value.trim().length === 0))
+      throw new TypeError(`settings ${field} must be a nonblank string`);
   }
-  if (input.home !== undefined && (typeof input.home !== "string" || input.home.trim().length === 0)) {
-    throw new TypeError("settings home must be a nonblank string");
-  }
-  const projectDirectory =
-    input.root === undefined ? undefined : await canonicalCoordinate(join(input.root, ".keiyaku"));
+  const projectDirectory = input.cwd === undefined ? undefined : await canonicalCoordinate(join(input.cwd, ".keiyaku"));
   const userDirectory = await canonicalCoordinate(input.home ?? join(homedir(), ".keiyaku"));
   const project =
     projectDirectory === undefined || projectDirectory === userDirectory
@@ -236,6 +236,8 @@ export async function settings(input: SettingsInput = {}): Promise<Settings> {
   const user = await readScope(join(userDirectory, "settings.json"));
   return settingsFromScopes(project, user);
 }
+
+export const Settings = Object.freeze({ load: loadSettings });
 
 /** Read only the project scope owned by a materialized candidate snapshot. */
 export async function projectSettings(root: string): Promise<Settings> {

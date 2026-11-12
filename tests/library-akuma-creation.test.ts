@@ -3,7 +3,17 @@ import { present } from "./support/library-verbs.js";
 import { temporaryDirectory, restoreEnvironmentValues } from "./support/process.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
@@ -28,7 +38,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import type { SpawnResult } from "../src/library/akumas.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { Akumas, Keis, Keiyaku, Repo, World, settings } from "../src/index.js";
+import { Akumas, Keis, Keiyaku, Repo, World, Settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
@@ -100,7 +110,7 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
     ].join("\n"),
   );
   chmodSync(executable, 0o755);
-  const value = await settings({ root, home });
+  const value = await Settings.load({ cwd: root, home });
   return { home, value, placement: { home, settings: value } };
 }
 
@@ -148,7 +158,7 @@ test("prompt-free bare Akumas.spawn reports born without admitting a Tell", asyn
     });
     const source = await loadPreparedArchetype({
       name: "worker",
-      project: world,
+      cwd: world,
       home: configured.home,
       settings: configured.value,
     });
@@ -436,7 +446,7 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
       caller: { kind: "external", integration: "tests", id: "submit:bounded" },
       initiator: "Submitter",
       home: configured.home,
-      settings: await settings({ root: world, home: configured.home }),
+      settings: await Settings.load({ cwd: world, home: configured.home }),
       mode: "wait",
       signal: t.signal,
     });
@@ -522,7 +532,7 @@ test("call without a host preserves log-only diagnostics", async (t) => {
       akumaName: "worker",
       cwd: world,
       home: configured.home,
-      settings: await settings({ root: world, home: configured.home }),
+      settings: await Settings.load({ cwd: world, home: configured.home }),
     });
     assert.equal(result.kind, "spawned");
     assert.equal(result.tellId, undefined);
@@ -1045,7 +1055,7 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
   writeFileSync(join(home, "akumas", "b.md"), "---\nbase: a\n---\n");
   writeFileSync(join(home, "akumas", "noprov.md"), "---\nbase: empty\n---\n");
   writeFileSync(join(home, "akumas", "empty.md"), "---\n{}\n---\n");
-  const settingsValue = await settings({ home });
+  const settingsValue = await Settings.load({ home });
   await assert.rejects(
     loadPreparedArchetype({ name: "missing", home, settings: settingsValue }),
     (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("missing -> absent"),
@@ -1090,7 +1100,7 @@ test("a local call reports unsupported Archetype options as an Archetype failure
   const root = temporaryDirectory(context, "keiyaku-local-unsupported-option-");
   const home = join(root, "home");
   mkdirSync(join(home, "akumas"), { recursive: true });
-  const value = await settings({ root, home });
+  const value = await Settings.load({ cwd: root, home });
   const archetypePath = join(home, "akumas", "greedy.md");
   writeFileSync(archetypePath, "---\nprovider: claude\nnetwork: enabled\n---\nWork.\n");
   await assert.rejects(

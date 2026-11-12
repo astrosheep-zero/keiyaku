@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { boundedListLimit } from "../bounded-list.js";
 import { akumaRowsAt, joinedAkumas, aliasesAt, dispatchesAt, diagnostic } from "../library/akumas.js";
 import { aliasBindingSchema, type AliasBinding } from "../alias/index.js";
 import { decodeContractDocument } from "../body/decode.js";
@@ -34,12 +35,11 @@ import { kanshiReportSchema, kanshiContractReportSchema, sectionSchema } from ".
 import { ROSTER_SNAPSHOT_ROWS, ROSTER_VISIBLE_ROWS } from "./roster.js";
 import { selectRegion } from "./select.js";
 
-export type KanshiInput = Readonly<{
-  world: WorldRoot | null;
-  repo?: Repo;
-  region?: KanshiRegionSelection;
-  contract?: ContractId;
-}>;
+export type KanshiScopeInput = Readonly<{ world?: WorldRoot | null; repo?: Repo | null }>;
+export type KanshiBoardOptions = Readonly<{ akumaLimit?: number }>;
+
+export type KanshiCoordinates = Readonly<{ world: WorldRoot | null; repo?: Repo }>;
+type KanshiInput = KanshiCoordinates & Readonly<{ contract?: ContractId }>;
 export type KanshiObservation = Readonly<{
   report: KanshiReport | KanshiContractReport;
   aliases: Section<readonly AliasBinding[]>;
@@ -85,13 +85,19 @@ function exactKeys(value: Record<string, unknown>, allowed: readonly string[], l
   for (const key of Object.keys(value))
     if (!allowed.includes(key)) throw new TypeError(`kanshi ${label} has unknown field: ${key}`);
 }
-function worldCoordinate(world: unknown, repo: unknown): void {
+export function captureKanshiScope(input: KanshiScopeInput): KanshiCoordinates {
+  const value = record(input, "scope");
+  exactKeys(value, ["world", "repo"], "scope");
+  const world = input.world ?? null;
+  const repo = input.repo ?? undefined;
   if (world !== null && (typeof world !== "string" || world.trim().length === 0))
     throw new TypeError("kanshi world must be a WorldRoot or null");
   if (repo !== undefined && !(repo instanceof Repo)) throw new TypeError("kanshi repo must be a Repo");
+  return Object.freeze({ world, ...(repo === undefined ? {} : { repo }) });
 }
 function regionSelection(value: unknown): KanshiRegionSelection {
   const selection = record(value, "region selection");
+  if (Object.keys(selection).length === 0) return { kind: "declarations" };
   if (selection.kind === "declarations") {
     exactKeys(selection, ["kind"], "region selection");
     return { kind: "declarations" };
@@ -122,18 +128,6 @@ function regionSelection(value: unknown): KanshiRegionSelection {
     return { kind: "path", patterns: [first, ...rest] };
   }
   throw new TypeError(`kanshi region selection kind is invalid: ${String(selection.kind)}`);
-}
-function coordinate(input: KanshiInput): KanshiInput {
-  const value = record(input, "input");
-  exactKeys(value, ["world", "repo", "region", "contract"], "input");
-  worldCoordinate(value.world, value.repo);
-  if (input.contract !== undefined && input.region !== undefined)
-    throw new TypeError("kanshi contract and region selections are exclusive");
-  return {
-    ...input,
-    ...(input.region === undefined ? {} : { region: regionSelection(input.region) }),
-    ...(input.contract === undefined ? {} : { contract: contractId(input.contract) }),
-  };
 }
 async function holdersAt(observation: GitReadObservation): Promise<Holders> {
   try {
@@ -275,7 +269,11 @@ async function selectedContract(
     return { kind: "contract-failed", id, diagnostic: diagnostic(error) };
   }
 }
-async function regionAt(repo: Repo | undefined, selection: KanshiRegionSelection): Promise<RegionRead> {
+export async function readKanshiRegion(
+  repo: Repo | undefined,
+  input: KanshiRegionSelection | Readonly<Record<string, never>> = {},
+): Promise<RegionRead> {
+  const selection = regionSelection(input);
   if (repo === undefined) return { kind: "absent" };
   try {
     return await withGitDecodeChannel(scopeForRepo(repo), (channel) =>
@@ -295,15 +293,24 @@ async function regionAt(repo: Repo | undefined, selection: KanshiRegionSelection
     return { kind: "failed", diagnostic: diagnostic(error) };
   }
 }
-export async function observeKanshi(input: KanshiInput): Promise<KanshiObservation> {
-  const { world, repo, contract, region } = coordinate(input);
-  if (region !== undefined)
-    throw new TypeError("observeKanshi observes World or Contract; use kanshi for Region selection");
+export function observeKanshi(
+  input: KanshiInput & Readonly<{ contract: ContractId }>,
+  options?: KanshiBoardOptions,
+): Promise<KanshiObservation & Readonly<{ report: KanshiContractReport }>>;
+export function observeKanshi(
+  input: KanshiInput & Readonly<{ contract?: undefined }>,
+  options?: KanshiBoardOptions,
+): Promise<KanshiObservation & Readonly<{ report: KanshiReport }>>;
+export async function observeKanshi(input: KanshiInput, options: KanshiBoardOptions = {}): Promise<KanshiObservation> {
+  const { world, repo, contract } = input;
+  const board = record(options, "board options");
+  exactKeys(board, ["akumaLimit"], "board options");
+  const akumaLimit = board.akumaLimit === undefined ? ROSTER_VISIBLE_ROWS : boundedListLimit(board.akumaLimit);
   const observedAt = new Date().toISOString();
   const [aliases, akumaProduct, debts] = await Promise.all([
     aliasesAt(world),
     contract === undefined && world !== null
-      ? akumaRowsAt(world, ROSTER_VISIBLE_ROWS, undefined, undefined, ROSTER_SNAPSHOT_ROWS).then(
+      ? akumaRowsAt(world, akumaLimit, undefined, undefined, ROSTER_SNAPSHOT_ROWS).then(
           ({ kind: _kind, observedAt: _observedAt, ...rows }): BoardSection<AkumaKanshiWorld> => ({
             kind: "present",
             ...rows,
@@ -356,14 +363,4 @@ export async function observeKanshi(input: KanshiInput): Promise<KanshiObservati
       aliases,
     };
   }
-}
-export function kanshi(input: KanshiInput & Readonly<{ region: KanshiRegionSelection }>): Promise<RegionRead>;
-export function kanshi(input: KanshiInput & Readonly<{ contract: ContractId }>): Promise<KanshiContractReport>;
-export function kanshi(
-  input: KanshiInput & Readonly<{ contract?: undefined; region?: undefined }>,
-): Promise<KanshiReport>;
-export function kanshi(input: KanshiInput): Promise<KanshiReport | KanshiContractReport | RegionRead>;
-export async function kanshi(input: KanshiInput): Promise<KanshiReport | KanshiContractReport | RegionRead> {
-  const value = coordinate(input);
-  return value.region === undefined ? (await observeKanshi(value)).report : regionAt(value.repo, value.region);
 }

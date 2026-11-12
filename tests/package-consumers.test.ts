@@ -56,9 +56,9 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Debt, K
     `
 import type { Gate, Fact, FactKind, KeiyakuError, KeiyakuErrorCategory, ContractDetail, ContractGateCurrent,
   ReconcileCompletion, SettlementAction, SettlementReport, NukeResult, Repo, Kei,
-  ContractWaitInput, ContractWaitResult, KanshiCountsInput, KanshiCountsReport } from "@astrosheep/keiyaku";
-const countsInput: KanshiCountsInput = { world: null };
-const countsResult: Promise<KanshiCountsReport> = (await import("@astrosheep/keiyaku")).kanshiCounts(countsInput);
+  ContractWaitInput, ContractWaitResult, KanshiScopeInput, KanshiCountsReport } from "@astrosheep/keiyaku";
+const countsInput: KanshiScopeInput = { world: null };
+const countsResult: Promise<KanshiCountsReport> = (await import("@astrosheep/keiyaku")).Kanshi.of(countsInput).counts();
 void countsResult;
 declare const repo: Repo;
 declare const handle: Kei;
@@ -117,8 +117,8 @@ void [word, arbitraryGate, kind, category, gates, actions];
         'import assert from "node:assert/strict";',
         'import { createRequire } from "node:module";',
         'import * as root from "@astrosheep/keiyaku";',
-        'import { Akuma, Akumas, Kei, Keis, Repo, Debts, kanshi, kanshiCounts, nuke, settings } from "@astrosheep/keiyaku";',
-        'assert.equal((await kanshiCounts({ world: null })).akuma.kind, "absent");',
+        'import { Akuma, Akumas, Kei, Keis, Repo, Debts, Kanshi, nuke, Settings } from "@astrosheep/keiyaku";',
+        'assert.equal((await Kanshi.of({ world: null }).counts()).akuma.kind, "absent");',
         'const repo = await Repo.at({ path: process.cwd() });',
         'const missingWait = await Keis.of(repo).wait({ contracts: ["kei/missing"], timeoutMs: 0 });',
         'assert.equal(missingWait.kind, "contract");',
@@ -152,8 +152,8 @@ void [word, arbitraryGate, kind, category, gates, actions];
         'assert.equal(selected.constructor.name, "Akuma");',
         'assert.equal(typeof Akumas.of, "function");',
         'assert.equal(typeof Debts.of, "function");',
-        'assert.equal(typeof kanshi, "function");',
-        'assert.equal(typeof settings, "function");',
+        'assert.equal((await Kanshi.of({}).board()).contracts.kind, "absent");',
+        'assert.equal((await Settings.load()).scopes.project.kind, "absent");',
         'assert.equal(typeof nuke, "function");',
         'assert.equal("Delivery" in root, false);',
         'assert.equal(plugin.manifest.id, "square");',

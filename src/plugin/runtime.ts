@@ -2,7 +2,7 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { isAbsolute, join, posix, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
-import { settings, type Settings, type SettingsEntry } from "../settings.js";
+import { Settings, type SettingsEntry } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import type {
   KeiyakuPlugin,
@@ -526,7 +526,7 @@ export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRu
 
 async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
   const report = input.reportDiagnostic;
-  const selected = selectedPlugins(input.settings ?? (await settings({ root: input.world })), report);
+  const selected = selectedPlugins(input.settings ?? (await Settings.load({ cwd: input.world })), report);
   const activated = new Set<string>();
   let previousStarted = Promise.resolve();
   const activations = selected.map((entry) => {

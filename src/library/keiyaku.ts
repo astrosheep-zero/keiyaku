@@ -14,7 +14,7 @@ import type { SpawnProgress } from "./akuma-creation.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { World, WorldError } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
-import { kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
+import { Kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
 import {
   Akumas,
   type SpawnInput,
@@ -28,7 +28,7 @@ import type { ContractWaitInput } from "./contract-wait.js";
 import { deliveryOwner, resolveActor } from "./keiyaku-attribution.js";
 import { akumaCallerFromEnvironment } from "./keiyaku-identity.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
-import { settings } from "../settings.js";
+import { Settings } from "../settings.js";
 import { Keis, type ReconcileInput } from "./contract-composition.js";
 import type { MutationObservation } from "./contract-outcomes.js";
 import type { AbandonInput, AmendInput, ArcInput, BindInput, ReviewInput, VerifyInput } from "./contract-types.js";
@@ -37,7 +37,6 @@ import { KeiyakuError } from "./outcome.js";
 import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
-import { listArchetypeDefinitions } from "../akuma/archetype.js";
 import type { AkumaCaller } from "../akuma/caller.js";
 import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
@@ -168,7 +167,7 @@ export class Keiyaku {
         return this.#nuke(request.input);
       case "kanshi": {
         const at = await this.#coordinates("optional");
-        return kanshi({ world: at.world, ...(at.repo === undefined ? {} : { repo: at.repo }) });
+        return Kanshi.of({ world: at.world, ...(at.repo === undefined ? {} : { repo: at.repo }) }).board();
       }
       case "status": {
         const at = await this.#coordinates("optional");
@@ -180,7 +179,7 @@ export class Keiyaku {
           });
         }
         if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
-        const report = await kanshi({ world: at.world, repo: at.repo, contract: contractId(request.input.id) });
+        const report = await Kanshi.of({ world: at.world, repo: at.repo }).contract(contractId(request.input.id));
         if (report.kind === "contract-absent") throw new Error("Contract observation with a Repo cannot be absent");
         return report;
       }
@@ -368,8 +367,8 @@ export class Keiyaku {
   async #keis(actor?: string) {
     const at = await this.#coordinates("required");
     if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
-    const configuration = await settings({
-      ...(at.world === null ? {} : { root: at.world }),
+    const configuration = await Settings.load({
+      ...(at.world === null ? {} : { cwd: at.world }),
       ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
     });
     const selected = this.#actor(actor);
@@ -511,8 +510,8 @@ export class Keiyaku {
     const initiator = deliveryOwner(this.#input.environment);
     const world = at.candidateWorld ?? (await at.establishWorld());
     await World.at(world);
-    const configuration = await settings({
-      root: world,
+    const configuration = await Settings.load({
+      cwd: world,
       ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
     });
     const selected =
@@ -668,9 +667,9 @@ export class Keiyaku {
       });
     if (input.selector === "aku" || input.selector === "aku/") {
       const at = await this.#coordinates("none");
-      return listArchetypeDefinitions({
+      return Akumas.archetypes({
         ...bound,
-        ...(at.world === null ? {} : { project: at.world }),
+        ...(at.world === null ? {} : { cwd: at.world }),
         ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
       });
     }
@@ -701,7 +700,7 @@ export class Keiyaku {
           ? { kind: "declarations" }
           : { kind: "contract", contract: await this.#resolve(Keis.of(repo), input.contract, at.cwd) };
     }
-    const result = await kanshi({ world: at.world, repo, region: selected });
+    const result = await Kanshi.of({ world: at.world, repo }).region(selected);
     if (result.kind === "absent") throw new Error("Region observation with a Repo cannot be absent");
     return result;
   }
@@ -712,8 +711,8 @@ export class Keiyaku {
 
   async #settings() {
     const at = await this.#coordinates("none");
-    return await settings({
-      ...(at.world === null ? {} : { root: at.world }),
+    return await Settings.load({
+      ...(at.world === null ? {} : { cwd: at.world }),
       ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
     });
   }

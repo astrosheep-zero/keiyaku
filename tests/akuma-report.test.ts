@@ -15,7 +15,7 @@ import { allocateAkumaDirectory, parsePublicHistoryId } from "../src/akuma/ident
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
-import { settings } from "../src/settings.js";
+import { Settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { bornBody, bornDirectAkuma, allocatedHeart, claudeBodyLaunch, noBodyLaunch } from "./support/akuma-fixtures.js";
@@ -35,7 +35,7 @@ async function reportFixture(root: string, suffix: string, initiator?: string) {
   });
   // Own the whole plugin selection rather than inheriting machine user settings.
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  await pluginRuntime({ world, settings: await settings({ root: world, home: join(root, "empty-home") }) });
+  await pluginRuntime({ world, settings: await Settings.load({ cwd: world, home: join(root, "empty-home") }) });
   return { ...born, world, turn, execution: { bodySequence: born.body.sequence, turnSequence: turn.sequence } };
 }
 
@@ -271,7 +271,7 @@ export default { manifest: { id: 'report-test', apiVersion: 1 }, activate() {
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {
     "report-test": { package: "./observer.mjs" },
   } }));
-  await pluginRuntime({ world, settings: await settings({ root: world, home: join(root, "empty-home") }) });
+  await pluginRuntime({ world, settings: await Settings.load({ cwd: world, home: join(root, "empty-home") }) });
   const diagnostics: string[] = [];
   const akuma = Akuma.select(world, value.allocated.id, { reportDiagnostic: message => diagnostics.push(message) });
   try {

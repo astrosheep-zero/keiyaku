@@ -1,6 +1,6 @@
 export type { AkumaCaller } from "./caller.js";
 export type { AkumaOrigin } from "./heart/index.js";
-export { AkumaArchetypeError, listArchetypeDefinitions } from "./archetype.js";
+export { AkumaArchetypeError } from "./archetype.js";
 export type { ArchetypeCatalog, ArchetypeCatalogInput, ArchetypeCatalogRow } from "./archetype.js";
 export {
   AkumaBusyError,

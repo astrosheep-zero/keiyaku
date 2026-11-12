@@ -1,5 +1,14 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdtempSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import test from "node:test";
@@ -14,9 +23,15 @@ import { Keiyaku, KeiyakuUsageError } from "../src/library/keiyaku.js";
 import { projectFailure } from "../src/library/outcome.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { DEFAULT_CLI_COLUMNS } from "../src/cli/render/terminal.js";
-import { Akuma, Akumas, Keis, Repo, World, kanshi, listArchetypeDefinitions } from "../src/index.js";
+import { Akuma, Akumas, Keis, Repo, World, Kanshi } from "../src/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
-import { repositoryAt, updateGitTree, writeBlob, writeStateCommit, updateRefsAtomically } from "../src/git/repository.js";
+import {
+  repositoryAt,
+  updateGitTree,
+  writeBlob,
+  writeStateCommit,
+  updateRefsAtomically,
+} from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { bornBody, bornDirectAkuma, bornLineageAkuma } from "./support/akuma-fixtures.js";
 import { beginTurn, endTurn } from "../src/akuma/heart/index.js";
@@ -322,11 +337,11 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   for (const [name, input, expected] of [
     ["ls", { selector: "kei/", limit: 1 }, await Keis.of(repo).list({ limit: 1 })],
     ["ls", { selector: "aku/*", limit: 1 }, catalogue],
-    ["ls", { selector: "aku/" }, await listArchetypeDefinitions({ project: world, home: cwd })],
+    ["ls", { selector: "aku/" }, await Akumas.archetypes({ cwd: world, home: cwd })],
 
-    ["status", { id: bound.contractId }, await kanshi({ world, repo, contract: bound.contractId })],
+    ["status", { id: bound.contractId }, await Kanshi.of({ world, repo }).contract(bound.contractId)],
     ["status", { id: worker.id }, await Akumas.of(world).status({ akuma: worker.id, repo })],
-    ["kanshi", {}, await kanshi({ world, repo })],
+    ["kanshi", {}, await Kanshi.of({ world, repo }).board()],
   ] as const) {
     const response = await client.callTool({ name, arguments: { cwd: first, repo: otherRepo.path, ...input } });
     assert.equal(response.isError, false, name);

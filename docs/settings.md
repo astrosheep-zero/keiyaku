@@ -7,9 +7,13 @@ entry name, record grammar, default, or admission policy.
 
 ## Scope and observation
 
-The process edge supplies an already resolved World coordinate and, when
-needed, a user-home coordinate. When the project management directory and user
-configuration directory resolve to the same canonical coordinate, Settings
+Settings owns loading as well as the immutable value it returns. The caller
+supplies an already resolved project directory coordinate and, when needed, a
+user-home coordinate. The project coordinate is explicit cwd, not an invocation
+to resolve a World. Omitting it selects no project scope: loading neither uses
+the ambient working directory as a substitute nor searches ancestors. When the
+project management directory and user configuration directory resolve to the
+same canonical coordinate, Settings
 reads that file once as user scope and reports project scope as absent. This is
 an equal-coordinate rule, not a home-directory exception. An omitted project
 coordinate means there is no project scope, rather than permission to guess one.

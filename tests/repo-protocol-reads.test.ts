@@ -18,7 +18,7 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { readContractCount, readContractMembership, readContractObservation } from "../src/protocol/read/status.js";
-import { Keis, Repo, kanshiCounts } from "../src/index.js";
+import { Keis, Repo, Kanshi } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
@@ -257,7 +257,7 @@ test("counts and selection observe only their membership authority", async () =>
   );
   await publish(badPath, brokenTarget.map(encodeEntry).join(""));
   await assert.rejects(library.observe({ id: bad }), /invalid Git ref/u);
-  assert.deepEqual((await kanshiCounts({ world: null, repo })).contracts, { kind: "present", value: 2 });
+  assert.deepEqual((await Kanshi.of({ world: null, repo }).counts()).contracts, { kind: "present", value: 2 });
   assert.deepEqual(await library.resolve({ selector }), { kind: "resolved", id: good });
   assert.deepEqual(await library.resolve({ cwd }), { kind: "resolved", id: good });
   const authority = await observeNamedAddress({ world: null, repo, selectors: [selector] });
@@ -289,7 +289,7 @@ test("counts and selection observe only their membership authority", async () =>
     }),
   );
   await publish(badPath, "corrupt journal\n");
-  assert.deepEqual((await kanshiCounts({ world: null, repo })).contracts, { kind: "present", value: 2 });
+  assert.deepEqual((await Kanshi.of({ world: null, repo }).counts()).contracts, { kind: "present", value: 2 });
   assert.deepEqual(await library.resolve({ selector }), { kind: "resolved", id: good });
   assert.deepEqual(
     resolveNamedAddress({
@@ -301,7 +301,7 @@ test("counts and selection observe only their membership authority", async () =>
   await assert.rejects(library.resolve({ selector: `@${bad.slice(4)}` }));
   await assert.rejects(library.resolve({ cwd }));
   await publish(GIT_FORMAT_PATH, "corrupt membership format\n");
-  assert.equal((await kanshiCounts({ world: null, repo })).contracts.kind, "failed");
+  assert.equal((await Kanshi.of({ world: null, repo }).counts()).contracts.kind, "failed");
 });
 
 test("repo reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {

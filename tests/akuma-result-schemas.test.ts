@@ -363,8 +363,8 @@ test("spawn and fork results describe real creation and refusal", async (context
 
 test("archetype catalogue wire preserves populated and empty pages", async (context) => {
   const home = temporaryDirectory(context, "akuma-catalog-wire-");
-  assertWireRoundTrip(root.archetypeCatalogSchema, await root.listArchetypeDefinitions({ home }));
+  assertWireRoundTrip(root.archetypeCatalogSchema, await root.Akumas.archetypes({ home }));
   mkdirSync(join(home, "akumas"), { recursive: true });
   writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\ndescription: Worker\n---\nWork.\n");
-  assertWireRoundTrip(root.archetypeCatalogSchema, await root.listArchetypeDefinitions({ home }));
+  assertWireRoundTrip(root.archetypeCatalogSchema, await root.Akumas.archetypes({ home }));
 });

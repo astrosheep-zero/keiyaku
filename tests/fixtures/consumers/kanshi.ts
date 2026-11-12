@@ -1,8 +1,8 @@
 import {
-  kanshi,
+  Kanshi,
   type ContractId,
   type KanshiContractReport,
-  type KanshiInput,
+  type KanshiScopeInput,
   type KanshiRegionSelection,
   type RegionDeclaration,
   type RegionOverlap,
@@ -18,15 +18,17 @@ const overlap: RegionOverlap = {
   patterns: [{ mine: "src/**", theirs: "src/cli/**", relation: "theirs-within-mine" }],
 };
 const read: RegionRead = { kind: "present", ...declaration, overlaps: [overlap] };
-const input: KanshiInput = { world: null, region: path };
-const selected: Promise<KanshiContractReport> = kanshi({ world: null, contract: id });
+const input: KanshiScopeInput = { world: null };
+const view: Kanshi = Kanshi.of(input);
+const regions: Promise<RegionRead> = view.region(path);
+const selected: Promise<KanshiContractReport> = Kanshi.of({ world: null }).contract(id);
 // @ts-expect-error overlap selection was deleted
 const deletedSelection: KanshiRegionSelection = { kind: "overlap" };
 // @ts-expect-error RegionIntersection is not exported
 type DeletedIntersection = import("@astrosheep/keiyaku").RegionIntersection;
 // @ts-expect-error the retired ./kanshi subpath promise is gone
 type RemovedKanshiSubpath = import("@astrosheep/keiyaku/kanshi").KanshiReport;
-void kanshi;
+void regions;
 void selected;
 void declarations;
 void contract;

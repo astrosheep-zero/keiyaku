@@ -151,6 +151,8 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["library/contract-address.ts", ["protocol/operations.ts", "contractsOperation"], true],
   ["library/contract-address.ts", ["library/keiyaku.ts", "Keiyaku"], false],
   ["library/address.ts", ["library/contract-address.ts", "matchContractCandidates"], true],
+  ["kanshi/index.ts", ["core/facts/types.ts", "contractId"], true],
+  ["kanshi/index.ts", ["library/repo.ts", "scopeForRepo"], false],
   ["kanshi/counts.ts", ["git/read-observation.ts", "withGitTargetedReadObservation"], true],
   ["kanshi/counts.ts", ["debt/operations.ts", "observeDebtBoard"], true],
   ["kanshi/counts.ts", ["library/repo.ts", "scopeForRepo"], true],

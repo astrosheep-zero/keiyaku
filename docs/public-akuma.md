@@ -207,11 +207,16 @@ omits the association; an independently failed Dispatch source makes links
 unavailable. Native roster source failures and whole Git observation or retirement
 failures remain exceptional at the catalogue boundary. World composition consumes
 the same rows and joins within its own bounded observation and failure isolation.
-Archetype definitions are listed by the archetype
-owner. The owner's bounded definitions catalogue and the native Archetype
-error that spawn admission already throws are reachable from the package root,
-so a root-only caller lists the same spawnable definitions the CLI shows and
-identifies that error without a private module. An archetype definition may declare `hidden: true`: a hidden definition
+Archetype definitions are listed by the archetype owner through the Akumas
+composition. A World-bound composition uses its captured World as the project
+configuration coordinate; standalone catalogue access accepts an explicit
+resolved project directory and user configuration coordinate. Omission of the
+project coordinate means user configuration alone, never an ambient working
+directory or ancestor search. Both faces preserve the same shadowing, bounded
+catalogue, and owner-native failures. The native Archetype error that spawn
+admission already throws is reachable from the package root, so a root-only
+caller lists the same spawnable definitions the CLI shows and identifies that
+error without a private module. An archetype definition may declare `hidden: true`: a hidden definition
 never appears in the archetype catalogue, but it resolves and answers spawns by
 name exactly as a visible one, and hiddenness is the definition's own
 catalogue visibility, never inherited through `base`. The pillars and product

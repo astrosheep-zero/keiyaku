@@ -73,7 +73,6 @@ export {
   AkumaNotBornError,
   AkumaObservationError,
   AkumaProviderError,
-  listArchetypeDefinitions,
 } from "./akuma/index.js";
 export type {
   AkumaCaller,
@@ -115,18 +114,15 @@ export type {
   SnapshotId,
 } from "./core/facts/types.js";
 export {
-  kanshi,
-  kanshiCounts,
+  Kanshi,
   kanshiCountsReportSchema,
-  observeKanshi,
-  selectRegion,
   regionReadSchema,
   kanshiReportSchema,
   kanshiContractReportSchema,
   kanshiResultSchema,
   kanshiObservationSchema,
 } from "./kanshi/index.js";
-export type { KanshiCountsInput, KanshiCountsReport } from "./kanshi/index.js";
+export type { KanshiScopeInput, KanshiBoardOptions, KanshiCountsReport } from "./kanshi/index.js";
 export type {
   AkumaKanshiRow,
   AkumaKanshiWorld,
@@ -136,7 +132,6 @@ export type {
   ContractKanshiDetail,
   KanshiContractReport,
   KanshiResult,
-  KanshiInput,
   KanshiRegionSelection,
   KanshiReport,
   RegionDeclaration,
@@ -149,6 +144,7 @@ export { AkumaAddressError, AkumaWorldScopeError, Akumas } from "./library/akuma
 export type {
   AliasBinding,
   AkumaAddressInput,
+  AkumaArchetypesInput,
   AkumaAliasesInput,
   AkumaAskInput,
   AkumaHistoryInput,
@@ -281,7 +277,7 @@ export type {
 } from "./protocol/read/status.js";
 export {
   SettingsError,
-  settings,
+  Settings,
   settingsSchema,
   settingsNamespaceViewSchema,
   settingsScopeStateSchema,
@@ -289,7 +285,6 @@ export {
 } from "./settings.js";
 export type { Gate } from "./library/contract-types.js";
 export type {
-  Settings,
   SettingsEntry,
   SettingsInput,
   SettingsNamespaceFailure,

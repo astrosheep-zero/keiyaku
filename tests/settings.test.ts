@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
-import { SettingsError, type Settings } from "../src/settings.js";
+import { SettingsError } from "../src/settings.js";
 import { loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { decodeProviderOptions } from "../src/akuma/provider-recipe.js";
 import { decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
 import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
-import { projectSettings, settings, settingsSchema } from "../src/settings.js";
+import { projectSettings, Settings, settingsSchema } from "../src/settings.js";
 import { z } from "zod";
 import { Keis, Repo, type ContractId } from "../src/index.js";
 import { KeiyakuError } from "../src/library/outcome.js";
@@ -34,7 +34,7 @@ async function loadNamed(value: SettingsFixture, name: string) {
   const akumaName = await loadPreparedArchetype({
     name,
     home: value.home,
-    settings: await settings({ root: value.project, home: value.home }),
+    settings: await Settings.load({ cwd: value.project, home: value.home }),
   });
   const { adapter } = await resolveProviderExecution(akumaName.provider);
   const admission = adapter.admitOptions(akumaName.options);
@@ -58,6 +58,37 @@ function contractGates(context: TestContext) {
   };
 }
 
+test("Settings.load keeps omitted cwd user-only and canonical equal coordinates in user scope", async () => {
+  const value = fixture();
+  const previous = process.cwd();
+  try {
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ sample: { shared: "user" } }));
+    writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({ sample: { shared: "project" } }));
+    const child = join(value.project, "nested");
+    mkdirSync(child);
+    process.chdir(child);
+    const user = await Settings.load({ home: value.home });
+    assert.deepEqual(user.scopes.project, { kind: "absent" });
+    assert.deepEqual(user.namespace("sample"), { kind: "read", entries: { shared: { value: "user", source: "user" } } });
+    const project = await Settings.load({ cwd: value.project, home: value.home });
+    assert.deepEqual(project.namespace("sample"), { kind: "read", entries: { shared: { value: "project", source: "project", shadows: true } } });
+    assert.deepEqual((await Settings.load({ cwd: child, home: value.home })).namespace("sample"), user.namespace("sample"));
+    const alias = join(value.root, "home-alias");
+    symlinkSync(join(value.project, ".keiyaku"), alias, process.platform === "win32" ? "junction" : "dir");
+    const equal = await Settings.load({ cwd: value.project, home: alias });
+    assert.deepEqual(equal.scopes.project, { kind: "absent" });
+    assert.deepEqual(equal.namespace("sample"), { kind: "read", entries: { shared: { value: "project", source: "user" } } });
+    assert.ok(Object.isFrozen(user));
+    writeFileSync(join(value.home, "settings.json"), JSON.stringify({ sample: { shared: "changed" } }));
+    assert.equal(user.namespace("sample").entries?.shared?.value, "user");
+    assert.equal((await Settings.load({ home: value.home })).namespace("sample").entries?.shared?.value, "changed");
+    await assert.rejects(Settings.load({ cwd: 7 } as never), TypeError);
+  } finally {
+    process.chdir(previous);
+    value.close();
+  }
+});
+
 test("Settings namespaces match individual resolution, including provenance and failures", async () => {
   const value = fixture();
   try {
@@ -74,7 +105,7 @@ test("Settings namespaces match individual resolution, including provenance and 
         providers: { shared: { project: true }, projectOnly: 2 },
       }),
     );
-    let loaded = await settings({ root: value.project, home: value.home });
+    let loaded = await Settings.load({ cwd: value.project, home: value.home });
     assert.deepEqual(Object.keys(loaded.namespaces ?? {}), ["broken", "providers"]);
     assert.deepEqual(
       loaded.namespaces,
@@ -91,7 +122,7 @@ test("Settings namespaces match individual resolution, including provenance and 
     assert.equal(loaded.namespace("broken").kind, "failed");
 
     writeFileSync(join(value.project, ".keiyaku", "settings.json"), "{");
-    loaded = await settings({ root: value.project, home: value.home });
+    loaded = await Settings.load({ cwd: value.project, home: value.home });
     assert.deepEqual(
       loaded.namespaces,
       Object.fromEntries(Object.keys(loaded.namespaces ?? {}).map((name) => [name, loaded.namespace(name)])),
@@ -122,7 +153,7 @@ test("opaque blank namespace names do not poison Settings construction or unrela
         " ": { projectOnly: true },
       }),
     );
-    const loaded = await settings({ root: value.project, home: value.home });
+    const loaded = await Settings.load({ cwd: value.project, home: value.home });
     assert.deepEqual(loaded.namespaces, {
       "": {
         kind: "read",
@@ -168,7 +199,7 @@ test("user Settings entries named like object properties retain their values and
       ["__proto__", { nested: JSON.parse('{"__proto__":null,"constructor":false,"toString":[]}') }],
     ])));
     writeFileSync(join(value.project, ".keiyaku", "settings.json"), JSON.stringify({ future: { projectOnly: null } }));
-    const loaded = await settings({ root: value.project, home: value.home });
+    const loaded = await Settings.load({ cwd: value.project, home: value.home });
     assert.deepEqual(loaded.namespace("future"), {
       kind: "read",
       entries: Object.fromEntries([
@@ -222,12 +253,12 @@ test("Settings isolates malformed namespaces but never falls through a failed hi
         providers: [],
       }),
     );
-    let loaded = await settings({ root: value.project, home: value.home });
+    let loaded = await Settings.load({ cwd: value.project, home: value.home });
     assert.deepEqual(await gates(loaded), ["reviewed"]);
     assert.equal(loaded.namespace("providers").kind, "failed");
 
     writeFileSync(join(value.project, ".keiyaku", "settings.json"), "{");
-    loaded = await settings({ root: value.project, home: value.home });
+    loaded = await Settings.load({ cwd: value.project, home: value.home });
     assert.equal(loaded.namespace("gates").kind, "failed");
     await assert.rejects(() => gates(loaded), invalidInputFromSettings);
     await assert.rejects(() => gates(loaded, ["reviewed"]), invalidInputFromSettings);
@@ -254,7 +285,7 @@ test("Contract bind expands mixed gates and bundles, deduplicates stably, and de
         },
       }),
     );
-    let loaded = await settings({ home: value.home });
+    let loaded = await Settings.load({ home: value.home });
     assert.deepEqual(await gates(loaded), ["reviewed"]);
     assert.deepEqual(await gates(loaded, []), []);
     assert.deepEqual(await gates(loaded, ["empty"]), []);
@@ -286,7 +317,7 @@ test("Contract bind expands mixed gates and bundles, deduplicates stably, and de
         },
       }),
     );
-    loaded = await settings({ home: value.home });
+    loaded = await Settings.load({ home: value.home });
     assert.deepEqual(await gates(loaded), []);
     assert.deepEqual(await gates(loaded, ["reviewed"]), ["verified"]);
   } finally {
@@ -311,7 +342,7 @@ test("Contract bind validates only selected bundle records and hard-rejects the 
         },
       }),
     );
-    const loaded = await settings({ home: value.home });
+    const loaded = await Settings.load({ home: value.home });
     assert.deepEqual(await gates(loaded, ["good"]), ["reviewed"]);
     await assert.rejects(() => gates(loaded, ["missing"]), /Unknown gate 'missing'/u);
     await assert.rejects(() => gates(loaded, ["future"]), /unsupported kind/u);
@@ -704,7 +735,7 @@ test("settings CLI maps KEIYAKU_HOME only at the process edge", async () => {
         },
       }),
     );
-    const observed = await settings({ root: value.project, home: value.home });
+    const observed = await Settings.load({ cwd: value.project, home: value.home });
     const text = await runCli(["-C", value.project, "settings"], {
       cwd: value.project,
       environment: { KEIYAKU_HOME: value.home },
@@ -777,7 +808,7 @@ test("settings CLI preserves opaque names, types, empty collections and provenan
     assert.doesNotMatch(text.stdout, /redacted|lower|\u001b|\u200d/u);
     const json = await cliJson<Pick<Settings, "scopes" | "namespaces">>(["-C", value.project, "settings"], runtime);
     assert.equal(json.exit, 0, json.stderr);
-    const observed = await settings({ root: value.project, home: value.home });
+    const observed = await Settings.load({ cwd: value.project, home: value.home });
     assert.deepEqual(json.value.scopes, observed.scopes);
     assert.deepEqual(json.value.namespaces, {
       future: {
@@ -806,7 +837,7 @@ test("settings CLI retains scoped failures and available opaque observations", a
     assert.doesNotMatch(text.stdout, /shadows user|redacted/u);
     const json = await cliJson<Pick<Settings, "scopes" | "namespaces">>(["-C", value.project, "settings"], runtime);
     assert.equal(json.exit, 0, json.stderr);
-    const observed = await settings({ root: value.project, home: value.home });
+    const observed = await Settings.load({ cwd: value.project, home: value.home });
     assert.deepEqual(json.value.scopes, observed.scopes);
     assert.deepEqual(json.value.namespaces, {
       future: {
@@ -830,7 +861,7 @@ test("settings text preserves long paths and opaque provider values", async () =
       longPath,
       JSON.stringify({ providers: { local: { kind: "acp", env: { LONG_VALUE: "x".repeat(100) } } } }),
     );
-    const observed = await settings({ root: value.project, home: longHome });
+    const observed = await Settings.load({ cwd: value.project, home: longHome });
     const text = renderSettingsText(observed, 72);
     assert.match(text, new RegExp(realpathSync.native(longPath).replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
     assert.match(text, /LONG_VALUE  "x{100}"/u);

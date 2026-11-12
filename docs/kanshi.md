@@ -1,7 +1,12 @@
 # Kanshi
 
-Kanshi is the read-only composite observation of one World. It gives callers a
-coherent report of Contract, Debt, and Akuma reality without creating a fourth
+Kanshi is the read-only composite observation of one World. Its immutable handle
+captures independent World and Repo coordinates synchronously without I/O;
+neither coordinate is inferred from the other. Each board, count, Region, or
+addressed Contract read observes fresh owner state rather than a construction-time
+snapshot or cache. An unselected Region read lists declared planning regions.
+It gives callers a coherent report of Contract, Debt, and Akuma reality without
+creating a fourth
 product authority. It owns report availability, read-time association,
 selection, and the meaning of a composite result; it owns no lifecycle,
 permission, persistence, or repair decision.

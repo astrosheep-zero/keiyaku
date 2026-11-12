@@ -1,7 +1,17 @@
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after, type TestContext } from "node:test";
@@ -15,7 +25,7 @@ import { publishDispatch } from "../src/dispatch/index.js";
 import { readGitPaths, repositoryAt } from "../src/git/repository.js";
 import { isPrivateStateSeatContention, withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
-import { settings } from "../src/index.js";
+import { Settings } from "../src/index.js";
 import { sweepInactiveAkumas } from "../src/library/akuma-retention.js";
 import { Akumas } from "../src/library/akumas.js";
 import { World, type WorldRoot } from "../src/world.js";
@@ -130,7 +140,7 @@ async function callSettings(root: string) {
     ].join("\n"),
   );
   chmodSync(executable, 0o755);
-  return { home, value: await settings({ root, home }) };
+  return { home, value: await Settings.load({ cwd: root, home }) };
 }
 
 async function boundContract(raw: ReturnType<typeof makeGitRepository>, verification?: string) {

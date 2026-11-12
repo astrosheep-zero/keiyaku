@@ -1,5 +1,5 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { kanshiCounts, NoGitWorldError, Repo, World } from "@astrosheep/keiyaku";
+import { Kanshi, NoGitWorldError, Repo, World } from "@astrosheep/keiyaku";
 import { registerAkumaTools } from "./akuma-tools.ts";
 
 type ExecResult = Readonly<{ stdout: string; stderr: string; code: number }>;
@@ -38,11 +38,15 @@ function overlay(lines: readonly string[], theme: Theme, done: () => void) {
   };
 }
 
-type StatusReaders = { repo: typeof Repo.at; world: typeof World.resolve; counts: typeof kanshiCounts };
+type StatusReaders = {
+  repo: typeof Repo.at;
+  world: typeof World.resolve;
+  counts: (scope: Parameters<typeof Kanshi.of>[0]) => ReturnType<Kanshi["counts"]>;
+};
 
 export default function keiyakuExtension(
   pi: ExtensionAPI,
-  readers: StatusReaders = { repo: Repo.at, world: World.resolve, counts: kanshiCounts },
+  readers: StatusReaders = { repo: Repo.at, world: World.resolve, counts: (scope) => Kanshi.of(scope).counts() },
 ): void {
   registerAkumaTools(pi);
   let close: (() => void) | undefined;

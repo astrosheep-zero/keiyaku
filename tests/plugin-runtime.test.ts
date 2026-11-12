@@ -8,7 +8,7 @@ import test, { type TestContext } from "node:test";
 import { emitPluginSignal, withAkumaWaitDeferrals } from "../src/plugin/akuma-signals.js";
 import { pluginRuntime } from "../src/plugin/runtime.js";
 import { outcomePluginObserver } from "../src/plugin/akuma-signals.js";
-import { settings } from "../src/settings.js";
+import { Settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 import { restoreEnvironmentValues } from "./support/process.js";
 
@@ -35,7 +35,7 @@ test("frozen child identities and independent resources surround observation", a
       alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
     });
     const world = await World.at(value.root);
-    const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
+    const runtime = await pluginRuntime({ world, settings: await Settings.load({ cwd: value.root, home: value.home }) });
     const selected = { akumaIds: ["aku/allocated"] as string[] };
     const pending = runtime.withWaitDeferrals(selected, undefined, async () => {
       await runtime.withWaitDeferrals({ akumaIds: ["aku/one", "aku/two"] }, undefined, async () => {
@@ -72,7 +72,7 @@ test("timed-out acquisition closes a scope that arrives later", async (context) 
       alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
     });
     const world = await World.at(value.root);
-    const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
+    const runtime = await pluginRuntime({ world, settings: await Settings.load({ cwd: value.root, home: value.home }) });
     const advance = deadlineClock(context);
     const pending = runtime.withWaitDeferrals({ akumaIds: ["aku/allocated"] }, undefined, async () => {
       appendFileSync(output, "route\n");
@@ -111,7 +111,7 @@ test("pre-aborted wait acquires nothing; rejected cleanup preserves both result 
       alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
     });
     const world = await World.at(value.root);
-    const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }) });
+    const runtime = await pluginRuntime({ world, settings: await Settings.load({ cwd: value.root, home: value.home }) });
     const aborted = new AbortController();
     aborted.abort();
     await assert.rejects(
@@ -160,7 +160,7 @@ test("cancellation cleans immediate and late scopes without diagnosing cooperati
     });
     const diagnostics: string[] = [];
     const world = await World.at(value.root);
-    const runtime = await pluginRuntime({ world, settings: await settings({ root: value.root, home: value.home }),
+    const runtime = await pluginRuntime({ world, settings: await Settings.load({ cwd: value.root, home: value.home }),
       reportDiagnostic: message => diagnostics.push(message) });
     const caller = new AbortController();
     const reason = new Error("caller cancelled");
@@ -189,7 +189,7 @@ test("caller abort outranks concurrent runtime acquisition failure", async () =>
   try {
     const caller = new AbortController();
     const reason = new Error("caller cancelled");
-    const selected = await settings({ root: value.root, home: value.home });
+    const selected = await Settings.load({ cwd: value.root, home: value.home });
     const failing = { ...selected, namespace() {
       caller.abort(reason);
       throw new Error("runtime failed concurrently");
@@ -205,7 +205,7 @@ test("wait with no selected plugins preserves its result", async () => {
   try {
     writeProjectPlugins(value.root, { square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false } });
     const runtime = await pluginRuntime({ world: await World.at(value.root),
-      settings: await settings({ root: value.root, home: value.home }) });
+      settings: await Settings.load({ cwd: value.root, home: value.home }) });
     const result = {};
     assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => result), result);
   } finally { value.close(); }
@@ -233,7 +233,7 @@ test("wait cleanup has a fresh bound and cannot replace the original error", asy
     });
     const diagnostics: string[] = [];
     const runtime = await pluginRuntime({ world: await World.at(value.root),
-      settings: await settings({ root: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
+      settings: await Settings.load({ cwd: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
     const advance = deadlineClock(context);
     const caller = new AbortController();
     const primary = new Error("original operation failed");
@@ -264,7 +264,7 @@ test("malformed wait resources diagnose without changing the route result", asyn
     });
     const diagnostics: string[] = [];
     const runtime = await pluginRuntime({ world: await World.at(value.root),
-      settings: await settings({ root: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
+      settings: await Settings.load({ cwd: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
     assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => "result"), "result");
     assert.equal(diagnostics.length, 1);
     assert.match(diagnostics[0]!, /wait deferral validation: resource close must be a function/u);
@@ -445,7 +445,7 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
     const diagnostics: string[] = [];
     const runtime = await pluginRuntime({
       world,
-      settings: await settings({ root: value.root, home: value.home }),
+      settings: await Settings.load({ cwd: value.root, home: value.home }),
       reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
     });
     await eventually(() => trace(output).includes("activate:beta"));
@@ -976,7 +976,7 @@ test("separately installed Paseo resolves from the World and absent daemon is on
   writeProjectPlugins(value.root, { paseo: { package: "@astrosheep/keiyaku-plugin-paseo" } });
   const diagnostics: string[] = [];
   const runtime = await pluginRuntime({
-    world: await World.at(value.root), settings: await settings({ root: value.root, home: value.home }),
+    world: await World.at(value.root), settings: await Settings.load({ cwd: value.root, home: value.home }),
     reportDiagnostic: (message) => { diagnostics.push(message); },
   });
   const start = performance.now();
@@ -998,7 +998,7 @@ test("missing selected Paseo does not fall back to the core installation or bloc
   });
   const diagnostics: string[] = [];
   const runtime = await pluginRuntime({
-    world: await World.at(value.root), settings: await settings({ root: value.root, home: value.home }),
+    world: await World.at(value.root), settings: await Settings.load({ cwd: value.root, home: value.home }),
     reportDiagnostic: (message) => { diagnostics.push(message); },
   });
   await runtime.emit({ kind: "akuma.turn-started", akumaId: "aku/test", turnSequence: 1 });

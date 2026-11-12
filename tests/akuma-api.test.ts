@@ -79,7 +79,6 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
       "AkumaNotBornError",
       "AkumaObservationError",
       "AkumaProviderError",
-      "listArchetypeDefinitions",
     ].sort(),
   );
   assert.equal("AkumaOwner" in exported, false);
