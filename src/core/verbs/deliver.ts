@@ -5,11 +5,10 @@ import {
   targetContractRefusal,
   type TargetContractRefusal,
 } from "../facts/observation.js";
-import { journalEntry, type ActorId, type ContractId, type DeliverData } from "../facts/types.js";
+import { journalEntry, type ContractId, type DeliverData } from "../facts/types.js";
 
 export type DeliverInput<Failure = never> = Readonly<{
   contractId: ContractId;
-  actor?: ActorId;
   at: string;
   preparation: StampedPreparation<DeliverData, Failure>;
 }>;

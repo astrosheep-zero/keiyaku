@@ -1,7 +1,7 @@
 import { accepted } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Kei, Keis, KeiyakuError, Repo } from "../src/index.js";
+import { Debts, Kei, Keis, KeiyakuError, Repo, World } from "../src/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function invalidInput(error: unknown, message?: string): boolean {
@@ -11,6 +11,35 @@ function invalidInput(error: unknown, message?: string): boolean {
   if (message !== undefined) assert.equal(error.cause.message, message);
   return true;
 }
+
+test("Contract and Debt boundaries reject actor before reading product authority", async () => {
+  const repository = makeGitRepository();
+  const repo = await Repo.at({ path: repository.path });
+  const contracts = Keis.of(repo);
+  const contract = contracts.kei({ id: "kei/missing" as never });
+  assert.throws(() => Keis.of(repo, { actor: "operator" } as never), /unknown field: actor/u);
+  await assert.rejects(
+    () => withGitShim("exit 99", {}, () => contracts.bind({ markdown: "terms", actor: "operator" } as never)),
+    /unknown field: actor/u,
+  );
+  for (const call of [
+    () => contract.amend({ markdown: "## Context\nChanged\n", actor: "operator" } as never),
+    () => contract.arc({ markdown: "# Chapter", actor: "operator" } as never),
+    () => contract.review({ verdict: "satisfied", summary: "ok", actor: "operator" } as never),
+    () => contract.abandon({ actor: "operator" } as never),
+  ]) {
+    await assert.rejects(
+      () => withGitShim("exit 99", {}, async () => { await call(); }),
+      (error: unknown) => { invalidInput(error); assert.match((error as Error).message, /actor/u); return true; },
+    );
+  }
+  const debts = Debts.of(await World.at(repository.path));
+  assert.throws(() => debts.add({ title: "Unwritten", actor: "operator" } as never), /Unrecognized key.*actor/su);
+  assert.throws(
+    () => debts.addDocument({ markdown: "---\ntitle: Unwritten\n---\n", actor: "operator" } as never),
+    /unknown field: actor/u,
+  );
+});
 
 test("package boundary rejects malformed runtime inputs before journal mutation", async () => {
   const repository = makeGitRepository();

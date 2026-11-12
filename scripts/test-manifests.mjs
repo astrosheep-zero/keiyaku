@@ -1,5 +1,4 @@
 export const LOCAL_TEST_FILES = [
-  "tests/actor.test.ts",
   "tests/amend-body.test.ts",
   "tests/architecture.test.ts",
   "tests/bounded-list-schema.test.ts",

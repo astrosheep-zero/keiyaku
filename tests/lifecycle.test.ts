@@ -98,10 +98,7 @@ test("malformed inherited refusals, journals, and folds refuse without inventing
 
   assert.throws(() => foldJournal(id, [bind, claimed]), /claimed requires a deliver/);
   assert.throws(
-    () =>
-      decodeJournal(
-        '{"v":1,"kind":"bound","contract":"kei/lifecycle-cycle","entry":"01ARZ3NDEKTSV4RRFFQ69G5FAV","at":"2026-08-07T00:00:00Z","data":{}}\n',
-      ),
+    () => decodeJournal(encodeEntry(bind).replace('"kind":"bind"', '"kind":"bound"')),
     /unknown journal entry kind: bound/,
   );
   assert.throws(() => foldJournal(id, [bind, abandoned, deliver]), /terminal contract cannot accept deliver/);

@@ -84,7 +84,6 @@ export async function amendOperation(
           const decision = decideAmend({
             input: {
               contractId: input.contractId,
-              ...(input.actor === undefined ? {} : { actor: input.actor }),
               at: timestamp(),
               ...(amendment === undefined ? {} : { source: amendment.source }),
               ...(preparation === undefined ? {} : { preparation }),

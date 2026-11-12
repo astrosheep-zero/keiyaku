@@ -92,12 +92,10 @@ export const mcpOutputSchemas = {
       holder: contract.shape.holder.unwrap().options[0].exactOptional(),
       roster: z.array(z.strictObject({ id: z.string(), aliases: z.array(z.string()).exactOptional() })).exactOptional(),
     }),
-    akuma
-      .omit({ createdDebts: true, changes: true, moreChanges: true, outsideChanges: true, contract: true, work: true })
-      .extend({
-        contract: associated.exactOptional(),
-        work,
-      }),
+    akuma.omit({ changes: true, moreChanges: true, outsideChanges: true, contract: true, work: true }).extend({
+      contract: associated.exactOptional(),
+      work,
+    }),
   ]),
   ls: z.union([
     contracts.omit({ rows: true }).extend({
@@ -141,7 +139,6 @@ function projectStatus(value: Normal<"status">) {
     };
   }
   const {
-    createdDebts: _debts,
     changes: _changes,
     moreChanges: _more,
     outsideChanges: _outside,

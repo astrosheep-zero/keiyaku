@@ -31,10 +31,9 @@ import { akumaMark } from "../src/cli/render/marks.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import type { AkumaObservation, AkumaTellResult, AkumaWaitItem } from "../src/akuma/selection-observation.js";
 import { projectCurrentWork } from "../src/akuma/status-projection.js";
-import type { CreatedDebtObservation, DispatchAssociation } from "../src/index.js";
+import type { DispatchAssociation } from "../src/index.js";
 import type { ForkResult, SpawnResult } from "../src/library/akuma-creation.js";
 import { contractId } from "../src/core/facts/types.js";
-import { debtIdSchema } from "../src/debt/identity.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import {
@@ -54,9 +53,7 @@ const DIRECT_BIRTH = { origin: { kind: "direct" }, caller: { kind: "unknown" } }
 function observation(
   status: LiveStatusObservation["status"],
   association: DispatchAssociation = { kind: "none" },
-  extra: Readonly<{ createdDebts?: CreatedDebtObservation }> = {},
 ): AkumaObservation {
-  const created = extra.createdDebts;
   return {
     kind: "akuma",
     id: status.id,
@@ -66,8 +63,6 @@ function observation(
     work: projectCurrentWork(status.timeline),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
     ...(association.kind === "none" ? {} : { contract: association }),
-    ...(created === undefined ? {} : created.kind === "failed" ? { createdDebts: created } :
-      created.rows === undefined ? {} : { createdDebts: created.rows.map(({ id, title, priority, disposition }) => ({ id, title, priority, disposition })) }),
     ...(status.timeline.reportedChanges.length === 0 ? {} : {
       changes: status.timeline.reportedChanges.map(({ path, diffstat }) => ({ path, ...(diffstat === undefined ? {} : { diffstat }) })),
     }),
@@ -756,15 +751,6 @@ function forkReceipt(
   return { kind: "forked", parentAkumaId: parseAkumaId(parent).id, childAkumaId: parseAkumaId(child).id, ...extra };
 }
 
-function createdDebtRow(): Extract<NonNullable<AkumaObservation["createdDebts"]>, readonly unknown[]>[number] {
-  return {
-    id: debtIdSchema.parse("debt/example"),
-    title: "close the rake",
-    priority: 2,
-    disposition: "ready",
-  };
-}
-
 test("Akuma outcomes distinguish admission from failed execution", () => {
   const spawn = { akumaName: "worker" };
   const input = { akuma: SPECIMEN_ID, prompt: "go", schema: {} };
@@ -1021,19 +1007,6 @@ test("Tell delivery keeps copyable log coordinates on its subject and bounds the
   assert.match(payload.slice(1).join("\n"), /^(?: {4}(?:👩‍💻)+…?\n?)+$/u, "wrapping keeps whole graphemes");
 });
 
-test("created Debt observations use the shared dropped disposition", () => {
-  const status = waitStatus("aku/worker/abcd1234", "asleep", idleAkumaSnapshot([]));
-  const text = snapshotText(
-    observation(
-      status,
-      { kind: "none" },
-      { createdDebts: { kind: "present", rows: [{ ...createdDebtRow(), disposition: "drop" }] } },
-    ),
-    DEFAULT_CONTEXT,
-  );
-  assert.match(text, /debt\/example · close the rake · dropped · P2/u);
-});
-
 test("an observation panel orders identity, context, activity, conclusion, outputs, and diagnostics", () => {
   const id = "aku/worker/abcd1234";
   const context = { columns: 100, color: false };
@@ -1051,7 +1024,6 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
     observation(
       status,
       { kind: "associated", contractId: contractId("kei/example-1234") },
-      { createdDebts: { kind: "present", rows: [createdDebtRow()] } },
     ),
     context,
   );
@@ -1063,19 +1035,13 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
   assert.equal(lines[4], "● running", "the activity closes on one truthful conclusion");
   assert.deepEqual(
     lines.slice(5),
-    ["  changes", "    ~  /work/file", "  debts 1", "    ○ debt/example · close the rake · ready · P2"],
+    ["  changes", "    ~  /work/file"],
     "dynamic outputs stay subordinate and no diagnostic is reported",
   );
   const failedReads = snapshotText(
     observation(
       status,
       { kind: "failed", diagnostic: "lookup refused" },
-      {
-        createdDebts: {
-          kind: "failed",
-          diagnostic: "Unmigrated ledger authority: /Users/astrosheep/.keiyaku/tasks",
-        },
-      },
     ),
     context,
   );
@@ -1084,8 +1050,6 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
     [
       "  changes",
       "    ~  /work/file",
-      "  ! created debts unavailable",
-      "    Unmigrated ledger authority: /Users/astrosheep/.keiyaku/tasks",
       "  ! contract association unavailable",
       "    lookup refused",
     ],

@@ -56,15 +56,15 @@ with their captured composition kept private. Its identity is directly readable 
 exposing construction authority or changing its compact JSON projection. A handle
 offers state and guidance reads, history,
 amendment, explicit Verification, delivery and its read-only preview, review,
-abandonment, and arc. `Keis.of(repo)` synchronously captures the Repo, an optional
-already-loaded immutable Settings value, and the Contract-local actor. Its collection
+abandonment, and arc. `Keis.of(repo)` synchronously captures the Repo and an optional
+already-loaded immutable Settings value. Its collection
 operations never take another repository coordinate. They bind, select a handle,
 resolve, list, observe, wait, and reconcile either the captured world or one addressed
 Contract. Construction performs no I/O and validates no product namespace.
 Public construction is synchronous. The CLI and Akuma execution invoke the same
 native owner operations with ordinary caller inputs. Neither the Git-world coordinate
-nor a Contract handle exposes a second repair door. The composition's actor,
-worktree hooks, and branch-freshness policy stay within Contract operations and
+nor a Contract handle exposes a second repair door. The composition's
+worktree hooks and branch-freshness policy stay within Contract operations and
 never configure Akumas; hooks and freshness are read from the captured Settings
 by the operation that actually consumes them. There is no package-root Akuma
 operation on the Contract collection.

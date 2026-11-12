@@ -37,32 +37,35 @@ test("debt physical local-ID budget fits authority and lock components", () => {
   );
 });
 
-test("optional createdBy is stored before timestamps and rejects blank values", () => {
+test("Debt persistence reads ignore unknown keys while known fields and creation stay validated", () => {
   const coordinate = "debt/authored";
   const document = {
     ...parseDebtCreationDocument("---\ntitle: Authored\n---\n"),
     id: canonicalDebtId(coordinate),
-    createdBy: "aku/worker/deadbeef",
     createdAt: "2026-08-07T01:02:03.004Z",
     updatedAt: "2026-08-07T02:03:04.005Z",
   };
   const bytes = serializeDebtDocument(document);
   const text = Buffer.from(bytes).toString("utf8");
-  assert.match(text, /note: ""\ncreatedBy: aku\/worker\/deadbeef\ncreatedAt: /u);
-  assert.deepEqual(parseDebtDocument(bytes, coordinate), document);
-  const blank = text.replace("aku/worker/deadbeef", "  ");
-  assert.throws(() => parseDebtDocument(Buffer.from(blank), coordinate), /createdBy must be a nonblank string/u);
+  const extended = Buffer.from(text.replace("createdAt:", "futureMetadata: { opaque: true }\ncreatedAt:"));
+  const parsed = parseDebtDocument(extended, coordinate);
+  assert.deepEqual(parsed, document);
+  assert.deepEqual(serializeDebtDocument(parsed), bytes);
   assert.throws(
-    () =>
-      parseDebtDocument(
-        Buffer.from(text.replace("createdBy: aku/worker/deadbeef\n", "latestActor: someone\n")),
-        coordinate,
-      ),
-    /unknown debt front matter key/u,
+    () => parseDebtDocument(Buffer.from(extended.toString().replace("title: Authored\n", "")), coordinate),
+    /missing title/u,
+  );
+  assert.throws(
+    () => parseDebtDocument(Buffer.from(extended.toString().replace("priority: 2", "priority: invalid")), coordinate),
+    /debt priority/u,
+  );
+  assert.throws(
+    () => parseDebtCreationDocument("---\ntitle: New\nfutureMetadata: opaque\n---\n"),
+    /unknown debt front matter key: futureMetadata/u,
   );
 });
 
-test("debt authority is closed and the path owns identity", () => {
+test("Debt authority follows its path and creation stays closed", () => {
   const coordinate = "debt/expected";
   const bytes = Buffer.from(
     "---\nid: debt/other\ntitle: Wrong\nstate: open\npriority: 2\nneeds: []\nparent: null\nsupersedes: []\nrelates: []\nnote: ''\ncreatedAt: 2026-08-07T01:02:03.004Z\nupdatedAt: 2026-08-07T01:02:03.004Z\n---\n",

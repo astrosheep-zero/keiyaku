@@ -23,11 +23,9 @@ import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execut
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { appendActivity, beginTurn, endTurn } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { createdDebtObservationSchema } from "../src/debt/created-observation.js";
 import { projectCurrentWork } from "../src/akuma/status-projection.js";
 import { activeTool, answeredOutcome, openAkumaSnapshot, idleAkumaSnapshot } from "./support/kanshi-activity.js";
 import { tellResultSchema } from "../src/akuma/call-initial-tell.js";
-import { debtSummarySchema } from "../src/debt/board.js";
 import { bornBody } from "./support/akuma-fixtures.js";
 import { bornWorld, fixtureAdapter, fixtureLauncher, answering, settleFixtureBodies } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory } from "./support/process.js";
@@ -220,27 +218,6 @@ test("public timeline wire is strict, deeply readonly, and exact-optional", () =
     }).success,
     false,
   );
-});
-
-test("created Debt wire rows freeze and reject explicit undefined without changing native decoding", () => {
-  const row = {
-    id: "debt/example",
-    title: "Example",
-    priority: 2,
-    disposition: "ready",
-  };
-  const parsed = createdDebtObservationSchema.parse({ kind: "present", rows: [row] });
-  assert.equal(parsed.kind, "present");
-  if (parsed.kind !== "present") throw new Error("expected rows");
-  const rows = parsed.rows!;
-  assert.ok(Object.isFrozen(parsed));
-  assert.ok(Object.isFrozen(rows));
-  assert.ok(Object.isFrozen(rows[0]));
-  assert.equal(
-    createdDebtObservationSchema.safeParse({ kind: "present", rows: [{ ...row, priority: undefined }] }).success,
-    false,
-  );
-  assert.equal(debtSummarySchema.safeParse({ ...row, priority: undefined }).success, false);
 });
 
 test("recorded and refused reports retain their wire evidence", async (context) => {

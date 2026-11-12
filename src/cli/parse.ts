@@ -294,14 +294,12 @@ function scanArgv(argv: readonly string[]): ContractTokens {
   }
 
   const output = scanned.flags.json === true ? ("json" as const) : ("text" as const);
-  const actor = typeof scanned.flags.actor === "string" ? scanned.flags.actor : undefined;
   return {
     command,
     flags: scanned.flags,
     positionals: scanned.positionals,
     stdin,
     output,
-    ...(actor === undefined ? {} : { actor }),
   };
 }
 

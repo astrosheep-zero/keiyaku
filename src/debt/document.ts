@@ -20,14 +20,13 @@ export const debtDocumentSchema = z
     supersedes: z.array(debtIdSchema).readonly(),
     relates: z.array(debtIdSchema).readonly(),
     note: z.string(),
-    createdBy: z.string().exactOptional(),
     createdAt: z.string(),
     updatedAt: z.string(),
     body: z.string(),
   })
   .readonly();
 export type DebtDocument = z.output<typeof debtDocumentSchema>;
-export type DebtCreationDocument = Omit<DebtDocument, "id" | "createdBy" | "createdAt" | "updatedAt">;
+export type DebtCreationDocument = Omit<DebtDocument, "id" | "createdAt" | "updatedAt">;
 
 export class DebtAuthorityCorruptionError extends KeiyakuError {
   /** The Debt document whose bytes failed decode, when the reader knew its coordinate. */
@@ -53,8 +52,16 @@ const REQUIRED_STORED_KEYS = [
   "createdAt",
   "updatedAt",
 ] as const;
-const STORED_KEYS = [...REQUIRED_STORED_KEYS, "createdBy"] as const;
-const CREATION_KEYS = ["title", "state", "priority", "needs", "parent", "supersedes", "relates", "note"] as const;
+const CREATION_KEYS: readonly string[] = [
+  "title",
+  "state",
+  "priority",
+  "needs",
+  "parent",
+  "supersedes",
+  "relates",
+  "note",
+];
 
 function frontMatter(
   markdown: string,
@@ -73,13 +80,11 @@ function frontMatter(
   return { value: value as Record<string, unknown>, body: markdown.slice(end + 5) };
 }
 
-function closed(
+function requireKeys(
   value: Record<string, unknown>,
-  allowed: readonly string[],
   required: readonly string[],
   fail: (message: string) => never,
 ): void {
-  for (const key of Object.keys(value)) if (!allowed.includes(key)) fail(`unknown debt front matter key: ${key}`);
   for (const key of required) if (!Object.hasOwn(value, key)) fail(`debt front matter is missing ${key}`);
 }
 function title(value: unknown, fail: (message: string) => never): string {
@@ -118,10 +123,6 @@ function debtIds(value: unknown, field: string, fail: (message: string) => never
 function nullableDebtId(value: unknown, field: string, fail: (message: string) => never): DebtId | null {
   return value === null ? null : debtId(value, field, fail);
 }
-function createdBy(value: unknown, fail: (message: string) => never): string {
-  if (typeof value !== "string" || value.trim().length === 0) fail("createdBy must be a nonblank string");
-  return value;
-}
 function fields(
   value: Record<string, unknown>,
   body: string,
@@ -144,7 +145,7 @@ export function parseDebtDocument(bytes: Uint8Array, coordinate: DebtId): DebtDo
     throw new DebtAuthorityCorruptionError(message, { coordinate, ...(cause === undefined ? {} : { cause }) });
   };
   const { value, body } = frontMatter(Buffer.from(bytes).toString("utf8"), fail);
-  closed(value, STORED_KEYS, REQUIRED_STORED_KEYS, fail);
+  requireKeys(value, REQUIRED_STORED_KEYS, fail);
   const id = debtId(value.id, "id", fail);
   if (id !== coordinate) fail(`debt document ID ${id} does not match its authority path`);
   const createdAt = timestamp(value.createdAt, "createdAt", fail),
@@ -156,7 +157,6 @@ export function parseDebtDocument(bytes: Uint8Array, coordinate: DebtId): DebtDo
     createdAt,
     updatedAt,
     ...fields(value, body, fail),
-    ...(Object.hasOwn(value, "createdBy") ? { createdBy: createdBy(value.createdBy, fail) } : {}),
   };
 }
 
@@ -165,7 +165,8 @@ export function parseDebtCreationDocument(markdown: string): DebtCreationDocumen
     throw new TypeError(message);
   };
   const { value, body } = frontMatter(markdown, fail);
-  closed(value, CREATION_KEYS, ["title"], fail);
+  for (const key of Object.keys(value)) if (!CREATION_KEYS.includes(key)) fail(`unknown debt front matter key: ${key}`);
+  requireKeys(value, ["title"], fail);
   const complete = {
     state: "open",
     priority: 2,
@@ -190,7 +191,6 @@ export function serializeDebtDocument(document: DebtDocument): Uint8Array {
     supersedes: [...document.supersedes],
     relates: [...document.relates],
     note: document.note,
-    ...(document.createdBy === undefined ? {} : { createdBy: document.createdBy }),
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,
   };

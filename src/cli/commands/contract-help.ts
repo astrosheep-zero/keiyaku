@@ -15,7 +15,6 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "none",
     stdin: "optional",
     flags: {
-      actor: "value",
       debt: "value",
       target: "value",
       "no-target": "boolean",
@@ -25,7 +24,7 @@ export const CONTRACT_COMMAND_SPECS = {
       json: "boolean",
     },
     usage:
-      "bind [--debt <debt/...>] [--target <branch|kei/...> | --no-target] [--after <kei/...>]... [--gates <name,...>] [--actor <actor>] [--repo <path>] -\nbind --fork-of <kei/...> [--target <branch|kei/...> | --no-target] [--actor <actor>] [--repo <path>]",
+      "bind [--debt <debt/...>] [--target <branch|kei/...> | --no-target] [--after <kei/...>]... [--gates <name,...>] [--repo <path>] -\nbind --fork-of <kei/...> [--target <branch|kei/...> | --no-target] [--repo <path>]",
     purpose: "Create a Contract from stdin Markdown or copy an existing Contract as a starting point.",
     details: [
       "--target names an existing local branch or a complete active kei/... identity.",
@@ -75,9 +74,9 @@ export const CONTRACT_COMMAND_SPECS = {
   amend: {
     positional: "optional",
     stdin: "optional",
-    flags: { actor: "value", after: "repeat", "clear-after": "boolean", gates: "raw-value", json: "boolean" },
+    flags: { after: "repeat", "clear-after": "boolean", gates: "raw-value", json: "boolean" },
     usage:
-      "amend [<contract>|@name] [--after <kei/...> [--after <kei/...>]... | --clear-after] [--gates <name,...>] [--actor <actor>] [--repo <path>] [-]",
+      "amend [<contract>|@name] [--after <kei/...> [--after <kei/...>]... | --clear-after] [--gates <name,...>] [--repo <path>] [-]",
     purpose: "Change a Contract's document, prerequisites, or acceptance gates.",
     details: [
       "Gates are checked at integration: reviewed needs a satisfied review;",
@@ -171,9 +170,8 @@ export const CONTRACT_COMMAND_SPECS = {
   review: {
     positional: "optional",
     stdin: "optional",
-    flags: { actor: "value", satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
-    usage:
-      "review [<contract>|@name] (--satisfied | --unsatisfied) (--summary <text> | -) [--actor <actor>] [--repo <path>]",
+    flags: { satisfied: "boolean", unsatisfied: "boolean", summary: "value", json: "boolean" },
+    usage: "review [<contract>|@name] (--satisfied | --unsatisfied) (--summary <text> | -) [--repo <path>]",
     purpose: "Record whether a Contract meets its acceptance criteria.",
     details: [
       "A review checks the whole Contract, not just one Arc. After delivery it checks the candidate; before delivery it checks the current Contract and worktree, but cannot integrate.",
@@ -187,8 +185,8 @@ export const CONTRACT_COMMAND_SPECS = {
   arc: {
     positional: "optional",
     stdin: "required",
-    flags: { actor: "value", json: "boolean" },
-    usage: "arc [<contract>|@name] [--actor <actor>] [--repo <path>] -",
+    flags: { json: "boolean" },
+    usage: "arc [<contract>|@name] [--repo <path>] -",
     purpose: "Name the current chapter of a Contract's story (a story arc).",
     details: [
       "stdin is one nonblank H1 chapter name followed by any Markdown body, including none:",
@@ -200,8 +198,8 @@ export const CONTRACT_COMMAND_SPECS = {
   abandon: {
     positional: "optional",
     stdin: "none",
-    flags: { actor: "value", note: "value", json: "boolean" },
-    usage: "abandon [<contract>|@name] [--note <text>] [--actor <actor>] [--repo <path>]",
+    flags: { note: "value", json: "boolean" },
+    usage: "abandon [<contract>|@name] [--note <text>] [--repo <path>]",
     purpose: "End work on a Contract without accepting it; optionally record why.",
   },
   show: {

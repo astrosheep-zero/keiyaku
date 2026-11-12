@@ -42,7 +42,6 @@ import { dependencyKeys } from "../core/subject.js";
 import { resolveContractTarget } from "../git/target.js";
 import { acquireTargetPlacementFence } from "../git/target-placement.js";
 import type {
-  ActorId,
   ChangeId,
   ContractId,
   ContractState,
@@ -193,7 +192,6 @@ async function prepareDeliveryWithWorktree(
   input: Readonly<{
     title: string;
     document: string;
-    actor?: ActorId;
     message?: string;
     requireBranchesToBeUpToDate?: boolean;
     includeDirty?: boolean;
@@ -214,7 +212,6 @@ async function prepareDeliveryWithWorktree(
     title: input.title,
     document: input.document,
     at: tender.data.at,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.message === undefined ? {} : { message: input.message }),
   });
   const tenderSnapshot = await materializeTenderSnapshot(repository, tender.data, commit);
@@ -273,7 +270,6 @@ export async function prepareDelivery(
   input: Readonly<{
     title: string;
     document: string;
-    actor?: ActorId;
     message?: string;
     requireBranchesToBeUpToDate?: boolean;
     includeDirty?: boolean;
@@ -312,7 +308,6 @@ function deliveryPreparationInput(input: DeliverOperationInput, derivation: Docu
   return {
     title: derivation.title,
     document: derivation.bytes,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.message === undefined ? {} : { message: input.message }),
     requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
     includeDirty: input.includeDirty,
@@ -585,7 +580,6 @@ async function decideAndAdmitDelivery(
   const decision = decideDeliver({
     input: {
       contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
       preparation,
     },
@@ -722,7 +716,6 @@ async function materializeDeliverConflict(
       title: derivation.title,
       document: derivation.bytes,
       at: tender.data.at,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.message === undefined ? {} : { message: input.message }),
     });
     handoffHead = await materializeTenderSnapshot(input.scope, tender.data, commit);

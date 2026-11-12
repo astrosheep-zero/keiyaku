@@ -1,7 +1,7 @@
 # Public Akuma Facets
 
 This chapter owns the World-bound `Akumas` composition for creation, addressing,
-and selection operations. It composes Akuma, Alias, Dispatch, Debt, and Contract
+and selection operations. It composes Akuma, Alias, Dispatch, and Contract
 owners without moving any of their authority into Library. `Akuma` remains the
 standalone product for one resolved identity; `Debts` remains an independent
 World-bound product.
@@ -12,8 +12,8 @@ World-bound product.
 cached resolution, parallel writer, or background integration queue. Callers do not repeat World on operations. Repo stays an
 explicit separate coordinate for Contract selector and Dispatch association;
 neither coordinate is inferred from the other. Every filesystem, Alias,
-Dispatch, Debt, and Heart observation is awaited before its public Promise
-settles. Contract-local actor, hook, and branch-freshness configuration does
+Dispatch, and Heart observation is awaited before its public Promise
+settles. Contract-local hook and branch-freshness configuration does
 not enter this composition.
 
 Construction captures a host choice independently of observation. Detached hosting remains the default; an explicit in-process choice
@@ -154,8 +154,9 @@ Selection composes public Akuma handles after address expansion. Plural
 selection resolves and freezes identities once, then fans out the same lower
 owner operations or one shared set-observation algorithm. Addressed status
 projects the native life and current actionable work, adding separate read-only
-Dispatch and Debt associations where available; it never intersects them into
-Akuma state or re-evaluates lifecycle. Execution history preserves requested
+Dispatch associations where available; it never intersects them into
+Akuma state or re-evaluates lifecycle. Debt creation establishes no Akuma
+association. Execution history preserves requested
 historical content and correlation independently of current associations. Selection uses one verb per meaning on both faces: `tell` admits a Tell and may observe its text answer; `ask` requires a JSON Schema document and observes the parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide work. Ask alone distinguishes invalid output; text observation reports it as failure with the same diagnostic. Bounds are optional and limit observation only, never admission. Schema belongs only to ask. Interrupt is a flag on tell or ask: it durably admits the Tell with a request for the current Body to yield, then observes completion before waking a successor; if completion is not proven, the Tell remains admitted and recoverable. Cancellation after admission stops observation, not admission. Kill is the pure stop. Tell and ask address one Akuma directly; set selection remains for wait and kill.
 Cancellation before admission preserves the native reason unchanged. After
 admission, exceptional Tell evidence remains directly readable on KeiyakuError

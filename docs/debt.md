@@ -69,9 +69,13 @@ An unchanged update leaves authority and its timestamp unchanged. Debt does
 not invent a relationship from a directory, a Contract, a caller, or a Git
 branch.
 
-Creation and update retain author testimony only when a caller supplies it.
-That testimony is not an identity registry, permission, Contract association,
-or later inferred attribution. Debt deliberately has no event-log, cached
+Debt retains no creator attribution and does not infer authorship from its
+caller. Persistence reads interpret known content and ignore unknown content;
+required content and known value constraints remain mandatory. Untouched
+authority is preserved, and an ordinary update writes only current content.
+An older reader deliberately does not interpret unknown future semantics.
+Creation and other public caller inputs remain closed.
+Debt deliberately has no event-log, cached
 readiness, counter, or partial-history promise: uncommitted Markdown edits are
 authority, so a synthetic history would be dishonest.
 
@@ -83,7 +87,7 @@ are ordered by priority and then canonical identity. Debt offers native listing
 and graph views without an expression language or caller-selected sorting.
 Catalogues summarize current work rather than repeat
 its full document, activity testimony, or decomposition. Native singular reads
-retain requested author testimony and resolved Debt-owned outbound relations.
+retain resolved Debt-owned outbound relations.
 Complete invocation detail additionally retains cycle-safe child decomposition
 from one board snapshot; unavailable relationship endpoints remain explicit.
 Batch reads distinguish complete, partial and

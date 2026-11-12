@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { access } from "node:fs/promises";
 import type { Preparation } from "../core/decide.js";
-import type { ActorId, ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
+import type { ContractCoordinates, ContractId, SnapshotId } from "../core/facts/types.js";
 import { gitObjectIdForSnapshot, mintSnapshotId, type GitObjectId } from "./identity.js";
 import { registeredWorktreePaths } from "./repository.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
@@ -115,21 +115,15 @@ export async function prepareDeliveryCommitMetadata(
     title: string;
     document: string;
     at: string;
-    actor?: ActorId;
     message?: string;
   }>,
 ): Promise<DeliveryCommitMetadata> {
-  let identity: GitCommitIdentity;
-  if (input.actor !== undefined) {
-    identity = { name: input.actor, email: "keiyaku@localhost" };
-  } else {
-    const [name, email] = await Promise.all([
-      effectiveConfig(repository, "user.name"),
-      effectiveConfig(repository, "user.email"),
-    ]);
-    identity =
-      name !== undefined && email !== undefined ? { name, email } : { name: "Keiyaku", email: "keiyaku@localhost" };
-  }
+  const [name, email] = await Promise.all([
+    effectiveConfig(repository, "user.name"),
+    effectiveConfig(repository, "user.email"),
+  ]);
+  const identity =
+    name !== undefined && email !== undefined ? { name, email } : { name: "Keiyaku", email: "keiyaku@localhost" };
   const subject = input.message ?? `${input.contractId}: ${input.title}`;
   return {
     message: `${subject}\n\n${contractBody(input.document)}\nKeiyaku-Contract: ${input.contractId}\n`,

@@ -120,8 +120,7 @@ function semanticBody(event: ContractHistoryEvent): readonly string[] {
 /** Full mode exposes supplied historical facts, never a current-state reread. */
 function fullEventLines(event: ContractHistoryEvent): readonly string[] {
   const identity = event.kind === "dispatch" ? event.akumaId : event.id;
-  const actor = event.kind !== "dispatch" && event.actor !== undefined ? ` · ${event.actor}` : "";
-  const header = `${event.at} ${event.kind} · ${identity}${actor}`;
+  const header = `${event.at} ${event.kind} · ${identity}`;
   const detail = [
     ...semanticBody(event),
     ...(event.kind === "bind" || event.kind === "amend"

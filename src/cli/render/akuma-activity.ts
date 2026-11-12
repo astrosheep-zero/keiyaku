@@ -16,8 +16,6 @@ import type { AkumaObservation } from "../../index.js";
 import type { SpawnResult } from "../../library/akuma-creation.js";
 import type { TellResult } from "../../akuma/body.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
-import { dispositionText } from "./debt.js";
-import { debtDispositionMark } from "./marks.js";
 import {
   ageText,
   DEFAULT_CLI_COLUMNS,
@@ -25,7 +23,6 @@ import {
   displayColumns,
   padToDisplay,
   renderBoundedPayload,
-  renderBoundedTextBlock,
   safeText,
   truncateDisplayText,
   type TextRenderContext,
@@ -795,8 +792,6 @@ export function callObservationStream(
   };
 }
 
-type CreatedDebtRow = Extract<NonNullable<AkumaObservation["createdDebts"]>, readonly unknown[]>[number];
-
 function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
   const changes = view.changes ?? [];
   if (changes.length === 0 && view.moreChanges !== true && view.outsideChanges === undefined) return [];
@@ -807,25 +802,6 @@ function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
     ...(view.moreChanges === true ? [`  ${OMISSION} more files`] : []),
     ...(view.outsideChanges === undefined ? [] : [`  ${view.outsideChanges} outside worktree`]),
   ];
-}
-
-function renderDebtRow(row: CreatedDebtRow, columns: number): readonly string[] {
-  const prefix = `  ${debtDispositionMark(row.disposition)} ${row.id} · `;
-  const body = `${safeText(row.title)} · ${dispositionText(row.disposition)} · P${row.priority}`;
-  const inline = `${prefix}${body}`;
-  if (displayColumns(inline) <= columns) return [inline];
-  return renderBoundedTextBlock(body, {
-    first: prefix,
-    continuation: "    ",
-    columns,
-    lines: Number.MAX_SAFE_INTEGER,
-  });
-}
-
-function renderDebtContextLines(created: AkumaObservation["createdDebts"], columns: number): readonly string[] {
-  if (created === undefined) return [];
-  if ("kind" in created) return diagnosticLines("created debts", created.diagnostic, columns);
-  return [`debts ${created.length}`, ...created.flatMap((row) => renderDebtRow(row, columns))];
 }
 
 type SnapshotView = AkumaObservation;
@@ -897,11 +873,7 @@ export function snapshotText(
   return [
     ...core.head,
     ...(content.length === 0 ? [] : [frameRule(core.head, context.columns), ...content]),
-    ...subordinateLines([
-      ...renderReportedChangeLines(view),
-      ...renderDebtContextLines(view.createdDebts, context.columns - SUBORDINATE_INDENT.length),
-      ...core.facts,
-    ]),
+    ...subordinateLines([...renderReportedChangeLines(view), ...core.facts]),
   ].join("\n");
 }
 

@@ -1,5 +1,4 @@
 import { z } from "zod";
-import { createdDebtObservationSchema } from "../debt/created-observation.js";
 import { akumaStatusSchema } from "./akuma.js";
 import { currentWorkSchema } from "./status-projection.js";
 import { diffstatSchema } from "./heart/activity-schema.js";
@@ -34,13 +33,6 @@ export const akumaCatalogueSchema = z
   })
   .readonly();
 
-const createdDebtRowSchema = createdDebtObservationSchema.options[0]
-  .unwrap()
-  .shape.rows.unwrap()
-  .unwrap()
-  .element.unwrap()
-  .pick({ id: true, title: true, priority: true, disposition: true })
-  .readonly();
 export const akumaObservationSchema = z
   .strictObject({
     kind: z.literal("akuma"),
@@ -53,9 +45,6 @@ export const akumaObservationSchema = z
     lastActivityAt: z.string().exactOptional(),
     strandedReason: z.literal("resume-unsupported").exactOptional(),
     contract: z.union([dispatchAssociationSchema.options[1], dispatchAssociationSchema.options[2]]).exactOptional(),
-    createdDebts: z
-      .union([z.array(createdDebtRowSchema).nonempty().readonly(), createdDebtObservationSchema.options[1]])
-      .exactOptional(),
     changes: z
       .array(
         z

@@ -44,14 +44,9 @@ async function addDebt(
   runtime: CliRuntime,
   stdin: string | undefined,
 ): Promise<CliOutcome> {
-  const actor = value(command, "actor");
-  if (command.stdin === "document") {
-    const input = { markdown: stdin!, ...optional("actor", actor) };
-    return execute("debt.addDocument", input, command, runtime);
-  }
+  if (command.stdin === "document") return execute("debt.addDocument", { markdown: stdin! }, command, runtime);
   const input = {
     title: command.positionals[0]!,
-    ...optional("actor", actor),
     ...optional("body", value(command, "body")),
     ...optional("note", value(command, "note")),
     ...optional("state", value(command, "state") as DebtState | undefined),

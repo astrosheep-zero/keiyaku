@@ -18,7 +18,7 @@ import {
   type LocalContractCompositionCapture,
 } from "./contract-settings.js";
 import type { BindInput } from "./contract-types.js";
-import { actorOption, normalizedList, requireInput, requireMarkdown, debtOption } from "./input.js";
+import { normalizedList, requireInput, requireMarkdown, debtOption } from "./input.js";
 import { InvocationAccumulator } from "./invocation.js";
 import type { Kei, createKeiHandle } from "./kei.js";
 import { project, validated, type InvocationFailure } from "./outcome.js";
@@ -34,29 +34,20 @@ function bindTargetSelection(target: string | null | undefined): BindTargetSelec
   return target === null ? { kind: "targetless" } : { kind: "explicit", target };
 }
 
-function bindInput(scope: RepositoryScope, input: BindInput, composition: LocalContractCompositionCapture) {
-  const fields = validated(() => requireInput(input, "Keis.bind input"));
-  const allowed =
-    fields.forkOf === undefined
-      ? ["markdown", "debt", "target", "actor", "after", "gates"]
-      : ["forkOf", "target", "actor"];
-  requireInput(input, "Keis.bind input", allowed);
+function bindInput(input: BindInput, composition: LocalContractCompositionCapture) {
+  const values = validated(() => requireInput(input, "Keis.bind input"));
+  const allowed = values.forkOf === undefined ? ["markdown", "debt", "target", "after", "gates"] : ["forkOf", "target"];
+  requireInput(values, "Keis.bind input", allowed);
   return validated(() => {
-    const values = fields;
     const forkOf = values.forkOf;
     if (values.target !== undefined && values.target !== null && typeof values.target !== "string")
       throw new TypeError("target must be a string or null");
-    const actor = actorOption(values.actor);
     const document = forkOf === undefined ? parseMarkdown(requireMarkdown(values.markdown)) : undefined;
-    if (forkOf !== undefined) {
-      if (typeof forkOf !== "string") throw new TypeError("forkOf must be a ContractId");
-    }
+    if (forkOf !== undefined && typeof forkOf !== "string") throw new TypeError("forkOf must be a ContractId");
     const derived = forkOf === undefined ? derivedGates(composition, gateNames(values.gates)) : undefined;
     return {
       forkOf: forkOf === undefined ? undefined : contractId(forkOf),
-      scope,
       document,
-      actor,
       target: values.target,
       debt: forkOf === undefined ? debtOption(values.debt) : undefined,
       gates: derived,
@@ -75,9 +66,9 @@ export async function bindKei(
   createHandle: typeof createKeiHandle,
   composition: LocalContractCompositionCapture = captureLocalContractComposition(),
 ): Promise<BindOutcome> {
-  const prepared = bindInput(scope, input, composition);
+  const prepared = bindInput(input, composition);
   const hooks = derivedHooks(composition);
-  const { forkOf, document, target, actor } = prepared;
+  const { forkOf, document, target } = prepared;
   const handle = (id: ContractId) => createHandle(id, scope, composition);
   const accumulator = new InvocationAccumulator();
   const projection = await (async (): Promise<BindOutcome | InvocationFailure> => {
@@ -95,7 +86,6 @@ export async function bindKei(
                 progress: accumulator,
                 sourceId: forkOf,
                 ...(target === undefined ? {} : { target }),
-                ...actor,
               });
               if (fork.kind === "refused") return { kind: "refused", reason: compactReason(fork.refusal) };
               const admission = fork.admission;
@@ -188,7 +178,7 @@ async function markdownBind(
   accumulator: InvocationAccumulator,
   handle: (id: ContractId) => Kei,
 ): Promise<BindOutcome | InvocationFailure> {
-  const { debt, target, actor, gates, after } = prepared;
+  const { debt, target, gates, after } = prepared;
   if (gates === undefined || after === undefined) throw new Error("Markdown bind requires prepared terms");
   const targetSelection = bindTargetSelection(target);
   const admission = await prepareMarkdownBind({
@@ -200,7 +190,6 @@ async function markdownBind(
     after,
     targetSelection,
     ...(debt === undefined ? {} : { debt }),
-    ...actor,
   });
   const leading = admission.admission === null ? admission.result : admission.admission.result;
   if (leading.kind !== "accepted")

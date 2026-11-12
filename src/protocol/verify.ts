@@ -161,7 +161,6 @@ async function prepareVerification(
       document: derivation.bytes,
       includeDirty: input.includeDirty,
       requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
     },
   );
   if (prepared.kind === "refused") return prepared;
@@ -225,7 +224,6 @@ export async function verifyOperation(input: VerifyOperationInput): Promise<Veri
       requirement,
       index,
       total: definition.declarations.length,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.progress === undefined ? {} : { progress: input.progress }),
     });

@@ -5,12 +5,11 @@ import {
   targetContractRefusal,
   type TargetContractRefusal,
 } from "../facts/observation.js";
-import { journalEntry, type ActorId, type ContractId, type ContractState } from "../facts/types.js";
+import { journalEntry, type ContractId, type ContractState } from "../facts/types.js";
 import type { DecideInput, OfferDecision } from "../decide.js";
 
 type PlacementInput = Readonly<{
   contractId: ContractId;
-  actor?: ActorId;
   at: string;
 }>;
 

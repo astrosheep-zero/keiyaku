@@ -49,7 +49,6 @@ export const debtDetailSchema = z
     updatedAt: debtRowTimestampSchema,
     body: z.string().min(1).exactOptional(),
     note: z.string().min(1).exactOptional(),
-    createdBy: z.string().exactOptional(),
     needs: nonEmptyDebtArraySchema(debtRefSchema).exactOptional(),
     parent: debtRefSchema.exactOptional(),
     supersedes: nonEmptyDebtArraySchema(debtRefSchema).exactOptional(),
@@ -192,7 +191,6 @@ export function projectDebtDetail(board: DebtBoard, id: DebtId): DebtDetail | nu
     updatedAt: debt.updatedAt,
     ...(debt.body.length === 0 ? {} : { body: debt.body }),
     ...(debt.note.length === 0 ? {} : { note: debt.note }),
-    ...(debt.createdBy === undefined ? {} : { createdBy: debt.createdBy }),
     ...(debt.needs.length === 0 ? {} : { needs: refs(debt.needs) }),
     ...(debt.parent === null ? {} : { parent: debtRef(board, debt.parent) }),
     ...(debt.supersedes.length === 0 ? {} : { supersedes: refs(debt.supersedes) }),
@@ -219,29 +217,6 @@ function compareDebtRows(left: DebtSummary, right: DebtSummary): number {
   return left.priority - right.priority || Buffer.compare(Buffer.from(left.id), Buffer.from(right.id));
 }
 
-/**
- * Rows for requested creators, grouped by creator in established row order.
- */
-export function projectCreatedByRows(
-  board: DebtBoard,
-  createdByIds: readonly string[],
-): ReadonlyMap<string, readonly DebtSummary[]> {
-  const requested = new Set(createdByIds);
-  const attributed: { createdBy: string; row: DebtSummary }[] = [];
-  for (const debt of board.debts.values()) {
-    const createdBy = debt.createdBy;
-    if (createdBy === undefined || !requested.has(createdBy)) continue;
-    attributed.push({ createdBy, row: projectDebtSummary(board, debt) });
-  }
-  attributed.sort((left, right) => compareDebtRows(left.row, right.row));
-  const grouped = new Map<string, DebtSummary[]>();
-  for (const { createdBy, row } of attributed) {
-    const rows = grouped.get(createdBy);
-    if (rows === undefined) grouped.set(createdBy, [row]);
-    else rows.push(row);
-  }
-  return grouped;
-}
 export function projectBlocked(board: DebtBoard): readonly BlockedDebtRow[] {
   return projectRows(board, "active").flatMap((row) => {
     const debt = board.debts.get(row.id)!;

@@ -8,7 +8,7 @@ import { projectSettings } from "../settings.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import { activeContract, type ActiveContractRefusal } from "../core/facts/observation.js";
 import { dependencyKeySet } from "../core/subject.js";
-import type { ActorId, ContractId, DependencyKeySet, Gate, RequirementId, SnapshotId } from "../core/facts/types.js";
+import type { ContractId, DependencyKeySet, Gate, RequirementId, SnapshotId } from "../core/facts/types.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import {
   executeVerification,
@@ -104,7 +104,6 @@ type VerifyRequirementInput = Readonly<{
   repository: GitRepository;
   contractId: ContractId;
   gates: readonly Gate[];
-  actor?: ActorId;
   at: string;
   snapshot: SnapshotId;
   requirement: RequirementId;
@@ -153,12 +152,11 @@ export type VerificationResult = Readonly<{
 
 function verificationInput(
   outcome: VerificationTerminalOutcome,
-  input: Pick<VerifyRequirementInput, "contractId" | "actor" | "at" | "requirement">,
+  input: Pick<VerifyRequirementInput, "contractId" | "at" | "requirement">,
   subject: DependencyKeySet,
 ): AttestationInput {
   return {
     contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: input.at,
     preparation: {
       kind: "prepared",

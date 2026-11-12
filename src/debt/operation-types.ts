@@ -118,12 +118,10 @@ export type AddDebtInput = Readonly<{
   parent?: DebtId | null;
   supersedes?: readonly DebtId[];
   relates?: readonly DebtId[];
-  actor?: string;
   signal?: AbortSignal;
 }>;
 export type AddDebtDocumentInput = Readonly<{
   markdown: string;
-  actor?: string;
   signal?: AbortSignal;
 }>;
 export type UpdateDebtInput = Readonly<{

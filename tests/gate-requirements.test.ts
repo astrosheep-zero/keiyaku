@@ -134,15 +134,25 @@ test("changing current obligations preserves matching evidence and removes only 
   assert.equal(gateReports(withRequirements([second])).reports[0]!.requirements.length, 1);
 });
 
-test("durable terms require nonempty exact gate requirements and attestations require an opaque identity", () => {
+test("durable terms require nonempty declared gate requirements and attestations require an opaque identity", () => {
   const original = bind();
   assert.deepEqual(decodeJournal(encodeEntry(original)), [original]);
-  for (const requirements of [{}, { checks: [] }, { checks: [first, first] }, { checks: [first], extra: [second] }]) {
+  for (const requirements of [{}, { checks: [] }, { checks: [first, first] }]) {
     assert.throws(
       () => validateEntry({ ...original, data: { ...original.data, terms: { ...original.data.terms, requirements } } }),
       /requirements/,
     );
   }
+  assert.deepEqual(
+    validateEntry({
+      ...original,
+      data: {
+        ...original.data,
+        terms: { ...original.data.terms, requirements: { checks: [first, second], extra: null } },
+      },
+    }),
+    original,
+  );
   const testimony = entry("attestation", attestation(first), 2);
   assert.deepEqual(decodeJournal(encodeEntry(testimony)), [testimony]);
   const { requirement: omitted, ...incomplete } = testimony.data;

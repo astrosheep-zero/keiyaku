@@ -1,15 +1,14 @@
 /** @architectureCompositionRoot */
-import { gate, gateWord, type ActorId, type Gate } from "../core/facts/types.js";
+import { gate, gateWord, type Gate } from "../core/facts/types.js";
 import { EMPTY_WORKTREE_HOOKS, worktreeHooksFrom, type WorktreeHooks } from "../git/hooks.js";
 import { SettingsError, type Settings } from "../settings.js";
 import type { KeisOptions } from "./contract-types.js";
-import { actorOption, requireInput } from "./input.js";
+import { requireInput } from "./input.js";
 import { KeiyakuError } from "./outcome.js";
 
 /** The one immutable Contract-local composition captured at construction. */
 export type LocalContractCompositionCapture = Readonly<{
   settings?: Settings;
-  actor?: ActorId;
 }>;
 
 /** One scoped Settings lookup: its native failure stays the cause of caller-invalid input. */
@@ -153,14 +152,12 @@ export function derivedGates(
 }
 
 export function captureLocalContractComposition(input?: KeisOptions): LocalContractCompositionCapture {
-  const values = requireInput(input === undefined ? {} : input, "Keis.of input", ["settings", "actor"]);
-  const actor = actorOption(values.actor).actor;
+  const values = requireInput(input === undefined ? {} : input, "Keis.of input", ["settings"]);
   const settings = values.settings;
   if (settings !== undefined && (settings === null || typeof settings !== "object")) {
     throw new TypeError("Keis.of settings must be a Settings value");
   }
   return Object.freeze({
-    ...(actor === undefined ? {} : { actor }),
     ...(settings === undefined ? {} : { settings: settings as Settings }),
   });
 }

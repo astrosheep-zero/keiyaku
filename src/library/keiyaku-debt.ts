@@ -11,7 +11,6 @@ import { addDebt, addDebtDocument } from "../debt/operations.js";
 import { addInput, addDocumentInput, record, debtId, updateInput } from "../debt/input.js";
 import { parseDebtCreationDocument } from "../debt/document.js";
 import { invocationCoordinates } from "./keiyaku-coordinates.js";
-import { resolveActor } from "./keiyaku-attribution.js";
 import type { KeiyakuAt } from "./keiyaku.js";
 
 type DebtListInvocation = Readonly<{ selection?: "active" | "closed" | "all"; limit?: number }>;
@@ -24,11 +23,9 @@ const missing = () => ({ kind: "refused", reason: "debt-missing" }) as const;
 export async function debtAdd(at: KeiyakuAt, input: AddDebtInput | AddDebtDocumentInput, document: boolean) {
   const parsed = document ? addDocumentInput(input) : addInput(input);
   if (document) parseDebtCreationDocument((parsed as AddDebtDocumentInput).markdown);
-  const actor = resolveActor({ env: at.environment, ...(parsed.actor === undefined ? {} : { actor: parsed.actor }) });
   const coord = await coordinates(at);
   const world = coord.world ?? (await coord.establishWorld());
-  const composed = { ...parsed, ...(actor === undefined ? {} : { actor }) };
-  return document ? addDebtDocument(world, composed as AddDebtDocumentInput) : addDebt(world, composed as AddDebtInput);
+  return document ? addDebtDocument(world, parsed as AddDebtDocumentInput) : addDebt(world, parsed as AddDebtInput);
 }
 export async function debtUpdate(at: KeiyakuAt, input: DebtUpdateInvocation) {
   const { id: raw, ...rest } = record(input, "update input");

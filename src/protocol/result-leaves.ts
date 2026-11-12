@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { actorId, documentKey, documentSegmentKey, entryUlid, gate, requirementId } from "../core/facts/types.js";
+import { documentKey, documentSegmentKey, entryUlid, gate, requirementId } from "../core/facts/types.js";
 import { parseDependencyKeySet } from "../core/subject.js";
 import { changeIdSchema, contractHeadSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 
@@ -67,7 +67,6 @@ export const gateReportSchema = z
     current: gateCurrentSchema,
   })
   .readonly();
-const actorIdSchema = z.string().transform(actorId);
 const documentKeySchema = z.string().transform(documentKey);
 const documentSegmentKeySchema = z.string().transform(documentSegmentKey);
 const dependencyKeySetSchema = z.string().transform(parseDependencyKeySet);
@@ -110,7 +109,6 @@ const journalFields = {
   contract: contractIdSchema,
   entry: entryUlidSchema,
   at: z.string(),
-  actor: actorIdSchema.exactOptional(),
 };
 function factSchema<Kind extends string, Data extends z.ZodType>(kind: Kind, data: Data) {
   return z.strictObject({ ...journalFields, kind: z.literal(kind), data }).readonly();

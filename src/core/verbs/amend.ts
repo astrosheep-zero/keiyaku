@@ -1,11 +1,10 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
 import { prerequisitesReach, samePrerequisites } from "../facts/eligibility.js";
 import { activeContract, prerequisiteStatus } from "../facts/observation.js";
-import { journalEntry, type ActorId, type AmendData, type ContractId, type ContractTerms } from "../facts/types.js";
+import { journalEntry, type AmendData, type ContractId, type ContractTerms } from "../facts/types.js";
 
 export type AmendInput<Failure = never> = Readonly<{
   contractId: ContractId;
-  actor?: ActorId;
   at: string;
   source?: ContractTerms;
   preparation?: Preparation<AmendData, Failure>;

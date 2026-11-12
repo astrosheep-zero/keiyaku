@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { contractId, type ActorId, type BindData, type ContractId } from "../core/facts/types.js";
+import { contractId, type BindData, type ContractId } from "../core/facts/types.js";
 import {
   resolveContractTarget,
   targetRef,
@@ -48,7 +48,6 @@ type BindOperationInput = Readonly<{
   terms: BindData["terms"];
   verification: VerificationDeclarationPreparation;
   targetSelection: BindTargetSelection;
-  actor?: ActorId;
   decorateOffer?: CompanionDecorator;
   contractId: ContractId;
   coordinates?: Readonly<{ start: import("../core/facts/types.js").SnapshotId }>;
@@ -66,7 +65,7 @@ type BindRefusalUnion =
   | VerificationDeclarationRefusal
   | ForkSourceMovedRefusal
   | TargetWorkspaceRefusal;
-type BindSeed = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
+type BindSeed = Readonly<{ contractId: ContractId; at: string }>;
 type RefusedVerificationDeclaration = Extract<VerificationDeclarationPreparation, Readonly<{ kind: "refused" }>>;
 
 /** What one seat-external coordinate acquisition proves about the mutable Git coordinates. */
@@ -212,7 +211,6 @@ export async function bindOperation(
         input.scope,
         {
           contractId: id,
-          ...(input.actor === undefined ? {} : { actor: input.actor }),
           at,
         } satisfies BindSeed,
         decideBind,

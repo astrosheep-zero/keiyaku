@@ -53,11 +53,7 @@ import { Akuma as NativeAkuma } from "../src/akuma/index.js";
 import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
-import {
-  debtAuthorityFile,
-  debtDocument as creatorDebt,
-  writeDebtAuthority as writeCreatorDebt,
-} from "./support/debt.js";
+import { debtAuthorityFile } from "./support/debt.js";
 
 let fixtureHistory = 0;
 
@@ -1383,64 +1379,13 @@ test("selection status projects Dispatch association without changing Akuma core
   assert.equal(waited.reason, "completed");
 });
 
-test("status projects created Debts while wait and kill retain member evidence", async (t) => {
-  const root = fixtureRoot(t, "keiyaku-facade-created-set-");
-  const worker = await answered(root, "worker", "00000001");
-  const reviewer = await answered(root, "reviewer", "00000002");
-  const world = await World.at(root);
-  writeCreatorDebt(
-    world,
-    creatorDebt({
-      id: "debt/from-worker",
-      title: "From worker",
-      createdBy: worker.id,
-      priority: 1,
-    }),
-  );
-  writeCreatorDebt(
-    world,
-    creatorDebt({
-      id: "debt/from-reviewer",
-      title: "From reviewer",
-      createdBy: reviewer.id,
-      priority: 0,
-      state: "drop",
-    }),
-  );
-  const status = await Akumas.of(root).status({ akuma: worker.id });
-  assert.deepEqual(status.createdDebts, [
-    { id: "debt/from-worker", title: "From worker", priority: 1, disposition: "ready" },
-  ]);
-  const waited = await Akumas.of(root).wait({
-    akuma: [worker.id, reviewer.id],
-    completion: "all",
-    timeoutMs: 0,
-  });
-  assert.deepEqual(
-    waited.results.map((item) => (item.kind === "observed" ? item.id : item.kind)),
-    [worker.id, reviewer.id],
-  );
-  assert.ok(waited.results.every((item) => !("createdDebts" in item)));
-  const killed = await Akumas.of(root).kill({
-    akuma: [worker.id, reviewer.id],
-  });
-  assert.deepEqual(
-    killed.results.map((member) => member.id),
-    [worker.id, reviewer.id],
-  );
-  assert.equal(
-    killed.results.every((member) => !("observation" in member)),
-    true,
-  );
-});
-
 function fixtureRepository(t: TestContext) {
   const repository = makeGitRepository();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   return repository;
 }
 
-test("failed Debt associations do not hide readable roster members or kill evidence", async (t) => {
+test("unavailable Debt authority does not affect Akuma status, wait or kill evidence", async (t) => {
   const root = fixtureRoot(t, "keiyaku-roster-debt-failure-");
   const a = await answered(root, "worker", "a0000001");
   const b = await answered(root, "worker", "a0000002");
@@ -1450,14 +1395,14 @@ test("failed Debt associations do not hide readable roster members or kill evide
     akuma: a.id,
   });
   assert.equal(status.id, a.id);
-  assert.ok(status.createdDebts && "kind" in status.createdDebts && status.createdDebts.kind === "failed");
+  assert.equal(status.life, "asleep");
   const waited = await Akumas.of(root).wait({
     akuma: [a.id, b.id],
     completion: "all",
     timeoutMs: 0,
   });
   assert.deepEqual(waited.results.map((item) => (item.kind === "observed" ? item.id : item.kind)).sort(), [a.id, b.id]);
-  assert.ok(waited.results.every((item) => !("createdDebts" in item) && !("contract" in item)));
+  assert.equal(waited.reason, "completed");
   const killed = await Akumas.of(root).kill({
     akuma: [a.id, b.id],
   });

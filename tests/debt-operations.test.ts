@@ -17,7 +17,6 @@ import {
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { parseDebtDocument, serializeDebtDocument, type DebtDocument } from "../src/debt/document.js";
 import { settleDebt } from "../src/debt/operations.js";
-import { observeCreatedDebtObservations } from "../src/debt/created-observation.js";
 import { Keiyaku } from "../src/library/keiyaku.js";
 import { nukeDebtAuthority, replaceAuthority, withDebtLocks } from "../src/debt/store.js";
 import { debtAuthorityFile } from "./support/debt.js";
@@ -73,65 +72,6 @@ test("a pre-aborted Debt CLI mutation leaves authority unchanged", async (t) => 
   assert.notEqual(result.exit, 0);
   assert.match(result.stdout + result.stderr, /caller cancelled Debt mutation/u);
   assert.equal(readFileSync(path, "utf8"), before);
-});
-
-test("created Debt association rows match complete board views and re-read manual edits", async (t) => {
-  const { root, debts } = await world();
-  t.after(() => rmSync(root, { recursive: true, force: true }));
-  const parent = acceptedId(await debts.add({ title: "Created parent", actor: "one", priority: 1, body: "body" }));
-  const need = acceptedId(await debts.add({ title: "Other creator prerequisite", actor: "two", priority: 0 }));
-  const child = acceptedId(
-    await debts.add({ title: "Created child", actor: "one", parent, needs: [need], priority: 0 }),
-  );
-  const terminal = acceptedId(await debts.add({ title: "Terminal child", parent, state: "done", actor: "two" }));
-  const dropped = acceptedId(await debts.add({ title: "Created dropped", actor: "one", state: "drop", priority: 1 }));
-  acceptedId(await debts.add({ title: "Unsigned dependency", needs: [parent] }));
-  const ids = ["two", "absent", "one", "one"];
-  const observed = await observeCreatedDebtObservations(root, ids);
-  const one = {
-    kind: "present",
-    rows: [
-      { id: child, title: "Created child", priority: 0, disposition: "blocked" },
-      { id: dropped, title: "Created dropped", priority: 1, disposition: "drop" },
-      { id: parent, title: "Created parent", priority: 1, disposition: "ready" },
-    ],
-  };
-  assert.deepEqual(observed, [
-    { kind: "present", rows: [
-      { id: need, title: "Other creator prerequisite", priority: 0, disposition: "ready" },
-      { id: terminal, title: "Terminal child", priority: 2, disposition: "done" },
-    ] },
-    { kind: "present" }, one, one,
-  ]);
-  const rows = observed[2];
-  assert.ok(rows?.kind === "present" && rows.rows !== undefined);
-  assert.equal(rows.rows[0]?.id, child);
-  assert.equal(rows.rows[0]?.disposition, "blocked");
-
-  const before = parseDebtDocument(readFileSync(debtAuthorityFile(root, need)), need);
-  writeFileSync(
-    debtAuthorityFile(root, need),
-    serializeDebtDocument({ ...before, state: "done", createdBy: "one", title: "Manual edit" }),
-  );
-  const fresh = await observeCreatedDebtObservations(root, ids);
-  assert.ok(fresh[0]?.kind === "present");
-  assert.deepEqual(fresh[0].rows?.map((row) => row.id), [terminal]);
-  assert.deepEqual(fresh[1], { kind: "present" });
-  assert.deepEqual(fresh[2], fresh[3]);
-  assert.ok(fresh[2]?.kind === "present" && fresh[2].rows !== undefined);
-  assert.equal(fresh[2].rows.find((row) => row.id === child)?.disposition, "ready");
-  assert.equal(fresh[2].rows.find((row) => row.id === need)?.title, "Manual edit");
-
-  const corrupt = join(root, ".keiyaku", "debts", "unrelated.md");
-  writeFileSync(corrupt, "not Debt authority\n");
-  const failed = await observeCreatedDebtObservations(root, ids);
-  assert.ok(failed.every((result) => result.kind === "failed"));
-  assert.deepEqual(await observeCreatedDebtObservations(root, []), []);
-  unlinkSync(corrupt);
-  const link = join(root, ".keiyaku", "debts", "linked");
-  symlinkSync(root, link, "dir");
-  const linked = await observeCreatedDebtObservations(root, ids);
-  assert.ok(linked.every((result) => result.kind === "failed" && /custody violation/u.test(result.diagnostic)));
 });
 
 test("note is replaceable authority and product timestamps advance only on change", async () => {
@@ -853,79 +793,26 @@ test("Debt batch detail retains decomposition, missing endpoints, and readable p
   assert.deepEqual(await debts.read({ ids: [removed] }), { kind: "debt-missing", items: [{ kind: "missing", id: removed }] });
 });
 
-test("creation actor persists as createdBy and later mutations leave it unchanged", async () => {
+test("unknown persisted Debt content survives reads and no-ops then disappears on ordinary rewrite", async (t) => {
   const { root, debts } = await world();
-  const envKey = "KEIYAKU_ACTOR_ID";
-  const previous = process.env[envKey];
-  process.env[envKey] = "env-must-not-leak";
-  try {
-    const unsigned = await debts.add({ title: "Unsigned" });
-    assert.equal(unsigned.kind, "accepted");
-    if (unsigned.kind === "accepted") assert.equal("createdBy" in (await readDetail(debts, unsigned.id)), false);
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const id = acceptedId(await debts.addDocument({ markdown: "---\ntitle: Existing\n---\nOriginal body\n" }));
+  const expected = await readDetail(debts, id);
+  const path = debtAuthorityFile(root, id);
+  const original = readFileSync(path, "utf8");
+  const extended = original.replace("createdAt:", "futureMetadata: { opaque: true }\ncreatedAt:");
+  writeFileSync(path, extended);
 
-    const added = await debts.add({ title: "Authored", actor: "flagship" });
-    assert.ok(added.kind === "accepted", 'expected added.kind = "accepted"');
-    assert.equal((await readDetail(debts, added.id)).createdBy, "flagship");
-    const addedPath = debtAuthorityFile(root, added.id);
-    assert.match(readFileSync(addedPath, "utf8"), /^createdBy: flagship$/mu);
+  assert.deepEqual(await readDetail(debts, id), expected);
+  const shown = await cliJson<unknown>(["-C", root, "show", id], { environment: {} });
+  assert.equal(shown.exit, 0, shown.stderr);
+  assert.equal(readFileSync(path, "utf8"), extended, "reads preserve original bytes");
+  assert.equal((await debts.debt({ id }).update({ title: "Existing" })).kind, "accepted");
+  assert.equal(readFileSync(path, "utf8"), extended, "an unchanged update preserves authority");
 
-    const fromDocument = await debts.addDocument({
-      markdown: "---\ntitle: From document\n---\n",
-      actor: "document-actor",
-    });
-    assert.equal(fromDocument.kind, "accepted");
-    if (fromDocument.kind === "accepted")
-      assert.equal((await readDetail(debts, fromDocument.id)).createdBy, "document-actor");
-    await assert.rejects(
-      debts.addDocument({ markdown: "---\ntitle: Illegal\ncreatedBy: sneaky\n---\n" }),
-      /unknown debt front matter key/u,
-    );
-    assert.deepEqual(await debts.debt({ id: "debt/illegal" }).read(), { kind: "missing" });
-
-    const mutated = await debts.debt({ id: added.id }).update({ note: "changed" });
-    assert.equal(mutated.kind, "accepted");
-    assert.equal((await readDetail(debts, added.id)).createdBy, "flagship");
-    const next = await debts.debt({ id: added.id }).update({ state: "done" });
-    assert.equal(next.kind, "accepted");
-    assert.equal((await readDetail(debts, added.id)).createdBy, "flagship");
-    const dropped = acceptedId(await debts.add({ title: "Drop me", actor: "flagship" }));
-    const drop = await debts.debt({ id: dropped }).update({ state: "drop" });
-    assert.equal(drop.kind, "accepted");
-    assert.equal((await readDetail(debts, dropped)).createdBy, "flagship");
-    const settledId = acceptedId(await debts.add({ title: "Settle me", actor: "flagship" }));
-    const settled = await settleDebt(debts.root, settledId);
-    assert.equal(settled.kind, "changed");
-    assert.equal((await readDetail(debts, settledId)).createdBy, "flagship");
-    assert.equal((await readDetail(debts, added.id)).createdBy, "flagship");
-
-    const legacyPath = join(root, ".keiyaku", "debts", "legacy.md");
-    writeFileSync(
-      legacyPath,
-      serializeDebtDocument({
-        id: "debt/legacy" as DebtId,
-        title: "Legacy",
-        state: "open",
-        priority: 2,
-        needs: [],
-        parent: null,
-        supersedes: [],
-        relates: [],
-        note: "",
-        createdAt: "2026-08-07T01:02:03.004Z",
-        updatedAt: "2026-08-07T01:02:03.004Z",
-        body: "",
-      }),
-    );
-    assert.equal("createdBy" in (await readDetail(debts, "debt/legacy")), false);
-    assert.equal((await debts.debt({ id: "debt/legacy" }).update({ note: "still unsigned" })).kind, "accepted");
-    assert.equal((await debts.debt({ id: "debt/legacy" }).update({ state: "done" })).kind, "accepted");
-    assert.equal("createdBy" in (await readDetail(debts, "debt/legacy")), false);
-    assert.throws(() => debts.add({ title: "Blank", actor: "  " }), /actor must be a nonblank string/u);
-    assert.throws(() => debts.debt({ id: added.id }).update({ actor: "nope" } as never), /Unrecognized key/u);
-  } finally {
-    if (previous === undefined) delete process.env[envKey];
-    else process.env[envKey] = previous;
-  }
+  assert.equal((await debts.debt({ id }).update({ note: "changed" })).kind, "accepted");
+  assert.equal((await readDetail(debts, id)).note, "changed");
+  assert.equal(readFileSync(path, "utf8").includes("futureMetadata:"), false);
 });
 
 test("accepted mutation retains a lock-release warning from its own invocation", { concurrency: false }, async () => {

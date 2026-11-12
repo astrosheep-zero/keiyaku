@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { CliUsageError, parseArgv, renderHelp } from "../src/cli/parse.js";
+import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -322,24 +322,15 @@ test("unknown debt command scopes minimal usage to debt", () => {
   );
 });
 
-test("review actor usage stays leaf-scoped and help advertises the flag", () => {
-  for (const [flags, diagnostic] of [
-    [["--actor"], "--actor requires a value"],
-    [["--actor", "one", "--actor", "two"], "duplicate option: --actor"],
-    [["--unknown"], "option --unknown is not valid for review"],
-  ] as const) {
-    assert.throws(
-      () => parseArgv(["review", "--satisfied", "--summary", "ok", ...flags]),
-      (error: unknown) =>
-        error instanceof CliUsageError &&
-        error.diagnostic === diagnostic &&
-        error.message.includes("  accepts  keiyaku review ") &&
-        error.message.includes("[--actor <actor>]"),
-    );
-  }
-  const help = parseArgv(["review", "--help"]);
-  assert.ok("help" in help);
-  assert.match(renderHelp(help.help), /\[--actor <actor>\]/u);
+test("review unknown options retain leaf-scoped usage", () => {
+  assert.throws(
+    () => parseArgv(["review", "--satisfied", "--summary", "ok", "--unknown"]),
+    (error: unknown) =>
+      error instanceof CliUsageError &&
+      error.diagnostic === "option --unknown is not valid for review" &&
+      error.message.includes("  accepts  keiyaku review ") &&
+      error.message.includes("  help  keiyaku review --help"),
+  );
 });
 
 test("invalid args keep diagnostic with deepest leaf usage", () => {

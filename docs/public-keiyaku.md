@@ -57,7 +57,7 @@ and the selected mode supplies presentation context without becoming authority.
 
 The invocation World is distinct from an explicitly selected Contract Repo:
 selecting a Repo never retargets the World. The facet adapts caller-supplied
-coordinates, Contract selection, and environment-derived actor, caller, and
+coordinates, Contract selection, and environment-derived caller and
 initiator attribution. These declarations are not authentication. Akuma
 execution directories remain independent of Contract association. Product
 surfaces neither depend on the facet nor require it to operate.
@@ -70,7 +70,7 @@ Debt invocation resolves the caller's World independently of a selected Repo.
 World-only Debt mutations and Akuma progress reports do not accept repository
 selection at the standalone transport edge.
 Every Debt catalogue covers that World's flat ledger. Creation alone
-derives actor testimony and establishes a missing World.
+establishes a missing World.
 Debt reads retain native absence and refusal distinctions; listing defaults to
 open work.
 

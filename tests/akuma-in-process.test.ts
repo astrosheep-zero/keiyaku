@@ -297,7 +297,7 @@ console.log(JSON.stringify({ who, debt, review, child, waited }));
     const child = await readHeart(pathsForAkumaId(world, result.child.akumaId));
     assert.equal(child.soul?.origin.kind, "direct");
     assert.deepEqual(child.soul?.caller, { kind: "akuma", world, akumaId: parent.id });
-    assert.equal(present(await contract.state()).attestations.at(-1)?.actor, parent.id);
+    assert.equal(present(await contract.state()).attestations.at(-1)?.data.verdict, "unsatisfied");
     const events = nativeEvents(world).filter((event) => event.event === "session_start");
     assert.ok(events.some((event) => event.pid === process.pid));
     assert.ok(

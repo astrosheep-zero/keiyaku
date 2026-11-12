@@ -222,7 +222,6 @@ async function decideAndAdmitReview(
   const decision = decideAttestation({
     input: {
       contractId: input.contractId,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
       at: timestamp(),
       ...(assembled.preparation === undefined ? {} : { preparation: assembled.preparation }),
     },

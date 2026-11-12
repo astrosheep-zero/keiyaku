@@ -15,7 +15,6 @@ export type { Gate } from "../core/facts/types.js";
 const historyCommon = {
   id: entryUlidSchema,
   at: z.string(),
-  actor: z.string().exactOptional(),
 };
 const historyTarget = z.union([
   z.string(),
@@ -96,7 +95,6 @@ type MarkdownBindInput = Readonly<{
   debt?: DebtId;
   /** A literal target branch; `null` is deliberately targetless; omitted is the Repo worktree's current branch. */
   target?: string | null;
-  actor?: string;
   after?: readonly ContractId[];
   gates?: readonly string[];
 }>;
@@ -104,23 +102,19 @@ type ForkBindInput = Readonly<{
   forkOf: ContractId;
   /** A literal target branch; `null` clears the source target; omitted inherits it. */
   target?: string | null;
-  actor?: string;
 }>;
 export type BindInput = MarkdownBindInput | ForkBindInput;
-type ActorOptions = Readonly<{ actor?: string }>;
-/** Contract-local composition: one captured Settings selection and the operation actor. */
+/** Contract-local composition: one captured Settings selection. */
 export type KeisOptions = Readonly<{
   settings?: Settings;
-  actor?: string;
 }>;
 
-export type AmendInput = ActorOptions &
-  Readonly<{
-    markdown?: string;
-    after?: readonly ContractId[];
-    gates?: readonly string[];
-  }>;
-export type ArcInput = ActorOptions & Readonly<{ markdown: string }>;
+export type AmendInput = Readonly<{
+  markdown?: string;
+  after?: readonly ContractId[];
+  gates?: readonly string[];
+}>;
+export type ArcInput = Readonly<{ markdown: string }>;
 export type ContractListInput = Readonly<{ limit?: number }>;
 export type ContractList = ContractCatalogue;
 export type ContractObservationInput = Readonly<{ id: ContractId }>;
@@ -139,9 +133,8 @@ export const contractResolutionSchema = z.union([
 ]);
 export type ContractSelectorRefusal = z.output<typeof contractSelectorRefusalSchema>;
 export type ContractResolution = z.output<typeof contractResolutionSchema>;
-export type ReviewInput = ActorOptions &
-  Readonly<{ verdict: AttestationData["verdict"]; summary: string; signal?: AbortSignal }>;
-export type AbandonInput = ActorOptions & Readonly<{ note?: string }>;
+export type ReviewInput = Readonly<{ verdict: AttestationData["verdict"]; summary: string; signal?: AbortSignal }>;
+export type AbandonInput = Readonly<{ note?: string }>;
 export type VerifyInput = Readonly<{ index?: number; includeDirty?: boolean; signal?: AbortSignal }>;
 export type DeliverInput = Readonly<{
   message?: string;

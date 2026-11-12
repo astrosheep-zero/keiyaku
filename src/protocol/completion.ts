@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { targetName, type ActorId, type ContractId } from "../core/facts/types.js";
+import { targetName, type ContractId } from "../core/facts/types.js";
 import { snapshotIdSchema, contractIdSchema } from "../git/identity.js";
 import { deliveryDiffScopeSchema } from "../git/integration.js";
 import { requirementIdSchema, gateSchema } from "./result-leaves.js";
@@ -204,7 +204,6 @@ export type CompletionInput = Readonly<{
   repository: GitRepository;
   checkpoint: ContractCheckpoint;
   progress: ProtocolProgress;
-  actor?: ActorId;
   signal?: AbortSignal;
 }>;
 
@@ -305,7 +304,6 @@ async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionC
         target: cursor.checkpoint.state.coordinates.target,
         placement: {
           contractId: cursor.checkpoint.state.id,
-          ...(input.actor === undefined ? {} : { actor: input.actor }),
           at: timestamp(),
         },
       });
@@ -370,7 +368,6 @@ async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor
       progress: input.progress,
       contractId: cursor.checkpoint.state.id,
       target,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
     });
     if (reintegrated.kind !== "accepted") return stoppedResult(cursor, reintegrationStop(reintegrated));
     cursor.checkpoint = contractCheckpoint(reintegrated);

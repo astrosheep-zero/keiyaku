@@ -23,7 +23,7 @@ The Debt CLI acquires only the input a selected verb permits and refuses an
 ambiguous, surplus, or ill-formed request before invoking Debt. Catalogues cover
 the World ledger; addressed operations name one flat Debt identity. The caller's
 directory, Contract, Git state, or Akuma request never supplies an implicit
-identity, state, association, or actor.
+identity, state, or association. Debt commands accept no creator attribution.
 
 ## Presentation
 

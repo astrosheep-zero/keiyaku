@@ -9,7 +9,6 @@ declare const documentKeyBrand: unique symbol;
 declare const documentSegmentKeyBrand: unique symbol;
 declare const requirementIdBrand: unique symbol;
 declare const dependencyKeySetBrand: unique symbol;
-declare const actorIdBrand: unique symbol;
 
 export type ContractId = string & { readonly [contractIdBrand]: "ContractId" };
 export type EntryUlid = string & { readonly [entryUlidBrand]: "EntryUlid" };
@@ -21,7 +20,6 @@ export type DocumentSegmentKey = string & { readonly [documentSegmentKeyBrand]: 
 export type Gate = string;
 export type RequirementId = string & { readonly [requirementIdBrand]: "RequirementId" };
 export type DependencyKeySet = string & { readonly [dependencyKeySetBrand]: "DependencyKeySet" };
-export type ActorId = string & { readonly [actorIdBrand]: "ActorId" };
 
 const ULID = /^[0-9ABCDEFGHJKMNPQRSTVWXYZ]{26}$/;
 function requireText(value: string, label: string): string {
@@ -71,11 +69,6 @@ export function snapshotId(value: string): SnapshotId {
 /** Validate an opaque persisted change value; only Git may mint one. */
 export function changeId(value: string): ChangeId {
   return requireOpaqueId(value, "change ID") as ChangeId;
-}
-
-/** Validate optional opaque testimony without imposing a registry. */
-export function actorId(value: string): ActorId {
-  return requireOpaqueId(value, "actor") as ActorId;
 }
 
 export function documentKey(value: string): DocumentKey {
@@ -182,7 +175,6 @@ type JournalEnvelope<Kind extends string, Data> = Readonly<{
   contract: ContractId;
   entry: EntryUlid;
   at: string;
-  actor?: ActorId;
   data: Data;
 }>;
 
@@ -209,12 +201,9 @@ export type FactKind = JournalEntry["kind"];
 
 /**
  * The one journal-envelope constructor for every verb offering a single fact: entry identity, the
- * invoking decision input's Contract, timestamp, and optional actor, and the verb's own payload.
+ * invoking decision input's Contract and timestamp, and the verb's own payload.
  */
-export function journalEntry<
-  Kind extends FactKind,
-  Input extends Readonly<{ contractId: ContractId; at: string; actor?: ActorId }>,
->(
+export function journalEntry<Kind extends FactKind, Input extends Readonly<{ contractId: ContractId; at: string }>>(
   kind: Kind,
   input: Input,
   entry: EntryUlid,
@@ -226,7 +215,6 @@ export function journalEntry<
     contract: input.contractId,
     entry,
     at: input.at,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
     data,
   } as Extract<JournalEntry, { kind: Kind }>;
 }

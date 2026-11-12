@@ -226,7 +226,6 @@ export async function previewDeliveryOperation(
     {
       title: derivation.title,
       document: derivation.bytes,
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
       requireBranchesToBeUpToDate: input.requireBranchesToBeUpToDate ?? false,
       includeDirty: input.includeDirty ?? false,
     },

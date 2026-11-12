@@ -20,7 +20,7 @@ import { captureLocalContractComposition } from "../src/library/contract-setting
 import { scopeForRepo } from "../src/library/repo.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { executionStop } from "../src/protocol/progress.js";
-import { actorId, contractId } from "../src/core/facts/types.js";
+import { contractId } from "../src/core/facts/types.js";
 import { bind, commitCandidate, repositoryWithMain, present, accepted, document } from "./support/library-verbs.js";
 
 // The captured native owner uses this repository-local capability; no global/module monkeypatch.
@@ -163,28 +163,24 @@ test("native delivery wraps lower-owner failures before publication", async () =
 
 test("native delivery never treats an aborted signal as proof that an independent programming failure was cancellation", async () => {
   const repository = repositoryWithMain();
-  const bound = await bind(repository);
-  commitCandidate(repository);
   const repo = await Repo.at({ path: repository.path });
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] })).kei;
+  commitCandidate(repository);
   const base = scopeForRepo(repo);
   const controller = new AbortController();
-  const original = new TypeError("composition failure after leading publication");
-  let armed = false;
+  const original = new TypeError("Git capability failure after leading publication");
   const scope = {
     ...base,
-    onPrivateStateSeatClose: () => {
-      armed = true;
-      controller.abort();
+    onPrivateStateSeatClose() {
+      Object.defineProperty(this, "gitPath", {
+        get() {
+          controller.abort();
+          throw original;
+        },
+      });
     },
   };
-  const composition = {
-    ...captureLocalContractComposition(),
-    get actor() {
-      if (armed) throw original;
-      return actorId("test");
-    },
-  };
-  const native = createKeiHandle(present(await bound.state()).id, scope, composition);
+  const native = createKeiHandle(present(await bound.state()).id, scope, captureLocalContractComposition());
   await assert.rejects(native.deliver({ signal: controller.signal }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "internal");

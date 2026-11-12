@@ -16,9 +16,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   assert.throws(() => Akumas.of(null as never), TypeError);
   assert.deepEqual(Object.keys(Akumas.of(world)), []);
 
-  assert.throws(() => Keis.of(repo, { actor: " \t\n" }), TypeError);
-  assert.throws(() => Keis.of(repo, { actor: 7 } as never), TypeError);
-  const contracts = Keis.of(repo, { actor: "contract-actor" });
+  const contracts = Keis.of(repo);
   assert.deepEqual(Object.keys(contracts).sort(), ["bind", "kei", "list", "observe", "reconcile", "resolve", "wait"]);
   assert.equal("spawn" in contracts, false);
   assert.equal("nuke" in contracts, false);

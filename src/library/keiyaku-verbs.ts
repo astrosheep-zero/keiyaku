@@ -95,7 +95,6 @@ const contract = {
     "Target Contract selector (kei/...); omit to resolve from cwd when inside an appointed Contract worktree.",
   ),
 };
-const actor = { actor: optText.describe("Optional caller attribution recorded on the journal entry.") };
 const commonBind = {
   target: text
     .nullable()
@@ -103,7 +102,6 @@ const commonBind = {
     .describe(
       "Integration target: branch name, active kei/... to stack on, or null for a targetless Contract. Omit to target the current branch.",
     ),
-  ...actor,
 };
 const jsonDocument = z.record(z.string(), z.unknown()).readonly();
 const contractSelector = text.startsWith("kei/");
@@ -214,7 +212,6 @@ export const verbs = Object.freeze({
               "Replacement prerequisite Contract IDs (kei/...); pass [] to clear prerequisites.",
             ),
             gates: branch.shape.gates.describe("Replacement acceptance gate names; pass [] to clear all gates."),
-            actor: branch.shape.actor.describe("Optional caller attribution recorded on the journal entry."),
           }) as typeof branch
         )
           .extend(contract)
@@ -231,7 +228,6 @@ export const verbs = Object.freeze({
       .strictObject({
         ...contract,
         markdown: text.describe("Arc Markdown body naming and scoping the current chapter."),
-        ...actor,
       })
       .readonly(),
     output: arcOutcomeSchema,
@@ -314,7 +310,6 @@ export const verbs = Object.freeze({
           .enum(["satisfied", "unsatisfied"])
           .describe('Review judgment for the candidate: "satisfied" or "unsatisfied".'),
         summary: nonblank.describe("Nonblank review rationale and findings recorded as testimony."),
-        actor: optText.describe("Optional reviewer attribution recorded on the testimony."),
       })
       .readonly(),
     output: reviewOutcomeSchema,
@@ -327,7 +322,6 @@ export const verbs = Object.freeze({
       .strictObject({
         ...contract,
         note: optText.describe("Optional reason recorded on the abandonment entry."),
-        ...actor,
       })
       .readonly(),
     output: abandonOutcomeSchema,
@@ -691,7 +685,7 @@ export const verbs = Object.freeze({
   },
   "debt.addDocument": {
     description: "Create a Debt from Markdown.",
-    input: z.strictObject({ markdown: text, ...actor }).readonly(),
+    input: z.strictObject({ markdown: text }).readonly(),
     output: debtMutationResultSchema,
     effect: "write",
   },

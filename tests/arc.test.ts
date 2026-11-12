@@ -124,10 +124,7 @@ test("Arc facts round trip canonically and fold only exact sequences", () => {
 
   const freeform = entry("arc", { seq: 2, title: "Freeform", body: "" }, "AC");
   assert.deepEqual(decodeJournal(encodeEntry(freeform)), [freeform]);
-  assert.throws(
-    () => decodeJournal(encodeEntry(freeform).replace('"body":""', '"body":"","brief":"extra"')),
-    /unknown field/,
-  );
+  assert.deepEqual(decodeJournal(encodeEntry(freeform).replace('"body":""', '"body":"","future":"extra"')), [freeform]);
   const before = foldJournal(id, [bind()]);
   assert.equal(before.currentArc, undefined);
   const folded = foldJournal(id, [bind(), first, freeform]);

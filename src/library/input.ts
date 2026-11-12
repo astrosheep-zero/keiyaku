@@ -4,7 +4,7 @@ import { decodeContractDocument } from "../body/decode.js";
 import { validated } from "./outcome.js";
 import { verificationDefinition } from "../body/decode.js";
 import type { DecodedContractDocument } from "../body/types.js";
-import { actorId, type ActorId, type ContractId, type ContractTerms, type Gate } from "../core/facts/types.js";
+import type { ContractId, ContractTerms, Gate } from "../core/facts/types.js";
 import { canonicalDebtId, type DebtId } from "../debt/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";
 import { gateRequirements, prepareVerificationDeclaration } from "../verification/declaration.js";
@@ -13,7 +13,6 @@ const amendFields = z.strictObject({
   markdown: z.string().exactOptional(),
   after: z.array(z.string()).readonly().exactOptional(),
   gates: z.array(z.string()).readonly().exactOptional(),
-  actor: z.string().regex(/\S/u, "actor must be nonblank").exactOptional(),
 });
 export const amendInputSchemas = [
   amendFields.required({ markdown: true }),
@@ -21,14 +20,6 @@ export const amendInputSchemas = [
   amendFields.required({ gates: true }),
 ] as const;
 export const amendInputSchema = z.union(amendInputSchemas);
-
-export function actorOption(actor: unknown): Readonly<{ actor?: ActorId }> {
-  if (actor === undefined) return {};
-  if (typeof actor !== "string" || actor.trim().length === 0) {
-    throw new TypeError("actor must be a nonblank string");
-  }
-  return { actor: actorId(actor) };
-}
 
 export function requireMarkdown(value: unknown, label = "markdown"): string {
   if (typeof value !== "string") throw new TypeError(`${label} must be a string`);

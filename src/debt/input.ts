@@ -33,14 +33,6 @@ export function text(value: unknown, label: string): string | undefined {
   return value;
 }
 
-export function actor(value: unknown): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError("actor must be a nonblank string");
-  }
-  return value;
-}
-
 const optionalText = z.string().exactOptional();
 const titleSchema = z.string().regex(/\S/u, "title must be nonblank");
 const idsSchema = z
@@ -62,11 +54,6 @@ export const addDebtInputSchema = z.strictObject({
   parent: debtIdSchema.nullable().exactOptional().describe("Parent container Debt ID (debt/<slug>-<hex>), or null."),
   supersedes: idsSchema.describe("Distinct Debt IDs (debt/<slug>-<hex>) replaced by this Debt."),
   relates: idsSchema.describe("Distinct non-blocking related Debt IDs (debt/<slug>-<hex>)."),
-  actor: z
-    .string()
-    .regex(/\S/u, "actor must be a nonblank string")
-    .exactOptional()
-    .describe("Optional creator attribution recorded on the Debt document."),
 });
 const updateDebtFields = {
   title: titleSchema.exactOptional().describe("Replacement nonblank one-line title."),
@@ -122,14 +109,12 @@ export function addInput(input: unknown): AddDebtInput {
 
 export function addDocumentInput(input: unknown): AddDebtDocumentInput {
   const v = record(input, "addDocument input");
-  closed(v, ["markdown", "actor", "signal"], "addDocument input");
+  closed(v, ["markdown", "signal"], "addDocument input");
   const markdown = text(v.markdown, "markdown");
   if (markdown === undefined) throw new TypeError("markdown is required");
-  const createdBy = actor(v.actor),
-    abort = signal(v.signal);
+  const abort = signal(v.signal);
   return {
     markdown,
-    ...(createdBy === undefined ? {} : { actor: createdBy }),
     ...(abort === undefined ? {} : { signal: abort }),
   };
 }

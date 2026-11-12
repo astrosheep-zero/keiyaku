@@ -109,7 +109,6 @@ function renderShowDetail(id: string, debt: Extract<DebtShowItem, { kind: "found
     ),
     `  created  ${textTimestamp(debt.createdAt)}`,
     `  updated  ${textTimestamp(debt.updatedAt)}`,
-    ...(debt.createdBy === undefined ? [] : [`  created by  ${debt.createdBy}`]),
   ];
   for (const need of debt.needs ?? []) lines.push(edge("needs", need));
   if (debt.parent !== undefined) lines.push(edge("parent", debt.parent));

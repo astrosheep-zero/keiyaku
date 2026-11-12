@@ -73,7 +73,6 @@ type ContinuationInput = Readonly<{
   channel: GitDecodeChannel;
   completed: Extract<CompletionResult, { kind: "completed" }>;
   progress: ProtocolProgress & ContinuationProgress;
-  actor?: import("../core/facts/types.js").ActorId;
   signal?: AbortSignal;
 }>;
 
@@ -109,7 +108,6 @@ async function continueCandidate(
     channel: input.channel,
     checkpoint: contractCheckpoint({ state: observed.state, journal: observed.entries }),
     progress: input.progress,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.signal === undefined ? {} : { signal: input.signal }),
   });
 }

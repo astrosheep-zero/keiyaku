@@ -36,7 +36,6 @@ import {
   optionalBoolean,
   requireInput,
   amendInputSchema,
-  actorOption,
   contractTerms,
   documentDerivation,
   normalizedList,
@@ -248,15 +247,14 @@ export class Kei {
       const values = amendInputSchema.parse(input);
       const derived = values.gates === undefined ? undefined : derivedGates(this.composition, gateNames(values.gates));
       return {
-        markdown: values.markdown === undefined ? undefined : requireMarkdown(values.markdown),
+        markdown: values.markdown,
         gates: derived,
         prerequisites: values.after === undefined ? undefined : normalizedList(values.after, "after", contractId),
-        actor: actorOption(values.actor).actor,
       };
     });
   }
   async amend(input: AmendInput): Promise<AmendOutcome> {
-    const { markdown, gates, prerequisites, actor } = this.amendInput(input);
+    const { markdown, gates, prerequisites } = this.amendInput(input);
     const hooks = derivedHooks(this.composition);
     const amendmentPlan = markdown === undefined ? undefined : validated(() => prepareAmendDocument(markdown));
     let changedSections: ReadonlySet<string> | undefined;
@@ -266,7 +264,6 @@ export class Kei {
         channel,
         contractId: this.id,
         progress: accumulator,
-        ...(actor === undefined ? {} : { actor }),
         deriveAmendment: (source) => {
           const current = persistedDocument(source.document.bytes);
           const amendment = amendmentPlan === undefined ? undefined : validated(() => amendmentPlan(current));
@@ -328,7 +325,6 @@ export class Kei {
             channel: localChannel,
             contractId: this.id,
             progress: accumulator,
-            ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
             ...(values.signal === undefined ? {} : { signal: values.signal }),
             ...(values.message === undefined ? {} : { message: values.message }),
             includeDirty: values.includeDirty,
@@ -350,7 +346,7 @@ export class Kei {
             return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
           if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
           requireMatchingDeliveryLeading(outcome.value.leading, accumulator, this.id);
-          await advanceAndContinue(accumulator, scope, localChannel, this.id, this.composition, outcome, values.signal);
+          await advanceAndContinue(accumulator, scope, localChannel, this.id, outcome, values.signal);
         } catch (error) {
           retainTrailingFailure(accumulator, this.id, error, values.signal);
         }
@@ -408,7 +404,6 @@ export class Kei {
           requireBranchesToBeUpToDate,
           ...(index === undefined ? {} : { index }),
           ...(signal === undefined ? {} : { signal }),
-          ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
         });
         if (outcome.kind === "refused")
           return { kind: "refused", contractId: this.id, reason: compactReason(outcome.refusal) };
@@ -420,7 +415,6 @@ export class Kei {
               scope,
               localChannel,
               this.id,
-              this.composition,
               {
                 kind: "accepted",
                 facts: [],
@@ -449,8 +443,7 @@ export class Kei {
   }
 
   async review(input: ReviewInput, options?: MutationObservation): Promise<ReviewOutcome> {
-    const values = validated(() => requireInput(input, "review input", ["verdict", "summary", "actor", "signal"]));
-    const actor = validated(() => actorOption(values.actor));
+    const values = validated(() => requireInput(input, "review input", ["verdict", "summary", "signal"]));
     const verdict = values.verdict;
     if (verdict !== "satisfied" && verdict !== "unsatisfied")
       throw new KeiyakuError("invalid-input", "verdict must be satisfied or unsatisfied", {
@@ -474,8 +467,6 @@ export class Kei {
             channel: localChannel,
             contractId: this.id,
             progress: accumulator,
-            ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
-            ...actor,
             ...(signal === undefined ? {} : { signal }),
             verdict,
             summary,
@@ -489,7 +480,7 @@ export class Kei {
           if (outcome.kind !== "accepted") return { contractId: this.id, ...compactRetry(outcome.reason) };
           accumulator.extendConclusions(this.id, outcome.value);
           if (verdict === "satisfied")
-            await advanceAndContinue(accumulator, scope, localChannel, this.id, this.composition, outcome, signal);
+            await advanceAndContinue(accumulator, scope, localChannel, this.id, outcome, signal);
         } catch (error) {
           retainTrailingFailure(accumulator, this.id, error, signal);
         }
@@ -502,12 +493,9 @@ export class Kei {
   }
 
   async abandon(input?: AbandonInput): Promise<AbandonOutcome> {
-    const { note, actor } = validated(() => {
-      const values = input === undefined ? undefined : requireInput(input, "abandon input", ["note", "actor"]);
-      return {
-        note: optionalNonblank(values?.note, "abandon note"),
-        actor: actorOption(values?.actor),
-      };
+    const note = validated(() => {
+      const values = input === undefined ? undefined : requireInput(input, "abandon input", ["note"]);
+      return optionalNonblank(values?.note, "abandon note");
     });
     const hooks = derivedHooks(this.composition);
     return await this.local("abandon", async (accumulator, channel, scope): Promise<AbandonOutcome> => {
@@ -517,7 +505,6 @@ export class Kei {
             scope,
             channel,
             contractId: this.id,
-            ...actor,
             ...(note === undefined ? {} : { note }),
             observationSelection: debtHolderObservationSelection(),
             progress: accumulator,
@@ -544,12 +531,9 @@ export class Kei {
   }
 
   async arc(input: ArcInput): Promise<ArcOutcome> {
-    const { chapter, actor } = validated(() => {
-      const values = requireInput(input, "arc input", ["markdown", "actor"]);
-      return {
-        chapter: decodeArcDocument(requireMarkdown(values.markdown)),
-        actor: actorOption(values.actor),
-      };
+    const chapter = validated(() => {
+      const values = requireInput(input, "arc input", ["markdown"]);
+      return decodeArcDocument(requireMarkdown(values.markdown));
     });
     const hooks = derivedHooks(this.composition);
     return await this.local("arc", async (accumulator, channel, scope): Promise<ArcOutcome> => {
@@ -557,7 +541,6 @@ export class Kei {
         scope,
         channel,
         contractId: this.id,
-        ...actor,
         chapter,
         progress: accumulator,
       });
@@ -600,7 +583,6 @@ export class Kei {
           showDiff,
           requireBranchesToBeUpToDate,
           ...(signal === undefined ? {} : { signal }),
-          ...(this.composition.actor === undefined ? {} : { actor: this.composition.actor }),
         });
         if (admission.kind === "refused")
           return { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) };
@@ -706,7 +688,7 @@ function attestationHistory(entry: Extract<JournalEntry, { kind: "attestation" }
 }
 
 function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, full: boolean): ContractHistoryEvent {
-  const common = { id: entry.entry, at: entry.at, ...(entry.actor === undefined ? {} : { actor: entry.actor }) };
+  const common = { id: entry.entry, at: entry.at };
   switch (entry.kind) {
     case "bind": {
       const { coordinates, terms: bound } = entry.data;
@@ -888,7 +870,6 @@ async function advanceAndContinue(
   scope: RepositoryScope,
   channel: GitDecodeChannel,
   contractId: ContractId,
-  composition: LocalContractCompositionCapture,
   outcome: AcceptedProtocolStep,
   signal: AbortSignal | undefined,
 ): Promise<void> {
@@ -898,7 +879,6 @@ async function advanceAndContinue(
     channel,
     checkpoint,
     progress: accumulator,
-    ...(composition.actor === undefined ? {} : { actor: composition.actor }),
     ...(signal === undefined ? {} : { signal }),
   });
   accumulator.recordCandidate(contractId, result.evidence);
@@ -909,7 +889,6 @@ async function advanceAndContinue(
     channel,
     progress: accumulator,
     completed: result,
-    ...(composition.actor === undefined ? {} : { actor: composition.actor }),
     ...(signal === undefined ? {} : { signal }),
   });
   accumulator.observe({ kind: "stage", contractId, stage: "continuation", state: "finished" });

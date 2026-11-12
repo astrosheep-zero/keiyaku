@@ -18,7 +18,6 @@ import type { BodyLauncher } from "../akuma/body-launch.js";
 import { readAliases, type AliasBinding } from "../alias/index.js";
 import { parseAkumaId } from "../akuma/identity.js";
 import type { DispatchAssociation } from "../akuma/dispatch-association.js";
-import type { CreatedDebtObservation } from "../debt/created-observation.js";
 import { World, type WorldRoot } from "../world.js";
 import { sweepInactiveAkumas } from "./akuma-retention.js";
 import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
@@ -59,7 +58,6 @@ export type {
   AkumaTellResult,
   AkumaWaitResult,
   AkumaWorldScopeRefusal,
-  CreatedDebtObservation,
   DispatchAssociation,
   ForkResult,
   SpawnResult,

@@ -108,7 +108,7 @@ test("receipt replay cannot rewind a newer admitted checkpoint", () => {
 test("conflicting identities reject an entire receipt before mutating progress", () => {
   const leading = admission(checkpoint(), 1),
     next = admission(leading, 2);
-  const conflict: JournalEntry = { ...leading.facts[0]!, actor: "different" as NonNullable<JournalEntry["actor"]> };
+  const conflict: JournalEntry = { ...leading.facts[0]!, at: "2026-08-06T00:00:01.000Z" };
   const progress = new InvocationAccumulator();
   progress.recordAdmission(leading);
   assert.throws(

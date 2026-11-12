@@ -16,7 +16,6 @@ import { parseDependencyKeySet } from "../subject.js";
 import { AuthorityCorruptionError } from "./errors.js";
 import {
   changeId,
-  actorId,
   contractId,
   documentKey,
   documentSegmentKey,
@@ -52,16 +51,7 @@ function requireRecord(value: unknown, path: string): RecordValue {
   return value;
 }
 
-function requireKeys(
-  value: RecordValue,
-  required: readonly string[],
-  path: string,
-  optional: readonly string[] = [],
-): void {
-  const expected = new Set([...required, ...optional]);
-  for (const key of Object.keys(value)) {
-    if (!expected.has(key)) fail(path, `unknown field '${key}'`);
-  }
+function requireKeys(value: RecordValue, required: readonly string[], path: string): void {
   for (const key of required) {
     if (!(key in value)) fail(path, `missing field '${key}'`);
   }
@@ -150,7 +140,7 @@ function targetValue(value: unknown, path: string): NonNullable<ContractCoordina
 
 function validateCoordinates(value: unknown, path: string): ContractCoordinates {
   const object = requireRecord(value, path);
-  requireKeys(object, ["start", "workspace"], path, ["target"]);
+  requireKeys(object, ["start", "workspace"], path);
   const workspace = stringValue(object.workspace, `${path}.workspace`);
   if (workspace !== "worktree") fail(`${path}.workspace`, "unknown workspace");
   return {
@@ -186,7 +176,7 @@ function termsValue(value: unknown, path: string): ContractTerms {
 
 function validateAttestation(value: unknown, path: string): AttestationData {
   const object = requireRecord(value, path);
-  requireKeys(object, ["gate", "requirement", "subject", "verdict"], path, ["summary"]);
+  requireKeys(object, ["gate", "requirement", "subject", "verdict"], path);
   const declaredGate = brandedValue(object.gate, `${path}.gate`, gate);
   const verdict = stringValue(object.verdict, `${path}.verdict`);
   if (verdict !== "satisfied" && verdict !== "unsatisfied") fail(`${path}.verdict`, "unknown attestation verdict");
@@ -231,7 +221,7 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
       return termsValue(value, path) satisfies AmendData;
     case "deliver": {
       const object = requireRecord(value, path);
-      requireKeys(object, ["tenderSnapshot", "integration", "method", "policy"], path, ["note"]);
+      requireKeys(object, ["tenderSnapshot", "integration", "method", "policy"], path);
       const integration = requireRecord(object.integration, `${path}.integration`);
       requireKeys(integration, ["predecessor", "snapshot", "changeId"], `${path}.integration`);
       const method = stringValue(object.method, `${path}.method`);
@@ -274,7 +264,6 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
       return validateArc(value, path) satisfies ArcData;
     case "abandoned": {
       const object = requireRecord(value, path);
-      requireKeys(object, [], path, ["note"]);
       return {
         ...(object.note === undefined ? {} : { note: stringValue(object.note, `${path}.note`) }),
       } satisfies AbandonedData;
@@ -284,7 +273,7 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
 
 export function validateEntry(value: unknown): JournalEntry {
   const object = requireRecord(value, "entry");
-  requireKeys(object, ["v", "kind", "contract", "entry", "at", "data"], "entry", ["actor"]);
+  requireKeys(object, ["v", "kind", "contract", "entry", "at", "data"], "entry");
   const kind = object.kind;
   if (typeof kind !== "string" || !Object.hasOwn(VERSION_BY_KIND, kind)) {
     throw new AuthorityCorruptionError(`unknown journal entry kind: ${String(kind)}`);
@@ -297,7 +286,6 @@ export function validateEntry(value: unknown): JournalEntry {
     contract: brandedValue(object.contract, "entry.contract", contractId),
     entry: brandedValue(object.entry, "entry.entry", entryUlid),
     at: validateTimestamp(object.at, "entry.at"),
-    ...(object.actor === undefined ? {} : { actor: brandedValue(object.actor, "entry.actor", actorId) }),
     data: validateData(kind as JournalEntry["kind"], object.data),
   } as JournalEntry;
   const after = entry.kind === "bind" ? entry.data.terms.after : entry.kind === "amend" ? entry.data.after : undefined;
@@ -327,10 +315,7 @@ export function encodeEntry(entry: JournalEntry): string {
   return `${canonicalValue(validated)}\n`;
 }
 
-function decodeEntry(line: string): JournalEntry {
-  if (line.includes("\r") || line.includes("\n\n"))
-    throw new AuthorityCorruptionError("journal entry must be one LF-delimited JSON value");
-  const body = line.endsWith("\n") ? line.slice(0, -1) : line;
+function decodeEntry(body: string): JournalEntry {
   if (body.length === 0) throw new AuthorityCorruptionError("journal entry cannot be empty");
   let value: unknown;
   try {
@@ -338,17 +323,13 @@ function decodeEntry(line: string): JournalEntry {
   } catch (error) {
     throw new AuthorityCorruptionError("journal entry is not valid JSON", { cause: error });
   }
-  const entry = validateEntry(value);
   if (canonicalValue(value) !== body) throw new AuthorityCorruptionError("journal entry is not canonical");
-  return entry;
+  return validateEntry(value);
 }
 
 export function decodeJournal(journal: string): JournalEntry[] {
   if (journal.length === 0) return [];
   if (journal.includes("\r") || !journal.endsWith("\n"))
     throw new AuthorityCorruptionError("journal must use LF lines and end with LF");
-  return journal
-    .slice(0, -1)
-    .split("\n")
-    .map((line) => decodeEntry(line));
+  return journal.slice(0, -1).split("\n").map(decodeEntry);
 }

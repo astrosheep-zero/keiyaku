@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { boundedListLimit } from "../bounded-list.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
-import type { ActorId, ContractId, ContractState, DeliverData, DocumentKey } from "../core/facts/types.js";
+import type { ContractId, ContractState, DeliverData, DocumentKey } from "../core/facts/types.js";
 import { gateReportSchema } from "./result-leaves.js";
 export {
   deliverDataSchema,
@@ -182,17 +182,15 @@ export type IntentOutcome<Value, Refusal = IntentRefusal> = ProtocolIntentOutcom
 type OperationInput = Readonly<{
   scope: RepositoryScope;
   contractId: ContractId;
-  actor?: import("../core/facts/types.js").ActorId;
 }>;
 export type MutationOperationInput = OperationInput &
   Readonly<{ channel: GitDecodeChannel; progress?: ProtocolProgress }>;
 
 /** The decision input of an intent whose verb contributes only its own payload. */
-type VoidIntentDecision<Payload extends object> = Payload &
-  Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
+type VoidIntentDecision<Payload extends object> = Payload & Readonly<{ contractId: ContractId; at: string }>;
 
 /**
- * Observe, decide, and atomically admit one intent over the invoking actor and time, then complete it
+ * Observe, decide, and atomically admit one intent over the invocation time, then complete it
  * as a void outcome. The verb contributes only its own decision payload.
  */
 export async function admitVoidIntent<Payload extends object, Refusal>(
@@ -203,7 +201,6 @@ export async function admitVoidIntent<Payload extends object, Refusal>(
 ): Promise<IntentOutcome<void, Refusal>> {
   const decisionInput: VoidIntentDecision<Payload> = {
     contractId: input.contractId,
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
     at: timestamp(),
     ...payload,
   };

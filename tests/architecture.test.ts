@@ -347,7 +347,7 @@ const compositionCases: readonly (readonly [string, readonly Edge[], string, boo
   ["library/akumas/index.ts", [akuma, catalog], marker, true],
   [
     "library/selection.js",
-    [akuma, ["dispatch/index.ts", "observeDispatch"], ["debt/created-observation.ts", "observeCreatedDebt"]],
+    [akuma, ["dispatch/index.ts", "observeDispatch"]],
     marker,
     true,
   ],

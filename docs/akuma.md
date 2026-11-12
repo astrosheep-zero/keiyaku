@@ -31,7 +31,7 @@ neither personality nor capabilities and remains frozen across wake and resume.
 Caller attribution is independent of origin and fork lineage. It names either
 an Akuma in its World or an external integration identity; absence is legal
 for both existing and new births. Attribution is not authentication and never
-changes actor evidence or admission authority. A
+changes Contract testimony or admission authority. A
 Body is the one live driver, holding the exclusive leash for its lifetime. The
 leash is the sole execution-seat and liveness authority; Heart owns durable
 facts. Live process custody is a handle held by the spawning Body or adapter,
@@ -173,7 +173,7 @@ complete deletion retains custody for retry.
 One Akuma owner implements creation, admission, observation, and lifecycle. The
 standalone identity handle and plural selection are faces over those same
 algorithms rather than parallel orchestrators. That owner reads only Heart, leash, provider, Archetype,
-Settings, and filesystem state; optional Alias, Dispatch, Debt, and Contract
+Settings, and filesystem state; optional Alias, Dispatch, and Contract
 associations are composed after its values by the World composition that owns
 them, so a standalone operation still works when those optional authorities are
 corrupt or unavailable. Its roster supplies native membership, semantic

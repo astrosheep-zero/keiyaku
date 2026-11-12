@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { decodeContractDocument } from "../body/decode.js";
 import { decodeCanonicalContractDocument } from "../body/render.js";
-import { contractIdFromSegment, type ActorId, type ContractId } from "../core/facts/types.js";
+import { contractIdFromSegment, type ContractId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { mintIdentitySegment } from "../identity/mint.js";
@@ -28,7 +28,6 @@ type BindAttemptInput = Readonly<{
   source?: Parameters<typeof bindOperation>[0]["source"];
   debt?: DebtId;
   progress?: ProtocolProgress;
-  actor?: ActorId;
 }>;
 
 const CONTRACT_ID_CODE_POINTS = 32;
@@ -67,7 +66,6 @@ async function attempt(input: BindAttemptInput, id: ContractId) {
       : {
           decorateOffer: ({ contractId: owner }) => [claimDebtHolder(input.debt!, owner)],
         }),
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.progress === undefined ? {} : { progress: input.progress }),
   });
 }
@@ -103,7 +101,6 @@ export async function admitForkBindWithAppointment(
     sourceId: ContractId;
     target?: string | null;
     progress?: ProtocolProgress;
-    actor?: ActorId;
   }>,
 ): Promise<Readonly<{ kind: "refused"; refusal: ForkSourceRefusal }> | ForkBindAdmission> {
   const missing = (): Readonly<{ kind: "refused"; refusal: ForkSourceRefusal }> => ({
@@ -161,7 +158,6 @@ export async function admitForkBindWithAppointment(
       start: source.coordinates.start,
       document: source.terms.document.key,
     },
-    ...(input.actor === undefined ? {} : { actor: input.actor }),
     ...(input.progress === undefined ? {} : { progress: input.progress }),
   });
   return { kind: "document", admission, document };
@@ -177,7 +173,6 @@ export async function prepareMarkdownBind(
     targetSelection: BindTargetSelection;
     debt?: DebtId;
     progress?: ProtocolProgress;
-    actor?: ActorId;
   }>,
 ) {
   const terms = contractTerms(input.document, input.gates, input.after);
@@ -190,7 +185,6 @@ export async function prepareMarkdownBind(
       verification: documentDerivation(input.document).verification,
       targetSelection: input.targetSelection,
       ...(input.debt === undefined ? {} : { debt: input.debt }),
-      ...(input.actor === undefined ? {} : { actor: input.actor }),
       ...(input.progress === undefined ? {} : { progress: input.progress }),
     });
   const admission =

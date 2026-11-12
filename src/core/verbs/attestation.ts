@@ -1,10 +1,9 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
 import { activeContract, type ActiveContractRefusal } from "../facts/observation.js";
-import { journalEntry, type ActorId, type AttestationData, type ContractId } from "../facts/types.js";
+import { journalEntry, type AttestationData, type ContractId } from "../facts/types.js";
 
 export type AttestationInput<Failure = never> = Readonly<{
   contractId: ContractId;
-  actor?: ActorId;
   at: string;
   preparation?: Preparation<AttestationData, Failure>;
 }>;

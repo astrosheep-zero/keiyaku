@@ -3,13 +3,7 @@ import type { ProtocolProgress } from "./progress.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
-import {
-  targetName,
-  type ActorId,
-  type ContractId,
-  type ContractTarget,
-  type SnapshotId,
-} from "../core/facts/types.js";
+import { targetName, type ContractId, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeContractsForAdmissionAt, observeGitForAdmissionAt } from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
@@ -74,7 +68,7 @@ export type PlacementProtocolResult<ExtraRefusal = never> =
   | TargetMovedStop
   | PlacementExecutionFailure;
 
-type PlacementProtocolInput = Readonly<{ contractId: ContractId; actor?: ActorId; at: string }>;
+type PlacementProtocolInput = Readonly<{ contractId: ContractId; at: string }>;
 type PlacementAdmissionInput<ExtraRefusal> = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;

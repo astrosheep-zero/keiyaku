@@ -30,7 +30,6 @@ import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import { observeDispatchAssociations } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
-import { observeCreatedDebtObservations } from "../debt/created-observation.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
@@ -149,13 +148,8 @@ function placementDischarged(repo: Repo | undefined): (contract: DispatchAssocia
   };
 }
 
-async function observeAkuma(
-  status: LiveStatusObservation["status"],
-  path: WorldRoot,
-  repo?: Repo,
-): Promise<AkumaObservation> {
+async function observeAkuma(status: LiveStatusObservation["status"], repo?: Repo): Promise<AkumaObservation> {
   const contract = (await dispatchAssociations(repo, [status.id])).get(status.id)!;
-  const createdDebts = (await observeCreatedDebtObservations(path, [status.id]))[0]!;
   if (status.cwd === undefined || status.provider === undefined)
     throw new Error(`Born Akuma ${status.id} lacks its frozen execution context`);
   const composed = (await placementDischarged(repo)(contract))
@@ -173,11 +167,6 @@ async function observeAkuma(
     ...(status.lastActivityAt === undefined ? {} : { lastActivityAt: status.lastActivityAt }),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
     ...(contract.kind === "none" ? {} : { contract }),
-    ...(createdDebts.kind === "failed"
-      ? { createdDebts }
-      : createdDebts.rows === undefined
-        ? {}
-        : { createdDebts: createdDebts.rows }),
     ...(changes.length === 0 ? {} : { changes }),
     ...(composed.timeline.reportedChangesOmitted === 0 ? {} : { moreChanges: true }),
     ...(composed.timeline.reportedChangesOutside === undefined
@@ -224,7 +213,6 @@ export async function statusAkuma(
         addressed.path,
         outcomePluginObserver({ world: addressed.path, reportDiagnostic }),
       ).status(),
-      addressed.path,
       input.repo,
     );
   } catch (error) {

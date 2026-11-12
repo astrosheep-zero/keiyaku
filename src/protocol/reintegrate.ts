@@ -2,7 +2,6 @@ import type { ProtocolProgress } from "./progress.js";
 import { contractState, targetContractRefusal } from "../core/facts/observation.js";
 import {
   targetName,
-  type ActorId,
   type ContractId,
   type ContractState,
   type ContractTarget,
@@ -48,7 +47,6 @@ type ReintegrationInput = Readonly<{
   repository: GitRepository;
   contractId: ContractId;
   target: ContractTarget;
-  actor?: ActorId;
   progress?: ProtocolProgress;
 }>;
 
@@ -169,7 +167,6 @@ async function runReintegration(
         const decision = decideReintegrate({
           input: {
             contractId: input.contractId,
-            ...(input.actor === undefined ? {} : { actor: input.actor }),
             at: timestamp(),
             preparation,
           },

@@ -16,7 +16,6 @@ export function debtDocument(
     state?: DebtDocument["state"];
     priority?: DebtDocument["priority"];
     needs?: DebtDocument["needs"];
-    createdBy?: string;
     createdAt?: string;
     updatedAt?: string;
   }>,
@@ -32,7 +31,6 @@ export function debtDocument(
     parent: null,
     supersedes: [],
     relates: [],
-    ...(input.createdBy === undefined ? {} : { createdBy: input.createdBy }),
     createdAt: input.createdAt ?? "2026-08-17T00:00:00.000Z",
     updatedAt: input.updatedAt ?? "2026-08-17T00:00:00.000Z",
   };

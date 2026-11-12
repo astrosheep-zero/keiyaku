@@ -6,11 +6,10 @@ import {
   targetContractRefusal,
   type TargetContractRefusal,
 } from "../facts/observation.js";
-import { journalEntry, type ActorId, type BindData, type ContractId } from "../facts/types.js";
+import { journalEntry, type BindData, type ContractId } from "../facts/types.js";
 
 export type BindInput<Failure = never> = Readonly<{
   contractId: ContractId;
-  actor?: ActorId;
   at: string;
   preparation: Preparation<BindData, Failure>;
   targetContract?: ContractId;

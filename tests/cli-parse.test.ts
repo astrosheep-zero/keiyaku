@@ -384,10 +384,6 @@ test("bind and amend retain complete after snapshots and mixed gate selectors", 
     /amend requires stdin or --after, --clear-after, or --gates/,
   );
   assert.throws(
-    () => parseArgv(["amend", "kei/example", "--actor", "operator", "--json"]),
-    /amend requires stdin or --after, --clear-after, or --gates/,
-  );
-  assert.throws(
     () => parseArgv(["amend", "kei/example", "--after", "kei/one", "--clear-after", "-"]),
     /mutually exclusive/,
   );
@@ -418,10 +414,10 @@ test("--gates word grammar restates the Contract owner's gateWord", () => {
 });
 
 test("abandon accepts a note but no caller-selected reason", () => {
-  assert.deepEqual(parseArgv(["abandon", "kei/example", "--note", "scope changed", "--actor", "operator"]), {
+  assert.deepEqual(parseArgv(["abandon", "kei/example", "--note", "scope changed"]), {
     command: {
       name: "abandon",
-      input: { contract: "kei/example", note: "scope changed", actor: "operator" },
+      input: { contract: "kei/example", note: "scope changed" },
       output: "text",
     },
   });
@@ -516,18 +512,27 @@ test("tell parses text observation and ask requires a schema document", () => {
   assert.throws(() => parseArgv(["tell", "@worker"]), /requires a prompt/u);
 });
 
-test("review accepts actor with either summary source", () => {
-  assert.deepEqual(command(["review", "kei/example", "--satisfied", "--summary", "ok", "--actor", "operator"]), {
+test("review accepts either summary source", () => {
+  assert.deepEqual(command(["review", "kei/example", "--satisfied", "--summary", "ok"]), {
     name: "review",
-    input: { contract: "kei/example", verdict: "satisfied", summary: "ok", actor: "operator" },
+    input: { contract: "kei/example", verdict: "satisfied", summary: "ok" },
     output: "text",
   });
-  assert.deepEqual(command(["review", "--unsatisfied", "--actor", "operator", "-"]), {
+  assert.deepEqual(command(["review", "--unsatisfied", "-"]), {
     name: "review",
-    input: { verdict: "unsatisfied", actor: "operator" },
+    input: { verdict: "unsatisfied" },
     acquire: { summary: true },
     output: "text",
   });
+});
+
+test("Contract mutations and Debt creation refuse a retired actor option", () => {
+  for (const argv of [
+    ["bind", "-"], ["amend", "-"], ["arc", "-"],
+    ["review", "--satisfied", "--summary", "ok"], ["abandon"], ["debt", "add", "Title"],
+  ]) {
+    assert.throws(() => parseArgv([...argv, "--actor", "operator"]), /option --actor is not valid/u);
+  }
 });
 
 test("exact-one source selection and nonblank argv fail at parse", () => {
@@ -536,12 +541,10 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["review", "--satisfied", "--summary", "ok", "-"], /review requires exactly one of --summary <text> or stdin '-'/],
     [["review", "--satisfied", "--summary", ""], /--summary requires a nonblank value/],
     [["review", "--satisfied", "--summary", " \t"], /--summary requires a nonblank value/],
-    [["review", "--satisfied", "--summary", "ok", "--actor", " "], /--actor requires a nonblank value/],
     [["bind", "--target", "", "-"], /--target requires a nonblank value/],
     [["bind", "--target", "main", "--no-target", "-"], /mutually exclusive/],
     [["deliver", "--message", "  "], /--message requires a nonblank value/],
     [["abandon", "--note", "\n"], /--note requires a nonblank value/],
-    [["bind", "--actor", " ", "-"], /--actor requires a nonblank value/],
     [["spawn", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
     [["spawn", "worker", "ok", "-"], /accepts either a prompt argument or stdin, not both/],
     [["spawn", "worker", ""], /spawn requires a nonblank value/],
@@ -553,7 +556,6 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["debt", "add", "  "], /debt add requires a nonblank value/],
     [["debt", "add", "Title", "--body", ""], /--body requires a nonblank value/],
     [["debt", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
-    [["debt", "add", "Title", "--actor", " "], /--actor requires a nonblank value/],
     [["debt", "update", "debt/a", "--title", " "], /--title requires a nonblank value/],
     [["debt", "update", "debt/a", "--state", "done", "--note", ""], /--note requires a nonblank value/],
     [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],
@@ -629,10 +631,10 @@ test("stdin marker is position independent for Contract commands and global coor
   assert.deepEqual(parseArgv(["amend", "-", "kei/example", "--json"]), {
     command: { name: "amend", input: { contract: "kei/example" }, acquire: { markdown: true }, output: "json" },
   });
-  assert.deepEqual(parseArgv(["arc", "-", "--actor", "operator", "kei/example"]), {
+  assert.deepEqual(parseArgv(["arc", "-", "kei/example"]), {
     command: {
       name: "arc",
-      input: { contract: "kei/example", actor: "operator" },
+      input: { contract: "kei/example" },
       acquire: { markdown: true },
       output: "text",
     },

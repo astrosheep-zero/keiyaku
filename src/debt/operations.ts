@@ -64,7 +64,7 @@ function currentTimestamp(): string {
   return new Date().toISOString();
 }
 
-function addDocument(base: DebtCreationDocument, board: DebtBoard, at: string, actor?: string): DebtDocument {
+function addDocument(base: DebtCreationDocument, board: DebtBoard, at: string): DebtDocument {
   const localId = allocateLocalId(
     deriveLocalStem(base.title),
     new Set([...board.debts.keys()].map((id) => id.slice(5))),
@@ -72,7 +72,6 @@ function addDocument(base: DebtCreationDocument, board: DebtBoard, at: string, a
   return {
     ...base,
     id: `debt/${localId}`,
-    ...(actor === undefined ? {} : { createdBy: actor }),
     createdAt: at,
     updatedAt: at,
   };
@@ -82,17 +81,12 @@ function boardWith(board: DebtBoard, document: DebtDocument): DebtBoard {
   debts.set(document.id, document);
   return { debts };
 }
-async function create(
-  world: WorldRoot,
-  base: DebtCreationDocument,
-  signal?: AbortSignal,
-  actor?: string,
-): Promise<DebtMutationResult> {
+async function create(world: WorldRoot, base: DebtCreationDocument, signal?: AbortSignal): Promise<DebtMutationResult> {
   const result = await withDebtLocks(
     { world, allocation: true, ids: [], ...(signal === undefined ? {} : { signal }) },
     async () => {
       const snapshot = await readBoard(world),
-        next = addDocument(base, snapshot.board, currentTimestamp(), actor);
+        next = addDocument(base, snapshot.board, currentTimestamp());
       const problem = relationProblem(boardWith(snapshot.board, next), null, next);
       if (problem !== null) return { kind: "refused", reason: "invalid-graph", diagnostic: problem } as const;
       const replaced = await replaceAuthority({
@@ -122,11 +116,10 @@ export async function addDebt(world: WorldRoot, input: AddDebtInput): Promise<De
       relates: input.relates ?? [],
     },
     input.signal,
-    input.actor,
   );
 }
 export async function addDebtDocument(world: WorldRoot, input: AddDebtDocumentInput): Promise<DebtMutationResult> {
-  return create(world, parseDebtCreationDocument(input.markdown), input.signal, input.actor);
+  return create(world, parseDebtCreationDocument(input.markdown), input.signal);
 }
 
 function listChange(

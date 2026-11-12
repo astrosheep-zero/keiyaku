@@ -35,7 +35,7 @@ if (nativeError instanceof AkumaArchetypeError) {
 }
 void [catalogue, catalogueRows];
 
-const contractPolicy: KeisOptions = { actor: "contract-owner" };
+const contractPolicy: KeisOptions = {};
 Keis.of(repo, contractPolicy);
 
 const scope: AkumaHostScope = AkumaHost.inProcess({ reportDiagnostic: console.error });

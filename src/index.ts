@@ -74,7 +74,6 @@ export type { AkumaAddressRefusal, AkumaSetAddressInput } from "./library/addres
 export type { SpawnProgress, SpawnWaitObserver } from "./library/akuma-creation.js";
 export type { WhoamiFacts } from "./library/keiyaku-identity.js";
 export type {
-  ActorId,
   ChangeId,
   ContractHead,
   ContractId,
@@ -123,7 +122,6 @@ export type {
   AkumaWaitInput,
   AkumaWaitResult,
   AkumaWorldScopeRefusal,
-  CreatedDebtObservation,
   DispatchAssociation,
   ForkInput,
   ForkResult,

@@ -19,7 +19,12 @@ The journal retains lifecycle facts and bounded intent only. It does not retain
 raw process logs, patches, artifacts, telemetry, producer caches, or a
 compatibility projection. Times, counts, elapsed durations, history order, and
 combined Contract/Akuma views are read-time presentation, never independent
-authority. Optional actor testimony is not lifecycle identity or gate input.
+authority. Contracts retain no actor testimony. Persistence reads interpret
+known content and ignore unknown content, including within nested records.
+Required content, known value constraints, and canonical persisted bytes remain
+mandatory. Original journal bytes stay unchanged; new facts contain only
+current content. An older reader deliberately does not interpret unknown future
+semantics. Public caller inputs remain closed.
 
 A delivery may retain the caller's note as bounded intent independently of its
 integration commit message. Each recorded delivery owns its note; reuse of an

@@ -40,7 +40,6 @@ export async function runReleasePlan(run) {
 // never cached test outcomes, timeouts or a file-selection allowlist.
 /** @type {Readonly<Record<string, number>>} */
 const SWEEP_COST_MS = Object.freeze({
-  "tests/actor.test.ts": 200,
   "tests/akuma-api.test.ts": 4700,
   "tests/akuma-body.test.ts": 7600,
   "tests/akuma-heart-admission.test.ts": 900,

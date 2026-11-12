@@ -6,6 +6,16 @@ import { Keis, Repo } from "../src/index.js";
 import type { ReviewOutcome, VerifyOutcome } from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
+import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
+import { contractJournalPath } from "../src/git/identity.js";
+import {
+  GIT_REF,
+  readGitPaths,
+  updateGitTree,
+  updateRefsAtomically,
+  writeBlob,
+  writeCommit,
+} from "../src/git/repository.js";
 import { renderReconcile } from "../src/cli/render/reconcile.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../src/library/reconcile.js";
 import { cliJson } from "./support/cli-fixtures.js";
@@ -59,37 +69,47 @@ function assertRuntimeStop(value: unknown): void {
   assert.equal(value.stop.name, "reject-candidate");
 }
 
-describe("review actor testimony", () => {
-  test("local CLI review records actor testimony with and without an enclosing Akuma identity", async () => {
-    const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
-    for (const { flags, environment, actor } of [
-      { flags: ["--actor", "operator"], environment: { KEIYAKU_ACTOR_ID: "default-actor" }, actor: "operator" },
-      { flags: [], environment: { KEIYAKU_ACTOR_ID: "default-actor" }, actor: "default-actor" },
-      { flags: [], environment: {}, actor: undefined },
-      {
-        flags: [],
-        environment: { KEIYAKU_ACTOR_ID: "aku/worker/f0d0a002", KEIYAKU_ACTOR_WORLD: repository.path },
-        actor: "aku/worker/f0d0a002",
-      },
-    ]) {
-      const reviewed = await cliJson<ReviewOutcome>(
-        ["-C", repository.path, "review", state.id, "--satisfied", "--summary", "ok", ...flags],
-        { environment },
-      );
-      assert.equal(reviewed.exit, 0, reviewed.stderr);
-      accepted(reviewed.value);
-      const attestation = present(await keiyaku.state()).attestations.at(-1);
-      assert.ok(attestation);
-      assert.equal(attestation.actor, actor);
-      assert.equal(Object.hasOwn(attestation, "actor"), actor !== undefined);
-      assert.deepEqual(present(await keiyaku.state()).attestations.at(-1), attestation);
-    }
-    const history = await keiyaku.history({ full: true });
-    assert.ok(history.kind === "contract");
-    assert.match(renderContractHistory(history, { full: true }), / · operator/u);
-    assert.match(renderContractHistory(history, { full: true }), / · default-actor/u);
-  });
+test("journal reads ignore unknown envelope and nested keys while append preserves original bytes", async () => {
+  const { repository, keiyaku, state } = await bindAndCommit({ gates: ["reviewed"], verification: "exit 0" });
+  const git = await cachedRepositoryAt(repository.path);
+  const path = contractJournalPath(state.id);
+  const snapshot = await readGitPaths(git, [path]);
+  const oid = snapshot.paths.get(path)?.oid;
+  assert.ok(oid);
+  const original = repository.run(["cat-file", "-p", oid]);
+  const history = await keiyaku.history({ full: true });
+  const extended = `{"additional":{"opaque":true},${original.slice(1)}`
+    .replace('"data":{', '"data":{"additional":null,')
+    .replace('"document":{', '"document":{"additional":"future",');
+  assert.deepEqual(decodeJournal(extended), decodeJournal(original));
+  assert.equal(encodeEntry(decodeJournal(extended)[0]!), original);
+  assert.throws(() => decodeJournal(extended.replace(/"at":"[^"]+",/u, "")), /missing field 'at'/u);
+  assert.throws(() => decodeJournal(extended.replace(/"at":"[^"]+"/u, '"at":null')), /entry.at/u);
+  assert.throws(() => decodeJournal(extended.replace('{"additional":', '{ "additional":')), /not canonical/u);
 
+  const tree = await updateGitTree(git, snapshot.tree, new Map([[path, { oid: await writeBlob(git, extended) }]]));
+  const commit = await writeCommit({ repository: git, tree, parent: snapshot.commit });
+  assert.equal(
+    (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
+    "published",
+  );
+  assert.deepEqual(await keiyaku.history({ full: true }), history);
+  const reviewed = await cliJson<ReviewOutcome>(
+    ["-C", repository.path, "review", state.id, "--satisfied", "--summary", "ordinary review"],
+    { environment: { KEIYAKU_ACTOR_ID: "aku/worker/f0d0a002", KEIYAKU_ACTOR_WORLD: repository.path } },
+  );
+  assert.equal(reviewed.exit, 0, reviewed.stderr);
+  accepted(reviewed.value);
+  const appended = repository.run(["show", `${GIT_REF}:${path}`]);
+  assert.ok(appended.startsWith(extended), "admission must append without rewriting original bytes");
+  const next = appended.slice(extended.length);
+  const [entry] = decodeJournal(next);
+  assert.ok(entry?.kind === "attestation");
+  assert.equal(entry.data.summary, "ordinary review");
+  assert.equal(encodeEntry(entry), next, "new writes contain only known content");
+  const updatedHistory = await keiyaku.history({ full: true });
+  assert.ok(updatedHistory.kind === "contract");
+  assert.match(renderContractHistory(updatedHistory, { full: true }), /ordinary review/u);
 });
 
 describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {

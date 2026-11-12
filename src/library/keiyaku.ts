@@ -16,7 +16,7 @@ import { Kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
 import { Akumas } from "./akumas.js";
 import type { AskObserver } from "../akuma/akuma-selection-execution.js";
 import type { SpawnWaitObserver } from "./akuma-creation.js";
-import { deliveryOwner, resolveActor } from "./keiyaku-attribution.js";
+import { deliveryOwner } from "./keiyaku-attribution.js";
 import { akumaCallerFromEnvironment } from "./keiyaku-identity.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import { Settings } from "../settings.js";
@@ -320,30 +320,16 @@ export class Keiyaku {
     return invocationCoordinates({ ...this.#input, use, contractWait });
   }
 
-  #actor(explicit?: string) {
-    try {
-      const actor = resolveActor({
-        env: this.#input.environment,
-        ...(explicit === undefined ? {} : { actor: explicit }),
-      });
-      return actor === undefined ? {} : { actor };
-    } catch (error) {
-      throw new KeiyakuUsageError(error instanceof Error ? error.message : String(error));
-    }
-  }
-
-  async #keis(actor?: string) {
+  async #keis() {
     const at = await this.#coordinates("required");
     if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
     const configuration = await Settings.load({
       ...(at.world === null ? {} : { cwd: at.world }),
       ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
     });
-    const selected = this.#actor(actor);
     return {
       cwd: at.cwd,
-      actor: selected,
-      library: Keis.of(at.repo, { settings: configuration, ...selected }),
+      library: Keis.of(at.repo, { settings: configuration }),
     };
   }
 
@@ -378,41 +364,38 @@ export class Keiyaku {
     }
   }
 
-  async #selected(selector: string | undefined, actor?: string) {
-    const { cwd, library, actor: selectedActor } = await this.#keis(actor);
+  async #selected(selector: string | undefined) {
+    const { cwd, library } = await this.#keis();
     const id = await this.#resolve(library, selector, cwd);
-    return { id, contract: library.kei({ id }), actor: selectedActor };
+    return { id, contract: library.kei({ id }) };
   }
 
   async #bind(input: ParsedInput<"bind">) {
-    const { library, actor } = await this.#keis(input.actor);
+    const { library } = await this.#keis();
     if ("forkOf" in input)
       return await library.bind({
         ...input,
         forkOf: this.#fullId(library, input.forkOf),
-        ...actor,
       });
     const { after, ...rest } = input;
     return await library.bind({
       ...rest,
       ...(after === undefined ? {} : { after: after.map((id) => this.#fullId(library, id)) }),
-      ...actor,
     });
   }
 
   async #amend({ contract, ...input }: VerbInput<"amend">) {
-    const { cwd, library, actor } = await this.#keis(input.actor);
+    const { cwd, library } = await this.#keis();
     const id = await this.#resolve(library, contract, cwd);
     const { after, ...rest } = input;
     return await library.kei({ id }).amend({
       ...rest,
       ...(after === undefined ? {} : { after: after.map((value) => this.#fullId(library, value)) }),
-      ...actor,
     });
   }
 
   async #arc({ contract, ...input }: VerbInput<"arc">) {
-    const selected = await this.#selected(contract, input.actor);
+    const selected = await this.#selected(contract);
     try {
       validateArcMarkdown(input.markdown);
     } catch (error) {
@@ -420,7 +403,7 @@ export class Keiyaku {
         throw new KeiyakuArcDocumentError(selected.id, error);
       throw error;
     }
-    return await selected.contract.arc({ ...input, ...selected.actor });
+    return await selected.contract.arc(input);
   }
 
   async #deliver({ contract, ...input }: ExecutionInput<"deliver">, progress?: MutationObservation) {
@@ -434,13 +417,13 @@ export class Keiyaku {
   }
 
   async #review({ contract, ...input }: ExecutionInput<"review">, progress?: MutationObservation) {
-    const selected = await this.#selected(contract, input.actor);
-    return await selected.contract.review({ ...input, ...selected.actor }, progress);
+    const selected = await this.#selected(contract);
+    return await selected.contract.review(input, progress);
   }
 
   async #abandon({ contract, ...input }: VerbInput<"abandon">) {
-    const selected = await this.#selected(contract, input.actor);
-    return await selected.contract.abandon({ ...input, ...selected.actor });
+    const selected = await this.#selected(contract);
+    return await selected.contract.abandon(input);
   }
 
   async #show(input: VerbInput<"show">) {

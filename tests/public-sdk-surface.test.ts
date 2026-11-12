@@ -392,7 +392,7 @@ Kanshi.of({ world: repo });
 declare const kei: Kei;
 const id: ContractId = kei.id;
 const gate: Gate = "ordinary word";
-const policy: KeisOptions = { actor: "ordinary caller" };
+const policy: KeisOptions = {};
 const reconcile: KeisReconcile = Keis.of(repo, policy).reconcile;
 const host = AkumaHost.inProcess();
 const close: Promise<void> = host.close();

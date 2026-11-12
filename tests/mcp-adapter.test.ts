@@ -88,6 +88,12 @@ test("real flat and native calls reject contradictory intent before coordinate I
   const facet = Keiyaku.at({ cwd, environment, home: cwd });
   const invalid: readonly (readonly [VerbName, Record<string, unknown>])[] = [
     ["bind", { markdown: "terms", forkOf: "kei/source" }],
+    ["bind", { markdown: "terms", actor: "operator" }],
+    ["amend", { markdown: "## Context\nChanged\n", actor: "operator" }],
+    ["arc", { markdown: "# Chapter", actor: "operator" }],
+    ["review", { verdict: "satisfied", summary: "ok", actor: "operator" }],
+    ["abandon", { actor: "operator" }],
+    ["debt.add", { title: "Unwritten", actor: "operator" }],
     ["ls", { selector: "kei/", mine: true }],
     ["spawn", { akumaName: "worker", mode: "wait" }],
     ["spawn", { akumaName: "worker", prompt: "work", mode: "detach", timeoutMs: 0 }],
@@ -346,7 +352,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     const response = await client.callTool({ name, arguments: { cwd: first, repo: otherRepo.path, ...input } });
     assert.equal(response.isError, false, name);
     if (schemaTools.has(name)) {
-      const stripPanels = (key: string, value: unknown) => ["observedAt", "targetObservation", "createdDebts"].includes(key) ? undefined : value;
+      const stripPanels = (key: string, value: unknown) => ["observedAt", "targetObservation"].includes(key) ? undefined : value;
       assert.deepEqual(
         JSON.parse(JSON.stringify(response.structuredContent, stripPanels)),
         JSON.parse(JSON.stringify(expected, stripPanels)),

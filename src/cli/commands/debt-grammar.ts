@@ -45,15 +45,14 @@ const DEBT_COMMAND_SPECS: Readonly<Record<DebtAction, DebtCommandSpec>> = {
       relates: "repeat",
       body: "value",
       note: "value",
-      actor: "value",
     },
     usage: `debt add <TITLE> [--priority 0..3]
   [--state open|done|drop]
-  [--note <text>] [--actor <actor>]
+  [--note <text>]
   [--needs <debt/...>]... [--parent <debt/...>]
   [--supersedes <debt/...>]... [--relates <debt/...>]...
   [--body <text>]
-debt add [--actor <actor>] -`,
+debt add -`,
     purpose: "Create a Debt from flags or a Debt document on stdin.",
     details:
       "The stdin document is YAML front matter (title, state, priority, needs, parent, supersedes, relates, note) followed by a Markdown body.",
@@ -187,11 +186,7 @@ function validateDebtScan(action: DebtAction, scanned: ScannedDebt, fail: (messa
     );
   if (action === "add" && (stdin === "document") === (positionals.length === 1))
     fail("debt add requires either TITLE or '-' input");
-  if (
-    action === "add" &&
-    stdin === "document" &&
-    Object.keys(flags).some((name) => name !== "json" && name !== "actor")
-  )
+  if (action === "add" && stdin === "document" && Object.keys(flags).some((name) => name !== "json"))
     fail("debt add document input owns its creation fields");
   if (DEBT_ID_ACTIONS.has(action)) validateDebtIdPositionals(positionals, fail);
   if (action === "update") validateUpdate(scanned, fail);

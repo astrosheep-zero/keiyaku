@@ -31,7 +31,7 @@ test("Debt facet preserves native lifecycle, flat World listing, and absent Worl
   assert.deepEqual(await facet.debtDoctor({}), { kind: "absent" });
   assert.equal((await facet.debtUpdate({ id: "debt/missing", note: "note" })).kind, "refused");
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  const first = accepted(await facet.debtAdd({ title: "First", actor: "fixture" }));
+  const first = accepted(await facet.debtAdd({ title: "First" }));
   const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] }));
   const world = await World.at(cwd);
   assert.deepEqual(await facet.show({ ids: [first.id, second.id] }), await Debts.of(world).read({ ids: [first.id, second.id] }));

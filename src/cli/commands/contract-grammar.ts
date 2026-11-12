@@ -12,7 +12,6 @@ export type ContractTokens = Readonly<{
   positionals: readonly string[];
   stdin: boolean;
   output: "text" | "json";
-  actor?: string;
 }>;
 
 function optionalFlag(flags: ContractTokens["flags"], name: string): string | undefined {
@@ -63,7 +62,6 @@ function parseBind(parts: ContractTokens): VerbRequest<"bind"> | Extract<Pending
       input: {
         forkOf,
         ...(target === undefined ? {} : { target }),
-        ...(parts.actor === undefined ? {} : { actor: parts.actor }),
       },
       output: parts.output,
     };
@@ -81,7 +79,6 @@ function parseBind(parts: ContractTokens): VerbRequest<"bind"> | Extract<Pending
       ...(target === undefined ? {} : { target }),
       ...(parts.flags.after === undefined ? {} : { after }),
       ...(gates === undefined ? {} : { gates }),
-      ...(parts.actor === undefined ? {} : { actor: parts.actor }),
     },
     acquire: { markdown: true },
     output: parts.output,
@@ -102,7 +99,6 @@ function parseAmend(parts: ContractTokens): CliRequest {
     ...(contract === undefined ? {} : { contract }),
     ...(parts.flags["clear-after"] === true ? { after: [] } : parts.flags.after === undefined ? {} : { after }),
     ...(gates === undefined ? {} : { gates }),
-    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
   };
   if (parts.stdin) return { name: "amend", input, acquire: { markdown: true }, output: parts.output };
   return {
@@ -169,7 +165,6 @@ function parseReview(parts: ContractTokens): CliRequest {
   const input = {
     ...(contract === undefined ? {} : { contract }),
     verdict: parts.flags.satisfied === true ? ("satisfied" as const) : ("unsatisfied" as const),
-    ...(parts.actor === undefined ? {} : { actor: parts.actor }),
   };
   return summary === undefined
     ? { name: "review", input, acquire: { summary: true }, output: parts.output }
@@ -266,7 +261,6 @@ function parseLs(parts: ContractTokens): VerbRequest<"ls"> {
 export function parseContractCommand(parts: ContractTokens): CliRequest {
   const contract = parts.positionals[0];
   const selected = contract === undefined ? {} : { contract };
-  const actor = parts.actor === undefined ? {} : { actor: parts.actor };
   const output = parts.output;
   switch (parts.command) {
     case "bind":
@@ -280,10 +274,10 @@ export function parseContractCommand(parts: ContractTokens): CliRequest {
     case "review":
       return parseReview(parts);
     case "arc":
-      return { name: "arc", input: { ...selected, ...actor }, acquire: { markdown: true }, output };
+      return { name: "arc", input: selected, acquire: { markdown: true }, output };
     case "abandon": {
       const note = optionalFlag(parts.flags, "note");
-      return { name: "abandon", input: { ...selected, ...actor, ...(note === undefined ? {} : { note }) }, output };
+      return { name: "abandon", input: { ...selected, ...(note === undefined ? {} : { note }) }, output };
     }
     case "show": {
       if (parts.positionals.some((selector) => selector.startsWith("debt/"))) {
