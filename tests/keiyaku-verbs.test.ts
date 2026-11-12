@@ -3,18 +3,73 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { z } from "zod";
-import { type VerbName, type VerbOutput } from "../src/library/keiyaku-verbs.js";
+import { type VerbName, type VerbInput, type VerbOutput, type VerbRunFor } from "../src/library/keiyaku-verbs.js";
 import { Akuma, Keiyaku, KeiyakuUsageError, World } from "../src/index.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { repositoryWithMain, accepted, commitCandidate, document } from "./support/library-verbs.js";
-import { cleanupSpawnCapableFixtureForTest, installAkumaBodyPidReceipt, temporaryDirectory } from "./support/process.js";
+import {
+  cleanupSpawnCapableFixtureForTest,
+  installAkumaBodyPidReceipt,
+  temporaryDirectory,
+} from "./support/process.js";
 import { assertWireRoundTrip, type Assert, type Exact } from "./support/schema-parity.js";
 
 export type VerbOutputParity = Assert<
   { [K in VerbName]: Exact<z.output<(typeof Keiyaku.verbs)[K]["output"]>, VerbOutput<K>> }[VerbName]
 >;
+
+type TypedMethod<K extends VerbName> = K extends "debt.add"
+  ? "debtAdd"
+  : K extends "debt.addDocument"
+    ? "debtAddDocument"
+    : K extends "debt.update"
+      ? "debtUpdate"
+      : K extends "debt.doctor"
+        ? "debtDoctor"
+        : K;
+type VerbParameters<K extends VerbName> =
+  {} extends VerbInput<K>
+    ? [input?: VerbInput<K> | undefined, run?: VerbRunFor<K> | undefined]
+    : [input: VerbInput<K>, run?: VerbRunFor<K> | undefined];
+export type TypedVerbParity = Assert<
+  {
+    [K in VerbName]: Exact<Parameters<Keiyaku[TypedMethod<K>]>, VerbParameters<K>>;
+  }[VerbName]
+>;
+export type DebtCancellationIsExecution = Assert<
+  Exact<
+    Extract<
+      "signal",
+      keyof VerbInput<"debt.add"> | keyof VerbInput<"debt.addDocument"> | keyof VerbInput<"debt.update">
+    >,
+    never
+  >
+>;
+
+test("every invocation checks pre-abort before discovery, including native bind", async () => {
+  const facet = Keiyaku.at({ cwd: "/missing-keiyaku-preabort", environment: {} });
+  const reason = new Error("cancelled before discovery");
+  const signal = AbortSignal.abort(reason);
+  for (const name of Object.keys(Keiyaku.verbs) as VerbName[]) {
+    await assert.rejects(facet.run(name, {} as never, { signal }), (error: unknown) => error === reason);
+    const method =
+      name === "debt.add"
+        ? "debtAdd"
+        : name === "debt.addDocument"
+          ? "debtAddDocument"
+          : name === "debt.update"
+            ? "debtUpdate"
+            : name === "debt.doctor"
+              ? "debtDoctor"
+              : name;
+    await assert.rejects(
+      () => facet[method]({} as never, { signal }),
+      (error: unknown) => error === reason,
+    );
+  }
+});
 
 test("verb runner preserves native bind, show and review results", async (t) => {
   const home = temporaryDirectory(t, "keiyaku-verbs-home-");

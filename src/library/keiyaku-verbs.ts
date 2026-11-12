@@ -80,7 +80,8 @@ export type VerbEntry = Readonly<{
   progress?: z.ZodType;
   effect: "read" | "write" | "destroy";
 }>;
-export type VerbRun<E = never> = Readonly<{ signal?: AbortSignal; observe?: (event: E) => void | PromiseLike<void> }>;
+export type KeiyakuRunOptions = Readonly<{ signal?: AbortSignal }>;
+export type VerbRun<E = never> = KeiyakuRunOptions & Readonly<{ observe?: (event: E) => void | PromiseLike<void> }>;
 
 const text = z.string();
 const nonblank = text.regex(/\S/u, "Must not be blank");

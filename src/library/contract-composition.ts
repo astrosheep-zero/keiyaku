@@ -44,7 +44,7 @@ import {
 import { scopeForRepo, type Repo } from "./repo.js";
 
 export type ReconcileInput = Readonly<{ contract?: string; retryHooks?: boolean }>;
-interface KeisReconcile {
+export interface KeisReconcile {
   (input: ReconcileInput & Readonly<{ contract: string }>): Promise<ReconcileCompletion>;
   (input: ReconcileInput & Readonly<{ contract?: undefined }>): Promise<RepoReconcileReport>;
   (input: ReconcileInput): Promise<ReconcileCompletion | RepoReconcileReport>;

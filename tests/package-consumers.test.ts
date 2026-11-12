@@ -38,7 +38,6 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Debt, K
     "AuditReport",
     "AuditOptions",
     "DeliveryObservation",
-    "MutationObservation",
     "KeiyakuWithInput",
   ];
   writeFileSync(

@@ -7,12 +7,13 @@ import { selectRegion as selectRegionValue } from "../src/kanshi/select.js";
 import { observeKanshi as observeComposite } from "../src/kanshi/read.js";
 import {
   Debts as DebtCollection,
-  debtAbsentSchema,
   World as WorldValue,
   Settings,
   nuke as nukeWorld,
   Kanshi,
-  kanshiCountsReportSchema as countsSchema,
+} from "../src/index.js";
+import {
+  debtAbsentSchema,
   debtMutationResultSchema as mutationSchema,
   debtListSchema as listSchema,
   debtReadyListSchema as readySchema,
@@ -21,15 +22,20 @@ import {
   debtReadResultSchema as readSchema,
   debtTreeResultSchema as treeSchema,
   debtUpdateResultSchema as updateSchema,
+} from "../src/debt/index.js";
+import { kanshiCountsReportSchema as countsSchema } from "../src/kanshi/counts.js";
+import {
   settingsSchema as settingsResultSchema,
   settingsNamespaceViewSchema as namespaceSchema,
+} from "../src/settings.js";
+import {
   worldResolutionSchema as resolutionSchema,
   worldLocationSchema as locationSchema,
   worldRootSchema as rootSchema,
   worldEstablishedSchema as establishedSchema,
-  regionReadSchema as regionSchema,
-  nukeResultSchema as resetSchema,
-} from "../src/index.js";
+} from "../src/world.js";
+import { regionReadSchema as regionSchema } from "../src/kanshi/report.js";
+import { nukeResultSchema as resetSchema } from "../src/library/nuke.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
@@ -40,11 +46,13 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import {
   Keis,
   Repo,
+} from "../src/index.js";
+import {
   kanshiReportSchema as reportSchema,
   kanshiContractReportSchema as contractReportSchema,
   kanshiResultSchema as resultSchema,
   kanshiObservationSchema as observationSchema,
-} from "../src/index.js";
+} from "../src/kanshi/index.js";
 
 test("Debt missing-world value has one strict owner schema", () => {
   assertWireRoundTrip(debtAbsentSchema, { kind: "absent" });

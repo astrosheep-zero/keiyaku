@@ -650,7 +650,7 @@ test("CLI nuke classifies required owner stops independently of optional residue
 });
 
 test("native reset awaits independent removals and keeps their counts on an exceptional owner retirement", async () => {
-  const { nukeKeiyaku } = await import("../src/library/nuke.js");
+  const { nukeWithGit } = await import("../src/library/nuke.js");
   const { KeiyakuError } = await import("../src/index.js");
   const fixture = await gitNukeFixture();
   const { raw, world } = fixture;
@@ -660,7 +660,7 @@ test("native reset awaits independent removals and keeps their counts on an exce
     const debt = await Debts.of(world).add({ title: "Independent reset owner" });
     assert.ok(debt.kind === "accepted");
     await assert.rejects(
-      nukeKeiyaku(
+      nukeWithGit(
         { world, confirm: world },
         {
           onPrivateStateSeatClose: () => {

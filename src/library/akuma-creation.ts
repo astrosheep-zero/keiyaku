@@ -140,7 +140,7 @@ export const spawnProgressSchema = z.union([
 ]);
 export type SpawnProgress = z.output<typeof spawnProgressSchema>;
 
-type SpawnWaitObserver = Omit<AskObserver, "admitted"> &
+export type SpawnWaitObserver = Omit<AskObserver, "admitted"> &
   Readonly<{
     admitted?: (tell: TellResult, id: AkumaStatus["id"], head: SpawnWaitHead) => void | Promise<void>;
   }>;

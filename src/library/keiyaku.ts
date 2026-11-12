@@ -1,48 +1,36 @@
 /** @architectureCompositionRoot */
 import { isAbsolute, resolve } from "node:path";
-import { ZodError } from "zod";
+import { ZodError, type z } from "zod";
 import {
   verbs,
+  type KeiyakuRunOptions,
   type VerbName,
   type VerbInput,
   type VerbOutput,
-  type VerbRun,
   type VerbRunFor,
 } from "./keiyaku-verbs.js";
-import type { AskProgress } from "../akuma/akuma-selection-execution.js";
-import type { SpawnProgress } from "./akuma-creation.js";
 import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { World, WorldError } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
 import { Kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
-import {
-  Akumas,
-  type SpawnInput,
-  type ForkInput,
-  type AkumaAskInput,
-  type AkumaTellInput,
-  type AkumaKillInput,
-  type AkumaHistoryInput,
-} from "./akumas.js";
-import type { ContractWaitInput } from "./contract-wait.js";
+import { Akumas } from "./akumas.js";
+import type { AskObserver } from "../akuma/akuma-selection-execution.js";
+import type { SpawnWaitObserver } from "./akuma-creation.js";
 import { deliveryOwner, resolveActor } from "./keiyaku-attribution.js";
 import { akumaCallerFromEnvironment } from "./keiyaku-identity.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import { Settings } from "../settings.js";
-import { Keis, type ReconcileInput } from "./contract-composition.js";
-import type { MutationObservation } from "./contract-outcomes.js";
-import type { AbandonInput, AmendInput, ArcInput, BindInput, ReviewInput, VerifyInput } from "./contract-types.js";
+import { Keis } from "./contract-composition.js";
+import type { BindOutcome, MutationObservation } from "./contract-outcomes.js";
 import { validateArcMarkdown } from "./input.js";
 import { KeiyakuError } from "./outcome.js";
 import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
 import type { AkumaCaller } from "../akuma/caller.js";
-import type { AddDebtInput, AddDebtDocumentInput } from "../debt/index.js";
 import * as debt from "./keiyaku-debt.js";
+import type { AkumaAlias } from "../identity/selector.js";
 import { validateAkumaName } from "../identity/normalize.js";
-import type { DebtUpdateInvocation } from "./keiyaku-debt.js";
-export type { DebtUpdateInvocation } from "./keiyaku-debt.js";
 export { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 
 export type KeiyakuAt = Readonly<{
@@ -52,26 +40,11 @@ export type KeiyakuAt = Readonly<{
   repo?: string;
 }>;
 
-type Selected<T> = T & Readonly<{ contract?: string }>;
-type BindInvocation =
-  | (Omit<Extract<BindInput, { markdown: string }>, "after"> & Readonly<{ after?: readonly string[] }>)
-  | (Omit<Extract<BindInput, { forkOf: ContractId }>, "forkOf"> & Readonly<{ forkOf: string }>);
-type AmendInvocation = Omit<AmendInput, "after"> & Readonly<{ after?: readonly string[] }>;
-type SpawnInvocation = Omit<SpawnInput, "body" | "cwd" | "contract" | "home" | "settings" | "caller" | "initiator"> &
-  Readonly<{
-    prompt?: string;
-    contract?: string;
-    workdir?: string;
-  }>;
-type TellInvocation = Omit<AkumaTellInput, "body" | "repo" | "initiator"> & Readonly<{ prompt: string }>;
-type AskInvocation = Omit<AkumaAskInput, "body" | "repo" | "initiator"> & Readonly<{ prompt: string }>;
-type ForkInvocation = Omit<ForkInput, "repo" | "caller" | "initiator">;
-type KillInvocation = Omit<AkumaKillInput, "repo">;
-type HistoryInvocation = Omit<AkumaHistoryInput, "akuma" | "repo"> & Readonly<{ selector: string; full?: boolean }>;
-type WaitInvocation = Omit<ContractWaitInput, "contracts"> & Readonly<{ selectors: readonly string[] }>;
+type ParsedInput<K extends VerbName> = z.output<(typeof verbs)[K]["input"]>;
+type ExecutionInput<K extends VerbName> = ParsedInput<K> & KeiyakuRunOptions;
 
 /** Invocation composition captures caller coordinates, never ambient process state. */
-type VerbRequest = { [K in VerbName]: Readonly<{ name: K; input: VerbInput<K> }> }[VerbName];
+type VerbRequest = { [K in VerbName]: Readonly<{ name: K; input: ParsedInput<K> }> }[VerbName];
 
 export class Keiyaku {
   static readonly verbs: typeof verbs = verbs;
@@ -96,6 +69,7 @@ export class Keiyaku {
   }
 
   async run<K extends VerbName>(name: K, input: VerbInput<K>, run?: VerbRunFor<K>): Promise<VerbOutput<K>> {
+    run?.signal?.throwIfAborted();
     let parsed: unknown;
     try {
       parsed = verbs[name].input.parse(input);
@@ -121,29 +95,20 @@ export class Keiyaku {
     notify: (event: unknown) => void,
   ): Promise<unknown> {
     const signal = run?.signal === undefined ? {} : { signal: run.signal };
-    const observe = run?.observe;
+    const progress = run?.observe === undefined ? undefined : { observe: notify };
     switch (request.name) {
       case "bind":
-        return this.#bind(request.input as BindInvocation);
+        return this.#bind(request.input);
       case "amend":
         return this.#amend(request.input);
       case "arc":
         return this.#arc(request.input);
       case "deliver":
-        return this.#deliver(
-          { ...request.input, ...signal },
-          observe === undefined ? undefined : { observe: (event) => notify(event) },
-        );
+        return this.#deliver({ ...request.input, ...signal }, progress);
       case "verify":
-        return this.#verify(
-          { ...request.input, ...signal },
-          observe === undefined ? undefined : { observe: (event) => notify(event) },
-        );
+        return this.#verify({ ...request.input, ...signal }, progress);
       case "review":
-        return this.#review(
-          { ...request.input, ...signal },
-          observe === undefined ? undefined : { observe: (event) => notify(event) },
-        );
+        return this.#review({ ...request.input, ...signal }, progress);
       case "abandon":
         return this.#abandon(request.input);
       case "show":
@@ -217,13 +182,13 @@ export class Keiyaku {
                   observe: (observation) => notify({ kind: "live", observation }),
                 },
               }),
-        } as SpawnInvocation);
+        });
       }
       case "fork":
         return this.#fork(request.input);
       case "tell":
-      case "ask": {
-        const input: TellInvocation | AskInvocation = {
+      case "ask":
+        return this.#tell({
           ...request.input,
           ...signal,
           ...(observe === undefined
@@ -234,9 +199,7 @@ export class Keiyaku {
                   observe: (observation) => notify({ kind: "live", observation }),
                 },
               }),
-        };
-        return "schema" in input ? this.#ask(input) : this.#tell(input);
-      }
+        });
       case "kill":
         return this.#kill({ ...request.input, ...signal });
       case "wait":
@@ -248,104 +211,109 @@ export class Keiyaku {
     }
   }
 
-  #dispatchDebt(request: Extract<VerbRequest, { name: `debt.${string}` }>, signal: Readonly<{ signal?: AbortSignal }>) {
+  #dispatchDebt(request: Extract<VerbRequest, { name: `debt.${string}` }>, signal: KeiyakuRunOptions) {
     switch (request.name) {
       case "debt.add":
-        return debt.debtAdd(this.#input, { ...request.input, ...signal } as AddDebtInput, false);
+        return debt.debtAdd(this.#input, { ...request.input, ...signal }, false);
       case "debt.addDocument":
         return debt.debtAdd(this.#input, { ...request.input, ...signal }, true);
       case "debt.update":
-        return debt.debtUpdate(this.#input, { ...request.input, ...signal } as DebtUpdateInvocation);
+        return debt.debtUpdate(this.#input, { ...request.input, ...signal });
       case "debt.doctor":
         return debt.debtDoctor(this.#input);
     }
   }
 
-  async bind(input: VerbInput<"bind">) {
-    const parsed = verbs.bind.input.safeParse(input);
-    if (!parsed.success) throw new KeiyakuUsageError(parsed.error.message);
-    return this.#bind(parsed.data);
+  bind(input: VerbInput<"bind">, run?: VerbRunFor<"bind">): Promise<BindOutcome> {
+    // Generic output describes the wire form; the same execution retains the native handle.
+    return this.run("bind", input, run) as Promise<BindOutcome>;
   }
-  amend(input: VerbInput<"amend">) {
-    return this.run("amend", input);
+  amend(input: VerbInput<"amend">, run?: VerbRunFor<"amend">): Promise<VerbOutput<"amend">> {
+    return this.run("amend", input, run);
   }
-  arc(input: Selected<ArcInput>) {
-    return this.run("arc", input);
+  arc(input: VerbInput<"arc">, run?: VerbRunFor<"arc">): Promise<VerbOutput<"arc">> {
+    return this.run("arc", input, run);
   }
-  deliver(input: VerbInput<"deliver">, run?: VerbRunFor<"deliver">) {
+  deliver(input: VerbInput<"deliver"> = {}, run?: VerbRunFor<"deliver">): Promise<VerbOutput<"deliver">> {
     return this.run("deliver", input, run);
   }
-  verify(input: Omit<Selected<VerifyInput>, "signal">, run?: VerbRunFor<"verify">) {
+  verify(input: VerbInput<"verify"> = {}, run?: VerbRunFor<"verify">): Promise<VerbOutput<"verify">> {
     return this.run("verify", input, run);
   }
-  review(input: Omit<Selected<ReviewInput>, "signal">, run?: VerbRunFor<"review">) {
+  review(input: VerbInput<"review">, run?: VerbRunFor<"review">): Promise<VerbOutput<"review">> {
     return this.run("review", input, run);
   }
-  abandon(input: Selected<AbandonInput>) {
-    return this.run("abandon", input);
+  abandon(input: VerbInput<"abandon"> = {}, run?: VerbRunFor<"abandon">): Promise<VerbOutput<"abandon">> {
+    return this.run("abandon", input, run);
   }
-  show(input: VerbInput<"show"> = {}) {
-    return this.run("show", input);
+  show(input: VerbInput<"show"> = {}, run?: VerbRunFor<"show">): Promise<VerbOutput<"show">> {
+    return this.run("show", input, run);
   }
-  reconcile(input: ReconcileInput = {}) {
-    return this.run("reconcile", input);
+  reconcile(input: VerbInput<"reconcile"> = {}, run?: VerbRunFor<"reconcile">): Promise<VerbOutput<"reconcile">> {
+    return this.run("reconcile", input, run);
   }
-  spawn(input: VerbInput<"spawn">, run?: VerbRun<SpawnProgress>) {
+  spawn(input: VerbInput<"spawn">, run?: VerbRunFor<"spawn">): Promise<VerbOutput<"spawn">> {
     return this.run("spawn", input, run);
   }
-  fork(input: ForkInvocation) {
-    return this.run("fork", input);
+  fork(input: VerbInput<"fork">, run?: VerbRunFor<"fork">): Promise<VerbOutput<"fork">> {
+    return this.run("fork", input, run);
   }
-  tell(input: VerbInput<"tell">, run?: VerbRun<AskProgress>) {
+  tell(input: VerbInput<"tell">, run?: VerbRunFor<"tell">): Promise<VerbOutput<"tell">> {
     return this.run("tell", input, run);
   }
-  ask(input: Omit<AskInvocation, "signal" | "observe">, run?: VerbRun<AskProgress>) {
+  ask(input: VerbInput<"ask">, run?: VerbRunFor<"ask">): Promise<VerbOutput<"ask">> {
     return this.run("ask", input, run);
   }
-  kill(input: Omit<KillInvocation, "signal">, run?: VerbRun) {
+  kill(input: VerbInput<"kill">, run?: VerbRunFor<"kill">): Promise<VerbOutput<"kill">> {
     return this.run("kill", input, run);
   }
-  wait(input: Omit<WaitInvocation, "signal">, run?: VerbRun) {
+  wait(input: VerbInput<"wait">, run?: VerbRunFor<"wait">): Promise<VerbOutput<"wait">> {
     return this.run("wait", input, run);
   }
-  history(input: VerbInput<"history">) {
-    return this.run("history", input);
+  history(input: VerbInput<"history">, run?: VerbRunFor<"history">): Promise<VerbOutput<"history">> {
+    return this.run("history", input, run);
   }
-  report(input: Readonly<{ text: string }>, run?: VerbRun) {
+  report(input: VerbInput<"report">, run?: VerbRunFor<"report">): Promise<VerbOutput<"report">> {
     return this.run("report", input, run);
   }
-  ls(input: VerbInput<"ls">) {
-    return this.run("ls", input);
+  ls(input: VerbInput<"ls">, run?: VerbRunFor<"ls">): Promise<VerbOutput<"ls">> {
+    return this.run("ls", input, run);
   }
-  debtAdd({ signal, ...input }: AddDebtInput) {
-    return this.run("debt.add", input, signal === undefined ? {} : { signal });
+  debtAdd(input: VerbInput<"debt.add">, run?: VerbRunFor<"debt.add">): Promise<VerbOutput<"debt.add">> {
+    return this.run("debt.add", input, run);
   }
-  debtAddDocument({ signal, ...input }: AddDebtDocumentInput) {
-    return this.run("debt.addDocument", input, signal === undefined ? {} : { signal });
+  debtAddDocument(
+    input: VerbInput<"debt.addDocument">,
+    run?: VerbRunFor<"debt.addDocument">,
+  ): Promise<VerbOutput<"debt.addDocument">> {
+    return this.run("debt.addDocument", input, run);
   }
-  debtUpdate({ signal, ...input }: DebtUpdateInvocation) {
-    return this.run("debt.update", input, signal === undefined ? {} : { signal });
+  debtUpdate(input: VerbInput<"debt.update">, run?: VerbRunFor<"debt.update">): Promise<VerbOutput<"debt.update">> {
+    return this.run("debt.update", input, run);
   }
-  debtDoctor(input: VerbInput<"debt.doctor">) {
-    return this.run("debt.doctor", input);
+  debtDoctor(
+    input: VerbInput<"debt.doctor"> = {},
+    run?: VerbRunFor<"debt.doctor">,
+  ): Promise<VerbOutput<"debt.doctor">> {
+    return this.run("debt.doctor", input, run);
   }
-  kanshi(input: VerbInput<"kanshi">) {
-    return this.run("kanshi", input);
+  kanshi(input: VerbInput<"kanshi"> = {}, run?: VerbRunFor<"kanshi">): Promise<VerbOutput<"kanshi">> {
+    return this.run("kanshi", input, run);
   }
-  status(input: VerbInput<"status">) {
-    return this.run("status", input);
+  status(input: VerbInput<"status">, run?: VerbRunFor<"status">): Promise<VerbOutput<"status">> {
+    return this.run("status", input, run);
   }
-  region(input: VerbInput<"region"> = {}) {
-    return this.run("region", input);
+  region(input: VerbInput<"region"> = {}, run?: VerbRunFor<"region">): Promise<VerbOutput<"region">> {
+    return this.run("region", input, run);
   }
-  whoami(input: VerbInput<"whoami">) {
-    return this.run("whoami", input);
+  whoami(input: VerbInput<"whoami"> = {}, run?: VerbRunFor<"whoami">): Promise<VerbOutput<"whoami">> {
+    return this.run("whoami", input, run);
   }
-  settings(input: VerbInput<"settings">) {
-    return this.run("settings", input);
+  settings(input: VerbInput<"settings"> = {}, run?: VerbRunFor<"settings">): Promise<VerbOutput<"settings">> {
+    return this.run("settings", input, run);
   }
-  nuke(input: Readonly<{ confirm?: string }> = {}) {
-    return this.run("nuke", input);
+  nuke(input: VerbInput<"nuke"> = {}, run?: VerbRunFor<"nuke">): Promise<VerbOutput<"nuke">> {
+    return this.run("nuke", input, run);
   }
 
   #coordinates(use: "none" | "optional" | "required", contractWait = false) {
@@ -416,7 +384,7 @@ export class Keiyaku {
     return { id, contract: library.kei({ id }), actor: selectedActor };
   }
 
-  async #bind(input: BindInvocation) {
+  async #bind(input: ParsedInput<"bind">) {
     const { library, actor } = await this.#keis(input.actor);
     if ("forkOf" in input)
       return await library.bind({
@@ -432,7 +400,7 @@ export class Keiyaku {
     });
   }
 
-  async #amend({ contract, ...input }: Selected<AmendInvocation>) {
+  async #amend({ contract, ...input }: VerbInput<"amend">) {
     const { cwd, library, actor } = await this.#keis(input.actor);
     const id = await this.#resolve(library, contract, cwd);
     const { after, ...rest } = input;
@@ -443,7 +411,7 @@ export class Keiyaku {
     });
   }
 
-  async #arc({ contract, ...input }: Selected<ArcInput>) {
+  async #arc({ contract, ...input }: VerbInput<"arc">) {
     const selected = await this.#selected(contract, input.actor);
     try {
       validateArcMarkdown(input.markdown);
@@ -455,25 +423,22 @@ export class Keiyaku {
     return await selected.contract.arc({ ...input, ...selected.actor });
   }
 
-  async #deliver(
-    { contract, ...input }: VerbInput<"deliver"> & Readonly<{ signal?: AbortSignal }>,
-    progress?: MutationObservation,
-  ) {
+  async #deliver({ contract, ...input }: ExecutionInput<"deliver">, progress?: MutationObservation) {
     const selected = (await this.#selected(contract)).contract;
     const { dryRun, ...native } = input;
     return dryRun ? await selected.previewDelivery(native, progress) : await selected.deliver(native, progress);
   }
 
-  async #verify({ contract, ...input }: Selected<VerifyInput>, progress?: MutationObservation) {
+  async #verify({ contract, ...input }: ExecutionInput<"verify">, progress?: MutationObservation) {
     return await (await this.#selected(contract)).contract.verify(input, progress);
   }
 
-  async #review({ contract, ...input }: Selected<ReviewInput>, progress?: MutationObservation) {
+  async #review({ contract, ...input }: ExecutionInput<"review">, progress?: MutationObservation) {
     const selected = await this.#selected(contract, input.actor);
     return await selected.contract.review({ ...input, ...selected.actor }, progress);
   }
 
-  async #abandon({ contract, ...input }: Selected<AbandonInput>) {
+  async #abandon({ contract, ...input }: VerbInput<"abandon">) {
     const selected = await this.#selected(contract, input.actor);
     return await selected.contract.abandon({ ...input, ...selected.actor });
   }
@@ -484,14 +449,22 @@ export class Keiyaku {
     return await (await this.#selected(input.id)).contract.guidance();
   }
 
-  async #reconcile(input: ReconcileInput = {}) {
+  async #reconcile(input: VerbInput<"reconcile">) {
     const { cwd, library } = await this.#keis();
     if (input.contract === undefined) return await library.reconcile(input);
     const id = await this.#resolve(library, input.contract, cwd);
     return await library.reconcile({ ...input, contract: id });
   }
 
-  async #spawn({ prompt, contract, workdir, writableDirectories, observe, ...input }: SpawnInvocation) {
+  async #spawn({
+    prompt,
+    contract,
+    workdir,
+    writableDirectories,
+    alias,
+    observe,
+    ...input
+  }: ExecutionInput<"spawn"> & Readonly<{ observe?: SpawnWaitObserver }>) {
     const at = await this.#coordinates(contract === undefined ? "none" : "required");
     const cwd =
       workdir === undefined
@@ -520,6 +493,7 @@ export class Keiyaku {
       ...input,
       cwd,
       settings: configuration,
+      ...(alias === undefined ? {} : { alias: alias as AkumaAlias }),
       ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
       ...(prompt === undefined ? {} : { body: prompt }),
       ...(directories === undefined ? {} : { writableDirectories: directories }),
@@ -556,7 +530,7 @@ export class Keiyaku {
     return { at, akumas: Akumas.of(at.world) };
   }
 
-  async #fork(input: ForkInvocation) {
+  async #fork(input: VerbInput<"fork">) {
     const { at, akumas } = await this.#akumas();
     const caller = await this.#caller();
     const initiator = deliveryOwner(this.#input.environment);
@@ -568,34 +542,24 @@ export class Keiyaku {
     });
   }
 
-  async #tell({ prompt, ...input }: TellInvocation) {
+  async #tell({ prompt, ...input }: ExecutionInput<"tell" | "ask"> & Readonly<{ observe?: AskObserver }>) {
     const { at, akumas } = await this.#akumas();
     const initiator = deliveryOwner(this.#input.environment);
-    return await akumas.tell({
+    const native = {
       ...input,
       body: prompt,
       ...(at.repo === undefined ? {} : { repo: at.repo }),
       ...(initiator === undefined ? {} : { initiator }),
-    });
+    };
+    return "schema" in native ? akumas.ask(native) : akumas.tell(native);
   }
 
-  async #ask({ prompt, ...input }: AskInvocation) {
-    const { at, akumas } = await this.#akumas();
-    const initiator = deliveryOwner(this.#input.environment);
-    return await akumas.ask({
-      ...input,
-      body: prompt,
-      ...(at.repo === undefined ? {} : { repo: at.repo }),
-      ...(initiator === undefined ? {} : { initiator }),
-    });
-  }
-
-  async #kill(input: KillInvocation) {
+  async #kill(input: ExecutionInput<"kill">) {
     const { at, akumas } = await this.#akumas();
     return await akumas.kill({ ...input, ...(at.repo === undefined ? {} : { repo: at.repo }) });
   }
 
-  async #wait({ selectors, ...input }: WaitInvocation) {
+  async #wait({ selectors, ...input }: ExecutionInput<"wait">) {
     const contracts = selectors.filter((selector) => selector.startsWith("kei/"));
     if (contracts.length > 0) {
       const at = await this.#coordinates("required", true);
@@ -606,20 +570,20 @@ export class Keiyaku {
     return await akumas.wait({ akuma: selectors, ...input, ...(at.repo === undefined ? {} : { repo: at.repo }) });
   }
 
-  async #history({ selector, full, ...input }: HistoryInvocation) {
+  async #history({ selector, ...input }: VerbInput<"history">) {
     if (selector.startsWith("kei/")) {
       const at = await this.#coordinates("required");
       if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
       const library = Keis.of(at.repo);
       return await library
         .kei({ id: this.#fullId(library, selector) })
-        .history(full === undefined ? undefined : { full });
+        .history("full" in input ? { full: input.full } : undefined);
     }
     const { at, akumas } = await this.#akumas();
     return await akumas.history({ akuma: selector, ...input, ...(at.repo === undefined ? {} : { repo: at.repo }) });
   }
 
-  async #report(input: Readonly<{ text: string; signal?: AbortSignal }>) {
+  async #report(input: ExecutionInput<"report">) {
     await this.#coordinates("none");
     const environment = this.#input.environment;
     if (environment.KEIYAKU_ACTOR_ID === undefined || environment.KEIYAKU_ACTOR_WORLD === undefined)
@@ -717,7 +681,7 @@ export class Keiyaku {
     });
   }
 
-  async #nuke(input: Readonly<{ confirm?: string }> = {}) {
+  async #nuke(input: VerbInput<"nuke">) {
     const at = await this.#coordinates("none");
     if (at.world === null) throw new KeiyakuUsageError("no Keiyaku world contains the invocation cwd");
     return await nukeKeiyaku({ world: at.world, ...input });

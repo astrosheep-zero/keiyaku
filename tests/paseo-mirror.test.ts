@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { ProviderEventSchema, type ProviderEvent } from "@getpaseo/plugin/server/provider";
-import { createHistorySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
-import { activityHistorySchema } from "../src/akuma/projection.js";
+import { historySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
 
-const historySchema = createHistorySchema(activityHistorySchema);
 const at = "2026-10-15T00:00:00.000Z";
 /**
  * One complete bounded window, exactly as the stream reports each frame. The

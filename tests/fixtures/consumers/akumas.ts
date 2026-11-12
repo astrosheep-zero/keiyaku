@@ -4,9 +4,6 @@ import {
   AkumaHost,
   Akumas,
   Keis,
-  actorId,
-  akumaStatusSchema,
-  akumaCatalogueSchema,
   nuke,
   type AkumaId,
   type AkumaAliasesInput,
@@ -38,7 +35,7 @@ if (nativeError instanceof AkumaArchetypeError) {
 }
 void [catalogue, catalogueRows];
 
-const contractPolicy: KeisOptions = { actor: actorId("contract-owner") };
+const contractPolicy: KeisOptions = { actor: "contract-owner" };
 Keis.of(repo, contractPolicy);
 
 const scope: AkumaHostScope = AkumaHost.inProcess({ reportDiagnostic: console.error });
@@ -53,7 +50,7 @@ const scopedCatalogue: Promise<ArchetypeCatalog> = plural.archetypes({ home: cat
 void scopedCatalogue;
 const rosterInput: AkumaListInput = { limit: 25, repo };
 const roster: Promise<AkumaList> = plural.list(rosterInput);
-const row = akumaCatalogueSchema.parse(await roster).rows?.[0];
+const row = (await roster).rows?.[0];
 const parent: AkumaId | undefined = row?.parentAkumaId;
 void parent;
 const aliasInput: AkumaAliasesInput = { akumaIds: [aku, "aku/worker/1234abcd"] };
@@ -66,11 +63,6 @@ const entry = singleStatus.work.summary;
 if (entry !== undefined) {
   // @ts-expect-error public current-work summaries retain the owner's readonly projection
   entry.text = "changed";
-}
-const wireEntry = akumaStatusSchema.parse(singleStatus).work.summary;
-if (wireEntry !== undefined) {
-  // @ts-expect-error parsed public current-work summaries remain readonly
-  wireEntry.text = "changed";
 }
 const constructor: Function = Akuma;
 const prototype: Akuma = Akuma.prototype;

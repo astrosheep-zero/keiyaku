@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { actorId, Akumas, Keis, Repo, World } from "../src/index.js";
+import { Akumas, Keis, Repo, World } from "../src/index.js";
 
 test("Contract and Akumas capture only their own composition inputs", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-product-boundaries-"));
@@ -16,7 +16,9 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   assert.throws(() => Akumas.of(null as never), TypeError);
   assert.deepEqual(Object.keys(Akumas.of(world)), []);
 
-  const contracts = Keis.of(repo, { actor: actorId("contract-actor") });
+  assert.throws(() => Keis.of(repo, { actor: " \t\n" }), TypeError);
+  assert.throws(() => Keis.of(repo, { actor: 7 } as never), TypeError);
+  const contracts = Keis.of(repo, { actor: "contract-actor" });
   assert.deepEqual(Object.keys(contracts).sort(), ["bind", "kei", "list", "observe", "reconcile", "resolve", "wait"]);
   assert.equal("spawn" in contracts, false);
   assert.equal("nuke" in contracts, false);

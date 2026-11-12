@@ -10,7 +10,7 @@ import type {
   verifyOutcomeSchema,
   reviewOutcomeSchema,
   deliveryPreviewOutcomeSchema,
-} from "../../src/index.js";
+} from "../../src/library/contract-outcomes.js";
 import { parseArgv } from "../../src/cli/parse.js";
 import { runCliCommand, type CliRuntimeInput } from "../../src/cli/runtime.js";
 import type { ContractCatalogue, ContractSummary } from "../../src/index.js";

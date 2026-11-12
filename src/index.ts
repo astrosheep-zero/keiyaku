@@ -1,54 +1,17 @@
 /**
- * The package root: the curated Contract, Akuma, Akumas, Debt, Kanshi, World,
- * Settings, and Plugin surfaces. Internal composition, execution, and
- * configuration helpers stay off this entry; only CLI and Body import them.
+ * The package root exposes native products and named domain types.
+ * Validators and private construction, execution, and storage stay with owners.
  */
-export { akumaStatusSchema } from "./akuma/akuma.js";
-export { akumaCatalogueSchema } from "./akuma/selection-observation.js";
-export { activityHistorySchema, activityRowSchema, activitySnapshotSchema, tellRowSchema } from "./akuma/projection.js";
-export { akumaCallerSchema } from "./akuma/caller.js";
-export { killEvidenceSchema } from "./akuma/heart/facts.js";
-export { tellWakeSchema } from "./akuma/call-initial-tell.js";
-export { akumaIdleResultSchema, akumaReportResultSchema } from "./akuma/akuma-instance.js";
-export { liveStatusObservationSchema, askProgressSchema } from "./akuma/akuma-selection-execution.js";
-export type { AskProgress } from "./akuma/akuma-selection-execution.js";
-export { archetypeCatalogSchema, archetypeCatalogRowSchema } from "./akuma/archetype.js";
-export {
-  akumaObservationSchema,
-  akumaWaitResultSchema,
-  akumaWaitItemSchema,
-  akumaKillResultSchema,
-  akumaTellResultSchema,
-  akumaAskResultSchema,
-  akumaAskObservationSchema,
-} from "./akuma/selection-observation.js";
-export { akumaHistoryResultSchema } from "./library/selection.js";
-export {
-  spawnResultSchema,
-  spawnProgressSchema,
-  spawnWaitHeadSchema,
-  forkResultSchema,
-} from "./library/akuma-creation.js";
-export type { SpawnProgress } from "./library/akuma-creation.js";
-export { whoamiFactsSchema } from "./library/keiyaku-identity.js";
-export type { WhoamiFacts } from "./library/keiyaku-identity.js";
-export { dispatchSchema, dispatchFailureSchema } from "./dispatch/index.js";
 export { AkumaHost } from "./body-host.js";
 export type { AkumaHostScope } from "./body-host.js";
 export { AuthorityCorruptionError } from "./core/facts/errors.js";
-export { deliverySchema } from "./library/delivery.js";
-export type { Delivery } from "./library/delivery.js";
-export { Kei, guidanceSchema } from "./library/kei.js";
+export { Kei } from "./library/kei.js";
 export type { Guidance } from "./library/kei.js";
-export {
-  contractResolutionSchema,
-  contractSelectorRefusalSchema,
-  contractHistorySchema,
-  contractHistoryEventSchema,
-} from "./library/contract-types.js";
+export type { Delivery } from "./library/delivery.js";
 export { Keiyaku, KeiyakuArcDocumentError, KeiyakuUsageError } from "./library/keiyaku.js";
-export type { KeiyakuAt, DebtUpdateInvocation } from "./library/keiyaku.js";
+export type { KeiyakuAt } from "./library/keiyaku.js";
 export type {
+  KeiyakuRunOptions,
   VerbEntry,
   VerbName,
   VerbInput,
@@ -60,11 +23,10 @@ export type {
   VerbCompletion,
 } from "./library/keiyaku-verbs.js";
 export { Keis } from "./library/contract-composition.js";
+export type { KeisReconcile, ReconcileInput } from "./library/contract-composition.js";
 export { KeiyakuError } from "./errors.js";
 export type { KeiyakuErrorCategory, KeiyakuErrorOptions } from "./errors.js";
 export { NoGitWorldError, Repo } from "./library/repo.js";
-export { actorId } from "./core/facts/types.js";
-export { z } from "zod";
 export {
   Akuma,
   AkumaArchetypeError,
@@ -79,6 +41,7 @@ export type {
   AkumaOrigin,
   ActivityHistory,
   ActivityRow,
+  ActivitySnapshot,
   AkumaId,
   AkumaAskObservation,
   AkumaAskOptions,
@@ -90,6 +53,7 @@ export type {
   AkumaIdleResult,
   AkumaReportOptions,
   AkumaReportResult,
+  AkumaRosterInput,
   AkumaSignalOptions,
   AkumaStatus,
   AkumaStreamSnapshot,
@@ -102,6 +66,13 @@ export type {
   JsonSchemaDocument,
   KillEvidence,
 } from "./akuma/index.js";
+export type { AskObserver, AskProgress } from "./akuma/akuma-selection-execution.js";
+export type { LiveStatusObservation } from "./akuma/akuma-observe.js";
+export type { TellResult, TellWake } from "./akuma/call-initial-tell.js";
+export type { AkumaAlias } from "./identity/selector.js";
+export type { AkumaAddressRefusal, AkumaSetAddressInput } from "./library/address.js";
+export type { SpawnProgress, SpawnWaitObserver } from "./library/akuma-creation.js";
+export type { WhoamiFacts } from "./library/keiyaku-identity.js";
 export type {
   ActorId,
   ChangeId,
@@ -113,17 +84,11 @@ export type {
   FactKind,
   SnapshotId,
 } from "./core/facts/types.js";
-export {
-  Kanshi,
-  kanshiCountsReportSchema,
-  regionReadSchema,
-  kanshiReportSchema,
-  kanshiContractReportSchema,
-  kanshiResultSchema,
-  kanshiObservationSchema,
-} from "./kanshi/index.js";
-export type { KanshiScopeInput, KanshiBoardOptions, KanshiCountsReport } from "./kanshi/index.js";
+export { Kanshi } from "./kanshi/index.js";
 export type {
+  KanshiScopeInput,
+  KanshiBoardOptions,
+  KanshiCountsReport,
   AkumaKanshiRow,
   AkumaKanshiWorld,
   ContractEndpointObservation,
@@ -167,24 +132,12 @@ export type {
   SpawnWaitHead,
 } from "./library/akumas.js";
 export type { ContinuationReport } from "./library/continuation.js";
-export { contractWaitMemberSchema, contractWaitResultSchema } from "./library/contract-wait.js";
 export type {
   ContractWaitInput,
   ContractWaitOptions,
   ContractWaitMember,
   ContractWaitResult,
 } from "./library/contract-wait.js";
-export type { ReconcileInput } from "./library/contract-composition.js";
-export {
-  arcOutcomeSchema,
-  abandonOutcomeSchema,
-  bindOutcomeSchema,
-  amendOutcomeSchema,
-  deliveryPreviewOutcomeSchema,
-  deliverOutcomeSchema,
-  verifyOutcomeSchema,
-  reviewOutcomeSchema,
-} from "./library/contract-outcomes.js";
 export type {
   AbandonOutcome,
   AmendOutcome,
@@ -193,6 +146,7 @@ export type {
   DeliveryPreviewOutcome,
   BindOutcome,
   DeliverOutcome,
+  MutationObservation,
   ReviewOutcome,
   VerifyOutcome,
 } from "./library/contract-outcomes.js";
@@ -214,11 +168,13 @@ export type {
   KeisOptions,
   ReviewInput,
   VerifyInput,
+  Gate,
 } from "./library/contract-types.js";
-export { nukeKeiyaku as nuke, nukeResultSchema } from "./library/nuke.js";
+export { nukeKeiyaku as nuke } from "./library/nuke.js";
 export type { NukeInput, NukeResult } from "./library/nuke.js";
 export type {
   InvocationIssue,
+  ResetCounts,
   ResetIssue,
   PartialOutcomeEnvelope,
   HandoffOutcome,
@@ -254,16 +210,8 @@ export type {
 export type { VerifyValue, VerificationCheck, VerificationStop } from "./protocol/verify.js";
 export type { Placement, Placed, RequirementProblem } from "./protocol/completion.js";
 export type { DeliveryPreviewReport } from "./protocol/delivery-preview.js";
-export { executionObservationSchema } from "./protocol/execution-observation.js";
-export { contractStateSchema, journalEntrySchema } from "./protocol/result-leaves.js";
 export type { ExecutionObservation, ExecutionObserver } from "./protocol/execution-observation.js";
 export type { ExecutionStop } from "./protocol/progress.js";
-export {
-  contractSummarySchema,
-  contractDetailSchema,
-  contractCatalogueSchema,
-  contractObservationSchema,
-} from "./protocol/read/status.js";
 export type {
   ContractAfterEdge,
   ContractCatalogue,
@@ -275,15 +223,7 @@ export type {
   ContractObservation,
   ContractPhase,
 } from "./protocol/read/status.js";
-export {
-  SettingsError,
-  Settings,
-  settingsSchema,
-  settingsNamespaceViewSchema,
-  settingsScopeStateSchema,
-  settingsEntrySchema,
-} from "./settings.js";
-export type { Gate } from "./library/contract-types.js";
+export { SettingsError, Settings } from "./settings.js";
 export type {
   SettingsEntry,
   SettingsInput,
@@ -293,37 +233,41 @@ export type {
   SettingsScopeState,
 } from "./settings.js";
 export type { SettlementAction, SettlementLag, SettlementReport } from "./settlement/settle.js";
-export type * from "./debt/index.js";
-export {
-  DebtAuthorityCorruptionError,
-  Debts,
-  debtAbsentSchema,
-  debtDetailSchema,
-  debtSummarySchema,
-  debtWarningSchema,
-  debtReadPageSchema,
-  debtReadResultSchema,
-  debtShowResultSchema,
-  debtCatalogueSchema,
-  debtListSchema,
-  debtReadyListSchema,
-  readyDebtRowSchema,
-  debtParentReadRefusalSchema,
-  debtTreeRootSchema,
-  blockedDebtListSchema,
-  debtDoctorReportSchema,
-  debtTreeResultSchema,
-  debtMutationResultSchema,
-  debtUpdateResultSchema,
+export { DebtAuthorityCorruptionError, Debts } from "./debt/index.js";
+export type {
+  AddDebtDocumentInput,
+  AddDebtInput,
+  BlockedDebtList,
+  BlockedDebtRow,
+  Debt,
+  DebtAbsent,
+  DebtCatalogue,
+  DebtChange,
+  DebtDetail,
+  DebtDoctorIssue,
+  DebtDoctorReport,
+  DebtId,
+  DebtList,
+  DebtMutationResult,
+  DebtParentReadRefusal,
+  DebtPriority,
+  DebtReadPage,
+  DebtReadResult,
+  DebtReadyList,
+  DebtRef,
+  DebtRefusal,
+  DebtRetry,
+  DebtShowItem,
+  DebtShowResult,
+  DebtState,
+  DebtSummary,
+  DebtTreeNode,
+  DebtTreeResult,
+  DebtTreeRoot,
+  DebtUpdateResult,
+  DebtWarning,
+  ReadyDebtRow,
+  UpdateDebtInput,
 } from "./debt/index.js";
-export {
-  World,
-  WorldError,
-  worldRootSchema,
-  worldResolutionSchema,
-  worldLocationSchema,
-  worldEstablishedSchema,
-} from "./world.js";
-export type { WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";
-
-export { reconcileCompletionSchema, repoReconcileReportSchema, reconcileResultSchema } from "./library/reconcile.js";
+export { World, WorldError } from "./world.js";
+export type { WorldInput, WorldResolution, WorldResolutionInput, WorldRoot } from "./world.js";

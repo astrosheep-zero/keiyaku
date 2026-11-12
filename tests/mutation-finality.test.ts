@@ -175,7 +175,7 @@ test("mutation nuke confirmed seat-close failure remains a typed outcome", async
   const { join } = await import("node:path");
   const { World } = await import("../src/world.js");
   const { nukeGit } = await import("../src/git/nuke.js");
-  const { nukeKeiyaku } = await import("../src/library/nuke.js");
+  const { nukeWithGit } = await import("../src/library/nuke.js");
   const { makeGitRepository } = await import("./support/git.js");
   const raw = makeGitRepository();
   raw.run(["config", "user.name", "Test User"]);
@@ -196,7 +196,7 @@ test("mutation nuke confirmed seat-close failure remains a typed outcome", async
     });
 
     raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
-    const publicResult = await nukeKeiyaku({ world, confirm: world }, { onPrivateStateSeatClose: close });
+    const publicResult = await nukeWithGit({ world, confirm: world }, { onPrivateStateSeatClose: close });
     assert.equal(publicResult.kind, "accepted");
     assert.ok(publicResult.kind === "accepted");
     assert.equal(publicResult.refsRemoved, 1);

@@ -53,6 +53,7 @@ export const LOCAL_TEST_FILES = [
   "tests/pi-extension.test.ts",
   "tests/pi-status.test.ts",
   "tests/product-boundaries.test.ts",
+  "tests/public-sdk-surface.test.ts",
   "tests/region.test.ts",
   "tests/settings.test.ts",
   "tests/v4-cut.test.ts",

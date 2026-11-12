@@ -48,9 +48,13 @@ form. Native Contract capabilities retain their process-local custody
 without serializing it or reconstructing capabilities from JSON. Schema parity
 is against their wire projection.
 
-Schemas are published for consumers, not enforced again on trusted local
-results. Shared semantic declarations remain shared in composed answers rather
-than expanding a separate vocabulary for each use. Core does not depend on a schema implementation. The nearest
+Schemas stay beside their producing owners for internal descriptions and transport
+adaptation. The package root publishes native values and named domain types rather
+than validators or a schema implementation. Transports consuming untrusted wire
+values own their local structural admission without acquiring product authority.
+Trusted local results are not parsed again. Shared semantic declarations remain
+shared in composed answers rather than expanding a separate vocabulary for each
+use. Core does not depend on a schema implementation. The nearest
 schema-using owner projecting a core fact owns its declaration; shared
 declarations live below their consumers without cycles. Caller values are
 validated once at their Library boundary. Structural validation grants no

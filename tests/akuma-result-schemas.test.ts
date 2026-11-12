@@ -8,6 +8,18 @@ import type { BodyLauncher } from "../src/akuma/body-launch.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import * as root from "../src/index.js";
+import { activityHistorySchema, activitySnapshotSchema } from "../src/akuma/projection.js";
+import { akumaStatusSchema } from "../src/akuma/akuma.js";
+import {
+  akumaAskResultSchema, akumaCatalogueSchema, akumaKillResultSchema, akumaObservationSchema,
+  akumaTellResultSchema, akumaWaitResultSchema,
+} from "../src/akuma/selection-observation.js";
+import { akumaHistoryResultSchema } from "../src/library/selection.js";
+import { akumaIdleResultSchema, akumaReportResultSchema } from "../src/akuma/akuma-instance.js";
+import { archetypeCatalogSchema } from "../src/akuma/archetype.js";
+import { forkResultSchema, spawnResultSchema, spawnWaitHeadSchema } from "../src/library/akuma-creation.js";
+import { killEvidenceSchema } from "../src/akuma/heart/facts.js";
+import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { appendActivity, beginTurn, endTurn } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
@@ -31,25 +43,25 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   );
   const akumas = akumasWithLauncher(fixture.world, launcher);
   const id = fixture.allocated.id;
-  assertWireRoundTrip(root.akumaCatalogueSchema, await akumas.list());
-  assertWireRoundTrip(root.akumaObservationSchema, await akumas.status({ akuma: id }));
+  assertWireRoundTrip(akumaCatalogueSchema, await akumas.list());
+  assertWireRoundTrip(akumaObservationSchema, await akumas.status({ akuma: id }));
   const status = await fixture.akuma.status();
-  assertWireRoundTrip(root.akumaStatusSchema, status);
-  const parsed = root.akumaStatusSchema.parse(status);
+  assertWireRoundTrip(akumaStatusSchema, status);
+  const parsed = akumaStatusSchema.parse(status);
   assert.ok(Object.isFrozen(parsed));
   assert.ok(Object.isFrozen(parsed.birth));
   assert.ok(Object.isFrozen(parsed.birth.origin));
   assert.ok(Object.isFrozen(parsed.work));
   assert.equal(
-    root.akumaStatusSchema.safeParse({
+    akumaStatusSchema.safeParse({
       ...status,
       birth: { ...status.birth, origin: { ...status.birth.origin, extra: true } },
     }).success,
     false,
   );
-  assert.equal(root.akumaStatusSchema.safeParse({ ...status, cwd: undefined }).success, false);
+  assert.equal(akumaStatusSchema.safeParse({ ...status, cwd: undefined }).success, false);
   assert.deepEqual(akumaOriginSchema.parse({ kind: "direct", extra: true }), { kind: "direct" });
-  const json = z.toJSONSchema(root.akumaStatusSchema, { io: "input" });
+  const json = z.toJSONSchema(akumaStatusSchema, { io: "input" });
   const origin = (json.properties as Record<string, any>).birth.properties.origin.anyOf as Array<
     Record<string, unknown>
   >;
@@ -58,22 +70,22 @@ test("Akuma result wire schemas preserve real observations and mutations", async
     [false, false],
   );
   assertWireRoundTrip(
-    root.akumaReportResultSchema,
+    akumaReportResultSchema,
     await fixture.akuma.report("hello"),
   );
-  assertWireRoundTrip(root.akumaHistoryResultSchema, await akumas.history({ akuma: id, id: "turn/999" }));
-  assertWireRoundTrip(root.activityHistorySchema, await fixture.akuma.history());
+  assertWireRoundTrip(akumaHistoryResultSchema, await akumas.history({ akuma: id, id: "turn/999" }));
+  assertWireRoundTrip(activityHistorySchema, await fixture.akuma.history());
   const completedWait = await akumas.wait({ akuma: [id], timeoutMs: 0 });
   const completedIdle = await fixture.akuma.idle({ timeoutMs: 0 });
   assert.equal(completedWait.reason, "completed");
   assert.equal(completedIdle.reason, "completed");
-  assertWireRoundTrip(root.akumaWaitResultSchema, completedWait);
-  assertWireRoundTrip(root.akumaIdleResultSchema, completedIdle);
-  assertWireRoundTrip(root.akumaTellResultSchema, await akumas.tell({ akuma: id, body: "first" }));
+  assertWireRoundTrip(akumaWaitResultSchema, completedWait);
+  assertWireRoundTrip(akumaIdleResultSchema, completedIdle);
+  assertWireRoundTrip(akumaTellResultSchema, await akumas.tell({ akuma: id, body: "first" }));
   await settleFixtureBodies(bodies);
   let admitted = false;
   assertWireRoundTrip(
-    root.akumaTellResultSchema,
+    akumaTellResultSchema,
     await akumas.tell({
       wait: true,
       akuma: id,
@@ -84,19 +96,19 @@ test("Akuma result wire schemas preserve real observations and mutations", async
           admitted = true;
           assertWireRoundTrip(tellResultSchema, tell);
         },
-        observe: (observation) => assertWireRoundTrip(root.liveStatusObservationSchema, observation),
+        observe: (observation) => assertWireRoundTrip(liveStatusObservationSchema, observation),
       },
     }),
   );
   assert.equal(admitted, true);
   await settleFixtureBodies(bodies);
-  assertWireRoundTrip(root.akumaHistoryResultSchema, await akumas.history({ akuma: id }));
-  assertWireRoundTrip(root.activityHistorySchema, await fixture.akuma.history());
-  assertWireRoundTrip(root.akumaKillResultSchema, await akumas.kill({ akuma: [id] }));
-  assertWireRoundTrip(root.killEvidenceSchema, await fixture.akuma.kill());
+  assertWireRoundTrip(akumaHistoryResultSchema, await akumas.history({ akuma: id }));
+  assertWireRoundTrip(activityHistorySchema, await fixture.akuma.history());
+  assertWireRoundTrip(akumaKillResultSchema, await akumas.kill({ akuma: [id] }));
+  assertWireRoundTrip(killEvidenceSchema, await fixture.akuma.kill());
   const stream = fixture.akuma.stream()[Symbol.asyncIterator]();
   const first = await stream.next();
-  assertWireRoundTrip(root.activityHistorySchema, first.value);
+  assertWireRoundTrip(activityHistorySchema, first.value);
   await stream.return?.();
 });
 
@@ -118,28 +130,28 @@ test("standalone public status shares compact active and idle observations while
     const native = await owner.status();
     assert.ok(native.timeline.entries.some(entry => entry.kind === "gap"));
     const active = await aku.status();
-    assertWireRoundTrip(root.akumaStatusSchema, active);
+    assertWireRoundTrip(akumaStatusSchema, active);
     assert.deepEqual(active.work, projectCurrentWork(native.timeline));
     assert.ok(active.work.summary?.id === activeId && active.work.summary.clipped);
     assert.match(active.work.summary.text, /^run \$ npm test/u);
     assert.deepEqual(active.work.activeTools, [{ id: activeId, turnSequence: turn.sequence, toolId: "native-long-tool" }]);
-    assert.equal(root.akumaStatusSchema.safeParse(native).success, false);
+    assert.equal(akumaStatusSchema.safeParse(native).success, false);
     const answer = `answer ${"🙂".repeat(600)}`;
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:04.000Z", outcome: { kind: "answered", answer, session: { sessionId: "compact-status" } } });
     const idle = await aku.status();
-    assertWireRoundTrip(root.akumaStatusSchema, idle);
+    assertWireRoundTrip(akumaStatusSchema, idle);
     assert.equal(idle.work.kind, "idle");
     assert.equal(idle.work.outcome?.verdict, "answered");
     assert.equal(idle.work.outcome?.historyId, `turn/${turn.sequence}`);
     assert.equal(idle.work.latestActivity, idle.work.outcome?.activityId);
     const waited = await aku.idle({ timeoutMs: 0 });
-    assertWireRoundTrip(root.akumaIdleResultSchema, waited);
+    assertWireRoundTrip(akumaIdleResultSchema, waited);
     assert.deepEqual(waited.status.work, idle.work);
     const history = await aku.history();
     assert.ok(history.rows.some(row => row.kind === "outcome" && row.outcome.kind === "answered" && row.outcome.answer === answer));
     const stream = aku.stream()[Symbol.asyncIterator]();
     try {
-      const window = root.activityHistorySchema.parse((await stream.next()).value);
+      const window = activityHistorySchema.parse((await stream.next()).value);
       assert.ok(window.rows.some(row => row.kind === "tool" && row.toolId === "native-long-tool"));
     } finally { await stream.return?.(); }
   } finally { born.holder.release(); }
@@ -182,7 +194,7 @@ test("public timeline wire is strict, deeply readonly, and exact-optional", () =
     reportedChanges: [],
     reportedChangesOmitted: 0,
   };
-  const parsed = root.activitySnapshotSchema.parse(snapshot);
+  const parsed = activitySnapshotSchema.parse(snapshot);
   assert.equal(parsed.kind, "open");
   if (parsed.kind !== "open") throw new Error("expected open snapshot");
   assert.ok(Object.isFrozen(parsed));
@@ -193,16 +205,16 @@ test("public timeline wire is strict, deeply readonly, and exact-optional", () =
   if (entry.kind !== "row" || entry.row.kind !== "tool") throw new Error("expected tool row");
   assert.ok(Object.isFrozen(entry.row));
   assert.ok(Object.isFrozen(entry.row.call));
-  assert.equal(root.activitySnapshotSchema.safeParse({ ...snapshot, openingSequence: undefined }).success, false);
+  assert.equal(activitySnapshotSchema.safeParse({ ...snapshot, openingSequence: undefined }).success, false);
   assert.equal(
-    root.activitySnapshotSchema.safeParse({
+    activitySnapshotSchema.safeParse({
       ...snapshot,
       entries: [{ kind: "row", row: { ...tool, call: { ...tool.call, offset: undefined } } }],
     }).success,
     false,
   );
   assert.equal(
-    root.activitySnapshotSchema.safeParse({
+    activitySnapshotSchema.safeParse({
       ...snapshot,
       entries: [{ kind: "row", row: { ...tool, call: { ...tool.call, extra: true } } }],
     }).success,
@@ -247,20 +259,20 @@ test("recorded and refused reports retain their wire evidence", async (context) 
     });
     const idle = await akuma.idle({ timeoutMs: 0 });
     assert.equal(idle.reason, "deadline");
-    assertWireRoundTrip(root.akumaIdleResultSchema, idle);
+    assertWireRoundTrip(akumaIdleResultSchema, idle);
     const wait = await api.wait({ akuma: [born.allocated.id], timeoutMs: 0 });
     assert.equal(wait.reason, "deadline");
-    assertWireRoundTrip(root.akumaWaitResultSchema, wait);
+    assertWireRoundTrip(akumaWaitResultSchema, wait);
     const ask = await api.tell({ akuma: born.allocated.id, body: "queued", wait: true, timeoutMs: 0 });
     assert.equal(ask.input?.kind, "deadline");
-    assertWireRoundTrip(root.akumaTellResultSchema, ask);
+    assertWireRoundTrip(akumaTellResultSchema, ask);
     const report = await akuma.report("working");
     assert.equal(report.kind, "recorded");
-    assertWireRoundTrip(root.akumaReportResultSchema, report);
+    assertWireRoundTrip(akumaReportResultSchema, report);
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:00.000Z", outcome: { kind: "canceled" } });
     const refused = await akuma.report("closed");
     assert.equal(refused.kind, "refused");
-    assertWireRoundTrip(root.akumaReportResultSchema, refused);
+    assertWireRoundTrip(akumaReportResultSchema, refused);
   } finally {
     born.holder.release();
   }
@@ -281,7 +293,7 @@ test("a fresh direct ask returns an answered wire result", async (context) => {
     timeoutMs: 5000,
   });
   assert.equal(ask.kind, "answered");
-  assertWireRoundTrip(root.akumaAskResultSchema, ask);
+  assertWireRoundTrip(akumaAskResultSchema, ask);
   await settleFixtureBodies(bodies);
 });
 
@@ -316,7 +328,7 @@ test("spawn and fork results describe real creation and refusal", async (context
   const spawned = await akumas.spawn({ akumaName: "worker", home, cwd: directory });
   assert.equal(spawned.kind, "spawned");
   assert.equal(spawned.input, undefined);
-  assertWireRoundTrip(root.spawnResultSchema, spawned);
+  assertWireRoundTrip(spawnResultSchema, spawned);
   assertWireConformance(root.Keiyaku.verbs.spawn.normal, spawned);
   let admitted = false;
   const observed = await akumas.spawn({
@@ -330,16 +342,16 @@ test("spawn and fork results describe real creation and refusal", async (context
       admitted: (tell, _id, head) => {
         admitted = true;
         assertWireRoundTrip(tellResultSchema, tell);
-        assertWireRoundTrip(root.spawnWaitHeadSchema, head);
+        assertWireRoundTrip(spawnWaitHeadSchema, head);
       },
-      observe: (observation) => assertWireRoundTrip(root.liveStatusObservationSchema, observation),
+      observe: (observation) => assertWireRoundTrip(liveStatusObservationSchema, observation),
     },
   });
   assert.equal(admitted, true);
   assert.equal(observed.input?.kind, "answered");
-  assertWireRoundTrip(root.spawnResultSchema, observed);
+  assertWireRoundTrip(spawnResultSchema, observed);
   assertWireConformance(root.Keiyaku.verbs.spawn.normal, observed);
-  assertWireRoundTrip(root.forkResultSchema, await akumas.fork({ akuma: observed.akumaId, at: "turn/999" }));
+  assertWireRoundTrip(forkResultSchema, await akumas.fork({ akuma: observed.akumaId, at: "turn/999" }));
   await settleFixtureBodies(bodies);
   const mutable = claudeProvider as { fork?: ProviderAdapter["fork"] };
   const original = mutable.fork;
@@ -352,7 +364,7 @@ test("spawn and fork results describe real creation and refusal", async (context
     assert.ok(outcome);
     const forked = await akumas.fork({ akuma: observed.akumaId, at: `turn/${outcome.turnSequence}` });
     assert.equal(forked.kind, "forked");
-    assertWireRoundTrip(root.forkResultSchema, forked);
+    assertWireRoundTrip(forkResultSchema, forked);
     assertWireConformance(root.Keiyaku.verbs.fork.normal, forked);
     await settleFixtureBodies(bodies);
   } finally {
@@ -363,8 +375,8 @@ test("spawn and fork results describe real creation and refusal", async (context
 
 test("archetype catalogue wire preserves populated and empty pages", async (context) => {
   const home = temporaryDirectory(context, "akuma-catalog-wire-");
-  assertWireRoundTrip(root.archetypeCatalogSchema, await root.Akumas.archetypes({ home }));
+  assertWireRoundTrip(archetypeCatalogSchema, await root.Akumas.archetypes({ home }));
   mkdirSync(join(home, "akumas"), { recursive: true });
   writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\ndescription: Worker\n---\nWork.\n");
-  assertWireRoundTrip(root.archetypeCatalogSchema, await root.Akumas.archetypes({ home }));
+  assertWireRoundTrip(archetypeCatalogSchema, await root.Akumas.archetypes({ home }));
 });

@@ -10,9 +10,8 @@ import {
   Repo,
   Kei,
   Keis,
-  deliveryPreviewOutcomeSchema,
-  deliverOutcomeSchema,
 } from "../src/index.js";
+import { deliveryPreviewOutcomeSchema, deliverOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { createKeiHandle } from "../src/library/kei.js";
 import { withOutcomeReceipt, projectFailure } from "../src/library/outcome.js";

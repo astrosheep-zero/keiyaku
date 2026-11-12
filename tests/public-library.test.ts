@@ -110,6 +110,9 @@ test("public Keis.bind omitted target names the Repo worktree branch", async () 
   const state = present(await bound.kei.state());
   assert.equal(state.coordinates.target, "refs/heads/main");
   const json = JSON.parse(JSON.stringify(bound));
+  assert.equal(bound.kei.id, state.id);
+  assert.equal(Object.getOwnPropertyDescriptor(bound.kei, "id")?.enumerable, false);
+  assert.deepEqual(bound.kei.toJSON(), { contract: state.id });
   assert.equal(json.contractId, state.id);
   assert.equal(json.target, "refs/heads/main");
   assert.equal(json.worktreePath, bound.worktreePath);

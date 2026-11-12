@@ -1,12 +1,11 @@
 import type {
-  z,
-  abandonOutcomeSchema,
-  amendOutcomeSchema,
-  arcOutcomeSchema,
-  bindOutcomeSchema,
-  deliverOutcomeSchema,
-  reviewOutcomeSchema,
-  verifyOutcomeSchema,
+  AbandonOutcome,
+  AmendOutcome,
+  ArcOutcome,
+  BindOutcome as NativeBindOutcome,
+  DeliverOutcome,
+  ReviewOutcome,
+  VerifyOutcome,
   ContractId,
   InvocationIssue,
   RegionOverlap,
@@ -33,13 +32,10 @@ import {
   type TextRenderContext,
 } from "./terminal.js";
 
-type BindOutcome = z.output<typeof bindOutcomeSchema>;
-type AmendOutcome = z.output<typeof amendOutcomeSchema>;
-type ArcOutcome = z.output<typeof arcOutcomeSchema>;
-type AbandonOutcome = z.output<typeof abandonOutcomeSchema>;
-type DeliverOutcome = z.output<typeof deliverOutcomeSchema>;
-type ReviewOutcome = z.output<typeof reviewOutcomeSchema>;
-type VerifyOutcome = z.output<typeof verifyOutcomeSchema>;
+type BindOutcome =
+  | Exclude<NativeBindOutcome, { kind: "accepted" }>
+  | Omit<Extract<NativeBindOutcome, { kind: "accepted" }>, "kei">;
+
 type ContractAnswers = {
   bind: BindOutcome;
   amend: AmendOutcome;

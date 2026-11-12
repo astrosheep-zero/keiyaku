@@ -30,7 +30,12 @@ async function removeEmptyWorldMarker(world: WorldRoot): Promise<void> {
   }
 }
 
-export async function nukeKeiyaku(input: NukeInput, gitOptions?: NukeGitOptions): Promise<NukeResult> {
+export function nukeKeiyaku(input: NukeInput): Promise<NukeResult> {
+  return nukeWithGit(input);
+}
+
+/** Internal reset seam for observing Git custody in tests. */
+export async function nukeWithGit(input: NukeInput, gitOptions?: NukeGitOptions): Promise<NukeResult> {
   const value = validated(() => {
     const values = requireInput(input, "nuke input", ["world", "confirm"]);
     return {

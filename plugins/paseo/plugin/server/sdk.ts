@@ -2,8 +2,7 @@ import { readFile, realpath } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
-import { createHistorySchema, type History } from "./keiyaku.js";
-import type { TellAdmission } from "./message.js";
+import { historySchema, tellSchema, type History } from "./keiyaku.js";
 import { stopAttempt } from "./stop.js";
 import type { AkumaTransport } from "./transport.js";
 
@@ -23,8 +22,6 @@ type PublicAkuma = {
   stream(options: Readonly<{ signal: AbortSignal }>): AsyncIterable<unknown>;
 };
 type KeiyakuSdk = {
-  akumaTellResultSchema: { parse(value: unknown): TellAdmission };
-  activityHistorySchema: Parameters<typeof createHistorySchema>[0];
   Akuma: {
     prototype: { stream: unknown };
     select(world: string, akuId: string): PublicAkuma;
@@ -112,10 +109,6 @@ function assertSdkSurface(sdk: KeiyakuSdk, version: string): void {
     throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose Akuma.select`);
   if (typeof sdk.Akuma.prototype?.stream !== "function")
     throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose Akuma.prototype.stream`);
-  if (typeof sdk.akumaTellResultSchema?.parse !== "function")
-    throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose akumaTellResultSchema`);
-  if (typeof sdk.activityHistorySchema?.unwrap !== "function")
-    throw new Error(`Installed ${PACKAGE_NAME} version ${version} does not expose activityHistorySchema`);
 }
 
 function abortReason(signal: AbortSignal): Error {
@@ -156,7 +149,6 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
   let closed = false;
   let sdk: KeiyakuSdk | undefined;
   let loading: Promise<KeiyakuSdk> | undefined;
-  let historySchema: ReturnType<typeof createHistorySchema>;
   const active = new Set<ActiveScope>();
 
   async function loadSdk(): Promise<KeiyakuSdk> {
@@ -166,7 +158,6 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
       const resolved = await resolveEntry(options.entry);
       const loaded = await import(pathToFileURL(resolved.entry).href) as KeiyakuSdk;
       assertSdkSurface(loaded, resolved.version);
-      historySchema = createHistorySchema(loaded.activityHistorySchema);
       sdk = loaded;
       return loaded;
     })();
@@ -218,7 +209,7 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
 
   const tell: AkumaTransport["tell"] = async (world, akuId, signal, text) => {
     const value = await request(world, akuId, signal, (akuma, requestSignal) => akuma.tell(text, { signal: requestSignal }));
-    const decoded = (await loadSdk()).akumaTellResultSchema.parse(value);
+    const decoded = tellSchema.parse(value);
     if (decoded.akumaId !== akuId)
       throw new Error("Keiyaku Tell outcome is uncertain: the admission receipt did not name the selected Akuma");
     return decoded;

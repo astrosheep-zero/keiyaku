@@ -70,7 +70,7 @@ async function ensureMarker(root: string): Promise<void> {
   await mkdir(path, { recursive: true });
 }
 
-type WorldInput = string | WorldResolutionInput;
+export type WorldInput = string | WorldResolutionInput;
 
 async function inputValues(
   input: WorldInput,

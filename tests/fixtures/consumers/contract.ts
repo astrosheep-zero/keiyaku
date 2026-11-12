@@ -1,7 +1,6 @@
 import {
   Kei,
   Keis,
-  actorId,
   type Delivery,
   Repo,
   KeiyakuError,
@@ -102,7 +101,7 @@ if (delivered.kind === "accepted") {
 }
 if (delivered.kind === "handoff") void [delivered.handoffBase, delivered.targetHead, delivered.conflictPaths];
 
-const local: KeisOptions = { actor: actorId("consumer") };
+const local: KeisOptions = { actor: "consumer" };
 Keis.of(repo, local).kei({ id }).review(cancellable);
 // @ts-expect-error the execution carrier is no longer a public construction input
 Keis.of(repo, { execution: {} });

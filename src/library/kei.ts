@@ -125,11 +125,11 @@ type HandleSeat = Readonly<{ id: ContractId; scope: RepositoryScope }>;
 const KEIYAKU_SEATS = new WeakMap<object, HandleSeat>();
 
 export class Kei {
-  private readonly id: ContractId;
+  readonly id: ContractId;
   private readonly scope: RepositoryScope;
   private readonly composition: LocalContractCompositionCapture;
 
-  constructor(
+  private constructor(
     token: typeof KEIYAKU_HANDLE,
     id: ContractId,
     scope: RepositoryScope,
@@ -788,7 +788,7 @@ export function createKeiHandle(
   scope: RepositoryScope,
   composition: LocalContractCompositionCapture,
 ): Kei {
-  return new Kei(KEIYAKU_HANDLE, id, scope, composition);
+  return Reflect.construct(Kei, [KEIYAKU_HANDLE, id, scope, composition]) as Kei;
 }
 
 /** Internal package composition capability; not exported from the package root. */

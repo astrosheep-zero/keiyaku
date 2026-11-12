@@ -111,7 +111,7 @@ class ScopedAkumaHost {
 }
 
 /** An ephemeral capability, not an Akuma identity set or persisted hosting policy. */
-export type AkumaHostScope = ScopedAkumaHost;
+export type AkumaHostScope = Readonly<AkumaHostOptions & { hosting: "in-process"; close(): Promise<void> }>;
 export const AkumaHost = Object.freeze({
   /** Create an in-process launch scope. Pass the scope itself as the public host option. */
   inProcess(options?: Pick<AkumaHostOptions, "reportDiagnostic">): AkumaHostScope {

@@ -9,8 +9,7 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { appendActivity, beginTurn, endTurn, HeldAkumaLeash, recordReport } from "../src/akuma/heart/index.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
-import { createHistorySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
-import { activityHistorySchema } from "../src/akuma/projection.js";
+import { historySchema, tellSchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
 import { tellPresentation } from "../plugins/paseo/plugin/server/message.js";
 import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
@@ -21,7 +20,6 @@ import * as pluginServerRuntime from "@getpaseo/plugin/server";
 import * as pluginProviderRuntime from "@getpaseo/plugin/server/provider";
 import * as zod from "zod";
 
-const historySchema = createHistorySchema(activityHistorySchema);
 const at = "2026-10-16T00:00:00.000Z";
 /**
  * The public package this suite proves the bridge against. The lane's own build
@@ -43,14 +41,12 @@ const nodeRequire = createRequire(import.meta.url);
 async function producer(): Promise<{ select(world: string, akuId: string): {
   history(options: Readonly<{ limit: number }>): Promise<History>;
   status(): Promise<unknown>;
-}; akumaTellResultSchema: { parse(value: unknown): unknown } }> {
+} }> {
   const sdk = await import(PUBLIC_ENTRY) as unknown as {
     Akuma: { select: (world: string, akuId: string) => {
       history(options: Readonly<{ limit: number }>): Promise<History>; status(): Promise<unknown> } };
-    akumaTellResultSchema: { parse(value: unknown): unknown };
   };
-  return { select: (world, akuId) => sdk.Akuma.select(world, akuId),
-    akumaTellResultSchema: sdk.akumaTellResultSchema };
+  return { select: (world, akuId) => sdk.Akuma.select(world, akuId) };
 }
 /** One retained row exactly as the producer admits it. */
 async function producerRow(root: string, akuId: string, sequence: number): Promise<Row | undefined> {
@@ -232,7 +228,6 @@ test("a native Pi completion reaches a Paseo edit detail through the public proj
 
 const FAKE_SDK = `import { readFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
-export { akumaTellResultSchema, activityHistorySchema } from ${JSON.stringify(pathToFileURL(PUBLIC_ENTRY).href)};
 const control = async () => { try { return JSON.parse(await readFile(new URL("./control.json", import.meta.url), "utf8")); } catch { return {}; } };
 const empty = { rows: [], omitted: 0, hasEarlier: false, hasLater: false, historyLost: false, lowestRetained: null, highest: null };
 const wait = (milliseconds, signal) => delay(milliseconds, undefined, { signal });
@@ -385,6 +380,26 @@ test("SDK isolates bad records within trusted windows and continues to a real ou
   }
 });
 
+test("local wire admission isolates nested tool payloads while preserving healthy siblings", () => {
+  const tool = { kind: "tool", sequence: 1, turnSequence: 1, at, name: "edit", toolId: "tool",
+    call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch: "@@\n-old\n+new\n" }] },
+    state: { status: "ok", output: "observed output" } };
+  const raw = { ...frame(1), omitted: -0.5, lowestRetained: 0, highest: 4.5, rows: [
+    { ...tool, state: { ...tool.state, secret: { nested: "never expose" } } },
+    { ...tool, sequence: 2, call: { ...tool.call, changes: [
+      { ...tool.call.changes[0], secret: { nested: "never expose" } },
+    ] } },
+    { ...tool, sequence: 3 },
+  ] };
+  const parsed = historySchema.parse(raw);
+  assert.deepEqual(parsed.rows.map((row) => row.kind), ["adapter-diagnostic", "adapter-diagnostic", "tool"]);
+  assert.deepEqual(parsed.rows[2], raw.rows[2]);
+  assert.equal(parsed.omitted, raw.omitted);
+  assert.equal(parsed.lowestRetained, raw.lowestRetained);
+  assert.equal(parsed.highest, raw.highest);
+  assert.ok(!JSON.stringify(parsed).includes("never expose"));
+});
+
 const AKU = "aku/test/11111111";
 const RECEIPT = { kind: "admitted", akumaId: AKU, tellId: "tell/7" };
 
@@ -427,18 +442,20 @@ test("the transport carries typed Tell admission, Stop evidence, and status", as
   assert.deepEqual(await transport.status("/world", "aku/test/1", signal), {}, "an unknown configuration is absent, never guessed");
 });
 
-test("the SDK boundary validates Tell admission with the loaded producer's own schema", async (t) => {
+test("the SDK boundary validates Tell admission locally without root schemas", async (t) => {
   const { transport, set, entry } = await fakeTransport(t);
-  const installed = await import(pathToFileURL(entry).href) as {
-    akumaTellResultSchema: { safeParse(value: unknown): { success: boolean } };
-  };
+  const installed = await import(pathToFileURL(entry).href);
+  assert.equal("akumaTellResultSchema" in installed, false);
+  assert.equal("activityHistorySchema" in installed, false);
+  const receipt = { ...RECEIPT, tellId: "", kind: "failed", wake: { kind: "pending" },
+    interrupt: { kind: "unavailable", evidence: "hung" }, input: { kind: "deadline" },
+    failures: [{ stage: "wake", diagnostic: "no provider", logPath: "/log" },
+      { stage: "observation", diagnostic: "read failed" }] };
+  await set({ tell: receipt });
+  assert.deepEqual(await transport.tell("/world", AKU, new AbortController().signal, "change direction"), receipt);
   const retired = { akuma: AKU, tell: { admission: { fact: "recorded", tellId: "tell/7" },
     row: { kind: "tell", sequence: 7, at, tellId: "tell/7", text: "change direction", state: "pending", deliveries: [] },
     wake: { kind: "told" } } };
-  assert.equal(installed.akumaTellResultSchema.safeParse(retired).success, false,
-    "the fixture reexports the installed owner schema rather than a permissive local shim");
-  assert.equal(installed.akumaTellResultSchema.safeParse({ akumaId: AKU, tellId: "tell/7", wake: { kind: "told" } }).success, false,
-    "the retired told wake is not a native control value");
   for (const value of [retired, { akumaId: AKU, tellId: "tell/7", wake: { kind: "told" } }, { akumaId: AKU }]) {
     await set({ tell: value });
     await assert.rejects(transport.tell("/world", AKU, new AbortController().signal, "change direction"));
@@ -755,8 +772,8 @@ test("the real public package admits one Tell through the transport while custod
   assert.equal(admitted.akumaId, value.allocated.id, "the flat receipt resolves the selected Akuma");
   assert.equal(typeof admitted.tellId, "string");
   assert.deepEqual(admitted.wake, { kind: "pending" }, "a held leash is reported as pending, not as a failed wake");
-  assert.deepEqual(await (await producer()).akumaTellResultSchema.parse(admitted), admitted,
-    "the transport's admission is the installed owner's own receipt verbatim, with no caller text echo");
+  assert.deepEqual(tellSchema.parse(admitted), admitted,
+    "the local boundary preserves the installed owner's receipt without a caller text echo");
 
   const stream = transport.stream(root, value.allocated.id, new AbortController().signal)[Symbol.asyncIterator]();
   const frame = await stream.next();

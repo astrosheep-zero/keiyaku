@@ -19,6 +19,10 @@ separate result model. Public construction stays synchronous and free of
 filesystem observation.
 
 Each crossing value has one structural declaration at its coherent domain owner.
+The package root exposes native capabilities and explicitly named domain types;
+structural validators and their implementation dependencies stay with their owners.
+Every caller-facing declaration is available through the public entry, while
+construction tokens, execution capabilities, and test injection remain private.
 Library composes those declarations at caller and process boundaries; trusted
 owner values are not revalidated while flowing through local composition.
 Structural admission grants no product capability or business judgment.
@@ -48,7 +52,9 @@ coordinate is caller-invalid input, never quietly replaced by an ambient
 current directory. `Kei` is the native branded Contract handle created by
 binding or selecting a complete identity within that repository; instance operations never accept a
 second repository coordinate. The handle owns its Contract operations directly,
-with their captured composition kept private. A handle offers state and guidance reads, history,
+with their captured composition kept private. Its identity is directly readable without
+exposing construction authority or changing its compact JSON projection. A handle
+offers state and guidance reads, history,
 amendment, explicit Verification, delivery and its read-only preview, review,
 abandonment, and arc. `Keis.of(repo)` synchronously captures the Repo, an optional
 already-loaded immutable Settings value, and the Contract-local actor. Its collection

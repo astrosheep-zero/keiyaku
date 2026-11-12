@@ -29,9 +29,9 @@ import {
   Keiyaku,
   KeiyakuError,
   Repo,
-  contractHistorySchema,
-  guidanceSchema,
 } from "../src/index.js";
+import { contractHistorySchema } from "../src/library/contract-types.js";
+import { guidanceSchema } from "../src/library/kei.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { waitForFile, withGitShim } from "./support/git.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";

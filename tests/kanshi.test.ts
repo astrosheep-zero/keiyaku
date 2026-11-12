@@ -30,7 +30,9 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
-import { Akumas, Keis, Repo, contractSummarySchema, akumaCatalogueSchema } from "../src/index.js";
+import { Akumas, Keis, Repo } from "../src/index.js";
+import { contractSummarySchema } from "../src/protocol/read/status.js";
+import { akumaCatalogueSchema } from "../src/akuma/selection-observation.js";
 import { Kanshi } from "../src/kanshi/index.js";
 import { observeKanshi } from "../src/kanshi/read.js";
 import type { AkumaKanshiRow, ContractKanshiDetail, KanshiContractReport, KanshiReport } from "../src/kanshi/index.js";

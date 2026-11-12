@@ -5,14 +5,6 @@ import test from "node:test";
 import { Keis, Repo, type ExecutionObservation } from "../src/index.js";
 import {
   bindOutcomeSchema,
-  contractCatalogueSchema,
-  contractObservationSchema,
-  contractResolutionSchema,
-  contractWaitResultSchema,
-  contractStateSchema,
-  contractHistorySchema,
-  guidanceSchema,
-  deliverySchema,
   amendOutcomeSchema,
   deliverOutcomeSchema,
   verifyOutcomeSchema,
@@ -20,9 +12,15 @@ import {
   abandonOutcomeSchema,
   arcOutcomeSchema,
   deliveryPreviewOutcomeSchema,
-  reconcileResultSchema,
-  executionObservationSchema,
-} from "../src/index.js";
+} from "../src/library/contract-outcomes.js";
+import { contractCatalogueSchema, contractObservationSchema } from "../src/protocol/read/status.js";
+import { contractResolutionSchema, contractHistorySchema } from "../src/library/contract-types.js";
+import { contractWaitResultSchema } from "../src/library/contract-wait.js";
+import { contractStateSchema } from "../src/protocol/result-leaves.js";
+import { guidanceSchema } from "../src/library/kei.js";
+import { deliverySchema } from "../src/library/delivery.js";
+import { reconcileResultSchema } from "../src/library/reconcile.js";
+import { executionObservationSchema } from "../src/protocol/execution-observation.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";

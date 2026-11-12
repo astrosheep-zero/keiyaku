@@ -21,7 +21,8 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { Kei, Keis, Repo, contractSummarySchema, type ContractDetail } from "../src/index.js";
+import { Kei, Keis, Repo, type ContractDetail } from "../src/index.js";
+import { contractSummarySchema } from "../src/protocol/read/status.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,

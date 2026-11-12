@@ -2,7 +2,7 @@
 import { z } from "zod";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { entryUlidSchema, gateSchema, requirementIdSchema, verdictSchema } from "../protocol/result-leaves.js";
-import type { ActorId, AttestationData, ContractId } from "../core/facts/types.js";
+import type { AttestationData, ContractId } from "../core/facts/types.js";
 import type { ContractCatalogue } from "../protocol/read/status.js";
 import type { Settings } from "../settings.js";
 import type { DebtId } from "../debt/identity.js";
@@ -10,7 +10,7 @@ import type { DebtId } from "../debt/identity.js";
 import { akumaIdSchema } from "../akuma/identity.js";
 
 /** Public gate words remain ordinary strings; private policy interprets them. */
-export type Gate = string;
+export type { Gate } from "../core/facts/types.js";
 
 const historyCommon = {
   id: entryUlidSchema,
@@ -111,7 +111,7 @@ type ActorOptions = Readonly<{ actor?: string }>;
 /** Contract-local composition: one captured Settings selection and the operation actor. */
 export type KeisOptions = Readonly<{
   settings?: Settings;
-  actor?: ActorId;
+  actor?: string;
 }>;
 
 export type AmendInput = ActorOptions &

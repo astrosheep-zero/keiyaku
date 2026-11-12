@@ -13,7 +13,6 @@ export const capabilityPolicy = {
     {
       module: "zod",
       owners: [
-        { source: "index.ts" },
         { source: "mcp/adapter.ts", symbols: ["z"] },
         { source: "mcp/output.ts", symbols: ["z"] },
         { source: "bounded-list.ts", symbols: ["z"] },
