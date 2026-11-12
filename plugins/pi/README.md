@@ -1,7 +1,9 @@
 # Keiyaku in Pi
 
 The existing Pi package entry `plugins/pi/keiyaku.ts` supplies `/keiyaku` (the
-status overlay). The ten native Akuma tools are temporarily registered with
+status overlay) and registers the package's MCP server for each Pi session. The
+24 MCP tools use `codemode` exposure; no separate `mcp.json` entry or global
+`keiyaku-mcp` binary is required. The ten native Akuma tools are temporarily registered with
 Pi's `hidden` exposure while their design is unfinished: they are not declared
 to the model, discoverable, or callable, even if selected explicitly. The CLI
 and `/keiyaku` command remain available. The implementation is retained for

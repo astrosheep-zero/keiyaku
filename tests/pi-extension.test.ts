@@ -413,6 +413,7 @@ type ExecResult = Readonly<{ stdout: string; stderr: string; code: number; kille
 function install(execute: (command: string, args: string[]) => Promise<ExecResult>) {
   const handlers = new Map<string, Handler>();
   const tools: Array<{ name: string; exposure?: string }> = [];
+  const mcpServers: Array<{ name: string; config: { command: string; args?: string[]; exposure?: string } }> = [];
   let command: CommandHandler | undefined;
   const pi = {
     on(event: string, handler: Handler): void {
@@ -425,6 +426,9 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
     registerTool(tool: { name: string; exposure?: string }): void {
       tools.push(tool);
     },
+    registerMcpServer(name: string, config: { command: string; args?: string[]; exposure?: string }): void {
+      mcpServers.push({ name, config });
+    },
     registerCommand(name: string, options: { handler: CommandHandler }): void {
       assert.equal(name, "keiyaku");
       command = options.handler;
@@ -436,17 +440,22 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
 
   keiyakuExtension(pi);
   assert.ok(command);
-  return { command, handlers, tools };
+  return { command, handlers, tools, mcpServers };
 }
 
 test("Pi keeps unfinished native tools hidden while preserving the explicit Keiyaku command", () => {
-  const { handlers, tools } = install(async () => {
+  const { handlers, tools, mcpServers } = install(async () => {
     throw new Error("status must not run while loading");
   });
 
   assert.deepEqual([...handlers.keys()], ["session_start", "session_shutdown", "agent_settled"]);
   assert.equal(tools.length, 10);
   assert.ok(tools.every((tool) => tool.exposure === "hidden"));
+  assert.equal(mcpServers.length, 1);
+  assert.equal(mcpServers[0]?.name, "keiyaku");
+  assert.equal(mcpServers[0]?.config.command, process.execPath);
+  assert.equal(mcpServers[0]?.config.args?.length, 1);
+  assert.ok(existsSync(mcpServers[0]!.config.args![0]!));
 });
 
 test("Pi command runs one text status and does not refresh when dismissed", async () => {

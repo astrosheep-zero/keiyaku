@@ -1,4 +1,5 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import { fileURLToPath } from "node:url";
 import { Kanshi, NoGitWorldError, Repo, World } from "@astrosheep/keiyaku";
 import { registerAkumaTools } from "./akuma-tools.ts";
 
@@ -48,6 +49,12 @@ export default function keiyakuExtension(
   pi: ExtensionAPI,
   readers: StatusReaders = { repo: Repo.at, world: World.resolve, counts: (scope) => Kanshi.of(scope).counts() },
 ): void {
+  pi.registerMcpServer("keiyaku", {
+    command: process.execPath,
+    args: [fileURLToPath(new URL("../../build/src/mcp/index.js", import.meta.url))],
+    description: "Agent work ledger: Contracts bind the work, Akumas do it, kanshi watches.",
+    timeout: 600,
+  });
   registerAkumaTools(pi);
   let close: (() => void) | undefined;
   let refresh: (() => void) | undefined;
