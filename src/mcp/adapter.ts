@@ -31,6 +31,8 @@ type McpAdapterInput = Readonly<{
 function hasOutputSchema(name: string): name is keyof typeof mcpOutputSchemas {
   return Object.hasOwn(mcpOutputSchemas, name);
 }
+const SERVER_DESCRIPTION =
+  "Agent work ledger for a Git repository: Contracts bind the work, Akumas do it, kanshi watches.";
 const NO_REPO_TOOLS = new Set<VerbName>(["debt.add", "debt.update", "report"]);
 const excluded = new Set<VerbName>(["nuke", "settings", "debt.doctor", "debt.addDocument"]);
 
@@ -209,12 +211,16 @@ function describeTools(): Tool[] {
   });
 }
 
+function createMcpServer(version: string): Server {
+  return new Server({ name: "keiyaku", version, description: SERVER_DESCRIPTION }, { capabilities: { tools: {} } });
+}
+
 export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ server: Server; close(): Promise<void> }> {
   const cwd = input.cwd;
   const environment = { ...input.environment };
   const home = environment.KEIYAKU_HOME?.trim() || undefined;
   const actorContext = environment.KEIYAKU_ACTOR_ID === undefined ? {} : { actor: environment.KEIYAKU_ACTOR_ID };
-  const server = new Server({ name: "keiyaku", version: input.version }, { capabilities: { tools: {} } });
+  const server = createMcpServer(input.version);
   const tools = describeTools();
   const pending = new Set<Promise<unknown>>();
   let closing: Promise<void> | undefined;

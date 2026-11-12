@@ -68,6 +68,7 @@ async function fixture(t: TestContext, artifact = true) {
       akumaId: id,
       bodySequence: 1,
       turnSequence: sequence,
+      at: "2026-11-09T00:00:00Z",
       participants,
       outcome: { kind: "answered", text: `answer ${id} ${sequence}` },
     });
@@ -147,6 +148,7 @@ test("direct cards preserve exact full content, frozen Owners and generic presen
       akumaId: "aku/forms/1234abcd",
       bodySequence: 1,
       turnSequence,
+      at: "2026-11-09T00:00:00Z",
       participants: [f.alice, f.bob, f.alice],
       initiator: f.bob,
       ...(turnSequence === 2 ? {} : { contractId: "kei/example" }),
@@ -167,14 +169,18 @@ test("direct cards preserve exact full content, frozen Owners and generic presen
     rows.map((row) => row.key),
     [1, 2, 3].map((n) => key("aku/forms/1234abcd", `turn/${n}`)),
   );
-  for (const row of rows) {
+  const bodies = [`✓ done\n${answer}`, "× failed\nfailure detail", "○ canceled"];
+  for (const [index, row] of rows.entries()) {
     assert.ok(isCardPresentation(row.details));
+    const at = (row.details as { at?: number }).at;
+    assert.equal(at, Date.parse("2026-11-09T00:00:00Z"));
     assert.deepEqual(row.details, {
       kind: "presentation",
       origin: "Keiyaku",
       author: "aku/forms/1234abcd",
       ref: row.key.split("/").slice(-2).join("/"),
-      body: row.text,
+      at,
+      body: bodies[index],
     });
   }
   assert.deepEqual(
@@ -197,16 +203,18 @@ test("alias-first card snapshots keep identity keys and do not follow later alia
   await bind("audit");
   await f.turn(id, 1, [f.alice, f.bob]);
   await f.plugin.signals!["akuma.body-ended"]!({ kind: "akuma.body-ended", akumaId: id, bodySequence: 1,
-    end: "broke-off", participants: [f.alice] });
+    end: "broke-off", at: "2026-11-09T00:00:00Z", participants: [f.alice] });
   const before = await f.cards();
   assert.deepEqual(before.map(card => card.key), [key(id, "report/1"), key(id, "turn/1"), key(id, "body/1")]);
+  const bodies = ["▸ update\nprogress", `✓ done\nanswer ${id} 1`, "× interrupted\nbroke-off"];
   for (const [index, card] of before.entries()) {
     const label = index === 0 ? "@reviewer" : "@audit, @reviewer";
     assert.ok(isCardPresentation(card.details));
     assert.equal(card.details.author, label);
+    assert.equal(card.details.body, bodies[index]);
+    assert.equal((card.details as { at?: number }).at, Date.parse("2026-11-09T00:00:00Z"));
     assert.ok(card.text.startsWith(`\`${label}\``));
     assert.ok(card.text.split("---\n\n")[1]?.includes(`\`${id}\``));
-    assert.equal(card.details.body, card.text);
   }
   assert.equal((await f.cards(f.bob))[0]?.text, before[1]?.text);
   await bind("reviewer", other); await bind("audit", other);
@@ -268,12 +276,15 @@ test("early and late exact suppression survive producer restart and remain Owner
   const reportCard = (await f.cards()).find((card) => card.key === key("aku/early/1234abcd", "report/1"));
   assert.ok(reportCard);
   assert.equal(reportCard.text, `\`aku/early/1234abcd\` ▸ update\n${report}\n\n---\n\n\`report/1\``);
+  const at = (reportCard.details as { at?: number }).at;
+  assert.equal(at, Date.parse("2026-11-04T00:00:00Z"));
   assert.deepEqual(reportCard.details, {
     kind: "presentation",
     origin: "Keiyaku",
     author: "aku/early/1234abcd",
     ref: "report/1",
-    body: reportCard.text,
+    at,
+    body: `▸ update\n${report}`,
   });
   assert.equal((await f.cards(f.bob)).some((card) => card.key === reportCard.key), false);
   assert.equal((await f.cards()).length, 2);

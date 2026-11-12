@@ -52,6 +52,8 @@ export type PluginSignalMap = Readonly<{
     akumaId: string;
     bodySequence: number;
     turnSequence: number;
+    /** Durable completion time; older external emitters may omit it. */
+    at?: string;
     initiator?: string;
     participants?: readonly string[];
     outcome: PluginOutcome;
@@ -61,6 +63,8 @@ export type PluginSignalMap = Readonly<{
     akumaId: string;
     bodySequence: number;
     end: PluginBodyEnd;
+    /** Durable body-end time; older external emitters may omit it. */
+    at?: string;
     initiator?: string;
     participants?: readonly string[];
     diagnostic?: string;

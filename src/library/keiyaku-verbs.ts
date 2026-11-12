@@ -164,7 +164,7 @@ const tellFields = {
 export const verbs = Object.freeze({
   bind: {
     description:
-      "Bind a new Contract from complete Markdown terms or fork an existing Contract's terms, and appoint an isolated worktree when targeting a branch or active Contract. Does not run Verification.",
+      "Bind a Contract: one tracked delivery with fixed terms. Complete Markdown terms in (or forkOf to copy another's); a kei/... id and its own worktree out. target is where the work lands once accepted; gates is what must pass first. Runs no checks.",
     input: z.union([
       z
         .strictObject({
@@ -200,7 +200,7 @@ export const verbs = Object.freeze({
   },
   amend: {
     description:
-      "Amend an active Contract's Markdown terms, prerequisite Contracts, or acceptance gates. Supply at least one of markdown, after, or gates.",
+      "Rewrite an active Contract's terms, prerequisites (after), or gates. markdown is H2 edits such as ## Replace: Objective, not a new Contract. Returns only what changed.",
     input: z.union(
       amendInputSchemas.map((branch) =>
         (
@@ -223,7 +223,7 @@ export const verbs = Object.freeze({
   },
   arc: {
     description:
-      "Record the current execution chapter (Arc) on an active Contract without rewriting its permanent terms.",
+      "Open the next chapter of an active Contract: a # Title and optional notes telling its Akumas what is being done now. The terms stay as bound.",
     input: z
       .strictObject({
         ...contract,
@@ -235,7 +235,7 @@ export const verbs = Object.freeze({
   },
   deliver: {
     description:
-      "Submit a Contract candidate from its appointed worktree and place it onto its target once prerequisites and gates are satisfied, or preview readiness with dryRun: true. Consumes existing gate testimony and never runs Verification.",
+      "Hand in the work from a Contract's worktree. It lands on the target once prerequisites are accepted and every gate passes (reviewed: a satisfied review; verified: passing verify results); until then it waits, delivered. Uncommitted changes need includeDirty. dryRun: true only looks. Runs no checks and records no review.",
     input: z.union([
       z
         .strictObject({
@@ -283,7 +283,7 @@ export const verbs = Object.freeze({
   },
   verify: {
     description:
-      "Execute ## Verification code fences from the Contract in independent scratch directories. An unsatisfied check is a normal negative verdict (isError: false), distinct from an operational failure. Records testimony and attempts placement only when the Contract has the verified gate.",
+      "Run the Contract's ## Verification checks now. A failed check is a verdict, not a tool error. Results are bound to the exact integration tree they ran on: any change to the work or the target makes them stale. They count only under the verified gate, and may land an already-delivered Contract.",
     input: z
       .strictObject({
         ...contract,
@@ -302,7 +302,7 @@ export const verbs = Object.freeze({
   },
   review: {
     description:
-      "Record whole-Contract review testimony (satisfied or unsatisfied) bound to the candidate's diff content (survives pure rebase). Never runs Verification; a satisfied verdict completes placement if a candidate is delivered and all other requirements are met.",
+      "Record your verdict on a Contract's diff: satisfied or unsatisfied, with reasons. Valid before or after deliver. Bound to the diff content: a pure rebase keeps it, a changed diff makes it stale. Satisfied may land an already-delivered Contract.",
     input: z
       .strictObject({
         ...contract,
@@ -317,7 +317,7 @@ export const verbs = Object.freeze({
     effect: "write",
   },
   abandon: {
-    description: "Close an active Contract without integrating its work and retire its appointed worktree.",
+    description: "Break an active Contract. Its work never lands; its worktree is reclaimed. No undo.",
     input: z
       .strictObject({
         ...contract,
@@ -329,7 +329,7 @@ export const verbs = Object.freeze({
   },
   show: {
     description:
-      "Read full Contract guidance (terms, current Arc, and workspace context) or full Debt documents with relationship trees. Omitting id and ids reads contextual Contract guidance from cwd.",
+      "Read a Contract in full: terms, current chapter, and working instructions. Or read Debts in full with their links. No id reads the Contract whose worktree you stand in.",
     input: z.union([
       z
         .strictObject({
@@ -356,7 +356,7 @@ export const verbs = Object.freeze({
   },
   reconcile: {
     description:
-      "Replay pending Git ref movements, Contract worktree appointments/retirements, and worktree hooks for one Contract or all Contracts in the repo.",
+      "Finish what an interrupted or lagging call left half done: Git, worktree, and hook steps, for one Contract or all. Safe to repeat; never undoes a recorded result.",
     input: z
       .strictObject({
         contract: optText.describe(
@@ -370,7 +370,7 @@ export const verbs = Object.freeze({
   },
   spawn: {
     description:
-      'Birth a new Akuma instance from a named archetype (discover names with ls {"selector":"aku/"}), optionally submitting its opening prompt. Associating contract records Dispatch only—it neither sets workdir nor injects Contract terms into prompt.',
+      "Birth a new Akuma, an agent, from an archetype (ls aku/), with an optional first order. contract only marks whose work it is; give it a workdir and the terms yourself. A failed result with an akumaId still left an Akuma alive.",
     input: z.union([
       spawnModeSchemas[0]
         .omit({ body: true })
@@ -407,7 +407,7 @@ export const verbs = Object.freeze({
   },
   fork: {
     description:
-      "Branch a new Akuma instance from an existing Akuma's retained answered turn (turn/<n>, visible in history output). Requires provider fork support.",
+      "Birth a copy of an Akuma as it stood at an answered turn (turn/<n> from history), to try another path. The copy wakes idle; give it orders with tell. Needs provider support.",
     input: z
       .strictObject({
         akuma: text.describe("Source Akuma selector (aku/<name>/<hex> or @alias)."),
@@ -423,7 +423,7 @@ export const verbs = Object.freeze({
   },
   tell: {
     description:
-      "Submit a text instruction to an existing Akuma, steering an open turn or waking a sleeping Akuma. Returns after admission unless wait: true observes that turn's text answer.",
+      "Give an Akuma new orders: steers its current work or wakes it. Returns once accepted; wait: true also returns that turn's answer. A timeout ends the waiting, not the work.",
     input: z.union([
       tellObservationSchemas[0]
         .extend({
@@ -451,7 +451,7 @@ export const verbs = Object.freeze({
   },
   ask: {
     description:
-      "Submit a prompt to an existing Akuma with a required JSON Schema output contract and await its parsed JSON answer. Keiyaku parses JSON but does not re-validate schema conformance on the client side.",
+      "Demand a structured answer from an Akuma: a prompt and a JSON Schema in, parsed JSON out. The answer is not checked against the schema; non-JSON is a failure. Not every provider honors schemas.",
     input: z
       .strictObject({
         akuma: text.describe("Target Akuma selector (aku/<name>/<hex> or @alias)."),
@@ -470,7 +470,7 @@ export const verbs = Object.freeze({
   },
   kill: {
     description:
-      "Stop current execution on one or more selected Akumas while preserving their history; a stopped Akuma can be woken later with tell or ask.",
+      "Kill an Akuma's current execution. Nothing is erased: history and queued orders remain, and tell or ask wakes it.",
     input: z
       .strictObject({
         akuma: z
@@ -487,7 +487,7 @@ export const verbs = Object.freeze({
   },
   wait: {
     description:
-      "Wait for selected Contracts (all kei/...) to record a journal change or reach a terminal state, or for selected Akumas (aku/..., @alias, or aku globs) to settle. Cannot mix Contract and Akuma selectors in one call; reaching timeoutMs ends observation without killing Akumas.",
+      "Wait until selected Contracts change or close, or selected Akumas finish their current work. Contracts or Akumas, never both in one call. Already closed or finished returns at once. A timeout ends the waiting, not the work.",
     input: z.union([
       z
         .strictObject({
@@ -534,7 +534,7 @@ export const verbs = Object.freeze({
   },
   history: {
     description:
-      "Read a Contract's causal journal history (kei/...) or an Akuma's execution timeline, latest answer, or exact turn/<n>, report/<n>, or decimal activity item.",
+      "Look back: a Contract's journal, or an Akuma's recent activity. For an Akuma, last returns its latest answer and id opens one item such as turn/<n> or report/<n>.",
     input: z.union([
       z
         .strictObject({
@@ -589,7 +589,7 @@ export const verbs = Object.freeze({
   },
   report: {
     description:
-      "Record a mid-turn progress report from inside an executing Akuma (requires KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD in server environment). Does not end the current turn or replace the final answer.",
+      "From inside a running Akuma, leave a progress note for whoever holds it and keep working. Only works when this server runs inside that Akuma.",
     input: z
       .strictObject({
         text: nonblank.describe("Nonblank progress report Markdown/text recorded on the current turn timeline."),
@@ -600,7 +600,7 @@ export const verbs = Object.freeze({
   },
   whoami: {
     description:
-      "Inspect the server environment's own caller/Akuma identity, current turn initiator, Dispatch association, and contextual Contract at cwd without establishing a World.",
+      "Who this server acts as: caller or Akuma identity, its Contract link and turn initiator, and which Contract worktree cwd stands in. Read from the environment; not authentication.",
     input: z.strictObject({}).readonly(),
     output: whoamiFactsSchema,
     effect: "read",
@@ -619,14 +619,14 @@ export const verbs = Object.freeze({
   },
   kanshi: {
     description:
-      "Read the composite World watchtower board across active Contracts, Debts, and Akumas. Selector-free; use status to inspect one Contract or Akuma.",
+      "Watch everything at once: active Contracts, Debts, and Akumas. Use status, show, or history to look closer.",
     input: z.strictObject({}).readonly(),
     output: kanshiReportSchema,
     effect: "read",
   },
   status: {
     description:
-      "Inspect one Contract or Akuma by exact canonical identity (kei/... or aku/<name>/<hex>), returning current lifecycle, workspace/gate state, or current work frontier.",
+      "Where one Contract stands (stage, gates, prerequisites, worktree) or what one Akuma is doing (state, current work, changed files). Exact kei/... or aku/<name>/<id> only; no aliases.",
     input: z
       .strictObject({
         id: z
@@ -642,7 +642,7 @@ export const verbs = Object.freeze({
   },
   ls: {
     description:
-      'List one catalogue by path selector: active Contracts ("kei/"), Debts ("debt/"), available Akuma archetypes ("aku/"), or retained Akuma instances ("aku/*", "aku/*/*", "aku/<name>", "aku/<name>/*").',
+      "List ids of one kind: active Contracts (kei/), open Debts (debt/), archetypes you can birth (aku/), or existing Akumas (aku/*).",
     input: lsInputSchema,
     output: z.union([contractCatalogueSchema, akumaCatalogueSchema, archetypeCatalogSchema, debtCatalogueSchema]),
     normal: z.union([contractCatalogueSchema, akumaCatalogueSchema, archetypeCatalogSchema, debtListSchema]),
@@ -650,7 +650,7 @@ export const verbs = Object.freeze({
   },
   region: {
     description:
-      "Inspect declared ## Region write-path patterns across active Contracts, for one Contract, or overlapping specific repository-relative paths.",
+      "Before parallel work: which files active Contracts claim to change and where those claims overlap. Advisory only; no locks, no conflict prediction.",
     input: z.union([
       z.strictObject({}).readonly(),
       z
@@ -677,7 +677,7 @@ export const verbs = Object.freeze({
   },
   "debt.add": {
     description:
-      "Record a new Debt in the World's flat ledger with optional priority, initial state, and dependency/hierarchy edges.",
+      "Record a Debt: a confirmed problem or unfinished work still owed, with optional priority and links to other Debts. Returns its debt/... id.",
     input: addDebtInputSchema.readonly(),
     output: debtMutationResultSchema,
     normal: debtMutationNormalResultSchema,
@@ -691,7 +691,7 @@ export const verbs = Object.freeze({
   },
   "debt.update": {
     description:
-      "Atomically update a Debt's state (open, done, drop), text fields, priority, or relationship edges. Requires at least one effective change; body and appendBody are mutually exclusive.",
+      "Settle a Debt as done or dropped, or edit its text, priority, or links. Settling is final. body replaces the text, appendBody adds to it; never both.",
     input: z.union(
       updateDebtInputSchemas.map((branch) =>
         branch.safeExtend({ id: debtIdSchema.describe("Target Debt ID (debt/<slug>-<hex>).") }).readonly(),

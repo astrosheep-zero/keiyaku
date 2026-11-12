@@ -537,6 +537,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
           akumaId: allocated.id,
           bodySequence: 1,
           turnSequence: 1,
+          at: "2026-08-08T00:00:00.000Z",
           outcome: { kind: "answered", text: "done" },
           initiator: "Alice",
           participants: ["Alice"],
@@ -589,6 +590,7 @@ test("turn-outcome plugins observe every committed answered Turn exactly once", 
         akumaId: allocated.id,
         bodySequence: 2,
         turnSequence: sequences[1],
+        at: "2026-08-08T00:00:02.000Z",
         outcome: { kind: "answered", text: "adjusted" },
         initiator: "Bob",
         participants: ["Bob", "Carol"],
@@ -662,6 +664,7 @@ test("turn-outcome plugins observe a committed failed Turn without changing it",
           akumaId: allocated.id,
           bodySequence: 1,
           turnSequence: 1,
+          at: "2026-08-08T00:00:00.000Z",
           outcome: { kind: "failed", reason: "provider failed" },
         },
         outcomes: [{ kind: "failed", diagnostic: "provider failed" }],
@@ -725,9 +728,9 @@ test("turn-started plugins observe one start per Turn of one Body before each ou
     await eventually(() => signals.length === 4);
     assert.deepEqual(signals, [
       { kind: "akuma.turn-started", akumaId: allocated.id, turnSequence: sequences[0], initiator: "Alice" },
-      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 1, turnSequence: sequences[0], initiator: "Alice", participants: ["Alice"], outcome: { kind: "answered", text: "one" } },
+      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 1, turnSequence: sequences[0], at: "2026-08-08T00:00:00.000Z", initiator: "Alice", participants: ["Alice"], outcome: { kind: "answered", text: "one" } },
       { kind: "akuma.turn-started", akumaId: allocated.id, turnSequence: sequences[1] },
-      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 1, turnSequence: sequences[1], outcome: { kind: "failed", reason: "provider failed" } },
+      { kind: "akuma.turn-outcome", akumaId: allocated.id, bodySequence: 1, turnSequence: sequences[1], at: "2026-08-08T00:00:00.000Z", outcome: { kind: "failed", reason: "provider failed" } },
     ]);
     /* The first Turn's started handler hung and the second Turn's threw; both Turns still began and ended. */
     await eventually(() => readFileSync(allocated.paths.log, "utf8").includes("timed out after 5000ms") && readFileSync(allocated.paths.log, "utf8").includes("started observer failure"), 15_000);
@@ -806,10 +809,10 @@ test("body-ended plugins attribute only the exact Body's latest admitted Turn", 
     );
 
     assert.deepEqual(recorder.signals, [
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 1, end: "exited", initiator: "Alice", participants: ["Alice"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", initiator: "Bob", participants: ["Bob", "Carol"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "exited", participants: ["Dana"] },
-      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 4, end: "broke-off" },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 1, end: "exited", at: "2026-08-08T00:00:00.000Z", initiator: "Alice", participants: ["Alice"] },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 2, end: "exited", at: "2026-08-08T00:00:01.000Z", initiator: "Bob", participants: ["Bob", "Carol"] },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 3, end: "exited", at: "2026-08-08T00:00:02.000Z", participants: ["Dana"] },
+      { kind: "akuma.body-ended", akumaId: allocated.id, bodySequence: 4, end: "broke-off", at: "2026-08-08T00:00:03.000Z" },
     ]);
   } finally {
     delete bodyEndPluginGlobal.__keiyakuBodyEndPluginRecorder;

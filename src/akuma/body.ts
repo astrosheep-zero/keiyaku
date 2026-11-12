@@ -347,6 +347,7 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): T
             akumaId: soul.id,
             bodySequence: turn.bodySequence,
             turnSequence,
+            at: turn.end.completedAt,
             ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
             ...(participants.length === 0 ? {} : { participants }),
             outcome:
@@ -376,6 +377,8 @@ function bodyEndEmitter(
   return async (bodySequence, end, diagnostic) => {
     try {
       const latestTurn = await readLatestTurnForBody(launch.paths, bodySequence);
+      const latestBody = (await readHeart(launch.paths)).latestBody;
+      const at = latestBody?.sequence === bodySequence ? latestBody.hung?.at ?? latestBody.endedAt : undefined;
       const initiator = latestTurn?.initiator;
       const participants = latestTurn === null ? [] : await readTurnParticipants(launch.paths, latestTurn.sequence);
       await emitPluginSignal(
@@ -385,6 +388,7 @@ function bodyEndEmitter(
           akumaId: soul.id,
           bodySequence,
           end,
+          ...(at === undefined ? {} : { at }),
           ...(initiator === undefined ? {} : { initiator }),
           ...(participants.length === 0 ? {} : { participants }),
           ...(diagnostic === undefined ? {} : { diagnostic }),
