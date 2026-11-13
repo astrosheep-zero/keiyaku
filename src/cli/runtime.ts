@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { AkumaNameError, Keiyaku, KeiyakuUsageError } from "../index.js";
+import { AkumaNameError, Keiyaku } from "../index.js";
+import { errorCategory } from "../errors.js";
 import {
   AkumaAddressError,
   AkumaWorldScopeError,
@@ -32,7 +33,7 @@ import { renderVerb } from "./render/verbs.js";
 import { renderRefusal } from "./render/refusal.js";
 import { DEFAULT_CLI_COLUMNS, formatNextCall, safeText } from "./render/terminal.js";
 import { cliExitCode, displayContext, emit, writeJson, writeStderr, writeStdout, type CliOutcome } from "./streams.js";
-import { usageAcceptanceLines } from "./usage.js";
+import { renderUsageMessage, usageAcceptanceLines } from "./usage.js";
 
 export type ParsedCommandInvocation = Extract<ParsedInvocation, { command: ParsedCommand }>;
 
@@ -104,11 +105,8 @@ function cliCancellation(signal: AbortSignal | undefined): Readonly<{ signal: Ab
   };
 }
 
-type FacetCommand = Exclude<ParsedCommand, { command: "install" }>;
-
-// A thrown completion does not consult input; acquisition may have failed before
-// there was a wire input. The name still selects operation-specific judgment.
-function thrownCompletion(error: unknown, command: FacetCommand) {
+// Acquisition may fail before the parsed input has all its required fields.
+function thrownCompletion(error: unknown, command: Exclude<ParsedCommand, { command: "install" }>) {
   const name = (
     "name" in command
       ? command.name
@@ -118,19 +116,12 @@ function thrownCompletion(error: unknown, command: FacetCommand) {
           : `debt.${command.action}`
         : command.command
   ) as VerbName;
-  const input = undefined as unknown as VerbInput<VerbName>;
+  const input = ("input" in command ? command.input : {}) as VerbInput<VerbName>;
   const completion = { kind: "threw", error } as const;
   return {
     outcome: classifyVerb(name, input, completion),
     text: () => renderVerb(name, input, completion, displayContext()),
   };
-}
-
-/** Install is a CLI-only operation, not a facet verb. */
-function writeInstallFailure(error: unknown, command: Extract<ParsedCommand, { command: "install" }>): CliOutcome {
-  if (command.output === "json") writeJson(projectFailure(error));
-  else writeStderr(`× install failed\n  reason  ${safeText(error instanceof Error ? error.message : String(error))}`);
-  return "failed";
 }
 
 function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): CliOutcome {
@@ -145,7 +136,7 @@ function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): C
 
 function writeAkumaFailure(
   error: AkumaNotBornError | AkumaAddressError | AkumaWorldScopeError | AkumaObservationError,
-  command: FacetCommand,
+  command: ParsedCommand,
   shared: ReturnType<typeof thrownCompletion>,
 ): CliOutcome {
   if (command.output === "json")
@@ -159,7 +150,7 @@ function writeAkumaFailure(
 
 function writeArchetypeFailure(
   error: AkumaNameError,
-  command: FacetCommand,
+  command: ParsedCommand,
   shared: ReturnType<typeof thrownCompletion>,
 ): CliOutcome {
   const missing = error.absent;
@@ -175,15 +166,15 @@ function writeArchetypeFailure(
   return shared.outcome;
 }
 
-async function writeFailure(error: unknown, command: ParsedCommand): Promise<CliOutcome> {
+function writeFailure(error: unknown, command: ParsedCommand): CliOutcome {
   if (error instanceof BindDraftError) return writeBindDraftFailure(error, command);
-  if (error instanceof CliUsageError) {
-    if (command.output === "json") writeJson(projectFailure(error));
-    else writeStderr(error.message);
-    return "usage";
-  }
-  if ("command" in command && command.command === "install") return writeInstallFailure(error, command);
-  const shared = thrownCompletion(error, command);
+  const shared =
+    "command" in command && command.command === "install"
+      ? {
+          outcome: errorCategory(error) === "invalid-input" ? ("usage" as const) : ("failed" as const),
+          text: () => `× install failed\n  reason  ${safeText(error instanceof Error ? error.message : String(error))}`,
+        }
+      : thrownCompletion(error, command);
   if (
     error instanceof AkumaNotBornError ||
     error instanceof AkumaAddressError ||
@@ -195,6 +186,13 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
     return writeArchetypeFailure(error, command, shared);
   if (command.output === "json") writeJson(projectFailure(error));
   else if (error instanceof KeiyakuError && error.outcome !== undefined) writeStdout(shared.text());
+  else if (shared.outcome === "usage")
+    writeStderr(
+      renderUsageMessage(
+        error instanceof Error ? error.message : String(error),
+        error instanceof CliUsageError ? (error.guide ?? usageGuideForCommand(command)) : usageGuideForCommand(command),
+      ),
+    );
   else writeStderr(shared.text());
   return shared.outcome;
 }
@@ -222,12 +220,12 @@ function invocationCoordinates(
 // eslint-disable-next-line complexity -- dispatch keeps acquisition, the facet, and process outcome in one edge.
 async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput): Promise<CliOutcome> {
   const command = invocation.command;
-  assertExplicitRepoUse(command, invocation.repo);
   const environment = { ...(input.environment ?? process.env) };
   const home = homeFromEnvironment(environment);
   const cancellation = cliCancellation(input.signal);
   let progress: Promise<ExecutionProgressDriver> | undefined;
   try {
+    assertExplicitRepoUse(command, invocation.repo);
     const runtime: CliRuntime = {
       environment,
       facet: Keiyaku.at({
@@ -281,16 +279,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
       return await runAkumaHistory(request, runtime);
     return await runContractRequest(request, runtime, selectedAlias);
   } catch (error) {
-    if (error instanceof KeiyakuUsageError) {
-      const usage = new CliUsageError(error.message, usageGuideForCommand(command));
-      if ("name" in command && command.name === "ls" && "mine" in command.input && command.input.mine === true)
-        return await writeFailure(usage, command);
-      throw usage;
-    }
-    if (error instanceof CliUsageError && error.guide === undefined) {
-      throw new CliUsageError(error.diagnostic, usageGuideForCommand(command));
-    }
-    return await writeFailure(error, command);
+    return writeFailure(error, command);
   } finally {
     cancellation.close();
   }

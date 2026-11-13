@@ -3,12 +3,11 @@ import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { makeGitRepository } from "./support/git.js";
-import { captureOutput, runCli as runCliInProcess } from "./support/cli-fixtures.js";
+import { captureOutput } from "./support/cli-fixtures.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { main } from "../src/cli/main.js";
-import { CliUsageError, parseArgv } from "../src/cli/parse.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../src/library/address.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -77,8 +76,14 @@ test("debt coordinate failures retain usage output for text and JSON", async (co
   for (const flags of [[], ["--json"]]) {
     const result = await captureOutput(() => main(["-C", root, "ls", "debt/", ...flags]));
     assert.equal(result.exit, 64);
-    assert.equal(result.stdout, "");
-    assert.match(result.stderr, /world marker is not a directory/u);
+    if (flags.length === 0) {
+      assert.equal(result.stdout, "");
+      assert.match(result.stderr, /world marker is not a directory/u);
+    } else {
+      assert.equal(result.stderr, "");
+      assert.equal(JSON.parse(result.stdout).category, "invalid-input");
+      assert.match(JSON.parse(result.stdout).diagnostic, /world marker is not a directory/u);
+    }
   }
 });
 
@@ -306,58 +311,44 @@ test("Akuma address refusals keep Alias absence, a malformed selector, and a for
   }
 });
 
-test("unknown debt command scopes minimal usage to debt", () => {
-  assert.throws(
-    () => parseArgv(["debt", "nonsense"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      error.diagnostic === "unknown debt command: nonsense" &&
-      error.message ===
-        [
-          "× usage  keiyaku debt",
-          "  given  nonsense",
-          "  accepts  keiyaku debt <command> ...",
-          "  help  keiyaku debt --help",
-        ].join("\n"),
-  );
+test("unknown debt command scopes minimal usage to debt", async () => {
+  const result = await captureOutput(() => main(["debt", "nonsense"]));
+  assert.equal(result.exit, 64);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, [
+    "× usage  keiyaku debt",
+    "  given  nonsense",
+    "  accepts  keiyaku debt <command> ...",
+    "  help  keiyaku debt --help",
+    "",
+  ].join("\n"));
 });
 
-test("review unknown options retain leaf-scoped usage", () => {
-  assert.throws(
-    () => parseArgv(["review", "--satisfied", "--summary", "ok", "--unknown"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      error.diagnostic === "option --unknown is not valid for review" &&
-      error.message.includes("  accepts  keiyaku review ") &&
-      error.message.includes("  help  keiyaku review --help"),
-  );
+test("review unknown options retain leaf-scoped usage", async () => {
+  const result = await captureOutput(() => main(["review", "--satisfied", "--summary", "ok", "--unknown"]));
+  assert.equal(result.exit, 64);
+  assert.match(result.stderr, /reason  option --unknown is not valid for review/u);
+  assert.match(result.stderr, /  accepts  keiyaku review /u);
+  assert.match(result.stderr, /  help  keiyaku review --help/u);
 });
 
-test("invalid args keep diagnostic with deepest leaf usage", () => {
-  assert.throws(
-    () => parseArgv(["bind", "--debt"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      error.diagnostic === "--debt requires a value" &&
-      error.message.includes("× usage  keiyaku bind") &&
-      error.message.includes("  reason  --debt requires a value") &&
-      error.message.includes("  accepts  keiyaku bind ") &&
-      error.message.includes("  help  keiyaku bind --help") &&
-      !error.message.includes("Contract — standing acceptance"),
-  );
-  assert.throws(
-    () => parseArgv(["--repo", "/one", "--repo", "/two", "status"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      error.diagnostic === "--repo may appear only once" &&
-      error.message ===
-        [
-          "× usage  keiyaku",
-          "  reason  --repo may appear only once",
-          "  accepts  keiyaku <command> [options]",
-          "  help  keiyaku --help",
-        ].join("\n"),
-  );
+test("invalid args keep diagnostic with deepest leaf usage", async () => {
+  const leaf = await captureOutput(() => main(["bind", "--debt"]));
+  assert.equal(leaf.exit, 64);
+  assert.match(leaf.stderr, /× usage  keiyaku bind/u);
+  assert.match(leaf.stderr, /  reason  --debt requires a value/u);
+  assert.match(leaf.stderr, /  accepts  keiyaku bind /u);
+  assert.match(leaf.stderr, /  help  keiyaku bind --help/u);
+  assert.doesNotMatch(leaf.stderr, /Contract — standing acceptance/u);
+  const root = await captureOutput(() => main(["--repo", "/one", "--repo", "/two", "status"]));
+  assert.equal(root.exit, 64);
+  assert.equal(root.stderr, [
+    "× usage  keiyaku",
+    "  reason  --repo may appear only once",
+    "  accepts  keiyaku <command> [options]",
+    "  help  keiyaku --help",
+    "",
+  ].join("\n"));
 });
 
 test("unmatched Contract selectors keep the text refusal and native missing guidance object", () => {
@@ -455,37 +446,46 @@ test("malformed bind JSON keeps the draft coordinate in the refusal", () => {
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test("blank stdin remains a visible usage diagnostic and performs no operation", async () => {
+test("blank stdin remains a visible usage diagnostic and performs no operation", () => {
   const repository = makeGitRepository();
   try {
-    await assert.rejects(
-      () =>
-        runCliInProcess(["-C", repository.path, "bind", "-"], {
-          cwd: repository.path,
-          environment: {},
-          readStdin: async () => " \n\t",
-        }),
-      (error: unknown) =>
-        error instanceof CliUsageError &&
-        error.diagnostic === "bind requires a nonblank stdin document" &&
-        error.message.includes("  reason  bind requires a nonblank stdin document") &&
-        error.message.includes("  accepts  keiyaku bind ") &&
-        error.message.includes("  help  keiyaku bind --help"),
-    );
+    const result = runCli(repository.path, ["bind", "-"], " \n\t");
+    assert.equal(result.status, 64);
+    assert.equal(result.stdout, "");
+    assert.match(result.stderr, /^× usage  keiyaku bind$/mu);
+    assert.match(result.stderr, /  reason  bind requires a nonblank stdin document/u);
+    assert.match(result.stderr, /  accepts  keiyaku bind /u);
+    assert.match(result.stderr, /  help  keiyaku bind --help/u);
+    assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
   } finally {
     rmSync(repository.path, { recursive: true, force: true });
   }
 });
 
-test("settings and duplicate-flag diagnostics stay visible", () => {
-  assert.throws(
-    () => parseArgv(["install", "--all", "--all"]),
-    (error: unknown) =>
-      error instanceof CliUsageError &&
-      error.diagnostic === "duplicate option: --all" &&
-      error.message.includes("  reason  duplicate option: --all") &&
-      error.message.includes("  help  keiyaku install --help"),
-  );
+test("blank bind stdin in JSON mode writes a plain typed usage failure to stdout", () => {
+  const repository = makeGitRepository();
+  try {
+    const result = runCli(repository.path, ["bind", "-", "--json"], "");
+    assert.equal(result.status, 64);
+    assert.equal(result.stderr, "");
+    const failure = JSON.parse(result.stdout);
+    assert.equal(failure.kind, "failed");
+    assert.equal(failure.category, "invalid-input");
+    assert.equal(failure.causeClass, "CliUsageError");
+    assert.equal(failure.causeDiagnostic, failure.diagnostic);
+    assert.match(failure.diagnostic, /nonblank stdin document/u);
+    assert.doesNotMatch(failure.diagnostic, /[\r\n]/u);
+    assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
+  } finally {
+    rmSync(repository.path, { recursive: true, force: true });
+  }
+});
+
+test("settings and duplicate-flag diagnostics stay visible", async () => {
+  const result = await captureOutput(() => main(["install", "--all", "--all"]));
+  assert.equal(result.exit, 64);
+  assert.match(result.stderr, /  reason  duplicate option: --all/u);
+  assert.match(result.stderr, /  help  keiyaku install --help/u);
 });
 
 test("usage refusal exits 64 without touching an absent world", async () => {

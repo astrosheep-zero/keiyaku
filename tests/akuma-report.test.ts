@@ -330,8 +330,9 @@ test("CLI report adapts explicit immutable execution and takes stdin", async (co
     const reports = (await Akuma.select(value.world, value.allocated.id).history()).rows.filter(row => row.kind === "report");
     assert.equal(reports[0]?.text, "report from stdin\n");
     assert.deepEqual(result.value, { kind: "recorded", reportId: `report/${reports[0]!.sequence}` });
-    await assert.rejects(runCli(["report", "cannot guess"], { cwd: root, environment: { KEIYAKU_EXTERNAL_CALLER: "pi:host" } }),
-      /requires explicit KEIYAKU_ACTOR_ID/u);
+    const missingActor = await runCli(["report", "cannot guess"], { cwd: root, environment: { KEIYAKU_EXTERNAL_CALLER: "pi:host" } });
+    assert.equal(missingActor.exit, 64);
+    assert.match(missingActor.stderr, /requires explicit KEIYAKU_ACTOR_ID/u);
     assert.throws(() => parseArgv(["report", "recipient", "text"]), /one text argument/u);
     const akuma = Akuma.select(value.world, value.allocated.id);
     await endTurn(value.allocated.paths, { turnSequence: value.turn.sequence, completedAt: AT, outcome: { kind: "canceled" } });

@@ -1,3 +1,5 @@
+import { KeiyakuError } from "../errors.js";
+
 export type CliUsageGuide = Readonly<{
   scope: string;
   accepts: string;
@@ -78,12 +80,12 @@ export function usageAcceptanceLines(guide: CliUsageGuide): readonly string[] {
   ];
 }
 
-export class CliUsageError extends Error {
+export class CliUsageError extends KeiyakuError {
   constructor(
     readonly diagnostic: string,
     readonly guide?: CliUsageGuide,
   ) {
-    super(renderUsageMessage(diagnostic, guide));
+    super("invalid-input", diagnostic);
     this.name = "CliUsageError";
   }
 }

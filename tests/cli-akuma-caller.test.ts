@@ -149,6 +149,26 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   }
 });
 
+test("ls --mine JSON usage failure retains a single-line native diagnostic", async (t) => {
+  const root = await World.at(temporaryDirectory(t, "keiyaku-cli-caller-json-refusal-"));
+  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  let diagnostic = "";
+  await assert.rejects(facet.ls({ selector: "aku/*", mine: true }), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuUsageError);
+    diagnostic = error.message;
+    return true;
+  });
+  const result = await cliJson<{ kind: string; category: string; diagnostic: string }>(
+    ["-C", root, "ls", "--mine"], { environment: {} },
+  );
+  assert.equal(result.exit, 64);
+  assert.equal(result.stderr, "");
+  assert.equal(result.value.kind, "failed");
+  assert.equal(result.value.category, "invalid-input");
+  assert.equal(result.value.diagnostic, diagnostic);
+  assert.doesNotMatch(result.value.diagnostic, /[\r\n]/u);
+});
+
 test("ls caller selection refuses absent identity and non-Akuma catalogues", async (t) => {
   const root = await World.at(temporaryDirectory(t, "keiyaku-cli-caller-refusal-"));
   const facet = Keiyaku.at({ cwd: root, environment: {} });

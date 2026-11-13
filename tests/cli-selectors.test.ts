@@ -89,7 +89,8 @@ test("exact Contract status without a Repo keeps the usage boundary", async (t) 
   await assert.rejects(facet.status({ id: "kei/example" }), KeiyakuUsageError);
   const result = await captureOutput(() => main(["-C", cwd, "status", "kei/example", "--json"]));
   assert.equal(result.exit, 64);
-  assert.match(result.stderr, /this command requires a resolved Repo/u);
+  assert.equal(result.stderr, "");
+  assert.match(JSON.parse(result.stdout).diagnostic, /this command requires a resolved Repo/u);
 });
 
 test("missing addressed Contracts retain their native status refusal", async () => {
@@ -155,7 +156,9 @@ test("named status uses complete live membership and preserves Alias collisions"
 
 test("instance listing preserves empty Alias failure and requires an invocation World", async (t) => {
   const root = temporaryDirectory(t, "cli-empty-list-");
-  await assert.rejects(runCli(["-C", root, "ls", "aku/*/*"], { environment: {} }), CliUsageError);
+  const missing = await runCli(["-C", root, "ls", "aku/*/*"], { environment: {} });
+  assert.equal(missing.exit, 64);
+  assert.match(missing.stderr, /× usage  keiyaku ls/u);
   const world = await World.at(root);
   mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "broken\n");

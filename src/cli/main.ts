@@ -1,4 +1,5 @@
 import { CliUsageError, parseArgv, renderHelp } from "./parse.js";
+import { renderUsageMessage } from "./usage.js";
 import { cliExitCode } from "./streams.js";
 import { installedPackageVersion } from "./version.js";
 
@@ -12,8 +13,9 @@ function handleBrokenPipe(stream: NodeJS.WriteStream): void {
 export async function main(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
   handleBrokenPipe(process.stdout);
   handleBrokenPipe(process.stderr);
+  let parsed: ReturnType<typeof parseArgv>;
   try {
-    const parsed = parseArgv(argv);
+    parsed = parseArgv(argv);
     if ("help" in parsed) {
       const columns =
         process.stdout.isTTY === true && Number.isInteger(process.stdout.columns) ? process.stdout.columns : undefined;
@@ -25,10 +27,15 @@ export async function main(argv: readonly string[] = process.argv.slice(2)): Pro
       process.stdout.write(`${await installedPackageVersion()}\n`);
       return cliExitCode("accepted");
     }
-    return await (await import("./runtime.js")).runCliCommand(parsed);
   } catch (error) {
-    const diagnostic = error instanceof Error ? error.message : String(error);
+    const diagnostic =
+      error instanceof CliUsageError
+        ? renderUsageMessage(error.diagnostic, error.guide)
+        : error instanceof Error
+          ? error.message
+          : String(error);
     process.stderr.write(diagnostic.endsWith("\n") ? diagnostic : `${diagnostic}\n`);
     return cliExitCode(error instanceof CliUsageError ? "usage" : "failed");
   }
+  return await (await import("./runtime.js")).runCliCommand(parsed);
 }
