@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import { MAX_AKUMA_NAME_BYTES, normalizeIdentityStem, validateAkumaName } from "./normalize.js";
 
@@ -27,11 +28,12 @@ export function parseReadableAkumaAlias(value: string): AkumaAlias {
 }
 
 export function parseAkumaAlias(value: string): AkumaAlias {
-  if (!value.startsWith("@")) throw new TypeError("Akuma alias selector must start with @");
+  if (!value.startsWith("@")) throw new KeiyakuError("invalid-input", "Akuma alias selector must start with @");
   try {
     validateAkumaName(value.slice(1));
   } catch {
-    throw new TypeError(
+    throw new KeiyakuError(
+      "invalid-input",
       `Akuma alias name must be a normalized Akuma name of at most ${MAX_AKUMA_NAME_BYTES} UTF-8 bytes`,
     );
   }
@@ -50,7 +52,7 @@ export function parseAkumaGlob(value: string): AkumaGlob {
     normalizeIdentityStem({ source: archetypeProbe }) !== archetypeProbe ||
     !AKUMA_GLOB_SUFFIX.test(segments[2] ?? "")
   ) {
-    throw new TypeError("Akuma glob must be aku/<akuma-pattern>/<hex-pattern> and contain *");
+    throw new KeiyakuError("invalid-input", "Akuma glob must be aku/<akuma-pattern>/<hex-pattern> and contain *");
   }
   return value as AkumaGlob;
 }

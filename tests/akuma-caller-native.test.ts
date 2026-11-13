@@ -3,6 +3,7 @@ import { mkdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { akumaCallerFromEnvironment } from "../src/library/keiyaku-identity.js";
+import { KeiyakuError } from "../src/errors.js";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { temporaryDirectory } from "./support/process.js";
 
@@ -30,14 +31,21 @@ test("complete Akuma parent wins; incomplete custody and ambiguous native hosts 
     { kind: "akuma", akumaId: "aku/parent/1234abcd", world: realpathSync(world) });
   await assert.rejects(akumaCallerFromEnvironment({ ...hosts, KEIYAKU_ACTOR_ID: "aku/parent/1234abcd" }),
     /requires both/u);
-  await assert.rejects(akumaCallerFromEnvironment(hosts), {
-    name: "TypeError",
-    message: "Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID, CLAUDE_CODE_SESSION_ID",
+  await assert.rejects(akumaCallerFromEnvironment(hosts), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuError);
+    assert.equal(error.category, "invalid-input");
+    assert.equal(
+      error.message,
+      "Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID, CLAUDE_CODE_SESSION_ID",
+    );
+    return true;
   });
   await assert.rejects(akumaCallerFromEnvironment({ CODEX_THREAD_ID: "codex", PI_SESSION_ID: "pi",
-    CLAUDE_CODE_SESSION_ID: "", KEIYAKU_EXTERNAL_CALLER: "paseo:legacy" }), {
-    name: "TypeError",
-    message: "Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID",
+    CLAUDE_CODE_SESSION_ID: "", KEIYAKU_EXTERNAL_CALLER: "paseo:legacy" }), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuError);
+    assert.equal(error.category, "invalid-input");
+    assert.equal(error.message, "Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID");
+    return true;
   });
 });
 

@@ -1,3 +1,4 @@
+import { KeiyakuError } from "./errors.js";
 import { setMaxListeners } from "node:events";
 import type { BodyLaunch, BodyLauncher, BodyLaunchEnd, LiveBodyLaunch } from "./akuma/body-launch.js";
 import { spawnAkumaBody } from "./akuma/detached-body.js";
@@ -125,15 +126,16 @@ export function captureAkumaHost(host?: AkumaHostOptions): Readonly<{
   reportDiagnostic?: (message: string) => void;
 }> {
   if (host !== undefined && (typeof host !== "object" || host === null || Array.isArray(host)))
-    throw new TypeError("Akuma host options must be an object");
+    throw new KeiyakuError("invalid-input", "Akuma host options must be an object");
   const unknown = Object.keys(host ?? {}).find((key) => key !== "reportDiagnostic" && key !== "hosting");
-  if (unknown !== undefined) throw new TypeError(`Akuma host options has unknown field: ${unknown}`);
+  if (unknown !== undefined)
+    throw new KeiyakuError("invalid-input", `Akuma host options has unknown field: ${unknown}`);
   const hosting = host?.hosting;
   if (hosting !== undefined && hosting !== "detached" && hosting !== "in-process")
-    throw new TypeError("Akuma host hosting must be detached or in-process");
+    throw new KeiyakuError("invalid-input", "Akuma host hosting must be detached or in-process");
   const reportDiagnostic = host?.reportDiagnostic;
   if (reportDiagnostic !== undefined && typeof reportDiagnostic !== "function")
-    throw new TypeError("Akuma host reportDiagnostic must be a function");
+    throw new KeiyakuError("invalid-input", "Akuma host reportDiagnostic must be a function");
   return Object.freeze({
     spawn:
       host instanceof ScopedAkumaHost

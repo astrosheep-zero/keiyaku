@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../../errors.js";
 import type { ProviderAdapter } from "../provider.js";
 import type { ProviderExecution } from "../provider-recipe.js";
 
@@ -30,7 +31,7 @@ export async function withWritableDirectories(
 ): Promise<ProviderExecution> {
   if (directories.length === 0) return execution;
   if (execution.kind !== "codex-app-server")
-    throw new TypeError(`writableDirectories is unsupported by provider ${execution.kind}`);
+    throw new KeiyakuError("invalid-input", `writableDirectories is unsupported by provider ${execution.kind}`);
   const { withCodexWritableDirectories } = await import("./codex-app-server/configuration.js");
   return await withCodexWritableDirectories(execution, cwd, directories, signal);
 }

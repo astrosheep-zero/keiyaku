@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import { durationSchema, validateAkumaInput, validateTellObservation } from "./call-input.js";
 import { akumaStatusSchema } from "./akuma.js";
@@ -70,7 +71,7 @@ export type { AkumaAskResult, AkumaTellResult, KillEvidence };
 
 function signalOption(value: unknown): AbortSignal | undefined {
   if (value === undefined) return undefined;
-  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
+  if (!(value instanceof AbortSignal)) throw new KeiyakuError("invalid-input", "signal must be an AbortSignal");
   return value;
 }
 
@@ -93,14 +94,15 @@ class AkumaHandle {
   }
 
   async tell(text: string, options: AkumaTellOptions = {}): Promise<AkumaTellResult> {
-    if (typeof text !== "string") throw new TypeError("Akuma tell text must be a string");
+    if (typeof text !== "string") throw new KeiyakuError("invalid-input", "Akuma tell text must be a string");
     if (typeof options !== "object" || options === null || Array.isArray(options))
-      throw new TypeError("Akuma tell options must be an object");
-    if ("schema" in options) throw new TypeError("Akuma tell does not accept schema; use ask");
+      throw new KeiyakuError("invalid-input", "Akuma tell options must be an object");
+    if ("schema" in options) throw new KeiyakuError("invalid-input", "Akuma tell does not accept schema; use ask");
     const unknown = Object.keys(options).find(
       (key) => !["interrupt", "initiator", "signal", "timeoutMs", "wait"].includes(key),
     );
-    if (unknown !== undefined) throw new TypeError(`Akuma tell options has unknown field: ${unknown}`);
+    if (unknown !== undefined)
+      throw new KeiyakuError("invalid-input", `Akuma tell options has unknown field: ${unknown}`);
     validateTellObservation(options);
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
@@ -123,13 +125,14 @@ class AkumaHandle {
   }
 
   async ask(text: string, options: AkumaAskOptions): Promise<AkumaAskResult> {
-    if (typeof text !== "string") throw new TypeError("Akuma ask text must be a string");
+    if (typeof text !== "string") throw new KeiyakuError("invalid-input", "Akuma ask text must be a string");
     if (typeof options !== "object" || options === null || Array.isArray(options))
-      throw new TypeError("Akuma ask options must be an object");
+      throw new KeiyakuError("invalid-input", "Akuma ask options must be an object");
     const unknown = Object.keys(options).find(
       (key) => !["schema", "timeoutMs", "interrupt", "initiator", "signal"].includes(key),
     );
-    if (unknown !== undefined) throw new TypeError(`Akuma ask options has unknown field: ${unknown}`);
+    if (unknown !== undefined)
+      throw new KeiyakuError("invalid-input", `Akuma ask options has unknown field: ${unknown}`);
     validateAkumaInput(durationSchema.optional(), options.timeoutMs);
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
@@ -157,11 +160,13 @@ class AkumaHandle {
   }
 
   async report(text: string, options: AkumaReportOptions = {}): Promise<AkumaReportResult> {
-    if (typeof text !== "string" || text.trim() === "") throw new TypeError("Akuma report text must be nonblank");
+    if (typeof text !== "string" || text.trim() === "")
+      throw new KeiyakuError("invalid-input", "Akuma report text must be nonblank");
     if (typeof options !== "object" || options === null || Array.isArray(options))
-      throw new TypeError("Akuma report options must be an object");
+      throw new KeiyakuError("invalid-input", "Akuma report options must be an object");
     const unknown = Object.keys(options).find((key) => !["signal"].includes(key));
-    if (unknown !== undefined) throw new TypeError(`Akuma report options has unknown field: ${unknown}`);
+    if (unknown !== undefined)
+      throw new KeiyakuError("invalid-input", `Akuma report options has unknown field: ${unknown}`);
     const signal = signalOption(options.signal);
     const result = await this.owner().report({ text, at: new Date().toISOString() }, signal);
     if (result.kind !== "recorded") return result;
@@ -189,10 +194,11 @@ class AkumaHandle {
 
   async idle(options: AkumaIdleOptions = {}): Promise<AkumaIdleResult> {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
-      throw new TypeError("Akuma idle options must be an object");
+      throw new KeiyakuError("invalid-input", "Akuma idle options must be an object");
     }
     const unknown = Object.keys(options).find((key) => key !== "timeoutMs" && key !== "signal");
-    if (unknown !== undefined) throw new TypeError(`Akuma idle options has unknown field: ${unknown}`);
+    if (unknown !== undefined)
+      throw new KeiyakuError("invalid-input", `Akuma idle options has unknown field: ${unknown}`);
     validateAkumaInput(durationSchema.optional(), options.timeoutMs);
     const signal = signalOption(options.signal);
     return await withAkumaWaitDeferrals(
@@ -212,10 +218,11 @@ class AkumaHandle {
 
   async history(options: AkumaHistoryOptions = {}): Promise<ActivityHistory> {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
-      throw new TypeError("Akuma history options must be an object");
+      throw new KeiyakuError("invalid-input", "Akuma history options must be an object");
     }
     const unknown = Object.keys(options).find((key) => !["before", "since", "limit"].includes(key));
-    if (unknown !== undefined) throw new TypeError(`Akuma history options has unknown field: ${unknown}`);
+    if (unknown !== undefined)
+      throw new KeiyakuError("invalid-input", `Akuma history options has unknown field: ${unknown}`);
     return (await this.owner(true).history({
       ...(options.before === undefined ? {} : { before: options.before }),
       ...(options.since === undefined ? {} : { since: options.since }),
@@ -225,17 +232,18 @@ class AkumaHandle {
 
   stream(options: AkumaSignalOptions = {}): AsyncIterable<AkumaStreamSnapshot> {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
-      throw new TypeError("Akuma stream options must be an object");
+      throw new KeiyakuError("invalid-input", "Akuma stream options must be an object");
     }
     const unknown = Object.keys(options).find((key) => key !== "signal");
-    if (unknown !== undefined) throw new TypeError(`Akuma stream options has unknown field: ${unknown}`);
+    if (unknown !== undefined)
+      throw new KeiyakuError("invalid-input", `Akuma stream options has unknown field: ${unknown}`);
     const signal = signalOption(options.signal);
     return this.owner(true).stream(signal === undefined ? {} : { signal });
   }
 
   async kill(options: AkumaSignalOptions = {}): Promise<KillEvidence> {
     if (typeof options !== "object" || options === null || Array.isArray(options)) {
-      throw new TypeError("Akuma kill options must be an object");
+      throw new KeiyakuError("invalid-input", "Akuma kill options must be an object");
     }
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
@@ -253,7 +261,7 @@ export class Akuma extends AkumaHandle {
 
   static async birth(akumaName: string, input: AkumaBirthInput): Promise<Akuma> {
     if (typeof input !== "object" || input === null || Array.isArray(input)) {
-      throw new TypeError("Akuma birth input must be an object");
+      throw new KeiyakuError("invalid-input", "Akuma birth input must be an object");
     }
     const unknown = Object.keys(input).find(
       (key) =>
@@ -261,8 +269,9 @@ export class Akuma extends AkumaHandle {
           key,
         ),
     );
-    if (unknown !== undefined) throw new TypeError(`Akuma birth input has unknown field: ${unknown}`);
-    if (typeof input.root !== "string") throw new TypeError("Akuma birth root must be a WorldRoot");
+    if (unknown !== undefined)
+      throw new KeiyakuError("invalid-input", `Akuma birth input has unknown field: ${unknown}`);
+    if (typeof input.root !== "string") throw new KeiyakuError("invalid-input", "Akuma birth root must be a WorldRoot");
     const { spawn, reportDiagnostic = stderrPluginDiagnostic } = captureAkumaHost(input.host);
     const admitted = await admitAkumaCall(
       input.root,
@@ -286,7 +295,7 @@ export class Akuma extends AkumaHandle {
   }
 
   static select(root: WorldRoot, selector: string, host?: AkumaHostOptions): Akuma {
-    if (typeof root !== "string") throw new TypeError("Akuma.select root must be a WorldRoot");
+    if (typeof root !== "string") throw new KeiyakuError("invalid-input", "Akuma.select root must be a WorldRoot");
     const { spawn, reportDiagnostic = stderrPluginDiagnostic } = captureAkumaHost(host);
     return new Akuma(parseAkumaId(selector).id, root, reportDiagnostic, spawn);
   }
@@ -299,7 +308,7 @@ export function akumaWithLauncher(
   spawn: BodyLauncher,
   host?: AkumaHostOptions,
 ): Akuma {
-  if (typeof root !== "string") throw new TypeError("Akuma.select root must be a WorldRoot");
+  if (typeof root !== "string") throw new KeiyakuError("invalid-input", "Akuma.select root must be a WorldRoot");
   const reportDiagnostic = captureAkumaHostDiagnostic(host) ?? stderrPluginDiagnostic;
   return new AkumaHandle(parseAkumaId(selector).id, root, reportDiagnostic, spawn);
 }

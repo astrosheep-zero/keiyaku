@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { parseToAST } from "../markdown/parse.js";
 import { indexDocument, indexedHeadings } from "../markdown/query.js";
 import type { SectionNode } from "../markdown/types.js";
@@ -10,7 +11,7 @@ export function decodeArcDocument(source: string): Readonly<{ title: string; bod
   try {
     document = parseToAST(source);
   } catch {
-    throw new TypeError(ARC_SHAPE);
+    throw new KeiyakuError("invalid-input", ARC_SHAPE);
   }
   const titles = indexedHeadings(indexDocument(document), { level: 1 }).filter(
     (node): node is SectionNode => node.type === "section",
@@ -23,7 +24,7 @@ export function decodeArcDocument(source: string): Readonly<{ title: string; bod
     title.title.trim().length === 0 ||
     source.slice(0, title.span.start).trim().length !== 0
   ) {
-    throw new TypeError(ARC_SHAPE);
+    throw new KeiyakuError("invalid-input", ARC_SHAPE);
   }
   return { title: title.title, body: source.slice(title.contentStart) };
 }

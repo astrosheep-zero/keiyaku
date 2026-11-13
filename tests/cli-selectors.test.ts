@@ -138,9 +138,10 @@ test("named status uses complete live membership and preserves Alias collisions"
   assert.equal(selected.value.kind, "contract");
   const born = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a0000001", createdAt: "2026-08-09T00:00:00.000Z" });
   await moveAlias({ world, alias: parseAkumaAlias(name), akumaId: born.id });
-  const collision = await cliJson<{ kind: string; diagnostic: string }>(["-C", world, "status", name], { environment: {} });
-  assert.equal(collision.exit, 3, collision.stderr);
+  const collision = await cliJson<{ kind: string; category: string; diagnostic: string }>(["-C", world, "status", name], { environment: {} });
+  assert.equal(collision.exit, 64, collision.stderr);
   assert.equal(collision.value.kind, "failed");
+  assert.equal(collision.value.category, "invalid-input");
   assert.match(collision.value.diagnostic, /ambiguous selector/u);
   // A failed Contract source cannot erase a readable Alias or pretend an unresolved name is absent.
   repository.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);

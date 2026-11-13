@@ -11,12 +11,12 @@ export class KeiyakuArcDocumentError extends KeiyakuError {
     readonly contract: ContractId,
     cause: Error,
   ) {
-    super("internal", cause.message, { cause });
+    super("invalid-input", cause.message, { cause });
   }
 }
 export class KeiyakuUsageError extends KeiyakuError {
   constructor(message: string) {
-    super("internal", message);
+    super("invalid-input", message);
   }
 }
 

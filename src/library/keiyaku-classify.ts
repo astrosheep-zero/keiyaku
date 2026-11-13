@@ -17,7 +17,8 @@ import type {
 import { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
 import type { ForkResult, SpawnResult } from "./akuma-creation.js";
 import type { ContractWaitResult } from "./contract-wait.js";
-import { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
+import { KeiyakuArcDocumentError } from "./keiyaku-coordinates.js";
+import { errorCategory } from "../errors.js";
 import type { VerbInput, VerbName, VerbOutput } from "./keiyaku-verbs.js";
 import { contractOutcomeDisposition, invocationIssueIsFailure, resetIssueIsRequired } from "./outcome.js";
 
@@ -35,7 +36,6 @@ function classifyDebt(result: DebtNativeResult): VerbDisposition {
 }
 
 function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
-  if (error instanceof KeiyakuUsageError) return "usage";
   if (
     error instanceof AkumaAddressError ||
     error instanceof AkumaNotBornError ||
@@ -44,7 +44,7 @@ function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
     (name === "spawn" && error instanceof AkumaNameError)
   )
     return "refused";
-  return "failed";
+  return errorCategory(error) === "invalid-input" ? "usage" : "failed";
 }
 
 const akumaCallDisposition = {

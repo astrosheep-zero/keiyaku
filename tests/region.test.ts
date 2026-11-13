@@ -4,6 +4,7 @@ import test from "node:test";
 import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { decodeRegion, RegionDocumentError } from "../src/body/region.js";
+import { KeiyakuError } from "../src/errors.js";
 import { parseToAST } from "../src/markdown/parse.js";
 import type { SectionNode } from "../src/markdown/types.js";
 
@@ -117,13 +118,15 @@ test("contract decoding and amendment share Region validation", () => {
   assert.throws(
     () => decodeContractDocument(contract("src/**file")),
     (error: unknown) =>
-      error instanceof TypeError &&
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
       error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
   );
   assert.throws(
     () => prepareAmendDocument("## Replace: Region\n~~~\nsrc/**file\n~~~")(current),
     (error: unknown) =>
-      error instanceof TypeError &&
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
       error.message.includes("Region pattern 'src/**file' may use ** only as a complete segment"),
   );
 });

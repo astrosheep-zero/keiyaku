@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 const GRAPHEMES = new Intl.Segmenter("und", { granularity: "grapheme" });
 const WORD_GRAPHEME = /^[\p{Letter}\p{Number}\p{Mark}]+$/u;
 const EMOJI_GRAPHEME = new RegExp("^\\p{RGI_Emoji}$", "v");
@@ -15,7 +16,8 @@ export function isCanonicalAkumaName(value: string): boolean {
 
 export function validateAkumaName(value: string): string {
   if (!isCanonicalAkumaName(value) || Buffer.byteLength(value, "utf8") > MAX_AKUMA_NAME_BYTES) {
-    throw new TypeError(
+    throw new KeiyakuError(
+      "invalid-input",
       `Akuma name must be one normalized human identity segment of at most ${MAX_AKUMA_NAME_BYTES} UTF-8 bytes`,
     );
   }

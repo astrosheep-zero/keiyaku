@@ -23,7 +23,7 @@ import { Settings } from "../settings.js";
 import { Keis } from "./contract-composition.js";
 import type { BindOutcome, MutationObservation } from "./contract-outcomes.js";
 import { validateArcMarkdown } from "./input.js";
-import { KeiyakuError } from "./outcome.js";
+import { errorCategory } from "../errors.js";
 import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
@@ -55,16 +55,19 @@ export class Keiyaku {
   }
 
   static at(input: KeiyakuAt): Keiyaku {
-    if (typeof input?.cwd !== "string" || !isAbsolute(input.cwd)) throw new TypeError("cwd must be an absolute string");
+    if (typeof input?.cwd !== "string" || !isAbsolute(input.cwd))
+      throw new KeiyakuUsageError("cwd must be an absolute string");
     if (
       typeof input.environment !== "object" ||
       input.environment === null ||
       Array.isArray(input.environment) ||
       Object.values(input.environment).some((value) => value !== undefined && typeof value !== "string")
     )
-      throw new TypeError("environment must be a string record");
-    if (input.home !== undefined && typeof input.home !== "string") throw new TypeError("home must be a string");
-    if (input.repo !== undefined && typeof input.repo !== "string") throw new TypeError("repo must be a string");
+      throw new KeiyakuUsageError("environment must be a string record");
+    if (input.home !== undefined && typeof input.home !== "string")
+      throw new KeiyakuUsageError("home must be a string");
+    if (input.repo !== undefined && typeof input.repo !== "string")
+      throw new KeiyakuUsageError("repo must be a string");
     return new Keiyaku(input);
   }
 
@@ -399,8 +402,7 @@ export class Keiyaku {
     try {
       validateArcMarkdown(input.markdown);
     } catch (error) {
-      if (error instanceof TypeError || (error instanceof KeiyakuError && error.category === "invalid-input"))
-        throw new KeiyakuArcDocumentError(selected.id, error);
+      if (errorCategory(error) === "invalid-input") throw new KeiyakuArcDocumentError(selected.id, error as Error);
       throw error;
     }
     return await selected.contract.arc(input);
@@ -458,7 +460,7 @@ export class Keiyaku {
         ? undefined
         : await Promise.all(
             writableDirectories.map((path) => {
-              if (path.trim() === "") throw new TypeError("a writable directory must be nonblank");
+              if (path.trim() === "") throw new KeiyakuUsageError("a writable directory must be nonblank");
               return canonicalBirthCwd(resolve(at.cwd, path));
             }),
           );
@@ -498,13 +500,8 @@ export class Keiyaku {
     });
   }
 
-  async #caller() {
-    try {
-      return await akumaCallerFromEnvironment(this.#input.environment);
-    } catch (error) {
-      if (error instanceof TypeError) throw new KeiyakuUsageError(error.message);
-      throw error;
-    }
+  #caller() {
+    return akumaCallerFromEnvironment(this.#input.environment);
   }
 
   async #akumas(use: "optional" | "required" = "optional") {
@@ -575,7 +572,7 @@ export class Keiyaku {
     try {
       caller = await akumaCallerFromEnvironment(environment);
     } catch (error) {
-      if (error instanceof TypeError || error instanceof WorldError) throw new KeiyakuUsageError(error.message);
+      if (error instanceof WorldError) throw new KeiyakuUsageError(error.message);
       throw error;
     }
     if (caller?.kind !== "akuma") throw new KeiyakuUsageError("report requires explicit Akuma identity");
@@ -639,7 +636,7 @@ export class Keiyaku {
     let selected: KanshiRegionSelection;
     if (input.paths !== undefined) {
       const [first, ...rest] = input.paths;
-      if (first === undefined) throw new TypeError("Region query requires one or more path patterns");
+      if (first === undefined) throw new KeiyakuUsageError("Region query requires one or more path patterns");
       selected = { kind: "path", patterns: [first, ...rest] };
     } else {
       selected =

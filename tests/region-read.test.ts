@@ -3,7 +3,7 @@ import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test, { describe } from "node:test";
 import { runCli } from "./support/cli-fixtures.js";
-import { Keis, Repo } from "../src/index.js";
+import { Keis, KeiyakuError, Repo } from "../src/index.js";
 import { Kanshi } from "../src/kanshi/index.js";
 import type { KanshiRegionSelection, KanshiReport, RegionRead } from "../src/kanshi/index.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
@@ -123,19 +123,25 @@ describe("region-read isolated fixtures", { concurrency: 3 }, () => {
 
     await assert.rejects(
       invalid({ kind: "bogus" }),
-      (error: unknown) => error instanceof TypeError && error.message.includes("kind is invalid"),
+      (error: unknown) =>
+        error instanceof KeiyakuError && error.category === "invalid-input" && error.message.includes("kind is invalid"),
     );
     await assert.rejects(
       invalid({ kind: "path", patterns: ["docs/**"], extra: true }),
-      (error: unknown) => error instanceof TypeError && error.message.includes("unknown field"),
+      (error: unknown) =>
+        error instanceof KeiyakuError && error.category === "invalid-input" && error.message.includes("unknown field"),
     );
     await assert.rejects(
       invalid({ kind: "overlap" }),
-      (error: unknown) => error instanceof TypeError && error.message.includes("kind is invalid"),
+      (error: unknown) =>
+        error instanceof KeiyakuError && error.category === "invalid-input" && error.message.includes("kind is invalid"),
     );
     await assert.rejects(
       invalid({ kind: "path", patterns: ["docs/[draft].md"] }),
-      (error: unknown) => error instanceof TypeError && error.message.includes("forbidden glob form"),
+      (error: unknown) =>
+        error instanceof KeiyakuError &&
+        error.category === "invalid-input" &&
+        error.message.includes("forbidden glob form"),
     );
     const canonical = await read(repository, { kind: "path", patterns: ["docs/"] });
     assert.deepEqual(canonical, {

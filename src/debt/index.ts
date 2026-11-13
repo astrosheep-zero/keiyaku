@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import {
   debtRefSchema,
@@ -182,7 +183,7 @@ class DebtHandle {
     return debt === null ? { kind: "missing" } : { kind: "present", ...debt };
   }
   async tree(): Promise<DebtTreeResult> {
-    if (arguments.length > 0) throw new TypeError("tree accepts no input");
+    if (arguments.length > 0) throw new KeiyakuError("invalid-input", "tree accepts no input");
     const board = (await readBoard(this.world)).board;
     const tree = buildTree(board, this.id, createDebtRelations(board));
     return tree === null ? { kind: "missing" } : { kind: "present", ...tree };
@@ -213,7 +214,7 @@ class DebtsHandle {
     const v = record(input, "list input");
     closed(v, ["selection", "limit"], "list input");
     if (v.selection !== undefined && v.selection !== "active" && v.selection !== "closed" && v.selection !== "all")
-      throw new TypeError("selection must be active, closed, or all");
+      throw new KeiyakuError("invalid-input", "selection must be active, closed, or all");
     return {
       ...(await listDebts(this.world, v.selection ?? "active", boundedListLimit(v.limit))),
       kind: "debt-catalogue",
@@ -234,7 +235,8 @@ class DebtsHandle {
   async read(input: Readonly<{ ids: readonly string[] }>): Promise<DebtShowResult> {
     const v = record(input, "read input");
     closed(v, ["ids"], "read input");
-    if (!Array.isArray(v.ids) || v.ids.length === 0) throw new TypeError("ids requires at least one DebtId");
+    if (!Array.isArray(v.ids) || v.ids.length === 0)
+      throw new KeiyakuError("invalid-input", "ids requires at least one DebtId");
     const ids = v.ids.map(id);
     const board = (await readBoard(this.world)).board;
     const relations = createDebtRelations(board);
@@ -262,7 +264,7 @@ export type Debts = DebtsHandle;
 
 export const Debts = Object.freeze({
   of(world: WorldRoot): Debts {
-    if (typeof world !== "string") throw new TypeError("Debts.of world must be a WorldRoot");
+    if (typeof world !== "string") throw new KeiyakuError("invalid-input", "Debts.of world must be a WorldRoot");
     return new DebtsHandle(world);
   },
 });

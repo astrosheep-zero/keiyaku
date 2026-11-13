@@ -1,6 +1,7 @@
 /** @architectureCompositionRoot */
 import { decodeCanonicalContractDocument } from "../body/render.js";
-import { contractId, type ContractId } from "../core/facts/types.js";
+import type { ContractId } from "../core/facts/types.js";
+import { KeiyakuError } from "../errors.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import type { BindTargetSelection } from "../protocol/bind.js";
@@ -18,7 +19,7 @@ import {
   type LocalContractCompositionCapture,
 } from "./contract-settings.js";
 import type { BindInput } from "./contract-types.js";
-import { normalizedList, requireInput, requireMarkdown, debtOption } from "./input.js";
+import { callerContractId, normalizedList, requireInput, requireMarkdown, debtOption } from "./input.js";
 import { InvocationAccumulator } from "./invocation.js";
 import type { Kei, createKeiHandle } from "./kei.js";
 import { project, validated, type InvocationFailure } from "./outcome.js";
@@ -41,17 +42,18 @@ function bindInput(input: BindInput, composition: LocalContractCompositionCaptur
   return validated(() => {
     const forkOf = values.forkOf;
     if (values.target !== undefined && values.target !== null && typeof values.target !== "string")
-      throw new TypeError("target must be a string or null");
+      throw new KeiyakuError("invalid-input", "target must be a string or null");
     const document = forkOf === undefined ? parseMarkdown(requireMarkdown(values.markdown)) : undefined;
-    if (forkOf !== undefined && typeof forkOf !== "string") throw new TypeError("forkOf must be a ContractId");
+    if (forkOf !== undefined && typeof forkOf !== "string")
+      throw new KeiyakuError("invalid-input", "forkOf must be a ContractId");
     const derived = forkOf === undefined ? derivedGates(composition, gateNames(values.gates)) : undefined;
     return {
-      forkOf: forkOf === undefined ? undefined : contractId(forkOf),
+      forkOf: forkOf === undefined ? undefined : callerContractId(forkOf),
       document,
       target: values.target,
       debt: forkOf === undefined ? debtOption(values.debt) : undefined,
       gates: derived,
-      after: forkOf === undefined ? normalizedList(values.after, "after", contractId) : undefined,
+      after: forkOf === undefined ? normalizedList(values.after, "after", callerContractId) : undefined,
     };
   });
 }

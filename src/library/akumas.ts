@@ -8,6 +8,7 @@ import { boundedListLimit } from "../bounded-list.js";
 import { boundedMap } from "../akuma/read-pool.js";
 import { projectCurrentWork } from "../akuma/status-projection.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
+import { KeiyakuError } from "../errors.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
 import { Repo, scopeForRepo } from "./repo.js";
 import type { AkumaKanshiRow, AkumaKanshiWorld, Section } from "../kanshi/report.js";
@@ -90,7 +91,8 @@ class AkumasHandle {
 
   async list(input: AkumaListInput = {}): Promise<AkumaList> {
     const { repo, ...native } = requireInput(input, "Akumas.list input", ["repo", "akumaName", "caller", "limit"]);
-    if (repo !== undefined && !(repo instanceof Repo)) throw new TypeError("Akumas.list repo must be a Repo");
+    if (repo !== undefined && !(repo instanceof Repo))
+      throw new KeiyakuError("invalid-input", "Akumas.list repo must be a Repo");
     const selection = rosterInput(native, true);
     const limit = boundedListLimit(native.limit);
     const path = await World.prove(this.#world);
@@ -108,7 +110,7 @@ class AkumasHandle {
 
   async aliases(input: AkumaAliasesInput): Promise<readonly AliasBinding[]> {
     const values = requireInput(input, "Akumas.aliases input", ["akumaIds"]);
-    if (!Array.isArray(values.akumaIds)) throw new TypeError("akumaIds must be an array");
+    if (!Array.isArray(values.akumaIds)) throw new KeiyakuError("invalid-input", "akumaIds must be an array");
     const selected = new Set(normalizedList(values.akumaIds, "akumaIds", (value) => parseAkumaId(value).id));
     const path = await World.prove(this.#world);
     return (await readAliases(path)).filter((binding) => selected.has(binding.akumaId));
@@ -187,7 +189,7 @@ class AkumasHandle {
   private withWorld<Input>(input: Input, label: string): Input & Readonly<{ path: WorldRoot }> {
     const values = requireInput(input, label);
     if (Object.hasOwn(values, "path"))
-      throw new TypeError(`${label} does not accept path; select World with Akumas.of`);
+      throw new KeiyakuError("invalid-input", `${label} does not accept path; select World with Akumas.of`);
     return { ...values, path: this.#world } as Input & Readonly<{ path: WorldRoot }>;
   }
 }
@@ -268,7 +270,7 @@ export function joinedAkumas<T extends AkumaKanshiWorld>(
 
 /** Internal host composition for an explicitly owned launcher. */
 export function akumasWithLauncher(world: WorldRoot, spawn: BodyLauncher, host?: AkumaHostOptions): Akumas {
-  if (typeof world !== "string") throw new TypeError("Akumas.of world must be a WorldRoot");
+  if (typeof world !== "string") throw new KeiyakuError("invalid-input", "Akumas.of world must be a WorldRoot");
   return new AkumasHandle(world, spawn, host);
 }
 

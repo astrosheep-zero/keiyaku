@@ -1,3 +1,4 @@
+import { KeiyakuError } from "./errors.js";
 import { z } from "zod";
 
 function boundedListBase<Row extends z.ZodType>(row: Row) {
@@ -30,7 +31,7 @@ export type BoundedList<Row> = Readonly<{
 export function boundedListLimit(value: unknown = undefined): number {
   if (value === undefined) return DEFAULT_BOUNDED_LIST_LIMIT;
   if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > MAX_BOUNDED_LIST_LIMIT) {
-    throw new TypeError(`limit must be an integer from 1 to ${MAX_BOUNDED_LIST_LIMIT}`);
+    throw new KeiyakuError("invalid-input", `limit must be an integer from 1 to ${MAX_BOUNDED_LIST_LIMIT}`);
   }
   return value as number;
 }

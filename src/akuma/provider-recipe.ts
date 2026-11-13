@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 
 const modelText = z
@@ -90,7 +91,7 @@ export function withoutModel(options: ProviderOptions): ProviderOptions {
 export function decodeProviderOptions(value: unknown): ProviderOptions {
   const parsed = providerOptionsSchema.safeParse(value);
   if (!parsed.success)
-    throw new TypeError(parsed.error.issues[0]?.message ?? "provider options must be an object", {
+    throw new KeiyakuError("invalid-input", parsed.error.issues[0]?.message ?? "provider options must be an object", {
       cause: parsed.error,
     });
   return parsed.data;
@@ -98,7 +99,7 @@ export function decodeProviderOptions(value: unknown): ProviderOptions {
 export function decodeProviderRecipe(value: unknown): ProviderExecution {
   const parsed = providerRecipeSchema.safeParse(value);
   if (!parsed.success)
-    throw new TypeError(parsed.error.issues[0]?.message ?? "provider execution must be an object", {
+    throw new KeiyakuError("invalid-input", parsed.error.issues[0]?.message ?? "provider execution must be an object", {
       cause: parsed.error,
     });
   return parsed.data;

@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
 import type { WorldRoot } from "../world.js";
@@ -55,7 +56,7 @@ export function projectAkumaBirth(soul: Soul): z.output<typeof akumaBirthSchema>
 export function decodeAkumaCaller(value: unknown): AkumaCaller | undefined {
   if (value === undefined) return undefined;
   const parsed = retainedCallerSchema.safeParse(value);
-  if (!parsed.success) throw new TypeError(`Invalid Akuma caller: ${parsed.error.message}`);
+  if (!parsed.success) throw new KeiyakuError("invalid-input", `Invalid Akuma caller: ${parsed.error.message}`);
   return parsed.data;
 }
 

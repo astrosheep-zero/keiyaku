@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import type { ContractBody, ContractCriterion, ContractExtension, DecodedContractDocument } from "./types.js";
 import type { VerificationDeclaration } from "../verification/declaration.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
@@ -29,7 +30,7 @@ type MutableBody = {
 };
 
 function refusal(message: string): never {
-  throw new TypeError(message);
+  throw new KeiyakuError("invalid-input", message);
 }
 
 function nonblank(document: DocumentNode, node: MarkdownBlockNode): boolean {

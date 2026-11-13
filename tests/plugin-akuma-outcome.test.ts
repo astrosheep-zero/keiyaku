@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import test, { after, type TestContext } from "node:test";
-import { Akuma, Akumas, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
+import { Akuma, Akumas, KeiyakuError, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { readAkumaTimeline } from "../src/akuma/akuma.js";
@@ -353,10 +353,11 @@ test("activation diagnostics belong to the initiating host and are never replaye
 
 test("host options reject malformed capabilities before construction or birth effects", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-host-invalid-"));
+  const invalidInput = (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input";
   for (const host of [null, { reportDiagnostic: "stderr" }, { execution: {} }]) {
-    assert.throws(() => Akumas.of(world, host as never), TypeError);
-    assert.throws(() => Akuma.select(world, "aku/worker/0b500015", host as never), TypeError);
-    await assert.rejects(Akuma.birth("worker", { root: world, host: host as never }), TypeError);
+    assert.throws(() => Akumas.of(world, host as never), invalidInput);
+    assert.throws(() => Akuma.select(world, "aku/worker/0b500015", host as never), invalidInput);
+    await assert.rejects(Akuma.birth("worker", { root: world, host: host as never }), invalidInput);
   }
   assert.equal((await Akumas.of(world).list()).rows, undefined, "an empty roster omits rows");
 });

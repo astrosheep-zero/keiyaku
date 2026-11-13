@@ -62,9 +62,9 @@ export function derivedContractPolicy(composition: LocalContractCompositionCaptu
 
 export function gateNames(value: unknown): readonly string[] | undefined {
   if (value === undefined) return undefined;
-  if (!Array.isArray(value)) throw new TypeError("gates must be an array");
+  if (!Array.isArray(value)) throw new KeiyakuError("invalid-input", "gates must be an array");
   return value.map((item, index) => {
-    if (typeof item !== "string") throw new TypeError(`gates[${index}] must be a string`);
+    if (typeof item !== "string") throw new KeiyakuError("invalid-input", `gates[${index}] must be a string`);
     return item;
   });
 }
@@ -155,7 +155,7 @@ export function captureLocalContractComposition(input?: KeisOptions): LocalContr
   const values = requireInput(input === undefined ? {} : input, "Keis.of input", ["settings"]);
   const settings = values.settings;
   if (settings !== undefined && (settings === null || typeof settings !== "object")) {
-    throw new TypeError("Keis.of settings must be a Settings value");
+    throw new KeiyakuError("invalid-input", "Keis.of settings must be a Settings value");
   }
   return Object.freeze({
     ...(settings === undefined ? {} : { settings: settings as Settings }),

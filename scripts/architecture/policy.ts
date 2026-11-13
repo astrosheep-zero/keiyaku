@@ -219,6 +219,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "body/**",
       allow: [
+        errorBase,
         any("body/**"),
         any("core/facts/types.ts"),
         any("duration.ts"),
@@ -312,6 +313,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "protocol/read/**",
       allow: [
+        runtime("errors.ts", ["errorCategory"]),
         any("body/**"),
         boundedList,
         any("core/**"),
@@ -579,6 +581,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "kanshi/read.ts",
       allow: [
+        errorBase,
         any("library/akumas.ts", ["akumaRowsAt", "joinedAkumas", "aliasesAt", "dispatchesAt", "diagnostic"]),
         types("akuma/projection.ts"),
         runtime("akuma/projection.ts", ["withoutReportedChanges"]),
@@ -665,6 +668,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "akuma/providers/**",
       allow: [
+        errorBase,
         any("akuma/abort.ts"),
         types("akuma/heart/**"),
         any("akuma/provider.ts"),
@@ -692,7 +696,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     ...["akuma/body-launch.ts", "akuma/publication.ts", "akuma/turn-drive.ts"].map((source) => ({
       source,
-      allow: [any("akuma/**"), any("identity/**"), any("world.ts")],
+      allow: [
+        ...(source === "akuma/publication.ts" ? [errorBase] : []),
+        any("akuma/**"),
+        any("identity/**"),
+        any("world.ts"),
+      ],
       deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     })),
     {
@@ -714,14 +723,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
       // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma.ts",
-      allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+      allow: [errorBase, any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
       deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
       // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-owner.ts",
-      allow: [any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+      allow: [errorBase, any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
       deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     {
@@ -748,6 +757,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "akuma/akuma-instance.ts",
       allow: [
+        errorBase,
         any("akuma/**"),
         any("body-host.ts"),
         any("settings.ts"),
@@ -805,12 +815,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("world.ts"),
       ],
     },
-    { source: "identity/**", allow: [any("identity/**")] },
+    { source: "identity/**", allow: [errorBase, any("identity/**")] },
     { source: "coordination/**", allow: [] },
     { source: "plugin/**", allow: [any("plugin/**"), any("settings.ts"), types("world.ts")] },
     {
       source: "body-host.ts",
       allow: [
+        errorBase,
         any("akuma/**"),
         any("dispatch/index.ts", ["readDispatch"]),
         any("git/repository.ts", ["NoGitWorldError", "repositoryAt"]),

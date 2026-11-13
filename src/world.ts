@@ -32,7 +32,7 @@ export class WorldError extends KeiyakuError {
 
 async function directory(input: string, label: string): Promise<string> {
   if (typeof input !== "string" || input.trim().length === 0) {
-    throw new TypeError(`${label} must be a nonblank path`);
+    throw new KeiyakuError("invalid-input", `${label} must be a nonblank path`);
   }
   const path = resolve(input);
   let real: string;
@@ -77,7 +77,8 @@ async function inputValues(
   label: string,
 ): Promise<Readonly<{ cwd: string; repositoryRoot?: string }>> {
   if (typeof input === "string") return { cwd: await directory(input, label) };
-  if (input === null || typeof input !== "object") throw new TypeError(`${label} must be a path or resolution input`);
+  if (input === null || typeof input !== "object")
+    throw new KeiyakuError("invalid-input", `${label} must be a path or resolution input`);
   const cwd = await directory(input.cwd, `${label} cwd`);
   if (input.repositoryRoot === undefined) return { cwd };
   return { cwd, repositoryRoot: await directory(input.repositoryRoot, `${label} repository root`) };

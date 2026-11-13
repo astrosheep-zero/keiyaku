@@ -2,6 +2,7 @@
 import { z } from "zod";
 import { contractIdSchema } from "../git/identity.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
+import { KeiyakuError } from "../errors.js";
 import { readHeart, readLatestTurnForBody } from "../akuma/heart/index.js";
 import { akumaIdSchema, parseAkumaId, pathsForAkumaId } from "../akuma/identity.js";
 import { Keis } from "./contract-composition.js";
@@ -16,7 +17,7 @@ export async function akumaCallerFromEnvironment(environment: NodeJS.ProcessEnv)
   const id = environment.KEIYAKU_ACTOR_ID;
   const world = environment.KEIYAKU_ACTOR_WORLD;
   if ((id === undefined) !== (world === undefined)) {
-    throw new TypeError("Akuma caller requires both KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD");
+    throw new KeiyakuError("invalid-input", "Akuma caller requires both KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD");
   }
   if (id !== undefined && world !== undefined) {
     const resolved = await World.resolve({ cwd: world, repositoryRoot: world });
@@ -28,13 +29,16 @@ export async function akumaCallerFromEnvironment(environment: NodeJS.ProcessEnv)
     { integration: "claude", variable: "CLAUDE_CODE_SESSION_ID", id: environment.CLAUDE_CODE_SESSION_ID },
   ].filter(({ id }) => id !== undefined && id !== "");
   if (hosts.length > 1) {
-    throw new TypeError(`Ambiguous native host caller: ${hosts.map(({ variable }) => variable).join(", ")}`);
+    throw new KeiyakuError(
+      "invalid-input",
+      `Ambiguous native host caller: ${hosts.map(({ variable }) => variable).join(", ")}`,
+    );
   }
   if (hosts[0]) return decodeAkumaCaller({ kind: "external", integration: hosts[0].integration, id: hosts[0].id });
   const external = environment.KEIYAKU_EXTERNAL_CALLER;
   if (external === undefined) return undefined;
   const colon = external.indexOf(":");
-  if (colon < 0) throw new TypeError("KEIYAKU_EXTERNAL_CALLER must be <integration>:<id>");
+  if (colon < 0) throw new KeiyakuError("invalid-input", "KEIYAKU_EXTERNAL_CALLER must be <integration>:<id>");
   return decodeAkumaCaller({ kind: "external", integration: external.slice(0, colon), id: external.slice(colon + 1) });
 }
 

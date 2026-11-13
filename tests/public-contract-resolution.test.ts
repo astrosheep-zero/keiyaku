@@ -94,11 +94,26 @@ test("selector refusals are ordinary data while malformed input and cwd are call
   const invalid = await library.resolve({ selector: "not-a-contract" });
   assert.equal(invalid.kind, "refused");
   if (invalid.kind === "refused") assert.equal(invalid.refusal.kind, "invalid-selector");
-  await assert.rejects(library.resolve({ selector: 7 } as never), TypeError);
-  await assert.rejects(library.resolve({ cwd: "relative" }), TypeError);
+  await assert.rejects(
+    library.resolve({ selector: 7 } as never),
+    (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input" && error.message === "selector must be a string",
+  );
+  await assert.rejects(
+    library.resolve({ cwd: "relative" }),
+    (error: unknown) =>
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message === "cwd must be an absolute directory coordinate",
+  );
   const file = join(repo.cwd, "not-directory");
   writeFileSync(file, "file");
-  await assert.rejects(library.resolve({ cwd: file }), TypeError);
+  await assert.rejects(
+    library.resolve({ cwd: file }),
+    (error: unknown) =>
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message === "cwd must be an absolute directory coordinate",
+  );
 });
 
 test("complete identities resolve without authority reads; corrupt short-selector authority retains its cause", async () => {

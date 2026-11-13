@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
@@ -51,7 +52,7 @@ export type AllocatedAkuma = Readonly<{
 }>;
 
 function suffixSegment(value: string): string {
-  if (!HEX8.test(value)) throw new TypeError("Akuma suffix must be lower hex8");
+  if (!HEX8.test(value)) throw new KeiyakuError("invalid-input", "Akuma suffix must be lower hex8");
   return value;
 }
 
@@ -64,10 +65,11 @@ export function akumaId(input: Readonly<{ akumaName: string; suffix: string }>):
 
 export function parseAkumaId(value: string): Readonly<{ id: AkumaId; akumaName: string; suffix: string }> {
   const segments = identitySegments({ family: "aku", value });
-  if (segments.length !== 2) throw new TypeError("Akuma identity must be aku/<akuma>/<hex8>");
+  if (segments.length !== 2) throw new KeiyakuError("invalid-input", "Akuma identity must be aku/<akuma>/<hex8>");
   const akumaName = segments[0]!;
   // Existing identities remain addressable after new births gain a name limit.
-  if (!isCanonicalAkumaName(akumaName)) throw new TypeError("Akuma name must be one normalized human identity segment");
+  if (!isCanonicalAkumaName(akumaName))
+    throw new KeiyakuError("invalid-input", "Akuma name must be one normalized human identity segment");
   const suffix = suffixSegment(segments[1]!);
   return { id: value as AkumaId, akumaName, suffix };
 }
@@ -94,7 +96,7 @@ export function akumaPaths(
   }>,
 ): AkumaPaths {
   if (!isCanonicalAkumaName(input.akumaName))
-    throw new TypeError("Akuma name must be one normalized human identity segment");
+    throw new KeiyakuError("invalid-input", "Akuma name must be one normalized human identity segment");
   const directory = join(input.runRoot, `${input.akumaName}-${suffixSegment(input.suffix)}`);
   return {
     directory,

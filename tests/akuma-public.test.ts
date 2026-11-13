@@ -56,7 +56,7 @@ import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { Settings } from "../src/settings.js";
-import { AkumaNameError, Akumas } from "../src/index.js";
+import { AkumaNameError, Akumas, KeiyakuError } from "../src/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { projectCurrentWork } from "../src/akuma/status-projection.js";
 import { World, type WorldRoot } from "../src/world.js";
@@ -180,9 +180,10 @@ test("malformed public history IDs refuse before Heart reads", async (context) =
   const born = await bornHistoryHandle(root, "c0000005");
   born.holder.release();
   unlinkSync(born.allocated.paths.heart);
+  const invalidInput = (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input";
   for (const id of ["history-1", "0", "-1", "01", "+1", "1.5", "1e2", "9007199254740992", "act/2"]) {
-    await assert.rejects(() => born.handle.history({ id }), TypeError);
-    await assert.rejects(async () => Akumas.of(await World.at(root)).history({ akuma: born.allocated.id, id }), TypeError);
+    await assert.rejects(() => born.handle.history({ id }), invalidInput);
+    await assert.rejects(async () => Akumas.of(await World.at(root)).history({ akuma: born.allocated.id, id }), invalidInput);
   }
   await assert.rejects(
     async () =>
@@ -1739,7 +1740,10 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
     listedRows.map((row) => row.id),
     "an unavailable cache falls back to direct Soul reads",
   );
-  await assert.rejects(world.list({ caller: { kind: "elsewhere" } } as never), TypeError);
+  await assert.rejects(
+    world.list({ caller: { kind: "elsewhere" } } as never),
+    (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
+  );
 });
 
 test("birth refreshes the World-local caller lineage cache", async (context) => {

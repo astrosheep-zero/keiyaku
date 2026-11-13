@@ -104,6 +104,31 @@ test("MCP spawn uses akumaName, accepts a bare alias, and points a missing name 
   assert.match(cli.stdout, /available  keiyaku ls aku\//u);
 });
 
+test("bad spawn workdir agrees on CLI usage and MCP failure category", async (t) => {
+  const cwd = temporaryDirectory(t, "mcp-bad-workdir-");
+  const workdir = join(cwd, "missing");
+  const diagnostic = `workdir is not an existing directory: ${workdir}`;
+  const environment = { HOME: cwd, USERPROFILE: cwd, KEIYAKU_HOME: cwd };
+  const cli = await runCli(["spawn", "worker", "--workdir", workdir, "--json"], { cwd, environment });
+  assert.equal(cli.exit, 64);
+  const failure = JSON.parse(cli.stdout);
+  assert.equal(failure.category, "invalid-input");
+  assert.equal(failure.diagnostic, diagnostic);
+
+  const adapter = createKeiyakuMcpServer({ cwd, environment, version: "test" });
+  const client = new Client({ name: "bad-workdir", version: "1" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([client.connect(a), adapter.server.connect(b)]);
+  t.after(async () => { await client.close(); await adapter.close(); });
+  const response = await client.callTool({ name: "spawn", arguments: { akumaName: "worker", workdir } });
+  assert.equal(response.isError, true);
+  assert.equal(response._meta?.["keiyaku/disposition"], "usage");
+  const projection = JSON.parse((response.content as { text: string }[])[1]!.text);
+  assert.equal(projection.category, "invalid-input");
+  assert.equal(projection.diagnostic, diagnostic);
+  assert.equal(existsSync(join(cwd, ".keiyaku")), false);
+});
+
 test("schema cleanup retains authored property names and values", () => {
   const schema = normalizeMcpSchema(JSON.parse(JSON.stringify({
     $schema: "https://json-schema.org/draft/2020-12/schema",

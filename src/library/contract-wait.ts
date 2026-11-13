@@ -1,11 +1,12 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import { contractIdSchema } from "../git/identity.js";
-import { contractId, type ContractId, type ContractState } from "../core/facts/types.js";
+import { type ContractId, type ContractState } from "../core/facts/types.js";
+import { KeiyakuError } from "../errors.js";
 import { observeContractsForAdmissionAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { RepositoryScope } from "../protocol/operations.js";
-import { optionalSignal, requireInput } from "./input.js";
+import { callerContractId, optionalSignal, requireInput } from "./input.js";
 import { readContractValue } from "./outcome.js";
 
 const waitDurationDiagnostic = "timeoutMs must be a nonnegative finite integer millisecond duration";
@@ -81,23 +82,20 @@ export function validateContractWaitHandle(
 
 function validateContractWaitValues(values: Record<string, unknown>, scope: RepositoryScope): ValidatedWait {
   if (!Array.isArray(values.contracts) || values.contracts.length === 0)
-    throw new TypeError("contracts must be a nonempty array");
+    throw new KeiyakuError("invalid-input", "contracts must be a nonempty array");
   const ids = [
     ...new Set(
       values.contracts.map((value: unknown) => {
-        if (typeof value !== "string") throw new TypeError("contract ID must be a string");
-        try {
-          return contractId(value);
-        } catch (error) {
-          throw new TypeError(error instanceof Error ? error.message : String(error));
-        }
+        if (typeof value !== "string") throw new KeiyakuError("invalid-input", "contract ID must be a string");
+        return callerContractId(value);
       }),
     ),
   ];
   const completion = values.completion === undefined ? "any" : values.completion;
-  if (completion !== "any" && completion !== "all") throw new TypeError("completion must be any or all");
+  if (completion !== "any" && completion !== "all")
+    throw new KeiyakuError("invalid-input", "completion must be any or all");
   const parsedTimeout = contractWaitDurationSchema.optional().safeParse(values.timeoutMs);
-  if (!parsedTimeout.success) throw new TypeError(parsedTimeout.error.message);
+  if (!parsedTimeout.success) throw new KeiyakuError("invalid-input", parsedTimeout.error.message);
   const timeoutMs = parsedTimeout.data;
   const signal = optionalSignal(values.signal);
   return {

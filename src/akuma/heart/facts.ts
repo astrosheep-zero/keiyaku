@@ -6,9 +6,9 @@ import type { ResumeCoordinate } from "../coordinate.js";
 import type { ProviderExecution, ProviderOptions } from "../provider-recipe.js";
 export type { ResumeCoordinate } from "../coordinate.js";
 
-export class HeartAuthorityCorruptionError extends Error {
+export class HeartAuthorityCorruptionError extends KeiyakuError {
   constructor(message: string, options?: ErrorOptions) {
-    super(message, options);
+    super("authority-corruption", message, options);
     this.name = "HeartAuthorityCorruptionError";
   }
 }

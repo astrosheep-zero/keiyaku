@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import { join } from "node:path";
 import { randomBytes } from "node:crypto";
@@ -25,8 +26,10 @@ function isDebtSegment(value: string): boolean {
 }
 
 export function canonicalDebtId(value: string): DebtId {
-  if (!value.startsWith("debt/") || value.slice(5).includes("/")) throw new TypeError("debt ID must be debt/<id>");
-  if (!isDebtSegment(value.slice(5))) throw new TypeError("debt ID contains a noncanonical segment");
+  if (!value.startsWith("debt/") || value.slice(5).includes("/"))
+    throw new KeiyakuError("invalid-input", "debt ID must be debt/<id>");
+  if (!isDebtSegment(value.slice(5)))
+    throw new KeiyakuError("invalid-input", "debt ID contains a noncanonical segment");
   return value as DebtId;
 }
 
@@ -48,7 +51,8 @@ export function debtAuthorityPath(debtsDirectory: string, id: DebtId): string {
 
 export function deriveLocalStem(title: string): string {
   const stem = normalizeIdentityStem({ source: title });
-  if (stem.length === 0) throw new TypeError("debt title must contain a normalized identity segment");
+  if (stem.length === 0)
+    throw new KeiyakuError("invalid-input", "debt title must contain a normalized identity segment");
   const words = stem.split("-");
   let fitted = words[0]!;
   let count = [...fitted].length;
@@ -74,6 +78,6 @@ export function allocateLocalId(stem: string, occupied: ReadonlySet<string>): st
 export function physicalDebtSegment(segment: string): string {
   if (Buffer.byteLength(segment) <= DEBT_LOCAL_ID_BYTES && !WINDOWS_RESERVED.test(segment)) return segment;
   if (Buffer.byteLength(segment) > DEBT_LOCAL_ID_BYTES)
-    throw new TypeError("debt identity cannot fit the physical filename budget");
-  throw new TypeError("debt identity contains a Windows-reserved physical segment");
+    throw new KeiyakuError("invalid-input", "debt identity cannot fit the physical filename budget");
+  throw new KeiyakuError("invalid-input", "debt identity contains a Windows-reserved physical segment");
 }

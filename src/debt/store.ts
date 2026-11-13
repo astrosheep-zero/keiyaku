@@ -10,7 +10,7 @@ import {
 import { syncDirectory } from "../coordination/durable-file.js";
 import type { WorldRoot } from "../world.js";
 import { boundedListLimit, projectBoundedList, type BoundedList } from "../bounded-list.js";
-import { parseDebtDocument, type DebtDocument } from "./document.js";
+import { DebtAuthorityCorruptionError, parseDebtDocument, type DebtDocument } from "./document.js";
 import { canonicalDebtId, physicalDebtSegment, debtAuthorityPath, type DebtId } from "./identity.js";
 import type { DebtBoard } from "./board.js";
 
@@ -77,8 +77,12 @@ async function authorityFiles(directory: string): Promise<readonly string[]> {
 }
 
 function idFromPath(path: string): DebtId {
-  const member = physicalDebtSegment(basename(path, ".md"));
-  return canonicalDebtId(`debt/${member}`);
+  try {
+    const member = physicalDebtSegment(basename(path, ".md"));
+    return canonicalDebtId(`debt/${member}`);
+  } catch (error) {
+    throw new DebtAuthorityCorruptionError(error instanceof Error ? error.message : String(error), { cause: error });
+  }
 }
 
 async function ownedAuthorityIds(directory: string): Promise<readonly DebtId[]> {

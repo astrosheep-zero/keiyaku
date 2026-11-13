@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import { debtPrioritySchema, debtStateSchema } from "./document.js";
 import { canonicalDebtId, debtIdSchema, type DebtId } from "./identity.js";
@@ -5,31 +6,31 @@ import type { AddDebtDocumentInput, AddDebtInput, UpdateDebtInput } from "./oper
 
 export function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError(`${label} must be an object`);
+    throw new KeiyakuError("invalid-input", `${label} must be an object`);
   }
   return value as Record<string, unknown>;
 }
 
 export function closed(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
   for (const key of Object.keys(value)) {
-    if (!allowed.includes(key)) throw new TypeError(`${label} has unknown field: ${key}`);
+    if (!allowed.includes(key)) throw new KeiyakuError("invalid-input", `${label} has unknown field: ${key}`);
   }
 }
 
 export function debtId(value: unknown): DebtId {
-  if (typeof value !== "string") throw new TypeError("debt ID must be a string");
+  if (typeof value !== "string") throw new KeiyakuError("invalid-input", "debt ID must be a string");
   return canonicalDebtId(value);
 }
 
 export function signal(value: unknown): AbortSignal | undefined {
   if (value === undefined) return undefined;
-  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
+  if (!(value instanceof AbortSignal)) throw new KeiyakuError("invalid-input", "signal must be an AbortSignal");
   return value;
 }
 
 export function text(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
+  if (typeof value !== "string") throw new KeiyakuError("invalid-input", `${label} must be a string`);
   return value;
 }
 
@@ -99,7 +100,7 @@ const signalSchema = z.instanceof(AbortSignal).exactOptional();
 
 function parseDebtInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
   const result = schema.safeParse(input);
-  if (!result.success) throw new TypeError(result.error.message);
+  if (!result.success) throw new KeiyakuError("invalid-input", result.error.message);
   return result.data;
 }
 
@@ -111,7 +112,7 @@ export function addDocumentInput(input: unknown): AddDebtDocumentInput {
   const v = record(input, "addDocument input");
   closed(v, ["markdown", "signal"], "addDocument input");
   const markdown = text(v.markdown, "markdown");
-  if (markdown === undefined) throw new TypeError("markdown is required");
+  if (markdown === undefined) throw new KeiyakuError("invalid-input", "markdown is required");
   const abort = signal(v.signal);
   return {
     markdown,

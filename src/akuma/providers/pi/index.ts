@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../../../errors.js";
 import type {
   createAgentSessionFromServices,
   createAgentSessionServices,
@@ -114,7 +115,10 @@ type PiDriveState = {
 
 async function createPiSession(sdk: PiSdk, execution: ProviderExecution, input: PiDriveInput): Promise<PiSessionSetup> {
   if (execution.config !== undefined) {
-    throw new TypeError("Pi provider config cannot be consumed by native CreateAgentSessionOptions");
+    throw new KeiyakuError(
+      "invalid-input",
+      "Pi provider config cannot be consumed by native CreateAgentSessionOptions",
+    );
   }
   const personality = input.options.systemPrompt;
   const append = [
@@ -376,9 +380,10 @@ export function createPiProvider(
   execution: ProviderExecution = { name: "pi", kind: "pi" },
   load: () => Promise<PiSdk> = loadPiSdk,
 ): ProviderAdapter {
-  if (execution.executable !== undefined) throw new TypeError("Pi provider does not support executable");
+  if (execution.executable !== undefined)
+    throw new KeiyakuError("invalid-input", "Pi provider does not support executable");
   if (execution.env !== undefined && Object.keys(execution.env).length > 0) {
-    throw new TypeError("env injection not supported for provider pi");
+    throw new KeiyakuError("invalid-input", "env injection not supported for provider pi");
   }
   const drive = async (input: PiDriveInput, custody: AttemptCustody): Promise<Session> => {
     custody.signal.throwIfAborted();

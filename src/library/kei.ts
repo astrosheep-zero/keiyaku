@@ -1,13 +1,7 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { renderContractGuidance } from "../contract-guidance.js";
-import {
-  type ContractId,
-  type ContractState,
-  type ContractTerms,
-  type JournalEntry,
-  contractId,
-} from "../core/facts/types.js";
+import { type ContractId, type ContractState, type ContractTerms, type JournalEntry } from "../core/facts/types.js";
 import { parseToAST } from "../markdown/parse.js";
 import { indexDocument, indexedHeadings, sectionContent, normalizeTitle } from "../markdown/query.js";
 import { readDispatchesAt } from "../dispatch/index.js";
@@ -33,6 +27,7 @@ import {
   type ContractConclusion,
 } from "./outcome.js";
 import {
+  callerContractId,
   optionalBoolean,
   requireInput,
   amendInputSchema,
@@ -244,12 +239,14 @@ export class Kei {
 
   private amendInput(input: AmendInput) {
     return validated(() => {
-      const values = amendInputSchema.parse(input);
+      const parsed = amendInputSchema.safeParse(input);
+      if (!parsed.success) throw new KeiyakuError("invalid-input", parsed.error.message, { cause: parsed.error });
+      const values = parsed.data;
       const derived = values.gates === undefined ? undefined : derivedGates(this.composition, gateNames(values.gates));
       return {
         markdown: values.markdown,
         gates: derived,
-        prerequisites: values.after === undefined ? undefined : normalizedList(values.after, "after", contractId),
+        prerequisites: values.after === undefined ? undefined : normalizedList(values.after, "after", callerContractId),
       };
     });
   }
@@ -384,7 +381,7 @@ export class Kei {
     const index = validated(() => {
       if (values?.index === undefined) return undefined;
       if (typeof values.index !== "number" || !Number.isSafeInteger(values.index) || values.index < 1)
-        throw new TypeError("verification index must be a positive safe integer");
+        throw new KeiyakuError("invalid-input", "verification index must be a positive safe integer");
       return values.index;
     });
     const includeDirty = validated(() => optionalBoolean(values?.includeDirty, "includeDirty") ?? false);
@@ -451,7 +448,7 @@ export class Kei {
       });
     const summary = validated(() => {
       const value = optionalNonblank(values.summary, "review summary");
-      if (value === undefined) throw new TypeError("review summary is required");
+      if (value === undefined) throw new KeiyakuError("invalid-input", "review summary is required");
       return value;
     });
     const signal = validated(() => optionalSignal(values.signal));
@@ -824,7 +821,7 @@ function observationOptions(options: MutationObservation | undefined): Execution
   if (options === undefined) return undefined;
   const input = requireInput(options, "observation options", ["observe"]);
   if (input.observe !== undefined && typeof input.observe !== "function")
-    throw new TypeError("observe must be a function");
+    throw new KeiyakuError("invalid-input", "observe must be a function");
   return input.observe as ExecutionObserver | undefined;
 }
 

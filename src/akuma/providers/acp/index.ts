@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../../../errors.js";
 import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
 import { providerLifecycle } from "../lifecycle.js";
@@ -50,7 +51,8 @@ function argv(
 }
 
 export function createAcpProvider(execution: ProviderExecution, dependencies: AcpDependencies = {}): ProviderAdapter {
-  if (execution.executable === undefined) throw new TypeError("ACP provider execution requires executable");
+  if (execution.executable === undefined)
+    throw new KeiyakuError("invalid-input", "ACP provider execution requires executable");
   const config = decodeAcpConfig(execution.config);
   const drive = async (input: AcpStartInput, custody: AttemptCustody) => {
     if (input.runtimeInstructions !== undefined) {

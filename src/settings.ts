@@ -86,7 +86,7 @@ export type SettingsInput = Readonly<{ cwd?: string; home?: string }>;
 export class SettingsError extends KeiyakuError {
   readonly kind = "settings";
   constructor(message: string) {
-    super("internal", message);
+    super("invalid-input", message);
   }
 }
 
@@ -196,7 +196,7 @@ function settingsFromScopes(project: LoadedScope, user: LoadedScope): Settings {
   }
   function namespace(name: string): SettingsNamespaceView {
     if (typeof name !== "string" || name.trim().length === 0)
-      throw new TypeError("settings namespace must be nonblank");
+      throw new KeiyakuError("invalid-input", "settings namespace must be nonblank");
     return resolveNamespace(name);
   }
   const names = [...new Set([user, project].flatMap((scope) => Object.keys(scope.root ?? {})))].sort();
@@ -219,13 +219,14 @@ async function canonicalCoordinate(path: string): Promise<string> {
 }
 
 async function loadSettings(input: SettingsInput = {}): Promise<Settings> {
-  if (!object(input)) throw new TypeError("settings input must be an object");
+  if (!object(input)) throw new KeiyakuError("invalid-input", "settings input must be an object");
   for (const key of Object.keys(input))
-    if (key !== "cwd" && key !== "home") throw new TypeError(`settings input has unknown field: ${key}`);
+    if (key !== "cwd" && key !== "home")
+      throw new KeiyakuError("invalid-input", `settings input has unknown field: ${key}`);
   for (const field of ["cwd", "home"] as const) {
     const value = input[field];
     if (value !== undefined && (typeof value !== "string" || value.trim().length === 0))
-      throw new TypeError(`settings ${field} must be a nonblank string`);
+      throw new KeiyakuError("invalid-input", `settings ${field} must be a nonblank string`);
   }
   const projectDirectory = input.cwd === undefined ? undefined : await canonicalCoordinate(join(input.cwd, ".keiyaku"));
   const userDirectory = await canonicalCoordinate(input.home ?? join(homedir(), ".keiyaku"));
@@ -242,7 +243,7 @@ export const Settings = Object.freeze({ load: loadSettings });
 /** Read only the project scope owned by a materialized candidate snapshot. */
 export async function projectSettings(root: string): Promise<Settings> {
   if (typeof root !== "string" || root.trim().length === 0)
-    throw new TypeError("settings root must be a nonblank string");
+    throw new KeiyakuError("invalid-input", "settings root must be a nonblank string");
   return settingsFromScopes(await readScope(join(resolve(root), ".keiyaku", "settings.json")), {
     state: { kind: "absent" },
   });

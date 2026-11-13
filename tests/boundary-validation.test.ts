@@ -7,8 +7,7 @@ import { makeGitRepository, withGitShim } from "./support/git.js";
 function invalidInput(error: unknown, message?: string): boolean {
   assert.ok(error instanceof KeiyakuError);
   assert.equal(error.category, "invalid-input");
-  assert.ok(error.cause instanceof TypeError);
-  if (message !== undefined) assert.equal(error.cause.message, message);
+  if (message !== undefined) assert.equal(error.message, message);
   return true;
 }
 
@@ -49,15 +48,21 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   const repo = await Repo.at({ path: repository.path });
   const before = (await Keis.of(repo).list({  })).rows;
 
-  await assert.rejects(() => withGitShim("exit 99", {}, () => Reflect.apply(Repo.at, Repo, [null])), TypeError);
+  await assert.rejects(
+    () => withGitShim("exit 99", {}, () => Reflect.apply(Repo.at, Repo, [null])),
+    (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
+  );
   assert.throws(
     () => withGitShim("exit 99", {}, () => Keis.of(repo).kei({ id: null } as never)),
-    TypeError,
+    (error: unknown) => invalidInput(error, "contract ID must be a string"),
   );
-  await assert.rejects(() => withGitShim("exit 99", {}, () => Keis.of(repo).list(null as never)), TypeError);
+  await assert.rejects(
+    () => withGitShim("exit 99", {}, () => Keis.of(repo).list(null as never)),
+    (error: unknown) => invalidInput(error, "Keis.list input must be an object"),
+  );
   await assert.rejects(
     () => withGitShim("exit 99", {}, () => Keis.of(repo).observe({ id: "bad" as never })),
-    (error: unknown) => error instanceof TypeError && error.message === "contract ID must be kei/<contract-segment>",
+    (error: unknown) => invalidInput(error, "contract ID must be kei/<contract-segment>"),
   );
   await assert.rejects(
     () =>

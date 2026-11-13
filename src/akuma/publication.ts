@@ -1,4 +1,5 @@
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
+import { errorCategory } from "../errors.js";
 import { HeldAkumaLeash, initializeHeart, readHeart, readSeal, readSoul, type Soul } from "./heart/index.js";
 import { acquireLeash } from "./control.js";
 import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths } from "./identity.js";
@@ -353,7 +354,8 @@ async function admittedRecipe(
   try {
     selected = await resolveProviderExecution(provider);
   } catch (error) {
-    if (error instanceof TypeError) throw new PreparedCallAdmissionError("resolve", error.message);
+    if (errorCategory(error) === "invalid-input")
+      throw new PreparedCallAdmissionError("resolve", error instanceof Error ? error.message : String(error));
     throw error;
   }
   const admission = selected.adapter.admitOptions(recipe.options);

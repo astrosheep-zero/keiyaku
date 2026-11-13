@@ -1334,7 +1334,8 @@ test("Contract wait refuses selectors while cross-World Contract kill refuses be
     timeoutMs: 0,
   });
   await assert.rejects(wait, {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "Akumas.wait does not accept Contract selectors; use Keis.wait",
   });
   await assert.rejects(

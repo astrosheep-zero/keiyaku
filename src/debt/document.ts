@@ -33,7 +33,7 @@ export class DebtAuthorityCorruptionError extends KeiyakuError {
   readonly coordinate?: DebtId;
 
   constructor(message: string, options?: ErrorOptions & { coordinate?: DebtId }) {
-    super("internal", message, options);
+    super("authority-corruption", message, options);
     if (options?.coordinate !== undefined) this.coordinate = options.coordinate;
   }
 }
@@ -162,7 +162,7 @@ export function parseDebtDocument(bytes: Uint8Array, coordinate: DebtId): DebtDo
 
 export function parseDebtCreationDocument(markdown: string): DebtCreationDocument {
   const fail = (message: string): never => {
-    throw new TypeError(message);
+    throw new KeiyakuError("invalid-input", message);
   };
   const { value, body } = frontMatter(markdown, fail);
   for (const key of Object.keys(value)) if (!CREATION_KEYS.includes(key)) fail(`unknown debt front matter key: ${key}`);

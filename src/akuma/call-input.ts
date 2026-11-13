@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { z } from "zod";
@@ -23,24 +24,30 @@ export function validateTellObservation(input: Readonly<{ wait?: unknown; timeou
 /** Native input errors stay caller errors; invocation translates its own schema errors to usage. */
 export function validateAkumaInput<S extends z.ZodType>(schema: S, input: unknown): z.output<S> {
   const parsed = schema.safeParse(input);
-  if (!parsed.success) throw new TypeError(parsed.error.message);
+  if (!parsed.success) throw new KeiyakuError("invalid-input", parsed.error.message);
   return parsed.data;
 }
 
 export function bareOption(value: unknown): boolean | undefined {
-  if (value !== undefined && typeof value !== "boolean") throw new TypeError("bare must be a boolean");
+  if (value !== undefined && typeof value !== "boolean")
+    throw new KeiyakuError("invalid-input", "bare must be a boolean");
   return value;
 }
 
 export async function writableDirectoriesOption(value: unknown): Promise<readonly string[]> {
   if (value === undefined) return [];
-  if (!Array.isArray(value)) throw new TypeError("writableDirectories must be an array of canonical directories");
+  if (!Array.isArray(value))
+    throw new KeiyakuError("invalid-input", "writableDirectories must be an array of canonical directories");
   const directories = await Promise.all(
     value.map(async (path: unknown) => {
       if (typeof path !== "string" || path.trim() === "" || !isAbsolute(path))
-        throw new TypeError("writableDirectories must contain nonblank canonical absolute directories");
+        throw new KeiyakuError(
+          "invalid-input",
+          "writableDirectories must contain nonblank canonical absolute directories",
+        );
       const canonical = await canonicalBirthCwd(path);
-      if (canonical !== path) throw new TypeError(`writableDirectories path is not canonical: ${path}`);
+      if (canonical !== path)
+        throw new KeiyakuError("invalid-input", `writableDirectories path is not canonical: ${path}`);
       return canonical;
     }),
   );
@@ -57,6 +64,6 @@ export async function canonicalBirthCwd(
     if (!(await stat(canonical)).isDirectory()) throw new Error("not a directory");
     return canonical;
   } catch {
-    throw new Error(diagnostic);
+    throw new KeiyakuError("invalid-input", diagnostic);
   }
 }

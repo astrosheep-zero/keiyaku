@@ -30,6 +30,7 @@ import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import { observeDispatchAssociations } from "../dispatch/index.js";
 import { observeContractAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
+import { KeiyakuError } from "../errors.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
@@ -181,7 +182,7 @@ function timeout(value: unknown): number | undefined {
 
 function signal(value: unknown): AbortSignal | undefined {
   if (value === undefined) return undefined;
-  if (!(value instanceof AbortSignal)) throw new TypeError("signal must be an AbortSignal");
+  if (!(value instanceof AbortSignal)) throw new KeiyakuError("invalid-input", "signal must be an AbortSignal");
   return value;
 }
 
@@ -223,7 +224,7 @@ export async function statusAkuma(
 function completionMode(value: unknown): "any" | "all" {
   // An omitted mode is any: a plural wait returns when any selected Akuma is complete.
   if (value === undefined) return "any";
-  if (value !== "any" && value !== "all") throw new TypeError("completion must be any or all");
+  if (value !== "any" && value !== "all") throw new KeiyakuError("invalid-input", "completion must be any or all");
   return value;
 }
 
@@ -259,7 +260,7 @@ export async function waitAkuma(
   const values = requireInput(input, "Akumas.wait input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal"].includes(key)) {
-      throw new TypeError(`Akumas.wait input has unknown field: ${key}`);
+      throw new KeiyakuError("invalid-input", `Akumas.wait input has unknown field: ${key}`);
     }
   }
   const selected = completionMode(values.completion);
@@ -288,7 +289,7 @@ export async function killAkuma(
   const values = requireInput(input, "Akumas.kill input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo", "signal"].includes(key)) {
-      throw new TypeError(`Akumas.kill input has unknown field: ${key}`);
+      throw new KeiyakuError("invalid-input", `Akumas.kill input has unknown field: ${key}`);
     }
   }
   const callerSignal = signal(values.signal);
@@ -308,18 +309,18 @@ export async function tellAkuma(
 ): Promise<AkumaTellResult> {
   const values = requireInput(input, "Akumas.tell input");
   for (const key of Object.keys(values)) {
-    if (key === "schema") throw new TypeError("Akumas.tell does not accept schema; use Akumas.ask");
+    if (key === "schema") throw new KeiyakuError("invalid-input", "Akumas.tell does not accept schema; use Akumas.ask");
     if (
       !["path", "akuma", "body", "repo", "interrupt", "initiator", "signal", "wait", "timeoutMs", "observe"].includes(
         key,
       )
     ) {
-      throw new TypeError(`Akumas.tell input has unknown field: ${key}`);
+      throw new KeiyakuError("invalid-input", `Akumas.tell input has unknown field: ${key}`);
     }
   }
-  if (typeof values.body !== "string") throw new TypeError("body must be a string");
+  if (typeof values.body !== "string") throw new KeiyakuError("invalid-input", "body must be a string");
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
-    throw new TypeError("interrupt must be a boolean");
+    throw new KeiyakuError("invalid-input", "interrupt must be a boolean");
   validateTellObservation(values);
   const callerSignal = signal(values.signal);
   const addressed = await addressAkuma(directAddress(values));
@@ -355,13 +356,13 @@ function validateAskInput(
         key,
       )
     ) {
-      throw new TypeError(`Akumas.ask input has unknown field: ${key}`);
+      throw new KeiyakuError("invalid-input", `Akumas.ask input has unknown field: ${key}`);
     }
   }
-  if (typeof values.body !== "string") throw new TypeError("body must be a string");
+  if (typeof values.body !== "string") throw new KeiyakuError("invalid-input", "body must be a string");
   timeout(values.timeoutMs);
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
-    throw new TypeError("interrupt must be a boolean");
+    throw new KeiyakuError("invalid-input", "interrupt must be a boolean");
 }
 
 export async function askAkuma(

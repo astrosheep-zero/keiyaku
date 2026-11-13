@@ -6,6 +6,7 @@ import test, { type TestContext } from "node:test";
 import {
   AkumaNameError,
   Akumas,
+  KeiyakuError,
   World,
   type AkumaNameCatalog,
   type AkumaNameCatalogInput,
@@ -57,7 +58,12 @@ test("a root-only caller lists the same callable definitions the CLI shows", asy
   const catalog: AkumaNameCatalog = await Akumas.akumaNames(input);
   const akumas = Akumas.of(await World.at(root));
   assert.deepEqual(await akumas.akumaNames({ home }), catalog);
-  await assert.rejects(akumas.akumaNames({ cwd: home } as never), TypeError);
+  await assert.rejects(akumas.akumaNames({ cwd: home } as never), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuError);
+    assert.equal(error.category, "invalid-input");
+    assert.equal(error.message, "Akumas.akumaNames input has unknown field: cwd");
+    return true;
+  });
   const rows: readonly AkumaNameCatalogRow[] = catalog.rows ?? [];
   assert.deepEqual(rows, [
     { name: "child" },
@@ -114,7 +120,8 @@ test("the public catalogue rejects malformed caller input before observing any d
 
   // The boundary wins over the invalid definition the same request would have read.
   await assert.rejects(Akumas.akumaNames({ cwd: root, home: 7 } as never), (error: unknown) => {
-    assert.ok(error instanceof TypeError);
+    assert.ok(error instanceof KeiyakuError);
+    assert.equal(error.category, "invalid-input");
     assert.equal(error.message, "Akuma catalogue home must be a nonblank string");
     return true;
   });

@@ -24,6 +24,7 @@ import { uniqueEntryUlid } from "./support/journal.js";
 import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { renderContractBody } from "../src/body/render.js";
+import { KeiyakuError } from "../src/errors.js";
 import type { ContractBody } from "../src/body/types.js";
 
 const id = contractId("kei/lifecycle-cycle");
@@ -156,7 +157,8 @@ test("an amendment still refuses every byte outside its H2 operations", () => {
   for (const [source, diagnostic] of refusals) {
     assert.throws(
       () => prepareAmendDocument(source)(currentAmendmentDocument()),
-      (error: unknown) => error instanceof TypeError && error.message === diagnostic,
+      (error: unknown) =>
+        error instanceof KeiyakuError && error.category === "invalid-input" && error.message === diagnostic,
       source,
     );
   }
@@ -166,6 +168,8 @@ test("a bind document still requires exactly one H1 title", () => {
   assert.throws(
     () => decodeContractDocument("## Context\nfacts\n"),
     (error: unknown) =>
-      error instanceof TypeError && error.message === "contract document requires exactly one H1 title",
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message === "contract document requires exactly one H1 title",
   );
 });

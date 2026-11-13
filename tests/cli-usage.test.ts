@@ -64,7 +64,7 @@ test("observing spawn rejects an invalid workdir without establishing a World", 
   const result = await captureOutput(() =>
     main(["-C", root, "spawn", "worker", "--workdir", "missing", "--wait", "1s", "prompt"]),
   );
-  assert.equal(result.exit, 3);
+  assert.equal(result.exit, 64);
   assert.equal(result.stdout, "");
   assert.match(result.stderr, /workdir is not an existing directory: missing/u);
   assert.equal(existsSync(join(root, ".keiyaku")), false);

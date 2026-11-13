@@ -38,7 +38,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import type { SpawnResult } from "../src/library/akumas.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { Akumas, Keis, Keiyaku, Repo, World, Settings } from "../src/index.js";
+import { Akumas, Keis, Keiyaku, KeiyakuError, Repo, World, Settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
@@ -228,12 +228,14 @@ test("explicit writable directories refuse invalid public grants before allocati
       writableDirectories: [alias],
     }),
     (error: unknown) =>
-      error instanceof TypeError && error.message === `writableDirectories path is not canonical: ${alias}`,
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message === `writableDirectories path is not canonical: ${alias}`,
   );
   assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
 });
 
-test("non-Codex writable directories refuse as a TypeError before allocation", async (t) => {
+test("non-Codex writable directories refuse as invalid input before allocation", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-provider-directory-refusal-"));
   const home = join(world, "home");
   mkdirSync(join(home, "akumas"), { recursive: true });
@@ -241,7 +243,9 @@ test("non-Codex writable directories refuse as a TypeError before allocation", a
   await assert.rejects(
     Akumas.of(world).spawn({ akumaName: "worker", home, writableDirectories: [world] }),
     (error: unknown) =>
-      error instanceof TypeError && error.message === "writableDirectories is unsupported by provider pi",
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message === "writableDirectories is unsupported by provider pi",
   );
   assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
 });

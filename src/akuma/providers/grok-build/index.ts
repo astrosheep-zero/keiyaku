@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../../../errors.js";
 import { tellRegistry, type TellRegistry } from "../../provider.js";
 import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission, Session, ToolCall } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
@@ -155,7 +156,8 @@ export function createGrokBuildProvider(
   execution: ProviderExecution,
   dependencies: AcpDependencies = {},
 ): ProviderAdapter {
-  if (execution.executable === undefined) throw new TypeError("Grok Build provider execution requires executable");
+  if (execution.executable === undefined)
+    throw new KeiyakuError("invalid-input", "Grok Build provider execution requires executable");
   const drive = async (input: AcpStartInput, custody: AttemptCustody) => {
     const tells = tellRegistry<string>();
     let live: AcpLiveSession | undefined;

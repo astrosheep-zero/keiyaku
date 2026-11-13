@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { breakBody } from "../src/akuma/heart/index.js";
-import { Debts, Kanshi, Keis, Repo, World } from "../src/index.js";
+import { Debts, Kanshi, Keis, KeiyakuError, Repo, World } from "../src/index.js";
 import type { KanshiScopeInput } from "../src/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
@@ -72,8 +72,14 @@ test("absence, explicit Repo and crossing validation remain independent", async 
   assert.deepEqual(independent.contracts, { kind: "present", value: 0 });
   assert.equal(independent.akuma.kind, "absent");
   const call = (value: unknown) => Kanshi.of(value as KanshiScopeInput).counts();
-  assert.throws(() => call({ world: directory, repo: {} }), TypeError);
-  assert.throws(() => call({ world: directory, extra: true }), TypeError);
+  assert.throws(
+    () => call({ world: directory, repo: {} }),
+    (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
+  );
+  assert.throws(
+    () => call({ world: directory, extra: true }),
+    (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
+  );
   await assert.rejects(call({ world: `${directory}/.` }));
   assert.equal((await Kanshi.of({ world }).counts()).debts.kind, "absent");
 });

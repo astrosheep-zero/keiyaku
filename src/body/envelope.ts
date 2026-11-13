@@ -1,9 +1,10 @@
+import { KeiyakuError } from "../errors.js";
 import { parseToAST } from "../markdown/parse.js";
 import { indexDocument, indexedHeadings, normalizeTitle, rawSlice } from "../markdown/query.js";
 import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
 
 function refusal(message: string): never {
-  throw new TypeError(message);
+  throw new KeiyakuError("invalid-input", message);
 }
 
 function nonblankRaw(document: DocumentNode, node: MarkdownBlockNode): boolean {

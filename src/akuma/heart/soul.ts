@@ -2,7 +2,7 @@ import { decodeAkumaCaller } from "../caller.js";
 import type { DatabaseSync } from "node:sqlite";
 import { parseAkumaId, type AkumaId } from "../identity.js";
 import { decodeProviderOptions, decodeProviderRecipe } from "../provider-recipe.js";
-import { akumaOriginSchema, type Soul, type SoulRow } from "./facts.js";
+import { akumaOriginSchema, HeartAuthorityCorruptionError, type Soul, type SoulRow } from "./facts.js";
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -76,8 +76,24 @@ export function encodeSoulRow(soul: Soul): readonly [string] {
   return [encodeSoul(soul)];
 }
 
+function storedSoulJson(row: SoulRow): unknown {
+  try {
+    return JSON.parse(row.soul_json) as unknown;
+  } catch (error) {
+    throw new HeartAuthorityCorruptionError(error instanceof Error ? error.message : String(error), { cause: error });
+  }
+}
+
+function decodeStoredSoul(value: unknown): Soul {
+  try {
+    return decodeSoul(value);
+  } catch (error) {
+    throw new HeartAuthorityCorruptionError(error instanceof Error ? error.message : String(error), { cause: error });
+  }
+}
+
 export function decodeSoulRow(row: SoulRow): Soul {
-  return decodeSoul(JSON.parse(row.soul_json));
+  return decodeStoredSoul(storedSoulJson(row));
 }
 
 export function soulFact(database: DatabaseSync): Soul | null {
@@ -100,8 +116,8 @@ export function insertSoulFact(database: DatabaseSync, soul: Soul): void {
 export function setSoulModel(database: DatabaseSync, model: string | undefined): boolean {
   const row = database.prepare("SELECT soul_json FROM soul WHERE singleton = 1").get() as SoulRow | undefined;
   if (row === undefined) throw new Error("Akuma soul is absent");
-  const raw = JSON.parse(row.soul_json) as unknown;
-  decodeSoul(raw);
+  const raw = storedSoulJson(row);
+  decodeStoredSoul(raw);
   const soul = record(raw)!;
   const options = record(soul.options);
   if (options === null) throw new Error("Akuma soul options must be an object");

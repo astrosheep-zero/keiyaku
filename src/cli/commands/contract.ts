@@ -1,4 +1,5 @@
 import { KeiyakuError, KeiyakuUsageError } from "../../index.js";
+import { errorCategory } from "../../errors.js";
 import { KeiyakuArcDocumentError } from "../../library/keiyaku.js";
 import { classifyVerb } from "../../library/keiyaku-verbs.js";
 import { renderVerb } from "../render/verbs.js";
@@ -25,8 +26,7 @@ export async function admitBindMarkdown(
     validateContractMarkdown(input.markdown);
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
-    if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
-      throw error;
+    if (errorCategory(error) !== "invalid-input") throw error;
     throw new BindDraftError(error, await bindDraftReceipt(() => resolveInvocationCwd(input), input.markdown));
   }
 }
@@ -111,8 +111,7 @@ async function runBind(request: VerbRequest<"bind">, runtime: CliRuntime): Promi
     // A selected Settings namespace failure is the owner's invalid input, not a bad draft.
     if (error instanceof KeiyakuError && error.category === "invalid-input" && error.cause instanceof SettingsError)
       throw error;
-    if (!(error instanceof TypeError) && !(error instanceof KeiyakuError && error.category === "invalid-input"))
-      throw error;
+    if (errorCategory(error) !== "invalid-input") throw error;
     throw new BindDraftError(error, await bindDraftReceipt(runtime.draftWorld, markdown));
   }
 }

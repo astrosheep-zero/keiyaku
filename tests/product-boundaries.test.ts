@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Akumas, Keis, Repo, World } from "../src/index.js";
+import { Akumas, Keis, KeiyakuError, Repo, World } from "../src/index.js";
 
 test("Contract and Akumas capture only their own composition inputs", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-product-boundaries-"));
@@ -12,8 +12,9 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   const world = await World.at(root);
   execFileSync("git", ["init", "--quiet", root]);
   const repo = await Repo.at({ path: root });
-  assert.throws(() => Keis.of(null as never), TypeError);
-  assert.throws(() => Akumas.of(null as never), TypeError);
+  const invalidInput = (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input";
+  assert.throws(() => Keis.of(null as never), invalidInput);
+  assert.throws(() => Akumas.of(null as never), invalidInput);
   assert.deepEqual(Object.keys(Akumas.of(world)), []);
 
   const contracts = Keis.of(repo);
@@ -21,7 +22,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   assert.equal("spawn" in contracts, false);
   assert.equal("nuke" in contracts, false);
   assert.equal("debts" in contracts, false);
-  assert.throws(() => contracts.kei({ repo, id: "kei/example" } as never), TypeError);
+  assert.throws(() => contracts.kei({ repo, id: "kei/example" } as never), invalidInput);
   for (const run of [
     () => contracts.bind({ repo, markdown: "" } as never),
     () => contracts.resolve({ repo } as never),
@@ -29,7 +30,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
     () => contracts.observe({ repo, id: "kei/example" } as never),
     () => contracts.wait({ repo, contracts: ["kei/example"] } as never),
     () => contracts.reconcile({ repo } as never),
-  ]) await assert.rejects(run, TypeError);
+  ]) await assert.rejects(run, invalidInput);
 
   const akumas = Akumas.of(world);
   assert.equal("actor" in akumas, false);

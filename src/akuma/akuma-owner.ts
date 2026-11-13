@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { bareOption, durationSchema, validateAkumaInput } from "./call-input.js";
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { randomUUID } from "node:crypto";
@@ -229,7 +230,8 @@ export class AkumaOwner {
   private async exactHistory(id: string): Promise<ExactHistory> {
     const selector = parseExactHistorySelector(id);
     if (selector === null)
-      throw new TypeError(
+      throw new KeiyakuError(
+        "invalid-input",
         "Akuma history id must be a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
       );
     const slice = await activitySlice(this.paths);

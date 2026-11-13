@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { mintDocumentKey, mintDocumentSegmentKey } from "./keys.js";
 import type { ContractBody, DecodedContractDocument } from "./types.js";
 import { decodeDocumentEnvelope } from "./envelope.js";
@@ -14,7 +15,7 @@ type RequiredSectionName = {
 }[ContractSectionName];
 
 function refusal(message: string): never {
-  throw new TypeError(message);
+  throw new KeiyakuError("invalid-input", message);
 }
 
 function requireSections(sections: ReadonlyMap<string, SectionNode>): string[] {

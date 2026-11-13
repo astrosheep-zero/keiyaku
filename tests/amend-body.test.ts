@@ -181,7 +181,8 @@ test("amend keeps criteria and extension collections coherent across ordered mut
 test("amend has no criterion-level remove operation", () => {
   assert.throws(
     () => applyAmendOperations("## Remove: Criterion Keep\n", body),
-    (error: unknown) => error instanceof TypeError && error.message === "unknown extension 'Criterion Keep'",
+    (error: unknown) =>
+      error instanceof KeiyakuError && error.category === "invalid-input" && error.message === "unknown extension 'Criterion Keep'",
   );
 });
 
@@ -190,7 +191,9 @@ test("amend cannot add a reserved H2 as an extension", () => {
     assert.throws(
       () => applyAmendOperations(`## Add: ${title}\nvalue\n`, body),
       (error: unknown) =>
-        error instanceof TypeError && error.message === `${title.toLowerCase()} is not a contract Markdown section`,
+        error instanceof KeiyakuError &&
+        error.category === "invalid-input" &&
+        error.message === `${title.toLowerCase()} is not a contract Markdown section`,
     );
   }
 });
@@ -198,14 +201,16 @@ test("amend cannot add a reserved H2 as an extension", () => {
 test("amend rejects a normalized extension-title collision at the operation boundary", () => {
   assert.throws(
     () => applyAmendOperations("## Add: notes\nsecond notes\n", body),
-    (error: unknown) => error instanceof TypeError && error.message === "extension already exists 'notes'",
+    (error: unknown) =>
+      error instanceof KeiyakuError && error.category === "invalid-input" && error.message === "extension already exists 'notes'",
   );
 });
 
 test("explicit Replace still refuses a missing extension", () => {
   assert.throws(
     () => applyAmendOperations("## Replace: Fresh notes\nnew extension\n", body),
-    (error: unknown) => error instanceof TypeError && error.message === "unknown extension 'Fresh notes'",
+    (error: unknown) =>
+      error instanceof KeiyakuError && error.category === "invalid-input" && error.message === "unknown extension 'Fresh notes'",
   );
 });
 
@@ -219,30 +224,36 @@ test("Criteria amendments preserve H3 boundaries and caller-context diagnostics"
     { title: "Last", body: "\nlast\n\n" },
   ]);
   assert.throws(() => prepareAmendDocument("## Criteria\nflat\n")(current), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "Criteria operation must contain one or more H3 entries",
   });
   assert.throws(() => prepareAmendDocument("## Criteria\nstray\n### Entry\nbody\n")(current), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "Criteria operation may contain only H3 entries",
   });
   assert.throws(() => prepareAmendDocument("## Criteria\n### Entry\nbody\n### ENTRY\nother\n")(current), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "criteria operation contains duplicate or empty titles",
   });
   assert.throws(() => prepareAmendDocument("## Criteria\n### Empty\n")(current), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "criterion 'Empty' operation body is empty",
   });
   assert.throws(() => prepareAmendDocument("## Add: Criteria\n### KEEP\nnew\n")(current), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "Add Criteria targets an existing criterion",
   });
 });
 
 test("prepared amendments refuse duplicates before application and preserve untouched bytes", () => {
   assert.throws(() => prepareAmendDocument("## Append: Context\nfirst\n## Append: Context\nsecond\n"), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "duplicate amend operation 'Append:Context'",
   });
   const current = decodeContractDocument(renderContractBody(body).replace("current\n", "current  \r\n"));
@@ -257,7 +268,7 @@ test("prepared amendments refuse duplicates before application and preserve unto
   assert.deepEqual(prepared(current), amended);
 });
 
-test("duplicate amendments retain their native input cause before Git observation", async () => {
+test("duplicate amendments declare invalid input before Git observation", async () => {
   const repository = makeGitRepository();
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const log = join(repository.path, "git-observations");
@@ -274,8 +285,7 @@ test("duplicate amendments retain their native input cause before Git observatio
       (error: unknown) => {
         assert.ok(error instanceof KeiyakuError);
         assert.equal(error.category, "invalid-input");
-        assert.ok(error.cause instanceof TypeError);
-        assert.equal(error.cause.message, "duplicate amend operation 'Append:Context'");
+        assert.equal(error.message, "duplicate amend operation 'Append:Context'");
         return true;
       },
     );

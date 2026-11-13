@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { akumaBirthSchema, akumaCallerKey, decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { readdir, stat } from "node:fs/promises";
 import { z } from "zod";
@@ -190,10 +191,10 @@ export function rosterInput(
   allowLimit: boolean,
 ): Readonly<{ akumaName?: string; caller?: AkumaCaller }> {
   if (typeof input !== "object" || input === null || Array.isArray(input))
-    throw new TypeError("Akuma list input must be an object");
+    throw new KeiyakuError("invalid-input", "Akuma list input must be an object");
   const allowed = allowLimit ? ["akumaName", "caller", "limit"] : ["akumaName", "caller"];
   const unknown = Object.keys(input).find((key) => !allowed.includes(key));
-  if (unknown !== undefined) throw new TypeError(`Akuma list input has unknown field: ${unknown}`);
+  if (unknown !== undefined) throw new KeiyakuError("invalid-input", `Akuma list input has unknown field: ${unknown}`);
   const caller = decodeAkumaCaller((input as AkumaRosterInput).caller);
   return {
     ...(input.akumaName === undefined ? {} : { akumaName: validateAkumaName(input.akumaName) }),

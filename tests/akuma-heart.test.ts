@@ -48,6 +48,7 @@ import {
 } from "../src/akuma/heart/index.js";
 import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { HeartAuthorityCorruptionError } from "../src/akuma/heart/facts.js";
+import { errorCategory, KeiyakuError } from "../src/errors.js";
 
 async function fixture() {
   return await soulFixture("keiyaku-akuma-heart-");
@@ -1253,7 +1254,12 @@ test("malformed pause frontier is Heart corruption, not legacy state", async (co
     database
       .prepare("INSERT INTO control(kind, value_json, at) VALUES ('pause', ?, ?)")
       .run(JSON.stringify({ bodySequence: body.sequence, frontierTellId: "missing-interrupt-tell" }), "2026-08-08T00:00:01.000Z");
-    await assert.rejects(readHeart(allocated.paths), HeartAuthorityCorruptionError);
+    await assert.rejects(readHeart(allocated.paths), (error: unknown) => {
+      assert.ok(error instanceof HeartAuthorityCorruptionError && error instanceof KeiyakuError);
+      assert.equal(error.name, "HeartAuthorityCorruptionError");
+      assert.equal(errorCategory(error), "authority-corruption");
+      return true;
+    });
   } finally {
     database.close();
     holder.release();
@@ -1766,10 +1772,15 @@ test("soul codec hard-fails invalid known members", () => {
   ];
   for (const { name, change } of corruptions) {
     assert.throws(() => decodeSoul(change(codecSoul())), undefined as never, name);
-    assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(change(codecSoul())) }), undefined as never, name);
+    assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(change(codecSoul())) }), HeartAuthorityCorruptionError, name);
     assert.throws(() => encodeSoulRow(change(codecSoul()) as Soul), undefined as never, name);
   }
-  assert.throws(() => decodeSoulRow({ soul_json: "not json" }), SyntaxError);
+  assert.throws(() => decodeSoulRow({ soul_json: "not json" }), (error: unknown) => {
+    assert.ok(error instanceof HeartAuthorityCorruptionError);
+    assert.equal(error.category, "authority-corruption");
+    assert.ok(error.cause instanceof SyntaxError);
+    return true;
+  });
   assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify("garbage") }));
   assert.throws(() => decodeSoulRow({ soul_json: JSON.stringify(42) }));
 });

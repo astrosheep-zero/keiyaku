@@ -567,7 +567,10 @@ test("native Contract reads tag lawful absence while corrupt fork terms remain e
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "authority-corruption");
     assert.ok(error.cause instanceof KeiyakuError);
-    assert.ok(error.cause.cause instanceof TypeError);
+    assert.equal(error.cause.category, "authority-corruption");
+    assert.match(error.cause.message, /has an undecodable document/u);
+    assert.ok(error.cause.cause instanceof KeiyakuError);
+    assert.equal(error.cause.cause.category, "invalid-input");
     assert.ok(error.message.includes(id));
     return true;
   });

@@ -1,5 +1,6 @@
 /** @architectureCompositionRoot */
-import { contractId, type ContractId } from "../core/facts/types.js";
+import type { ContractId } from "../core/facts/types.js";
+import { KeiyakuError } from "../errors.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import {
   contractCatalogueOperation,
@@ -24,7 +25,7 @@ import type {
   ContractResolution,
   KeisOptions,
 } from "./contract-types.js";
-import { requireInput } from "./input.js";
+import { callerContractId, requireInput } from "./input.js";
 import {
   validateContractWait,
   waitContractLocal,
@@ -69,8 +70,8 @@ export const Keis = Object.freeze({
       bind: (operation: BindInput) => bindKei(scope, operation, createKeiHandle, composition),
       kei: (input: Readonly<{ id: ContractId }>) => {
         const values = requireInput(input, "Keis.kei input", ["id"]);
-        if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-        return createKeiHandle(contractId(values.id), scope, composition);
+        if (typeof values.id !== "string") throw new KeiyakuError("invalid-input", "contract ID must be a string");
+        return createKeiHandle(callerContractId(values.id), scope, composition);
       },
       resolve: (operation: ContractResolveInput) => resolveContract(scope, operation),
       list: (operation: ContractListInput = {}) => listKeis(scope, operation),
@@ -104,12 +105,13 @@ async function reconcileKeiyaku(
 ): Promise<ReconcileCompletion | RepoReconcileReport> {
   const values = requireInput(input, "Keis.reconcile input", ["contract", "retryHooks"]);
   const contract = values.contract;
-  if (contract !== undefined && typeof contract !== "string") throw new TypeError("contract must be a string");
+  if (contract !== undefined && typeof contract !== "string")
+    throw new KeiyakuError("invalid-input", "contract must be a string");
   if (values.retryHooks !== undefined && typeof values.retryHooks !== "boolean")
-    throw new TypeError("retryHooks must be a boolean");
+    throw new KeiyakuError("invalid-input", "retryHooks must be a boolean");
   const options = { scope, hooks: derivedHooks(composition), retryHooks: values.retryHooks ?? false };
   const accumulator = new InvocationAccumulator();
-  const id = contract === undefined ? undefined : contractId(contract);
+  const id = contract === undefined ? undefined : callerContractId(contract);
   try {
     return await withGitDecodeChannel<ReconcileCompletion | RepoReconcileReport>(
       scope,
@@ -129,7 +131,7 @@ async function reconcileKeiyaku(
 export async function listKeis(scope: RepositoryScope, input: ContractListInput): Promise<ContractList> {
   const values = requireInput(input, "Keis.list input");
   for (const key of Object.keys(values)) {
-    if (key !== "limit") throw new TypeError(`Keis.list input has unknown field: ${key}`);
+    if (key !== "limit") throw new KeiyakuError("invalid-input", `Keis.list input has unknown field: ${key}`);
   }
   const limit = values.limit;
   if (limit === undefined) {
@@ -137,7 +139,7 @@ export async function listKeis(scope: RepositoryScope, input: ContractListInput)
       withGitDecodeChannel(scope, (channel) => contractCatalogueOperation({ scope, channel })),
     );
   }
-  if (typeof limit !== "number") throw new TypeError("Contract list limit must be a number");
+  if (typeof limit !== "number") throw new KeiyakuError("invalid-input", "Contract list limit must be a number");
   return readContractValue(() =>
     withGitDecodeChannel(scope, (channel) => contractCatalogueOperation({ scope, channel, limit })),
   );
@@ -149,14 +151,9 @@ export async function observeKei(
 ): Promise<ContractObservation> {
   const values = requireInput(input, "Keis.observe input");
   for (const key of Object.keys(values))
-    if (key !== "id") throw new TypeError(`Keis.observe input has unknown field: ${key}`);
-  if (typeof values.id !== "string") throw new TypeError("contract ID must be a string");
-  let id: ContractId;
-  try {
-    id = contractId(values.id);
-  } catch (error) {
-    throw new TypeError(error instanceof Error ? error.message : "contract ID is invalid");
-  }
+    if (key !== "id") throw new KeiyakuError("invalid-input", `Keis.observe input has unknown field: ${key}`);
+  if (typeof values.id !== "string") throw new KeiyakuError("invalid-input", "contract ID must be a string");
+  const id = callerContractId(values.id);
   return readContractValue(() =>
     withGitDecodeChannel(scope, (channel) => contractObservationOperation({ scope, channel, contractId: id })),
   );

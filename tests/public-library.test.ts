@@ -8,6 +8,7 @@ import {
   KeiyakuError, KeiyakuUsageError, NoGitWorldError, Repo, SettingsError, World, WorldError,
   type AliasBinding, type KeiyakuErrorCategory, type KeiyakuErrorOptions,
 } from "../src/index.js";
+import { errorCategory } from "../src/errors.js";
 import ts from "typescript";
 import { join, resolve } from "node:path";
 import { writeFileSync } from "node:fs";
@@ -17,7 +18,7 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { temporaryDirectory } from "./support/process.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 
-test("all distinguished root SDK errors share the base and retain their existing categories", async (t) => {
+test("all distinguished root SDK errors share the base and declare their owner categories", async (t) => {
   const world = await World.at(temporaryDirectory(t, "keiyaku-public-errors-"));
   const id = Akuma.select(world, "aku/worker/11111111").id;
   const repository = repositoryWithMain();
@@ -33,9 +34,9 @@ test("all distinguished root SDK errors share the base and retain their existing
   const base = new KeiyakuError("invalid-input", "caller error", options);
   const cases: readonly (readonly [KeiyakuError, KeiyakuErrorCategory])[] = [
     [base, "invalid-input"],
-    [new KeiyakuArcDocumentError(bound.contractId, cause), "internal"],
-    [new KeiyakuUsageError("usage"), "internal"],
-    [new AkumaAddressError({ kind: "invalid-akuma", selector: "invalid" }), "internal"],
+    [new KeiyakuArcDocumentError(bound.contractId, cause), "invalid-input"],
+    [new KeiyakuUsageError("usage"), "invalid-input"],
+    [new AkumaAddressError({ kind: "invalid-akuma", selector: "invalid" }), "invalid-input"],
     [new AkumaWorldScopeError({ kind: "akuma-not-in-world", ids: [id], world }), "internal"],
     [new AkumaNotBornError(id), "internal"],
     [new AkumaObservationError(id, "unreadable"), "internal"],
@@ -45,8 +46,8 @@ test("all distinguished root SDK errors share the base and retain their existing
     [new AkumaBusyError(), "internal"],
     [new AuthorityCorruptionError("corrupt authority"), "authority-corruption"],
     [new NoGitWorldError(world), "internal"],
-    [new DebtAuthorityCorruptionError("corrupt Debt"), "internal"],
-    [new SettingsError("unavailable Settings"), "internal"],
+    [new DebtAuthorityCorruptionError("corrupt Debt"), "authority-corruption"],
+    [new SettingsError("unavailable Settings"), "invalid-input"],
     [new WorldError("invalid World"), "internal"],
   ];
   for (const [error, category] of cases) {
@@ -54,6 +55,7 @@ test("all distinguished root SDK errors share the base and retain their existing
     assert.equal(error.category, category, error.name);
   }
   assert.equal(base.cause, cause);
+  assert.equal(errorCategory(cause), "internal", "arbitrary programmer TypeErrors remain internal");
   for (const key of ["outcome", "spawn", "tell"] as const) {
     assert.equal(base[key], options[key]);
     assert.ok(Object.isFrozen(base[key]));
@@ -177,7 +179,8 @@ test("World-bound alias observation selects one canonical mapping without requir
   assert.deepEqual(await akumas.aliases({ akumaIds: [] }), []);
   for (const input of [{}, { akumaIds: "@alpha" }, { akumaIds: ["@alpha"] }, { akumaIds: [first, 1] },
     { akumaIds: [first], path: world }]) {
-    await assert.rejects(akumas.aliases(input as never), TypeError);
+    await assert.rejects(akumas.aliases(input as never), (error: unknown) =>
+      error instanceof KeiyakuError && error.category === "invalid-input");
   }
   writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "corrupt\n");
   await assert.rejects(akumas.aliases({ akumaIds: [missing] }), AuthorityCorruptionError);

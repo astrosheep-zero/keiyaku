@@ -1,6 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, normalize } from "node:path";
 import { contractId, type ContractId } from "../core/facts/types.js";
+import { KeiyakuError } from "../errors.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import { contractsOperation, type RepositoryScope } from "../protocol/operations.js";
 import type { ContractMembership } from "../protocol/read/status.js";
@@ -39,17 +40,18 @@ export async function resolveContract(
 ): Promise<ContractResolution> {
   const values = requireInput(input, "Keis.resolve input", ["selector", "cwd"]);
   const selector = values.selector;
-  if (selector !== undefined && typeof selector !== "string") throw new TypeError("selector must be a string");
+  if (selector !== undefined && typeof selector !== "string")
+    throw new KeiyakuError("invalid-input", "selector must be a string");
   const suppliedCwd = values.cwd;
   if (suppliedCwd !== undefined && (typeof suppliedCwd !== "string" || !isAbsolute(suppliedCwd)))
-    throw new TypeError("cwd must be an absolute directory coordinate");
+    throw new KeiyakuError("invalid-input", "cwd must be an absolute directory coordinate");
   let cwd = scope.invocationWorktree;
   if (typeof suppliedCwd === "string") {
     try {
       cwd = await realpath(suppliedCwd);
       if (!(await stat(cwd)).isDirectory()) throw new TypeError("cwd must be a directory");
     } catch (cause) {
-      throw new TypeError("cwd must be an absolute directory coordinate", { cause });
+      throw new KeiyakuError("invalid-input", "cwd must be an absolute directory coordinate", { cause });
     }
   }
   let ids: readonly ContractId[] | undefined;

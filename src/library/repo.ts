@@ -1,5 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { isAbsolute } from "node:path";
+import { KeiyakuError } from "../errors.js";
 import { currentBranchOperation, scopeOperation, type RepositoryScope } from "../protocol/operations.js";
 import { NoGitWorldError } from "../git/repository.js";
 import { optionalNonblank, requireInput } from "./input.js";
@@ -14,8 +15,8 @@ const REPO_SCOPES = new WeakMap<object, RepositoryScope>();
 async function resolvePinnedScope(values: Record<string, unknown>): Promise<RepositoryScope> {
   const path = values.path;
   if (typeof path !== "string" || path.trim().length === 0)
-    throw new TypeError("repository path must be a nonblank string");
-  if (!isAbsolute(path)) throw new TypeError(`repository path must be absolute: ${path}`);
+    throw new KeiyakuError("invalid-input", "repository path must be a nonblank string");
+  if (!isAbsolute(path)) throw new KeiyakuError("invalid-input", `repository path must be absolute: ${path}`);
   const gitPath = optionalNonblank(values.gitPath, "Git executable path");
   return await scopeOperation({
     coordinate: await realpath(path),
@@ -44,7 +45,7 @@ export class Repo {
 }
 
 export function scopeForRepo(value: unknown): RepositoryScope {
-  if (!(value instanceof Repo)) throw new TypeError("repo must be a Repo");
+  if (!(value instanceof Repo)) throw new KeiyakuError("invalid-input", "repo must be a Repo");
   const scope = REPO_SCOPES.get(value);
   if (scope === undefined) throw new TypeError("repo must be a Repo");
   return scope;

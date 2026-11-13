@@ -1,3 +1,4 @@
+import { errorCategory } from "../../errors.js";
 import { z } from "zod";
 import { contractIdSchema, contractJournalPaths, snapshotIdSchema } from "../../git/identity.js";
 import { type ContractTargetLag as GitContractTargetLag } from "../../git/workspace.js";
@@ -255,7 +256,7 @@ function documentFor(state: ContractState): ReturnType<typeof decodeContractDocu
   try {
     return decodeContractDocument(state.terms.document.bytes);
   } catch (error) {
-    if (error instanceof TypeError) return undefined;
+    if (errorCategory(error) === "invalid-input") return undefined;
     throw error;
   }
 }

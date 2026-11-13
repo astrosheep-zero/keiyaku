@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import type { DocumentNode, ListItemNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
 
 type RegionSegment =
@@ -206,12 +207,12 @@ export function decodeRegion(_document: DocumentNode, section: SectionNode): rea
   return patterns.map((pattern) => compileRegionPattern(pattern).source);
 }
 
-/** Region decoding for body parsers: document errors surface as plain TypeError refusals. */
+/** Region decoding for body parsers: document errors surface as invalid-input refusals. */
 export function decodeRegionOrRefusal(document: DocumentNode, section: SectionNode): readonly string[] {
   try {
     return decodeRegion(document, section);
   } catch (error) {
-    if (error instanceof RegionDocumentError) throw new TypeError(error.message);
+    if (error instanceof RegionDocumentError) throw new KeiyakuError("invalid-input", error.message, { cause: error });
     throw error;
   }
 }

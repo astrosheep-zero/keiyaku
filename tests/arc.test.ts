@@ -2,6 +2,7 @@ import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeArcDocument } from "../src/body/arc.js";
+import { KeiyakuError } from "../src/errors.js";
 import { renderContractBody } from "../src/body/render.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderContractGuidance } from "../src/contract-guidance.js";
@@ -110,7 +111,8 @@ test("Arc Markdown accepts a chapter name and arbitrary or empty body", () => {
     assert.throws(
       () => decodeArcDocument(malformed),
       (error: unknown) =>
-        error instanceof TypeError &&
+        error instanceof KeiyakuError &&
+        error.category === "invalid-input" &&
         error.message.includes("exactly one nonblank H1 chapter name") &&
         error.message.includes("freeform Markdown body (which may be empty)"),
     );

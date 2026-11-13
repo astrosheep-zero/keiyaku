@@ -8,6 +8,7 @@ import {
   Debts,
   Keis,
   Keiyaku,
+  KeiyakuError,
   KeiyakuUsageError,
   Repo,
   World,
@@ -67,7 +68,11 @@ test("construction captures explicit inputs synchronously without observing cwd"
     { cwd: home, environment: {}, home: 1 },
     { cwd: home, environment: {}, repo: 1 },
   ])
-    assert.throws(() => Keiyaku.at(input as never), TypeError);
+    assert.throws(
+      () => Keiyaku.at(input as never),
+      (error: unknown) =>
+        error instanceof KeiyakuUsageError && error.category === "invalid-input",
+    );
 
   const environment: Record<string, string> = { PI_SESSION_ID: "captured" };
   const captured = Keiyaku.at({ cwd: home, environment, home });
@@ -227,7 +232,7 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
     for (const invalid of [{ ...environment, KEIYAKU_ACTOR_ID: "invalid" }, {}]) {
       await assert.rejects(
         Keiyaku.at({ cwd: world, environment: invalid, home }).report({ text: "bad" }),
-        KeiyakuUsageError,
+        (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
       );
     }
   } finally {

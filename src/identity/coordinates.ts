@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 export type IdentityFamily = "aku" | "kei" | "resp";
 
 function prefix(family: IdentityFamily): string {
@@ -27,10 +28,10 @@ export function identitySegments(
   }>,
 ): readonly string[] {
   const marker = prefix(input.family);
-  if (!input.value.startsWith(marker)) throw new TypeError(`identity must use ${marker}`);
+  if (!input.value.startsWith(marker)) throw new KeiyakuError("invalid-input", `identity must use ${marker}`);
   const segments = input.value.slice(marker.length).split("/");
   if (segments.length === 0 || !segments.every(validSegment)) {
-    throw new TypeError("identity coordinate contains an invalid segment");
+    throw new KeiyakuError("invalid-input", "identity coordinate contains an invalid segment");
   }
   return segments;
 }

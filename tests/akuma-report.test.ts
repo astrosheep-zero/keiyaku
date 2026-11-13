@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Akuma, Akumas, type AkumaReportResult } from "../src/index.js";
+import { Akuma, Akumas, KeiyakuError, type AkumaReportResult } from "../src/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { activitySlice, beginTurn, breakBody, endTurn, readHeart, recordReport } from "../src/akuma/heart/index.js";
 import { insertActivityFact } from "../src/akuma/heart/rows.js";
@@ -156,7 +156,10 @@ test("exact report history selects retained identity without observing outcomes"
     assert.notEqual(missing.exit, 0);
     for (const invalid of ["report/0", "report/01", "report/9007199254740992", "report/-1"]) {
       assert.throws(() => parseArgv(["history", value.allocated.id, "--id", invalid]));
-      await assert.rejects(owner.history({ id: invalid }), TypeError);
+      await assert.rejects(
+        owner.history({ id: invalid }),
+        (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
+      );
     }
     for (const flag of ["--last", "--before", "--since", "--limit"]) {
       assert.throws(() => parseArgv(["history", value.allocated.id, "--id", id, flag, ...(flag === "--last" ? [] : ["1"])]));

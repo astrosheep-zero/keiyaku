@@ -586,15 +586,13 @@ export function validated<Value>(phase: () => Value): Value {
   try {
     return phase();
   } catch (error) {
-    if (error instanceof AuthorityCorruptionError || error instanceof SettingsError)
-      throw new KeiyakuError(error instanceof SettingsError ? "invalid-input" : error.category, error.message, {
-        cause: error,
-      });
-    if (error instanceof KeiyakuError) throw error;
-    const message = error instanceof Error ? error.message : String(error);
-    throw new KeiyakuError("invalid-input", message, {
-      cause: error instanceof TypeError ? error : new TypeError(message),
-    });
+    if (
+      error instanceof KeiyakuError &&
+      !(error instanceof AuthorityCorruptionError) &&
+      !(error instanceof SettingsError)
+    )
+      throw error;
+    throw new KeiyakuError(errorCategory(error), errorDiagnostic(error), { cause: error });
   }
 }
 export async function readContractValue<Value>(operation: () => Promise<Value>): Promise<Value> {

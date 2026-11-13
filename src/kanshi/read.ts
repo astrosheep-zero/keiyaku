@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import { boundedListLimit } from "../bounded-list.js";
 import { akumaRowsAt, joinedAkumas, aliasesAt, dispatchesAt, diagnostic } from "../library/akumas.js";
@@ -78,12 +79,12 @@ function debtFailure(error: unknown): Extract<DebtSection<never>, { kind: "faile
 }
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value))
-    throw new TypeError(`kanshi ${label} must be an object`);
+    throw new KeiyakuError("invalid-input", `kanshi ${label} must be an object`);
   return value as Record<string, unknown>;
 }
 function exactKeys(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
   for (const key of Object.keys(value))
-    if (!allowed.includes(key)) throw new TypeError(`kanshi ${label} has unknown field: ${key}`);
+    if (!allowed.includes(key)) throw new KeiyakuError("invalid-input", `kanshi ${label} has unknown field: ${key}`);
 }
 export function captureKanshiScope(input: KanshiScopeInput): KanshiCoordinates {
   const value = record(input, "scope");
@@ -91,8 +92,9 @@ export function captureKanshiScope(input: KanshiScopeInput): KanshiCoordinates {
   const world = input.world ?? null;
   const repo = input.repo ?? undefined;
   if (world !== null && (typeof world !== "string" || world.trim().length === 0))
-    throw new TypeError("kanshi world must be a WorldRoot or null");
-  if (repo !== undefined && !(repo instanceof Repo)) throw new TypeError("kanshi repo must be a Repo");
+    throw new KeiyakuError("invalid-input", "kanshi world must be a WorldRoot or null");
+  if (repo !== undefined && !(repo instanceof Repo))
+    throw new KeiyakuError("invalid-input", "kanshi repo must be a Repo");
   return Object.freeze({ world, ...(repo === undefined ? {} : { repo }) });
 }
 function regionSelection(value: unknown): KanshiRegionSelection {
@@ -104,30 +106,31 @@ function regionSelection(value: unknown): KanshiRegionSelection {
   }
   if (selection.kind === "contract") {
     exactKeys(selection, ["kind", "contract"], "region selection");
-    if (typeof selection.contract !== "string") throw new TypeError("kanshi region contract must be a ContractId");
+    if (typeof selection.contract !== "string")
+      throw new KeiyakuError("invalid-input", "kanshi region contract must be a ContractId");
     try {
       return { kind: "contract", contract: contractId(selection.contract) };
     } catch (cause) {
-      throw new TypeError("kanshi region contract must be a canonical ContractId", { cause });
+      throw new KeiyakuError("invalid-input", "kanshi region contract must be a canonical ContractId", { cause });
     }
   }
   if (selection.kind === "path") {
     exactKeys(selection, ["kind", "patterns"], "region selection");
     if (!Array.isArray(selection.patterns) || selection.patterns.length === 0)
-      throw new TypeError("Region query requires one or more path patterns");
+      throw new KeiyakuError("invalid-input", "Region query requires one or more path patterns");
     const patterns = selection.patterns.map((pattern) => {
-      if (typeof pattern !== "string") throw new TypeError("Region path patterns must be strings");
+      if (typeof pattern !== "string") throw new KeiyakuError("invalid-input", "Region path patterns must be strings");
       try {
         return assertRegionPattern(pattern);
       } catch (cause) {
-        throw new TypeError(cause instanceof Error ? cause.message : String(cause), { cause });
+        throw new KeiyakuError("invalid-input", cause instanceof Error ? cause.message : String(cause), { cause });
       }
     });
     const [first, ...rest] = patterns;
     if (first === undefined) throw new TypeError("Region query requires one or more path patterns");
     return { kind: "path", patterns: [first, ...rest] };
   }
-  throw new TypeError(`kanshi region selection kind is invalid: ${String(selection.kind)}`);
+  throw new KeiyakuError("invalid-input", `kanshi region selection kind is invalid: ${String(selection.kind)}`);
 }
 async function holdersAt(observation: GitReadObservation): Promise<Holders> {
   try {

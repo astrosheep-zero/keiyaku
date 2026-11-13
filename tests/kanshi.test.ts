@@ -30,6 +30,7 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
+import { KeiyakuError } from "../src/errors.js";
 import { Akumas, Keis, Repo } from "../src/index.js";
 import { contractSummarySchema } from "../src/protocol/read/status.js";
 import { akumaCatalogueSchema } from "../src/akuma/selection-observation.js";
@@ -94,7 +95,10 @@ test("Kanshi captures immutable coordinates without observation and reads fresh 
   const unobserved = Kanshi.of({ world: "/missing-kanshi-world" as WorldRoot, repo: null });
   assert.ok(Object.isFrozen(unobserved));
   for (const input of [null, [], { world: " " }, { repo: {} }, { extra: true }])
-    assert.throws(() => Kanshi.of(input as never), TypeError);
+    assert.throws(
+      () => Kanshi.of(input as never),
+      (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
+    );
 
   const repository = fixtureRepository(t);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -120,7 +124,10 @@ test("Kanshi captures immutable coordinates without observation and reads fresh 
   await bound.kei.abandon();
   assert.deepEqual((await view.counts()).contracts, { kind: "present", value: 0 });
   assert.deepEqual(await view.region(), { kind: "present" });
-  await assert.rejects(view.board({ akumaLimit: 0 }), TypeError);
+  await assert.rejects(
+    view.board({ akumaLimit: 0 }),
+    (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
+  );
 });
 
 function fixtureRepository(t: TestContext) {

@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../../../errors.js";
 import { LineRpcProcess } from "../../../runtime/proc/line-rpc.js";
 import { createProviderAttempt } from "../../provider.js";
 import { decodeProviderRecipe, type ProviderExecution } from "../../provider-recipe.js";
@@ -41,7 +42,10 @@ export async function withCodexWritableDirectories(
       custody.signal.throwIfAborted();
       const sandbox = codexObject(response?.sandbox);
       if (sandbox?.type !== "workspaceWrite" || response?.activePermissionProfile != null)
-        throw new TypeError("writableDirectories requires Codex native workspace-write sandbox configuration");
+        throw new KeiyakuError(
+          "invalid-input",
+          "writableDirectories requires Codex native workspace-write sandbox configuration",
+        );
       const roots = sandbox.writableRoots;
       if (
         !Array.isArray(roots) ||

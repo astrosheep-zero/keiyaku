@@ -82,7 +82,10 @@ test("Settings.load keeps omitted cwd user-only and canonical equal coordinates 
     writeFileSync(join(value.home, "settings.json"), JSON.stringify({ sample: { shared: "changed" } }));
     assert.equal(user.namespace("sample").entries?.shared?.value, "user");
     assert.equal((await Settings.load({ home: value.home })).namespace("sample").entries?.shared?.value, "changed");
-    await assert.rejects(Settings.load({ cwd: 7 } as never), TypeError);
+    await assert.rejects(
+      Settings.load({ cwd: 7 } as never),
+      (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
+    );
   } finally {
     process.chdir(previous);
     value.close();
@@ -1072,7 +1075,7 @@ test("the CLI keeps a broken selected namespace as invalid input, not a draft re
     const environment = { KEIYAKU_HOME: home };
     const readStdin = async () => contractDocument("CLI broken gates");
     const refused = await runCli(["-C", repository.path, "bind", "-"], { environment, readStdin });
-    assert.equal(refused.exit, 3, refused.stdout + refused.stderr);
+    assert.equal(refused.exit, 64, refused.stdout + refused.stderr);
     assert.doesNotMatch(refused.stdout, /draft/u);
     const explicit = await runCli(["-C", repository.path, "bind", "--gates", "", "-"], { environment, readStdin });
     assert.equal(explicit.exit, 0, explicit.stdout + explicit.stderr);

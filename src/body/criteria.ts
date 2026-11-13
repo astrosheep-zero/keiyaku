@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../errors.js";
 import { directChildren, normalizeTitle, rawSlice } from "../markdown/query.js";
 import type { DocumentNode, SectionNode } from "../markdown/types.js";
 import type { ContractCriterion } from "./types.js";
@@ -26,14 +27,15 @@ export function decodeCriteria(
   context: CriteriaContext = "contract",
 ): readonly ContractCriterion[] {
   const structural = criteriaStructure(document, section, context);
-  if (structural !== null) throw new TypeError(structural);
+  if (structural !== null) throw new KeiyakuError("invalid-input", structural);
   const headings = criteriaHeadings(section);
   const seen = new Set<string>();
   return headings.map((heading, index) => {
     const title = heading.text.trim();
     const key = normalizeTitle(title);
     if (title.length === 0 || seen.has(key)) {
-      throw new TypeError(
+      throw new KeiyakuError(
+        "invalid-input",
         context === "amend"
           ? "criteria operation contains duplicate or empty titles"
           : `duplicate criterion '${title}'`,
@@ -45,7 +47,8 @@ export function decodeCriteria(
       end: headings[index + 1]?.span.start ?? section.span.end,
     });
     if (body.trim().length === 0) {
-      throw new TypeError(
+      throw new KeiyakuError(
+        "invalid-input",
         context === "amend" ? `criterion '${title}' operation body is empty` : `criterion '${title}' is empty`,
       );
     }

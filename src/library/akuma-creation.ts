@@ -33,7 +33,7 @@ import type { TellResult } from "../akuma/body.js";
 import { bareOption, canonicalBirthCwd, durationSchema, validateAkumaInput } from "../akuma/call-input.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "../akuma/identity.js";
 import { moveAlias } from "../alias/index.js";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
+import { errorCategory, KeiyakuError } from "../errors.js";
 import { publishDispatch, readDispatch } from "../dispatch/index.js";
 import { akumaAliasSchema, parseAkumaAlias, type AkumaAlias } from "../identity/selector.js";
 import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
@@ -184,7 +184,7 @@ export type ForkInput = Readonly<{
 
 function nonblank(value: unknown, label: string): string {
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`${label} must be a nonblank string`);
+    throw new KeiyakuError("invalid-input", `${label} must be a nonblank string`);
   }
   return value;
 }
@@ -196,14 +196,14 @@ function settingsOption(value: unknown): Settings | undefined {
     value === null ||
     typeof (value as { namespace?: unknown }).namespace !== "function"
   ) {
-    throw new TypeError("settings must be a Settings");
+    throw new KeiyakuError("invalid-input", "settings must be a Settings");
   }
   return value as Settings;
 }
 
 function integrationFailure(error: unknown): IntegrationFailure {
   return {
-    kind: error instanceof AuthorityCorruptionError ? "authority-corruption" : "infrastructure",
+    kind: errorCategory(error) === "authority-corruption" ? "authority-corruption" : "infrastructure",
     diagnostic: error instanceof Error ? error.message : String(error),
   };
 }
@@ -211,7 +211,7 @@ function integrationFailure(error: unknown): IntegrationFailure {
 function callSeat(contract: unknown) {
   if (contract === undefined) return undefined;
   const seat = seatForKei(contract);
-  if (seat === null) throw new TypeError("contract must be a Kei");
+  if (seat === null) throw new KeiyakuError("invalid-input", "contract must be a Kei");
   return seat;
 }
 

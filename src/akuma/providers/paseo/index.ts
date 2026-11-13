@@ -1,3 +1,4 @@
+import { KeiyakuError } from "../../../errors.js";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
 // Pinned vendor CLI entry: the public SDK does not expose cancellation or selectors.
@@ -128,10 +129,13 @@ async function setup<T>(signal: AbortSignal, operation: () => Promise<T>): Promi
 }
 
 function configuration(execution: ProviderExecution): PaseoConfig {
-  if (execution.executable !== undefined) throw new TypeError("Paseo connects to a local daemon, not an executable");
+  if (execution.executable !== undefined)
+    throw new KeiyakuError("invalid-input", "Paseo connects to a local daemon, not an executable");
   const parsed = configSchema.safeParse(execution.config ?? {});
   if (!parsed.success)
-    throw new TypeError(`Paseo configuration: ${parsed.error.issues[0]?.message}`, { cause: parsed.error });
+    throw new KeiyakuError("invalid-input", `Paseo configuration: ${parsed.error.issues[0]?.message}`, {
+      cause: parsed.error,
+    });
   const config = parsed.data;
   const url = new URL(config.url);
   if (
@@ -143,10 +147,13 @@ function configuration(execution: ProviderExecution): PaseoConfig {
     url.search !== "" ||
     url.hash !== ""
   ) {
-    throw new TypeError("Paseo url must be a loopback WebSocket endpoint ending in /ws");
+    throw new KeiyakuError("invalid-input", "Paseo url must be a loopback WebSocket endpoint ending in /ws");
   }
   if (config.provider.includes("/"))
-    throw new TypeError("Paseo provider must be a bare native provider id; use the model option separately");
+    throw new KeiyakuError(
+      "invalid-input",
+      "Paseo provider must be a bare native provider id; use the model option separately",
+    );
   return config;
 }
 

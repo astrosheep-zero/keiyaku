@@ -1,4 +1,4 @@
-import { KeiyakuError } from "../errors.js";
+import { KeiyakuError, errorCategory } from "../errors.js";
 import { z } from "zod";
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -157,7 +157,7 @@ function archetypeField(values: Readonly<Record<string, unknown>>, key: string, 
   const value = values[key];
   if (value === undefined && !required) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`Akuma ${key} must be a nonblank string`);
+    throw new KeiyakuError("invalid-input", `Akuma ${key} must be a nonblank string`);
   }
   return value;
 }
@@ -169,14 +169,15 @@ function archetypeEnum<T extends string>(
 ): T | undefined {
   const value = archetypeField(values, key);
   if (value === undefined) return undefined;
-  if (!allowed.includes(value as T)) throw new TypeError(`Akuma ${key} must be one of ${allowed.join(", ")}`);
+  if (!allowed.includes(value as T))
+    throw new KeiyakuError("invalid-input", `Akuma ${key} must be one of ${allowed.join(", ")}`);
   return value as T;
 }
 
 function archetypeBoolean(values: Readonly<Record<string, unknown>>, key: string): boolean | undefined {
   const value = values[key];
   if (value === undefined) return undefined;
-  if (typeof value !== "boolean") throw new TypeError(`Akuma ${key} must be a boolean`);
+  if (typeof value !== "boolean") throw new KeiyakuError("invalid-input", `Akuma ${key} must be a boolean`);
   return value;
 }
 
@@ -188,14 +189,16 @@ type ArchetypeFrontmatter = Readonly<{
 
 function parseArchetypeFrontmatter(markdown: string): ArchetypeFrontmatter {
   const lines = markdown.split(/\r?\n/u);
-  if (lines[0]?.trim() !== "---") throw new TypeError("Akuma file must begin with YAML frontmatter");
+  if (lines[0]?.trim() !== "---")
+    throw new KeiyakuError("invalid-input", "Akuma file must begin with YAML frontmatter");
   const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-  if (closing < 0) throw new TypeError("Akuma frontmatter is not closed");
+  if (closing < 0) throw new KeiyakuError("invalid-input", "Akuma frontmatter is not closed");
   const document = parseDocument(lines.slice(1, closing).join("\n"), { uniqueKeys: true });
-  if (document.errors.length > 0) throw new TypeError(`Akuma frontmatter is invalid: ${document.errors[0]!.message}`);
+  if (document.errors.length > 0)
+    throw new KeiyakuError("invalid-input", `Akuma frontmatter is invalid: ${document.errors[0]!.message}`);
   const decoded = document.toJS() as unknown;
   if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
-    throw new TypeError("Akuma frontmatter must be one mapping");
+    throw new KeiyakuError("invalid-input", "Akuma frontmatter must be one mapping");
   }
   return { lines, closing, values: decoded as Readonly<Record<string, unknown>> };
 }
@@ -216,7 +219,7 @@ function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): Arche
     (key) =>
       !["base", "provider", "model", "effort", "network", "description", "hidden", "systemPromptMode"].includes(key),
   );
-  if (unknown !== undefined) throw new TypeError(`Akuma frontmatter has unknown field: ${unknown}`);
+  if (unknown !== undefined) throw new KeiyakuError("invalid-input", `Akuma frontmatter has unknown field: ${unknown}`);
   const provider = archetypeField(values, "provider");
   const baseValue = archetypeField(values, "base");
   const base = baseValue === undefined ? undefined : validateAkumaName(baseValue);
@@ -243,7 +246,7 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
   const fields = decodeArchetypeFields(values);
   const systemPrompt = lines.slice(closing + 1).join("\n");
   if (fields.systemPromptMode !== undefined && systemPrompt.length === 0) {
-    throw new TypeError("Akuma systemPromptMode requires a nonempty Markdown body");
+    throw new KeiyakuError("invalid-input", "Akuma systemPromptMode requires a nonempty Markdown body");
   }
   return Object.freeze({
     name,
@@ -268,7 +271,7 @@ function decodeArchetype(name: string, path: string, markdown: string): LocalArc
 
 function mergeArchetype(base: DecodedArchetype | undefined, local: LocalArchetype): DecodedArchetype {
   const provider = local.provider ?? base?.provider;
-  if (provider === undefined) throw new TypeError("Akuma provider must be a nonblank string");
+  if (provider === undefined) throw new KeiyakuError("invalid-input", "Akuma provider must be a nonblank string");
   const options = decodeProviderOptions({ ...(base?.options ?? {}), ...local.options });
   return Object.freeze({
     name: local.name,
@@ -347,20 +350,22 @@ async function resolveArchetype(
 function catalogueCoordinate(value: unknown, field: "cwd" | "home"): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {
-    throw new TypeError(`Akuma catalogue ${field} must be a nonblank string`);
+    throw new KeiyakuError("invalid-input", `Akuma catalogue ${field} must be a nonblank string`);
   }
-  if (!isAbsolute(value)) throw new TypeError(`Akuma catalogue ${field} must be absolute: ${value}`);
+  if (!isAbsolute(value))
+    throw new KeiyakuError("invalid-input", `Akuma catalogue ${field} must be absolute: ${value}`);
   return value;
 }
 
 /** Malformed caller input fails here, before any filesystem observation. */
 function catalogueInput(value: unknown): AkumaNameCatalogInput {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new TypeError("Akuma catalogue input must be an object");
+    throw new KeiyakuError("invalid-input", "Akuma catalogue input must be an object");
   }
   const input = value as Readonly<Record<string, unknown>>;
   const unknown = Object.keys(input).find((key) => !["cwd", "home", "limit"].includes(key));
-  if (unknown !== undefined) throw new TypeError(`Akuma catalogue input has unknown field: ${unknown}`);
+  if (unknown !== undefined)
+    throw new KeiyakuError("invalid-input", `Akuma catalogue input has unknown field: ${unknown}`);
   const cwd = catalogueCoordinate(input.cwd, "cwd");
   const home = catalogueCoordinate(input.home, "home");
   return {
@@ -419,18 +424,18 @@ function optionalProviderText(
   const selected = value[field];
   if (selected === undefined) return undefined;
   if (typeof selected !== "string" || selected.trim().length === 0) {
-    throw new TypeError(`provider ${name} ${field} must be a nonblank string`);
+    throw new KeiyakuError("invalid-input", `provider ${name} ${field} must be a nonblank string`);
   }
   return selected;
 }
 
 function configuredProvider(name: string, selected: unknown): ProviderExecution {
   const value = record(selected);
-  if (value === null) throw new TypeError(`provider ${name} must be an object`);
+  if (value === null) throw new KeiyakuError("invalid-input", `provider ${name} must be an object`);
   const unknown = Object.keys(value).find(
     (key) => !["kind", "description", "executable", "config", "env"].includes(key),
   );
-  if (unknown !== undefined) throw new TypeError(`provider ${name} has unknown field ${unknown}`);
+  if (unknown !== undefined) throw new KeiyakuError("invalid-input", `provider ${name} has unknown field ${unknown}`);
   optionalProviderText(value, name, "description");
   return decodeProviderRecipe({
     name,
@@ -461,7 +466,8 @@ const BUILTIN_EXECUTIONS = {
 function providerExecution(settings: Settings, name: string): ProviderExecution {
   const view = settings.namespace("providers");
   if (view.kind === "failed")
-    throw new TypeError(
+    throw new KeiyakuError(
+      "invalid-input",
       view.failures
         .map((failure) => {
           const scope = settings.scopes[failure.scope];
@@ -473,7 +479,7 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
   if (selected !== undefined) return configuredProvider(name, selected);
   const builtin = BUILTIN_EXECUTIONS[name as keyof typeof BUILTIN_EXECUTIONS];
   if (builtin !== undefined) return decodeProviderRecipe({ name, ...builtin });
-  throw new TypeError(`unknown provider ${name}`);
+  throw new KeiyakuError("invalid-input", `unknown provider ${name}`);
 }
 
 /** Resolve one akumaName and decode its provider execution, leaving option admission to the caller. */
@@ -486,8 +492,12 @@ export async function loadPreparedArchetype(
   try {
     provider = providerExecution(input.settings, definition.provider);
   } catch (error) {
-    if (error instanceof TypeError)
-      throw new AkumaNameError(definition.name, [definition.path], `uses ${error.message}`);
+    if (errorCategory(error) === "invalid-input")
+      throw new AkumaNameError(
+        definition.name,
+        [definition.path],
+        `uses ${error instanceof Error ? error.message : String(error)}`,
+      );
     throw error;
   }
   return Object.freeze({ ...definition, provider });

@@ -2,6 +2,7 @@ import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeContractDocument } from "../src/body/decode.js";
+import { KeiyakuError } from "../src/errors.js";
 import { renderContractBody } from "../src/body/render.js";
 
 function document(extra = "", regionInfo = ""): string {
@@ -47,28 +48,35 @@ test("contract Markdown accepts the exact txt Region fence info string", () => {
 test("contract Markdown rejects frontmatter, duplicate sections, and missing structure", () => {
   assert.throws(
     () => decodeContractDocument(`---\ninvalid: [\n---\n${document()}`),
-    (error: unknown) => error instanceof TypeError && error.name === "TypeError",
+    (error: unknown) =>
+      error instanceof KeiyakuError && error.category === "invalid-input" && error.name === "KeiyakuError",
   );
   assert.throws(
     () => decodeContractDocument(`---\nkind: contract\n---\n${document()}`),
     (error: unknown) =>
-      error instanceof TypeError && error.message.includes("contract document may not contain frontmatter"),
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message.includes("contract document may not contain frontmatter"),
   );
   assert.throws(
     () => decodeContractDocument(`${document()}\n## context\nduplicate\n`),
-    (error: unknown) => error instanceof TypeError && error.message.includes("duplicate contract section 'context'"),
+    (error: unknown) =>
+      error instanceof KeiyakuError && error.category === "invalid-input" && error.message.includes("duplicate contract section 'context'"),
   );
   assert.throws(
     () => decodeContractDocument("# Missing\n## Context\nonly one section\n"),
     (error: unknown) =>
-      error instanceof TypeError && error.message.includes("contract document is missing ## Objective"),
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message.includes("contract document is missing ## Objective"),
   );
   assert.throws(
     () =>
       decodeContractDocument(
         contractMarkdown("No Region", { Context: "facts.", Objective: "ship.", Design: "adapter." }),
       ),
-    (error: unknown) => error instanceof TypeError && error.message.includes("contract document is missing ## Region"),
+    (error: unknown) =>
+      error instanceof KeiyakuError && error.category === "invalid-input" && error.message.includes("contract document is missing ## Region"),
   );
 });
 
@@ -100,7 +108,7 @@ test("contract Markdown reports independent structural diagnostics together", ()
   assert.throws(
     () => decodeContractDocument(malformed),
     (error: unknown) => {
-      if (!(error instanceof TypeError)) return false;
+      if (!(error instanceof KeiyakuError) || error.category !== "invalid-input") return false;
       assert.equal(
         error.message,
         [
@@ -142,7 +150,8 @@ test("Verification uses direct fenced executors and reserved H2s are refused", (
     assert.throws(
       () => decodeContractDocument(`${document()}\n## ${name}\n- declaration\n`),
       (error: unknown) =>
-        error instanceof TypeError &&
+        error instanceof KeiyakuError &&
+        error.category === "invalid-input" &&
         error.message.includes(`${name.toLowerCase()} is not a contract Markdown section`),
     );
   }
@@ -162,15 +171,18 @@ test("criteria bodies keep exact bytes through nested structure; duplicate title
     { title: "Last", body: "last" },
   ]);
   assert.throws(() => decodeContractDocument(withCriteria("### First title\none\n\n###  FIRST   title \ntwo")), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "duplicate criterion 'FIRST   title'",
   });
   assert.throws(() => decodeContractDocument(withCriteria("stray\n### Entry\nbody")), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "Criteria may contain only H3 entries",
   });
   assert.throws(() => decodeContractDocument(withCriteria("### Empty\n  \r\n")), {
-    name: "TypeError",
+    name: "KeiyakuError",
+    category: "invalid-input",
     message: "criterion 'Empty' is empty",
   });
 });
