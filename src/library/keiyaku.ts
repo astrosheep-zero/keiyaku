@@ -614,7 +614,7 @@ export class Keiyaku {
       });
     if (input.selector === "aku" || input.selector === "aku/") {
       const at = await this.#coordinates("none");
-      return Akumas.archetypes({
+      return Akumas.akumaNames({
         ...bound,
         ...(at.world === null ? {} : { cwd: at.world }),
         ...(this.#input.home === undefined ? {} : { home: this.#input.home }),

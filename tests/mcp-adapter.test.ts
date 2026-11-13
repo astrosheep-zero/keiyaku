@@ -61,6 +61,26 @@ test("flat discovery preserves strict business branches and rejects coordinate c
   assert.throws(() => mcpInputSchema(z.strictObject({ cwd: z.string() })), /coordinate collides.*cwd/u);
 });
 
+test("MCP spawn uses akumaName, accepts a bare alias, and points a missing name to ls", async (t) => {
+  const cwd = temporaryDirectory(t, "mcp-akuma-name-");
+  const environment = { HOME: cwd, USERPROFILE: cwd, KEIYAKU_HOME: cwd };
+  const adapter = createKeiyakuMcpServer({ cwd, environment, version: "test" });
+  const client = new Client({ name: "akuma-name-surface", version: "1" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([client.connect(a), adapter.server.connect(b)]);
+  t.after(async () => { await client.close(); await adapter.close(); });
+  const { tools } = await client.listTools();
+  const spawn = tools.find((tool) => tool.name === "spawn")!;
+  const properties = spawn.inputSchema.properties as Record<string, { description?: string }>;
+  assert.match(properties.akumaName!.description!, /akumaName to spawn.*ls \{"selector":"aku\/"\}/u);
+  assert.match(spawn.description!, /from akumaName/u);
+  const missing = await client.callTool({ name: "spawn", arguments: { akumaName: "missing", alias: "lane" } });
+  assert.equal(missing.isError, true);
+  const text = JSON.stringify(missing.content);
+  assert.match(text, /Akuma not found · missing/u);
+  assert.match(text, /available {2}keiyaku ls aku\//u);
+});
+
 test("schema cleanup retains authored property names and values", () => {
   const schema = normalizeMcpSchema(JSON.parse(JSON.stringify({
     $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -343,7 +363,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   for (const [name, input, expected] of [
     ["ls", { selector: "kei/", limit: 1 }, await Keis.of(repo).list({ limit: 1 })],
     ["ls", { selector: "aku/*", limit: 1 }, catalogue],
-    ["ls", { selector: "aku/" }, await Akumas.archetypes({ cwd: world, home: cwd })],
+    ["ls", { selector: "aku/" }, await Akumas.akumaNames({ cwd: world, home: cwd })],
 
     ["status", { id: bound.contractId }, await Kanshi.of({ world, repo }).contract(bound.contractId)],
     ["status", { id: worker.id }, await Akumas.of(world).status({ akuma: worker.id, repo })],
@@ -448,7 +468,7 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
   const absentDebt = await client.callTool({ name: "ls", arguments: { cwd: temporaryDirectory(t, "mcp-absent-debt-"), selector: "debt/" } });
   assert.equal(absentDebt.isError, true);
   await World.at(repository.path);
-  for (const [selector, kind] of [["kei/", "contract-catalogue"], ["aku/", "archetype-catalogue"], ["aku/*", "akuma-catalogue"], ["debt/", "debt-catalogue"]] as const) {
+  for (const [selector, kind] of [["kei/", "contract-catalogue"], ["aku/", "akuma-name-catalogue"], ["aku/*", "akuma-catalogue"], ["debt/", "debt-catalogue"]] as const) {
     const response = await client.callTool({ name: "ls", arguments: { selector } });
     assert.equal(response.isError, false);
     assert.equal((response.structuredContent as { kind: string }).kind, kind);

@@ -147,7 +147,7 @@ model settings):
   "cwd": "/absolute/path/to/workdir",
   "config": {
     "provider": "keiyaku/mirror",
-    "options": { "world": "/absolute/path/to/world", "akuId": "aku/archetype/id" }
+    "options": { "world": "/absolute/path/to/world", "akuId": "aku/worker/id" }
   }
 }
 ```

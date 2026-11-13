@@ -126,7 +126,7 @@ existing address authority, then invoke the resolved family's exact operation;
 parsing remains synchronous and free of authority reads.
 
 `ls` routes Contract rows through the Repo-bound Contract collection, Akuma instances
-through `Akumas.of(world).list`, archetypes through their definition owner, and
+through `Akumas.of(world).list`, akumaNames through their definition owner, and
 Debts through the native World-wide Debt list with its default open-work selection.
 Contract-only selection, including region lookup, delegates to the public
 Contract resolver owned by [public-api.md](public-api.md). The edge renders its
@@ -139,7 +139,7 @@ An Akuma-instance `ls` may restrict its roster to the invocation's own caller,
 derived from its captured environment. This selection stays World-local and
 includes direct and transitive descendants. Explicit selection of another caller
 belongs to the independent native Akumas surface. Absent or ambiguous identity,
-and caller scoping on a Contract, Debt, or Archetype catalogue, refuse at the
+and caller scoping on a Contract, Debt, or akumaName catalogue, refuse at the
 usage boundary rather than returning a misleading empty list.
 
 The ask edge acquires a required JSON Schema from a caller-selected file and

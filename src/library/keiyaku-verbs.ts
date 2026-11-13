@@ -8,7 +8,7 @@ import { askProgressSchema } from "../akuma/akuma-selection-execution.js";
 import { akumaReportResultSchema } from "../akuma/akuma-instance.js";
 import { akumaIdSchema } from "../akuma/identity.js";
 import { contractIdSchema } from "../git/identity.js";
-import { archetypeCatalogSchema } from "../akuma/archetype.js";
+import { akumaNameCatalogSchema } from "../akuma/archetype.js";
 import {
   akumaCatalogueSchema,
   akumaObservationSchema,
@@ -114,7 +114,7 @@ const debtSelection = z
   );
 const listBound = { limit: positive.exactOptional().describe("Maximum rows to return (positive integer).") };
 const catalogueSelector =
-  'Catalogue path selector: "kei"/"kei/", "debt"/"debt/", "aku"/"aku/" (archetypes), or "aku/*" / "aku/*/*" / "aku/<name>" / "aku/<name>/*" (instances).';
+  'Catalogue path selector: "kei"/"kei/", "debt"/"debt/", "aku"/"aku/" (akumaName values), or "aku/*" / "aku/*/*" / "aku/<name>" / "aku/<name>/*" (instances).';
 const lsInputSchema = z.union([
   z.strictObject({ selector: text.regex(/^(?:kei|aku)\/?$/u).describe(catalogueSelector), ...listBound }).readonly(),
   z
@@ -136,7 +136,7 @@ const lsInputSchema = z.union([
 ]);
 const spawnFields = {
   akumaName: nonblank.describe(
-    'Archetype name to spawn (from ls {"selector":"aku/"}). Always births a new instance; use tell or ask to continue an existing Akuma.',
+    'akumaName to spawn. Use ls {"selector":"aku/"} to list valid names, including when the selected name is not found. Always births a new instance; use tell or ask to continue an existing Akuma.',
   ),
   contract: optText.describe(
     "Contract ID (kei/...) to record as Dispatch association for status/kanshi; does not set workdir or inject Contract text.",
@@ -370,7 +370,7 @@ export const verbs = Object.freeze({
   },
   spawn: {
     description:
-      "Birth a new Akuma, an agent, from an archetype (ls aku/), with an optional first order. contract only marks whose work it is; give it a workdir and the terms yourself. A failed result with an akumaId still left an Akuma alive.",
+      "Birth a new Akuma from akumaName (ls aku/), with an optional first order. contract only marks whose work it is; give it a workdir and the terms yourself. A failed result with an akumaId still left an Akuma alive.",
     input: z.union([
       spawnModeSchemas[0]
         .omit({ body: true })
@@ -642,10 +642,10 @@ export const verbs = Object.freeze({
   },
   ls: {
     description:
-      "List ids of one kind: active Contracts (kei/), open Debts (debt/), archetypes you can birth (aku/), or existing Akumas (aku/*).",
+      "List ids of one kind: active Contracts (kei/), open Debts (debt/), akumaName values you can birth (aku/), or existing Akumas (aku/*).",
     input: lsInputSchema,
-    output: z.union([contractCatalogueSchema, akumaCatalogueSchema, archetypeCatalogSchema, debtCatalogueSchema]),
-    normal: z.union([contractCatalogueSchema, akumaCatalogueSchema, archetypeCatalogSchema, debtListSchema]),
+    output: z.union([contractCatalogueSchema, akumaCatalogueSchema, akumaNameCatalogSchema, debtCatalogueSchema]),
+    normal: z.union([contractCatalogueSchema, akumaCatalogueSchema, akumaNameCatalogSchema, debtListSchema]),
     effect: "read",
   },
   region: {

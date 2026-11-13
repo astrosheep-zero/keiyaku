@@ -47,7 +47,7 @@ const removedEntrypoints = new Set([
   "observeKanshi",
   "selectRegion",
   "settings",
-  "listArchetypeDefinitions",
+  "listAkumaNameDefinitions",
 ]);
 const schemaName = (name: string) => name.endsWith("Schema") && name !== "JsonSchema";
 const diagnostics = (program: ts.Program) =>
@@ -333,7 +333,7 @@ import { Kei, Keis, Keiyaku, AkumaHost, Akumas, Kanshi, Settings, KeiyakuError,
   type KeiyakuErrorCategory, type KeiyakuErrorOptions, type PartialOutcomeEnvelope,
   type SpawnResult, type AkumaTellResult, type AkumaId, type KanshiScopeInput,
   type KanshiBoardOptions, type KanshiCountsReport, type KanshiContractReport, type RegionRead,
-  type SettingsInput, type ArchetypeCatalogInput, type AkumaArchetypesInput, type ArchetypeCatalog,
+  type SettingsInput, type AkumaNameCatalogInput, type AkumaNamesInput, type AkumaNameCatalog,
   type KeisOptions, type MutationObservation, type WorldInput, type KeisReconcile,
   type KeiyakuRunOptions, type ResetCounts, type AkumaAlias, type AkumaAddressRefusal,
   type AkumaSetAddressInput, type AkumaRosterInput, type AskObserver, type SpawnWaitObserver,
@@ -377,16 +377,16 @@ const regions: Promise<RegionRead> = watch.region();
 const contract: Promise<KanshiContractReport> = watch.contract("kei/example" as ContractId);
 const settingsInput: SettingsInput = { cwd: world, home: "/explicit/home" };
 const loaded: Promise<Settings> = Settings.load(settingsInput);
-const catalogueInput: ArchetypeCatalogInput = { cwd: world, home: "/explicit/home", limit: 10 };
-const catalogue: Promise<ArchetypeCatalog> = Akumas.archetypes(catalogueInput);
-const boundCatalogueInput: AkumaArchetypesInput = { home: "/explicit/home", limit: 10 };
-const boundCatalogue: Promise<ArchetypeCatalog> = Akumas.of(world).archetypes(boundCatalogueInput);
+const catalogueInput: AkumaNameCatalogInput = { cwd: world, home: "/explicit/home", limit: 10 };
+const catalogue: Promise<AkumaNameCatalog> = Akumas.akumaNames(catalogueInput);
+const boundCatalogueInput: AkumaNamesInput = { home: "/explicit/home", limit: 10 };
+const boundCatalogue: Promise<AkumaNameCatalog> = Akumas.of(world).akumaNames(boundCatalogueInput);
 // @ts-expect-error Settings project coordinates use cwd
 Settings.load({ root: world });
 // @ts-expect-error standalone archetype coordinates use cwd
-Akumas.archetypes({ project: world });
+Akumas.akumaNames({ project: world });
 // @ts-expect-error bound catalogue already captures its project coordinate
-Akumas.of(world).archetypes({ cwd: world });
+Akumas.of(world).akumaNames({ cwd: world });
 // @ts-expect-error World and Repo are independent coordinates
 Kanshi.of({ world: repo });
 declare const kei: Kei;

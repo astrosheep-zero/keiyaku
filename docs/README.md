@@ -25,7 +25,7 @@ surface. Read every owner named for the surface being changed.
 | [cli-debt.md](cli-debt.md) | Debt command intent, refusal direction, and Debt-facing presentation. |
 | [cli-output.md](cli-output.md) | Help composition, shared rendering, and process outcome direction. |
 | [debt.md](debt.md) | Separate in-package debt product: document authority, identity, lifecycle, associations, concurrency, and persistence. |
-| [akuma.md](akuma.md) | Akuma identity, birth, life, Archetypes, and placement. |
+| [akuma.md](akuma.md) | Akuma identity, birth, life, akumaNames, and placement. |
 | [akuma-heart.md](akuma-heart.md) | Akuma durable life evidence, custody, activity retention, and observation. |
 | [akuma-execution.md](akuma-execution.md) | Body execution and tell, interrupt, kill, fork, and wake semantics. |
 | [akuma-provider.md](akuma-provider.md) | Provider boundary, shared event meaning, and adaptation responsibility. |

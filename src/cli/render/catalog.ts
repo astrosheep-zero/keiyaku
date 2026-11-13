@@ -1,4 +1,4 @@
-import type { ArchetypeCatalog, ContractCatalogue, ContractSummary } from "../../index.js";
+import type { AkumaNameCatalog, ContractCatalogue, ContractSummary } from "../../index.js";
 import { contractAttentionFacts, progressStrip } from "./contract-observation.js";
 import { ageText, emptyCatalogue, safeText } from "./terminal.js";
 import { contractMark } from "./marks.js";
@@ -26,7 +26,7 @@ export function renderContractCatalogue(list: ContractCatalogue): string {
   ].join("\n");
 }
 
-export function renderArchetypeCatalogue(list: ArchetypeCatalog): string {
+export function renderAkumaNameCatalogue(list: AkumaNameCatalog): string {
   const rows = list.rows ?? [];
   if (rows.length === 0) return emptyCatalogue("akuma names");
   return [

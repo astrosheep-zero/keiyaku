@@ -1,5 +1,5 @@
 import { AkumaNotBornError, AkumaObservationError } from "../../akuma/akuma-errors.js";
-import { AkumaArchetypeError } from "../../akuma/archetype.js";
+import { AkumaNameError } from "../../akuma/archetype.js";
 import type { ContractId } from "../../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../../library/address.js";
 import type { VerbCompletion, VerbInput, VerbName, VerbOutput } from "../../library/keiyaku-verbs.js";
@@ -16,7 +16,7 @@ import {
   waitText,
 } from "./akuma-activity.js";
 import { renderCallText, renderForkText, renderKillText, renderSpawnFailure, waitedTellProgress } from "./akuma.js";
-import { renderArchetypeCatalogue, renderContractCatalogue } from "./catalog.js";
+import { renderAkumaNameCatalogue, renderContractCatalogue } from "./catalog.js";
 import { renderAkumaBoard } from "./kanshi-akuma.js";
 import {
   contractIssueLines,
@@ -137,7 +137,7 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
   }
   if (error instanceof AkumaObservationError)
     return `× Akuma observation failed  ${safeText(error.id)} — ${safeText(error.diagnostic)}`;
-  if (name === "spawn" && error instanceof AkumaArchetypeError) {
+  if (name === "spawn" && error instanceof AkumaNameError) {
     const absent = error.reason === "was not found";
     return renderStructuredRefusal("spawn", `${absent ? "Akuma not found" : error.reason} · ${error.akumaName}`, [
       ...error.searched.map((path) => `searched  ${path}`),
@@ -314,7 +314,7 @@ export function renderVerb<K extends VerbName>(
     case "ls": {
       const result = value as VerbOutput<"ls">;
       if (result.kind === "contract-catalogue") return renderContractCatalogue(result);
-      if (result.kind === "archetype-catalogue") return renderArchetypeCatalogue(result);
+      if (result.kind === "akuma-name-catalogue") return renderAkumaNameCatalogue(result);
       if (result.kind === "debt-catalogue") return renderDebtList(result, context);
       const query = input as VerbInput<"ls">;
       return renderAkumaBoard({ ...result, kind: "present" }, result.observedAt, {

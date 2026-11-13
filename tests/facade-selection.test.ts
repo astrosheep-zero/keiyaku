@@ -984,8 +984,8 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
         disposition: "ready",
       },
     ]);
-    assert.deepEqual(await Akumas.archetypes({ home }), {
-      kind: "archetype-catalogue",
+    assert.deepEqual(await Akumas.akumaNames({ home }), {
+      kind: "akuma-name-catalogue",
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
     });
     const workers = await Akumas.of(await World.at(root)).list({ akumaName: "worker" });

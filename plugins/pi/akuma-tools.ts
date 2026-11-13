@@ -222,7 +222,7 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
     "List visible spawnable Akuma definitions for all configured providers (not running instances).",
     { limit },
     [],
-    async (input, akumas) => akumas.archetypes(input),
+    async (input, akumas) => akumas.akumaNames(input),
   );
   register<ToolAddress<AkumaTellInput> & LaunchChoice>(
     "akuma_tell",

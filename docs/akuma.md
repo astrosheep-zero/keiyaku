@@ -1,7 +1,7 @@
 # Akuma
 
 An Akuma is a summoned agent the flagship can spawn, observe, steer, and collect.
-This chapter owns its identity, birth, life, Archetype admission, placement, and
+This chapter owns its identity, birth, life, akumaName admission, placement, and
 execution/provider boundary. Processes come and go; the Heart remains its
 durable authority.
 
@@ -13,7 +13,7 @@ boundary.
 ## Identity, Birth, And Life
 
 An Akuma has one complete public identity in the Akuma family defined by
-[model.md](model.md). Archetype names are bounded canonical human identity
+[model.md](model.md). akumaName names are bounded canonical human identity
 segments; Alias uses the same name admission. The bound applies to new names,
 not the readability of existing identities. Physical topology is its private
 structural projection, not a second identity. Atomic allocation prevents reuse; an occupied or sealed
@@ -24,7 +24,7 @@ ordinary birth owner initializes and publishes that same child. Cancellation or
 failure preserves the allocation's existing leash and seal judgment; observation
 never adopts, reuses, or silently recreates it.
 
-Soul is the immutable birth snapshot: identity, admitted Archetype/provider
+Soul is the immutable birth snapshot: identity, admitted akumaName/provider
 recipe, execution cwd, origin, optional declared caller, and the choice to omit
 Keiyaku execution instructions. That opt-out changes
 neither personality nor capabilities and remains frozen across wake and resume.
@@ -111,24 +111,24 @@ kills an Akuma, and a failure in one candidate never affects another candidate
 or the operation that triggered the pass. If no later successful spawn or fork
 occurs, eligible entries simply remain.
 
-## Archetype And Placement
+## akumaName And Placement
 
-An Archetype is spawn-time personality and provider configuration. Publicly these are Akuma names; the word Archetype never appears on the CLI face. Its exact
+An akumaName definition is spawn-time personality and provider configuration. Public callers select it as `akumaName`; no second configuration vocabulary appears on the CLI, SDK, or MCP face. Its exact
 Markdown grammar is edge detail; admission rejects malformed, unknown, or
-unsupported provider input before allocation. Later Archetype or Settings edits
+unsupported provider input before allocation. Later definition or Settings edits
 change only future births. A definition file joins the catalogue exactly when
 its stem is one canonical name under [model.md](model.md); when the spelling
-rule widens, previously inadmissible files become live Archetypes unchanged. A missing native resume promise never authorizes
+rule widens, previously inadmissible files become live akumaName definitions unchanged. A missing native resume promise never authorizes
 reconstructing one.
 
-Archetype definitions are configuration kept apart from World runtime custody.
+akumaName definitions are configuration kept apart from World runtime custody.
 Project definitions are eligible for version control. Definitions may come from
 both the current project and Home. A project definition shadows a Home definition
 with the same canonical name; Home remains the fallback when the project has no
 definition. This precedence applies only to spawn-time definition configuration
 and never changes World runtime custody, Heart evidence, or leash ownership.
 
-An Archetype may name one `base` Archetype at load time. The base is resolved
+An akumaName definition may name one `base` definition at load time. The base is resolved
 using the same project-over-Home precedence, then the child is merged into one
 complete snapshot before catalog presentation or birth. Provider, model,
 effort, network, and description are replaced only when present on the child;
@@ -147,7 +147,7 @@ and Heart storage. Soul cwd is execution input, not World identity. Contract
 association never supplies that input: an explicit execution directory wins,
 and otherwise the effective invocation directory stands. Akuma state lives in
 the World rather than a Contract worktree, so ordinary worktree cleanup cannot
-erase it. Home supplies Archetype configuration only, never runtime authority.
+erase it. Home supplies akumaName configuration only, never runtime authority.
 The accepted risk of force-cleaning repository-local management state is not
 hidden by a second store or automatic defense.
 
@@ -172,7 +172,7 @@ complete deletion retains custody for retry.
 
 One Akuma owner implements creation, admission, observation, and lifecycle. The
 standalone identity handle and plural selection are faces over those same
-algorithms rather than parallel orchestrators. That owner reads only Heart, leash, provider, Archetype,
+algorithms rather than parallel orchestrators. That owner reads only Heart, leash, provider, akumaName,
 Settings, and filesystem state; optional Alias, Dispatch, and Contract
 associations are composed after its values by the World composition that owns
 them, so a standalone operation still works when those optional authorities are
@@ -180,7 +180,7 @@ corrupt or unavailable. Its roster supplies native membership, semantic
 activity order, and observed extent, and the upper composition attaches Alias
 context without counting or reopening the board.
 
-The public surface composes identity, Archetype, Heart, Body, provider,
+The public surface composes identity, akumaName, Heart, Body, provider,
 publication, and Settings. Body drives providers and writes typed Heart facts. Provider adapters depend on the provider-neutral boundary, never
 on public or lifecycle projections. Kanshi consumes public values only.
 Inactive retirement follows the same split: the Akuma owner reads Heart, leash,

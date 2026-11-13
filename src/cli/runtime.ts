@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
-import { AkumaArchetypeError, Keiyaku, KeiyakuUsageError } from "../index.js";
+import { AkumaNameError, Keiyaku, KeiyakuUsageError } from "../index.js";
 import {
   AkumaAddressError,
   AkumaWorldScopeError,
@@ -158,7 +158,7 @@ function writeAkumaFailure(
 }
 
 function writeArchetypeFailure(
-  error: AkumaArchetypeError,
+  error: AkumaNameError,
   command: FacetCommand,
   shared: ReturnType<typeof thrownCompletion>,
 ): CliOutcome {
@@ -191,7 +191,7 @@ async function writeFailure(error: unknown, command: ParsedCommand): Promise<Cli
     error instanceof AkumaObservationError
   )
     return writeAkumaFailure(error, command, shared);
-  if (error instanceof AkumaArchetypeError && commandName(command) === "spawn")
+  if (error instanceof AkumaNameError && commandName(command) === "spawn")
     return writeArchetypeFailure(error, command, shared);
   if (command.output === "json") writeJson(projectFailure(error));
   else if (error instanceof KeiyakuError && error.outcome !== undefined) writeStdout(shared.text());

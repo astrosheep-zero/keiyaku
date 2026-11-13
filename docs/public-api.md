@@ -202,7 +202,7 @@ an ordinary refusal.
 ## Product Boundaries
 
 Settings owns explicit configuration loading; its resolved project directory
-coordinate is named cwd consistently with standalone Archetype catalogue access.
+coordinate is named cwd consistently with standalone akumaName catalogue access.
 Omission selects no project scope: the loader never substitutes the ambient
 working directory or discovers an ancestor project. Loaded Settings are an
 explicit shared resource captured once at Contract construction. Contract
@@ -236,9 +236,9 @@ The standalone Akuma product owns one Akuma's identity, execution, and public
 handle. `Akumas.of(world)` captures a World for selector, selection, creation, and fork
 operations; callers do not repeat that World on each
 operation. It retains an explicit Repo only for Contract selection or Dispatch
-association and never infers Repo from World or World from Repo. Archetype
+association and never infers Repo from World or World from Repo. `Akumas.akumaNames`
 catalogues are grouped on Akumas, with captured-World access and standalone
-explicit configuration coordinates over the same archetype owner. Its bounded
+explicit configuration coordinates over the same definition owner. Its bounded
 catalogue and native error remain public; no public definition
 loader joins the root. The independent Debt product
 likewise captures World and does not read or write Contract authority except

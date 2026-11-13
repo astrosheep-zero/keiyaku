@@ -73,7 +73,7 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
     Object.keys(exported).sort(),
     [
       "Akuma",
-      "AkumaArchetypeError",
+      "AkumaNameError",
       "AkumaBusyError",
       "AkumaDecodeError",
       "AkumaNotBornError",

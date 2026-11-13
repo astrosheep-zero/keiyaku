@@ -51,7 +51,7 @@ ignore protection after an active managed worktree exists. These files keep
 derived management material out of ordinary status and delivery capture without
 hiding project-owned data. Primary management ignore protection excludes the
 local Debt ledger and runtime custody while leaving shared Settings and project
-Archetype definitions eligible for version control. A tracked generated location
+akumaName definitions eligible for version control. A tracked generated location
 is a failure. A recognized user-owned skill leaf remains untouched; static seat
 skills contain procedure only, while Contract and arc facts remain in canonical
 guidance.

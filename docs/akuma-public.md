@@ -239,7 +239,7 @@ Given one frozen caller coordinate — an external integration or an Akuma in th
 World — it returns the directly spawned Akumas and their transitively descended
 Akumas. Only frozen Soul caller edges are followed; fork origin is not a caller
 edge, and absent attribution is never inferred. The complete caller closure is
-computed across every Archetype before a requested Archetype narrows it, then
+computed across every akumaName before a requested akumaName narrows it, then
 presented in the same semantic activity order and bound. Any World-local
 candidate index is verified against born Souls before returning a member and
 falls back to direct Soul evidence on disagreement; unprovable or deleted

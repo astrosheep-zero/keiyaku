@@ -17,6 +17,7 @@ function fixture(readers: Readers) {
   const pi = {
     on(name: string, handler: Handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
     registerTool(tool: { name: string }) { tools.push(tool.name); },
+    registerMcpServer() {},
     registerCommand(name: string) { commands.push(name); },
     registerFlag() {}, getFlag() { return false; },
   } as unknown as ExtensionAPI;

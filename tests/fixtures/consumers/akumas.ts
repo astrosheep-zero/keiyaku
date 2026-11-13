@@ -1,6 +1,6 @@
 import {
   Akuma,
-  AkumaArchetypeError,
+  AkumaNameError,
   AkumaHost,
   Akumas,
   Keis,
@@ -12,9 +12,9 @@ import {
   type AliasBinding,
   type AkumaHostOptions,
   type AkumaHostScope,
-  type ArchetypeCatalog,
-  type ArchetypeCatalogInput,
-  type ArchetypeCatalogRow,
+  type AkumaNameCatalog,
+  type AkumaNameCatalogInput,
+  type AkumaNameCatalogRow,
   type KeisOptions,
   type Repo,
   type WorldRoot,
@@ -25,11 +25,11 @@ declare const aku: AkumaId;
 declare const repo: Repo;
 declare const nativeError: unknown;
 
-const catalogueInput: ArchetypeCatalogInput = { cwd: world, home: "/tmp/keiyaku-consumer-home", limit: 25 };
-const catalogue: Promise<ArchetypeCatalog> = Akumas.archetypes(catalogueInput);
-const catalogueRows: readonly ArchetypeCatalogRow[] = [];
-if (nativeError instanceof AkumaArchetypeError) {
-  const kind: "akuma-archetype" = nativeError.kind;
+const catalogueInput: AkumaNameCatalogInput = { cwd: world, home: "/tmp/keiyaku-consumer-home", limit: 25 };
+const catalogue: Promise<AkumaNameCatalog> = Akumas.akumaNames(catalogueInput);
+const catalogueRows: readonly AkumaNameCatalogRow[] = [];
+if (nativeError instanceof AkumaNameError) {
+  const kind: "akuma-name" = nativeError.kind;
   const searched: readonly string[] = nativeError.searched;
   void [kind, searched];
 }
@@ -46,7 +46,7 @@ void [scoped, scopedSingle, closed];
 
 const host: AkumaHostOptions = { reportDiagnostic: (message) => console.error(message) };
 const plural = Akumas.of(world, host);
-const scopedCatalogue: Promise<ArchetypeCatalog> = plural.archetypes({ home: catalogueInput.home!, limit: 25 });
+const scopedCatalogue: Promise<AkumaNameCatalog> = plural.akumaNames({ home: catalogueInput.home!, limit: 25 });
 void scopedCatalogue;
 const rosterInput: AkumaListInput = { limit: 25, repo };
 const roster: Promise<AkumaList> = plural.list(rosterInput);

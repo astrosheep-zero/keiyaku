@@ -2,7 +2,7 @@ import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import { AkumaOwner } from "./akuma-owner.js";
-import { AkumaArchetypeError, loadPreparedArchetype } from "./archetype.js";
+import { AkumaNameError, loadPreparedArchetype } from "./archetype.js";
 import type { BodyLauncher } from "./body-launch.js";
 import { tellWakeRuntime, type TellResult } from "./body.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
@@ -112,7 +112,7 @@ export async function prepareAkumaCall(
   } catch (error) {
     // Provider admission retains the initiating caller's Archetype-classified refusal.
     if (error instanceof PreparedCallAdmissionError) {
-      throw new AkumaArchetypeError(
+      throw new AkumaNameError(
         akumaName.name,
         [akumaName.path],
         error.stage === "options" ? `is unsupported: ${error.diagnostic}` : `uses ${error.diagnostic}`,

@@ -119,7 +119,7 @@ escape hatch.
 ## Native Continuity And Options
 
 Keiyaku execution instructions are generated at one shared execution boundary,
-separate from the frozen Archetype personality. They identify the actual Akuma
+separate from the frozen akumaName personality. They identify the actual Akuma
 and give concise progress-report guidance. New births receive this section by
 default; the birth opt-out omits only this section. Ordinary native resume may
 retain the immutable section without a hot-update capability. Already existing

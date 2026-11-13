@@ -1,5 +1,5 @@
 import { AkumaNotBornError } from "../akuma/akuma-errors.js";
-import { AkumaArchetypeError } from "../akuma/archetype.js";
+import { AkumaNameError } from "../akuma/archetype.js";
 import type {
   AkumaAskResult,
   AkumaKillResult,
@@ -41,7 +41,7 @@ function classifyThrown(name: VerbName, error: unknown): VerbDisposition {
     error instanceof AkumaNotBornError ||
     error instanceof AkumaWorldScopeError ||
     error instanceof KeiyakuArcDocumentError ||
-    (name === "spawn" && error instanceof AkumaArchetypeError)
+    (name === "spawn" && error instanceof AkumaNameError)
   )
     return "refused";
   return "failed";

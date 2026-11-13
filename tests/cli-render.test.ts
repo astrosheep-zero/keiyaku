@@ -21,7 +21,7 @@ import {
   type ContractId,
 } from "../src/core/facts/types.js";
 import type { ReconcileCompletion } from "../src/library/reconcile.js";
-import { renderArchetypeCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
+import { renderAkumaNameCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
 import type { SpawnResult } from "../src/library/akuma-creation.js";
 import {
   DEFAULT_CONTEXT,
@@ -539,8 +539,8 @@ test("catalog text renders only the selected identity layer", () => {
     /debt\/catalog-row/u,
   );
   assert.equal(
-    renderArchetypeCatalogue({
-      kind: "archetype-catalogue",
+    renderAkumaNameCatalogue({
+      kind: "akuma-name-catalogue",
       rows: [{ name: "reviewer", model: "codex-5", description: "Read the complete change without truncation." }],
     }),
     ["AKUMA NAMES // available", "", "reviewer", "  codex-5 — Read the complete change without truncation."].join("\n"),
@@ -555,8 +555,8 @@ test("ls help lists the Akuma catalogue usage forms", () => {
 });
 
 test("rendered Akuma catalog header names Akuma names, never akumaName", () => {
-  const text = renderArchetypeCatalogue({
-    kind: "archetype-catalogue",
+  const text = renderAkumaNameCatalogue({
+    kind: "akuma-name-catalogue",
     rows: [{ name: "reviewer" }],
   });
   assert.ok(text.startsWith("AKUMA NAMES // available"));

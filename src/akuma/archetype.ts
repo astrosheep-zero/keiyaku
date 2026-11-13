@@ -33,27 +33,27 @@ type DecodedArchetype = Readonly<{
   options: ProviderOptions;
 }>;
 
-export const archetypeCatalogRowSchema = z
+export const akumaNameCatalogRowSchema = z
   .strictObject({ name: z.string(), model: z.string().exactOptional(), description: z.string().exactOptional() })
   .readonly();
-export const archetypeCatalogSchema = z
+export const akumaNameCatalogSchema = z
   .strictObject({
-    kind: z.literal("archetype-catalogue"),
-    rows: z.array(archetypeCatalogRowSchema).nonempty().readonly().exactOptional(),
+    kind: z.literal("akuma-name-catalogue"),
+    rows: z.array(akumaNameCatalogRowSchema).nonempty().readonly().exactOptional(),
     more: z.literal(true).exactOptional(),
   })
   .readonly();
 
-export type ArchetypeCatalogRow = Readonly<{
+export type AkumaNameCatalogRow = Readonly<{
   name: string;
   model?: string;
   description?: string;
 }>;
 
-export type ArchetypeCatalog = z.output<typeof archetypeCatalogSchema>;
+export type AkumaNameCatalog = z.output<typeof akumaNameCatalogSchema>;
 
 /** One closed catalogue request: omitted cwd means no project scope, never ambient discovery. */
-export type ArchetypeCatalogInput = Readonly<{
+export type AkumaNameCatalogInput = Readonly<{
   cwd?: string;
   home?: string;
   limit?: number;
@@ -65,8 +65,8 @@ type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
     provider: ProviderExecution;
   }>;
 
-export class AkumaArchetypeError extends KeiyakuError {
-  readonly kind = "akuma-archetype";
+export class AkumaNameError extends KeiyakuError {
+  readonly kind = "akuma-name";
   constructor(
     readonly akumaName: string,
     readonly searched: readonly string[],
@@ -77,7 +77,7 @@ export class AkumaArchetypeError extends KeiyakuError {
   }
 }
 
-type ArchetypeCoordinates = Pick<ArchetypeCatalogInput, "cwd" | "home">;
+type ArchetypeCoordinates = Pick<AkumaNameCatalogInput, "cwd" | "home">;
 
 function projectArchetypeDirectory(project?: string): string | undefined {
   return project === undefined ? undefined : join(project, ".keiyaku", "akumas");
@@ -146,9 +146,9 @@ function archetypeError(
   reason: string,
   chain: readonly string[],
   guidance?: string,
-): AkumaArchetypeError {
+): AkumaNameError {
   const withChain = chain.length === 0 ? reason : `${reason} (base chain: ${chainText(chain)})`;
-  return new AkumaArchetypeError(name, searched, withChain, guidance);
+  return new AkumaNameError(name, searched, withChain, guidance);
 }
 
 function archetypeField(values: Readonly<Record<string, unknown>>, key: string, required = false): string | undefined {
@@ -344,7 +344,7 @@ async function resolveArchetype(
     searched,
     "was not found",
     missingChain,
-    chain.length === 0 ? "use `keiyaku ls aku/` to list available Akuma" : undefined,
+    chain.length === 0 ? "use `ls` with selector `aku/` to list available akumaName values" : undefined,
   );
 }
 
@@ -358,7 +358,7 @@ function catalogueCoordinate(value: unknown, field: "cwd" | "home"): string | un
 }
 
 /** Malformed caller input fails here, before any filesystem observation. */
-function catalogueInput(value: unknown): ArchetypeCatalogInput {
+function catalogueInput(value: unknown): AkumaNameCatalogInput {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new TypeError("Akuma catalogue input must be an object");
   }
@@ -374,7 +374,7 @@ function catalogueInput(value: unknown): ArchetypeCatalogInput {
   };
 }
 
-export async function listArchetypeDefinitions(input: ArchetypeCatalogInput = {}): Promise<ArchetypeCatalog> {
+export async function listAkumaNameDefinitions(input: AkumaNameCatalogInput = {}): Promise<AkumaNameCatalog> {
   // Reads still run concurrently, but the reported failure is the first invalid
   // definition in catalog byte order, not whichever read happened to finish first.
   const { limit, ...coordinates } = catalogueInput(input);
@@ -384,12 +384,8 @@ export async function listArchetypeDefinitions(input: ArchetypeCatalogInput = {}
       try {
         return await resolveArchetype(name, coordinates, undefined);
       } catch (error) {
-        if (error instanceof AkumaArchetypeError) throw error;
-        throw new AkumaArchetypeError(
-          name,
-          [path],
-          `is invalid: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        if (error instanceof AkumaNameError) throw error;
+        throw new AkumaNameError(name, [path], `is invalid: ${error instanceof Error ? error.message : String(error)}`);
       }
     }),
   );
@@ -407,7 +403,7 @@ export async function listArchetypeDefinitions(input: ArchetypeCatalogInput = {}
     );
   const rows = limit === undefined ? visible : visible.slice(0, limit);
   return {
-    kind: "archetype-catalogue",
+    kind: "akuma-name-catalogue",
     ...(rows.length === 0 ? {} : { rows }),
     ...(limit !== undefined && visible.length > limit ? { more: true as const } : {}),
   };
@@ -495,7 +491,7 @@ export async function loadPreparedArchetype(
     provider = providerExecution(input.settings, definition.provider);
   } catch (error) {
     if (error instanceof TypeError)
-      throw new AkumaArchetypeError(definition.name, [definition.path], `uses ${error.message}`);
+      throw new AkumaNameError(definition.name, [definition.path], `uses ${error.message}`);
     throw error;
   }
   return Object.freeze({ ...definition, provider });

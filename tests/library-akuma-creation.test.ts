@@ -17,7 +17,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { after } from "node:test";
-import { AkumaArchetypeError, loadPreparedArchetype } from "../src/akuma/archetype.js";
+import { AkumaNameError, loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { harnessOwner } from "@astrosheep/square";
 import {
   beginTurn,
@@ -1047,7 +1047,7 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
 });
 
 test("Archetype base chains refuse missing providers, malformed names, and cycles", async (context) => {
-  const home = temporaryDirectory(context, "keiyaku-akuma-archetype-invalid-base-");
+  const home = temporaryDirectory(context, "keiyaku-akuma-name-invalid-base-");
   mkdirSync(join(home, "akumas"));
   writeFileSync(join(home, "akumas", "missing.md"), "---\nbase: absent\n---\n");
   writeFileSync(join(home, "akumas", "malformed.md"), "---\nbase: 'bad/name'\n---\n");
@@ -1058,19 +1058,19 @@ test("Archetype base chains refuse missing providers, malformed names, and cycle
   const settingsValue = await Settings.load({ home });
   await assert.rejects(
     loadPreparedArchetype({ name: "missing", home, settings: settingsValue }),
-    (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("missing -> absent"),
+    (error: unknown) => error instanceof AkumaNameError && error.message.includes("missing -> absent"),
   );
   await assert.rejects(
     loadPreparedArchetype({ name: "malformed", home, settings: settingsValue }),
-    (error: unknown) => error instanceof AkumaArchetypeError && error.reason.includes("Akuma name"),
+    (error: unknown) => error instanceof AkumaNameError && error.reason.includes("Akuma name"),
   );
   await assert.rejects(
     loadPreparedArchetype({ name: "a", home, settings: settingsValue }),
-    (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("a -> b -> a"),
+    (error: unknown) => error instanceof AkumaNameError && error.message.includes("a -> b -> a"),
   );
   await assert.rejects(
     loadPreparedArchetype({ name: "noprov", home, settings: settingsValue }),
-    (error: unknown) => error instanceof AkumaArchetypeError && error.message.includes("provider must be"),
+    (error: unknown) => error instanceof AkumaNameError && error.message.includes("provider must be"),
   );
 });
 
@@ -1106,7 +1106,7 @@ test("a local call reports unsupported Archetype options as an Archetype failure
   await assert.rejects(
     Akumas.of(await World.at(root)).spawn({ akumaName: "greedy", body: "hello", home, settings: value }),
     (error: unknown) =>
-      error instanceof AkumaArchetypeError &&
+      error instanceof AkumaNameError &&
       error.akumaName === "greedy" &&
       error.searched.join("\n") === archetypePath &&
       error.reason === "is unsupported: Claude provider does not support the network option",

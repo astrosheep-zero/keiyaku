@@ -78,7 +78,7 @@ Each list and addressed status operation selects one producing owner before
 observation. The independent selector-free Kanshi read owns the World report;
 status requires one complete Contract or Akuma identity and never falls back to
 World observation. A missing Contract is refused; a failed exact Contract read
-is an operational failure. Catalogues identify their Contract, Akuma-instance, Archetype, or Debt family even
+is an operational failure. Catalogues identify their Contract, Akuma-instance, akumaName, or Debt family even
 when empty or unavailable. Instance caller selection and Debt lifecycle selection
 belong only to their respective owners and precede bounding. Invocation caller
 scoping selects only this invocation's environment-derived identity; absent or

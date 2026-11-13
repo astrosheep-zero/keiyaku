@@ -29,7 +29,7 @@ export type { KeiyakuErrorCategory, KeiyakuErrorOptions } from "./errors.js";
 export { NoGitWorldError, Repo } from "./library/repo.js";
 export {
   Akuma,
-  AkumaArchetypeError,
+  AkumaNameError,
   AkumaBusyError,
   AkumaDecodeError,
   AkumaNotBornError,
@@ -59,9 +59,9 @@ export type {
   AkumaStreamSnapshot,
   AkumaTellOptions,
   AkumaTellResult,
-  ArchetypeCatalog,
-  ArchetypeCatalogInput,
-  ArchetypeCatalogRow,
+  AkumaNameCatalog,
+  AkumaNameCatalogInput,
+  AkumaNameCatalogRow,
   JsonSchema,
   JsonSchemaDocument,
   KillEvidence,
@@ -108,7 +108,7 @@ export { AkumaAddressError, AkumaWorldScopeError, Akumas } from "./library/akuma
 export type {
   AliasBinding,
   AkumaAddressInput,
-  AkumaArchetypesInput,
+  AkumaNamesInput,
   AkumaAliasesInput,
   AkumaAskInput,
   AkumaHistoryInput,

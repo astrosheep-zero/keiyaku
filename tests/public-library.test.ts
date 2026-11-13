@@ -2,7 +2,7 @@ import "./keiyaku-invocation.cases.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  Akuma, Akumas, AkumaAddressError, AkumaArchetypeError, AkumaBusyError, AkumaDecodeError,
+  Akuma, Akumas, AkumaAddressError, AkumaNameError, AkumaBusyError, AkumaDecodeError,
   AkumaNotBornError, AkumaObservationError, AkumaProviderError, AkumaWorldScopeError,
   AuthorityCorruptionError, DebtAuthorityCorruptionError, Keis, KeiyakuArcDocumentError,
   KeiyakuError, KeiyakuUsageError, NoGitWorldError, Repo, SettingsError, World, WorldError,
@@ -41,7 +41,7 @@ test("all distinguished root SDK errors share the base and retain their existing
     [new AkumaObservationError(id, "unreadable"), "internal"],
     [new AkumaDecodeError("invalid answer"), "internal"],
     [new AkumaProviderError("provider failure"), "internal"],
-    [new AkumaArchetypeError("worker", [], "was not found"), "internal"],
+    [new AkumaNameError("worker", [], "was not found"), "internal"],
     [new AkumaBusyError(), "internal"],
     [new AuthorityCorruptionError("corrupt authority"), "authority-corruption"],
     [new NoGitWorldError(world), "internal"],

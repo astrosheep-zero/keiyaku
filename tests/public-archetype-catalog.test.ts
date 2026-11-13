@@ -4,17 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import {
-  AkumaArchetypeError,
+  AkumaNameError,
   Akumas,
   World,
-  type ArchetypeCatalog,
-  type ArchetypeCatalogInput,
-  type ArchetypeCatalogRow,
+  type AkumaNameCatalog,
+  type AkumaNameCatalogInput,
+  type AkumaNameCatalogRow,
 } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 
 /**
- * A root-only consumer of the public Archetype catalogue: this file reaches the
+ * A root-only consumer of the public akumaName catalogue: this file reaches the
  * owner listing and its native error through the package root alone, exactly as
  * an external caller would, and the CLI is checked against that same value.
  */
@@ -53,33 +53,33 @@ test("a root-only caller lists the same callable definitions the CLI shows", asy
     },
   });
 
-  const input: ArchetypeCatalogInput = { cwd: root, home };
-  const catalog: ArchetypeCatalog = await Akumas.archetypes(input);
+  const input: AkumaNameCatalogInput = { cwd: root, home };
+  const catalog: AkumaNameCatalog = await Akumas.akumaNames(input);
   const akumas = Akumas.of(await World.at(root));
-  assert.deepEqual(await akumas.archetypes({ home }), catalog);
-  await assert.rejects(akumas.archetypes({ cwd: home } as never), TypeError);
-  const rows: readonly ArchetypeCatalogRow[] = catalog.rows ?? [];
+  assert.deepEqual(await akumas.akumaNames({ home }), catalog);
+  await assert.rejects(akumas.akumaNames({ cwd: home } as never), TypeError);
+  const rows: readonly AkumaNameCatalogRow[] = catalog.rows ?? [];
   assert.deepEqual(rows, [
     { name: "child" },
     { name: "home-only" },
     { name: "project-only" },
     { name: "shared", description: "Project" },
   ]);
-  assert.deepEqual(await Akumas.archetypes({ cwd: root, home, limit: 2 }), {
-    kind: "archetype-catalogue",
+  assert.deepEqual(await Akumas.akumaNames({ cwd: root, home, limit: 2 }), {
+    kind: "akuma-name-catalogue",
     rows: [{ name: "child" }, { name: "home-only" }],
     more: true,
   });
 
   // Omitted project keeps no project scope: the shared name falls back to Home.
-  assert.deepEqual(await Akumas.archetypes({ home }), {
-    kind: "archetype-catalogue",
+  assert.deepEqual(await Akumas.akumaNames({ home }), {
+    kind: "akuma-name-catalogue",
     rows: [{ name: "child" }, { name: "home-only" }, { name: "shared", description: "Home" }],
   });
 
-  const bounded = await akumas.archetypes({ home, limit: 1 });
-  assert.deepEqual(bounded, { kind: "archetype-catalogue", rows: [{ name: "child" }], more: true });
-  const cli = await cliJson<ArchetypeCatalog>(["-C", root, "ls", "aku/"], { environment: { KEIYAKU_HOME: home } });
+  const bounded = await akumas.akumaNames({ home, limit: 1 });
+  assert.deepEqual(bounded, { kind: "akuma-name-catalogue", rows: [{ name: "child" }], more: true });
+  const cli = await cliJson<AkumaNameCatalog>(["-C", root, "ls", "aku/"], { environment: { KEIYAKU_HOME: home } });
   assert.deepEqual(cli.value, catalog);
 });
 
@@ -89,55 +89,66 @@ test("the public catalogue rejects malformed caller input before observing any d
   });
 
   for (const malformed of [null, "aku/", []]) {
-    await assert.rejects(Akumas.archetypes(malformed as never), /Akuma catalogue input must be an object/u);
+    await assert.rejects(Akumas.akumaNames(malformed as never), /Akuma catalogue input must be an object/u);
   }
   await assert.rejects(
-    Akumas.archetypes({ cwd: root, home, akumaName: "worker" } as never),
+    Akumas.akumaNames({ cwd: root, home, akumaName: "worker" } as never),
     /Akuma catalogue input has unknown field: akumaName/u,
   );
   await assert.rejects(
-    Akumas.archetypes({ cwd: 7 } as never),
+    Akumas.akumaNames({ cwd: 7 } as never),
     /Akuma catalogue cwd must be a nonblank string/u,
   );
   await assert.rejects(
-    Akumas.archetypes({ home: "   " } as never),
+    Akumas.akumaNames({ home: "   " } as never),
     /Akuma catalogue home must be a nonblank string/u,
   );
   await assert.rejects(
-    Akumas.archetypes({ home: "relative/home" } as never),
+    Akumas.akumaNames({ home: "relative/home" } as never),
     /Akuma catalogue home must be absolute: relative\/home/u,
   );
   await assert.rejects(
-    Akumas.archetypes({ cwd: root, limit: 0 } as never),
+    Akumas.akumaNames({ cwd: root, limit: 0 } as never),
     /limit must be an integer from 1 to 500/u,
   );
 
   // The boundary wins over the invalid definition the same request would have read.
-  await assert.rejects(Akumas.archetypes({ cwd: root, home: 7 } as never), (error: unknown) => {
+  await assert.rejects(Akumas.akumaNames({ cwd: root, home: 7 } as never), (error: unknown) => {
     assert.ok(error instanceof TypeError);
     assert.equal(error.message, "Akuma catalogue home must be a nonblank string");
     return true;
   });
-  await assert.rejects(Akumas.archetypes({ cwd: root, home }), (error: unknown) => {
-    assert.ok(error instanceof AkumaArchetypeError);
+  await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
+    assert.ok(error instanceof AkumaNameError);
     return true;
   });
 });
 
-test("the native Archetype error keeps its class, kind, reason and searched paths", async (context) => {
+test("the native akumaName error keeps its class, kind, reason and searched paths", async (context) => {
   const { root, home } = catalogueFixture(context, {
     root: { broken: '---\nprovider: claude\nhidden: "true"\n---\n' },
   });
 
-  await assert.rejects(Akumas.archetypes({ cwd: root, home }), (error: unknown) => {
-    assert.ok(error instanceof AkumaArchetypeError);
+  await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
+    assert.ok(error instanceof AkumaNameError);
     assert.ok(error instanceof Error);
-    assert.equal(error.name, "AkumaArchetypeError");
-    assert.equal(error.kind, "akuma-archetype");
+    assert.equal(error.name, "AkumaNameError");
+    assert.equal(error.kind, "akuma-name");
     assert.equal(error.akumaName, "broken");
     assert.deepEqual(error.searched, [join(root, ".keiyaku", "akumas", "broken.md")]);
     assert.equal(error.reason, "is invalid: Akuma hidden must be a boolean");
     assert.match(error.message, /`broken` is invalid/u);
+    return true;
+  });
+});
+
+test("spawn accepts a bare alias and a missing akumaName points to the catalogue", async (context) => {
+  const { root, home } = catalogueFixture(context, {});
+  const akumas = Akumas.of(await World.at(root));
+  await assert.rejects(akumas.spawn({ akumaName: "missing", alias: "lane", home }), (error: unknown) => {
+    assert.ok(error instanceof AkumaNameError);
+    assert.equal(error.akumaName, "missing");
+    assert.match(error.message, /use `ls` with selector `aku\/` to list available akumaName values/u);
     return true;
   });
 });

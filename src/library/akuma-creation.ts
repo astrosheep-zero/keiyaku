@@ -164,7 +164,7 @@ export type SpawnInput = Readonly<{
   home?: string;
   settings?: Settings;
   contract?: Kei;
-  alias?: AkumaAlias;
+  alias?: string;
   writableDirectories?: readonly string[];
   bare?: boolean;
   initiator?: string;
@@ -311,9 +311,10 @@ const CALL_INPUT_KEYS = [
   "observe",
 ] as const;
 
-type ParsedCallInput = Omit<SpawnInput, "body" | "contract" | "mode" | "timeoutMs"> &
+type ParsedCallInput = Omit<SpawnInput, "alias" | "body" | "contract" | "mode" | "timeoutMs"> &
   Readonly<{
     path: WorldRoot;
+    alias?: AkumaAlias;
     mode: "wait" | "detach";
     timeoutMs: number;
     seat: ReturnType<typeof callSeat>;
@@ -327,6 +328,12 @@ function initialCallTell(body: string | undefined, initiator: string | undefined
     body,
     ...(initiator === undefined ? {} : { initiator }),
   };
+}
+
+function parseSpawnAlias(value: unknown): AkumaAlias | undefined {
+  if (value === undefined) return undefined;
+  const alias = nonblank(value, "alias");
+  return parseAkumaAlias(alias.startsWith("@") ? alias : `@${alias}`);
 }
 
 async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>): Promise<ParsedCallInput> {
@@ -347,8 +354,7 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
   const signal = optionalSignal(values.signal);
   const home = optionalNonblank(values.home, "home");
   const settings = settingsOption(values.settings);
-  const alias: AkumaAlias | undefined =
-    values.alias === undefined ? undefined : parseAkumaAlias(nonblank(values.alias, "alias"));
+  const alias = parseSpawnAlias(values.alias);
   const seat = callSeat(values.contract);
   const observe = values.observe as AskObserver | undefined;
   const initialTell = initialCallTell(options.body, initiator);

@@ -378,7 +378,7 @@ function bodyEndEmitter(
     try {
       const latestTurn = await readLatestTurnForBody(launch.paths, bodySequence);
       const latestBody = (await readHeart(launch.paths)).latestBody;
-      const at = latestBody?.sequence === bodySequence ? latestBody.hung?.at ?? latestBody.endedAt : undefined;
+      const at = latestBody?.sequence === bodySequence ? (latestBody.hung?.at ?? latestBody.endedAt) : undefined;
       const initiator = latestTurn?.initiator;
       const participants = latestTurn === null ? [] : await readTurnParticipants(launch.paths, latestTurn.sequence);
       await emitPluginSignal(

@@ -47,7 +47,7 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["index.ts", ["akuma/akuma-selection-execution.ts", "liveStatusObservationSchema"], false],
   ["index.ts", ["akuma/akuma-selection-execution.ts", "askProgressSchema"], false],
   ["index.ts", ["akuma/akuma-selection-execution.ts", "AskProgress", true], true],
-  ["index.ts", ["akuma/archetype.ts", "archetypeCatalogSchema"], false],
+  ["index.ts", ["akuma/archetype.ts", "akumaNameCatalogSchema"], false],
   ["index.ts", ["akuma/selection-observation.ts", "akumaObservationSchema"], false],
   ["index.ts", ["library/selection.ts", "akumaHistoryResultSchema"], false],
   ["index.ts", ["library/akuma-creation.ts", "spawnResultSchema"], false],

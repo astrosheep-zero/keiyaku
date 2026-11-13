@@ -16,7 +16,7 @@ import {
 } from "../src/akuma/selection-observation.js";
 import { akumaHistoryResultSchema } from "../src/library/selection.js";
 import { akumaIdleResultSchema, akumaReportResultSchema } from "../src/akuma/akuma-instance.js";
-import { archetypeCatalogSchema } from "../src/akuma/archetype.js";
+import { akumaNameCatalogSchema } from "../src/akuma/archetype.js";
 import { forkResultSchema, spawnResultSchema, spawnWaitHeadSchema } from "../src/library/akuma-creation.js";
 import { killEvidenceSchema } from "../src/akuma/heart/facts.js";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
@@ -352,8 +352,8 @@ test("spawn and fork results describe real creation and refusal", async (context
 
 test("archetype catalogue wire preserves populated and empty pages", async (context) => {
   const home = temporaryDirectory(context, "akuma-catalog-wire-");
-  assertWireRoundTrip(archetypeCatalogSchema, await root.Akumas.archetypes({ home }));
+  assertWireRoundTrip(akumaNameCatalogSchema, await root.Akumas.akumaNames({ home }));
   mkdirSync(join(home, "akumas"), { recursive: true });
   writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\ndescription: Worker\n---\nWork.\n");
-  assertWireRoundTrip(archetypeCatalogSchema, await root.Akumas.archetypes({ home }));
+  assertWireRoundTrip(akumaNameCatalogSchema, await root.Akumas.akumaNames({ home }));
 });

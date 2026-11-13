@@ -17,7 +17,7 @@ research.
   spawning an `Akuma` (`@deliverer`, `@reviewer`, `@scout`). Aliases make
   `status`, `wait`, `tell`, and `history` readable by role across
   parallel lanes; keep the underlying `aku/<name>/<id>` only when reassigning
-  that `@alias` to a replacement worker. Spawning an archetype name (`worker`,
+  that `@alias` to a replacement worker. Spawning an akumaName name (`worker`,
   `review-akuma`) always spawns a new instance — address the existing `@alias`
   or `AkuId` with `tell` to continue with the same worker.
 - **Detached `spawn` + `wait` for real work:** launch workers detached, then
@@ -48,7 +48,7 @@ research.
   file-change summary for an Akuma. Plural and category status are refused.
   `history` reads recent timeline events, the latest answer, or one exact
   `turn/N` or `report/N` item.
-- **`ls`, `fork`, and `kill`:** `ls` lists archetypes (`aku/`), recent
+- **`ls`, `fork`, and `kill`:** `ls` lists akumaNames (`aku/`), recent
   instances with life and associations (`"aku/*/*"`), or your own call tree;
   `fork` branches a new `Akuma`
   from an answered `turn/N`; `kill` stops active work while keeping history.

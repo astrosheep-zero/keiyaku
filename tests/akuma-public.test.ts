@@ -56,7 +56,7 @@ import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { Settings } from "../src/settings.js";
-import { AkumaArchetypeError, Akumas } from "../src/index.js";
+import { AkumaNameError, Akumas } from "../src/index.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { projectCurrentWork } from "../src/akuma/status-projection.js";
 import { World, type WorldRoot } from "../src/world.js";
@@ -2217,9 +2217,9 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     writeFileSync(join(home, "akumas", "shared.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
 
     const settingsValue = await Settings.load({ cwd: root, home });
-    const catalog = await Akumas.archetypes({ cwd: root, home });
+    const catalog = await Akumas.akumaNames({ cwd: root, home });
     assert.deepEqual(catalog, {
-      kind: "archetype-catalogue",
+      kind: "akuma-name-catalogue",
       rows: [{ name: "home-only" }, { name: "project-only" }, { name: "shared", description: "Project" }],
     });
 
@@ -2238,7 +2238,7 @@ test("Project Archetype definitions shadow Home while Home remains the fallback"
     await assert.rejects(
       loadPreparedArchetype({ name: "missing", cwd: root, home, settings: settingsValue }),
       (error: unknown) =>
-        error instanceof AkumaArchetypeError &&
+        error instanceof AkumaNameError &&
         error.searched.join("\n") ===
           [join(root, ".keiyaku", "akumas", "missing.md"), join(home, "akumas", "missing.md")].join("\n"),
     );
@@ -2258,8 +2258,8 @@ test("dotted akumaName file stems join the catalogue as canonical names", async 
     writeFileSync(join(home, "akumas", "bad..stem.md"), "---\nprovider: claude\n---\nNot canonical.\n");
     writeFileSync(join(home, "akumas", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
 
-    const catalog = await Akumas.archetypes({ cwd: root, home });
-    assert.deepEqual(catalog, { kind: "archetype-catalogue", rows: [{ name: "review.v2" }] });
+    const catalog = await Akumas.akumaNames({ cwd: root, home });
+    assert.deepEqual(catalog, { kind: "akuma-name-catalogue", rows: [{ name: "review.v2" }] });
 
     const settingsValue = await Settings.load({ cwd: root, home });
     const dotted = await loadPreparedArchetype({ name: "review.v2", cwd: root, home, settings: settingsValue });
@@ -2280,10 +2280,10 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
     writeFileSync(join(home, "akumas", "secret.md"), "---\nprovider: claude\nhidden: true\n---\nSecret.\n");
     writeFileSync(join(home, "akumas", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
 
-    const catalog = await Akumas.archetypes({ cwd: root, home });
-    assert.deepEqual(catalog, { kind: "archetype-catalogue", rows: [{ name: "child" }, { name: "visible" }] });
-    assert.deepEqual(await Akumas.archetypes({ cwd: root, home, limit: 1 }), {
-      kind: "archetype-catalogue",
+    const catalog = await Akumas.akumaNames({ cwd: root, home });
+    assert.deepEqual(catalog, { kind: "akuma-name-catalogue", rows: [{ name: "child" }, { name: "visible" }] });
+    assert.deepEqual(await Akumas.akumaNames({ cwd: root, home, limit: 1 }), {
+      kind: "akuma-name-catalogue",
       rows: [{ name: "child" }],
       more: true,
     });
@@ -2293,7 +2293,7 @@ test("hidden archetypes stay callable but leave the catalogue", async () => {
     assert.equal(hidden.path, join(home, "akumas", "secret.md"));
 
     writeFileSync(join(home, "akumas", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');
-    await assert.rejects(Akumas.archetypes({ cwd: root, home }), /hidden must be a boolean/u);
+    await assert.rejects(Akumas.akumaNames({ cwd: root, home }), /hidden must be a boolean/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
