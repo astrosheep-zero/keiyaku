@@ -66,7 +66,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | deliver, review, verify, abandon, reconcile | Request lifecycle, evidence production, or repair judgment, or delivery preview; refuse an absent or ambiguous Contract selector. | Return the owning operation result unchanged. |
 | kanshi | Read the selector-free composite World report. | Render independent section availability without changing classification for section failure. |
 | status, ls | Read one addressed Contract or Akuma, or one owner's catalogue; refuse missing or invalid subjects before observation. | Render the owner observation without manufacturing facts. |
-| show | Route explicitly addressed Debts to their owner or read one explicitly or contextually selected Contract's guidance; refuse mixed families and plural Contract selection before reading. | Return the selected owner's native value without an envelope. |
+| show | Read one explicitly selected Debt or one explicitly or contextually selected Contract's guidance; refuse plural selection before reading. | Return the selected owner's native value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
 | report | Record the invoking Akuma's explicit progress on its current execution; refused when not executing; no recipient selection or inferred caller fallback. | Return native report admission; recorded never claims notification receipt. |
@@ -114,17 +114,18 @@ Its Dispatch association is independent of the contextual Contract. Independent
 facts remain visible when another is absent, invalid, ambiguous, or unavailable;
 the Akuma profile is descriptive, not live execution status.
 
-`show` reads addressed Debts through their owner or one selected Contract's
+`show` reads one addressed Debt through its owner or one selected Contract's
 guidance, using the existing exact Contract selection context when selection
-is omitted. Debt selection may be plural; mixed Debt and Contract selection,
-Akuma, category, and plural Contract selection refuse before reading. The
-returned text and JSON are the selected owner's own value. Status requires one
+is omitted. Plural selection, Akuma, category, and glob selection refuse before
+reading. The returned text and JSON are the selected owner's own value. Status requires one
 complete Contract or Akuma identity without guidance; omitted status is a usage
 refusal. Kanshi alone reads the selector-free World report.
 Plural and category status requests refuse before authority observation. Named
 addresses are resolved once during asynchronous input acquisition through the
 existing address authority, then invoke the resolved family's exact operation;
-parsing remains synchronous and free of authority reads.
+parsing remains synchronous and free of authority reads. Kill accepts one selector
+whose Contract or glob expansion may select several Akumas, retaining each member's
+native stop evidence. Wait retains caller-selected batching.
 
 `ls` routes Contract rows through the Repo-bound Contract collection, Akuma instances
 through `Akumas.of(world).list`, akumaNames through their definition owner, and

@@ -2,10 +2,11 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { accepted, present } from "./support/library-verbs.js";
 import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
-import { deferred as promiseBarrier } from "./support/process.js";
+import { deferred as promiseBarrier, temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
   constants,
+  existsSync,
   copyFileSync,
   mkdirSync,
   mkdtempSync,
@@ -345,6 +346,15 @@ test("facade wait refuses the retired live observer input before addressing", as
   );
 });
 
+test("facade kill rejects a batch before proving the World", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-kill-shape-");
+  await assert.rejects(
+    Akumas.of(root as never).kill({ akuma: ["aku/worker/00000001"] } as never),
+    /akuma must be a nonblank string/u,
+  );
+  assert.equal(existsSync(join(root, ".keiyaku")), false);
+});
+
 test("facade snapshots aliases and globs with stable dedupe for wait and kill", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-selection-");
   const worker = await answered(root, "worker", "00000002");
@@ -362,15 +372,20 @@ test("facade snapshots aliases and globs with stable dedupe for wait and kill", 
     [reviewer.id, worker.id],
   );
 
-  const killed = await Akumas.of(root).kill({ akuma: ["@review", worker.id] });
-  assert.deepEqual(
-    killed.results.map((member) => member.id),
-    [reviewer.id, worker.id],
-  );
-  assert.deepEqual(
-    killed.results.map((member) => member.outcome),
-    ["already-stopped", "already-stopped"],
-  );
+  const aliasKill = await Akumas.of(root).kill({ akuma: "@review" });
+  assert.deepEqual(aliasKill.results, [{ id: reviewer.id, outcome: "already-stopped" }]);
+  const workerLeash = (await HeldAkumaLeash.try(worker.paths))!;
+  try {
+    const body = await workerLeash.recordBody(worker.paths, { leashTakenAt: "2026-08-11T00:00:00.000Z" });
+    await workerLeash.recordBodyHung(worker.paths, { sequence: body.sequence, diagnostic: "provider custody remained live", at: "2026-08-11T00:00:01.000Z" });
+  } finally {
+    workerLeash.release();
+  }
+  const killed = await Akumas.of(root).kill({ akuma: "aku/*/*" });
+  assert.deepEqual(killed.results, [
+    { id: worker.id, outcome: "hung" },
+    { id: reviewer.id, outcome: "already-stopped" },
+  ]);
 });
 
 const WAIT_AT = "2026-08-11T00:00:00.000Z";
@@ -1340,7 +1355,7 @@ test("Contract wait refuses selectors while cross-World Contract kill refuses be
   });
   await assert.rejects(
     Akumas.of(worldB).kill({
-      akuma: ["kei/foreign"],
+      akuma: "kei/foreign",
       repo: repoB,
     }),
     (error: unknown) => error instanceof AkumaWorldScopeError && error.refusal.kind === "akuma-not-in-world",
@@ -1408,7 +1423,7 @@ test("unavailable Debt authority does not affect Akuma status, wait or kill evid
   assert.deepEqual(waited.results.map((item) => (item.kind === "observed" ? item.id : item.kind)).sort(), [a.id, b.id]);
   assert.equal(waited.reason, "completed");
   const killed = await Akumas.of(root).kill({
-    akuma: [a.id, b.id],
+    akuma: "aku/worker/*",
   });
   assert.deepEqual(killed.results.map((member) => member.id).sort(), [a.id, b.id]);
   assert.ok(killed.results.every((member) => member.outcome === "already-stopped" && !("observation" in member)));

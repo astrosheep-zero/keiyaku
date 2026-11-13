@@ -300,7 +300,7 @@ test("Contract member selection and complete Dispatch reads reject an unrelated 
   const before = await Akumas.of(world).status({ akuma: born.id });
   assert.ok(before.kind === "akuma");
   await assert.rejects(
-    Akumas.of(world).kill({ akuma: [owner], repo: await Repo.at({ path: raw.path }) }),
+    Akumas.of(world).kill({ akuma: owner, repo: await Repo.at({ path: raw.path }) }),
     AuthorityCorruptionError,
   );
   const after = await Akumas.of(world).status({ akuma: born.id });

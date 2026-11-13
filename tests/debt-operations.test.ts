@@ -773,6 +773,8 @@ test("Debt batch detail retains decomposition, missing endpoints, and readable p
     syncBuiltinESMExports();
   }
   assert.equal(batch.kind, "debt-partial");
+  assert.equal(Keiyaku.verbs.show.output.safeParse(JSON.parse(JSON.stringify(batch))).success, true);
+  assert.equal(Keiyaku.verbs.show.normal.safeParse(JSON.parse(JSON.stringify(batch))).success, false);
   assert.deepEqual(batch.items.map(item => item.id), [second, removed, first, second]);
   assert.deepEqual(batch.items[1], { kind: "missing", id: removed });
   const parent = batch.items[2];
@@ -784,8 +786,7 @@ test("Debt batch detail retains decomposition, missing endpoints, and readable p
     children: [{ kind: "cycle", id: first }],
   });
   const facet = Keiyaku.at({ cwd: root, environment: {} });
-  assert.deepEqual(await facet.show({ ids: [second, removed, first, second] }), batch);
-  const complete = await facet.show({ ids: [first] });
+  const complete = await facet.show({ id: first });
   assert.equal(complete.kind, "debt-complete");
   if (complete.kind === "debt-complete") assert.deepEqual(complete.items, [parent]);
   assert.deepEqual(await debts.read({ ids: [removed] }), { kind: "debt-missing", items: [{ kind: "missing", id: removed }] });
@@ -913,14 +914,10 @@ test("show distinguishes an absent World from a missing addressed Debt", async (
     items: [{ kind: "missing", id: "debt/missing" }],
   });
 
-  const plural = await runCli(["-C", established, "show", "debt/a", "debt/b", "--json"], {
-    environment: {},
-  });
-  assert.equal(plural.exit, 1, plural.stderr);
-  assert.deepEqual(JSON.parse(plural.stdout), {
-    kind: "debt-missing",
-    items: [{ kind: "missing", id: "debt/a" }, { kind: "missing", id: "debt/b" }],
-  });
+  await assert.rejects(
+    runCli(["-C", established, "show", "debt/a", "debt/b", "--json"], { environment: {} }),
+    /show accepts at most one selector/u,
+  );
 
   const text = await runCli(["-C", established, "show", "debt/missing"], { environment: {} });
   assert.equal(text.exit, 1, text.stderr);

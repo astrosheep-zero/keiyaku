@@ -327,31 +327,26 @@ export const verbs = Object.freeze({
   },
   show: {
     description:
-      "Read a Contract in full: terms, current chapter, and working instructions. Or read Debts in full with their links. Omit ids to read the Contract whose worktree you stand in.",
+      "Read a Contract in full: terms, current chapter, and working instructions. Or read one Debt in full with its links. Omit id to read the Contract whose worktree you stand in.",
     input: z
       .strictObject({
-        ids: z
-          .array(text)
-          .nonempty()
-          .readonly()
-          .superRefine((ids, context) => {
+        id: text
+          .superRefine((id, context) => {
             if (
-              ids.every((id) => debtIdSchema.safeParse(id).success) ||
-              (ids.length === 1 &&
-                contractIdSchema.safeParse(ids[0]!.startsWith("@") ? `kei/${ids[0]!.slice(1)}` : ids[0]).success)
+              debtIdSchema.safeParse(id).success ||
+              contractIdSchema.safeParse(id.startsWith("@") ? `kei/${id.slice(1)}` : id).success
             )
               return;
             context.addIssue({
               code: "custom",
-              message:
-                ids.length === 1 && ids[0]!.startsWith("@kei/")
-                  ? `redundant short contract selector: ${ids[0]}`
-                  : "show requires one Contract selector or one or more Debt IDs; mixed selection is invalid",
+              message: id.startsWith("@kei/")
+                ? `redundant short contract selector: ${id}`
+                : "show requires one Contract selector or one Debt ID",
             });
           })
           .exactOptional()
           .describe(
-            "One kei/... or @alias for Contract guidance, or one or more debt/... IDs; never mix families or select several Contracts. Omit for contextual Contract guidance from cwd.",
+            "One kei/... or @name for Contract guidance, or one debt/... ID. Omit for contextual Contract guidance from cwd.",
           ),
       })
       .readonly(),
@@ -450,13 +445,9 @@ export const verbs = Object.freeze({
       "Kill an Akuma's current execution. Nothing is erased: history and queued orders remain, and tell or ask wakes it.",
     input: z
       .strictObject({
-        akuma: z
-          .array(text)
-          .min(1)
-          .readonly()
-          .describe(
-            'Nonempty list of Akuma selectors: aku/<name>/<hex>, @alias, kei/... (all Akumas dispatched to that Contract), or glob "aku/<name-pattern>/<hex-pattern>".',
-          ),
+        akuma: nonblank.describe(
+          'One Akuma selector: aku/<name>/<hex>, @alias, kei/... (all Akumas dispatched to that Contract), or glob "aku/<name-pattern>/<hex-pattern>". Contract/glob selection may expand to several members.',
+        ),
       })
       .readonly(),
     output: akumaKillResultSchema,

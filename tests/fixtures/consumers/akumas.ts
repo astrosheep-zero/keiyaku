@@ -57,6 +57,9 @@ const aliasInput: AkumaAliasesInput = { akumaIds: [aku, "aku/worker/1234abcd"] }
 const aliases: Promise<readonly AliasBinding[]> = plural.aliases(aliasInput);
 void aliases;
 const status = plural.status({ akuma: aku });
+const killed = plural.kill({ akuma: "aku/*/*", repo });
+const waited = plural.wait({ akuma: [aku, "@peer"], completion: "all" });
+void [killed, waited];
 const single = Akuma.select(world, aku, host);
 const singleStatus = await single.status();
 const entry = singleStatus.work.summary;

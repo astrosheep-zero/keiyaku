@@ -25,7 +25,7 @@ const selectors = {
   type: "array",
   items: selector,
   minItems: 1,
-  description: "IDs, aliases or glob selectors; Contract selectors require repo",
+  description: "IDs, aliases or glob selectors; Contract waits belong to the Contract product",
 };
 const repo = { type: "string", minLength: 1, description: "Optional Git worktree path, relative to session cwd" };
 const body = { type: "string", minLength: 1, description: "Input to admit; an observation deadline never retracts it" };
@@ -275,7 +275,7 @@ export function registerAkumaTools(pi: ExtensionAPI, exposure: "hidden" | "direc
   register<ToolAddress<AkumaKillInput>>(
     "akuma_kill",
     "Stop current work for a frozen Akuma selection without admitting input or deleting history. Returns each owner's honest stop evidence; does not shut down this Pi host.",
-    { akuma: selectors, repo },
+    { akuma: { type: "string", minLength: 1, pattern: "\\S", description: "One ID, alias, Contract selector (requires repo), or glob; Contract/glob selection may expand to several Akumas" }, repo },
     ["akuma"],
     async (input, akumas, ctx, signal) =>
       akumas.kill({ ...(await address(input, ctx)), ...(signal === undefined ? {} : { signal }) }),

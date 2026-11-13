@@ -362,6 +362,7 @@ test(
     assert.equal(invalid.structuredContent.kind, "failed");
     assert.equal(invalid.structuredContent.category, "internal");
     assert.equal(invalid.structuredContent.causeClass, "TypeError");
+    await host.invoke("akuma_kill", { akuma: [id] }, true);
     const deadlineCall = await native("akuma_spawn", {
       akumaName: "worker",
       body: command(holding(world, "deadline")),
@@ -370,7 +371,7 @@ test(
     });
     assert.equal(deadlineCall.input.kind, "deadline");
     await waitForCondition("deadline work remains active", () => existsSync(join(world, "deadline.ready")));
-    const killed = await native("akuma_kill", { akuma: [deadlineCall.akumaId] });
+    const killed = await native("akuma_kill", { akuma: deadlineCall.akumaId });
     assert.equal(killed.results[0].outcome, "killed");
 
     const aborting = host.invoke(
@@ -393,7 +394,7 @@ test(
     assert.equal(aborted.structuredContent.tell.akumaId, aborted.structuredContent.spawn.akumaId);
     assert.equal(aborted.structuredContent.tell.tellId, aborted.structuredContent.spawn.tellId);
     assert.equal((await api.status({ akuma: aborted.structuredContent.spawn.akumaId })).life, "running");
-    await native("akuma_kill", { akuma: [aborted.structuredContent.spawn.akumaId] });
+    await native("akuma_kill", { akuma: aborted.structuredContent.spawn.akumaId });
 
     const detached = await native("akuma_spawn", {
       akumaName: "worker",
@@ -429,7 +430,8 @@ test(
     } finally {
       for (const name of ["first", "deadline", "aborted", "detached", "scoped", "foreign"])
         writeFileSync(join(world, `${name}.release`), "release");
-      await api.kill({ akuma: [detached.akumaId, scoped.akumaId] }).catch(() => undefined);
+      await api.kill({ akuma: detached.akumaId }).catch(() => undefined);
+      await api.kill({ akuma: scoped.akumaId }).catch(() => undefined);
       await foreignScope.close();
       await asking.catch(() => undefined);
     }

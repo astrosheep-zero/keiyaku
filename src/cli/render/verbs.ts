@@ -226,8 +226,7 @@ function renderDebtVerb(
 }
 
 function renderKill(input: VerbInput<"kill">, value: VerbOutput<"kill">, context: TextRenderContext): string {
-  const selectors = input.akuma;
-  return renderKillText(value, selectors.length === 1 ? alias(selectors[0]) : undefined, context);
+  return renderKillText(value, alias(input.akuma), context);
 }
 
 function renderAsk(
@@ -270,7 +269,7 @@ function renderReport(result: VerbOutput<"report">, context: TextRenderContext):
 
 function renderShow(input: VerbInput<"show">, result: VerbOutput<"show">, context: TextRenderContext): string {
   if (result.kind === "present") return result.guidance;
-  if (result.kind === "missing") return missing("show", input.ids?.[0], context);
+  if (result.kind === "missing") return missing("show", input.id, context);
   return renderDebtShow(result, context);
 }
 

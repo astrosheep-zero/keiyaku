@@ -2,14 +2,13 @@ import { Debts, Keiyaku, World, type DebtDetail, type DebtShowItem, type DebtSho
 
 const facet = Keiyaku.at({ cwd: "/tmp", environment: {} });
 const catalogue = facet.ls({ selector: "debt/", selection: "all" });
-const one = facet.show({ ids: ["debt/example"] });
-const many = facet.show({ ids: ["debt/example", "debt/peer"] });
+const one = facet.show({ id: "debt/example" });
 const completed: Promise<DebtUpdateResult> = facet.debtUpdate({ id: "debt/example", state: "done" });
 
 async function native(world: import("@astrosheep/keiyaku").WorldRoot) {
   const debts = Debts.of(world);
   const debt = debts.debt({ id: "debt/example" });
-  const batch: DebtShowResult = await debts.read({ ids: [debt.id] });
+  const batch: DebtShowResult = await debts.read({ ids: [debt.id, "debt/peer"] });
   await debt.read();
   await debt.tree();
   await debt.update({ note: "replacement" });
@@ -23,4 +22,4 @@ async function selectedTitles() {
   const result = await catalogue;
   return result.kind === "debt-catalogue" && !("absent" in result) ? result.rows?.map(row => row.title) : undefined;
 }
-void [one, many, completed, native, firstFound, selectedTitles, World];
+void [one, completed, native, firstFound, selectedTitles, World];

@@ -203,7 +203,7 @@ export function commandRepoPolicy(
     case "region":
       return { use: "required", acceptsExplicit: true };
     case "show": {
-      const debt = command.input.ids?.[0]?.startsWith("debt/") === true;
+      const debt = command.input.id?.startsWith("debt/") === true;
       return { use: debt ? "none" : "required", acceptsExplicit: !debt };
     }
     case "ls":
@@ -229,10 +229,12 @@ export function commandRepoPolicy(
       };
     case "fork":
       return { use: "optional", acceptsExplicit: true };
-    case "wait":
+    case "wait": {
+      const contractSelector = command.input.selectors.some((selector) => selector.startsWith("kei/"));
+      return { use: contractSelector ? "required" : "optional", acceptsExplicit: contractSelector };
+    }
     case "kill": {
-      const selectors = command.name === "wait" ? command.input.selectors : command.input.akuma;
-      const contractSelector = selectors.some((selector) => selector.startsWith("kei/"));
+      const contractSelector = command.input.akuma.startsWith("kei/");
       return { use: contractSelector ? "required" : "optional", acceptsExplicit: contractSelector };
     }
     case "spawn":

@@ -199,8 +199,8 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["tell", { akuma: "@worker", prompt: "work", wait: "bad" }],
     ["tell", { akuma: "@worker", prompt: "work", wait: true }],
     ["tell", { akuma: "@worker", prompt: "work", timeoutMs: 0 }],
-    ["show", { ids: ["kei/example", "debt/example"] }],
-    ["show", { ids: ["kei/example", "kei/other"] }],
+    ["show", { ids: ["debt/example"] }],
+    ["kill", { akuma: ["@worker"] }],
     ["wait", { selectors: ["kei/example", "aku/worker/12345678"] }],
     ["history", { selector: "@worker", id: "turn/1", last: true }],
     ["history", { selector: "@worker", last: true, limit: 1 }],
@@ -294,10 +294,12 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["tell", "wait", "string"], ["history", "last", "boolean"]]) {
+  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["tell", "wait", "string"], ["history", "last", "boolean"], ["show", "id", "string"], ["kill", "akuma", "string"]]) {
     const properties = tools.find((tool) => tool.name === name)!.inputSchema.properties as Record<string, { type?: string }>;
     assert.equal(properties[key!]!.type, type);
   }
+  assert.ok(!tools.find(tool => tool.name === "show")!.inputSchema.required?.includes("id"));
+  assert.ok(tools.find(tool => tool.name === "kill")!.inputSchema.required?.includes("akuma"));
   for (const name of ["ls", "report", "reconcile"])
     assert.ok(tools.some((tool) => tool.name === name));
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
@@ -341,10 +343,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   });
   assert.equal(childResult.isError, false);
   const child = accepted(Keiyaku.verbs["debt.add"].output.parse(childResult.structuredContent)).id;
-  const tree = await client.callTool({ name: "show", arguments: { ids: [id] } });
+  const tree = await client.callTool({ name: "show", arguments: { id } });
   assert.equal(tree.isError, false);
   assert.match(JSON.stringify(tree.content), /Check the repair/u);
-  const shown = await client.callTool({ name: "show", arguments: { ids: [child] } });
+  const shown = await client.callTool({ name: "show", arguments: { id: child } });
   assert.equal(shown.isError, false);
   assert.equal(shown.structuredContent, undefined);
   assert.ok(JSON.stringify(shown.content).includes(`needs ${id}`));
@@ -355,7 +357,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const done = await client.callTool({ name: "debt_update", arguments: { id, state: "done", note: "finished" } });
   assert.equal(done.isError, false);
   assert.equal(done.structuredContent, undefined);
-  const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { ids: [id] });
+  const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { id });
   assert.ok(completed.kind === "debt-complete" && completed.items[0]?.kind === "found");
   assert.equal(completed.items[0].state, "done");
   assert.equal(completed.items[0].note, "finished");
@@ -462,6 +464,26 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
       );
     } else assert.equal(response.structuredContent, undefined);
   }
+  const killingFacet = Keiyaku.at({ cwd: first, repo: otherRepo.path, environment, home: cwd });
+  const killInput = { akuma: worker.id };
+  const nativeKill = await killingFacet.kill(killInput);
+  assert.deepEqual(nativeKill.results, [{ id: worker.id, outcome: "already-stopped" }]);
+  const directKill = await client.callTool({ name: "kill", arguments: { cwd: first, ...killInput } });
+  assert.equal(directKill.isError, false);
+  assert.equal((directKill.content as { text: string }[])[0]?.text,
+    renderVerb("kill", killInput, { kind: "returned", value: nativeKill }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
+  const cliKill = await runCli(["-C", first, "kill", worker.id, "--json"], { environment });
+  assert.equal(cliKill.exit, 0, cliKill.stderr);
+  assert.deepEqual(JSON.parse(cliKill.stdout), nativeKill);
+  const peer = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a2000015", createdAt: "2026-08-10T00:00:00.000Z" });
+  await publishDispatch({ repository: await repositoryAt(otherRepo.path), akumaId: peer.id, contractId: bound.contractId });
+  const contractKillInput = { akuma: bound.contractId };
+  const expandedKill = await killingFacet.run("kill", contractKillInput);
+  assert.deepEqual(expandedKill.results, [worker.id, peer.id].map(id => ({ id, outcome: "already-stopped" })));
+  const contractKill = await client.callTool({ name: "kill", arguments: { cwd: first, repo: otherRepo.path, ...contractKillInput } });
+  assert.equal(contractKill.isError, false);
+  assert.equal((contractKill.content as { text: string }[])[0]?.text,
+    renderVerb("kill", contractKillInput, { kind: "returned", value: expandedKill }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
   const missing = await client.callTool({ name: "status", arguments: { repo: otherRepo.path, id: "kei/missing-mcp-status" } });
   assert.equal(missing.structuredContent, undefined);
   assert.equal(missing.isError, true);
@@ -575,31 +597,31 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
     assert.equal(response.structuredContent, undefined);
     return (response.content as { type: string; text?: string }[]).filter(item => item.type === "text").map(item => item.text).join("\n");
   };
-  assert.equal(await directText({ ids: [bound.contractId] }), nativeGuidance.guidance);
-  const nativeDebt = await facet.show({ ids: [parent] });
-  const textDebt = await directText({ ids: [parent] });
-  assert.equal(textDebt, renderVerb("show", { ids: [parent] }, { kind: "returned", value: nativeDebt }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
+  assert.equal(await directText({ id: bound.contractId }), nativeGuidance.guidance);
+  const nativeDebt = await facet.show({ id: parent });
+  const textDebt = await directText({ id: parent });
+  assert.equal(textDebt, renderVerb("show", { id: parent }, { kind: "returned", value: nativeDebt }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
   const cliDebt = await runCli(["-C", repository.path, "show", parent], { environment });
   assert.equal(cliDebt.exit, 0);
   assert.equal(cliDebt.stdout.trimEnd(), textDebt.trimEnd());
   for (const evidence of [...body.split("\n"), ...note.split("\n"), child, "Complete child"])
     assert.ok(textDebt.includes(evidence), evidence);
-  const jsonDebt = await runCli(["-C", repository.path, "show", parent, child, "--json"], { environment });
+  const jsonDebt = await runCli(["-C", repository.path, "show", parent, "--json"], { environment });
   assert.equal(jsonDebt.exit, 0, jsonDebt.stderr);
   const scriptDebt = Keiyaku.verbs.show.normal.parse(JSON.parse(jsonDebt.stdout));
   assert.ok(scriptDebt.kind === "debt-complete");
   assert.equal(scriptDebt.items[0]?.body, body);
   assert.equal(scriptDebt.items[0]?.note, note);
   assert.equal(scriptDebt.items[0]?.children?.[0]?.id, child);
-  assert.deepEqual(scriptDebt.items[1]?.parent, { id: parent, state: "open" });
-  const partial = await client.callTool({ name: "show", arguments: { ids: [parent, "debt/missing"] } });
-  assert.equal(partial.isError, true);
-  assert.equal(partial.structuredContent, undefined);
-  assert.match(JSON.stringify(partial.content), /Complete parent/u);
-  const partialNative = await facet.show({ ids: [parent, "debt/missing"] });
-  assert.equal(partialNative.kind, "debt-partial");
-  assertWireConformance(Keiyaku.verbs.show.output, partialNative);
-  assertWireConformance(Keiyaku.verbs.show.normal, partialNative, false);
+  const jsonChild = await runCli(["-C", repository.path, "show", child, "--json"], { environment });
+  assert.equal(jsonChild.exit, 0, jsonChild.stderr);
+  assert.deepEqual(JSON.parse(jsonChild.stdout), await facet.show({ id: child }));
+  const textChild = await directText({ id: child });
+  assert.ok(textChild.includes(`parent ${parent}`));
+  const missing = await client.callTool({ name: "show", arguments: { id: "debt/missing" } });
+  assert.equal(missing.isError, true);
+  assert.equal(missing.structuredContent, undefined);
+  assert.match(JSON.stringify(missing.content), /debt missing/u);
   const contextual = await client.callTool({ name: "show", arguments: { cwd: bound.worktreePath } });
   assert.equal(contextual.isError, false);
   assert.equal(contextual.structuredContent, undefined);
@@ -752,7 +774,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
       columns: DEFAULT_CLI_COLUMNS, color: false,
     }),
   }]);
-  const guidance = await client.callTool({ name: "show", arguments: { ids: [before.id] } });
+  const guidance = await client.callTool({ name: "show", arguments: { id: before.id } });
   const nativeGuidance = await handle.guidance();
   assert.equal(guidance.structuredContent, undefined);
   assert.equal(guidance.isError, false);
@@ -763,12 +785,12 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   assert.equal(boundOverMcp.isError, false);
   const wire = accepted(Keiyaku.verbs.bind.output.parse(boundOverMcp.structuredContent));
   assert.equal(Object.hasOwn(wire, "kei"), false);
-  const mintedInput = { ids: [wire.contractId] };
+  const mintedInput = { id: wire.contractId };
   const minted = await client.callTool({ name: "show", arguments: mintedInput });
   assert.equal(minted.isError, false);
   const mintedGuidance = await Keiyaku.at({ cwd: repository.path, environment: {} }).run("show", mintedInput);
   assert.ok(mintedGuidance.kind === "present");
-  const missingInput = { ids: ["kei/missing-mcp-contract"] };
+  const missingInput = { id: "kei/missing-mcp-contract" };
   const absent = await client.callTool({ name: "show", arguments: missingInput });
   assert.equal(absent.structuredContent, undefined);
   assert.equal(absent.isError, true);

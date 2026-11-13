@@ -284,7 +284,7 @@ test("guidance preserves exact requested bytes and distinguishes missing authori
   const guidance = await bound.kei.guidance();
   assert.ok(guidance.kind === "present");
   assert.ok(guidance.guidance.includes("## Objective"));
-  assert.deepEqual(await facet.show({ ids: [bound.contractId] }), guidance);
+  assert.deepEqual(await facet.show({ id: bound.contractId }), guidance);
   assertWireRoundTrip(guidanceSchema, guidance);
 
   const missing = contracts.kei({ id: "kei/missing" as never });

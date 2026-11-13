@@ -12,13 +12,13 @@ test("show renders the native guidance object and keeps missing distinct", () =>
   assert.equal(
     renderVerb(
       "show",
-      { ids: [id] },
+      { id },
       { kind: "returned", value: { kind: "present", guidance: "# Exact terms\n\nbody\n" } },
       context,
     ),
     "# Exact terms\n\nbody\n",
   );
-  const missing = renderVerb("show", { ids: [id] }, { kind: "returned", value: { kind: "missing" } }, context);
+  const missing = renderVerb("show", { id }, { kind: "returned", value: { kind: "missing" } }, context);
   assert.match(missing, /show refused/u);
   assert.match(missing, /contract missing/u);
   assert.ok(missing.includes(id));

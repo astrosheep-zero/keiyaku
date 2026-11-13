@@ -62,7 +62,7 @@ export type {
   AkumaTellResult,
   AkumaWaitResult,
 } from "../akuma/selection-observation.js";
-export type AkumaKillInput = AkumaSetAddressInput & Readonly<{ signal?: AbortSignal }>;
+export type AkumaKillInput = AkumaAddressInput & Readonly<{ signal?: AbortSignal }>;
 export type AkumaHistoryInput = AkumaAddressInput &
   Readonly<{
     id?: string;
@@ -292,8 +292,14 @@ export async function killAkuma(
       throw new KeiyakuError("invalid-input", `Akumas.kill input has unknown field: ${key}`);
     }
   }
+  if (typeof values.akuma !== "string" || values.akuma.trim().length === 0)
+    throw new KeiyakuError("invalid-input", "akuma must be a nonblank string");
   const callerSignal = signal(values.signal);
-  const addressed = await addressAkumaSet(setAddress(values));
+  const addressed = await addressAkumaSet({
+    path: values.path,
+    akuma: [values.akuma],
+    ...(values.repo === undefined ? {} : { repo: values.repo }),
+  });
   return await executeKillAkuma({
     spawn,
     path: addressed.path,

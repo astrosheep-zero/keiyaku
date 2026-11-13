@@ -88,11 +88,11 @@ ambiguous identity is usage. The native Akumas composition independently retains
 explicit caller selection. There is no
 cross-family catalogue, category status, or plural status result.
 
-Guidance selection reuses the Contract context resolver when omitted. Singular
-detail selects a Contract or Debt; plural detail selects Debts only, including a
-single-member batch. Invalid or mixed selection refuses before product reads.
-Debt partial absence preserves independently readable peers in the native answer
-while refusing the invocation. A named CLI
+Guidance selection reuses the Contract context resolver when omitted. Detail
+selects at most one Contract or Debt. Invalid or plural selection refuses before
+product reads; native Debt batch reads remain independently owned by Debt.
+Kill accepts one selector that may expand to a frozen set of Akumas, preserving
+each member's native stop evidence. A named CLI
 address is acquired at the asynchronous process edge, then dispatched as the
 resolved family's ordinary exact operation. A Contract wait and an Akuma wait
 remain separate and a mixed wait is refused before observation. History selects

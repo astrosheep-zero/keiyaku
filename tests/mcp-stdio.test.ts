@@ -50,7 +50,7 @@ test("packaged stdio server launches from its documented Pi configuration", asyn
   const created = await client.callTool({ name: "debt_add", arguments: { cwd: root, title: "Stdio flat business input" } });
   assert.equal(created.isError, false, JSON.stringify(created));
   const id = (created.structuredContent as { id: string }).id;
-  const detail = await client.callTool({ name: "show", arguments: { ids: [id] } });
+  const detail = await client.callTool({ name: "show", arguments: { id } });
   assert.equal(detail.isError, false, JSON.stringify(detail));
   assert.equal(detail.structuredContent, undefined);
   assert.match(JSON.stringify(detail.content), /Stdio flat business input/u);

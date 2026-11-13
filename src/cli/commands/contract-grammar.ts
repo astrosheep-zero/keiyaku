@@ -172,10 +172,10 @@ function parseReview(parts: ContractTokens): CliRequest {
 }
 
 function showSelector(parts: ContractTokens): string | undefined {
+  if (parts.positionals.length > 1) refuse("show", "show accepts at most one selector");
   const selected = parts.positionals[0];
   if (selected !== undefined && ["aku/", "kei", "kei/", "kei/*"].includes(selected))
     refuse("show", "show cannot select a category");
-  if (parts.positionals.length > 1) refuse("show", "show accepts at most one Contract selector");
   if (selected === "aku" || selected?.startsWith("aku/") === true) refuse("show", "show cannot select an Akuma");
   if (selected !== undefined && !selected.startsWith("@") && /[*?\[\]]/u.test(selected))
     refuse("show", `unsupported show glob: ${selected}`);
@@ -280,19 +280,15 @@ export function parseContractCommand(parts: ContractTokens): CliRequest {
       return { name: "abandon", input: { ...selected, ...(note === undefined ? {} : { note }) }, output };
     }
     case "show": {
-      if (parts.positionals.some((selector) => selector.startsWith("debt/"))) {
-        if (parts.positionals.some((selector) => !selector.startsWith("debt/")))
-          refuse("show", "show cannot mix Debt and Contract selectors");
+      const id = showSelector(parts);
+      if (id?.startsWith("debt/") === true) {
         try {
-          for (const selector of parts.positionals) canonicalDebtId(selector);
+          canonicalDebtId(id);
         } catch (error) {
           refuse("show", error instanceof Error ? error.message : String(error));
         }
-        const ids = parts.positionals;
-        return { name: "show", input: { ids }, output };
       }
-      const contract = showSelector(parts);
-      return { name: "show", input: contract === undefined ? {} : { ids: parts.positionals }, output };
+      return { name: "show", input: id === undefined ? {} : { id }, output };
     }
     case "kanshi":
       return { name: "kanshi", input: {}, output };

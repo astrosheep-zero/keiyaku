@@ -102,7 +102,7 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   await settleFixtureBodies(bodies);
   assertWireRoundTrip(akumaHistoryResultSchema, await akumas.history({ akuma: id }));
   assertWireRoundTrip(activityHistorySchema, await fixture.akuma.history());
-  assertWireRoundTrip(akumaKillResultSchema, await akumas.kill({ akuma: [id] }));
+  assertWireRoundTrip(akumaKillResultSchema, await akumas.kill({ akuma: id }));
   assertWireRoundTrip(killEvidenceSchema, await fixture.akuma.kill());
   const stream = fixture.akuma.stream()[Symbol.asyncIterator]();
   const first = await stream.next();

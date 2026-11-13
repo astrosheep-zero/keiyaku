@@ -38,9 +38,9 @@ export async function debtUpdate(at: KeiyakuAt, input: DebtUpdateInvocation) {
   updateInput(rest).signal?.throwIfAborted();
   return missing();
 }
-export async function debtShow(at: KeiyakuAt, ids: readonly string[]): Promise<DebtShowResult | DebtAbsent> {
+export async function debtShow(at: KeiyakuAt, id: string): Promise<DebtShowResult | DebtAbsent> {
   const coord = await coordinates(at);
-  return coord.world === null ? absent : Debts.of(coord.world).read({ ids });
+  return coord.world === null ? absent : Debts.of(coord.world).read({ ids: [id] });
 }
 export async function debtLs(at: KeiyakuAt, input: DebtListInvocation) {
   debtRowViewLimit(input.limit);

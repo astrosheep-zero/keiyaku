@@ -58,12 +58,17 @@ test("real CLI shares one flat ledger across managed worktrees and nested invoca
   )));
   assert.equal(update.kind, "accepted");
   const shown = Keiyaku.verbs.show.output.parse(JSON.parse(execFileSync(
-    process.execPath, [cli, "-C", nested, "show", child.id, added.id, "--json"],
+    process.execPath, [cli, "-C", nested, "show", child.id, "--json"],
     { env: environment, encoding: "utf8" },
   )));
-  assert.ok(shown.kind === "debt-complete" && shown.items[0]?.kind === "found" && shown.items[1]?.kind === "found");
+  assert.ok(shown.kind === "debt-complete" && shown.items[0]?.kind === "found");
   assert.deepEqual(shown.items[0].needs, [{ id: added.id, state: "done" }]);
-  assert.equal(shown.items[1].note, "finished");
+  const parent = Keiyaku.verbs.show.output.parse(JSON.parse(execFileSync(
+    process.execPath, [cli, "-C", nested, "show", added.id, "--json"],
+    { env: environment, encoding: "utf8" },
+  )));
+  assert.ok(parent.kind === "debt-complete" && parent.items[0]?.kind === "found");
+  assert.equal(parent.items[0].note, "finished");
   assert.ok(existsSync(join(repository.path, ".keiyaku", "debts", `${added.id.slice(5)}.md`)));
   assert.equal(existsSync(join(worktree, ".keiyaku", "debts")), false);
 });

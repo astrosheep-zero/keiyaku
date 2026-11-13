@@ -1024,7 +1024,7 @@ test("package-root World inputs reject a forged JavaScript coordinate before eff
   );
   await assert.rejects(
     Akumas.of(forged as never).kill({
-      akuma: ["aku/worker/1234abcd"],
+      akuma: "aku/worker/1234abcd",
     }),
     /canonical physical directory/u,
   );

@@ -638,7 +638,7 @@ test(
               .some((event) => event.event === "stall-started"),
         );
         if (priorStop) {
-          assert.equal((await api.kill({ akuma: [called.akumaId], signal: t.signal })).results[0]?.outcome, "hung");
+          assert.equal((await api.kill({ akuma: called.akumaId, signal: t.signal })).results[0]?.outcome, "hung");
           await waitForCondition(
             "hung launch has ended and released its execution seat",
             async () => (await probeLeash(paths)) === "free",

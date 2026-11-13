@@ -46,7 +46,7 @@ data. No native tool shells out to the CLI.
 | `akuma_wait` | `akuma` array; optional `completion` (`any` or `all`), `timeoutMs`, `repo` |
 | `akuma_history` | `akuma`; optional `id`, `last`, `before`, `since`, `limit`, `repo` |
 | `akuma_fork` | `akuma`, `at`; optional `detach`, `bare`, `repo` |
-| `akuma_kill` | `akuma` array; optional `repo` |
+| `akuma_kill` | one `akuma` selector; optional `repo` |
 
 `akuma_spawn` supports every configured provider, not only Pi. Default
 `detach: false` launches in the calling Pi session's in-process host scope.
@@ -72,8 +72,9 @@ World resolves from Pi's `ctx.cwd`. Relative `workdir` and `repo` paths resolve
 there too; `repo` supplies Git association/selector context, not a different
 World. Caller attribution comes from the current Pi session manager, not ambient
 parent Akuma or harness environment declarations. Single targets accept IDs or
-World-local aliases; Wait/Kill also accept globs and Contract selectors (the
-latter need `repo`). History `id` and Fork `at` are exact returned `turn/n`
+World-local aliases. Wait accepts a batch of IDs, aliases or globs. Kill accepts
+one selector, including a glob or Contract selector (the latter needs `repo`),
+which may expand to several Akumas with one stop result per member. History `id` and Fork `at` are exact returned `turn/n`
 identities. Exact history cannot combine with paging or `last`.
 
 Ask/Wait are unbounded unless `timeoutMs` is supplied. Tell observes its exact

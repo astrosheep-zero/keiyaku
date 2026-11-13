@@ -435,9 +435,9 @@ export class Keiyaku {
     return await selected.contract.abandon(input);
   }
 
-  async #show({ ids }: VerbInput<"show">) {
-    if (ids?.[0]?.startsWith("debt/") === true) return debt.debtShow(this.#input, ids);
-    return await (await this.#selected(ids?.[0])).contract.guidance();
+  async #show({ id }: VerbInput<"show">) {
+    if (id?.startsWith("debt/") === true) return debt.debtShow(this.#input, id);
+    return await (await this.#selected(id)).contract.guidance();
   }
 
   async #reconcile(input: VerbInput<"reconcile">) {

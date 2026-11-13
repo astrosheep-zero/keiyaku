@@ -103,7 +103,8 @@ test("show preserves native absence and selection refusals with command-specific
     [["@kei/missing"], /redundant short contract selector/u],
     [["aku/worker/1234abcd"], /cannot select an Akuma/u],
     [["kei/*"], /cannot select a category/u],
-    [["kei/a", "kei/b"], /at most one Contract/u],
+    [["kei/a", "kei/b"], /at most one selector/u],
+    [["debt/a", "debt/b"], /at most one selector/u],
     [["--unknown"], /not valid for show/u],
   ] as const) {
     const result = await captureOutput(() => main(["-C", repository.path, "show", ...args]));

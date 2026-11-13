@@ -135,12 +135,13 @@ const AKUMA_COMMAND_SPECS = {
     ].join("\n"),
   },
   kill: {
-    arity: "one-or-more",
+    arity: 1,
     stdin: false,
     flags: { json: "boolean" },
-    usage: `kill ${SET_SELECTORS} [--repo <path>]`,
-    purpose: "Stop the selected Akuma's current work; it can be woken again with tell.",
-    details: SET_DETAILS,
+    usage: 'kill (<aku/...> | @name | <kei/...> | "aku/<name-pattern>/<hex-pattern>") [--repo <path>]',
+    purpose: "Stop current work selected by one Akuma selector; tell can wake it again.",
+    details:
+      "A Contract or glob selector may expand to several Akumas; each member returns its own stop evidence. Globs contain * and use lowercase hex digits or * in the suffix. --repo requires a Contract (kei/...) selector.",
   },
 } as const satisfies Readonly<Record<string, AkumaCommandSpec>>;
 
@@ -292,8 +293,7 @@ function parseAddressed(
   output: "text" | "json",
   fail: (message: string) => never,
 ): CliRequest {
-  if (action === "kill")
-    return { name: action, input: { akuma: rawSelectors.map((value) => validateSet(value, fail)) }, output };
+  if (action === "kill") return { name: action, input: { akuma: validateSet(rawSelectors[0]!, fail) }, output };
   if (action === "wait") return parseWait(rawSelectors, flags, output, fail);
   if (action === "history") {
     const selector = rawSelectors[0]!;

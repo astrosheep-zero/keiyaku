@@ -153,7 +153,7 @@ function ruleFor(...headLines: readonly string[]): string {
 async function killAndAwaitPluralTarget(world: WorldRoot, selector: string): Promise<void> {
   const akumas = Akumas.of(world);
   const killed = await akumas.kill({
-    akuma: [selector],
+    akuma: selector,
   });
   assert.equal(killed.results.length, 1, `public kill selected ${selector} once`);
   const member = killed.results[0]!;

@@ -14,13 +14,10 @@ function command(argv: readonly string[]): ParsedCommand {
 
 test("show routes complete Debt addresses to the native Debt operation", () => {
   assert.deepEqual(command(["show", "debt/example"]), {
-    name: "show", input: { ids: ["debt/example"] }, output: "text",
+    name: "show", input: { id: "debt/example" }, output: "text",
   });
-  assert.deepEqual(command(["show", "debt/one", "debt/two", "--json"]), {
-    name: "show", input: { ids: ["debt/one", "debt/two"] }, output: "json",
-  });
-  assert.throws(() => command(["show", "debt/one", "kei/two"]), /cannot mix Debt and Contract/u);
-  assert.throws(() => command(["show", "@one", "debt/two"]), /cannot mix Debt and Contract/u);
+  for (const selectors of [["debt/one", "debt/two"], ["debt/one", "kei/two"], ["@one", "debt/two"]])
+    assert.throws(() => command(["show", ...selectors]), /at most one selector/u);
   assert.throws(() => command(["show", "debt/Bad Name"]), /debt ID/u);
   assert.throws(() => assertExplicitRepoUse(command(["show", "debt/example"]), "/repo"), /no consumer/u);
 });
@@ -226,13 +223,13 @@ test("show parses a standalone Contract guidance read with root coordinates", ()
     assert.deepEqual(parseArgv(["-C", "/invocation", "--repo", "/repository", "show", selector, "--json"]), {
       cwd: "/invocation",
       repo: "/repository",
-      command: { name: "show", input: { ids: [selector] }, output: "json" },
+      command: { name: "show", input: { id: selector }, output: "json" },
     });
   }
   for (const selector of ["aku", "aku/", "aku/*", "kei", "kei/", "kei/*", "aku/worker/1234abcd", "kei/foo*"]) {
     assert.throws(() => parseArgv(["show", selector]), CliUsageError);
   }
-  assert.throws(() => parseArgv(["show", "kei/one", "kei/two"]), /at most one Contract/u);
+  assert.throws(() => parseArgv(["show", "kei/one", "kei/two"]), /at most one selector/u);
   assert.throws(() => parseArgv(["show", "--guidance"]), /not valid for show/u);
   assert.throws(() => parseArgv(["show", "--limit", "2"]), /not valid for show/u);
   assert.throws(() => parseArgv(["show", "-"]), /show reads no stdin/u);
@@ -240,10 +237,10 @@ test("show parses a standalone Contract guidance read with root coordinates", ()
 
 test("show parses one Contract selector and JSON output; status refuses the retired guidance flag", () => {
   assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
-    command: { name: "show", input: { ids: ["kei/example"] }, output: "json" },
+    command: { name: "show", input: { id: "kei/example" }, output: "json" },
   });
   assert.deepEqual(parseArgv(["show", "@example"]), {
-    command: { name: "show", input: { ids: ["@example"] }, output: "text" },
+    command: { name: "show", input: { id: "@example" }, output: "text" },
   });
   assert.throws(() => parseArgv(["show", "aku/x/*"]), /cannot select an Akuma/u);
   for (const selectors of [[], ["kei/example"], ["@example"], ["kei/one", "kei/two"], ["aku/x/*"]]) {
@@ -453,18 +450,18 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   assert.throws(() => parseArgv(["wait", "@one", "@two", "--any", "--all"]), /mutually exclusive/u);
 });
 
-test("wait rejects mixed selector families while kill retains mixed selection", () => {
+test("wait rejects mixed selector families while kill takes one expanding selector", () => {
   assert.throws(
     () => command(["wait", "kei/example", "aku/work*/12*"]),
     /wait cannot mix Contract and Akuma selectors/u,
   );
   for (const action of ["wait", "kill"] as const) {
-    const selectors = action === "wait" ? ["kei/example"] : ["kei/example", "aku/work*/12*"];
+    const selectors = ["kei/example"];
     const parsed = parseArgv([action, ...selectors, "--repo", "/repo", "--json"]);
     assert.ok("command" in parsed);
     assert.deepEqual(parsed.command, {
       name: action,
-      input: action === "wait" ? { selectors } : { akuma: selectors },
+      input: action === "wait" ? { selectors } : { akuma: selectors[0]! },
       output: "json",
     });
     assert.doesNotThrow(() => assertExplicitRepoUse(parsed.command, parsed.repo));
@@ -472,6 +469,10 @@ test("wait rejects mixed selector families while kill retains mixed selection", 
     assert.ok("command" in akumaOnly);
     assert.throws(() => assertExplicitRepoUse(akumaOnly.command, akumaOnly.repo), /--repo has no consumer/u);
   }
+  assert.deepEqual(command(["kill", "aku/work*/12*"]), {
+    name: "kill", input: { akuma: "aku/work*/12*" }, output: "text",
+  });
+  assert.throws(() => command(["kill", "kei/example", "aku/work*/12*"]), /kill accepts one Akuma selector/u);
 });
 
 test("tell parses text observation and ask requires a schema document", () => {

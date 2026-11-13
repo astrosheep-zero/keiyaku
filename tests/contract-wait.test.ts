@@ -142,8 +142,10 @@ test("other journals, Dispatch, worker completion, worktree edits and target mov
     await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: worker.id, contractId: first.id });
     const completed = await Akumas.of(world).wait({ akuma: [worker.id], timeoutMs: 0 });
     assert.equal(completed.reason, "completed");
-    const killed = await Akumas.of(world).kill({ akuma: [first.id], repo });
-    assert.equal(killed.results[0]?.id, worker.id);
+    const peer = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "1234abce", createdAt: "2026-08-18T00:00:00.000Z" });
+    await publishDispatch({ repository: await repositoryAt(repository.path), akumaId: peer.id, contractId: first.id });
+    const killed = await Akumas.of(world).kill({ akuma: first.id, repo });
+    assert.deepEqual(killed.results, [worker.id, peer.id].map(id => ({ id, outcome: "already-stopped" })));
     await amend(second.handle, "Other Contract changes.");
     writeFileSync(join(repository.path, "unrelated.txt"), "worktree edit\n");
     repository.run(["add", "unrelated.txt"]);
