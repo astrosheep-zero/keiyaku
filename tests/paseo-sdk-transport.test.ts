@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { appendFile, cp, mkdir, mkdtemp, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
@@ -15,6 +15,7 @@ import { tellPresentation } from "../plugins/paseo/plugin/server/message.js";
 import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
 import { ProviderEventSchema, type ProviderConnection, type ProviderEvent,
   type ProviderRegistration } from "@getpaseo/plugin/server/provider";
+import type { PluginServerContribution } from "@getpaseo/plugin/server";
 import * as pluginRuntime from "@getpaseo/plugin";
 import * as pluginServerRuntime from "@getpaseo/plugin/server";
 import * as pluginProviderRuntime from "@getpaseo/plugin/server/provider";
@@ -84,13 +85,16 @@ function evaluate(bundle: string): Record<string, unknown> {
  * the consumer is absent, and never claims the compiler is portable.
  */
 async function consumerToolchain(): Promise<Readonly<{
-  compilePlugin: typeof import("../node_modules/@getpaseo/server/dist/server/server/plugins/compiler.js").compilePlugin;
-  evaluateBundle: typeof import("../node_modules/@getpaseo/server/dist/server/server/plugins/bundle-evaluator.js").evaluateBundle;
+  compilePlugin(entries: { client: string | null; server: string | null }): Promise<{
+    clientBundle: string | null; serverBundle: string | null;
+  }>;
+  evaluateBundle(bundle: string): PluginServerContribution;
 }> | undefined> {
   try {
+    const serverDirectory = dirname(nodeRequire.resolve("@getpaseo/server"));
     const [compiler, evaluator] = await Promise.all([
-      import("../node_modules/@getpaseo/server/dist/server/server/plugins/compiler.js"),
-      import("../node_modules/@getpaseo/server/dist/server/server/plugins/bundle-evaluator.js"),
+      import(pathToFileURL(join(serverDirectory, "plugins/compiler.js")).href),
+      import(pathToFileURL(join(serverDirectory, "plugins/bundle-evaluator.js")).href),
     ]);
     return { compilePlugin: compiler.compilePlugin, evaluateBundle: evaluator.evaluateBundle };
   } catch {
@@ -611,7 +615,7 @@ async function compiledConsumer(t: TestContext): Promise<Readonly<{
   const copied = join(await mkdtemp(join(tmpdir(), "paseo-plugin-copy-")), "plugin");
   t.after(() => rm(copied, { recursive: true, force: true }));
   await cp(PLUGIN_DIRECTORY, copied, { recursive: true });
-  await symlink(resolve("node_modules"), join(copied, "node_modules"), "dir");
+  await symlink(dirname(dirname(nodeRequire.resolve("zod/package.json"))), join(copied, "node_modules"), "dir");
   await appendFile(join(copied, "index.server.ts"), "\nexport { createSdkTransport } from \"./server/sdk.js\";\n");
   const bundles = await compilePlugin({ client: null, server: join(copied, "index.server.ts") });
   assert.ok(bundles.serverBundle, "the plugin server entry compiles under Paseo's own compiler");

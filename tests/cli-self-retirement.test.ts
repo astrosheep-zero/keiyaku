@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
@@ -14,7 +15,7 @@ const repositoryRoot = resolve(import.meta.dirname, compiled ? "../.." : "..");
 const repositoryCli = resolve(repositoryRoot, "build/src/cli/index.js");
 /** The build tree a managed worktree holds when a developer built inside that worktree. */
 const repositoryBuild = resolve(repositoryRoot, "build");
-const repositoryModules = realpathSync(resolve(repositoryRoot, "node_modules"));
+const repositoryModules = realpathSync(dirname(dirname(createRequire(import.meta.url).resolve("zod/package.json"))));
 
 const CONTRACT_MARKDOWN = contractMarkdown("Self retirement receipt", {
   Context: "The CLI executes from inside the managed worktree its own review retires.",

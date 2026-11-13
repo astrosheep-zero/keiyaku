@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
@@ -16,7 +17,7 @@ const options: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2023,
   module: ts.ModuleKind.NodeNext,
   moduleResolution: ts.ModuleResolutionKind.NodeNext,
-  typeRoots: [join(root, "node_modules/@types")],
+  typeRoots: [dirname(dirname(createRequire(import.meta.url).resolve("@types/node/package.json")))],
   types: ["node"],
 };
 const banned = new Set([

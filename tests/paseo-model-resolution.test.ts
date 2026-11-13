@@ -1,19 +1,24 @@
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, realpath, rm, symlink } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { runInNewContext } from "node:vm";
 import test from "node:test";
 import pino from "pino";
-import { AgentManager } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-manager.js";
-import { AgentStorage } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-storage.js";
-import { PluginAgentClientRegistry } from "../node_modules/@getpaseo/server/dist/server/server/agent/plugin-provider.js";
-import { PluginHookHandlers } from "../node_modules/@getpaseo/server/dist/server/server/plugins/lifecycle/index.js";
-import type { PluginLifecycle } from "../node_modules/@getpaseo/server/dist/server/server/plugins/lifecycle/index.js";
+import type { PaseoDaemon } from "@getpaseo/server";
+import type { PluginBeforeRequests, PluginLifecycleEvents } from "@getpaseo/plugin/server";
 import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";
 import { registerModelCorrection } from "../plugins/paseo/plugin/server/model.js";
 import type { AkumaTransport, StatusObservation } from "../plugins/paseo/plugin/server/transport.js";
+
+const serverDirectory = dirname(createRequire(import.meta.url).resolve("@getpaseo/server"));
+const { AgentManager } = await import(pathToFileURL(join(serverDirectory, "agent/agent-manager.js")).href);
+const { AgentStorage } = await import(pathToFileURL(join(serverDirectory, "agent/agent-storage.js")).href);
+const { PluginAgentClientRegistry } = await import(pathToFileURL(join(serverDirectory, "agent/plugin-provider.js")).href);
+const { PluginHookHandlers } = await import(pathToFileURL(join(serverDirectory, "plugins/lifecycle/index.js")).href);
 
 type Model = { id: string; label: string; isSelectable?: boolean };
 type Selection = { activeModelId: string | null; displayModel: string };
@@ -23,7 +28,7 @@ const logger = pino({ level: "silent" });
 const emptyHistory = { rows: [], omitted: 0, hasEarlier: false, hasLater: false, historyLost: false, lowestRetained: null, highest: 0 };
 
 async function installedModelResolver(): Promise<(input: SelectionInput) => Selection> {
-  const directory = resolve("node_modules/@getpaseo/server/dist/server/web-ui/_expo/static/js/web");
+  const directory = join(serverDirectory, "../web-ui/_expo/static/js/web");
   let file: string | undefined;
   for (const candidate of await readdir(directory)) {
     if (!candidate.endsWith(".js")) continue;
@@ -93,16 +98,16 @@ async function harness() {
   const hooks = new PluginHookHandlers(() => {});
   const removeCorrection = registerModelCorrection(hooks, transport.status);
   const lifecycle = {
-    before(name: Parameters<PluginLifecycle["before"]>[0], request: Parameters<PluginLifecycle["before"]>[1]) {
+    before<Name extends keyof PluginBeforeRequests>(name: Name, request: PluginBeforeRequests[Name]) {
       return hooks.invoke("model-resolution-test", "before", name, request, {} as never);
     },
-    emit(name: Parameters<PluginLifecycle["emit"]>[0], event: Parameters<PluginLifecycle["emit"]>[1]) {
+    emit<Name extends keyof PluginLifecycleEvents>(name: Name, event: PluginLifecycleEvents[Name]) {
       void hooks.invoke("model-resolution-test", "event", name, event, {} as never);
     },
-  } as unknown as PluginLifecycle;
-  const storage = new AgentStorage(join(directory, "agents"), logger);
+  };
+  const storage: PaseoDaemon["agentStorage"] = new AgentStorage(join(directory, "agents"), logger);
   await storage.initialize();
-  const manager = new AgentManager({ logger, clients: registry.clients(), providerDefinitions: { keiyaku: { enabled: true } },
+  const manager: PaseoDaemon["agentManager"] = new AgentManager({ logger, clients: registry.clients(), providerDefinitions: { keiyaku: { enabled: true } },
     registry: storage, pluginLifecycle: lifecycle });
   const close = async () => {
     manager.prepareForShutdown();

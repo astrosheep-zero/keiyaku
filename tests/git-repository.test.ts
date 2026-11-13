@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { lstatSync, mkdirSync, mkdtempSync, readlinkSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 import {
@@ -26,9 +26,13 @@ test("state commit construction warns while ordinary commit messages stay unchan
   assert.equal(raw.run(["show", "-s", "--format=%s", ordinary]).trim(), "ordinary detail");
 });
 
-test("dependency provisioning links a managed worktree to the registered primary with a separate git dir", () => {
+test("managed dependency provisioning resolves through the registered primary without a local link", (t) => {
   const primary = mkdtempSync(join(tmpdir(), "keiyaku-separate-primary-"));
   const gitDir = mkdtempSync(join(tmpdir(), "keiyaku-separate-gitdir-"));
+  t.after(() => {
+    rmSync(primary, { recursive: true, force: true });
+    rmSync(gitDir, { recursive: true, force: true });
+  });
   execFileSync("git", ["init", "--quiet", "--initial-branch=main", `--separate-git-dir=${gitDir}`, primary]);
   execFileSync("git", ["-C", primary, "config", "user.name", "Keiyaku Test"]);
   execFileSync("git", ["-C", primary, "config", "user.email", "keiyaku@example.invalid"]);
@@ -37,18 +41,48 @@ test("dependency provisioning links a managed worktree to the registered primary
     encoding: "utf8",
   }).trim();
   assert.notEqual(resolve(dirname(common)), resolve(primary));
-  mkdirSync(join(primary, "node_modules"));
+  const shared = join(primary, "node_modules");
+  const dependency = join(shared, "provision-probe");
+  mkdirSync(dependency, { recursive: true });
+  writeFileSync(join(dependency, "package.json"), JSON.stringify({ type: "module", exports: "./index.js" }));
+  writeFileSync(join(dependency, "index.js"), "export default 'primary contents';\n");
   const managed = join(primary, ".keiyaku", "wt", "atlantis");
   execFileSync("git", ["-C", primary, "worktree", "add", "--quiet", "--detach", managed]);
-  execFileSync(
+  const provision = () => execFileSync(
     process.execPath,
     [fileURLToPath(new URL("../scripts/provision-worktree-dependencies.js", import.meta.url))],
     { cwd: managed, encoding: "utf8" },
   );
-  const linked = join(managed, "node_modules");
-  assert.equal(lstatSync(linked).isSymbolicLink(), true);
-  assert.equal(realpathSync(linked), realpathSync(join(primary, "node_modules")));
-  assert.notEqual(resolve(managed, readlinkSync(linked)), resolve(dirname(common), "node_modules"));
+  const local = join(managed, "node_modules");
+  provision();
+  provision();
+  assert.equal(existsSync(local), false);
+
+  symlinkSync(relative(managed, shared), local, "dir");
+  provision();
+  assert.equal(existsSync(local), false, "only the legacy link is removed");
+  assert.equal(lstatSync(shared).isDirectory(), true);
+  assert.equal(readFileSync(join(dependency, "index.js"), "utf8"), "export default 'primary contents';\n");
+  const imported = JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", [
+    'import value from "provision-probe";',
+    'console.log(JSON.stringify({ value, resolved: import.meta.resolve("provision-probe") }));',
+  ].join("\n")], { cwd: managed, encoding: "utf8" }));
+  assert.equal(imported.value, "primary contents");
+  assert.equal(realpathSync(fileURLToPath(imported.resolved)), realpathSync(join(dependency, "index.js")));
+
+  mkdirSync(local);
+  writeFileSync(join(local, "sentinel"), "local contents");
+  provision();
+  assert.equal(readFileSync(join(local, "sentinel"), "utf8"), "local contents");
+  rmSync(local, { recursive: true });
+  const foreign = join(primary, "foreign-dependencies");
+  mkdirSync(foreign);
+  symlinkSync(relative(managed, foreign), local, "dir");
+  const foreignTarget = readlinkSync(local);
+  provision();
+  assert.equal(lstatSync(local).isSymbolicLink(), true);
+  assert.equal(readlinkSync(local), foreignTarget);
+  assert.equal(realpathSync(local), realpathSync(foreign));
 });
 
 test("cancelling streamed Git execution uses its capability signal", async () => {

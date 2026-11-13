@@ -1,21 +1,16 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import pino from "pino";
-import { PluginAgentClientRegistry } from "../node_modules/@getpaseo/server/dist/server/server/agent/plugin-provider.js";
-import { AgentManager } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-manager.js";
-import { AgentStorage } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-storage.js";
-import { createIdleRuntimeCleanup } from "../node_modules/@getpaseo/server/dist/server/server/agent/idle-runtime-cleanup/index.js";
-import { PluginHookHandlers } from "../node_modules/@getpaseo/server/dist/server/server/plugins/lifecycle/index.js";
-import type { PluginLifecycle } from "../node_modules/@getpaseo/server/dist/server/server/plugins/lifecycle/index.js";
-import { startAgentRun } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-prompt.js";
-import type { AgentStreamEvent } from "../node_modules/@getpaseo/server/dist/server/server/agent/agent-sdk-types.js";
+import type { AgentTimelineItem, PaseoDaemon } from "@getpaseo/server";
 import type { PaseoAgent, PaseoAgentListResult, SubscriptionObserver } from "@getpaseo/client";
-import type { PluginHookContext } from "@getpaseo/plugin/server";
-import type { ProviderEvent } from "@getpaseo/plugin/server/provider";
+import type { PluginBeforeRequests, PluginHookContext, PluginLifecycleEvents } from "@getpaseo/plugin/server";
+import type { ProviderEvent, ProviderRegistration } from "@getpaseo/plugin/server/provider";
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";
 import { createRegistrationHandoff, registerRegistrationHooks } from "../plugins/paseo/plugin/server/handoff.js";
@@ -24,11 +19,22 @@ import { akumaId } from "../src/akuma/identity.js";
 import { activityFact, turnEndFact } from "./support/akuma-fixtures.js";
 import { expectBodySettles } from "./support/process.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
-import { projectTimelineRows } from "../node_modules/@getpaseo/server/dist/server/server/agent/timeline-projection.js";
 import { historySchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 import type { Tell, TellAdmission } from "../plugins/paseo/plugin/server/message.js";
 import { stopAttempt, type Stop } from "../plugins/paseo/plugin/server/stop.js";
 import type { AkumaTransport } from "../plugins/paseo/plugin/server/transport.js";
+const serverDirectory = dirname(createRequire(import.meta.url).resolve("@getpaseo/server"));
+const { PluginAgentClientRegistry } = await import(pathToFileURL(join(serverDirectory, "agent/plugin-provider.js")).href);
+const { AgentManager } = await import(pathToFileURL(join(serverDirectory, "agent/agent-manager.js")).href);
+const { AgentStorage } = await import(pathToFileURL(join(serverDirectory, "agent/agent-storage.js")).href);
+const { createIdleRuntimeCleanup } = await import(pathToFileURL(join(serverDirectory, "agent/idle-runtime-cleanup/index.js")).href);
+const { PluginHookHandlers } = await import(pathToFileURL(join(serverDirectory, "plugins/lifecycle/index.js")).href);
+const { startAgentRun } = await import(pathToFileURL(join(serverDirectory, "agent/agent-prompt.js")).href);
+const { projectTimelineRows } = await import(pathToFileURL(join(serverDirectory, "agent/timeline-projection.js")).href);
+type AgentManager = PaseoDaemon["agentManager"];
+type AgentSession = NonNullable<NonNullable<ReturnType<AgentManager["getAgent"]>>["session"]>;
+type AgentStreamEvent = Parameters<Parameters<AgentSession["subscribe"]>[0]>[0];
+
 const logger = pino({ level: "silent" });
 const at = "2026-10-15T00:00:00.000Z";
 const AKUMA_ID = akumaId({ akumaName: "test", suffix: "be57eff0" });
@@ -111,7 +117,7 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
         if (input.type === "session.prompt") await beforePrompt?.();
         await connection.send(input);
       } };
-  } }]);
+  } } satisfies ProviderRegistration]);
   let directoryOpens = 0;
   let activeDirectoryListeners = 0;
   let releaseDirectoryListener: (() => void) | undefined;
@@ -153,14 +159,14 @@ async function harness(t: TestContext, mock: MockTransport = {}, initialRows: Ro
   let manager!: AgentManager;
   const removeHandoff = hooks && handoff ? registerRegistrationHooks(hooks, handoff) : undefined;
   const pluginLifecycle = hooks && paseo ? {
-      before(name: Parameters<PluginLifecycle["before"]>[0], request: Parameters<PluginLifecycle["before"]>[1]) {
-      return hooks.invoke("keiyaku-paseo", "before", name, request, paseo) as ReturnType<PluginLifecycle["before"]>;
+      before<Name extends keyof PluginBeforeRequests>(name: Name, request: PluginBeforeRequests[Name]) {
+      return hooks.invoke("keiyaku-paseo", "before", name, request, paseo);
     },
-    emit(name: Parameters<PluginLifecycle["emit"]>[0], event: Parameters<PluginLifecycle["emit"]>[1]) {
+    emit<Name extends keyof PluginLifecycleEvents>(name: Name, event: PluginLifecycleEvents[Name]) {
       void hooks.invoke("keiyaku-paseo", "event", name, event, paseo);
     },
-  } as PluginLifecycle : undefined;
-  const storage = withResidency ? new AgentStorage(join(root, "agents"), logger) : undefined;
+  } : undefined;
+  const storage: PaseoDaemon["agentStorage"] | undefined = withResidency ? new AgentStorage(join(root, "agents"), logger) : undefined;
   await storage?.initialize();
   manager = new AgentManager({ logger, clients: registry.clients(), providerDefinitions: { keiyaku: { enabled: true } },
     ...(storage ? { registry: storage } : {}), ...(pluginLifecycle ? { pluginLifecycle } : {}) });
@@ -584,7 +590,7 @@ test("installed native consumer folds tool start and result by producer identity
   const rows = h.events.flatMap((event, index) => event.type === "timeline"
     ? [{ item: event.item, seq: index + 1, timestamp: event.timestamp ?? at,
       ...(event.turnId === undefined ? {} : { turnId: event.turnId }) }] : []);
-  const projected = projectTimelineRows({ rows, mode: "projected" });
+  const projected: Array<{ item: AgentTimelineItem }> = projectTimelineRows({ rows, mode: "projected" });
   const calls = projected.flatMap((entry) => entry.item.type === "tool_call" ? [entry.item] : []);
   assert.deepEqual(calls.map((item) => [item.callId, item.status]), [["tool/2/a", "completed"], ["tool/2/b", "failed"]]);
   assert.deepEqual(calls.map((item) => item.detail), [

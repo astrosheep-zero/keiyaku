@@ -1,6 +1,6 @@
 import { execFile, spawn } from "node:child_process";
-import { lstat, readlink, realpath, symlink } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve } from "node:path";
+import { lstat, readlink, realpath, unlink } from "node:fs/promises";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
@@ -65,11 +65,8 @@ if (!isManagedWorktree) {
     const linkedTarget = worktreeStat.isSymbolicLink()
       ? resolve(dirname(worktreeDependencies), await readlink(worktreeDependencies))
       : undefined;
-    if (linkedTarget !== sharedDependencies) {
-      throw new Error(`${worktreeDependencies} already exists and is not the shared dependency link`);
-    }
+    if (linkedTarget === sharedDependencies) await unlink(worktreeDependencies);
   } catch (error) {
     if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
-    await symlink(relative(cwd, sharedDependencies), worktreeDependencies, "dir");
   }
 }

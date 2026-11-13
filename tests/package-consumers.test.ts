@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 
+const nodeRequire = createRequire(import.meta.url);
 const root = resolve(import.meta.dirname, import.meta.url.endsWith(".js") ? "../.." : "..");
 
 function externalConsumer(context: TestContext): string {
@@ -24,8 +26,16 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Debt, K
     join(directory, "node_modules", "@astrosheep", "keiyaku-plugin-square"),
     "dir",
   );
-  symlinkSync(join(root, "node_modules", "@types", "node"), join(directory, "node_modules", "@types", "node"), "dir");
-  symlinkSync(join(root, "node_modules", "undici-types"), join(directory, "node_modules", "undici-types"), "dir");
+  symlinkSync(dirname(nodeRequire.resolve("@types/node/package.json")), join(directory, "node_modules", "@types", "node"), "dir");
+  symlinkSync(dirname(nodeRequire.resolve("undici-types/package.json")), join(directory, "node_modules", "undici-types"), "dir");
+  const installedModules = dirname(dirname(nodeRequire.resolve("zod/package.json")));
+  const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+  for (const name of Object.keys({ ...manifest.dependencies, ...manifest.peerDependencies })) {
+    if (name === "@astrosheep/keiyaku-plugin-square") continue;
+    const slot = join(directory, "node_modules", name);
+    mkdirSync(dirname(slot), { recursive: true });
+    symlinkSync(join(installedModules, name), slot, "dir");
+  }
   const examples = ["contract", "akumas", "debt", "kanshi", "plugin"].map((name) => name + ".ts");
   for (const example of examples) {
     copyFileSync(join(root, "tests", "fixtures", "consumers", example), join(directory, example));
@@ -89,7 +99,7 @@ void [word, arbitraryGate, kind, category, gates, actions];
   const checked = spawnSync(
     process.execPath,
     [
-      join(root, "node_modules", "typescript", "bin", "tsc"),
+      nodeRequire.resolve("typescript/bin/tsc"),
       "--noEmit",
       "--strict",
       "--target",

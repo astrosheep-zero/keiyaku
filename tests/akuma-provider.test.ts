@@ -839,7 +839,7 @@ function fakeAcp(
 ) {
   const executable = join(root, "fake-acp.mjs");
   const log = join(root, "acp-log.jsonl");
-  const sdk = join(process.cwd(), "node_modules/@agentclientprotocol/sdk/dist/acp.js");
+  const sdk = import.meta.resolve("@agentclientprotocol/sdk");
   writeFileSync(
     executable,
     `
