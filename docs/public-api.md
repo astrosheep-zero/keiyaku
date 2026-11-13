@@ -246,8 +246,9 @@ through the settlement owner. Its collection offers creation, bounded list,
 readiness and blocked views, and diagnosis. Every catalogue covers the flat
 World ledger and selects lifecycle before bounding, under Debt's canonical
 priority and identity order; there is no
-public expression or custom-sort operation. Addressed Debt handles offer reads,
-relationship trees, and atomic updates of facts and disposition. Explicit
+public expression or custom-sort operation. Native batch reads preserve requested
+peers and absence from one board observation. Addressed Debt handles offer reads
+and atomic replacement of facts and freely reversible disposition. Explicit
 completion and dropping belong to that addressed update, with no public batch
 lifecycle operation. Settlement alone retains internal idempotent completion.
 Board observation remains read-only. There is no planning or execution-progress

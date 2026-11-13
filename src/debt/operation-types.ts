@@ -25,29 +25,8 @@ const graphRefusalSchema = z
     diagnostic: z.string(),
   })
   .readonly();
-const ownershipRefusalSchema = z
-  .strictObject({
-    kind: z.literal("refused"),
-    reason: z.literal("relation-owned-by-other"),
-    related: debtIdSchema,
-  })
-  .readonly();
-const terminalRefusalSchema = z
-  .strictObject({
-    kind: z.literal("refused"),
-    reason: z.literal("invalid-lifecycle-transition"),
-    state: z.enum(["done", "drop"]),
-  })
-  .readonly();
-export const debtRefusalSchema = z.union([
-  missingRefusalSchema,
-  graphRefusalSchema,
-  ownershipRefusalSchema,
-  terminalRefusalSchema,
-]);
+export const debtRefusalSchema = z.union([missingRefusalSchema, graphRefusalSchema]);
 export type DebtRefusal = z.output<typeof debtRefusalSchema>;
-export const debtParentReadRefusalSchema = missingRefusalSchema;
-export type DebtParentReadRefusal = z.output<typeof debtParentReadRefusalSchema>;
 
 export function debtReadPageSchema<Row extends z.ZodType>(row: Row) {
   return z.union([
@@ -61,10 +40,9 @@ export function debtReadPageSchema<Row extends z.ZodType>(row: Row) {
     z.strictObject({ kind: z.literal("absent") }).readonly(),
   ]);
 }
-export type DebtReadPage<Row, Refusal = never> =
+export type DebtReadPage<Row> =
   | Readonly<{ kind: "present"; rows?: readonly Row[]; more?: true }>
-  | Readonly<{ kind: "absent" }>
-  | Refusal;
+  | Readonly<{ kind: "absent" }>;
 
 export const debtMutationNormalResultSchema = z
   .strictObject({ kind: z.literal("accepted"), id: debtIdSchema, warning: debtWarningSchema.exactOptional() })
@@ -74,17 +52,7 @@ export const debtMutationResultSchema = z.union([
   graphRefusalSchema,
   retryResultSchema,
 ]);
-export const debtChangeSchema = z.enum([
-  "title",
-  "body",
-  "note",
-  "state",
-  "priority",
-  "needs",
-  "parent",
-  "supersedes",
-  "relates",
-]);
+export const debtChangeSchema = z.enum(["title", "body", "note", "state", "priority", "needs"]);
 export const debtUpdateResultSchema = z.union([
   z
     .strictObject({
@@ -95,8 +63,6 @@ export const debtUpdateResultSchema = z.union([
     .readonly(),
   missingRefusalSchema,
   graphRefusalSchema,
-  ownershipRefusalSchema,
-  terminalRefusalSchema,
   retryResultSchema,
 ]);
 
@@ -104,20 +70,18 @@ export type DebtRetry = z.output<typeof debtRetrySchema>;
 export type DebtMutationResult = z.output<typeof debtMutationResultSchema>;
 export type DebtChange = z.output<typeof debtChangeSchema>;
 export type DebtUpdateResult = z.output<typeof debtUpdateResultSchema>;
+/** Settlement alone retains a private drop refusal; public updates accept every state transition. */
 export type SettledDebtResult =
   | Readonly<{ kind: "changed"; cleanup?: DebtWarning }>
   | Readonly<{ kind: "unchanged" }>
-  | Extract<DebtUpdateResult, { kind: "refused" | "retry" }>;
+  | Readonly<{ kind: "refused"; reason: "debt-missing" }>
+  | Readonly<{ kind: "refused"; reason: "invalid-lifecycle-transition"; state: "drop" }>
+  | Readonly<{ kind: "retry"; reason: DebtRetry }>;
 export type AddDebtInput = Readonly<{
   title: string;
   body?: string;
-  note?: string;
-  state?: DebtState;
   priority?: DebtPriority;
   needs?: readonly DebtId[];
-  parent?: DebtId | null;
-  supersedes?: readonly DebtId[];
-  relates?: readonly DebtId[];
   signal?: AbortSignal;
 }>;
 export type AddDebtDocumentInput = Readonly<{
@@ -127,19 +91,9 @@ export type AddDebtDocumentInput = Readonly<{
 export type UpdateDebtInput = Readonly<{
   title?: string;
   body?: string;
-  appendBody?: string;
   note?: string;
   state?: DebtState;
   priority?: DebtPriority;
   needs?: readonly DebtId[];
-  addNeeds?: readonly DebtId[];
-  dropNeeds?: readonly DebtId[];
-  parent?: DebtId | null;
-  supersedes?: readonly DebtId[];
-  addSupersedes?: readonly DebtId[];
-  dropSupersedes?: readonly DebtId[];
-  relates?: readonly DebtId[];
-  addRelates?: readonly DebtId[];
-  dropRelates?: readonly DebtId[];
   signal?: AbortSignal;
 }>;

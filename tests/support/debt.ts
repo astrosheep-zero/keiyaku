@@ -28,9 +28,6 @@ export function debtDocument(
     state: input.state ?? "open",
     priority: input.priority ?? 2,
     needs: input.needs ?? [],
-    parent: null,
-    supersedes: [],
-    relates: [],
     createdAt: input.createdAt ?? "2026-08-17T00:00:00.000Z",
     updatedAt: input.updatedAt ?? "2026-08-17T00:00:00.000Z",
   };

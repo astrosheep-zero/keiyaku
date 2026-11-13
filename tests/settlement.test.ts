@@ -44,8 +44,10 @@ function document(title: string): string {
 }
 
 async function debt(path: string, title: string, state: "open" | "done" | "drop" = "open") {
-  const result = await Debts.of(await World.at(path)).add({ title, state });
+  const debts = Debts.of(await World.at(path));
+  const result = await debts.add({ title });
   assert.ok(result.kind === "accepted", "expected result.kind = \"accepted\"");
+  if (state !== "open") assert.equal((await debts.debt({ id: result.id }).update({ state })).kind, "accepted");
   return result.id;
 }
 
@@ -53,10 +55,9 @@ function debtPath(id: string): string {
   return `.keiyaku/debts/${id.slice("debt/".length)}.md`;
 }
 
-function replaceDebtState(path: string, id: string, before: string, after: string): void {
-  const authority = `${path}/.keiyaku/debts/${id.slice("debt/".length)}.md`;
-  const bytes = readFileSync(authority, "utf8");
-  writeFileSync(authority, bytes.replace(`state: ${before}\n`, `state: ${after}\n`));
+async function reopen(path: string, id: string): Promise<void> {
+  const result = await Debts.of(await World.at(path)).debt({ id }).update({ state: "open" });
+  assert.equal(result.kind, "accepted");
 }
 
 async function debtState(path: string, id: string) {
@@ -134,7 +135,7 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
   assert.deepEqual(await holders(world), [
     { version: 1, debtId, contractId: (present(await bound.kei.state())).id, disposition: "held" },
   ]);
-  replaceDebtState(world.path, debtId, "drop", "open");
+  await reopen(world.path, debtId);
 
   const first = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
   assert.ok(first.kind === "contract");
@@ -150,6 +151,18 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
   assert.equal(second.issues, undefined);
   assert.equal(second.effects, undefined);
   assert.equal(await debtState(world.path, debtId), "done");
+
+  // The released holder stays consumed: an explicit public reopen is not reclosed by replay.
+  await reopen(world.path, debtId);
+  const third = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
+  assert.ok(third.kind === "contract");
+  assert.equal(third.issues, undefined);
+  assert.equal(third.effects, undefined);
+  assert.equal(await debtState(world.path, debtId), "open");
+  assert.equal((present(await bound.kei.state())).terminal?.kind, "claimed");
+  assert.deepEqual(await holders(world), [
+    { version: 1, debtId, contractId: (present(await bound.kei.state())).id, disposition: "released" },
+  ]);
 });
 
 test(
@@ -171,7 +184,7 @@ test(
     assert.deepEqual(await holders(world), [
       { version: 1, debtId, contractId: (present(await bound.kei.state())).id, disposition: "held" },
     ]);
-    replaceDebtState(world.path, debtId, "drop", "open");
+    await reopen(world.path, debtId);
     assert.equal(await debtState(world.path, debtId), "open");
 
     const originalClose = DatabaseSync.prototype.close;
@@ -227,7 +240,7 @@ test("Settlement exact-read-backs an unknown DebtHolder release after external s
   assert.deepEqual(await holders(world), [
     { version: 1, debtId, contractId: (present(await bound.kei.state())).id, disposition: "held" },
   ]);
-  replaceDebtState(world.path, debtId, "drop", "open");
+  await reopen(world.path, debtId);
   assert.equal(await debtState(world.path, debtId), "open");
   const state = present(await bound.kei.state());
 

@@ -20,7 +20,6 @@ import {
   blockedDebtListSchema as blockedSchema,
   debtDoctorReportSchema as doctorSchema,
   debtReadResultSchema as readSchema,
-  debtTreeResultSchema as treeSchema,
   debtUpdateResultSchema as updateSchema,
 } from "../src/debt/index.js";
 import { kanshiCountsReportSchema as countsSchema } from "../src/kanshi/counts.js";
@@ -104,8 +103,6 @@ test("Debt, Settings, World, region and reset schemas describe real wire results
   const missing = debts.debt({ id: "debt/missing" });
   assertWireRoundTrip(readSchema, await debt.read());
   assertWireRoundTrip(readSchema, await missing.read());
-  assertWireRoundTrip(treeSchema, await debt.tree());
-  assertWireRoundTrip(treeSchema, await missing.tree());
   assertWireRoundTrip(updateSchema, await debt.update({ note: "updated" }));
   assertWireRoundTrip(updateSchema, await missing.update({ note: "missing" }));
   assertWireRoundTrip(listSchema, await debts.list());
@@ -114,6 +111,7 @@ test("Debt, Settings, World, region and reset schemas describe real wire results
   assertWireRoundTrip(doctorSchema, await debts.doctor());
   assertWireRoundTrip(updateSchema, await debt.update({ state: "done" }));
   assertWireRoundTrip(updateSchema, await debt.update({ state: "drop" }));
+  assertWireRoundTrip(updateSchema, await debt.update({ state: "open" }));
   assertWireRoundTrip(updateSchema, await debts.debt({ id: second.id }).update({ state: "drop" }));
   assertWireRoundTrip(regionSchema, selectRegionValue({ declarations: [], selection: { kind: "declarations" } }));
   assertWireRoundTrip(

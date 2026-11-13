@@ -1,7 +1,5 @@
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import {
-  createDebtRelations,
-  debtDescendants,
   projectDebtDetail,
   relationProblem,
   projectBlocked,
@@ -39,10 +37,8 @@ import type {
   AddDebtDocumentInput,
   AddDebtInput,
   DebtChange,
-  DebtParentReadRefusal,
   DebtMutationResult,
   DebtReadPage,
-  DebtRefusal,
   DebtRetry,
   DebtUpdateResult,
   UpdateDebtInput,
@@ -107,13 +103,10 @@ export async function addDebt(world: WorldRoot, input: AddDebtInput): Promise<De
     {
       title: input.title,
       body: input.body ?? "",
-      note: input.note ?? "",
-      state: input.state ?? "open",
+      note: "",
+      state: "open",
       priority: input.priority ?? 2,
       needs: input.needs ?? [],
-      parent: input.parent ?? null,
-      supersedes: input.supersedes ?? [],
-      relates: input.relates ?? [],
     },
     input.signal,
   );
@@ -122,63 +115,21 @@ export async function addDebtDocument(world: WorldRoot, input: AddDebtDocumentIn
   return create(world, parseDebtCreationDocument(input.markdown), input.signal);
 }
 
-function listChange(
-  current: readonly DebtId[],
-  replacement: readonly DebtId[] | undefined,
-  additions: readonly DebtId[] | undefined,
-  removals: readonly DebtId[] | undefined,
-): readonly DebtId[] {
-  const next = [...(replacement ?? current)];
-  for (const id of additions ?? []) if (!next.includes(id)) next.push(id);
-  return next.filter((id) => !(removals ?? []).includes(id));
-}
-function relatedOwner(board: DebtBoard, id: DebtId, target: DebtId): DebtId | null {
-  return board.debts.get(target)?.relates.includes(id) ? target : null;
-}
-function appendDebtBody(current: string, addition: string): string {
-  if (current.length === 0 || addition.length === 0 || current.endsWith("\n") || addition.startsWith("\n")) {
-    return current + addition;
-  }
-  return `${current}\n${addition}`;
-}
-function updateDocument(
-  board: DebtBoard,
-  current: DebtDocument,
-  input: UpdateDebtInput,
-): DebtDocument | Extract<DebtRefusal, { reason: "relation-owned-by-other" }> {
-  for (const related of input.dropRelates ?? [])
-    if (!current.relates.includes(related)) {
-      const owner = relatedOwner(board, current.id, related);
-      if (owner !== null) return { kind: "refused", reason: "relation-owned-by-other", related };
-    }
+function updateDocument(current: DebtDocument, input: UpdateDebtInput): DebtDocument {
   return {
     ...current,
     ...(input.title === undefined ? {} : { title: input.title }),
-    body:
-      input.body ?? (input.appendBody === undefined ? current.body : appendDebtBody(current.body, input.appendBody)),
+    ...(input.body === undefined ? {} : { body: input.body }),
     ...(input.note === undefined ? {} : { note: input.note }),
     ...(input.state === undefined ? {} : { state: input.state }),
     ...(input.priority === undefined ? {} : { priority: input.priority }),
-    needs: listChange(current.needs, input.needs, input.addNeeds, input.dropNeeds),
-    ...(input.parent === undefined ? {} : { parent: input.parent }),
-    supersedes: listChange(current.supersedes, input.supersedes, input.addSupersedes, input.dropSupersedes),
-    relates: listChange(current.relates, input.relates, input.addRelates, input.dropRelates),
+    ...(input.needs === undefined ? {} : { needs: input.needs }),
   };
 }
 
 function updateFieldChanges(current: DebtDocument, next: DebtDocument): readonly DebtChange[] {
   const changes: DebtChange[] = [];
-  for (const field of [
-    "title",
-    "body",
-    "note",
-    "state",
-    "priority",
-    "needs",
-    "parent",
-    "supersedes",
-    "relates",
-  ] as const) {
+  for (const field of ["title", "body", "note", "state", "priority", "needs"] as const) {
     const before = current[field];
     const after = next[field];
     if (Array.isArray(before) && Array.isArray(after) ? before.join("\0") === after.join("\0") : before === after)
@@ -195,10 +146,7 @@ export async function updateDebt(world: WorldRoot, id: DebtId, input: UpdateDebt
       const snapshot = await readBoard(world),
         current = snapshot.board.debts.get(id);
       if (current === undefined) return { kind: "refused", reason: "debt-missing" };
-      if (input.state !== undefined && input.state !== current.state && current.state !== "open")
-        return { kind: "refused", reason: "invalid-lifecycle-transition", state: current.state };
-      const candidate = updateDocument(snapshot.board, current, input);
-      if ("kind" in candidate) return candidate;
+      const candidate = updateDocument(current, input);
       const problem = relationProblem(boardWith(snapshot.board, candidate), current, candidate);
       if (problem !== null) return { kind: "refused", reason: "invalid-graph", diagnostic: problem } as const;
       const changes = nonEmptyDebtValues(updateFieldChanges(current, candidate));
@@ -245,59 +193,27 @@ export async function readDebtDetail(world: WorldRoot, id: DebtId): Promise<Debt
   const debt = await readDebtDocument(world, id);
   if (debt === undefined) return null;
   const selected = new Map<DebtId, DebtDocument>([[id, debt]]);
-  const references = [
-    ...debt.needs,
-    ...(debt.parent === null ? [] : [debt.parent]),
-    ...debt.supersedes,
-    ...debt.relates,
-  ];
-  for (const reference of references) {
+  for (const reference of debt.needs) {
     if (selected.has(reference)) continue;
     const document = await readDebtDocument(world, reference);
     if (document !== undefined) selected.set(reference, document);
   }
   return projectDebtDetail({ debts: selected }, id);
 }
-/** Select descendants from the complete graph before bounding either native view. */
-async function readDebtGraphContext(
-  input: Readonly<{
-    world: WorldRoot;
-    parent?: DebtId | undefined;
-    limit?: number | undefined;
-  }>,
-) {
-  const limit = boundedListLimit(input.limit);
-  const board = (await readBoard(input.world)).board;
-  if (input.parent !== undefined && !board.debts.has(input.parent))
-    return { kind: "refused", reason: "debt-missing" } as const;
-  return {
-    kind: "ready",
-    limit,
-    board,
-    descendants: input.parent === undefined ? undefined : debtDescendants(createDebtRelations(board), input.parent),
-  } as const;
+/** Read the complete prerequisite graph before bounding either native view. */
+async function readDebtGraphContext(world: WorldRoot, limit: number | undefined) {
+  return { limit: boundedListLimit(limit), board: (await readBoard(world)).board };
 }
-export async function readyDebts(
-  world: WorldRoot,
-  parent?: DebtId,
-  limit?: number,
-): Promise<DebtReadPage<ReadyDebtRow, DebtParentReadRefusal>> {
-  const context = await readDebtGraphContext({ world, parent, limit });
-  if (context.kind === "refused") return context;
+export async function readyDebts(world: WorldRoot, limit?: number): Promise<DebtReadPage<ReadyDebtRow>> {
+  const context = await readDebtGraphContext(world, limit);
   const rows = projectRows(context.board, "active")
-    .filter((row) => row.disposition === "ready" && (context.descendants?.has(row.id) ?? true))
+    .filter((row) => row.disposition === "ready")
     .map(({ id, title, priority }) => ({ id, title, priority }));
   return readPage(projectBoundedList(rows, context.limit));
 }
-export async function blockedDebts(
-  world: WorldRoot,
-  parent?: DebtId,
-  limit?: number,
-): Promise<DebtReadPage<BlockedDebtRow, DebtParentReadRefusal>> {
-  const context = await readDebtGraphContext({ world, parent, limit });
-  if (context.kind === "refused") return context;
-  const rows = projectBlocked(context.board).filter((row) => context.descendants?.has(row.id) ?? true);
-  return readPage(projectBoundedList(rows, context.limit));
+export async function blockedDebts(world: WorldRoot, limit?: number): Promise<DebtReadPage<BlockedDebtRow>> {
+  const context = await readDebtGraphContext(world, limit);
+  return readPage(projectBoundedList(projectBlocked(context.board), context.limit));
 }
 export async function observeDebtBoard(world: WorldRoot): Promise<readonly DebtSummary[]> {
   return projectRows((await readBoard(world)).board, "all");

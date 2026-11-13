@@ -43,15 +43,15 @@ test("real CLI shares one flat ledger across managed worktrees and nested invoca
     assert.deepEqual(listed.rows?.map(({ id }) => id), [added.id]);
   }
   const child = accepted(Keiyaku.verbs["debt.add"].output.parse(JSON.parse(execFileSync(
-    process.execPath, [cli, "-C", nested, "debt", "add", "Check shared work", "--parent", added.id, "--needs", added.id, "--json"],
+    process.execPath, [cli, "-C", nested, "debt", "add", "Check shared work", "--needs", added.id, "--json"],
     { env: environment, encoding: "utf8" },
   ))));
-  const tree = Keiyaku.verbs.show.output.parse(JSON.parse(execFileSync(
-    process.execPath, [cli, "-C", worktree, "show", added.id, "--json"],
+  const waiting = Keiyaku.verbs.show.output.parse(JSON.parse(execFileSync(
+    process.execPath, [cli, "-C", worktree, "show", child.id, "--json"],
     { env: environment, encoding: "utf8" },
   )));
-  assert.ok(tree.kind === "debt-complete");
-  assert.deepEqual(tree.items[0]!.children?.map(({ id }) => id), [child.id]);
+  assert.ok(waiting.kind === "debt-complete" && waiting.items[0]?.kind === "found");
+  assert.deepEqual(waiting.items[0].needs, [{ id: added.id, state: "open" }]);
   const update = Keiyaku.verbs["debt.update"].output.parse(JSON.parse(execFileSync(
     process.execPath, [cli, "-C", repository.path, "debt", "update", added.id, "--state", "done", "--note", "finished", "--json"],
     { env: environment, encoding: "utf8" },

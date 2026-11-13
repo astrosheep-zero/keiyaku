@@ -33,8 +33,8 @@ function value(command: ParsedDebtCommand, name: string): string | undefined {
   return typeof item === "string" ? item : undefined;
 }
 function values(command: ParsedDebtCommand, name: string): readonly DebtId[] | undefined {
-  const item = command.flags[name];
-  return Array.isArray(item) ? (item as readonly DebtId[]) : undefined;
+  const item = value(command, name);
+  return item === undefined ? undefined : item === "" ? [] : (item.split(",") as readonly DebtId[]);
 }
 function optional<K extends string, T>(key: K, val: T | undefined): { [P in K]?: T } {
   return val === undefined ? {} : ({ [key]: val } as { [P in K]: T });
@@ -48,16 +48,11 @@ async function addDebt(
   const input = {
     title: command.positionals[0]!,
     ...optional("body", value(command, "body")),
-    ...optional("note", value(command, "note")),
-    ...optional("state", value(command, "state") as DebtState | undefined),
     ...optional(
       "priority",
       value(command, "priority") === undefined ? undefined : (Number(value(command, "priority")) as DebtPriority),
     ),
     ...optional("needs", values(command, "needs")),
-    ...optional("parent", value(command, "parent") as DebtId | undefined),
-    ...optional("supersedes", values(command, "supersedes")),
-    ...optional("relates", values(command, "relates")),
   };
   return execute("debt.add", input, command, runtime);
 }
@@ -71,40 +66,21 @@ async function updateDebt(
     id: command.positionals[0]!,
     ...optional("title", value(command, "title")),
     ...optional("body", command.stdin === "body" ? stdin : value(command, "body")),
-    ...optional("appendBody", command.stdin === "append" ? stdin : value(command, "append")),
-    ...optional("note", command.stdin === "note" ? stdin : value(command, "note")),
+    ...optional("note", value(command, "note")),
     ...optional("state", value(command, "state") as DebtState | undefined),
     ...optional(
       "priority",
       value(command, "priority") === undefined ? undefined : (Number(value(command, "priority")) as DebtPriority),
     ),
-    ...optional("addNeeds", values(command, "needs")),
-    ...optional("dropNeeds", values(command, "drop-needs")),
-    ...optional(
-      "parent",
-      command.flags["no-parent"] === true ? null : (value(command, "parent") as DebtId | undefined),
-    ),
-    ...optional("addSupersedes", values(command, "supersedes")),
-    ...optional("dropSupersedes", values(command, "drop-supersedes")),
-    ...optional("addRelates", values(command, "relates")),
-    ...optional("dropRelates", values(command, "drop-relates")),
+    ...optional("needs", values(command, "needs")),
   };
   return execute("debt.update", input, command, runtime);
 }
 
 export async function runDebtCommand(command: ParsedDebtCommand, runtime: CliRuntime): Promise<CliOutcome> {
-  const diagnostic =
-    command.stdin === "document"
-      ? "debt add requires a nonblank stdin document"
-      : command.stdin === "body"
-        ? "debt update --body requires a nonblank value"
-        : command.stdin === "append"
-          ? "debt update --append requires a nonblank value"
-          : command.stdin === "note"
-            ? "debt update --note requires a nonblank value"
-            : undefined;
-  const stdin = diagnostic === undefined ? undefined : await runtime.readStdin();
-  if (diagnostic !== undefined && isBlankInput(stdin ?? "")) throw new CliUsageError(diagnostic);
+  const stdin = command.stdin === undefined ? undefined : await runtime.readStdin();
+  if (command.stdin === "document" && isBlankInput(stdin ?? ""))
+    throw new CliUsageError("debt add requires a nonblank stdin document");
   switch (command.action) {
     case "add":
       return addDebt(command, runtime, stdin);

@@ -6,7 +6,7 @@ description: >-
 
 # Keiyaku Debt
 
-A `Debt` records confirmed unresolved work and its relationships (`open`, `done`,
+A `Debt` records confirmed unresolved work and its prerequisites (`open`, `done`,
 `drop`). Unlike a `kei`, a `Debt` does not require a closed design — use it to
 capture a confirmed problem or prerequisite that must outlive the current
 conversation, while keeping transient scratch plans in session notes.
@@ -26,13 +26,15 @@ Only `needs` orders work: a `Debt` with unresolved `needs` is `blocked`, and
 becomes `ready` once every prerequisite is `done` or `drop`. Do not add `needs`
 merely because two `Debts` touch the same `Region` or are related.
 
-- `needs`: prerequisite that must become terminal first.
-- `parent`: decomposition grouping (does not block).
-- `supersedes`: earlier `Debt` replaced by this one.
-- `relates`: non-blocking link.
+`show` displays current prerequisites and their availability. Native readiness
+and blocked views interpret unresolved `needs`. Creation starts open; use update
+to set disposition or its current explanation. Every state may be reopened or
+changed to another state. Reopening a prerequisite blocks open dependents again.
 
-`show` displays outbound relations declared on that `Debt`; use `tree` to inspect
-decomposition. Native readiness and blocked views interpret unresolved `needs`.
+Updates replace supplied values completely; omission preserves them. Pass one
+comma-separated `--needs` value to replace prerequisites. `--needs ""`,
+`--body ""`, and `--note ""` clear those fields; `--body -` accepts replacement
+stdin, including an empty stream. The explanation is current context, not history.
 
 ## 3. World Ledger And `Contract` Settlement
 
@@ -41,4 +43,5 @@ decomposition. Native readiness and blocked views interpret unresolved `needs`.
   flat `debt/<id>` identity. A managed worktree shares its repository's ledger.
 - **`Contract` settlement:** associating a `Debt` when binding a `kei` holds that
   `Debt`; accepting the `kei` marks it `done`, while abandoning the `kei`
-  releases it back to `open`.
+  releases its association without changing the Debt's disposition. A released
+  association is not restored when the Debt is explicitly reopened.

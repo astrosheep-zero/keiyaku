@@ -36,7 +36,10 @@ Debt refusal, concurrent Debt movement, or failed holder publication is visible
 lag; the holder remains when release did not publish and a later replay
 re-evaluates it. A terminal Contract without its matching held holder is
 strictly inert: it does not create, repair, or inspect unrelated Debt, World, or
-context state.
+context state. Explicitly reopening a Debt does not restore a released holder or
+reverse Contract acceptance. A still-held matching accepted holder continues to
+owe replay even if the Debt was reopened; Settlement still refuses to complete
+dropped work.
 
 Only explicit current DebtHolder facts establish Contract-to-Debt association.
 Contract names and identity spelling carry no association authority. Settlement

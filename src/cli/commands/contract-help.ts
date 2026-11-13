@@ -207,7 +207,7 @@ export const CONTRACT_COMMAND_SPECS = {
     stdin: "none",
     flags: { json: "boolean" },
     usage: "show [<contract>|@name] [--repo <path>]\nshow <debt/...>",
-    purpose: "Read one Contract's guidance or one Debt and its relationships.",
+    purpose: "Read one Contract's guidance or one Debt and its prerequisites.",
     details: [
       "Accepts a complete Contract identity, exact @name short selector, or one complete Debt identity.",
       "Omitted selection uses the exact managed worktree's installed Contract context.",

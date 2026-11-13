@@ -10,8 +10,7 @@ async function native(world: import("@astrosheep/keiyaku").WorldRoot) {
   const debt = debts.debt({ id: "debt/example" });
   const batch: DebtShowResult = await debts.read({ ids: [debt.id, "debt/peer"] });
   await debt.read();
-  await debt.tree();
-  await debt.update({ note: "replacement" });
+  await debt.update({ note: "replacement", state: "open" });
   return batch;
 }
 function firstFound(items: readonly DebtShowItem[]): DebtDetail | undefined {

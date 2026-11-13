@@ -51,23 +51,24 @@ Terminal Debts release their dependents. Readiness means an open Debt has no
 unfinished prerequisites; blocked views show open work waiting on at least one
 unfinished prerequisite.
 
-An addressed update owns both ordinary fact changes and explicit lifecycle
-judgment as one indivisible Debt mutation. Omitted state preserves disposition;
-repeating the current state is unchanged. Open work may become terminal, while
-a terminal Debt cannot move to another state. Other facts retain their ordinary
-edit legality even on terminal work. A refused transition or relationship leaves
-the whole requested change unwritten. Settlement retains its internal,
-idempotent completion judgment; there is no public terminal batch operation.
+Creation records open work with an empty current explanation. An addressed update
+owns ordinary facts and explicit disposition as one indivisible Debt mutation.
+Every explicit transition among open, done, and dropped is legal, including
+reopening and changing between terminal dispositions. Omission preserves a fact;
+replacement supplies its complete current value, and an empty body, explanation,
+or prerequisite selection clears it. Repeating current facts leaves authority
+and its timestamp unchanged. Invalid requested facts leave the entire mutation
+unwritten. Explanations describe the current situation rather than a history.
+Settlement retains its internal idempotent completion judgment; there is no
+public terminal batch operation.
 
-Debt owns dependency, parentage, supersession, and related-work relationships.
-They name complete Debt identities and retain their declared order. Newly
-declared missing targets and self relations are refused; duplicate entries in
-relationship input are invalid. Illegal terminal transitions and corrupted
-authority cannot be admitted. Cycles may be written: diagnostic views report
-cycle components, and relationship trees mark cycles without recursing forever.
-An unchanged update leaves authority and its timestamp unchanged. Debt does
-not invent a relationship from a directory, a Contract, a caller, or a Git
-branch.
+Debt owns prerequisite dependencies only. They name complete Debt identities
+and retain their declared order. Newly declared missing targets, self dependencies,
+and duplicate input entries are refused. Cycles may be written and diagnosis
+reports their components. Reopening a prerequisite blocks open dependents on
+fresh observation without writing those dependents, changing closed dependents,
+or reversing an accepted Contract. Debt does not invent a dependency from a
+directory, a Contract, a caller, or a Git branch.
 
 Debt retains no creator attribution and does not infer authorship from its
 caller. Persistence reads interpret known content and ignore unknown content;
@@ -86,16 +87,12 @@ work or all work. Lifecycle selection precedes the bound, and rows
 are ordered by priority and then canonical identity. Debt offers native listing
 and graph views without an expression language or caller-selected sorting.
 Catalogues summarize current work rather than repeat
-its full document, activity testimony, or decomposition. Native singular reads
-retain resolved Debt-owned outbound relations.
-Complete invocation detail additionally retains cycle-safe child decomposition
-from one board snapshot; unavailable relationship endpoints remain explicit.
-Batch reads distinguish complete, partial and
-missing selection while preserving readable peers and the identity of each
-missing member. Blocked views identify every unresolved
-prerequisite and distinguish missing endpoints. Reverse relations are derived
-only by named board projections. Debt's board, readiness, blocked, tree, and
-diagnostic views are read-only interpretations of current Debt authority. Growing row catalogues
+its full document or activity testimony. Native singular reads retain resolved
+prerequisites; unavailable endpoints remain explicit. Batch reads distinguish
+complete, partial and missing selection while preserving readable peers and the
+identity of each missing member. Blocked views identify every unresolved
+prerequisite and distinguish missing endpoints. Debt's board, readiness, blocked,
+and diagnostic views are read-only interpretations of current Debt authority. Growing row catalogues
 are bounded observations: they retain the selected rows and whether the same
 observation establishes another matching row, without becoming a traversal or
 counting interface. Recent package catalogue order remains canonical Debt

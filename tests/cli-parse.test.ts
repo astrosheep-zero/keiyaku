@@ -547,15 +547,13 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     [["debt", "add"], /debt add requires either TITLE or '-' input/],
     [["debt", "add", "Title", "-"], /debt add requires either TITLE or '-' input/],
     [["debt", "add", "  "], /debt add requires a nonblank value/],
-    [["debt", "add", "Title", "--body", ""], /--body requires a nonblank value/],
-    [["debt", "add", "Title", "--note", "\t"], /--note requires a nonblank value/],
+    [["debt", "add", "Title", "--note", "\t"], /option --note is not valid for debt add/],
     [["debt", "update", "debt/a", "--title", " "], /--title requires a nonblank value/],
-    [["debt", "update", "debt/a", "--state", "done", "--note", ""], /--note requires a nonblank value/],
     [["bind", "--after", "   ", "-"], /--after requires a nonblank value/],
     [["bind", "--after", "kei/one", "--after", " ", "-"], /--after requires a nonblank value/],
     [["spawn", "worker", "--contract", " ", "prompt"], /--contract requires a nonblank value/],
     [["show", " "], /show requires a nonblank value/],
-    [["debt", "add", "Title", "--needs", "debt/a", "--needs", "\t"], /--needs requires a nonblank value/],
+    [["debt", "add", "Title", "--needs", "debt/a", "--needs", "\t"], /duplicate option: --needs/],
     [["wait", "aku/claude/1234abcd", " "], /wait requires a nonblank value/],
     [["region", "--path", "  "], /--path requires a nonblank value/],
     [["region", "--overlap"], /option --overlap is not valid for region/],
@@ -583,6 +581,20 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
     output: "text",
     positionals: ["--urgent debt"],
     flags: {},
+  });
+  assert.deepEqual(command(["debt", "add", "Title", "--body", "", "--needs", "debt/a,debt/b"]), {
+    command: "debt",
+    action: "add",
+    output: "text",
+    positionals: ["Title"],
+    flags: { body: "", needs: "debt/a,debt/b" },
+  });
+  assert.deepEqual(command(["debt", "update", "debt/a", "--state", "done", "--note", ""]), {
+    command: "debt",
+    action: "update",
+    output: "text",
+    positionals: ["debt/a"],
+    flags: { state: "done", note: "" },
   });
   assert.deepEqual(command(["spawn", "worker", "--", "--workdir"]), {
     name: "spawn",

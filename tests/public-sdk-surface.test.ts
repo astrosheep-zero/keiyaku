@@ -343,10 +343,10 @@ import { Kei, Keis, Keiyaku, AkumaHost, Akumas, Kanshi, Settings, KeiyakuError,
   type Repo, type WorldRoot, type AddDebtDocumentInput, type AddDebtInput, type BlockedDebtList,
   type BlockedDebtRow, type Debt, type DebtAbsent, type DebtCatalogue, type DebtChange, type DebtDetail,
   type DebtDoctorIssue, type DebtDoctorReport, type DebtId, type DebtList, type DebtMutationResult,
-  type DebtParentReadRefusal, type DebtPriority, type DebtReadPage, type DebtReadResult,
+  type DebtPriority, type DebtReadPage, type DebtReadResult,
   type DebtReadyList, type DebtRef, type DebtRefusal, type DebtRetry, type DebtShowItem,
-  type DebtShowResult, type DebtState, type DebtSummary, type DebtTreeNode, type DebtTreeResult,
-  type DebtTreeRoot, type DebtUpdateResult, type DebtWarning, type ReadyDebtRow, type UpdateDebtInput
+  type DebtShowResult, type DebtState, type DebtSummary,
+  type DebtUpdateResult, type DebtWarning, type ReadyDebtRow, type UpdateDebtInput
 } from "@astrosheep/keiyaku";
 declare const repo: Repo;
 declare const world: WorldRoot;

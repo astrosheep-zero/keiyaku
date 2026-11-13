@@ -8,7 +8,6 @@ import type {
   DebtRef,
   DebtRefusal,
   DebtShowResult,
-  DebtTreeNode,
   DebtUpdateResult,
   DebtWarning,
 } from "../../debt/index.js";
@@ -58,9 +57,6 @@ function entityLines(entity: DebtEntity, columns: number, indent = ""): readonly
 function projectRefusal(refusal: DebtRefusal): RefusalProjection {
   const diagnostic = refusal.reason.replaceAll("-", " ");
   if (refusal.reason === "debt-missing") return { diagnostic };
-  if (refusal.reason === "invalid-lifecycle-transition")
-    return { diagnostic, facts: [`state  ${dispositionText(refusal.state)}`] };
-  if (refusal.reason === "relation-owned-by-other") return { diagnostic, facts: [`related debt  ${refusal.related}`] };
   return { diagnostic, facts: [`detail  ${refusal.diagnostic}`] };
 }
 
@@ -111,10 +107,6 @@ function renderShowDetail(id: string, debt: Extract<DebtShowItem, { kind: "found
     `  updated  ${textTimestamp(debt.updatedAt)}`,
   ];
   for (const need of debt.needs ?? []) lines.push(edge("needs", need));
-  if (debt.parent !== undefined) lines.push(edge("parent", debt.parent));
-  for (const item of debt.supersedes ?? []) lines.push(edge("supersedes", item));
-  for (const item of debt.relates ?? []) lines.push(edge("relates", item));
-  for (const child of debt.children ?? []) lines.push(...treeLines(child, columns));
   for (const label of ["note", "body"] as const) {
     const payload = debt[label];
     if (payload !== undefined)
@@ -136,19 +128,6 @@ export function renderDebtShow(
         : refusalLines("show", ["reason  debt missing", `debt  ${item.id}`], context.columns).join("\n"),
     )
     .join("\n\n");
-}
-
-function treeLines(node: DebtTreeNode, columns: number, depth = 1): readonly string[] {
-  const indent = "  ".repeat(depth);
-  if (node.kind === "cycle") return [`${indent}! ${node.id} · cycle`];
-  return [
-    ...entityLines(
-      { id: node.id, priority: node.priority, mark: debtMark(node.state), word: node.state, title: node.title },
-      columns,
-      indent,
-    ),
-    ...(node.children ?? []).flatMap((child) => treeLines(child, columns, depth + 1)),
-  ];
 }
 
 function doctorIssue(issue: DebtDoctorIssue): string {

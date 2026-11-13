@@ -119,9 +119,6 @@ function debtCatalogDocument(id: DebtId, updatedAt: string): DebtDocument {
     state: "open",
     priority: 2,
     needs: [],
-    parent: null,
-    supersedes: [],
-    relates: [],
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt,
   };

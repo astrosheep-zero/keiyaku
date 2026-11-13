@@ -502,32 +502,39 @@ test("Debt receipts name identity, preserve exact content, and report field chan
   assert.equal(renderDebtShow({ kind: "absent" }), "debt world absent");
 });
 
-test("Debt show and doctor render their native relationship facts", () => {
-  const tree = renderDebtShow(
+test("Debt show and doctor render native prerequisite facts", () => {
+  const shown = renderDebtShow(
     {
-      kind: "debt-complete", items: [{ kind: "found", id: "debt/root", ...debtDetail({ title: "Root" }),
-        children: [
-          { kind: "node", id: "debt/child", title: "Child", state: "drop", priority: 1 },
-          { kind: "cycle", id: "debt/loop" },
-        ],
+      kind: "debt-complete", items: [{
+        kind: "found",
+        id: "debt/root",
+        ...debtDetail({
+          title: "Root",
+          needs: [
+            { id: "debt/child", state: "drop" },
+            { id: "debt/gone", state: "missing" },
+          ],
+        }),
       }],
     },
     { columns: 120, color: false },
   );
-  assert.match(tree, /^○ debt\/root · open · P2 — Root$/mu);
-  assert.match(tree, /^ {2}× debt\/child · dropped · P1 — Child$/mu);
-  assert.match(tree, /^ {2}! debt\/loop · cycle$/mu);
+  assert.match(shown, /^○ debt\/root · open · P2 — Root$/mu);
+  assert.match(shown, /^ {2}needs debt\/child · dropped$/mu);
+  assert.match(shown, /^ {2}needs debt\/gone · missing$/mu);
   assert.equal(renderDoctor({ kind: "present" }), "✓ doctor  healthy");
   const issues = renderDoctor({
     kind: "present",
     issues: [
       { kind: "missing-target", debtId: "debt/a", relation: "needs", target: "debt/b" },
-      { kind: "self-relation", debtId: "debt/a", relation: "parent" },
+      { kind: "self-relation", debtId: "debt/a", relation: "needs" },
+      { kind: "cycle", relation: "needs", debts: ["debt/a", "debt/c"] },
     ],
   });
-  assert.match(issues, /^! doctor  2 issues$/mu);
+  assert.match(issues, /^! doctor  3 issues$/mu);
   assert.match(issues, /^! missing-target debt\/a needs debt\/b$/mu);
-  assert.match(issues, /^! self-relation debt\/a parent$/mu);
+  assert.match(issues, /^! self-relation debt\/a needs$/mu);
+  assert.match(issues, /^! cycle needs debt\/a debt\/c$/mu);
   assert.equal(renderDoctor({ kind: "absent" }), "debt world absent");
 });
 

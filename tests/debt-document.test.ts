@@ -39,8 +39,11 @@ test("debt physical local-ID budget fits authority and lock components", () => {
 
 test("Debt persistence reads ignore unknown keys while known fields and creation stay validated", () => {
   const coordinate = "debt/authored";
+  const created = parseDebtCreationDocument("---\ntitle: Authored\n---\n");
+  assert.equal(created.state, "open");
+  assert.equal(created.note, "");
   const document = {
-    ...parseDebtCreationDocument("---\ntitle: Authored\n---\n"),
+    ...created,
     id: canonicalDebtId(coordinate),
     createdAt: "2026-08-07T01:02:03.004Z",
     updatedAt: "2026-08-07T02:03:04.005Z",
@@ -59,16 +62,17 @@ test("Debt persistence reads ignore unknown keys while known fields and creation
     () => parseDebtDocument(Buffer.from(extended.toString().replace("priority: 2", "priority: invalid")), coordinate),
     /debt priority/u,
   );
-  assert.throws(
-    () => parseDebtCreationDocument("---\ntitle: New\nfutureMetadata: opaque\n---\n"),
-    /unknown debt front matter key: futureMetadata/u,
-  );
+  for (const closed of ["state: done", "note: closed on creation"])
+    assert.throws(
+      () => parseDebtCreationDocument(`---\ntitle: New\n${closed}\n---\n`),
+      /unknown debt front matter key/u,
+    );
 });
 
 test("Debt authority follows its path and creation stays closed", () => {
   const coordinate = "debt/expected";
   const bytes = Buffer.from(
-    "---\nid: debt/other\ntitle: Wrong\nstate: open\npriority: 2\nneeds: []\nparent: null\nsupersedes: []\nrelates: []\nnote: ''\ncreatedAt: 2026-08-07T01:02:03.004Z\nupdatedAt: 2026-08-07T01:02:03.004Z\n---\n",
+    "---\nid: debt/other\ntitle: Wrong\nstate: open\npriority: 2\nneeds: []\nnote: ''\ncreatedAt: 2026-08-07T01:02:03.004Z\nupdatedAt: 2026-08-07T01:02:03.004Z\n---\n",
   );
   assert.throws(() => parseDebtDocument(bytes, coordinate), DebtAuthorityCorruptionError);
   assert.throws(

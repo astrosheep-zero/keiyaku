@@ -10,7 +10,7 @@ import { canonicalDebtId } from "../../debt/identity.js";
 
 export type DebtAction = "add" | "doctor" | "update";
 type DebtFlagValue = string | true | readonly string[];
-type DebtStdin = "document" | "body" | "append" | "note";
+type DebtStdin = "document" | "body";
 
 export type ParsedDebtCommand = Readonly<{
   command: "debt";
@@ -37,25 +37,15 @@ const DEBT_COMMAND_SPECS: Readonly<Record<DebtAction, DebtCommandSpec>> = {
     stdin: "document",
     flags: {
       ...COMMON,
-      state: "value",
       priority: "value",
-      needs: "repeat",
-      parent: "value",
-      supersedes: "repeat",
-      relates: "repeat",
-      body: "value",
-      note: "value",
+      needs: "raw-value",
+      body: "raw-value",
     },
-    usage: `debt add <TITLE> [--priority 0..3]
-  [--state open|done|drop]
-  [--note <text>]
-  [--needs <debt/...>]... [--parent <debt/...>]
-  [--supersedes <debt/...>]... [--relates <debt/...>]...
-  [--body <text>]
+    usage: `debt add <TITLE> [--priority 0..3] [--needs <debt/...,debt/...>] [--body <text>]
 debt add -`,
-    purpose: "Create a Debt from flags or a Debt document on stdin.",
+    purpose: "Create open work from flags or a Debt document on stdin.",
     details:
-      "The stdin document is YAML front matter (title, state, priority, needs, parent, supersedes, relates, note) followed by a Markdown body.",
+      "The stdin document is YAML front matter (title, priority, needs) followed by a Markdown body. --needs takes one comma-separated value.",
   },
   doctor: {
     arity: [0, 0],
@@ -68,30 +58,20 @@ debt add -`,
     flags: {
       ...COMMON,
       title: "value",
-      body: "value",
-      append: "value",
-      note: "value",
+      body: "raw-value",
+      note: "raw-value",
       state: "value",
       priority: "value",
-      needs: "repeat",
-      "drop-needs": "repeat",
-      parent: "value",
-      "no-parent": "boolean",
-      supersedes: "repeat",
-      "drop-supersedes": "repeat",
-      relates: "repeat",
-      "drop-relates": "repeat",
+      needs: "raw-value",
     },
-    usage: `debt update <debt/...> [--title <text>] [--body <text>|- | --append <text>]
+    usage: `debt update <debt/...> [--title <text>] [--body <text>|-]
   [--note <text>] [--state open|done|drop]
-  [--priority 0..3] [--needs <debt/...>]... [--drop-needs <debt/...>]...
-  [--parent <debt/...> | --no-parent]
-  [--supersedes <debt/...>]... [--drop-supersedes <debt/...>]...
-  [--relates <debt/...>]... [--drop-relates <debt/...>]...`,
-    purpose: "Change a Debt's fields, relationships, and state.",
+  [--priority 0..3] [--needs <debt/...,debt/...>]`,
+    purpose: "Replace a Debt's fields or change its disposition, including reopening.",
     details: [
-      "--body replaces the body; --append adds text after it, separated by a newline when needed.",
-      "--body - reads replacement body text from stdin.",
+      "Omitted fields are preserved. --needs replaces prerequisites with one comma-separated value.",
+      '--body "", --note "", and --needs "" clear their fields.',
+      "--body - reads replacement text from stdin, including an empty stream.",
     ].join("\n"),
   },
 };
@@ -153,10 +133,7 @@ function scanSpec(action: DebtAction, spec: DebtCommandSpec): ScanSpec<DebtStdin
 
 function validateUpdate(scanned: ScannedDebt, fail: (message: string) => never): void {
   const flags = scanned.flags;
-  if (flags.body !== undefined && flags.append !== undefined) fail("--body and --append are mutually exclusive");
-  if (flags.parent !== undefined && flags["no-parent"] === true)
-    fail("--parent and --no-parent are mutually exclusive");
-  if (Object.keys(flags).every((name) => name === "json")) fail("debt update requires at least one patch option");
+  if (Object.keys(flags).every((name) => name === "json")) fail("debt update requires at least one update option");
 }
 
 /** Actions whose positionals are all addressed DebtIds validated by the native owner. */

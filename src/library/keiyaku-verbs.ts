@@ -3,7 +3,7 @@ import { z } from "zod";
 export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
 import { durationSchema } from "../akuma/call-input.js";
 import { parseDuration } from "../duration.js";
-import { addDebtInputSchema, updateDebtInputSchemas } from "../debt/input.js";
+import { addDebtInputSchema, updateDebtInputSchema } from "../debt/input.js";
 import { amendInputSchemas } from "./input.js";
 import { askProgressSchema } from "../akuma/akuma-selection-execution.js";
 import { akumaReportResultSchema } from "../akuma/akuma-instance.js";
@@ -327,7 +327,7 @@ export const verbs = Object.freeze({
   },
   show: {
     description:
-      "Read a Contract in full: terms, current chapter, and working instructions. Or read one Debt in full with its links. Omit id to read the Contract whose worktree you stand in.",
+      "Read a Contract in full: terms, current chapter, and working instructions. Or read one Debt in full with its prerequisites. Omit id to read the Contract whose worktree you stand in.",
     input: z
       .strictObject({
         id: text
@@ -645,7 +645,7 @@ export const verbs = Object.freeze({
   },
   "debt.add": {
     description:
-      "Record a Debt: a confirmed problem or unfinished work still owed, with optional priority and links to other Debts. Returns its debt/... id.",
+      "Record open work still owed, with optional body, priority and prerequisite needs. Returns its debt/... id.",
     input: addDebtInputSchema.readonly(),
     output: debtMutationResultSchema,
     normal: debtMutationNormalResultSchema,
@@ -659,17 +659,15 @@ export const verbs = Object.freeze({
   },
   "debt.update": {
     description:
-      "Settle a Debt as done or dropped, or edit its text, priority, or links. Settling is final. body replaces the text, appendBody adds to it; never both.",
-    input: z.union(
-      updateDebtInputSchemas.map((branch) =>
-        branch.safeExtend({ id: debtIdSchema.describe("Target Debt ID (debt/<slug>-<hex>).") }).readonly(),
-      ),
-    ),
+      "Replace a Debt's text, priority or prerequisites, or set its disposition to open, done or drop. Any state may be reopened or changed; omitted fields are preserved and empty body, note or needs clears them.",
+    input: updateDebtInputSchema
+      .safeExtend({ id: debtIdSchema.describe("Target Debt ID (debt/<slug>-<hex>).") })
+      .readonly(),
     output: debtUpdateResultSchema,
     effect: "write",
   },
   "debt.doctor": {
-    description: "Diagnose Debt authority and relations.",
+    description: "Diagnose Debt authority and prerequisites.",
     input: z.strictObject({}).readonly(),
     output: z.union([debtDoctorReportSchema, debtAbsentSchema]),
     effect: "read",

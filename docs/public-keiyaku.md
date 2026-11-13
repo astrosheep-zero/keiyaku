@@ -73,8 +73,8 @@ World-only Debt mutations and Akuma progress reports do not accept repository
 selection at the standalone transport edge.
 Every Debt catalogue covers that World's flat ledger. Creation alone
 establishes a missing World.
-Debt reads retain native absence and refusal distinctions; listing defaults to
-open work.
+Debt reads retain native absence and refusal distinctions, including prerequisite
+availability in complete detail; listing defaults to open work.
 
 Each list and addressed status operation selects one producing owner before
 observation. The independent selector-free Kanshi read owns the World report;

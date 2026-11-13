@@ -16,9 +16,6 @@ export const debtDocumentSchema = z
     state: debtStateSchema,
     priority: debtPrioritySchema,
     needs: z.array(debtIdSchema).readonly(),
-    parent: debtIdSchema.nullable(),
-    supersedes: z.array(debtIdSchema).readonly(),
-    relates: z.array(debtIdSchema).readonly(),
     note: z.string(),
     createdAt: z.string(),
     updatedAt: z.string(),
@@ -39,29 +36,8 @@ export class DebtAuthorityCorruptionError extends KeiyakuError {
 }
 
 const STATES = new Set<DebtState>(["open", "done", "drop"]);
-const REQUIRED_STORED_KEYS = [
-  "id",
-  "title",
-  "state",
-  "priority",
-  "needs",
-  "parent",
-  "supersedes",
-  "relates",
-  "note",
-  "createdAt",
-  "updatedAt",
-] as const;
-const CREATION_KEYS: readonly string[] = [
-  "title",
-  "state",
-  "priority",
-  "needs",
-  "parent",
-  "supersedes",
-  "relates",
-  "note",
-];
+const REQUIRED_STORED_KEYS = ["id", "title", "state", "priority", "needs", "note", "createdAt", "updatedAt"] as const;
+const CREATION_KEYS: readonly string[] = ["title", "priority", "needs"];
 
 function frontMatter(
   markdown: string,
@@ -120,9 +96,6 @@ function debtIds(value: unknown, field: string, fail: (message: string) => never
   if (new Set(ids).size !== ids.length) fail(`${field} must not contain duplicates`);
   return ids;
 }
-function nullableDebtId(value: unknown, field: string, fail: (message: string) => never): DebtId | null {
-  return value === null ? null : debtId(value, field, fail);
-}
 function fields(
   value: Record<string, unknown>,
   body: string,
@@ -132,9 +105,6 @@ function fields(
     title: title(value.title, fail),
     priority: priority(value.priority, fail),
     needs: debtIds(value.needs, "needs", fail),
-    parent: nullableDebtId(value.parent, "parent", fail),
-    supersedes: debtIds(value.supersedes, "supersedes", fail),
-    relates: debtIds(value.relates, "relates", fail),
     note: typeof value.note === "string" ? value.note : fail("note must be a string"),
     body,
   };
@@ -167,16 +137,7 @@ export function parseDebtCreationDocument(markdown: string): DebtCreationDocumen
   const { value, body } = frontMatter(markdown, fail);
   for (const key of Object.keys(value)) if (!CREATION_KEYS.includes(key)) fail(`unknown debt front matter key: ${key}`);
   requireKeys(value, ["title"], fail);
-  const complete = {
-    state: "open",
-    priority: 2,
-    needs: [],
-    parent: null,
-    supersedes: [],
-    relates: [],
-    note: "",
-    ...value,
-  };
+  const complete = { state: "open", priority: 2, needs: [], note: "", ...value };
   return { state: state(complete.state, fail), ...fields(complete, body, fail) };
 }
 
@@ -187,9 +148,6 @@ export function serializeDebtDocument(document: DebtDocument): Uint8Array {
     state: document.state,
     priority: document.priority,
     needs: [...document.needs],
-    parent: document.parent,
-    supersedes: [...document.supersedes],
-    relates: [...document.relates],
     note: document.note,
     createdAt: document.createdAt,
     updatedAt: document.updatedAt,

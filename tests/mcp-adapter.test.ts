@@ -206,8 +206,7 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["history", { selector: "@worker", last: true, limit: 1 }],
     ["history", { selector: "@worker", before: 2, since: 1 }],
     ["debt.update", { id: "debt/example" }],
-    ["debt.update", { id: "debt/example", appendBody: "", addNeeds: [] }],
-    ["debt.update", { id: "debt/example", body: "replace", appendBody: "append" }],
+    ["debt.update", { id: "debt/example", state: "paused" }],
     ["debt.add", { title: " \n" }],
     ["amend", { contract: "kei/example" }],
     ["whoami", { input: {} }],
@@ -257,6 +256,12 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     "bind", "wait", "status", "ls",
     "verify", "spawn", "fork", "debt_add", "ask",
   ]);
+  const publishedProperties = (name: string): readonly string[] =>
+    Object.keys((tools.find((tool) => tool.name === name)!.inputSchema.properties ?? {}) as Record<string, unknown>).sort();
+  assert.deepEqual(publishedProperties("debt_add"), ["body", "cwd", "needs", "priority", "title"]);
+  assert.deepEqual(publishedProperties("debt_update"), [
+    "body", "cwd", "id", "needs", "note", "priority", "state", "title",
+  ]);
   let unknown: McpError | undefined;
   await assert.rejects(
     () => client.callTool({ name: "no-such-tool", arguments: {} }),
@@ -282,7 +287,6 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     for (const keyword of ["anyOf", "oneOf", "allOf"]) assert.equal(tool.inputSchema[keyword], undefined, tool.name);
     const properties = tool.inputSchema.properties as Record<string, { anyOf?: unknown }>;
     for (const [key, schema] of Object.entries(properties)) {
-      if ((tool.name === "debt_add" || tool.name === "debt_update") && key === "parent") continue;
       assert.equal(schema.anyOf, undefined, `${tool.name}.${key}`);
     }
     new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.inputSchema)));
@@ -339,13 +343,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.match(id, /^debt\/fix-the-roof-[0-9a-f]{4}$/u);
   assert.ok(existsSync(join(cwd, ".keiyaku", "debts", `${id.slice(5)}.md`)));
   const childResult = await client.callTool({
-    name: "debt_add", arguments: { title: "Check the repair", parent: id, needs: [id] },
+    name: "debt_add", arguments: { title: "Check the repair", needs: [id] },
   });
   assert.equal(childResult.isError, false);
   const child = accepted(Keiyaku.verbs["debt.add"].output.parse(childResult.structuredContent)).id;
-  const tree = await client.callTool({ name: "show", arguments: { id } });
-  assert.equal(tree.isError, false);
-  assert.match(JSON.stringify(tree.content), /Check the repair/u);
   const shown = await client.callTool({ name: "show", arguments: { id: child } });
   assert.equal(shown.isError, false);
   assert.equal(shown.structuredContent, undefined);
@@ -354,17 +355,42 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(list.isError, false);
   assert.match(JSON.stringify(list.structuredContent), /Fix the roof/);
 
-  const done = await client.callTool({ name: "debt_update", arguments: { id, state: "done", note: "finished" } });
+  const done = await client.callTool({
+    name: "debt_update",
+    arguments: { id, state: "done", note: "finished", body: "repair notes" },
+  });
   assert.equal(done.isError, false);
   assert.equal(done.structuredContent, undefined);
   const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { id });
   assert.ok(completed.kind === "debt-complete" && completed.items[0]?.kind === "found");
   assert.equal(completed.items[0].state, "done");
   assert.equal(completed.items[0].note, "finished");
+  assert.equal(completed.items[0].body, "repair notes");
   const unblocked = await client.callTool({ name: "ls", arguments: { selector: "debt/" } });
   assert.equal(unblocked.isError, false);
   assert.deepEqual(unblocked.structuredContent, {
     kind: "debt-catalogue", rows: [{ id: child, title: "Check the repair", priority: 2, disposition: "ready" }],
+  });
+  const reopened = await client.callTool({
+    name: "debt_update",
+    arguments: { id, state: "open", body: "", note: "", needs: [] },
+  });
+  assert.equal(reopened.isError, false);
+  assert.equal(reopened.structuredContent, undefined);
+  const reopenedDetail = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { id });
+  assert.ok(reopenedDetail.kind === "debt-complete" && reopenedDetail.items[0]?.kind === "found");
+  assert.equal(reopenedDetail.items[0].state, "open");
+  assert.equal(reopenedDetail.items[0].body, undefined);
+  assert.equal(reopenedDetail.items[0].note, undefined);
+  assert.equal(reopenedDetail.items[0].needs, undefined);
+  const reopenedList = await client.callTool({ name: "ls", arguments: { selector: "debt/" } });
+  assert.equal(reopenedList.isError, false);
+  assert.deepEqual(reopenedList.structuredContent, {
+    kind: "debt-catalogue",
+    rows: [
+      { id: child, title: "Check the repair", priority: 2, disposition: "blocked" },
+      { id, title: "Fix the roof", priority: 2, disposition: "ready" },
+    ],
   });
   const malformedDebt = await client.callTool({
     name: "debt_update", arguments: { id: "debt/one/two", note: "unwritten" },
@@ -373,12 +399,13 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(malformedDebt._meta?.["keiyaku/disposition"], "usage");
   assert.deepEqual(
     (await client.callTool({ name: "ls", arguments: { selector: "debt/" } })).structuredContent,
-    unblocked.structuredContent,
+    reopenedList.structuredContent,
   );
   const facet = Keiyaku.at({ cwd, environment, home: cwd });
   await facet.debtAdd({ title: "Low priority", priority: 3 });
   await facet.debtAdd({ title: "High priority", priority: 0 });
-  await facet.debtAdd({ title: "Dropped", state: "drop", priority: 1 });
+  const dropped = accepted(await facet.debtAdd({ title: "Dropped", priority: 1 }));
+  assert.equal((await facet.debtUpdate({ id: dropped.id, state: "drop" })).kind, "accepted");
   for (const input of [
     { limit: 1 },
     { selection: "closed", limit: 1 },
@@ -589,8 +616,10 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
     ...Array.from({ length: 120 }, (_, index) => `Parent note section ${index + 1}\n\n  note indentation`),
     "complete parent note tail",
   ].join("\n");
-  const parent = accepted(await facet.debtAdd({ title: "Complete parent", body, note })).id;
-  const child = accepted(await facet.debtAdd({ title: "Complete child", parent, needs: [parent] })).id;
+  const prerequisite = accepted(await facet.debtAdd({ title: "Complete prerequisite" })).id;
+  const parent = accepted(await facet.debtAdd({ title: "Complete parent", body })).id;
+  assert.equal((await facet.debtUpdate({ id: parent, note, needs: [prerequisite] })).kind, "accepted");
+  const child = accepted(await facet.debtAdd({ title: "Complete child", needs: [parent] })).id;
   const directText = async (input: VerbInput<"show">): Promise<string> => {
     const response = await client.callTool({ name: "show", arguments: input });
     assert.equal(response.isError, false);
@@ -604,7 +633,7 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
   const cliDebt = await runCli(["-C", repository.path, "show", parent], { environment });
   assert.equal(cliDebt.exit, 0);
   assert.equal(cliDebt.stdout.trimEnd(), textDebt.trimEnd());
-  for (const evidence of [...body.split("\n"), ...note.split("\n"), child, "Complete child"])
+  for (const evidence of [...body.split("\n"), ...note.split("\n"), prerequisite])
     assert.ok(textDebt.includes(evidence), evidence);
   const jsonDebt = await runCli(["-C", repository.path, "show", parent, "--json"], { environment });
   assert.equal(jsonDebt.exit, 0, jsonDebt.stderr);
@@ -612,12 +641,12 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
   assert.ok(scriptDebt.kind === "debt-complete");
   assert.equal(scriptDebt.items[0]?.body, body);
   assert.equal(scriptDebt.items[0]?.note, note);
-  assert.equal(scriptDebt.items[0]?.children?.[0]?.id, child);
+  assert.equal(scriptDebt.items[0]?.needs?.[0]?.id, prerequisite);
   const jsonChild = await runCli(["-C", repository.path, "show", child, "--json"], { environment });
   assert.equal(jsonChild.exit, 0, jsonChild.stderr);
   assert.deepEqual(JSON.parse(jsonChild.stdout), await facet.show({ id: child }));
   const textChild = await directText({ id: child });
-  assert.ok(textChild.includes(`parent ${parent}`));
+  assert.ok(textChild.includes(`needs ${parent}`));
   const missing = await client.callTool({ name: "show", arguments: { id: "debt/missing" } });
   assert.equal(missing.isError, true);
   assert.equal(missing.structuredContent, undefined);
