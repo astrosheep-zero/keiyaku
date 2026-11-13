@@ -132,7 +132,13 @@ from a later read. Missing or disagreeing provenance remains an integrity
 failure.
 
 Placement has one adjudicated conclusion: placed, a semantic stop, or an
-operational stop. The addressed Contract and attempted dependents share the same
+operational stop. Each stop family's producing owner exhaustively judges its
+invocation meaning; consumers preserve that judgment. Ordinary waiting and an
+observed target with identical candidate content are benign conclusions, while
+retry remains distinct from failure. Verification testimony admission has its
+own judgment: refusal or cancellation is a failure to finish recording, and
+retry remains retryable regardless of the executed check's verdict.
+The addressed Contract and attempted dependents share the same
 stop meaning; dependent ownership never creates a second classification.
 Successful placement retains the destination and before and
 after movement. A Contract destination is named as a Contract, not a branch or private

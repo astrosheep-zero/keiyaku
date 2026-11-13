@@ -5,7 +5,8 @@ import type { ChangeId, ContractId, SnapshotId } from "../core/facts/types.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { reconcileEffectSchema, gitReconcileLagSchema } from "../git/reconcile.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
-import { placementSchema, placedSchema } from "../protocol/completion.js";
+import { placementOutcome, placementSchema, placedSchema } from "../protocol/completion.js";
+import { verificationAdmissionOutcome } from "../protocol/verify.js";
 
 import { worldRootSchema, type WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
@@ -153,23 +154,18 @@ export function contractOutcomeDisposition(
   if (result.kind === "retry") return "retryable";
   let retry = false;
   let unsatisfied = false;
-  const stopped = (stop: Readonly<{ kind: string }>): boolean => {
-    if (stop.kind === "retry") {
-      retry = true;
-      return false;
-    }
-    return !["placed", "gates-unsatisfied", "prerequisites-unsatisfied", "delivery-missing", "physical-lag"].includes(
-      stop.kind,
-    );
+  const stopped = (outcome: "benign" | "retry" | "failed"): boolean => {
+    if (outcome === "retry") retry = true;
+    return outcome === "failed";
   };
   if (result.issues?.some(invocationIssueIsFailure)) return "failed";
-  if (result.placement !== undefined && stopped(result.placement)) return "failed";
+  if (result.placement !== undefined && stopped(placementOutcome(result.placement))) return "failed";
   for (const check of result.checks ?? []) {
     if (check.kind !== "terminal") return "failed";
-    if (typeof check.admission === "object" && stopped(check.admission)) return "failed";
+    if (stopped(verificationAdmissionOutcome(check.admission))) return "failed";
     if (check.verdict === "unsatisfied") unsatisfied = true;
   }
-  for (const { stop } of result.continuation?.stopped ?? []) if (stopped(stop)) return "failed";
+  for (const { stop } of result.continuation?.stopped ?? []) if (stopped(placementOutcome(stop))) return "failed";
   return retry ? "retryable" : unsatisfied ? "unsatisfied" : "accepted";
 }
 

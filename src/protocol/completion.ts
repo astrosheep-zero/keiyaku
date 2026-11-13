@@ -162,6 +162,39 @@ export const placementSchema = z.union([placedSchema, placementStopSchema]);
 export type Placement = z.output<typeof placementSchema>;
 export type Placed = z.output<typeof placedSchema>;
 
+export function placementOutcome(stop: CompactPlacementStop | Pick<Placed, "kind">): "benign" | "retry" | "failed" {
+  switch (stop.kind) {
+    case "placed":
+    case "gates-unsatisfied":
+    case "prerequisites-unsatisfied":
+    case "delivery-missing":
+    case "physical-lag":
+    case "target-content-identical":
+      return "benign";
+    case "retry":
+      return "retry";
+    case "contract-missing":
+    case "terminal":
+    case "target-contract-missing":
+    case "target-contract-terminal":
+    case "target-workspace-unavailable":
+    case "target-missing":
+    case "checkout-not-followable":
+    case "not-based-on-target":
+    case "unrelated-histories":
+    case "integration-conflict":
+    case "integration-unsupported":
+    case "failed":
+    case "target-moved":
+    case "execution-stopped":
+      return "failed";
+    default: {
+      const exhaustive: never = stop;
+      return exhaustive;
+    }
+  }
+}
+
 export function compactScope(scope: z.output<typeof deliveryDiffScopeSchema>): z.output<typeof compactScopeSchema> {
   return {
     ...(scope.filesChanged === 0 ? {} : { filesChanged: scope.filesChanged }),

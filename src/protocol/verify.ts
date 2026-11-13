@@ -50,6 +50,29 @@ const checkAdmissionStopSchema = z
   .meta({ id: "verificationAdmissionStop" });
 export type VerificationStop = z.output<typeof runtimeStopSchema | typeof checkAdmissionStopSchema>;
 const normalAdmissionSchema = z.enum(["admitted", "reused", "unrecorded"]);
+export function verificationAdmissionOutcome(
+  admission: z.output<typeof normalAdmissionSchema | typeof checkAdmissionStopSchema>,
+): "benign" | "retry" | "failed" {
+  switch (admission) {
+    case "admitted":
+    case "reused":
+    case "unrecorded":
+      return "benign";
+    default:
+      switch (admission.kind) {
+        case "retry":
+          return "retry";
+        case "refused":
+        case "cancelled":
+          return "failed";
+        default: {
+          const exhaustive: never = admission;
+          return exhaustive;
+        }
+      }
+  }
+}
+
 function terminalCheckSchemas<Admission extends z.ZodType>(admission: Admission) {
   const terminal = { ...checkCoordinate, kind: z.literal("terminal"), admission };
   return [
