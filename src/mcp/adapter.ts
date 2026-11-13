@@ -33,7 +33,7 @@ function hasOutputSchema(name: string): name is keyof typeof mcpOutputSchemas {
   return Object.hasOwn(mcpOutputSchemas, name);
 }
 const SERVER_DESCRIPTION =
-  "Agent work ledger for a Git repository: Contracts bind the work, Akumas do it, kanshi watches.";
+  "Agent work ledger for a Git repository. Contracts: bind, amend, arc, deliver, verify, review, abandon, reconcile. Akumas: spawn, fork, tell, ask, kill, wait, history, report. Read and inspect: show, status, ls, region, kanshi, whoami. Debts: debt_add, debt_update. show and ls also read Debts; wait and history also support Contracts.";
 const NO_REPO_TOOLS = new Set<VerbName>(["debt.add", "debt.update", "report"]);
 const excluded = new Set<VerbName>(["nuke", "settings", "debt.doctor", "debt.addDocument"]);
 
