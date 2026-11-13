@@ -154,11 +154,11 @@ test("ls caller selection refuses absent identity and non-Akuma catalogues", asy
   const facet = Keiyaku.at({ cwd: root, environment: {} });
   await assert.rejects(
     facet.ls({ selector: "aku/*", mine: true }),
-    (error: unknown) => error instanceof KeiyakuUsageError && /--mine requires a caller identity/u.test(error.message),
+    (error: unknown) => error instanceof KeiyakuUsageError && /listing the caller's own Akumas requires a caller identity/u.test(error.message),
   );
   const missing = await runCli(["-C", root, "ls", "--mine"], { environment: {} });
   assert.equal(missing.exit, 64);
-  assert.match(missing.stderr, /--mine requires a caller identity/u);
+  assert.match(missing.stderr, /listing the caller's own Akumas requires a caller identity/u);
   for (const [environment, message] of [
     [{ CODEX_THREAD_ID: "codex", PI_SESSION_ID: "pi" }, /Ambiguous native host caller: CODEX_THREAD_ID, PI_SESSION_ID/u],
     [{ KEIYAKU_ACTOR_ID: "aku/parent/1234abcd" }, /requires both KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD/u],

@@ -814,7 +814,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "index.ts",
       allow: [
-        any("errors.ts", ["KeiyakuError", "KeiyakuErrorCategory", "KeiyakuErrorOptions"]),
+        any("errors.ts", ["KeiyakuError", "KeiyakuErrorCategory", "KeiyakuErrorOptions", "NextCall"]),
         any("body-host.ts", ["AkumaHost", "AkumaHostScope"]),
         any("akuma/index.ts"),
         types("akuma/akuma-selection-execution.ts", ["AskObserver", "AskProgress"]),

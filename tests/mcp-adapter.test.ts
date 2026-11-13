@@ -76,9 +76,32 @@ test("MCP spawn uses akumaName, accepts a bare alias, and points a missing name 
   assert.match(spawn.description!, /from akumaName/u);
   const missing = await client.callTool({ name: "spawn", arguments: { akumaName: "missing", alias: "lane" } });
   assert.equal(missing.isError, true);
-  const text = JSON.stringify(missing.content);
+  const content = missing.content as { type: string; text: string }[];
+  const text = content.map((block) => block.text).join("\n");
   assert.match(text, /Akuma not found · missing/u);
-  assert.match(text, /available {2}keiyaku ls aku\//u);
+  assert.ok(text.includes('available  ls {"selector":"aku/"}'));
+  assert.doesNotMatch(text, /keiyaku |--/u);
+  assert.equal(missing._meta?.["keiyaku/disposition"], "refused");
+  assert.equal(missing.structuredContent, undefined);
+  const failure = content[1]!;
+  assert.equal(failure.type, "text");
+  if (failure.type === "text") {
+    const projection = JSON.parse(failure.text);
+    assert.equal(projection.category, "invalid-input");
+    assert.deepEqual(projection.next, { verb: "ls", input: { selector: "aku/" } });
+  }
+
+  mkdirSync(join(cwd, "akumas"), { recursive: true });
+  writeFileSync(join(cwd, "akumas", "child.md"), "---\nbase: missing\n---\n");
+  const baseMissing = await client.callTool({ name: "spawn", arguments: { akumaName: "child" } });
+  const baseText = (baseMissing.content as { text: string }[]).map((block) => block.text).join("\n");
+  assert.equal(baseMissing._meta?.["keiyaku/disposition"], "refused");
+  assert.ok(baseText.includes('available  ls {"selector":"aku/"}'));
+  assert.match(baseText, /base chain: child -> missing/u);
+  assert.doesNotMatch(baseText, /keiyaku |--/u);
+  const cli = await runCli(["spawn", "child", "go"], { cwd, environment });
+  assert.equal(cli.exit, 1);
+  assert.match(cli.stdout, /available  keiyaku ls aku\//u);
 });
 
 test("schema cleanup retains authored property names and values", () => {
@@ -615,14 +638,24 @@ test("SDK deliver selects native preview or placement with one text-only tool", 
   assert.deepEqual(await bound.kei.history(), before.history);
   assert.equal(repository.run(["for-each-ref", "--format=%(refname) %(objectname)"]), before.refs);
   assert.equal(repository.run(["-C", bound.worktreePath, "status", "--porcelain=v1"]), before.status);
-  const delivered = await client.callTool({ name: "deliver", arguments: {
+  writeFileSync(join(bound.worktreePath, "dirty.txt"), "unfinished work\n");
+  const dirty = await client.callTool({ name: "deliver", arguments: {
     repo: repository.path, contract: bound.contractId,
+  } });
+  assert.equal(dirty._meta?.["keiyaku/disposition"], "refused");
+  assert.equal(dirty.structuredContent, undefined);
+  const dirtyText = (dirty.content as { text: string }[]).map((block) => block.text).join("\n");
+  assert.ok(dirtyText.includes('option  deliver {"includeDirty":true}'));
+  assert.match(dirtyText, /captures complete non-ignored worktree bytes/u);
+  assert.doesNotMatch(dirtyText, /keiyaku |--/u);
+  const delivered = await client.callTool({ name: "deliver", arguments: {
+    repo: repository.path, contract: bound.contractId, includeDirty: true,
   } });
   assert.equal(delivered.isError, false);
   assert.equal(delivered._meta?.["keiyaku/disposition"], "accepted");
   assert.equal(delivered.structuredContent, undefined);
   assert.ok(native.kind === "ready");
-  assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), native.integration);
+  assert.equal(repository.run(["show", "refs/heads/main:dirty.txt"]).trim(), "unfinished work");
   assert.equal(present(await bound.kei.state()).terminal?.kind, "claimed");
   assert.equal(existsSync(bound.worktreePath), false);
 });

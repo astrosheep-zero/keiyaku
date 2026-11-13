@@ -11,7 +11,7 @@ import { worldRootSchema, type WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { ReviewOutcome, VerifyOutcome } from "./contract-outcomes.js";
 import type { SpawnResult } from "./akuma-creation.js";
-import { KeiyakuError, errorCategory, type KeiyakuErrorCategory } from "../errors.js";
+import { KeiyakuError, errorCategory, type KeiyakuErrorCategory, type NextCall } from "../errors.js";
 import { SettingsError } from "../settings.js";
 export { KeiyakuError, errorCategory } from "../errors.js";
 import type { AkumaTellResult } from "../akuma/selection-observation.js";
@@ -637,7 +637,9 @@ export function withOutcomeReceipt(
     }
   }
   return new KeiyakuError(errorCategory(error, signal), errorDiagnostic(error), {
-    ...(error instanceof KeiyakuError ? { spawn: error.spawn, tell: error.tell } : {}),
+    ...(error instanceof KeiyakuError
+      ? { spawn: error.spawn, tell: error.tell, ...(error.next === undefined ? {} : { next: error.next }) }
+      : {}),
     cause: error,
     outcome,
   });
@@ -646,7 +648,9 @@ export function withOutcomeReceipt(
 /** Confirmed birth is attached without mutating a shared or frozen native failure. */
 export function withSpawnFailureReceipt(reason: unknown, spawn: SpawnResult, signal?: AbortSignal): KeiyakuError {
   return new KeiyakuError(errorCategory(reason, signal), errorDiagnostic(reason), {
-    ...(reason instanceof KeiyakuError ? { outcome: reason.outcome, tell: reason.tell } : {}),
+    ...(reason instanceof KeiyakuError
+      ? { outcome: reason.outcome, tell: reason.tell, ...(reason.next === undefined ? {} : { next: reason.next }) }
+      : {}),
     cause: reason,
     spawn,
   });
@@ -656,6 +660,7 @@ export type FailureProjection = Readonly<{
   kind: "failed";
   category: KeiyakuErrorCategory;
   diagnostic: string;
+  next?: NextCall;
   causeClass?: string;
   causeDiagnostic?: string;
   outcome?: PartialOutcomeEnvelope;
@@ -669,6 +674,7 @@ export function projectFailure(error: unknown): FailureProjection {
     kind: "failed",
     category: errorCategory(error),
     diagnostic: errorDiagnostic(error),
+    ...(error instanceof KeiyakuError && error.next !== undefined ? { next: error.next } : {}),
     ...(cause instanceof Error ? { causeClass: cause.name, causeDiagnostic: cause.message } : {}),
     ...(error instanceof KeiyakuError && error.spawn !== undefined ? { spawn: error.spawn } : {}),
     ...(error instanceof KeiyakuError && error.tell !== undefined ? { tell: error.tell } : {}),

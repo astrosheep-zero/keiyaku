@@ -41,9 +41,11 @@ the next call. Every normal answer of such a tool carries that projection,
 including an answered negative verdict. Native callers and CLI JSON retain the
 full owner value. Guidance and Debt detail return complete unclipped text at the
 transport edge. These projections supply no new classification or authority.
-Error results are text led by their
-classification. An unsatisfied verification verdict is an answered negative,
-distinct from an operation failure, and is not a transport error. Published names are safe
+Error results are text led by their classification and remain text-only, including
+their structured failure projection. Runtime recovery guidance uses MCP calls in
+MCP syntax, derived from the same native recovery facts used by other surfaces.
+An unsatisfied verification verdict is an answered negative, distinct from an
+operation failure, and is not a transport error. Published names are safe
 for model APIs and are the only callable transport names. Read-only annotations
 identify reads; destructive annotations identify destruction alone, not ordinary
 writes.

@@ -7,7 +7,7 @@ import {
   kanshiReport,
   runCli,
 } from "./support/cli-fixtures.js";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { temporaryDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
@@ -52,6 +52,16 @@ test("spawn preserves a definition failure instead of reporting a missing Akuma"
   assert.equal(missing.exit, 1);
   assert.match(missing.stdout, /reason  Akuma not found · missing/u);
   assert.match(missing.stdout, /available  keiyaku ls aku\//u);
+  const missingJson = await runCli(["spawn", "missing", "go", "--json"], runtime);
+  assert.equal(missingJson.exit, 1);
+  assert.deepEqual(JSON.parse(missingJson.stdout), {
+    kind: "refused",
+    diagnostic: "Akuma not found",
+    akumaName: "missing",
+    searched: [join(realpathSync(root), ".keiyaku", "akumas", "missing.md"), join(definitions, "missing.md")],
+    available: "keiyaku ls aku/",
+    next: { verb: "ls", input: { selector: "aku/" } },
+  });
   const invalid = await runCli(["spawn", "broken", "go"], runtime);
   assert.equal(invalid.exit, 1);
   assert.match(invalid.stdout, /reason  is invalid: Akuma provider must be a nonblank string · broken/u);
@@ -162,18 +172,19 @@ test("narrow entities retain deliberate layout and compact facts never split a p
 
 test("dirty refusal describes available capture without asserting a current unmerged index", () => {
   const refusal = { kind: "dirty-workspace" as const, paths: ["file.txt"] };
-  const output = renderRefusalFacts({ ...refusal, option: { flag: "--include-dirty", available: true } }, "  ", 120);
+  const next = { verb: "deliver", input: { includeDirty: true } } as const;
+  const output = renderRefusalFacts({ ...refusal, option: { next, available: true } }, "  ", 120);
   assert.deepEqual(output.slice(-3), [
-    "  option  --include-dirty · captures complete non-ignored worktree bytes",
+    "  option  keiyaku deliver --include-dirty · captures complete non-ignored worktree bytes",
     "  capture index  private · real index unchanged, including any unmerged entries",
-    "  staging  not required for --include-dirty",
+    "  staging  not required for worktree capture",
   ]);
   assert.doesNotMatch(output.join("\n"), /index  unmerged entries remain/u);
   const review = renderRefusalFacts({ kind: "dirty-submodules", paths: ["vendor"] }, "  ", 120);
   assert.ok(review.includes("  reason  submodule changes cannot be captured for review"));
   assert.ok(review.includes("    vendor"));
-  const blocked = renderRefusalFacts({ ...refusal, option: { flag: "--include-dirty", available: false } }, "  ", 120);
-  assert.equal(blocked.at(-1), "  option  --include-dirty · unavailable with submodule changes");
+  const blocked = renderRefusalFacts({ ...refusal, option: { next, available: false } }, "  ", 120);
+  assert.equal(blocked.at(-1), "  option  keiyaku deliver --include-dirty · unavailable with submodule changes");
   assert.doesNotMatch(blocked.join("\n"), /captures complete/u);
 });
 
@@ -189,8 +200,8 @@ test("integration refusal keeps its reason distinct from the target coordinate",
     `  target  ${target}`,
     "  conflicts",
     "    file.txt",
-    "  option  materialize  deliver --materialize-conflict --include-dirty",
-    "  option  deliver  deliver --include-dirty",
+    "  option  materialize  keiyaku deliver --materialize-conflict --include-dirty",
+    "  option  deliver  keiyaku deliver --include-dirty",
   ]);
 });
 

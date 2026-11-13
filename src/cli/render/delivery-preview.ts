@@ -8,7 +8,12 @@ import { contractIssueLines } from "./contract.js";
 type Preview = Extract<DeliveryPreviewOutcome, { kind: "ready" | "blocked" }>;
 type Ready = Extract<Preview, { kind: "ready" }>;
 
-function targetLines(report: Ready, columns: number, ids: ReadonlyMap<string, string>): readonly string[] {
+function targetLines(
+  report: Ready,
+  columns: number,
+  ids: ReadonlyMap<string, string>,
+  surface: TextRenderContext["surface"],
+): readonly string[] {
   const target = report.target;
   const lines: string[] = [];
   if (target === undefined) return lines;
@@ -52,7 +57,7 @@ function targetLines(report: Ready, columns: number, ids: ReadonlyMap<string, st
     receiptPayload(lines, "reason", target.diagnostic);
   } else {
     receiptRow(lines, "!", "target", [{ text: "refused" }], columns);
-    lines.push(...renderRefusalFacts(target.reason, "  ", columns, report.contractId));
+    lines.push(...renderRefusalFacts(target.reason, "  ", columns, report.contractId, surface));
   }
   return lines;
 }
@@ -100,7 +105,7 @@ export function renderDeliveryPreview(report: Preview, context?: TextRenderConte
   if (report.kind === "blocked") {
     receiptRow(lines, "!", "candidate", [{ text: "blocked" }], columns);
     lines.push(
-      ...renderRefusalFacts(report.reason, "  ", columns, report.contractId),
+      ...renderRefusalFacts(report.reason, "  ", columns, report.contractId, context?.surface),
       ...contractIssueLines(report, columns),
     );
     return lines.join("\n");
@@ -135,6 +140,6 @@ export function renderDeliveryPreview(report: Preview, context?: TextRenderConte
       [{ text: `previous content ${displayGitId(report.previousContentId, ids)}` }],
       columns,
     );
-  lines.push(...targetLines(report, columns, ids), ...contractIssueLines(report, columns));
+  lines.push(...targetLines(report, columns, ids, context?.surface), ...contractIssueLines(report, columns));
   return lines.join("\n");
 }

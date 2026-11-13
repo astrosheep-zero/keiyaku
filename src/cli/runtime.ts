@@ -30,7 +30,7 @@ import {
 import { createExecutionProgressRenderer } from "./render/execution-progress.js";
 import { renderVerb } from "./render/verbs.js";
 import { renderRefusal } from "./render/refusal.js";
-import { DEFAULT_CLI_COLUMNS, safeText } from "./render/terminal.js";
+import { DEFAULT_CLI_COLUMNS, formatNextCall, safeText } from "./render/terminal.js";
 import { cliExitCode, displayContext, emit, writeJson, writeStderr, writeStdout, type CliOutcome } from "./streams.js";
 import { usageAcceptanceLines } from "./usage.js";
 
@@ -162,14 +162,14 @@ function writeArchetypeFailure(
   command: FacetCommand,
   shared: ReturnType<typeof thrownCompletion>,
 ): CliOutcome {
-  const missing = error.reason === "was not found";
+  const missing = error.absent;
   if (command.output === "json") {
     writeJson({
       kind: "refused",
       diagnostic: missing ? "Akuma not found" : error.reason,
       akumaName: error.akumaName,
       searched: error.searched,
-      ...(missing ? { available: "keiyaku ls aku/" } : {}),
+      ...(error.next === undefined ? {} : { available: formatNextCall(error.next), next: error.next }),
     });
   } else writeStdout([shared.text(), ...usageAcceptanceLines(usageGuideForCommand(command))].join("\n"));
   return shared.outcome;

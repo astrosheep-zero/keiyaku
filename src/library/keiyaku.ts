@@ -458,7 +458,7 @@ export class Keiyaku {
         ? undefined
         : await Promise.all(
             writableDirectories.map((path) => {
-              if (path.trim() === "") throw new TypeError("--add-dir requires a nonblank directory");
+              if (path.trim() === "") throw new TypeError("a writable directory must be nonblank");
               return canonicalBirthCwd(resolve(at.cwd, path));
             }),
           );
@@ -595,7 +595,7 @@ export class Keiyaku {
     }
     if (caller === undefined) {
       throw new KeiyakuUsageError(
-        "--mine requires a caller identity; set KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD or run inside a calling host",
+        "listing the caller's own Akumas requires a caller identity; set KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD or run inside a calling host",
       );
     }
     return caller;

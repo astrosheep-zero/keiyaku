@@ -71,9 +71,11 @@ export class AkumaNameError extends KeiyakuError {
     readonly akumaName: string,
     readonly searched: readonly string[],
     readonly reason: string,
-    guidance?: string,
+    readonly absent = false,
   ) {
-    super("internal", [`\`${akumaName}\` ${reason}`, ...(guidance === undefined ? [] : [guidance])].join("\n"));
+    super(absent ? "invalid-input" : "internal", `\`${akumaName}\` ${reason}`, {
+      ...(absent ? { next: { verb: "ls", input: { selector: "aku/" } } as const } : {}),
+    });
   }
 }
 
@@ -145,10 +147,10 @@ function archetypeError(
   searched: readonly string[],
   reason: string,
   chain: readonly string[],
-  guidance?: string,
+  absent = false,
 ): AkumaNameError {
   const withChain = chain.length === 0 ? reason : `${reason} (base chain: ${chainText(chain)})`;
-  return new AkumaNameError(name, searched, withChain, guidance);
+  return new AkumaNameError(name, searched, withChain, absent);
 }
 
 function archetypeField(values: Readonly<Record<string, unknown>>, key: string, required = false): string | undefined {
@@ -339,13 +341,7 @@ async function resolveArchetype(
     }
   }
   const missingChain = chain.length === 0 ? chain : [...chain, name];
-  throw archetypeError(
-    name,
-    searched,
-    "was not found",
-    missingChain,
-    chain.length === 0 ? "use `ls` with selector `aku/` to list available akumaName values" : undefined,
-  );
+  throw archetypeError(name, searched, "was not found", missingChain, true);
 }
 
 function catalogueCoordinate(value: unknown, field: "cwd" | "home"): string | undefined {

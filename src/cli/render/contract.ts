@@ -328,20 +328,28 @@ function amend(result: AcceptedOf<"amend">, columns: number, color: boolean): st
 
 type CompletionAccepted = AcceptedOf<"deliver"> | AcceptedOf<"review"> | AcceptedOf<"verify">;
 
-function continuationLines(continuation: CompletionAccepted["continuation"], columns: number): readonly string[] {
+function continuationLines(
+  continuation: CompletionAccepted["continuation"],
+  columns: number,
+  surface: TextRenderContext["surface"],
+): readonly string[] {
   if (continuation === undefined) return [];
   const lines: string[] = [];
   for (const contractId of continuation.claimed ?? [])
     receiptRow(lines, "✓", "dependent", [{ text: "complete" }, { text: contractId, opaque: true }], columns);
   for (const { contractId, stop } of continuation.stopped ?? [])
-    lines.push(...stopLines(stop, columns, contractId, contractId));
+    lines.push(...stopLines(stop, columns, contractId, contractId, surface));
   return lines;
 }
 
-function completionPlacementLines(result: CompletionAccepted, columns: number): readonly string[] {
+function completionPlacementLines(
+  result: CompletionAccepted,
+  columns: number,
+  surface: TextRenderContext["surface"],
+): readonly string[] {
   const placement = result.placement;
   if (placement === undefined) return [];
-  if (placement.kind !== "placed") return stopLines(placement, columns, result.contractId);
+  if (placement.kind !== "placed") return stopLines(placement, columns, result.contractId, undefined, surface);
   const fallback = "integration" in result ? result.integration : undefined;
   const integration = ("integration" in placement ? placement.integration : undefined) ?? fallback;
   if (integration === undefined || placement.target === undefined) return [];
@@ -351,18 +359,27 @@ function completionPlacementLines(result: CompletionAccepted, columns: number): 
   return lines;
 }
 
-function trailingPlacementLines(result: CompletionAccepted, columns: number): readonly string[] {
+function trailingPlacementLines(
+  result: CompletionAccepted,
+  columns: number,
+  surface: TextRenderContext["surface"],
+): readonly string[] {
   const placement = result.placement;
   return [
-    ...completionPlacementLines(result, columns),
-    ...continuationLines(result.continuation, columns),
+    ...completionPlacementLines(result, columns, surface),
+    ...continuationLines(result.continuation, columns, surface),
     ...recoverySnapshotLines(result.recoverySnapshots, columns, result.contractId),
     ...contractIssueLines(result, columns, { mode: "receipt", follow: placement !== undefined }),
     ...gatesAwaitLines(placement?.kind === "placed" ? undefined : placement),
   ];
 }
 
-function deliver(result: AcceptedOf<"deliver">, columns: number, input: PresentationInput): string {
+function deliver(
+  result: AcceptedOf<"deliver">,
+  columns: number,
+  input: PresentationInput,
+  surface: TextRenderContext["surface"],
+): string {
   const lines = titleLines("✓", "delivered", result.contractId, columns);
   const placement: Readonly<{ kind: string; predecessor?: string; integration?: string }> | undefined =
     result.placement;
@@ -393,7 +410,7 @@ function deliver(result: AcceptedOf<"deliver">, columns: number, input: Presenta
       columns,
     );
   if (input.message !== undefined && result.admission !== "reused") receiptPayload(lines, "note", input.message);
-  lines.push(...trailingPlacementLines(result, columns));
+  lines.push(...trailingPlacementLines(result, columns, surface));
   return lines.join("\n");
 }
 
@@ -405,18 +422,23 @@ function worktreeChangeLines(result: AcceptedOf<"review">, columns: number): rea
   return lines;
 }
 
-function review(result: AcceptedOf<"review">, columns: number, input: PresentationInput): string {
+function review(
+  result: AcceptedOf<"review">,
+  columns: number,
+  input: PresentationInput,
+  surface: TextRenderContext["surface"],
+): string {
   if (input.verdict === undefined) throw new Error("review renderer requires its invocation verdict");
   const lines = titleLines("✓", `review ${input.verdict}`, result.contractId, columns);
-  lines.push(...worktreeChangeLines(result, columns), ...trailingPlacementLines(result, columns));
+  lines.push(...worktreeChangeLines(result, columns), ...trailingPlacementLines(result, columns, surface));
   return lines.join("\n");
 }
 
-function verify(result: AcceptedOf<"verify">, columns: number): string {
+function verify(result: AcceptedOf<"verify">, columns: number, surface: TextRenderContext["surface"]): string {
   const lines = titleLines("✓", "verify", result.contractId, columns);
   lines.push(
-    ...verificationCheckLines(result.checks, result.snapshot, columns, result.contractId),
-    ...trailingPlacementLines(result, columns),
+    ...verificationCheckLines(result.checks, result.snapshot, columns, result.contractId, surface),
+    ...trailingPlacementLines(result, columns, surface),
   );
   return lines.join("\n");
 }
@@ -435,11 +457,11 @@ export function renderAccepted<K extends ContractMutationName>(
     case "amend":
       return amend(result as AcceptedOf<"amend">, columns, context?.color === true);
     case "deliver":
-      return deliver(result as AcceptedOf<"deliver">, columns, input);
+      return deliver(result as AcceptedOf<"deliver">, columns, input, context?.surface);
     case "review":
-      return review(result as AcceptedOf<"review">, columns, input);
+      return review(result as AcceptedOf<"review">, columns, input, context?.surface);
     case "verify":
-      return verify(result as AcceptedOf<"verify">, columns);
+      return verify(result as AcceptedOf<"verify">, columns, context?.surface);
     case "arc": {
       const arc = result as AcceptedOf<"arc">;
       return [

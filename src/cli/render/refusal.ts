@@ -1,3 +1,4 @@
+import type { NextCall } from "../../errors.js";
 import type { BindDraftReceipt } from "../draft.js";
 import { usageAcceptanceLines, type CliUsageGuide } from "../usage.js";
 import type { ContractId, KeiyakuRefusal } from "../../index.js";
@@ -5,6 +6,7 @@ import type { HandoffOutcome } from "../../library/outcome.js";
 import { contractOperationName, shortGitId } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
+  formatNextCall,
   orderRefusalFacts,
   renderOpaqueBlock,
   safeText,
@@ -12,7 +14,7 @@ import {
 } from "./terminal.js";
 
 type DirtyWithOption = Extract<KeiyakuRefusal, { kind: "dirty-workspace" }> & {
-  option?: Readonly<{ flag: string; available: boolean }>;
+  option?: Readonly<{ next: NextCall; available: boolean }>;
 };
 /** Edge acquisition refusals the CLI owns; they never come from the SDK. */
 type CliEdgeRefusal = Readonly<{ kind: "invalid-document"; diagnostic: string }>;
@@ -48,7 +50,12 @@ function refusalWords(kind: string): string {
   return REFUSAL_WORDS[kind] ?? words(kind);
 }
 
-function renderDirtyRefusal(refusal: DirtyWithOption, indent: string, columns: number): readonly string[] {
+function renderDirtyRefusal(
+  refusal: DirtyWithOption,
+  indent: string,
+  columns: number,
+  surface: TextRenderContext["surface"],
+): readonly string[] {
   const lines: string[] = [];
   wrap(lines, "reason  worktree has uncommitted changes", indent, columns);
   lines.push(...collectionLines("paths", refusal.paths ?? [], indent));
@@ -57,11 +64,13 @@ function renderDirtyRefusal(refusal: DirtyWithOption, indent: string, columns: n
     if ((refusal.submodules ?? []).length > 0)
       wrap(lines, "reason  submodule changes cannot be captured for review", indent, columns);
   } else if (!refusal.option.available) {
-    lines.push(`${indent}option  ${refusal.option.flag} · unavailable with submodule changes`);
+    lines.push(`${indent}option  ${formatNextCall(refusal.option.next, surface)} · unavailable with submodule changes`);
   } else {
-    lines.push(`${indent}option  ${refusal.option.flag} · captures complete non-ignored worktree bytes`);
+    lines.push(
+      `${indent}option  ${formatNextCall(refusal.option.next, surface)} · captures complete non-ignored worktree bytes`,
+    );
     lines.push(`${indent}capture index  private · real index unchanged, including any unmerged entries`);
-    lines.push(`${indent}staging  not required for --include-dirty`);
+    lines.push(`${indent}staging  not required for worktree capture`);
   }
   return lines;
 }
@@ -119,6 +128,7 @@ function refusalFacts(
   indent: string,
   columns: number,
   addressed?: string,
+  surface?: TextRenderContext["surface"],
 ): readonly string[] {
   const identity = refusalIdentity(refusal, addressed);
   const target = "targetContractId" in refusal ? refusal.targetContractId : undefined;
@@ -126,7 +136,7 @@ function refusalFacts(
     return nukeRefusalFacts(refusal, indent);
   const verification = verificationRefusalFacts(refusal, indent, identity);
   if (verification !== undefined) return verification;
-  if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns);
+  if (refusal.kind === "dirty-workspace") return renderDirtyRefusal(refusal, indent, columns, surface);
   if (refusal.kind === "dirty-submodules") {
     return [
       `${indent}reason  submodule changes cannot be captured for review`,
@@ -139,8 +149,8 @@ function refusalFacts(
       ...targetRefusalLines(undefined, indent, identity, undefined),
       `${indent}target  ${safeText(refusal.targetHead)}`,
       ...collectionLines("conflicts", refusal.conflictPaths, indent),
-      `${indent}option  materialize  deliver --materialize-conflict --include-dirty`,
-      `${indent}option  deliver  deliver --include-dirty`,
+      `${indent}option  materialize  ${formatNextCall({ verb: "deliver", input: { materializeConflict: true, includeDirty: true } }, surface)}`,
+      `${indent}option  deliver  ${formatNextCall({ verb: "deliver", input: { includeDirty: true } }, surface)}`,
     ];
   }
   if (refusal.kind === "not-based-on-target" || refusal.kind === "unrelated-histories") {
@@ -195,9 +205,10 @@ export function renderRefusalFacts(
   indent: string,
   columns: number,
   addressed?: string,
+  surface?: TextRenderContext["surface"],
 ): readonly string[] {
   return orderRefusalFacts(
-    refusalFacts(refusal, indent, columns, addressed).map((line) => line.slice(indent.length)),
+    refusalFacts(refusal, indent, columns, addressed, surface).map((line) => line.slice(indent.length)),
   ).map((line) => `${indent}${line}`);
 }
 
@@ -235,12 +246,12 @@ export function renderRefusal(
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   const lines = [refusalTitle(refused.operation)];
   if (refused.contract !== undefined) lines.push(`  contract  ${safeText(refused.contract)}`);
-  lines.push(...renderRefusalFacts(refused.refusal, "  ", columns, refused.contract));
+  lines.push(...renderRefusalFacts(refused.refusal, "  ", columns, refused.contract, context?.surface));
   const output = lines.join("\n");
   return draft === undefined ? output : `${output}\n${renderBindDraftReceipt(draft)}`;
 }
 
-export function renderConflictMaterialized(result: HandoffOutcome, _context?: TextRenderContext): string {
+export function renderConflictMaterialized(result: HandoffOutcome, context?: TextRenderContext): string {
   const indent = "  ";
   return [
     "! integration-conflict-materialized",
@@ -251,7 +262,7 @@ export function renderConflictMaterialized(result: HandoffOutcome, _context?: Te
     `${indent}handoff base  ${shortGitId(result.handoffBase)}`,
     ...collectionLines("conflicts", result.conflictPaths, indent),
     `${indent}workspace  ${safeText(result.worktreePath)}`,
-    `${indent}option  deliver  deliver --include-dirty · reads worktree bytes, not index`,
+    `${indent}option  deliver  ${formatNextCall({ verb: "deliver", input: { includeDirty: true } }, context?.surface)} · reads worktree bytes, not index`,
   ].join("\n");
 }
 

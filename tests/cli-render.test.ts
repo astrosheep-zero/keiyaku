@@ -1882,7 +1882,7 @@ test("materialized conflict text keeps the exact recovery projection", () => {
       "    a.txt",
       "    b.txt",
       "  workspace  /repo/.keiyaku/wt/x",
-      "  option  deliver  deliver --include-dirty · reads worktree bytes, not index",
+      "  option  deliver  keiyaku deliver --include-dirty · reads worktree bytes, not index",
     ].join("\n"),
   );
   assert.equal(JSON.parse(JSON.stringify(result)).handoffBase, result.handoffBase);

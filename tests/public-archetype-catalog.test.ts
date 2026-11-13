@@ -148,7 +148,14 @@ test("spawn accepts a bare alias and a missing akumaName points to the catalogue
   await assert.rejects(akumas.spawn({ akumaName: "missing", alias: "lane", home }), (error: unknown) => {
     assert.ok(error instanceof AkumaNameError);
     assert.equal(error.akumaName, "missing");
-    assert.match(error.message, /use `ls` with selector `aku\/` to list available akumaName values/u);
+    assert.equal(error.message, "`missing` was not found");
+    assert.equal(error.absent, true);
+    assert.equal(error.category, "invalid-input");
+    assert.deepEqual(error.next, { verb: "ls", input: { selector: "aku/" } });
+    assert.ok(Object.isFrozen(error.next));
+    assert.ok(Object.isFrozen(error.next.input));
+    assert.equal(Object.getOwnPropertyDescriptor(error, "next")?.writable, false);
+    assert.equal(Object.getOwnPropertyDescriptor(error, "next")?.enumerable, true);
     return true;
   });
 });

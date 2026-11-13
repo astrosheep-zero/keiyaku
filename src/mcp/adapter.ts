@@ -262,6 +262,7 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
     try {
       const disposition = classifyVerb(name, value, completion);
       const text = renderVerb(name, value, completion, {
+        surface: "mcp",
         columns: DEFAULT_CLI_COLUMNS,
         color: false,
         now: Date.now(),

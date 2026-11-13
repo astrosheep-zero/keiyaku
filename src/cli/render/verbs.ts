@@ -41,7 +41,7 @@ import {
 } from "./refusal.js";
 import { renderRegionText } from "./region.js";
 import { renderSettingsText } from "./settings.js";
-import { safeText, type TextRenderContext } from "./terminal.js";
+import { formatNextCall, safeText, type TextRenderContext } from "./terminal.js";
 import { renderWhoami } from "./whoami.js";
 
 function alias(selector: string | undefined): string | undefined {
@@ -81,7 +81,10 @@ function contractAnswer(
       if ((name === "deliver" || name === "verify") && refusal.kind === "dirty-workspace") {
         refusal = {
           ...refusal,
-          option: { flag: "--include-dirty", available: (refusal.submodules?.length ?? 0) === 0 },
+          option: {
+            next: { verb: name, input: { includeDirty: true } },
+            available: (refusal.submodules?.length ?? 0) === 0,
+          },
         };
       }
       return renderRefusal(
@@ -138,16 +141,15 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
   if (error instanceof AkumaObservationError)
     return `× Akuma observation failed  ${safeText(error.id)} — ${safeText(error.diagnostic)}`;
   if (name === "spawn" && error instanceof AkumaNameError) {
-    const absent = error.reason === "was not found";
-    return renderStructuredRefusal("spawn", `${absent ? "Akuma not found" : error.reason} · ${error.akumaName}`, [
+    return renderStructuredRefusal("spawn", `${error.absent ? "Akuma not found" : error.reason} · ${error.akumaName}`, [
       ...error.searched.map((path) => `searched  ${path}`),
-      ...(absent ? ["available  keiyaku ls aku/"] : []),
+      ...(error.next === undefined ? [] : [`available  ${formatNextCall(error.next, context.surface)}`]),
     ]);
   }
   if (error instanceof KeiyakuUsageError) return failure.diagnostic;
   if (error instanceof KeiyakuError && error.outcome !== undefined)
     return [
-      ...executionFailureLines(name, error.outcome, failure, context.columns),
+      ...executionFailureLines(name, error.outcome, failure, context.columns, context.surface),
       ...(error.outcome.kind === "contract" ? contractIssueLines(error.outcome, context.columns) : []),
     ].join("\n");
   return `× ${name} failed\n  reason  ${safeText(failure.diagnostic)}`;

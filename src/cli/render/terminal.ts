@@ -1,3 +1,5 @@
+import type { NextCall } from "../../errors.js";
+
 export const DEFAULT_CLI_COLUMNS = 100;
 
 export function emptyCatalogue(surface: string): string {
@@ -11,7 +13,27 @@ export function orderRefusalFacts(facts: readonly string[]): readonly string[] {
   ];
 }
 
-export type TextRenderContext = Readonly<{ columns: number; color: boolean; actor?: string; now?: number }>;
+export type TextRenderContext = Readonly<{
+  columns: number;
+  color: boolean;
+  actor?: string;
+  now?: number;
+  surface?: "cli" | "mcp";
+}>;
+
+export function formatNextCall(call: NextCall, surface: TextRenderContext["surface"] = "cli"): string {
+  if (surface === "mcp") return `${call.verb} ${JSON.stringify(call.input)}`;
+  switch (call.verb) {
+    case "ls":
+      return `keiyaku ls ${call.input.selector}`;
+    case "deliver":
+      return `keiyaku deliver${call.input.materializeConflict === true ? " --materialize-conflict" : ""} --include-dirty`;
+    case "verify":
+      return "keiyaku verify --include-dirty";
+    default:
+      throw new TypeError("Unsupported recovery call");
+  }
+}
 
 type GitShortStat = Readonly<{
   filesChanged: number;

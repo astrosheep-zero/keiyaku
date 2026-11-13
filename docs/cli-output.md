@@ -21,7 +21,9 @@ distinct from a failure to complete the operation.
 The CLI owns its numeric exit projection; changing either the classification or
 its exit mapping is a product change, and ordinary receipt text never carries
 the numeric map. Final text rendering is shared, pure projection of native
-answers and explicitly supplied presentation context.
+answers and explicitly supplied presentation context. Known recovery calls are
+transient native facts, independent of caller syntax. Shared rendering formats
+each call for the caller's surface; native diagnostics remain surface-neutral.
 
 Substantive refusals use one text grammar: a denied-verdict title naming the
 verb, a labeled reason with machine kinds rendered as words, and

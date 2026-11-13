@@ -25,7 +25,7 @@ export type {
 export { Keis } from "./library/contract-composition.js";
 export type { KeisReconcile, ReconcileInput } from "./library/contract-composition.js";
 export { KeiyakuError } from "./errors.js";
-export type { KeiyakuErrorCategory, KeiyakuErrorOptions } from "./errors.js";
+export type { KeiyakuErrorCategory, KeiyakuErrorOptions, NextCall } from "./errors.js";
 export { NoGitWorldError, Repo } from "./library/repo.js";
 export {
   Akuma,

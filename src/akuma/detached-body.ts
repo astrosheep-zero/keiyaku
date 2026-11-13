@@ -54,7 +54,7 @@ async function diagnoseSpawnEnoent(
     );
   if (noExecutable)
     remedies.push(
-      "a missing executable likely means the host removed the running process binary: re-enter with a fresh CLI process and retry",
+      "a missing executable likely means the host removed the running process binary: restart the host process and retry",
     );
   const remedy = `kill this Akuma and spawn a fresh one; ${remedies.join("; ")}`;
   const error = new Error(`Body spawn failed: ${missing.join(" and ")}; ${remedy}`, { cause });

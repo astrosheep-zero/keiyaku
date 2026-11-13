@@ -14,6 +14,7 @@ import {
   quotedText,
   renderOpaqueBlock,
   safeText,
+  type TextRenderContext,
 } from "./terminal.js";
 import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 
@@ -243,8 +244,14 @@ type OutcomeStop = Extract<
   }
 >;
 
-function outcomeStopRows(stop: OutcomeStop, columns: number, addressed: string, dependent?: string): readonly string[] {
-  if (stop.kind !== "failed") return renderRefusalFacts(stop, "  ", columns, addressed);
+function outcomeStopRows(
+  stop: OutcomeStop,
+  columns: number,
+  addressed: string,
+  dependent: string | undefined,
+  surface: TextRenderContext["surface"],
+): readonly string[] {
+  if (stop.kind !== "failed") return renderRefusalFacts(stop, "  ", columns, addressed, surface);
   const lines: string[] = [];
   receiptRow(lines, "×", "not accepted", dependent === undefined ? [] : [{ text: dependent, opaque: true }], columns);
   receiptPayload(lines, "reason", stop.diagnostic);
@@ -294,6 +301,7 @@ function placementStopRows(
   columns: number,
   addressed: string,
   dependent: string | undefined,
+  surface: TextRenderContext["surface"],
 ): readonly string[] {
   switch (stop.kind) {
     case "gates-unsatisfied":
@@ -312,7 +320,7 @@ function placementStopRows(
     case "integration-conflict":
     case "integration-unsupported":
     case "failed":
-      return outcomeStopRows(stop, columns, addressed, dependent);
+      return outcomeStopRows(stop, columns, addressed, dependent, surface);
     case "target-content-identical":
     case "target-moved":
       return targetMovementStopRows(stop, columns, dependent);
@@ -328,6 +336,7 @@ export function stopLines(
   columns: number,
   addressed: string,
   dependent?: string,
+  surface?: TextRenderContext["surface"],
 ): readonly string[] {
   const related = dependent;
   switch (stop.kind) {
@@ -351,7 +360,7 @@ export function stopLines(
     case "retry":
       return retryRows(stop, columns, dependent);
     case "refused":
-      return renderRefusalFacts(stop.reason, "  ", columns, addressed);
+      return renderRefusalFacts(stop.reason, "  ", columns, addressed, surface);
     case "cancelled":
     case "unknown-exit":
     case "candidate-unavailable":
@@ -362,11 +371,11 @@ export function stopLines(
     case "checkout-not-followable": {
       const lines: string[] = [];
       if (dependent !== undefined) receiptRow(lines, "!", "dependent", [{ text: dependent, opaque: true }], columns);
-      lines.push(...renderRefusalFacts(stop, "", columns, addressed));
+      lines.push(...renderRefusalFacts(stop, "", columns, addressed, surface));
       return lines;
     }
     default:
-      return placementStopRows(stop, columns, addressed, dependent);
+      return placementStopRows(stop, columns, addressed, dependent, surface);
   }
 }
 
@@ -416,6 +425,7 @@ export function verificationCheckLines(
   snapshot: string,
   columns: number,
   addressed: string,
+  surface?: TextRenderContext["surface"],
 ): readonly string[] {
   const ids = abbreviateGitIds([snapshot]);
   const lines: string[] = [];
@@ -432,7 +442,7 @@ export function verificationCheckLines(
       columns,
     );
     if (check.kind !== "terminal") {
-      lines.push(...stopLines(check.stop, columns, addressed));
+      lines.push(...stopLines(check.stop, columns, addressed, undefined, surface));
     } else {
       receiptRow(lines, check.verdict === "satisfied" ? "✓" : "×", "verdict", [{ text: check.verdict }], columns);
       if (check.verdict === "unsatisfied") receiptPayload(lines, "summary", check.summary);
@@ -447,7 +457,7 @@ export function verificationCheckLines(
         );
       else {
         receiptRow(lines, "!", "admission", [{ text: "stopped" }], columns);
-        lines.push(...stopLines(admission, columns, addressed));
+        lines.push(...stopLines(admission, columns, addressed, undefined, surface));
       }
     }
     if (check.retainedPath !== undefined)
@@ -604,8 +614,13 @@ function effectLines(effect: ExceptionalEffect, columns: number, primary?: strin
   }
 }
 
-function placementEvidenceLines(placement: Placement, columns: number, addressed: string): readonly string[] {
-  if (placement.kind !== "placed") return stopLines(placement, columns, addressed);
+function placementEvidenceLines(
+  placement: Placement,
+  columns: number,
+  addressed: string,
+  surface: TextRenderContext["surface"],
+): readonly string[] {
+  if (placement.kind !== "placed") return stopLines(placement, columns, addressed, undefined, surface);
   if (placement.target === undefined) return [];
   const lines: string[] = [];
   targetMovementRows(lines, placement, columns);
@@ -616,11 +631,12 @@ function placementEvidenceLines(placement: Placement, columns: number, addressed
 export function executionEvidenceLines(
   receipt: Extract<PartialOutcomeEnvelope, { kind: "contract" }>,
   columns: number,
+  surface?: TextRenderContext["surface"],
 ): readonly string[] {
   const lines: string[] = [];
   for (const admission of receipt.admitted ?? []) lines.push(...admittedLines(admission, columns, receipt.contractId));
   if (receipt.placement !== undefined)
-    lines.push(...placementEvidenceLines(receipt.placement, columns, receipt.contractId ?? ""));
+    lines.push(...placementEvidenceLines(receipt.placement, columns, receipt.contractId ?? "", surface));
   for (const effect of receipt.effects ?? []) lines.push(...effectLines(effect, columns, receipt.contractId));
   return lines;
 }
@@ -630,6 +646,7 @@ export function executionFailureLines(
   receipt: PartialOutcomeEnvelope,
   failure: Readonly<{ category: string; diagnostic: string; causeClass?: string; causeDiagnostic?: string }>,
   columns: number,
+  surface?: TextRenderContext["surface"],
 ): readonly string[] {
   const lines: string[] = [];
   const identity = receipt.kind === "contract" ? receipt.contractId : receipt.world;
@@ -647,7 +664,7 @@ export function executionFailureLines(
       "cause",
       [failure.causeClass, failure.causeDiagnostic].filter((part) => part !== undefined).join(": "),
     );
-  if (receipt.kind === "contract") lines.push(...executionEvidenceLines(receipt, columns));
+  if (receipt.kind === "contract") lines.push(...executionEvidenceLines(receipt, columns, surface));
   else {
     for (const [owner, count] of Object.entries(receipt.removed ?? {}))
       receiptRow(lines, " ", `${owner} removed`, [{ text: String(count) }], columns);
