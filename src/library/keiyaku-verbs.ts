@@ -1,7 +1,8 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
-import { durationSchema, tellObservationSchemas } from "../akuma/call-input.js";
+import { durationSchema } from "../akuma/call-input.js";
+import { parseDuration } from "../duration.js";
 import { addDebtInputSchema, updateDebtInputSchemas } from "../debt/input.js";
 import { amendInputSchemas } from "./input.js";
 import { askProgressSchema } from "../akuma/akuma-selection-execution.js";
@@ -29,7 +30,6 @@ import { settingsSchema } from "../settings.js";
 import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
 import {
-  spawnModeSchemas,
   spawnProgressSchema,
   spawnResultSchema,
   spawnNormalResultSchema,
@@ -90,6 +90,9 @@ const optBool = z.boolean().exactOptional();
 const strings = z.array(text).readonly();
 const positive = z.number().int().positive();
 const timeout = durationSchema.exactOptional();
+const waitDuration = text.refine((value) => parseDuration(value).kind === "parsed", {
+  message: "wait requires an integer duration with unit ms, s, m, or h within the safe millisecond range",
+});
 const contract = {
   contract: optText.describe(
     "Target Contract selector (kei/...); omit to resolve from cwd when inside an appointed Contract worktree.",
@@ -329,27 +332,34 @@ export const verbs = Object.freeze({
   },
   show: {
     description:
-      "Read a Contract in full: terms, current chapter, and working instructions. Or read Debts in full with their links. No id reads the Contract whose worktree you stand in.",
-    input: z.union([
-      z
-        .strictObject({
-          id: text
-            .exactOptional()
-            .describe(
-              "Single selector to read: kei/... or @alias for Contract guidance, or debt/<slug>-<hex> for one Debt. Omit when not passing ids to read contextual Contract guidance from cwd.",
-            ),
-        })
-        .readonly(),
-      z
-        .strictObject({
-          ids: z
-            .array(debtIdSchema)
-            .nonempty()
-            .readonly()
-            .describe("Nonempty list of Debt IDs (debt/<slug>-<hex>) to read together; mutually exclusive with id."),
-        })
-        .readonly(),
-    ]),
+      "Read a Contract in full: terms, current chapter, and working instructions. Or read Debts in full with their links. Omit ids to read the Contract whose worktree you stand in.",
+    input: z
+      .strictObject({
+        ids: z
+          .array(text)
+          .nonempty()
+          .readonly()
+          .superRefine((ids, context) => {
+            if (
+              ids.every((id) => debtIdSchema.safeParse(id).success) ||
+              (ids.length === 1 &&
+                contractIdSchema.safeParse(ids[0]!.startsWith("@") ? `kei/${ids[0]!.slice(1)}` : ids[0]).success)
+            )
+              return;
+            context.addIssue({
+              code: "custom",
+              message:
+                ids.length === 1 && ids[0]!.startsWith("@kei/")
+                  ? `redundant short contract selector: ${ids[0]}`
+                  : "show requires one Contract selector or one or more Debt IDs; mixed selection is invalid",
+            });
+          })
+          .exactOptional()
+          .describe(
+            "One kei/... or @alias for Contract guidance, or one or more debt/... IDs; never mix families or select several Contracts. Omit for contextual Contract guidance from cwd.",
+          ),
+      })
+      .readonly(),
     output: z.union([guidanceSchema, debtShowResultSchema, debtAbsentSchema]),
     normal: z.union([guidanceNormalSchema, debtShowNormalResultSchema]),
     effect: "read",
@@ -371,35 +381,18 @@ export const verbs = Object.freeze({
   spawn: {
     description:
       "Birth a new Akuma from akumaName (ls aku/), with an optional first order. contract only marks whose work it is; give it a workdir and the terms yourself. A failed result with an akumaId still left an Akuma alive.",
-    input: z.union([
-      spawnModeSchemas[0]
-        .omit({ body: true })
-        .extend({
-          ...spawnFields,
-          mode: spawnModeSchemas[0].shape.mode.describe(
-            '"detach" (default) returns right after birth and prompt admission; "wait" awaits the opening turn\'s text answer (requires prompt).',
+    input: z
+      .strictObject({
+        ...spawnFields,
+        wait: waitDuration
+          .exactOptional()
+          .describe(
+            "Wait for the opening turn's text answer up to this duration (e.g. 10m); requires prompt. The deadline never kills the Akuma. Omit to return after birth and admission.",
           ),
-          timeoutMs: spawnModeSchemas[0].shape.timeoutMs.describe(
-            'Observation deadline in integer milliseconds when mode is "wait" (never kills the Akuma on deadline). Disallowed in detach mode.',
-          ),
-          prompt: nonblank.describe(
-            "Opening instruction text. Optional in detach mode (omit to birth idle); required in wait mode.",
-          ),
-        })
-        .readonly(),
-      spawnModeSchemas[1]
-        .omit({ body: true })
-        .extend({
-          ...spawnFields,
-          mode: spawnModeSchemas[1].shape.mode.describe(
-            '"detach" (default) returns right after birth and prompt admission; "wait" awaits the opening turn\'s text answer (requires prompt).',
-          ),
-          prompt: nonblank
-            .exactOptional()
-            .describe("Opening instruction text. Optional in detach mode (omit to birth idle); required in wait mode."),
-        })
-        .readonly(),
-    ]),
+        prompt: nonblank.exactOptional().describe("Opening instruction text; omit to birth idle. Required with wait."),
+      })
+      .refine((input) => input.wait === undefined || input.prompt !== undefined, "spawn wait requires prompt")
+      .readonly(),
     output: spawnResultSchema,
     normal: spawnNormalResultSchema,
     progress: spawnProgressSchema,
@@ -423,28 +416,17 @@ export const verbs = Object.freeze({
   },
   tell: {
     description:
-      "Give an Akuma new orders: steers its current work or wakes it. Returns once accepted; wait: true also returns that turn's answer. A timeout ends the waiting, not the work.",
-    input: z.union([
-      tellObservationSchemas[0]
-        .extend({
-          ...tellFields,
-          wait: tellObservationSchemas[0].shape.wait.describe(
-            "When true, wait for and return this exact turn's text answer; when false or omitted, return immediately after admission.",
+      "Give an Akuma new orders: steers its current work or wakes it. Returns once accepted; wait (e.g. 10m) also returns that turn's answer. A timeout ends the waiting, not the work.",
+    input: z
+      .strictObject({
+        ...tellFields,
+        wait: waitDuration
+          .exactOptional()
+          .describe(
+            "Wait for this exact turn's text answer up to this duration (e.g. 10m). Omit to return after admission; the deadline never retracts the Tell or kills the Akuma.",
           ),
-          timeoutMs: tellObservationSchemas[0].shape.timeoutMs.describe(
-            "Observation deadline in integer milliseconds (valid only with wait: true; deadline stops observation without retracting the Tell or killing the Akuma).",
-          ),
-        })
-        .readonly(),
-      tellObservationSchemas[1]
-        .extend({
-          ...tellFields,
-          wait: tellObservationSchemas[1].shape.wait.describe(
-            "When true, wait for and return this exact turn's text answer; when false or omitted, return immediately after admission.",
-          ),
-        })
-        .readonly(),
-    ]),
+      })
+      .readonly(),
     output: akumaTellResultSchema,
     progress: askProgressSchema,
     effect: "write",

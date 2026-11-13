@@ -289,10 +289,10 @@ export function parseContractCommand(parts: ContractTokens): CliRequest {
           refuse("show", error instanceof Error ? error.message : String(error));
         }
         const ids = parts.positionals;
-        return { name: "show", input: ids.length === 1 ? { id: ids[0]! } : { ids }, output };
+        return { name: "show", input: { ids }, output };
       }
       const contract = showSelector(parts);
-      return { name: "show", input: contract === undefined ? {} : { id: contract }, output };
+      return { name: "show", input: contract === undefined ? {} : { ids: parts.positionals }, output };
     }
     case "kanshi":
       return { name: "kanshi", input: {}, output };

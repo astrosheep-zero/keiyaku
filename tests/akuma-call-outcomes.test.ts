@@ -63,7 +63,7 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   const alias = parseAkumaAlias("@unchanged");
   await moveAlias({ world, alias, akumaId: parent.akumaId });
   writeFileSync(join(git.commonDirectory, "refs", "heads", "keiyaku-state.lock"), "fixture publication stop\n");
-  const input = { akumaName: "worker", prompt: "answer", mode: "wait" as const };
+  const input = { akumaName: "worker", prompt: "answer", wait: "5m" };
   const progress: SpawnProgress[] = [];
   const result = await api.spawn({ akumaName: "worker", home, cwd: world, body: input.prompt, mode: "wait", contract: bound.kei, alias, observe: {
     admitted: (tell, id, head) => { progress.push({ kind: "admitted", tell, id, head }); },

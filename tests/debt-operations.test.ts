@@ -785,11 +785,9 @@ test("Debt batch detail retains decomposition, missing endpoints, and readable p
   });
   const facet = Keiyaku.at({ cwd: root, environment: {} });
   assert.deepEqual(await facet.show({ ids: [second, removed, first, second] }), batch);
-  for (const input of [{ id: first }, { ids: [first] }]) {
-    const complete = await facet.show(input);
-    assert.equal(complete.kind, "debt-complete");
-    if (complete.kind === "debt-complete") assert.deepEqual(complete.items, [parent]);
-  }
+  const complete = await facet.show({ ids: [first] });
+  assert.equal(complete.kind, "debt-complete");
+  if (complete.kind === "debt-complete") assert.deepEqual(complete.items, [parent]);
   assert.deepEqual(await debts.read({ ids: [removed] }), { kind: "debt-missing", items: [{ kind: "missing", id: removed }] });
 });
 

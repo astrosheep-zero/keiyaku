@@ -338,21 +338,22 @@ function parseTell(
   fail: (message: string) => never,
 ): Extract<PendingRequest, { name: "tell" | "ask" }> {
   const output = flags.json === true ? "json" : "text";
+  const wait = flags.wait === undefined ? undefined : stringFlag(flags.wait, "--wait requires a duration", fail);
+  const timeoutMs = wait === undefined ? undefined : parseDuration(wait, "--wait", fail);
   const input = {
     akuma: subject,
     ...(flags.interrupt === true ? { interrupt: true } : {}),
-    ...(flags.wait === undefined ? {} : { timeoutMs: parseDuration(flags.wait, "--wait", fail) }),
   };
   return action === "tell"
     ? {
         name: action,
-        input: { ...input, ...(flags.wait === undefined ? {} : { wait: true }) },
+        input: { ...input, ...(wait === undefined ? {} : { wait }) },
         acquire: { prompt },
         output,
       }
     : {
         name: action,
-        input,
+        input: { ...input, ...(timeoutMs === undefined ? {} : { timeoutMs }) },
         acquire: { prompt, schema: stringFlag(flags.schema, "ask requires --schema <file>", fail) },
         output,
       };
@@ -374,8 +375,8 @@ function parseSpawn(
       fail(error instanceof Error ? error.message : "invalid Akuma alias");
     }
   }
-  const mode = flags.wait === undefined ? ("detach" as const) : ("wait" as const);
-  const timeoutMs = flags.wait === undefined ? undefined : parseDuration(flags.wait, "--wait", fail);
+  const wait = flags.wait === undefined ? undefined : stringFlag(flags.wait, "--wait requires a duration", fail);
+  if (wait !== undefined) parseDuration(wait, "--wait", fail);
   if (prompt === undefined && flags.wait !== undefined) fail("spawn --wait requires a prompt");
   return {
     name: "spawn",
@@ -383,8 +384,7 @@ function parseSpawn(
       akumaName,
       ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
       ...(alias === undefined ? {} : { alias }),
-      mode,
-      ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      ...(wait === undefined ? {} : { wait }),
       ...(flags["add-dir"] === undefined ? {} : { writableDirectories: flags["add-dir"] as readonly string[] }),
       ...(flags.bare === true ? { bare: true } : {}),
     },

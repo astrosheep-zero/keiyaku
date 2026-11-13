@@ -46,14 +46,13 @@ import { accepted, commitCandidate, document, present, repositoryWithMain } from
 import { runCli } from "./support/cli-fixtures.js";
 import { assertWireConformance } from "./support/schema-parity.js";
 
-test("flat discovery preserves strict business branches and rejects coordinate collisions at construction", () => {
+test("coordinate composition preserves native branches and rejects collisions at construction", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.bind.input);
-  const validate = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(z.toJSONSchema(schema, { io: "input" }))));
-  assert.equal(validate({ cwd: "/invocation", repo: "/contract", markdown: "terms" }).valid, true);
-  assert.equal(validate({ repo: "/contract", forkOf: "kei/source" }).valid, true);
-  assert.equal(validate({ markdown: "terms", forkOf: "kei/source" }).valid, false);
-  assert.equal(validate({ input: { markdown: "terms" } }).valid, false);
-  assert.equal(validate({ forkOf: "kei/source", extra: true }).valid, false);
+  assert.equal(schema.safeParse({ cwd: "/invocation", repo: "/contract", markdown: "terms" }).success, true);
+  assert.equal(schema.safeParse({ repo: "/contract", forkOf: "kei/source" }).success, true);
+  assert.equal(schema.safeParse({ markdown: "terms", forkOf: "kei/source" }).success, false);
+  assert.equal(schema.safeParse({ input: { markdown: "terms" } }).success, false);
+  assert.equal(schema.safeParse({ forkOf: "kei/source", extra: true }).success, false);
   assert.throws(() => mcpInputSchema(z.union([
     z.strictObject({ markdown: z.string() }).readonly(),
     z.strictObject({ repo: z.string() }).readonly(),
@@ -144,6 +143,35 @@ test("schema cleanup retains authored property names and values", () => {
   });
 });
 
+test("input publication keeps shared structure, enum choices, and authored property unions", () => {
+  const propertyUnion = { anyOf: [{ type: "string" }, { type: "null" }] };
+  const branch = (choice: string, pattern: string, description: string, required: string[]) => ({
+    type: "object",
+    additionalProperties: false,
+    required,
+    properties: {
+      choice: { type: "string", const: choice, description },
+      selectors: { type: "array", minItems: 1, items: { type: "string", pattern } },
+      nested: { type: "object", properties: { value: { type: "string", pattern } } },
+      parent: propertyUnion,
+    },
+  });
+  assert.deepEqual(normalizeMcpSchema(JSON.parse(JSON.stringify({ anyOf: [
+    branch("a", "^a", "", ["choice", "selectors"]),
+    branch("b", "^b", "Choose a branch", ["choice"]),
+  ] })), true), {
+    type: "object",
+    additionalProperties: false,
+    required: ["choice"],
+    properties: {
+      choice: { type: "string", enum: ["a", "b"], description: "Choose a branch" },
+      selectors: { type: "array", minItems: 1, items: { type: "string" } },
+      nested: { type: "object", properties: { value: { type: "string" } } },
+      parent: propertyUnion,
+    },
+  });
+});
+
 test("real flat and native calls reject contradictory intent before coordinate I/O or Akuma allocation", async (t) => {
   const cwd = temporaryDirectory(t, "mcp-pre-io-");
   const environment = { HOME: cwd, USERPROFILE: cwd, KEIYAKU_HOME: cwd };
@@ -152,7 +180,7 @@ test("real flat and native calls reject contradictory intent before coordinate I
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([client.connect(a), adapter.server.connect(b)]);
   t.after(async () => { await client.close(); await adapter.close(); });
-  const { tools } = await client.listTools();
+  await client.listTools();
   const facet = Keiyaku.at({ cwd, environment, home: cwd });
   const invalid: readonly (readonly [VerbName, Record<string, unknown>])[] = [
     ["bind", { markdown: "terms", forkOf: "kei/source" }],
@@ -163,10 +191,15 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["abandon", { actor: "operator" }],
     ["debt.add", { title: "Unwritten", actor: "operator" }],
     ["ls", { selector: "kei/", mine: true }],
-    ["spawn", { akumaName: "worker", mode: "wait" }],
-    ["spawn", { akumaName: "worker", prompt: "work", mode: "detach", timeoutMs: 0 }],
-    ["spawn", { akumaName: "worker", prompt: "work", mode: "wait", timeoutMs: 0.5 }],
+    ["spawn", { akumaName: "worker", wait: "10m" }],
+    ["spawn", { akumaName: "worker", prompt: "work", wait: "0.5s" }],
+    ["spawn", { akumaName: "worker", prompt: "work", wait: "9007199254740992ms" }],
+    ["tell", { akuma: "@worker", prompt: "work", wait: "bad" }],
+    ["tell", { akuma: "@worker", prompt: "work", wait: true }],
     ["tell", { akuma: "@worker", prompt: "work", timeoutMs: 0 }],
+    ["show", { ids: ["kei/example", "debt/example"] }],
+    ["show", { ids: ["kei/example", "kei/other"] }],
+    ["wait", { selectors: ["kei/example", "aku/worker/12345678"] }],
     ["history", { selector: "@worker", id: "turn/1", last: true }],
     ["history", { selector: "@worker", last: true, limit: 1 }],
     ["history", { selector: "@worker", before: 2, since: 1 }],
@@ -186,13 +219,9 @@ test("real flat and native calls reject contradictory intent before coordinate I
     assert.equal(response.isError, true, `${name}: ${JSON.stringify(response)}`);
     assert.equal(response._meta?.["keiyaku/disposition"], "usage", name);
     assert.equal(response.structuredContent, undefined, name);
+    const failure = JSON.parse((response.content as { text: string }[])[1]!.text);
+    assert.equal(failure.category, "invalid-input", name);
     await assert.rejects(facet.run(name, input as never), KeiyakuUsageError);
-    const tool = tools.find(tool => tool.name === name.replaceAll(".", "_"))!;
-    // Native refinements also own effective Debt changes; structural contradictions must be honest on the wire.
-    if (!(name === "debt.update" && !Object.hasOwn(input, "body"))) {
-      const validate = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.inputSchema)));
-      assert.equal(validate(args).valid, false, `${name} published schema: ${JSON.stringify(args)}`);
-    }
   }
   for (const name of ["debt_add", "debt_update", "report"]) {
     const result = await client.callTool({ name, arguments: { cwd: join(cwd, "missing"), repo: "/invalid", ...(name === "debt_add" ? { title: "unwritten" } : name === "debt_update" ? { id: "debt/example", note: "unwritten" } : { text: "unwritten" }) } });
@@ -202,12 +231,6 @@ test("real flat and native calls reject contradictory intent before coordinate I
   // Discovery and the invalid spawn in this existing directory leave no marker or allocated child.
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
   assert.deepEqual(readdirSync(cwd), []);
-  const validateSpawn = new AjvJsonSchemaValidator().getValidator(
-    JSON.parse(JSON.stringify(tools.find(tool => tool.name === "spawn")!.inputSchema)),
-  );
-  assert.equal(validateSpawn({ akumaName: "worker", mode: "wait", prompt: "work", timeoutMs: 0 }).valid, true);
-  assert.equal(validateSpawn({ akumaName: "worker", mode: "wait" }).valid, false);
-  assert.equal(validateSpawn({ akumaName: "worker", mode: "detach", timeoutMs: 0 }).valid, false);
 });
 
 test("SDK discovery and real invocation share the verb table and renderer", async (t) => {
@@ -253,6 +276,13 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     const entry = Keiyaku.verbs[tool.name.replaceAll("_", ".") as keyof typeof Keiyaku.verbs];
     assert.equal(tool.description, entry.description);
     assert.equal(tool.inputSchema.type, "object");
+    assert.equal(tool.inputSchema.additionalProperties, false);
+    for (const keyword of ["anyOf", "oneOf", "allOf"]) assert.equal(tool.inputSchema[keyword], undefined, tool.name);
+    const properties = tool.inputSchema.properties as Record<string, { anyOf?: unknown }>;
+    for (const [key, schema] of Object.entries(properties)) {
+      if ((tool.name === "debt_add" || tool.name === "debt_update") && key === "parent") continue;
+      assert.equal(schema.anyOf, undefined, `${tool.name}.${key}`);
+    }
     new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.inputSchema)));
     if (schemaTools.has(tool.name)) {
       assert.ok("normal" in entry);
@@ -261,6 +291,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     } else assert.equal(tool.outputSchema, undefined);
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
+  }
+  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["tell", "wait", "string"], ["history", "last", "boolean"]]) {
+    const properties = tools.find((tool) => tool.name === name)!.inputSchema.properties as Record<string, { type?: string }>;
+    assert.equal(properties[key!]!.type, type);
   }
   for (const name of ["ls", "report", "reconcile"])
     assert.ok(tools.some((tool) => tool.name === name));
@@ -305,23 +339,21 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   });
   assert.equal(childResult.isError, false);
   const child = accepted(Keiyaku.verbs["debt.add"].output.parse(childResult.structuredContent)).id;
-  const tree = await client.callTool({ name: "show", arguments: { id } });
+  const tree = await client.callTool({ name: "show", arguments: { ids: [id] } });
   assert.equal(tree.isError, false);
   assert.match(JSON.stringify(tree.content), /Check the repair/u);
-  const shown = await client.callTool({ name: "show", arguments: { id: child } });
+  const shown = await client.callTool({ name: "show", arguments: { ids: [child] } });
   assert.equal(shown.isError, false);
   assert.equal(shown.structuredContent, undefined);
   assert.ok(JSON.stringify(shown.content).includes(`needs ${id}`));
   const list = await client.callTool({ name: "ls", arguments: { selector: "debt/" } });
   assert.equal(list.isError, false);
   assert.match(JSON.stringify(list.structuredContent), /Fix the roof/);
-  const plural = await client.callTool({ name: "show", arguments: { ids: [id] } });
-  assert.equal(plural.structuredContent, undefined);
-  assert.match(JSON.stringify(plural.content), /Check the repair/u);
+
   const done = await client.callTool({ name: "debt_update", arguments: { id, state: "done", note: "finished" } });
   assert.equal(done.isError, false);
   assert.equal(done.structuredContent, undefined);
-  const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { id });
+  const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { ids: [id] });
   assert.ok(completed.kind === "debt-complete" && completed.items[0]?.kind === "found");
   assert.equal(completed.items[0].state, "done");
   assert.equal(completed.items[0].note, "finished");
@@ -541,10 +573,10 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
     assert.equal(response.structuredContent, undefined);
     return (response.content as { type: string; text?: string }[]).filter(item => item.type === "text").map(item => item.text).join("\n");
   };
-  assert.equal(await directText({ id: bound.contractId }), nativeGuidance.guidance);
-  const nativeDebt = await facet.show({ id: parent });
-  const textDebt = await directText({ id: parent });
-  assert.equal(textDebt, renderVerb("show", { id: parent }, { kind: "returned", value: nativeDebt }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
+  assert.equal(await directText({ ids: [bound.contractId] }), nativeGuidance.guidance);
+  const nativeDebt = await facet.show({ ids: [parent] });
+  const textDebt = await directText({ ids: [parent] });
+  assert.equal(textDebt, renderVerb("show", { ids: [parent] }, { kind: "returned", value: nativeDebt }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
   const cliDebt = await runCli(["-C", repository.path, "show", parent], { environment });
   assert.equal(cliDebt.exit, 0);
   assert.equal(cliDebt.stdout.trimEnd(), textDebt.trimEnd());
@@ -718,7 +750,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
       columns: DEFAULT_CLI_COLUMNS, color: false,
     }),
   }]);
-  const guidance = await client.callTool({ name: "show", arguments: { id: before.id } });
+  const guidance = await client.callTool({ name: "show", arguments: { ids: [before.id] } });
   const nativeGuidance = await handle.guidance();
   assert.equal(guidance.structuredContent, undefined);
   assert.equal(guidance.isError, false);
@@ -729,12 +761,12 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   assert.equal(boundOverMcp.isError, false);
   const wire = accepted(Keiyaku.verbs.bind.output.parse(boundOverMcp.structuredContent));
   assert.equal(Object.hasOwn(wire, "kei"), false);
-  const mintedInput = { id: wire.contractId };
+  const mintedInput = { ids: [wire.contractId] };
   const minted = await client.callTool({ name: "show", arguments: mintedInput });
   assert.equal(minted.isError, false);
   const mintedGuidance = await Keiyaku.at({ cwd: repository.path, environment: {} }).run("show", mintedInput);
   assert.ok(mintedGuidance.kind === "present");
-  const missingInput = { id: "kei/missing-mcp-contract" };
+  const missingInput = { ids: ["kei/missing-mcp-contract"] };
   const absent = await client.callTool({ name: "show", arguments: missingInput });
   assert.equal(absent.structuredContent, undefined);
   assert.equal(absent.isError, true);
@@ -896,7 +928,7 @@ lines.on("line", line => {
   try {
     await Promise.all([adapter.server.connect(b), client.connect(a)]);
     await client.listTools();
-    const spawned = await client.callTool({ name: "spawn", arguments: { akumaName: "worker", prompt: "work", mode: "wait", timeoutMs: 30_000 } });
+    const spawned = await client.callTool({ name: "spawn", arguments: { akumaName: "worker", prompt: "work", wait: "30s" } });
     assert.equal(spawned.isError, false, JSON.stringify(spawned));
     const source = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
     assert.equal((await Akuma.select(world, source.akumaId).idle({ timeoutMs: 30_000 })).reason, "completed");
@@ -961,7 +993,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     await client.listTools();
     const spawned = await client.callTool({
       name: "spawn",
-      arguments: { akumaName: "acp-worker", prompt: "structured", bare: true, mode: "wait", timeoutMs: 30_000 },
+      arguments: { akumaName: "acp-worker", prompt: "structured", bare: true, wait: "30s" },
     });
     assert.equal(spawned.isError, false, JSON.stringify(spawned));
     const child = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
@@ -970,6 +1002,12 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     assert.equal(waited.isError, false);
     const completion = Keiyaku.verbs.wait.normal.parse(waited.structuredContent);
     assert.ok(completion.kind === "akuma" && completion.results[0]?.kind === "observed");
+    const told = await client.callTool({
+      name: "tell", arguments: { akuma: child.akumaId, prompt: "structured", wait: "30s" },
+    });
+    assert.equal(told.isError, false, JSON.stringify(told));
+    assert.deepEqual(told.content, [{ type: "text", text: '{"ok":true}' }]);
+    assert.equal((await Akuma.select(world, child.akumaId).idle({ timeoutMs: 30_000 })).reason, "completed");
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] };
     const result = await client.callTool({
       name: "ask",

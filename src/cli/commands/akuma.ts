@@ -73,7 +73,7 @@ export async function runSpawn(request: VerbRequest<"spawn">, runtime: CliRuntim
   const { input, output } = request;
   let stream: ReturnType<typeof callObservationStream> | undefined;
   const driver = new ActivityDriver(process.stderr);
-  const observing = input.mode === "wait" && output === "text";
+  const observing = input.wait !== undefined && output === "text";
   const observe = observing
     ? (event: SpawnProgress): void => {
         if (event.kind === "admitted") {

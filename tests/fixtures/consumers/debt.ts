@@ -2,8 +2,8 @@ import { Debts, Keiyaku, World, type DebtDetail, type DebtShowItem, type DebtSho
 
 const facet = Keiyaku.at({ cwd: "/tmp", environment: {} });
 const catalogue = facet.ls({ selector: "debt/", selection: "all" });
-const one = facet.show({ id: "debt/example" });
-const many = facet.show({ ids: ["debt/example"] });
+const one = facet.show({ ids: ["debt/example"] });
+const many = facet.show({ ids: ["debt/example", "debt/peer"] });
 const completed: Promise<DebtUpdateResult> = facet.debtUpdate({ id: "debt/example", state: "done" });
 
 async function native(world: import("@astrosheep/keiyaku").WorldRoot) {

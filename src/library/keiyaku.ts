@@ -1,5 +1,6 @@
 /** @architectureCompositionRoot */
 import { isAbsolute, resolve } from "node:path";
+import { parseDuration } from "../duration.js";
 import { ZodError, type z } from "zod";
 import {
   verbs,
@@ -45,6 +46,12 @@ type ExecutionInput<K extends VerbName> = ParsedInput<K> & KeiyakuRunOptions;
 
 /** Invocation composition captures caller coordinates, never ambient process state. */
 type VerbRequest = { [K in VerbName]: Readonly<{ name: K; input: ParsedInput<K> }> }[VerbName];
+
+function waitTimeout(wait: string): number {
+  const duration = parseDuration(wait);
+  if (duration.kind !== "parsed") throw new KeiyakuUsageError("invalid wait duration");
+  return duration.milliseconds;
+}
 
 export class Keiyaku {
   static readonly verbs: typeof verbs = verbs;
@@ -428,10 +435,9 @@ export class Keiyaku {
     return await selected.contract.abandon(input);
   }
 
-  async #show(input: VerbInput<"show">) {
-    if ("ids" in input) return debt.debtShow(this.#input, input.ids);
-    if (input.id?.startsWith("debt/") === true) return debt.debtShow(this.#input, [input.id]);
-    return await (await this.#selected(input.id)).contract.guidance();
+  async #show({ ids }: VerbInput<"show">) {
+    if (ids?.[0]?.startsWith("debt/") === true) return debt.debtShow(this.#input, ids);
+    return await (await this.#selected(ids?.[0])).contract.guidance();
   }
 
   async #reconcile(input: VerbInput<"reconcile">) {
@@ -443,6 +449,7 @@ export class Keiyaku {
 
   async #spawn({
     prompt,
+    wait,
     contract,
     workdir,
     writableDirectories,
@@ -476,6 +483,7 @@ export class Keiyaku {
       contract === undefined ? undefined : Keis.of(at.repo!).kei({ id: this.#fullId(Keis.of(at.repo!), contract) });
     return await Akumas.of(world).spawn({
       ...input,
+      ...(wait === undefined ? {} : { mode: "wait", timeoutMs: waitTimeout(wait) }),
       cwd,
       settings: configuration,
       ...(alias === undefined ? {} : { alias: alias as AkumaAlias }),
@@ -531,7 +539,9 @@ export class Keiyaku {
       ...(at.repo === undefined ? {} : { repo: at.repo }),
       ...(initiator === undefined ? {} : { initiator }),
     };
-    return "schema" in native ? akumas.ask(native) : akumas.tell(native);
+    if ("schema" in native) return akumas.ask(native);
+    const { wait, ...tell } = native;
+    return akumas.tell({ ...tell, ...(wait === undefined ? {} : { wait: true, timeoutMs: waitTimeout(wait) }) });
   }
 
   async #kill(input: ExecutionInput<"kill">) {

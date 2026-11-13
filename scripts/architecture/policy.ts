@@ -87,6 +87,7 @@ const libraryOwner = {
     any("dispatch/**"),
     any("git/**"),
     runtime("git/identity.ts", ["contractHeadSchema", "contractIdSchema"]),
+    any("duration.ts", ["parseDuration"]),
     any("identity/**"),
     any("kanshi/**"),
     any("region.ts", ["regionOverlapSchema", "regionOverlapResultSchema", "RegionOverlap"]),
@@ -385,7 +386,6 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/keiyaku-identity.ts"),
         any("library/outcome.ts"),
         any("library/akuma-creation.ts", [
-          "spawnModeSchemas",
           "spawnProgressSchema",
           "spawnResultSchema",
           "spawnNormalResultSchema",

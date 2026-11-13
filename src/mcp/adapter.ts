@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import {
@@ -112,17 +113,40 @@ function cleanSchema(schema: JsonSchema): JsonSchema {
   return cleaned;
 }
 
-function constraints(schema: JsonSchema | boolean): JsonSchema | boolean {
-  if (typeof schema === "boolean") return schema;
-  const { description: _description, ...value } = schema;
-  return value;
+function sharedSchema(alternatives: readonly (JsonSchema | boolean)[]): JsonSchema | boolean {
+  const first = alternatives[0]!;
+  if (alternatives.every((value) => isDeepStrictEqual(value, first))) return first;
+  if (alternatives.some((value) => typeof value === "boolean")) return {};
+  const objects = alternatives as readonly JsonSchema[];
+  const shared: JsonSchema = {};
+  for (const [key, value] of Object.entries(first as JsonSchema)) {
+    if (key === "description" || !objects.every((schema) => Object.hasOwn(schema, key))) continue;
+    if (key === "items" && objects.every((schema) => typeof schema.items === "object")) {
+      shared.items = sharedSchema(objects.map((schema) => schema.items as JsonSchema));
+    } else if (key === "properties") {
+      shared.properties = Object.fromEntries(
+        Object.keys(value as Record<string, unknown>)
+          .filter((name) => objects.every((schema) => Object.hasOwn(schema.properties!, name)))
+          .map((name) => [name, sharedSchema(objects.map((schema) => schema.properties![name]!))]),
+      );
+    } else if (objects.every((schema) => isDeepStrictEqual(schema[key], value))) shared[key] = value;
+  }
+  if (objects.every((schema) => Object.hasOwn(schema, "const"))) {
+    const values = [...new Set(objects.map((schema) => schema.const).filter((value) => value !== undefined))];
+    delete shared.const;
+    if (values.length === 2 && values.every((value) => typeof value === "boolean")) shared.type = "boolean";
+    else shared.enum = values;
+  }
+  const description = objects.find((schema) => schema.description)?.description;
+  if (description !== undefined) shared.description = description;
+  return shared;
 }
 
-/** Hoist only object input alternatives, retaining each branch's complete restrictions. */
+/** Advertise shared structure; native verb validation owns cross-field admission. */
 export function normalizeMcpSchema(schema: JsonSchema, input = false): JsonSchema {
   const cleaned = cleanSchema(schema);
   if (!input || cleaned.anyOf === undefined) return cleaned;
-  const branches = cleaned.anyOf;
+  const { anyOf: branches, ...root } = cleaned;
   if (
     !branches.every(
       (branch) => typeof branch === "object" && branch.type === "object" && branch.additionalProperties === false,
@@ -131,61 +155,23 @@ export function normalizeMcpSchema(schema: JsonSchema, input = false): JsonSchem
     throw new Error("MCP input alternatives must be strict objects");
   const objects = branches as JsonSchema[];
   const keys = [...new Set(objects.flatMap((branch) => Object.keys(branch.properties ?? {})))];
-  const properties: Record<string, JsonSchema | boolean> = {};
-  for (const key of keys) {
-    const alternatives = objects.flatMap((branch) =>
-      branch.properties?.[key] === undefined ? [] : [branch.properties[key]!],
-    );
-    const first = alternatives[0]!;
-    const unique = [
-      ...new Map(alternatives.map((value) => [JSON.stringify(constraints(value)), constraints(value)])).values(),
-    ];
-    const merged = unique.includes(true)
-      ? true
-      : unique.length === 1
-        ? unique[0]!
-        : { anyOf: unique.filter((value): value is JsonSchema => typeof value !== "boolean") };
-    properties[key] =
-      typeof merged === "boolean"
-        ? merged
-        : {
-            ...merged,
-            ...(typeof first === "boolean" || first.description === undefined
-              ? {}
-              : { description: first.description }),
-          };
-  }
+  const properties = Object.fromEntries(
+    keys.map((key) => [
+      key,
+      sharedSchema(
+        objects.flatMap((branch) => (branch.properties?.[key] === undefined ? [] : [branch.properties[key]!])),
+      ),
+    ]),
+  );
   const required = (objects[0]!.required ?? []).filter((key) =>
     objects.every((branch) => branch.required?.includes(key)),
   );
   return {
-    ...cleaned,
+    ...root,
     type: "object",
     properties,
     ...(required.length === 0 ? {} : { required }),
     additionalProperties: false,
-    anyOf: objects.map((branch) => {
-      const {
-        type: _type,
-        properties: _properties,
-        required: branchRequired,
-        additionalProperties: _extra,
-        ...rest
-      } = branch;
-      const narrowed: Record<string, JsonSchema | boolean> = {};
-      for (const key of keys) {
-        const value = branch.properties?.[key];
-        if (value === undefined) narrowed[key] = false;
-        else if (JSON.stringify(constraints(value)) !== JSON.stringify(constraints(properties[key]!)))
-          narrowed[key] = constraints(value);
-      }
-      const needs = (branchRequired ?? []).filter((key) => !required.includes(key));
-      return {
-        ...rest,
-        ...(needs.length === 0 ? {} : { required: needs }),
-        ...(Object.keys(narrowed).length === 0 ? {} : { properties: narrowed }),
-      };
-    }),
   };
 }
 

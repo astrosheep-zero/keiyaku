@@ -145,15 +145,14 @@ export type SpawnWaitObserver = Omit<AskObserver, "admitted"> &
     admitted?: (tell: TellResult, id: AkumaStatus["id"], head: SpawnWaitHead) => void | Promise<void>;
   }>;
 
-export const spawnModeSchemas = [
+const spawnModeSchema = z.union([
   z.strictObject({
     mode: z.literal("wait"),
     body: z.string(),
     timeoutMs: durationSchema.exactOptional(),
   }),
   z.strictObject({ mode: z.literal("detach").exactOptional(), body: z.string().exactOptional() }),
-] as const;
-const spawnModeSchema = z.union(spawnModeSchemas);
+]);
 
 export type SpawnInput = Readonly<{
   akumaName: string;

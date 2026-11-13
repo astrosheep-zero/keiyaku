@@ -275,7 +275,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
           : command;
     }
     if (request.name === "spawn") return await runSpawn(request, runtime);
-    if (request.name === "ask" || (request.name === "tell" && request.input.wait === true))
+    if (request.name === "ask" || (request.name === "tell" && request.input.wait !== undefined))
       return await runAsk(request, runtime);
     if (request.name === "history" && !request.input.selector.startsWith("kei/"))
       return await runAkumaHistory(request, runtime);

@@ -90,7 +90,7 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   assert.ok(bound.worktreePath);
   commitCandidate(repository, bound.worktreePath);
 
-  const showInput = { id: bound.contractId };
+  const showInput = { ids: [bound.contractId] };
   const guidance = await facet.run("show", showInput);
   assert.deepEqual(guidance, await bound.kei.guidance());
   assert.ok(guidance.kind === "present" && guidance.guidance.includes("Library verbs"));
@@ -188,7 +188,7 @@ test("wire validation and classification reject malformed calls before observati
   }
   for (const [name, inputs] of [
     ["show", [{ ids: [] }, { id: "debt/a", ids: ["debt/a"] }, { ids: ["debt/a", "kei/b"] },
-      { ids: ["kei/a"] }, { ids: ["kei/a", "kei/b"] }, { id: "aku/worker/1234abcd" }, { id: "debt/" }, { id: "@*" }, { id: "@" }]],
+      { ids: ["kei/a", "kei/b"] }, { ids: ["aku/worker/1234abcd"] }, { ids: ["debt/"] }, { ids: ["@*"] }, { ids: ["@"] }]],
     ["ls", [{ selector: "kei/", selection: "all" }, { selector: "debt/", mine: true },
       { selector: "aku/", mine: true }, { selector: "aku/*", caller: "aku/intern/00000001" }, { selector: "aku/*", selection: "closed" }]],
     ["status", [{}, { id: "debt/a" }, { id: "aku/*" }, { ids: ["kei/a", "kei/b"] }]],

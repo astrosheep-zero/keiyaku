@@ -27,7 +27,7 @@ function spawned(extra: Omit<Extract<SpawnResult, { kind: "spawned" }>, "kind" |
 test("spawn defaults to detached birth and rejects removed detach flags", () => {
   assert.deepEqual(command, {
     name: "spawn",
-    input: { akumaName: "worker", mode: "detach" },
+    input: { akumaName: "worker" },
     acquire: { prompt: { kind: "argument", value: "prompt" } },
     output: "text",
   });

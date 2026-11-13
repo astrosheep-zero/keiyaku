@@ -14,7 +14,7 @@ function command(argv: readonly string[]): ParsedCommand {
 
 test("show routes complete Debt addresses to the native Debt operation", () => {
   assert.deepEqual(command(["show", "debt/example"]), {
-    name: "show", input: { id: "debt/example" }, output: "text",
+    name: "show", input: { ids: ["debt/example"] }, output: "text",
   });
   assert.deepEqual(command(["show", "debt/one", "debt/two", "--json"]), {
     name: "show", input: { ids: ["debt/one", "debt/two"] }, output: "json",
@@ -94,7 +94,7 @@ test("global coordinates are independent of command position", () => {
     workdir: "work",
     command: {
       name: "spawn",
-      input: { akumaName: "worker", mode: "detach" },
+      input: { akumaName: "worker" },
       acquire: { prompt: { kind: "argument", value: "body" } },
       output: "text",
     },
@@ -103,7 +103,7 @@ test("global coordinates are independent of command position", () => {
     workdir: "work",
     command: {
       name: "spawn",
-      input: { akumaName: "worker", contract: "kei/example", mode: "detach" },
+      input: { akumaName: "worker", contract: "kei/example" },
       acquire: { prompt: { kind: "argument", value: "body" } },
       output: "text",
     },
@@ -116,13 +116,13 @@ test("global coordinates are independent of command position", () => {
   );
   assert.deepEqual(command(["spawn", "worker"]), {
     name: "spawn",
-    input: { akumaName: "worker", mode: "detach" },
+    input: { akumaName: "worker" },
     acquire: {},
     output: "text",
   });
   assert.deepEqual(command(["spawn", "worker", "--bare"]), {
     name: "spawn",
-    input: { akumaName: "worker", mode: "detach", bare: true },
+    input: { akumaName: "worker", bare: true },
     acquire: {},
     output: "text",
   });
@@ -149,7 +149,7 @@ test("global coordinates are independent of command position", () => {
 test("spawn repeats native writable-directory grants and refuses retired options", () => {
   assert.deepEqual(command(["spawn", "worker", "--add-dir", "../runtime", "--add-dir", "/square"]), {
     name: "spawn",
-    input: { akumaName: "worker", mode: "detach", writableDirectories: ["../runtime", "/square"] },
+    input: { akumaName: "worker", writableDirectories: ["../runtime", "/square"] },
     acquire: {},
     output: "text",
   });
@@ -234,7 +234,7 @@ test("show parses a standalone Contract guidance read with root coordinates", ()
     assert.deepEqual(parseArgv(["-C", "/invocation", "--repo", "/repository", "show", selector, "--json"]), {
       cwd: "/invocation",
       repo: "/repository",
-      command: { name: "show", input: { id: selector }, output: "json" },
+      command: { name: "show", input: { ids: [selector] }, output: "json" },
     });
   }
   for (const selector of ["aku", "aku/", "aku/*", "kei", "kei/", "kei/*", "aku/worker/1234abcd", "kei/foo*"]) {
@@ -248,10 +248,10 @@ test("show parses a standalone Contract guidance read with root coordinates", ()
 
 test("show parses one Contract selector and JSON output; status refuses the retired guidance flag", () => {
   assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
-    command: { name: "show", input: { id: "kei/example" }, output: "json" },
+    command: { name: "show", input: { ids: ["kei/example"] }, output: "json" },
   });
   assert.deepEqual(parseArgv(["show", "@example"]), {
-    command: { name: "show", input: { id: "@example" }, output: "text" },
+    command: { name: "show", input: { ids: ["@example"] }, output: "text" },
   });
   assert.throws(() => parseArgv(["show", "aku/x/*"]), /cannot select an Akuma/u);
   for (const selectors of [[], ["kei/example"], ["@example"], ["kei/one", "kei/two"], ["aku/x/*"]]) {
@@ -491,7 +491,7 @@ test("tell parses text observation and ask requires a schema document", () => {
   });
   assert.deepEqual(command(["tell", "@worker", "--wait", "0ms", "continue"]), {
     name: "tell",
-    input: { akuma: "@worker", wait: true, timeoutMs: 0 },
+    input: { akuma: "@worker", wait: "0ms" },
     acquire: { prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
@@ -593,14 +593,14 @@ test("exact-one source selection and nonblank argv fail at parse", () => {
   });
   assert.deepEqual(command(["spawn", "worker", "--", "--workdir"]), {
     name: "spawn",
-    input: { akumaName: "worker", mode: "detach" },
+    input: { akumaName: "worker" },
     acquire: { prompt: { kind: "argument", value: "--workdir" } },
     output: "text",
   });
   assert.deepEqual(parseArgv(["spawn", "worker", "--", "--workdir"]), {
     command: {
       name: "spawn",
-      input: { akumaName: "worker", mode: "detach" },
+      input: { akumaName: "worker" },
       acquire: { prompt: { kind: "argument", value: "--workdir" } },
       output: "text",
     },
@@ -663,7 +663,7 @@ test("stdin marker is position independent for Contract commands and global coor
   assert.deepEqual(parseArgv(["spawn", "worker", "--", "--cwd"]), {
     command: {
       name: "spawn",
-      input: { akumaName: "worker", mode: "detach" },
+      input: { akumaName: "worker" },
       acquire: { prompt: { kind: "argument", value: "--cwd" } },
       output: "text",
     },
@@ -671,7 +671,7 @@ test("stdin marker is position independent for Contract commands and global coor
   assert.deepEqual(parseArgv(["spawn", "worker", "--", "--help"]), {
     command: {
       name: "spawn",
-      input: { akumaName: "worker", mode: "detach" },
+      input: { akumaName: "worker" },
       acquire: { prompt: { kind: "argument", value: "--help" } },
       output: "text",
     },

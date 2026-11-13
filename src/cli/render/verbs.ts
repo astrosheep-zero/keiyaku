@@ -270,7 +270,7 @@ function renderReport(result: VerbOutput<"report">, context: TextRenderContext):
 
 function renderShow(input: VerbInput<"show">, result: VerbOutput<"show">, context: TextRenderContext): string {
   if (result.kind === "present") return result.guidance;
-  if (result.kind === "missing") return missing("show", "id" in input ? input.id : undefined, context);
+  if (result.kind === "missing") return missing("show", input.ids?.[0], context);
   return renderDebtShow(result, context);
 }
 

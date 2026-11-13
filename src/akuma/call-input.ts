@@ -8,11 +8,10 @@ export const durationSchema = z
   .number({ error: durationDiagnostic })
   .nonnegative({ error: durationDiagnostic })
   .multipleOf(1, { error: durationDiagnostic });
-export const tellObservationSchemas = [
+const tellObservationSchema = z.union([
   z.strictObject({ wait: z.literal(true), timeoutMs: durationSchema.max(Number.MAX_SAFE_INTEGER).exactOptional() }),
   z.strictObject({ wait: z.literal(false).exactOptional() }),
-] as const;
-const tellObservationSchema = z.union(tellObservationSchemas);
+]);
 
 export function validateTellObservation(input: Readonly<{ wait?: unknown; timeoutMs?: unknown }>): void {
   validateAkumaInput(tellObservationSchema, {
