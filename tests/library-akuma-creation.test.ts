@@ -227,9 +227,23 @@ test("explicit writable directories refuse invalid public grants before allocati
       ...configured.placement,
       writableDirectories: [alias],
     }),
-    /not canonical/u,
+    (error: unknown) =>
+      error instanceof TypeError && error.message === `writableDirectories path is not canonical: ${alias}`,
   );
-  assert.equal((await Akumas.of(world).list()).rows, undefined);
+  assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
+});
+
+test("non-Codex writable directories refuse as a TypeError before allocation", async (t) => {
+  const world = await World.at(temporaryDirectory(t, "keiyaku-provider-directory-refusal-"));
+  const home = join(world, "home");
+  mkdirSync(join(home, "akumas"), { recursive: true });
+  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: pi\n---\nWork.\n");
+  await assert.rejects(
+    Akumas.of(world).spawn({ akumaName: "worker", home, writableDirectories: [world] }),
+    (error: unknown) =>
+      error instanceof TypeError && error.message === "writableDirectories is unsupported by provider pi",
+  );
+  assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
 });
 
 test("prompt-free Akumas.spawn refuses wait options", async () => {

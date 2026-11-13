@@ -278,7 +278,9 @@ function canonicalAkumaOrder(selected: ReadonlySet<AkumaId>): readonly AkumaId[]
   return ids;
 }
 
-async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<ResolvedAkumaSet> {
+type AkumaSetOptions = Readonly<{ contractSelectors?: boolean }>;
+
+async function readAkumaSet(input: UncheckedAkumaAddressInput, options: AkumaSetOptions): Promise<ResolvedAkumaSet> {
   const values = requireInput(input, "Akuma set address input");
   for (const key of Object.keys(values)) {
     if (!["path", "akuma", "repo"].includes(key)) {
@@ -289,6 +291,8 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<Resolved
     throw new TypeError("akuma must be a nonempty selector array");
   const path = await World.prove(nonblank(values.path, "path"));
   const selectors = values.akuma.map(parseSetSelector);
+  if (options.contractSelectors === false && hasSelectorKind(selectors, "contract"))
+    throw new TypeError("Akumas.wait does not accept Contract selectors; use Keis.wait");
   if (hasSelectorKind(selectors, "contract") && values.repo === undefined) {
     throw new TypeError("Contract Akuma selector requires repo");
   }
@@ -311,8 +315,9 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput): Promise<Resolved
 
 export async function addressAkumaSet(
   input: UncheckedAkumaAddressInput,
+  options: AkumaSetOptions = {},
 ): Promise<Readonly<{ path: WorldRoot; ids: readonly AkumaId[]; orderedIds: readonly AkumaId[] }>> {
-  const resolved = await readAkumaSet(input);
+  const resolved = await readAkumaSet(input, options);
   for (const id of resolved.explicit) await requireBornAkuma(resolved.path, id);
   await refuseForeignContractMembers(resolved.path, resolved.ids, resolved.contractMembers);
   return { path: resolved.path, ids: resolved.ids, orderedIds: resolved.orderedIds };

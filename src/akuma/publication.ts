@@ -347,10 +347,10 @@ async function admittedRecipe(
   recipe: PreparedCallRecipe,
   input: Pick<PreparedCallInput, "cwd" | "writableDirectories" | "signal">,
 ): Promise<PreparedCallRecipe> {
+  const directories = await writableDirectoriesOption(input.writableDirectories);
+  const provider = await withWritableDirectories(recipe.provider, input.cwd, directories, input.signal);
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
   try {
-    const directories = await writableDirectoriesOption(input.writableDirectories);
-    const provider = await withWritableDirectories(recipe.provider, input.cwd, directories, input.signal);
     selected = await resolveProviderExecution(provider);
   } catch (error) {
     if (error instanceof TypeError) throw new PreparedCallAdmissionError("resolve", error.message);

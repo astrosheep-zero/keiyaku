@@ -6,7 +6,7 @@ import { AkumaNameError, loadPreparedArchetype } from "./archetype.js";
 import type { BodyLauncher } from "./body-launch.js";
 import { tellWakeRuntime, type TellResult } from "./body.js";
 import type { CallInitialTell } from "./call-initial-tell.js";
-import { bareOption, canonicalBirthCwd, writableDirectoriesOption } from "./call-input.js";
+import { bareOption, canonicalBirthCwd } from "./call-input.js";
 import { validateAkumaName } from "../identity/normalize.js";
 import { type AllocatedAkuma } from "./identity.js";
 import { PreparedCallAdmissionError, prepareCall, publishPreparedCall, type PreparedCall } from "./publication.js";
@@ -71,9 +71,6 @@ export async function prepareAkumaCall(
   const home = configuration.home === undefined ? {} : { home: configuration.home };
   const settings = configuration.settings ?? (await Settings.load({ cwd: path, ...home }));
   const akumaName = await loadPreparedArchetype({ name, cwd: path, ...home, settings });
-  const writableDirectories = await writableDirectoriesOption(input.writableDirectories);
-  if (writableDirectories.length > 0 && akumaName.provider.kind !== "codex-app-server")
-    throw new TypeError(`writableDirectories is unsupported by provider ${akumaName.provider.kind}`);
   const recipe = Object.freeze({
     ...(akumaName.description === undefined ? {} : { description: akumaName.description }),
     provider: akumaName.provider,

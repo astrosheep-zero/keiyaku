@@ -262,16 +262,10 @@ export async function waitAkuma(
       throw new TypeError(`Akumas.wait input has unknown field: ${key}`);
     }
   }
-  if (
-    Array.isArray(values.akuma) &&
-    values.akuma.some((selector: unknown) => typeof selector === "string" && selector.startsWith("kei/"))
-  ) {
-    throw new TypeError("Akumas.wait does not accept Contract selectors; use Keis.wait");
-  }
   const selected = completionMode(values.completion);
   const timeoutMs = timeout(values.timeoutMs);
   const callerSignal = signal(values.signal);
-  const addressed = await addressAkumaSet(setAddress(values));
+  const addressed = await addressAkumaSet(setAddress(values), { contractSelectors: false });
   return await withAkumaWaitDeferrals(
     { world: addressed.path, reportDiagnostic },
     { akumaIds: addressed.orderedIds },

@@ -1333,7 +1333,10 @@ test("Contract wait refuses selectors while cross-World Contract kill refuses be
     repo: repoB,
     timeoutMs: 0,
   });
-  await assert.rejects(wait, /Akumas\.wait does not accept Contract selectors/u);
+  await assert.rejects(wait, {
+    name: "TypeError",
+    message: "Akumas.wait does not accept Contract selectors; use Keis.wait",
+  });
   await assert.rejects(
     Akumas.of(worldB).kill({
       akuma: ["kei/foreign"],
