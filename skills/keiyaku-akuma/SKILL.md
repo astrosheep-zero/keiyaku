@@ -24,9 +24,10 @@ research.
   supervise them together with `wait` (wakes on any settlement by default, or
   all; a wait deadline never kills workers). `wait` on `kei/...` waits for a
   `Contract`'s next journal change or terminal state.
-- **`tell --wait <duration>` for single-turn answers:** submits an instruction
-  and observes that exact `Turn`'s answer. `--schema <file>` supplies a JSON
-  Schema answer contract and also observes; without `--wait` it has no deadline.
+- **Observed `tell` for single-turn answers:** submits an instruction and
+  observes that exact `Turn`'s answer (a deadline). Without the observation
+  deadline there is no wait. For a structured JSON answer, use `ask` instead:
+  a prompt plus a JSON Schema answer contract, also observed.
 - **`tell` vs. interrupting `tell`:** `tell` queues steering instructions
   without blocking; request an interrupt only when the worker is on the wrong
   track and should yield its current attempt first.

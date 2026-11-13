@@ -36,8 +36,8 @@ decomposition. Native readiness and blocked views interpret unresolved `needs`.
 
 ## 3. World Ledger And `Contract` Settlement
 
-- **World ledger:** `ls debt/` lists open work across the World; `--closed` selects
-  terminal work and `--all` selects both. Address a specific `Debt` by its complete
+- **World ledger:** `ls debt/` lists open work across the World; its selection
+  option chooses terminal work or both. Address a specific `Debt` by its complete
   flat `debt/<id>` identity. A managed worktree shares its repository's ledger.
 - **`Contract` settlement:** associating a `Debt` when binding a `kei` holds that
   `Debt`; accepting the `kei` marks it `done`, while abandoning the `kei`
