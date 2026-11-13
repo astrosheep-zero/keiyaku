@@ -51,7 +51,6 @@ export type AkumaBirthInput = Readonly<{
   cwd?: string;
   home?: string;
   settings?: Settings;
-  writableDirectories?: readonly string[];
   bare?: boolean;
   caller?: AkumaCaller;
   initiator?: string;
@@ -264,10 +263,7 @@ export class Akuma extends AkumaHandle {
       throw new KeiyakuError("invalid-input", "Akuma birth input must be an object");
     }
     const unknown = Object.keys(input).find(
-      (key) =>
-        !["root", "cwd", "home", "settings", "writableDirectories", "bare", "caller", "initiator", "host"].includes(
-          key,
-        ),
+      (key) => !["root", "cwd", "home", "settings", "bare", "caller", "initiator", "host"].includes(key),
     );
     if (unknown !== undefined)
       throw new KeiyakuError("invalid-input", `Akuma birth input has unknown field: ${unknown}`);
@@ -282,7 +278,6 @@ export class Akuma extends AkumaHandle {
       {
         akumaName,
         ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
-        ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
         ...(input.bare === undefined ? {} : { bare: input.bare }),
         ...(input.caller === undefined ? {} : { caller: input.caller }),
         ...(input.initiator === undefined ? {} : { initiator: input.initiator }),

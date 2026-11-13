@@ -452,7 +452,6 @@ export class Keiyaku {
     wait,
     contract,
     workdir,
-    writableDirectories,
     alias,
     observe,
     ...input
@@ -462,15 +461,6 @@ export class Keiyaku {
       workdir === undefined
         ? at.cwd
         : await canonicalBirthCwd(resolve(at.cwd, workdir), `workdir is not an existing directory: ${workdir}`);
-    const directories =
-      writableDirectories === undefined
-        ? undefined
-        : await Promise.all(
-            writableDirectories.map((path) => {
-              if (path.trim() === "") throw new KeiyakuUsageError("a writable directory must be nonblank");
-              return canonicalBirthCwd(resolve(at.cwd, path));
-            }),
-          );
     const caller = await this.#caller();
     const initiator = deliveryOwner(this.#input.environment);
     const world = at.candidateWorld ?? (await at.establishWorld());
@@ -489,7 +479,6 @@ export class Keiyaku {
       ...(alias === undefined ? {} : { alias: alias as AkumaAlias }),
       ...(this.#input.home === undefined ? {} : { home: this.#input.home }),
       ...(prompt === undefined ? {} : { body: prompt }),
-      ...(directories === undefined ? {} : { writableDirectories: directories }),
       ...(selected === undefined ? {} : { contract: selected }),
       ...(caller === undefined ? {} : { caller }),
       ...(initiator === undefined ? {} : { initiator }),

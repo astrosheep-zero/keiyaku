@@ -230,17 +230,13 @@ adapter reports it. Compaction is execution housekeeping, not a Turn failure,
 retry, or lifecycle transition; a compaction error may be narrated separately
 when the provider supplies an error detail.
 
-Explicit additional writable directories are currently supported only by the
-Codex native workspace-write configuration. Other native sandbox modes and
-permission-profile policies refuse roots they cannot represent without
-changing policy. Native configuration precedence is adjudicated before birth,
-without a model turn or retained session; no configuration files are written.
-The adapter folds them additively
-into the immutable birth recipe, retaining existing native writable roots,
-sandbox mode, and network policy. Other providers refuse nonempty grants before
-birth rather than silently ignoring them or inventing equivalent access.
-These roots expose the selected directories to native tools; they are not live
-elevation or a shared Settings mutation.
+Native filesystem policy and configuration precedence belong to the selected
+provider. Codex forwards authored opaque configuration unchanged; Keiyaku adds
+no shared root admission, additive grant mapping, or pre-birth sandbox probe.
+Native execution judges configuration validity and enforcement, so setup may
+fail after birth under ordinary execution semantics. The retained
+recipe preserves explicit configuration, including previously retained policy,
+without discovering or freezing external native defaults or files.
 
 Option admission happens once before identity allocation. Prompt and
 structured-answer changes apply only when the provider begins a new Turn,

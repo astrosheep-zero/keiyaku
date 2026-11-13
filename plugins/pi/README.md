@@ -37,7 +37,7 @@ data. No native tool shells out to the CLI.
 
 | Tool | Parameters |
 | --- | --- |
-| `akuma_spawn` | `akuma` definition name, `body`; optional `workdir`, `writableDirectories`, `detach`, `bare`, `wait`, `timeoutMs` |
+| `akuma_spawn` | `akuma` definition name, `body`; optional `workdir`, `detach`, `bare`, `wait`, `timeoutMs` |
 | `akuma_status` | `akuma`; optional `repo` |
 | `akuma_list` | optional `akumaName`, `limit` |
 | `akuma_definitions` | optional `limit` |
@@ -57,13 +57,6 @@ Spawn and Fork pass `bare` through to the SDK: it omits only Keiyaku runtime
 instructions and remains frozen through wake and inherited by forks. Providers
 without a verified runtime-instruction channel retain their explicit refusal
 unless the caller opts out.
-
-`writableDirectories` grants native tools access to additional existing canonical
-absolute directories at birth (currently Codex only). It preserves the native
-sandbox mode, network policy, and existing writable roots. Other providers
-refuse nonempty grants. These explicit filesystem grants do not automatically
-expose the repository or Home. Forks inherit the frozen native recipe; there is
-no live elevation option.
 
 ```json
 {"akuma":"worker","body":"Inspect the parser without changing files."}

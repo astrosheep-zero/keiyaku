@@ -1,6 +1,6 @@
 import { KeiyakuError } from "../errors.js";
 import { realpath, stat } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { z } from "zod";
 
 const durationDiagnostic = "timeoutMs must be a nonnegative finite millisecond duration";
@@ -31,26 +31,6 @@ export function bareOption(value: unknown): boolean | undefined {
   if (value !== undefined && typeof value !== "boolean")
     throw new KeiyakuError("invalid-input", "bare must be a boolean");
   return value;
-}
-
-export async function writableDirectoriesOption(value: unknown): Promise<readonly string[]> {
-  if (value === undefined) return [];
-  if (!Array.isArray(value))
-    throw new KeiyakuError("invalid-input", "writableDirectories must be an array of canonical directories");
-  const directories = await Promise.all(
-    value.map(async (path: unknown) => {
-      if (typeof path !== "string" || path.trim() === "" || !isAbsolute(path))
-        throw new KeiyakuError(
-          "invalid-input",
-          "writableDirectories must contain nonblank canonical absolute directories",
-        );
-      const canonical = await canonicalBirthCwd(path);
-      if (canonical !== path)
-        throw new KeiyakuError("invalid-input", `writableDirectories path is not canonical: ${path}`);
-      return canonical;
-    }),
-  );
-  return Object.freeze([...new Set(directories)]);
 }
 
 export async function canonicalBirthCwd(

@@ -12,8 +12,7 @@ import type {
   TellResult,
 } from "./call-initial-tell.js";
 import { BIRTH_TIMEOUT_MS, pendingTellReceipt } from "./call-initial-tell.js";
-import { resolveProviderExecution, withWritableDirectories } from "./providers/index.js";
-import { writableDirectoriesOption } from "./call-input.js";
+import { resolveProviderExecution } from "./providers/index.js";
 import type { WorldRoot } from "../world.js";
 
 const POLL_MS = 100;
@@ -331,7 +330,6 @@ type PreparedCallResult = Readonly<{
 type PreparedCallInput = Readonly<{
   akumaName: string;
   cwd: string;
-  writableDirectories?: readonly string[];
   caller?: AkumaCaller;
   initialTell?: CallInitialTell;
   signal?: AbortSignal;
@@ -344,15 +342,10 @@ type PreparedCallInput = Readonly<{
 }>;
 
 /** Admit the provider recipe once before allocating any child. */
-async function admittedRecipe(
-  recipe: PreparedCallRecipe,
-  input: Pick<PreparedCallInput, "cwd" | "writableDirectories" | "signal">,
-): Promise<PreparedCallRecipe> {
-  const directories = await writableDirectoriesOption(input.writableDirectories);
-  const provider = await withWritableDirectories(recipe.provider, input.cwd, directories, input.signal);
+async function admittedRecipe(recipe: PreparedCallRecipe): Promise<PreparedCallRecipe> {
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
   try {
-    selected = await resolveProviderExecution(provider);
+    selected = await resolveProviderExecution(recipe.provider);
   } catch (error) {
     if (errorCategory(error) === "invalid-input")
       throw new PreparedCallAdmissionError("resolve", error instanceof Error ? error.message : String(error));
@@ -386,7 +379,7 @@ export type PreparedCall = Readonly<{
 /** Validate completely, then reserve one coordinate before any birth or input. */
 export async function prepareCall(input: PreparedCallInput): Promise<PreparedCall> {
   const caller = decodeAkumaCaller(input.caller);
-  const recipe = await admittedRecipe(input.recipe, input);
+  const recipe = await admittedRecipe(input.recipe);
   input.signal?.throwIfAborted();
   const allocated = await allocateAkumaDirectory({ worldRoot: input.world, akumaName: input.akumaName });
   return { allocated, input, recipe, caller };

@@ -30,7 +30,6 @@ import { decodeResumeCoordinate } from "../src/akuma/coordinate.js";
 import { type ProviderExecution } from "../src/akuma/provider-recipe.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createCodexAppServerProvider } from "../src/akuma/providers/codex-app-server/index.js";
-import { withWritableDirectories } from "../src/akuma/providers/index.js";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import {
   composeHeadlessPermissionConfig,
@@ -2623,7 +2622,6 @@ function fakeCodex(
       "  if(message.method==='initialized') return;",
       "  if(message.method==='thread/start'){",
       "    if(mode==='exit-before-admit') process.exit(7);",
-      "    if(message.params.ephemeral) return reply(message,{sandbox:{type:'workspaceWrite',writableRoots:[log],networkAccess:false,excludeTmpdirEnvVar:true,excludeSlashTmp:true}});",
       "    return reply(message,{thread:{id:'thread-fresh'},...(mode==='model-evidence'?{model:'gpt-5-codex'}:{})});",
       "  }",
       "  if(message.method==='thread/resume') return reply(message,{thread:{id:message.params.threadId}});",
@@ -3084,11 +3082,16 @@ test("Claude live tell waits for a post-yield source pull and shares one Query",
 test("Codex app-server maps admitted options, native session, answer, and exact turn history", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-codex-provider-");
   const fake = fakeCodex(root);
+  const config = {
+    service_tier: "priority",
+    sandbox_mode: "workspace-write",
+    sandbox_workspace_write: { writable_roots: [root, "/native/extra"], network_access: false },
+  };
   const provider = createCodexAppServerProvider({
     name: "configured",
     kind: "codex-app-server",
     executable: fake.executable,
-    config: { service_tier: "priority" },
+    config,
     env: { SETTINGS_LITERAL: "from-settings", KEIYAKU_ACTOR_ID: "" },
   });
   const options = {
@@ -3121,7 +3124,7 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
   const thread = requests[2]!.params as Record<string, unknown>;
   assert.deepEqual(thread, {
     cwd: root,
-    config: { service_tier: "priority" },
+    config,
     model: "gpt-test",
     developerInstructions: "Work precisely.",
   });
@@ -3136,6 +3139,16 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
   });
   assert.equal(fake.environment().SETTINGS_LITERAL, "from-settings");
   assert.equal(fake.environment().KEIYAKU_ACTOR_ID, "");
+
+  const resumed = provider.resume!({
+    ...freshInput("continue", { cwd: root, options }),
+    session: { kind: "resume", coordinate: { sessionId: "thread-fresh" } },
+  });
+  await (await resumed.result).completion;
+  await resumed.closed;
+  assert.deepEqual(fake.requests().slice(4).map((request) => request.method),
+    ["initialize", "initialized", "thread/resume", "turn/start"]);
+  assert.deepEqual(fake.requests()[6]?.params, { threadId: "thread-fresh", ...thread });
 });
 
 test("native adapters report only the runtime model their own payloads name", { timeout: 30_000 }, async (context) => {
@@ -3362,29 +3375,6 @@ test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async
   await drive.completion;
   const turn = fake.requests().find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
   assert.deepEqual(turn.outputSchema, { type: "object", properties: { ok: { type: "boolean" } } });
-});
-
-test("Codex birth grants freeze native effective roots without changing policy or probing omission", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-codex-grants-");
-  const fake = fakeCodex(root);
-  const execution: ProviderExecution = {
-    name: "configured", kind: "codex-app-server", executable: fake.executable,
-    config: { service_tier: "priority", "sandbox_workspace_write.writable_roots": ["/old"], sandbox_workspace_write: { network_access: true } },
-  };
-  assert.equal(await withWritableDirectories(execution, root, []), execution);
-  const admitted = await withWritableDirectories(execution, root, [root, root]);
-  assert.deepEqual(admitted.config, {
-    service_tier: "priority", sandbox_mode: "workspace-write",
-    sandbox_workspace_write: { writable_roots: [join(root, "requests.jsonl"), root], network_access: false, exclude_tmpdir_env_var: true, exclude_slash_tmp: true },
-  });
-  assert.deepEqual(execution.config?.["sandbox_workspace_write.writable_roots"], ["/old"]);
-  assert.ok(Object.isFrozen(admitted.config?.sandbox_workspace_write));
-  assert.deepEqual(fake.requests().map((request) => request.method), ["initialize", "initialized", "thread/start"]);
-  assert.deepEqual(fake.requests()[2]?.params, { cwd: root, ephemeral: true, config: execution.config });
-  await assert.rejects(withWritableDirectories({ name: "pi", kind: "pi" }, root, [root]), /unsupported/u);
-  const cancelled = new AbortController();
-  cancelled.abort(new Error("cancelled grant"));
-  await assert.rejects(withWritableDirectories(execution, root, [root], cancelled.signal), /cancelled grant/u);
 });
 
 test("Codex leaves sandbox policy to native configuration", async (context) => {

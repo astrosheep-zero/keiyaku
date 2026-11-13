@@ -59,11 +59,9 @@ only an explicit selection or the effective invocation directory determines
 it. Exact public inputs, result fields,
 and timeout defaults belong to declarations and help.
 
-Birth and spawn also accept explicit additional writable directories. The SDK
-requires nonblank existing canonical absolute directories and rejects invalid
-or unsupported grants before allocating an Akuma. Omission leaves existing
-behavior unchanged. The Akuma/provider owner admits these additive native
-filesystem roots under the provider's sandbox and writable-directory policy.
+Filesystem policy belongs to the selected provider's native configuration.
+Birth and spawn expose no shared filesystem-grant operation; execution directory
+selection remains independent of that policy.
 
 Creation accepts optional explicit caller and initiator attribution, including
 prompt-free births and forks. Either kind of caller declaration is

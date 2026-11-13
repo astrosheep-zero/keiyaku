@@ -164,7 +164,6 @@ export type SpawnInput = Readonly<{
   settings?: Settings;
   contract?: Kei;
   alias?: string;
-  writableDirectories?: readonly string[];
   bare?: boolean;
   initiator?: string;
   caller?: AkumaCaller;
@@ -302,7 +301,6 @@ const CALL_INPUT_KEYS = [
   "settings",
   "contract",
   "alias",
-  "writableDirectories",
   "bare",
   "initiator",
   "caller",
@@ -367,9 +365,6 @@ async function parseCallInput(input: SpawnInput & Readonly<{ path: WorldRoot }>)
     ...(home === undefined ? {} : { home }),
     ...(settings === undefined ? {} : { settings }),
     ...(alias === undefined ? {} : { alias }),
-    ...(values.writableDirectories === undefined
-      ? {}
-      : { writableDirectories: values.writableDirectories as readonly string[] }),
     ...(bare === undefined ? {} : { bare }),
     seat,
     ...(caller === undefined ? {} : { caller }),

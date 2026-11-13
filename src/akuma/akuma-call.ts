@@ -15,7 +15,6 @@ export type AkumaCallInput = Readonly<{
   akumaName: string;
   body?: string;
   cwd?: string;
-  writableDirectories?: readonly string[];
   bare?: boolean;
   initiator?: string;
   caller?: AkumaCaller;
@@ -88,7 +87,6 @@ export async function prepareAkumaCall(
     const publication = await prepareCall({
       akumaName: akumaName.name,
       cwd,
-      ...(input.writableDirectories === undefined ? {} : { writableDirectories: input.writableDirectories }),
       ...(input.caller === undefined ? {} : { caller: input.caller }),
       ...(input.initialTell === undefined ? {} : { initialTell: input.initialTell }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),

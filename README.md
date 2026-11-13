@@ -238,6 +238,32 @@ A failing hook retains the worktree
 and reports lag; it never abandons the Contract. `keiyaku settings --help`
 lists every recognized namespace.
 
+### Codex provider
+
+Codex owns filesystem policy through its existing native provider configuration.
+For an Akuma definition selecting `provider: codex-app-server`, configure:
+
+```json
+{
+  "providers": {
+    "codex-app-server": {
+      "kind": "codex-app-server",
+      "config": {
+        "sandbox_mode": "workspace-write",
+        "sandbox_workspace_write": {
+          "writable_roots": ["/absolute/extra/root"],
+          "network_access": false
+        }
+      }
+    }
+  }
+}
+```
+
+This config passes unchanged to native start and resume; Codex judges its
+validity and enforcement. Explicit config stays in the birth recipe across wake
+and fork. External Codex defaults and files remain Codex's concern.
+
 ### Paseo provider
 
 Configure a local, already-running Paseo server in settings.json:

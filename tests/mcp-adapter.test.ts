@@ -71,6 +71,7 @@ test("MCP spawn uses akumaName, accepts a bare alias, and points a missing name 
   const { tools } = await client.listTools();
   const spawn = tools.find((tool) => tool.name === "spawn")!;
   const properties = spawn.inputSchema.properties as Record<string, { description?: string }>;
+  assert.equal(Object.hasOwn(properties, "writableDirectories"), false);
   assert.match(properties.akumaName!.description!, /akumaName to spawn.*ls \{"selector":"aku\/"\}/u);
   assert.match(spawn.description!, /from akumaName/u);
   const missing = await client.callTool({ name: "spawn", arguments: { akumaName: "missing", alias: "lane" } });
@@ -191,6 +192,7 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["abandon", { actor: "operator" }],
     ["debt.add", { title: "Unwritten", actor: "operator" }],
     ["ls", { selector: "kei/", mine: true }],
+    ["spawn", { akumaName: "worker", writableDirectories: [cwd] }],
     ["spawn", { akumaName: "worker", wait: "10m" }],
     ["spawn", { akumaName: "worker", prompt: "work", wait: "0.5s" }],
     ["spawn", { akumaName: "worker", prompt: "work", wait: "9007199254740992ms" }],

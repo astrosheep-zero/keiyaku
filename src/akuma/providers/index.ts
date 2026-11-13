@@ -1,4 +1,3 @@
-import { KeiyakuError } from "../../errors.js";
 import type { ProviderAdapter } from "../provider.js";
 import type { ProviderExecution } from "../provider-recipe.js";
 
@@ -21,19 +20,6 @@ async function adapterFor(execution: ProviderExecution): Promise<ProviderAdapter
   if (execution.kind === "paseo") return (await import("./paseo/index.js")).createPaseoProvider(execution);
   if (execution.kind === "pi") return (await import("./pi/index.js")).createPiProvider(execution);
   throw new TypeError(`unknown Akuma provider kind ${(execution as ProviderExecution).kind}`);
-}
-
-export async function withWritableDirectories(
-  execution: ProviderExecution,
-  cwd: string,
-  directories: readonly string[],
-  signal?: AbortSignal,
-): Promise<ProviderExecution> {
-  if (directories.length === 0) return execution;
-  if (execution.kind !== "codex-app-server")
-    throw new KeiyakuError("invalid-input", `writableDirectories is unsupported by provider ${execution.kind}`);
-  const { withCodexWritableDirectories } = await import("./codex-app-server/configuration.js");
-  return await withCodexWritableDirectories(execution, cwd, directories, signal);
 }
 
 export async function resolveProviderExecution(execution: ProviderExecution): Promise<

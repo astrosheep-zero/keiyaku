@@ -148,11 +148,6 @@ const spawnFields = {
   alias: optText.describe(
     "World-local alias (with or without leading @) assigned to this Akuma, reassigning any previous holder.",
   ),
-  writableDirectories: strings
-    .exactOptional()
-    .describe(
-      "Additional writable root paths granted to Codex workspace-write sandboxes (relative paths resolve from cwd).",
-    ),
   bare: optBool.describe(
     "Omit Keiyaku runtime instructions for this Akuma's lifetime (required for generic ACP providers).",
   ),

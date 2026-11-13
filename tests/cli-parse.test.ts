@@ -146,19 +146,11 @@ test("global coordinates are independent of command position", () => {
   );
 });
 
-test("spawn repeats native writable-directory grants and refuses retired options", () => {
-  assert.deepEqual(command(["spawn", "worker", "--add-dir", "../runtime", "--add-dir", "/square"]), {
-    name: "spawn",
-    input: { akumaName: "worker", writableDirectories: ["../runtime", "/square"] },
-    acquire: {},
-    output: "text",
-  });
+test("spawn refuses retired options", () => {
   assert.throws(
     () => command(["spawn", "worker", "--allowed", "contract.review"]),
     /option --allowed is not valid for spawn/u,
   );
-  assert.throws(() => command(["spawn", "worker", "--add-dir"]), /--add-dir requires/u);
-  assert.throws(() => command(["fork", "@worker", "--at", "turn/1", "--add-dir", "/square"]), /--add-dir/u);
 });
 
 test("root version is recognized only after coordinates and help", () => {

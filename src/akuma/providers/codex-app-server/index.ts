@@ -13,13 +13,20 @@ import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { providerLifecycle } from "../lifecycle.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
 import { codexNotificationResult, codexObject, codexText, type CodexTurnState } from "./events.js";
-import { initializeCodex } from "./configuration.js";
 
 export { CODEX_ITEM_DISPOSITIONS, CODEX_NOTIFICATION_DISPOSITIONS } from "./events.js";
 
 type StartInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 type ForkInput = Parameters<NonNullable<ProviderAdapter["fork"]>>[0];
 type Finish = (result: TurnResult) => void;
+
+async function initializeCodex(server: LineRpcProcess): Promise<void> {
+  await server.request("initialize", {
+    clientInfo: { name: "keiyaku", title: "keiyaku", version: "4" },
+    capabilities: { experimentalApi: true, requestAttestation: false },
+  });
+  server.notify("initialized");
+}
 
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

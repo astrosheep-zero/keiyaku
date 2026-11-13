@@ -193,16 +193,11 @@ test(
       akumaName: "acp-worker",
       body: "ordinary provider",
       bare: true,
-      writableDirectories: [],
       wait: true,
       timeoutMs: 20_000,
     });
     assert.equal(nonPi.input?.kind, "answered", JSON.stringify(nonPi));
     assert.equal(nonPi.input.answer, "acp-answer", JSON.stringify(nonPi));
-    const unsupported = await host.invoke("akuma_spawn", {
-      akumaName: "worker", body: "must not start", writableDirectories: [world],
-    }, true);
-    assert.match(JSON.stringify(unsupported), /writableDirectories.*pi|pi.*writableDirectories/u);
     const ambient = {
       KEIYAKU_ACTOR_ID: process.env.KEIYAKU_ACTOR_ID,
       KEIYAKU_ACTOR_WORLD: process.env.KEIYAKU_ACTOR_WORLD,

@@ -38,7 +38,7 @@ import { repositoryAt } from "../src/git/repository.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import type { SpawnResult } from "../src/library/akumas.js";
 import { readManagedWorktreeAppointment } from "../src/workspace-place.js";
-import { Akumas, Keis, Keiyaku, KeiyakuError, Repo, World, Settings } from "../src/index.js";
+import { Akumas, Keis, Keiyaku, Repo, World, Settings } from "../src/index.js";
 import {
   cleanupSpawnCapableFixtureForTest,
   installAkumaBodyEmptyPublicationBarrier,
@@ -73,10 +73,15 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
   symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"), "dir");
   mkdirSync(join(home, "akumas"), { recursive: true });
   writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: local\n---\nWork.\n");
+  const config = {
+    service_tier: "priority",
+    sandbox_mode: "workspace-write",
+    sandbox_workspace_write: { writable_roots: [root], network_access: false },
+  };
   writeFileSync(
     join(home, "settings.json"),
     JSON.stringify({
-      providers: { local: { kind: "codex-app-server", executable } },
+      providers: { local: { kind: "codex-app-server", executable, config } },
     }),
   );
   writeFileSync(
@@ -89,16 +94,19 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
       "const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');",
       "const reply = (message, result) => send({ id: message.id, result });",
       "const lines = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });",
+      "let turnId = 'turn-1';",
       "lines.on('line', (line) => {",
       "  const message = JSON.parse(line);",
       "  if (message.method === 'initialize') return reply(message, {});",
       "  if (message.method === 'initialized') return;",
-      "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' }, sandbox: { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: true, excludeSlashTmp: true } });",
+      "  if (message.method === 'thread/resume') turnId = 'turn-resumed';",
+      "  if (message.method === 'thread/start' || message.method === 'thread/resume') return reply(message, { thread: { id: 'thread-1' } });",
+      "  if (message.method === 'thread/fork') return reply(message, { thread: { id: 'thread-child' } });",
       "  if (message.method !== 'turn/start') return;",
-      "  reply(message, { turn: { id: 'turn-1' } });",
+      "  reply(message, { turn: { id: turnId } });",
       "  const answer = () => {",
       "    send({ method: 'item/completed', params: { item: { type: 'agentMessage', text: '{\"ok\":true}' } } });",
-      "    send({ method: 'turn/completed', params: { turn: { id: 'turn-1', status: 'completed' } } });",
+      "    send({ method: 'turn/completed', params: { turn: { id: turnId, status: 'completed' } } });",
       "  };",
       "  if (answerReleasePath === null || existsSync(answerReleasePath)) return answer();",
       "  const timer = setInterval(() => {",
@@ -111,7 +119,7 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
   );
   chmodSync(executable, 0o755);
   const value = await Settings.load({ cwd: root, home });
-  return { home, value, placement: { home, settings: value } };
+  return { home, value, config, placement: { home, settings: value } };
 }
 
 async function directCallFixture(options: Readonly<{ holdAnswer?: boolean }> = {}) {
@@ -140,7 +148,6 @@ test("prompt-free bare Akumas.spawn reports born without admitting a Tell", asyn
       akumaName: "worker",
       cwd: world,
       bare: true,
-      writableDirectories: [world, world],
       ...configured.placement,
     });
     assert.equal(result.kind, "spawned");
@@ -150,19 +157,14 @@ test("prompt-free bare Akumas.spawn reports born without admitting a Tell", asyn
     const soul = await readSoul(pathsForAkumaId(world, result.akumaId));
     assert.equal(soul?.caller, undefined);
     assert.equal(soul?.bare, true);
-    assert.deepEqual(soul?.provider.config?.sandbox_workspace_write, {
-      writable_roots: [world],
-      network_access: false,
-      exclude_tmpdir_env_var: true,
-      exclude_slash_tmp: true,
-    });
+    assert.deepEqual(soul?.provider.config, configured.config);
     const source = await loadPreparedArchetype({
       name: "worker",
       cwd: world,
       home: configured.home,
       settings: configured.value,
     });
-    assert.equal(source.provider.config, undefined, "birth grant never mutates source recipe");
+    assert.deepEqual(source.provider.config, configured.config);
     assert.match(soul?.options.systemPrompt ?? "", /Work\./u);
     const history = await handle.history();
     assert.equal(
@@ -199,57 +201,6 @@ test("malformed explicit callers refuse before allocation on public call and for
   assert.equal((await Akumas.of(world).list()).rows, undefined);
 });
 
-test("explicit writable directories refuse invalid public grants before allocation", async (t) => {
-  const world = await World.at(temporaryDirectory(t, "keiyaku-directory-refusal-"));
-  const configured = await directArchetypeSettings(world);
-  const alias = join(world, "directory-alias");
-  symlinkSync(world, alias, "dir");
-  for (const value of [
-    [""],
-    ["relative"],
-    [join(world, "missing")],
-    [alias],
-    [join(world, "fake-codex")],
-    "not-an-array",
-  ]) {
-    await assert.rejects(
-      Akumas.of(world).spawn({
-        akumaName: "worker",
-        ...configured.placement,
-        writableDirectories: value as never,
-      }),
-      /writableDirectories|not an existing directory/u,
-    );
-  }
-  await assert.rejects(
-    PublicAkuma.birth("worker", {
-      root: world,
-      ...configured.placement,
-      writableDirectories: [alias],
-    }),
-    (error: unknown) =>
-      error instanceof KeiyakuError &&
-      error.category === "invalid-input" &&
-      error.message === `writableDirectories path is not canonical: ${alias}`,
-  );
-  assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
-});
-
-test("non-Codex writable directories refuse as invalid input before allocation", async (t) => {
-  const world = await World.at(temporaryDirectory(t, "keiyaku-provider-directory-refusal-"));
-  const home = join(world, "home");
-  mkdirSync(join(home, "akumas"), { recursive: true });
-  writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: pi\n---\nWork.\n");
-  await assert.rejects(
-    Akumas.of(world).spawn({ akumaName: "worker", home, writableDirectories: [world] }),
-    (error: unknown) =>
-      error instanceof KeiyakuError &&
-      error.category === "invalid-input" &&
-      error.message === "writableDirectories is unsupported by provider pi",
-  );
-  assert.equal(existsSync(join(world, ".keiyaku", "akuma", "run")), false);
-});
-
 test("prompt-free Akumas.spawn refuses wait options", async () => {
   const { world, configured } = await directCallFixture();
 
@@ -259,7 +210,7 @@ test("prompt-free Akumas.spawn refuses wait options", async () => {
   );
 });
 
-test("local Akumas.spawn waits for its held empty Body before admitting its Tell", async (t) => {
+test("local spawn waits for its empty Body and retains native config through wake and fork", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
@@ -304,6 +255,22 @@ test("local Akumas.spawn waits for its held empty Body before admitting its Tell
     assert.equal(tells[0]?.kind, "tell");
     if (tells[0]?.kind === "tell") assert.equal(tells[0].text, "schema-call");
     assert.equal(history.rows.filter((row) => row.kind === "turn").length, 1);
+
+    // Reopening after Settings change must use the retained native recipe.
+    writeFileSync(join(configured.home, "settings.json"), JSON.stringify({ providers: {} }));
+    const reopened = PublicAkuma.select(await World.at(world), result.akumaId);
+    await reopened.idle({ timeoutMs: 10_000 });
+    const continued = await reopened.tell("continue", { wait: true, timeoutMs: 10_000 });
+    assert.deepEqual(continued.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.deepEqual((await readSoul(pathsForAkumaId(world, result.akumaId)))?.provider.config, configured.config);
+    const answered = (await reopened.history()).rows.find(
+      (row) => row.kind === "outcome" && row.outcome.kind === "answered",
+    );
+    assert.ok(answered && answered.kind === "outcome");
+    const fork = await Akumas.of(world).fork({ akuma: result.akumaId, at: `turn/${answered.turnSequence}` });
+    assert.equal(fork.kind, "forked");
+    if (fork.kind !== "forked") assert.fail(JSON.stringify(fork));
+    assert.deepEqual((await readSoul(pathsForAkumaId(world, fork.childAkumaId)))?.provider.config, configured.config);
     assert.equal(
       history.rows.some((row) => row.kind === "call"),
       false,
