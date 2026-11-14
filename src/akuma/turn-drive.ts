@@ -295,24 +295,30 @@ async function retireProviderCustody(
 ): Promise<Retirement> {
   const dispose = async (
     operation: () => Promise<void>,
-  ): Promise<Readonly<{ kind: "retired" }> | Readonly<{ kind: "held"; error: unknown }>> =>
-    await Promise.race([
-      operation().then(
-        async () => {
-          try {
-            await attempt.closed;
-            return { kind: "retired" as const };
-          } catch (error: unknown) {
-            return { kind: "held" as const, error };
-          }
-        },
-        (error: unknown) => ({ kind: "held" as const, error }),
-      ),
-      abortableDelay(CONTROL_RESPONSE_MS).then(() => ({
-        kind: "held" as const,
-        error: new Error(`provider custody remained live after ${CONTROL_RESPONSE_MS}ms`),
-      })),
-    ]);
+  ): Promise<Readonly<{ kind: "retired" }> | Readonly<{ kind: "held"; error: unknown }>> => {
+    const deadline = new AbortController();
+    try {
+      return await Promise.race([
+        operation().then(
+          async () => {
+            try {
+              await attempt.closed;
+              return { kind: "retired" as const };
+            } catch (error: unknown) {
+              return { kind: "held" as const, error };
+            }
+          },
+          (error: unknown) => ({ kind: "held" as const, error }),
+        ),
+        abortableDelay(CONTROL_RESPONSE_MS, deadline.signal).then(() => ({
+          kind: "held" as const,
+          error: new Error(`provider custody remained live after ${CONTROL_RESPONSE_MS}ms`),
+        })),
+      ]);
+    } finally {
+      deadline.abort();
+    }
+  };
   let outcome = await dispose(input.supervisor.forceSignal?.aborted ? attempt.forceDispose : attempt.abort);
   if (outcome.kind === "retired") return outcome;
   outcome = await dispose(attempt.forceDispose);

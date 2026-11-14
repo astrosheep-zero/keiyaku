@@ -2,9 +2,15 @@ import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import { allocatedHeart, claudeBodyLaunch, recordTell, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
-import { expectBodySettles, settlementProbe, waitForCondition } from "./support/process.js";
+import {
+  expectBodySettles, installAkumaBodyIdleFinishBarrier, installAkumaBodyPidReceipt,
+  settlementProbe, waitForCondition, waitForPidReceiptExit,
+} from "./support/process.js";
+import { fileURLToPath } from "node:url";
+import { runProcess } from "../src/runtime/proc/run.js";
 import assert from "node:assert/strict";
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync, rmSync, writeFileSync
@@ -1865,6 +1871,98 @@ test("interrupt supervises an answered Turn until Attempt closure proof", async 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test(
+  "fixture gates retire on owner loss, launch cancellation, and supervisor close",
+  {
+    skip: process.platform === "win32" && "Windows cannot unlink the open fixture Heart",
+  },
+  async () => {
+    const root = await World.at(bodyTestDirectory("keiyaku-owned-gates-"));
+    const barrier = join(root, "barrier");
+    const receipt = join(root, "body-pids");
+    mkdirSync(barrier);
+    const restoreReceipt = installAkumaBodyPidReceipt(receipt);
+    const restoreBarrier = installAkumaBodyIdleFinishBarrier(barrier);
+    let launch: LiveBodyLaunch | undefined;
+    try {
+      const allocated = await allocatedHeart(root, "claude", "c3000000");
+      const { initialBody: _, ...empty } = claudeBodyLaunch(allocated, root, "unused");
+      launch = await spawnAkumaBody(empty);
+      await waitForCondition(
+        "detached Body at both fixture gates",
+        () => existsSync(join(barrier, "idle-ready")) && existsSync(join(barrier, "observation-ready")),
+        {
+          budgetMs: 5_000,
+          terminalState: settlementProbe(
+            launch.completed,
+            (end) => `${end.diagnostic}: ${readFileSync(allocated.paths.log, "utf8")}`,
+          ),
+        },
+      );
+      // Fault injection removes only this launch's gate owner and Heart. Keep its
+      // log and captured launch capability until physical departure is witnessed.
+      rmSync(barrier, { recursive: true });
+      rmSync(allocated.paths.heart);
+      await expectBodySettles(launch.completed, "ownerless fixture gates retained the detached Body", 5_000);
+      await waitForPidReceiptExit(receipt, 2_000, { requireBirth: true });
+    } finally {
+      try {
+        if (existsSync(barrier)) {
+          writeFileSync(join(barrier, "release"), "release\n");
+          writeFileSync(join(barrier, "observation-release"), "release\n");
+        }
+        await launch?.cancel();
+        await launch?.completed;
+        if (launch !== undefined) await waitForPidReceiptExit(receipt, 2_000, { requireBirth: true });
+        // This removal is unreachable when exact launch retirement is unproven.
+        rmSync(root, { recursive: true, force: true });
+      } finally {
+        restoreBarrier();
+        restoreReceipt();
+      }
+    }
+
+    const scoped = await World.at(bodyTestDirectory("keiyaku-owned-gate-cancellation-"));
+    try {
+      const result = await runOwnedWaitFixture("gates", scoped);
+      assert.equal(result.kind, "terminal", JSON.stringify(result));
+      if (result.kind === "terminal") assert.equal(result.code, 0, result.stderr);
+    } finally {
+      rmSync(scoped, { recursive: true, force: true });
+    }
+  },
+);
+
+test("proven provider retirement leaves no deadline retaining the subprocess", async () => {
+  const root = await World.at(bodyTestDirectory("keiyaku-owned-wait-retirement-"));
+  try {
+    const result = await runOwnedWaitFixture("retirement", root);
+    assert.equal(result.kind, "terminal", JSON.stringify(result));
+    if (result.kind !== "terminal") return;
+    assert.equal(result.code, 0, result.stderr);
+    const receipt: { departureMs: number; deadlineMs: number } = JSON.parse(result.stdout);
+    assert.ok(receipt.departureMs < receipt.deadlineMs * 0.75, JSON.stringify(receipt));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+async function runOwnedWaitFixture(mode: "gates" | "retirement", root: string) {
+  const compiled = import.meta.url.endsWith(".js");
+  const fixture = new URL("./support/owned-wait-retirement.js", import.meta.url);
+  if (!compiled) fixture.pathname = fixture.pathname.replace(/\.js$/u, ".ts");
+  return await runProcess({
+    argv: [
+      process.execPath,
+      ...(compiled ? [] : ["--import", "tsx"]),
+      fileURLToPath(fixture),
+      mode,
+      root,
+    ],
+    timeoutMs: 15_000,
+  });
+}
 
 test("ordinary wake recovers an interrupt admitted before its caller disappears", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-interrupt-caller-loss-");
