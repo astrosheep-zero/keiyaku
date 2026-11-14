@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { createHash, randomBytes } from "node:crypto";
-import { lstat, realpath, unlink } from "node:fs/promises";
+import { realpath, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
@@ -11,7 +11,7 @@ import {
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractLocator, gitRefLocator, gitObjectIdForSnapshot } from "./identity.js";
 import { executeGit, type GitRepository } from "./process.js";
-import { registeredWorktreePaths } from "./repository.js";
+import { pathExists, registeredWorktreePaths } from "./repository.js";
 
 const SCRATCH_PREFIX = "keiyaku-v4-verify-";
 const SCRATCH_ROOT = await realpath(tmpdir());
@@ -95,17 +95,6 @@ async function* collectableScratchWorktrees(
       continue;
     const lock = await tryAcquireSqliteTransactionLock({ path: lockPath, mode: "exclusive" });
     if (lock !== null) yield { path, lockPath, release: () => lock.close() };
-  }
-}
-
-/** Absence is ENOENT on the path entry itself: a dangling symlink is present residue, not a missing path. */
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
   }
 }
 

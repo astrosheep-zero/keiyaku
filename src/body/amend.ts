@@ -3,8 +3,9 @@ import type { ContractBody, ContractCriterion, ContractExtension, DecodedContrac
 import type { VerificationDeclaration } from "../verification/declaration.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import { parseToAST } from "../markdown/parse.js";
-import { indexDocument, indexedHeadings, normalizeTitle, rawSlice, sectionContent } from "../markdown/query.js";
-import type { DocumentNode, MarkdownBlockNode, SectionNode } from "../markdown/types.js";
+import { indexDocument, indexedHeadings, normalizeTitle, sectionContent } from "../markdown/query.js";
+import type { DocumentNode, SectionNode } from "../markdown/types.js";
+import { nonblankRaw as nonblank, topLevelSections as sections } from "./envelope.js";
 import { decodeRegionOrRefusal } from "./region.js";
 import { contractSectionName, RESERVED_SECTIONS } from "./shape.js";
 import { renderAmendedContractBody } from "./render.js";
@@ -31,16 +32,6 @@ type MutableBody = {
 
 function refusal(message: string): never {
   throw new KeiyakuError("invalid-input", message);
-}
-
-function nonblank(document: DocumentNode, node: MarkdownBlockNode): boolean {
-  return rawSlice(document, node.span).trim().length > 0;
-}
-
-function sections(document: DocumentNode): readonly SectionNode[] {
-  return indexedHeadings(indexDocument(document), { level: 2 }).filter(
-    (node): node is SectionNode => node.type === "section",
-  );
 }
 
 function operationSections(document: DocumentNode): readonly Operation[] {
@@ -134,10 +125,6 @@ function requireEmpty(document: DocumentNode, section: SectionNode): void {
   if (sectionContent(document, section).trim().length > 0) refusal("Remove operation must not have a body");
 }
 
-function alteredText(body: MutableBody, target: "context" | "objective" | "design", value: string): void {
-  body[target] = value;
-}
-
 function applyRemove(body: MutableBody, operation: Operation, document: DocumentNode): void {
   requireEmpty(document, operation.section);
   const index = extensionIndex(body, operation.target);
@@ -187,7 +174,7 @@ function applyAppend(body: MutableBody, operation: Operation, document: Document
     return;
   }
   if (target === "context" || target === "objective" || target === "design") {
-    alteredText(body, target, appendText(body[target], prose(document, operation.section, operation.target)));
+    body[target] = appendText(body[target], prose(document, operation.section, operation.target));
     return;
   }
   if (target !== null) refusal(`Append does not support ${operation.target}`);
@@ -207,7 +194,7 @@ function applyReplace(body: MutableBody, operation: Operation, document: Documen
     return;
   }
   if (target === "context" || target === "objective" || target === "design") {
-    alteredText(body, target, prose(document, operation.section, operation.target));
+    body[target] = prose(document, operation.section, operation.target);
     return;
   }
   if (target === "region") {
@@ -221,10 +208,7 @@ function applyReplace(body: MutableBody, operation: Operation, document: Documen
     return;
   }
   if (target !== null) refusal(`Replace does not support ${operation.target}`);
-  const index = extensionIndex(body, operation.target);
-  if (index < 0) refusal(`unknown extension '${operation.target}'`);
-  const extension = body.extensions[index]!;
-  body.extensions[index] = { ...extension, content: prose(document, operation.section, "extension") };
+  applyUpdate(body, operation, document);
 }
 
 function applySet(body: MutableBody, operation: Operation, document: DocumentNode): void {

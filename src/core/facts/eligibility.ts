@@ -1,13 +1,11 @@
 import { contractState, type ContractsObservation } from "./observation.js";
 import type { ContractId } from "./types.js";
 
-type EligibilityObservation = ContractsObservation;
-
 /** Decide whether resulting prerequisites reach the amended contract. */
 export function prerequisitesReach(
   contract: ContractId,
   prerequisites: readonly ContractId[],
-  observation: EligibilityObservation,
+  observation: ContractsObservation,
 ): boolean {
   const pending = [...prerequisites];
   const visited = new Set<ContractId>();

@@ -40,7 +40,7 @@ import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals }
 import type { Settings } from "../settings.js";
 import { World, type WorldRoot } from "../world.js";
 import { addressAkuma } from "./address.js";
-import { requireInput, requireMarkdown as text, optionalNonblank, optionalSignal } from "./input.js";
+import { requireInput, requireMarkdown as text, nonblank, optionalNonblank, optionalSignal } from "./input.js";
 import type { Kei } from "./kei.js";
 import { seatForKei } from "./kei.js";
 import { scopeForRepo, type Repo } from "./repo.js";
@@ -179,13 +179,6 @@ export type ForkInput = Readonly<{
   caller?: AkumaCaller;
   initiator?: string;
 }>;
-
-function nonblank(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new KeiyakuError("invalid-input", `${label} must be a nonblank string`);
-  }
-  return value;
-}
 
 function settingsOption(value: unknown): Settings | undefined {
   if (value === undefined) return undefined;

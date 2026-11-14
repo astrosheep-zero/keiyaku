@@ -84,8 +84,7 @@ export function renderDebtList(result: DebtCatalogue, context: TextRenderContext
   const columns = context.columns;
   if ("absent" in page) return "debt world absent";
   const rows = page.rows ?? [];
-  const view = "debts";
-  if (rows.length === 0) return emptyCatalogue(view);
+  if (rows.length === 0) return emptyCatalogue("debts");
   return [
     "DEBTS // world",
     ...rows.flatMap((row) => entityLines({ ...row, mark: debtMark(row.disposition), word: row.disposition }, columns)),

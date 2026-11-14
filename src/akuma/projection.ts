@@ -447,27 +447,33 @@ function publicResult(result: ToolResult): CompletedToolRow["state"] {
 }
 
 function narrationRow(fact: Extract<TimelineFact, { event: unknown }>, event: AgentEvent): TurnNarrationRow | null {
-  if (event.type === "assistant") {
-    return {
-      kind: "said",
-      sequence: fact.sequence,
-      turnSequence: fact.turnSequence,
-      at: fact.at,
-      text: event.text,
-      ...(event.truncated === true ? { truncated: true } : {}),
-    };
-  }
-  if (event.type === "thought" || event.type === "note") {
-    return {
-      kind: event.type,
-      sequence: fact.sequence,
-      turnSequence: fact.turnSequence,
-      at: fact.at,
-      text: event.text,
-      ...(event.truncated === true ? { truncated: true } : {}),
-    };
-  }
-  return null;
+  if (event.type !== "assistant" && event.type !== "thought" && event.type !== "note") return null;
+  return {
+    kind: event.type === "assistant" ? "said" : event.type,
+    sequence: fact.sequence,
+    turnSequence: fact.turnSequence,
+    at: fact.at,
+    text: event.text,
+    ...(event.truncated === true ? { truncated: true } : {}),
+  };
+}
+
+/** The one tool-row body every phase shares; each phase adds its own state. */
+function toolRow(
+  fact: Extract<TimelineFact, { kind: "activity" }>,
+  event: Extract<AgentEvent, { type: "tool" }>,
+  truncated: boolean,
+): ToolRowFields {
+  return {
+    kind: "tool",
+    sequence: fact.sequence,
+    turnSequence: fact.turnSequence,
+    at: fact.at,
+    name: event.name,
+    toolId: event.id,
+    call: publicCall(event.call),
+    ...(truncated ? { truncated: true } : {}),
+  };
 }
 
 function projectToolEvent(
@@ -480,47 +486,20 @@ function projectToolEvent(
   const key = toolKey(fact.turnSequence, event.id);
   if (event.phase === "started") {
     running.set(key, rows.length);
-    rows.push({
-      kind: "tool",
-      sequence: fact.sequence,
-      turnSequence: fact.turnSequence,
-      at: fact.at,
-      name: event.name,
-      toolId: event.id,
-      call: publicCall(event.call),
-      state: phase === "open" ? "active" : "unsettled",
-      ...(event.truncated === true ? { truncated: true } : {}),
-    });
+    rows.push({ ...toolRow(fact, event, event.truncated === true), state: phase === "open" ? "active" : "unsettled" });
     return;
   }
   const index = running.get(key);
   const started = index === undefined ? undefined : rows[index];
   if (started?.kind !== "tool") {
-    rows.push({
-      kind: "tool",
-      sequence: fact.sequence,
-      turnSequence: fact.turnSequence,
-      at: fact.at,
-      name: event.name,
-      toolId: event.id,
-      call: publicCall(event.call),
-      state: publicResult(event.result),
-      ...(event.truncated === true ? { truncated: true } : {}),
-    });
+    rows.push({ ...toolRow(fact, event, event.truncated === true), state: publicResult(event.result) });
     return;
   }
   const durationMs = duration(started.at, fact.at);
   rows[index!] = {
-    kind: "tool",
-    sequence: fact.sequence,
-    turnSequence: fact.turnSequence,
-    at: fact.at,
+    ...toolRow(fact, event, started.truncated === true || event.truncated === true),
     ...(durationMs === undefined ? {} : { durationMs }),
-    name: event.name,
-    toolId: event.id,
-    call: publicCall(event.call),
     state: publicResult(event.result),
-    ...(started.truncated === true || event.truncated === true ? { truncated: true } : {}),
   };
   running.delete(key);
 }

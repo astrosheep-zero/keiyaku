@@ -77,25 +77,24 @@ async function unregisteredResidueBelongsToRepository(repository: GitRepository,
   }
 }
 
-async function removeUnregisteredResidue(repository: GitRepository, entry: ManagedEntry): Promise<boolean> {
-  let present = true;
+/** Residue presence follows access: a path whose target is gone is already removed. */
+async function residuePresent(path: string): Promise<boolean> {
   try {
-    await access(entry.path);
+    await access(path);
+    return true;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") present = false;
-    else throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
-  if (!present) return true;
+}
+
+async function removeUnregisteredResidue(repository: GitRepository, entry: ManagedEntry): Promise<boolean> {
+  if (!(await residuePresent(entry.path))) return true;
   if (!(await unregisteredResidueBelongsToRepository(repository, entry.path))) {
     throw new GitResetStopError(`managed Place path has foreign custody: ${entry.path}`);
   }
   await rm(entry.path, { recursive: true, force: true });
-  try {
-    await access(entry.path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
-    throw error;
-  }
+  if (!(await residuePresent(entry.path))) return true;
   throw new GitResetStopError(`managed Place worktree remains present: ${entry.path}`);
 }
 
@@ -107,12 +106,7 @@ async function removeManagedWorktree(repository: GitRepository, entry: ManagedEn
   if ((await registeredWorktrees(repository)).some((candidate) => candidate.path === entry.path)) {
     throw new GitResetStopError(`managed Place worktree remains registered: ${entry.path}`);
   }
-  try {
-    await access(entry.path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
-    throw error;
-  }
+  if (!(await residuePresent(entry.path))) return true;
   throw new GitResetStopError(`managed Place worktree remains present: ${entry.path}`);
 }
 

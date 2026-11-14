@@ -109,8 +109,7 @@ function renderContractBoard(
 ): readonly string[] {
   if (section.kind === "absent") return ["CONTRACTS // absent"];
   if (section.kind === "failed") {
-    const failure = ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.diagnostic)}`, "alert", context.color)];
-    return failure;
+    return ["CONTRACTS // unavailable", "", tone(`! ${safeText(section.diagnostic)}`, "alert", context.color)];
   }
   if ((section.rows ?? []).length === 0) return [];
   return contractBoardRows(section, observedAt, context);
@@ -131,7 +130,7 @@ function detailHasError(row: ContractKanshiDetail): boolean {
   );
 }
 
-function semanticBlock(_name: string, facts: readonly string[], _context: TextRenderContext): readonly string[] {
+function semanticBlock(facts: readonly string[]): readonly string[] {
   if (facts.length === 0) return [];
   return facts.map((fact) => `  ${safeText(fact)}`);
 }
@@ -268,9 +267,7 @@ function renderSelectedContractRow(
     const outcome = terminalFacts(row, context, abbreviations);
     lines.push(...outcome.map((fact) => (fact.startsWith("  ") ? fact : `  ${safeText(fact)}`)));
     // A terminal Contract still carries a physical retention issue; its worktree is expected to be gone.
-    lines.push(
-      ...semanticBlock("alarms", row.issue === undefined ? [] : [`! ${issueAlarm(row.issue, row.target)}`], context),
-    );
+    lines.push(...semanticBlock(row.issue === undefined ? [] : [`! ${issueAlarm(row.issue, row.target)}`]));
     lines.push(...linkedAkumaRows(row));
     return lines;
   }
@@ -279,28 +276,24 @@ function renderSelectedContractRow(
     ?.requirements.find(
       (requirement) => requirement.current.kind === "attested" && requirement.current.verdict === "unsatisfied",
     );
-  lines.push(...semanticBlock("ball", [detailProgressStrip(row)], context));
-  lines.push(...semanticBlock("gates", (row.gates ?? []).flatMap(gateRequirementFacts), context));
-  lines.push(...semanticBlock("prerequisites", (row.after ?? []).map(afterWording), context));
+  lines.push(...semanticBlock([detailProgressStrip(row)]));
+  lines.push(...semanticBlock((row.gates ?? []).flatMap(gateRequirementFacts)));
+  lines.push(...semanticBlock((row.after ?? []).map(afterWording)));
   if (row.delivery !== undefined) {
     const moved = targetMoved(row);
     lines.push(
-      ...semanticBlock(
-        "candidate",
-        [
-          `candidate  ${displayGitId(row.delivery.candidate, abbreviations)}`,
-          `integration result  ${displayGitId(row.delivery.integration, abbreviations)}${moved ? " · target moved since" : ""}`,
-          ...(moved ? targetMovementFacts(row, abbreviations) : []),
-        ],
-        context,
-      ),
+      ...semanticBlock([
+        `candidate  ${displayGitId(row.delivery.candidate, abbreviations)}`,
+        `integration result  ${displayGitId(row.delivery.integration, abbreviations)}${moved ? " · target moved since" : ""}`,
+        ...(moved ? targetMovementFacts(row, abbreviations) : []),
+      ]),
     );
   }
   if (deniedReview?.current.kind === "attested" && deniedReview.current.summary !== undefined)
     lines.push(...payload("review  ×", deniedReview.current.summary, context));
   lines.push(...linkedAkumaRows(row));
-  lines.push(...semanticBlock("worktree", worktreeFacts(row), context));
-  lines.push(...semanticBlock("alarms", liveAlarms(row), context));
+  lines.push(...semanticBlock(worktreeFacts(row)));
+  lines.push(...semanticBlock(liveAlarms(row)));
   return lines;
 }
 
@@ -330,12 +323,7 @@ function renderDebts(report: KanshiReport, context: TextRenderContext): readonly
   const section = report.debts;
   if (section.kind === "absent") return ["DEBTS // absent"];
   if (section.kind === "failed") {
-    const failure = [
-      "DEBTS // unavailable",
-      "",
-      tone(`! ${safeText(debtFailureFact(section))}`, "alert", context.color),
-    ];
-    return failure;
+    return ["DEBTS // unavailable", "", tone(`! ${safeText(debtFailureFact(section))}`, "alert", context.color)];
   }
   return (section.rows ?? []).length === 0 ? [] : debtBoardRows(section, context);
 }

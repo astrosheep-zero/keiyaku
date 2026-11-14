@@ -288,20 +288,27 @@ export function activeContractJournalPaths(observation: GitReadObservation): rea
   });
 }
 
+async function readJournalBlobs(
+  entries: readonly (readonly [string, { oid: GitOid }])[],
+  readBlobsAt: GitReadObservation["readBlobs"],
+): Promise<Map<GitOid, Buffer>> {
+  const results = await readBlobsAt(entries.map(([, entry]) => entry.oid));
+  const blobs = new Map<GitOid, Buffer>();
+  for (const [path, entry] of entries) {
+    const result = results.get(entry.oid);
+    if (result?.kind !== "present") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
+    blobs.set(entry.oid, result.bytes);
+  }
+  return blobs;
+}
+
 /** Observe active journals without following their prerequisite edges. */
 export async function observeActiveContractJournals(
   observation: GitReadObservation,
 ): Promise<ReadonlyMap<ContractId, GitJournalRecord>> {
   const git = observation.snapshot;
   const journals = activeContractJournalPaths(observation).map((path) => [path, git.paths.get(path)!] as const);
-  const results = await observation.readBlobs(journals.map(([, entry]) => entry.oid));
-  const blobs = new Map<GitOid, Buffer>();
-  for (const [path, entry] of journals) {
-    const result = results.get(entry.oid);
-    if (result?.kind !== "present") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
-    blobs.set(entry.oid, result.bytes);
-  }
-  return enumerateContractObservations(git, blobs, "active");
+  return enumerateContractObservations(git, await readJournalBlobs(journals, observation.readBlobs), "active");
 }
 
 export async function observeActiveContractWorld(
@@ -328,13 +335,7 @@ export async function observeContractWorld(
     ([path, entry]) =>
       /^contracts\/(?:active|terminal)\//u.test(path) && path.endsWith(".jsonl") && entry.type === "blob",
   );
-  const results = await observation.readBlobs(journals.map(([, entry]) => entry.oid));
-  const blobs = new Map<GitOid, Buffer>();
-  for (const [path, entry] of journals) {
-    const result = results.get(entry.oid);
-    if (result?.kind !== "present") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
-    blobs.set(entry.oid, result.bytes);
-  }
+  const blobs = await readJournalBlobs(journals, observation.readBlobs);
   const contracts = new Map(enumerateContractObservations(git, blobs));
   for (const id of requested) {
     if (!contracts.has(id)) contracts.set(id, observeFromGit(git, id, blobs));
@@ -362,13 +363,7 @@ async function observeTargetedContractsFromSnapshotAt(
     const journal = snapshot.paths.get(path);
     return journal?.type === "blob" ? [[path, journal] as const] : [];
   });
-  const results = await readBlobsAt(entries.map(([, entry]) => entry.oid));
-  const blobs = new Map<GitOid, Buffer>();
-  for (const [path, entry] of entries) {
-    const result = results.get(entry.oid);
-    if (result?.kind !== "present") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
-    blobs.set(entry.oid, result.bytes);
-  }
+  const blobs = await readJournalBlobs(entries, readBlobsAt);
   const contracts = new Map<ContractId, GitJournalRecord>();
   for (const id of ids) contracts.set(id, observeFromGit(snapshot, id, blobs));
   return { contracts, frozenJournalBytes: blobs };

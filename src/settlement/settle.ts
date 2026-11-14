@@ -110,6 +110,21 @@ function recordAction(
   input.progress?.recordSettlement(input.candidate.id, { actions: [action], lags: [] });
 }
 
+function settleFailure(
+  candidate: ContractState,
+  surface: SettlementLag["surface"],
+  diagnostic: string,
+  debtId?: DebtId,
+): SettlementLag {
+  return {
+    kind: "settlement-failed",
+    surface,
+    contractId: candidate.id,
+    ...(debtId === undefined ? {} : { debtId }),
+    diagnostic,
+  };
+}
+
 async function observeApplicableHolder(
   input: Pick<SettleDebtsInput, "repository" | "channel" | "candidate" | "lags" | "progress">,
 ): Promise<DebtHolder | null> {
@@ -128,12 +143,7 @@ async function observeApplicableHolder(
     return holder?.disposition === "held" ? holder : null;
   } catch (error) {
     if (!operational(error)) throw error;
-    recordLag(input, {
-      kind: "settlement-failed",
-      surface: "debt-holder",
-      contractId: candidate.id,
-      diagnostic: diagnostic(error),
-    });
+    recordLag(input, settleFailure(candidate, "debt-holder", diagnostic(error)));
     return null;
   }
 }
@@ -147,13 +157,7 @@ async function completeHeldDebt(
     world = await World.at(repository.primaryWorktree);
   } catch (error) {
     if (!operational(error)) throw error;
-    recordLag(input, {
-      kind: "settlement-failed",
-      surface: "debt",
-      contractId: candidate.id,
-      debtId,
-      diagnostic: diagnostic(error),
-    });
+    recordLag(input, settleFailure(candidate, "debt", diagnostic(error), debtId));
     return false;
   }
   let result: SettledDebtResult;
@@ -161,33 +165,15 @@ async function completeHeldDebt(
     result = await settleDebt(world, debtId);
   } catch (error) {
     if (!operational(error)) throw error;
-    recordLag(input, {
-      kind: "settlement-failed",
-      surface: "debt",
-      contractId: candidate.id,
-      debtId,
-      diagnostic: diagnostic(error),
-    });
+    recordLag(input, settleFailure(candidate, "debt", diagnostic(error), debtId));
     return false;
   }
   if (result.kind === "changed") recordAction(input, { kind: "debt", debtId, action: "done" });
   if (result.kind === "changed" && result.cleanup !== undefined) {
-    recordLag(input, {
-      kind: "settlement-failed",
-      surface: "debt",
-      contractId: candidate.id,
-      debtId,
-      diagnostic: result.cleanup,
-    });
+    recordLag(input, settleFailure(candidate, "debt", result.cleanup, debtId));
   }
   if (result.kind === "changed" || result.kind === "unchanged") return true;
-  recordLag(input, {
-    kind: "settlement-failed",
-    surface: "debt",
-    contractId: candidate.id,
-    debtId,
-    diagnostic: debtFailure(result),
-  });
+  recordLag(input, settleFailure(candidate, "debt", debtFailure(result), debtId));
   return false;
 }
 
@@ -211,13 +197,15 @@ async function releaseHeldDebtHolder(
       if (holder === null || holder.disposition !== "held" || holder.debtId !== debtId) return "inert" as const;
       const publication = await publishDebtHolderRelease(repository, channel, observation, candidate.id, seat);
       if (publication.kind === "non-published") {
-        recordLag(input, {
-          kind: "settlement-failed",
-          surface: "debt-holder",
-          contractId: candidate.id,
-          debtId,
-          diagnostic: `Debt holder release requires retry: ${publication.diagnostic}`,
-        });
+        recordLag(
+          input,
+          settleFailure(
+            candidate,
+            "debt-holder",
+            `Debt holder release requires retry: ${publication.diagnostic}`,
+            debtId,
+          ),
+        );
         return "held" as const;
       }
       return publication.kind === "released" ? ("released" as const) : ("inert" as const);
@@ -229,13 +217,7 @@ async function releaseHeldDebtHolder(
     return outcome.value;
   } catch (error) {
     if (!operational(error)) throw error;
-    recordLag(input, {
-      kind: "settlement-failed",
-      surface: "debt-holder",
-      contractId: candidate.id,
-      debtId,
-      diagnostic: diagnostic(error),
-    });
+    recordLag(input, settleFailure(candidate, "debt-holder", diagnostic(error), debtId));
     return "held";
   }
 }
@@ -250,13 +232,7 @@ async function settleDebts(input: SettleDebtsInput): Promise<boolean> {
     fence = await acquireDebtSettlementFence(repository, debtId);
   } catch (error) {
     if (!operational(error)) throw error;
-    recordLag(input, {
-      kind: "settlement-failed",
-      surface: "debt",
-      contractId: candidate.id,
-      debtId,
-      diagnostic: diagnostic(error),
-    });
+    recordLag(input, settleFailure(candidate, "debt", diagnostic(error), debtId));
     return true;
   }
   let failure: { error: unknown } | undefined;
@@ -289,13 +265,7 @@ async function settleDebts(input: SettleDebtsInput): Promise<boolean> {
       } else if (!debtSettled && failure === undefined) throw error;
       // Post-release fence teardown is custodial residue, not an owed holder publication.
       if (holderDisposition !== "released") {
-        recordLag(input, {
-          kind: "settlement-failed",
-          surface: "debt-holder",
-          contractId: candidate.id,
-          debtId,
-          diagnostic: diagnostic(error),
-        });
+        recordLag(input, settleFailure(candidate, "debt-holder", diagnostic(error), debtId));
       }
     }
   }
@@ -334,12 +304,7 @@ async function settleObserved(input: SettlementInput): Promise<SettlementReport>
       if (!operational(error)) throw error;
       recordLag(
         { candidate, lags, ...(input.progress === undefined ? {} : { progress: input.progress }) },
-        {
-          kind: "settlement-failed",
-          surface: "debt",
-          contractId: candidate.id,
-          diagnostic: diagnostic(error),
-        },
+        settleFailure(candidate, "debt", diagnostic(error)),
       );
     }
   }

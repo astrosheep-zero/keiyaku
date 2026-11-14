@@ -340,10 +340,6 @@ function settledRows(activity: RenderedActivity): readonly RenderRow[] {
   return activity.rows.filter((row) => isSettledStreamRow(row) && !inFlightSay(activity, row));
 }
 
-function isBoundedStreamTool(row: RenderRow): boolean {
-  return row.kind === "tool";
-}
-
 function rememberPendingTells(state: ActivityStreamState, activity: RenderedActivity): void {
   for (const row of activity.rows)
     if (
@@ -446,7 +442,7 @@ function observeActivitySnapshot(state: ActivityStreamState, activity: RenderedA
     if (row.kind === "thought") continue;
     // A failed tool is evidence, not routine progress, so it always prints and spends no budget.
     const failed = row.kind === "tool" && typeof row.state === "object" && row.state.status === "error";
-    if (isBoundedStreamTool(row) && !failed) {
+    if (row.kind === "tool" && !failed) {
       if (state.checkpointTools >= TOOL_BUDGET) {
         state.omitted += 1;
         continue;

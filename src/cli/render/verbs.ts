@@ -44,7 +44,7 @@ import { renderSettingsText } from "./settings.js";
 import { formatNextCall, safeText, type TextRenderContext } from "./terminal.js";
 import { renderWhoami } from "./whoami.js";
 
-function alias(selector: string | undefined): string | undefined {
+export function aliasSelector(selector: string | undefined): string | undefined {
   return selector?.startsWith("@") === true ? selector : undefined;
 }
 
@@ -169,7 +169,7 @@ function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">, 
 function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, context: TextRenderContext): string {
   if ("contracts" in result) return contractWaitText(result);
   const selectors = input.selectors;
-  const selectedAlias = selectors.length === 1 ? alias(selectors[0]) : undefined;
+  const selectedAlias = selectors.length === 1 ? aliasSelector(selectors[0]) : undefined;
   return waitText(result, selectedAlias === undefined ? {} : { alias: selectedAlias }, context);
 }
 
@@ -184,7 +184,7 @@ function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history"
     throw new Error("Akuma history returned a non-Akuma result");
   const id = options.id;
   const last = options.last === true;
-  const selectedAlias = alias(query.selector);
+  const selectedAlias = aliasSelector(query.selector);
   return (
     historyRawAnswer(result, id) ??
     (last && result.kind === "akuma-last"
@@ -226,7 +226,7 @@ function renderDebtVerb(
 }
 
 function renderKill(input: VerbInput<"kill">, value: VerbOutput<"kill">, context: TextRenderContext): string {
-  return renderKillText(value, alias(input.akuma), context);
+  return renderKillText(value, aliasSelector(input.akuma), context);
 }
 
 function renderAsk(
@@ -234,7 +234,7 @@ function renderAsk(
   result: VerbOutput<"ask" | "tell">,
   context: TextRenderContext,
 ): string {
-  const selectedAlias = alias(input.akuma);
+  const selectedAlias = aliasSelector(input.akuma);
   if ((result.kind === "admitted" || (result.kind === "failed" && "failures" in result)) && result.input === undefined)
     return tellText(result, input.prompt, selectedAlias, context);
   const answer = askRawAnswer(result);

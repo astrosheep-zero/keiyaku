@@ -3,13 +3,9 @@ import { contractAttentionFacts, progressStrip } from "./contract-observation.js
 import { ageText, emptyCatalogue, safeText } from "./terminal.js";
 import { contractMark } from "./marks.js";
 
-function formatAge(source: string, observedAt: string): string {
-  return ageText(source, observedAt, "future");
-}
-
 /** One summary row names identity, age, title, and a terminal outcome or the current candidate strip. */
 function contractCatalogueBlock(row: ContractSummary, observedAt: string): string {
-  const head = `${contractMark(row)} ${safeText(row.id)} · ${formatAge(row.phaseAt, observedAt)} · ${safeText(row.title ?? "title unavailable")}`;
+  const head = `${contractMark(row)} ${safeText(row.id)} · ${ageText(row.phaseAt, observedAt, "future")} · ${safeText(row.title ?? "title unavailable")}`;
   return [head, `  ${progressStrip(row)}`, ...contractAttentionFacts(row).map((fact) => `  ${safeText(fact)}`)].join(
     "\n",
   );

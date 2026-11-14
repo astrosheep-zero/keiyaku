@@ -121,8 +121,6 @@ export const materializedConflictSchema = z
   .readonly();
 export type IntegrationConflictMaterialized = z.infer<typeof materializedConflictSchema>;
 
-const DELIVER_CONFLICT_RECOVERY = conflictRecovery;
-
 type DeliverOperationInput = MutationOperationInput &
   Readonly<{
     deriveDocument: (state: ContractState) => DocumentDerivation;
@@ -249,13 +247,7 @@ async function prepareDeliveryWithWorktree(
       method: "squash",
       policy: { requireBranchesToBeUpToDate },
     },
-    worktree: {
-      tree: tender.data.tree,
-      head: tender.data.head,
-      ...(tender.data.mergeHead === undefined ? {} : { mergeHead: tender.data.mergeHead }),
-      dirty: tender.data.dirty,
-      changeId,
-    },
+    worktree: worktreeWitness(tender.data, changeId),
   };
 }
 
@@ -324,13 +316,10 @@ async function recaptureDeliveryWorktree(
     input.includeDirty,
   );
   if (tender.kind === "refused") return undefined;
-  return {
-    tree: tender.data.tree,
-    head: tender.data.head,
-    ...(tender.data.mergeHead === undefined ? {} : { mergeHead: tender.data.mergeHead }),
-    dirty: tender.data.dirty,
-    changeId: await worktreeChangeId(input.scope, { coordinates: state.coordinates }, tender.data),
-  };
+  return worktreeWitness(
+    tender.data,
+    await worktreeChangeId(input.scope, { coordinates: state.coordinates }, tender.data),
+  );
 }
 
 async function mechanicalDeliveryPreparation(
@@ -369,18 +358,14 @@ async function mechanicalDeliveryPreparation(
   };
 }
 
-function worktreeInput(
-  repository: import("../git/process.js").GitRepository,
-  state: ContractState,
-  tender: TenderCapture,
-): Promise<WorktreeWitness> {
-  return worktreeChangeId(repository, { coordinates: state.coordinates }, tender).then((changeId) => ({
+function worktreeWitness(tender: TenderCapture, changeId: ChangeId): WorktreeWitness {
+  return {
     tree: tender.tree,
     head: tender.head,
     ...(tender.mergeHead === undefined ? {} : { mergeHead: tender.mergeHead }),
     dirty: tender.dirty,
     changeId,
-  }));
+  };
 }
 
 /**
@@ -405,7 +390,10 @@ async function prepareDeliveryArtifacts(
     input.includeDirty,
   );
   if (captured.kind === "refused") return { kind: "refused", refusal: captured.refusal };
-  const worktree = await worktreeInput(input.scope, state, captured.data);
+  const worktree = worktreeWitness(
+    captured.data,
+    await worktreeChangeId(input.scope, { coordinates: state.coordinates }, captured.data),
+  );
   if (reusesCurrentCandidate(input, state, worktree.changeId)) {
     return { kind: "reuse", worktree };
   }
@@ -735,7 +723,7 @@ async function materializeDeliverConflict(
     conflictPaths: refusal.conflictPaths,
     workspace,
     handoffBase: handoffHead,
-    recovery: DELIVER_CONFLICT_RECOVERY,
+    recovery: conflictRecovery,
   };
 }
 

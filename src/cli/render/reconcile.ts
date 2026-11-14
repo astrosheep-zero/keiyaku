@@ -9,13 +9,9 @@ import type { VerbDisposition } from "../../library/keiyaku-verbs.js";
 import { contractIssueLines } from "./contract.js";
 import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import { receiptRow } from "./receipt.js";
-import { DEFAULT_CLI_COLUMNS, safeText, type TextRenderContext } from "./terminal.js";
+import { DEFAULT_CLI_COLUMNS, kindWords, safeText, type TextRenderContext } from "./terminal.js";
 
 type ReconcileReport = ReconcileCompletion | RepoReconcileReport;
-
-function words(kind: string): string {
-  return kind.replaceAll("-", " ");
-}
 
 function effectSegments(effect: MeaningfulEffect): readonly { text: string; opaque?: boolean }[] {
   switch (effect.kind) {
@@ -40,7 +36,7 @@ function effectSegments(effect: MeaningfulEffect): readonly { text: string; opaq
       return [{ text: "debt settled" }, { text: effect.debtId, opaque: true }];
     case "worktree-created":
     case "worktree-removed":
-      return [{ text: words(effect.kind) }, { text: effect.path, opaque: true }];
+      return [{ text: kindWords(effect.kind) }, { text: effect.path, opaque: true }];
   }
 }
 

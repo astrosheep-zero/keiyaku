@@ -19,7 +19,7 @@ function optionalFlag(flags: ContractTokens["flags"], name: string): string | un
   return typeof value === "string" ? value : undefined;
 }
 
-function refuse(command: ContractCommand, message: string): never {
+export function refuse(command: ContractCommand, message: string): never {
   throw new CliUsageError(message, commandGuide(command, CONTRACT_COMMAND_SPECS[command].usage));
 }
 

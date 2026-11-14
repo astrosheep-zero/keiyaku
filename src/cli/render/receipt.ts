@@ -10,6 +10,7 @@ import { renderRefusalFacts } from "./refusal.js";
 import {
   DEFAULT_CLI_COLUMNS,
   displayColumns,
+  kindWords,
   orderRefusalFacts,
   quotedText,
   renderOpaqueBlock,
@@ -83,10 +84,6 @@ export function titleLines(mark: string, title: string, contract: string, column
   return displayColumns(inline) <= columns ? [inline] : [base, `  contract  ${safeText(contract)}`];
 }
 
-function words(kind: string): string {
-  return kind.replaceAll("-", " ");
-}
-
 type PlacementStop = Exclude<Placement, { kind: "placed" }>;
 type TerminalCheck = Extract<VerificationCheck, { kind: "terminal" }>;
 type CheckAdmissionStop = Exclude<NonNullable<TerminalCheck["admission"]>, string>;
@@ -132,7 +129,7 @@ function retryRows(reason: KeiyakuRetryReason, columns: number, dependent?: stri
     "?",
     "retry",
     [
-      { text: words(reason.reason) },
+      { text: kindWords(reason.reason) },
       ...(dependent === undefined ? [] : [{ text: "·" }, { text: dependent, opaque: true }]),
     ],
     columns,
@@ -170,7 +167,7 @@ function runtimeStopLines(
   const lines: string[] = [];
   const segments: ReceiptSegment[] = dependent === undefined ? [] : [{ text: "·" }, { text: dependent, opaque: true }];
   if (stop.kind === "environment-hook-failure") segments.push({ text: `name ${quotedText(stop.name)}` });
-  receiptRow(lines, "!", dependent ?? words(stop.kind), segments, columns);
+  receiptRow(lines, "!", dependent ?? kindWords(stop.kind), segments, columns);
   const diagnostic = "diagnostic" in stop ? stop.diagnostic : undefined;
   if (diagnostic !== undefined && diagnostic.length > 0) receiptPayload(lines, "reason", diagnostic);
   return lines;
@@ -224,14 +221,14 @@ function availabilityStopRows(
 ): readonly string[] {
   const lines: string[] = [];
   if (stop.kind !== "target-workspace-unavailable") {
-    dependentRow(lines, dependent, words(stop.kind), columns);
+    dependentRow(lines, dependent, kindWords(stop.kind), columns);
     return lines;
   }
   receiptRow(
     lines,
     "!",
     "target workspace unavailable",
-    [{ text: stop.targetContractId, opaque: true }, { text: words(stop.reason) }],
+    [{ text: stop.targetContractId, opaque: true }, { text: kindWords(stop.reason) }],
     columns,
   );
   return lines;
@@ -609,7 +606,7 @@ function effectLines(effect: ExceptionalEffect, columns: number, primary?: strin
       return lines;
     case "worktree-created":
     case "worktree-removed":
-      receiptRow(lines, " ", words(effect.kind), [{ text: effect.path, opaque: true }], columns);
+      receiptRow(lines, " ", kindWords(effect.kind), [{ text: effect.path, opaque: true }], columns);
       return lines;
   }
 }
@@ -672,7 +669,7 @@ export function executionFailureLines(
       receiptRow(
         lines,
         "!",
-        words(issue.kind),
+        kindWords(issue.kind),
         issue.kind === "reset-owner-stopped" ? [{ text: issue.owner }] : [],
         columns,
       );

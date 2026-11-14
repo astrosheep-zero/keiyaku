@@ -33,8 +33,10 @@ import type {
   Section,
 } from "./report.js";
 import { kanshiReportSchema, kanshiContractReportSchema, sectionSchema } from "./report.js";
-import { ROSTER_SNAPSHOT_ROWS, ROSTER_VISIBLE_ROWS } from "./roster.js";
 import { selectRegion } from "./select.js";
+
+const ROSTER_VISIBLE_ROWS = 10;
+const ROSTER_SNAPSHOT_ROWS = 3;
 
 export type KanshiScopeInput = Readonly<{ world?: WorldRoot | null; repo?: Repo | null }>;
 export type KanshiBoardOptions = Readonly<{ akumaLimit?: number }>;

@@ -67,11 +67,6 @@ function memoized(reader: () => Promise<string>): () => Promise<string> {
   return () => (value ??= reader());
 }
 
-function homeFromEnvironment(environment: NodeJS.ProcessEnv): string | undefined {
-  const mapped = environment.KEIYAKU_HOME?.trim();
-  return mapped === undefined || mapped.length === 0 ? undefined : mapped;
-}
-
 /** Builds the one live progress observer for an invocation; the leaf owns when it finishes. */
 export async function writeExecutionProgress(
   stream: NodeJS.WritableStream = process.stderr,
@@ -221,7 +216,7 @@ function invocationCoordinates(
 async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntimeInput): Promise<CliOutcome> {
   const command = invocation.command;
   const environment = { ...(input.environment ?? process.env) };
-  const home = homeFromEnvironment(environment);
+  const home = environment.KEIYAKU_HOME?.trim() || undefined;
   const cancellation = cliCancellation(input.signal);
   let progress: Promise<ExecutionProgressDriver> | undefined;
   try {

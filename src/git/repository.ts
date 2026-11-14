@@ -1,6 +1,6 @@
 import { KeiyakuError } from "../errors.js";
 import { isAbsolute, resolve } from "node:path";
-import { realpath } from "node:fs/promises";
+import { lstat, realpath } from "node:fs/promises";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
@@ -112,6 +112,17 @@ export async function registeredWorktrees(repository: GitRepository): Promise<re
 
 export async function registeredWorktreePaths(repository: GitRepository): Promise<readonly string[]> {
   return (await registeredWorktrees(repository)).map((worktree) => worktree.path);
+}
+
+/** Absence is ENOENT on the path entry itself: a dangling symlink is present residue, not a missing path. */
+export async function pathExists(path: string): Promise<boolean> {
+  try {
+    await lstat(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
 }
 export async function repositoryAt(cwd: string, gitPath = "git"): Promise<GitRepository> {
   if (typeof cwd !== "string" || cwd.length === 0) {

@@ -136,9 +136,6 @@ function validateUpdate(scanned: ScannedDebt, fail: (message: string) => never):
   if (Object.keys(flags).every((name) => name === "json")) fail("debt update requires at least one update option");
 }
 
-/** Actions whose positionals are all addressed DebtIds validated by the native owner. */
-const DEBT_ID_ACTIONS: ReadonlySet<DebtAction> = new Set(["update"]);
-
 /** Validate every addressed DebtId positional through the native owner before any read or write. */
 function validateDebtIdPositionals(positionals: readonly string[], fail: (message: string) => never): void {
   for (const debtId of positionals) {
@@ -165,8 +162,10 @@ function validateDebtScan(action: DebtAction, scanned: ScannedDebt, fail: (messa
     fail("debt add requires either TITLE or '-' input");
   if (action === "add" && stdin === "document" && Object.keys(flags).some((name) => name !== "json"))
     fail("debt add document input owns its creation fields");
-  if (DEBT_ID_ACTIONS.has(action)) validateDebtIdPositionals(positionals, fail);
-  if (action === "update") validateUpdate(scanned, fail);
+  if (action === "update") {
+    validateDebtIdPositionals(positionals, fail);
+    validateUpdate(scanned, fail);
+  }
 }
 
 export function parseDebtCommand(argv: readonly string[]): ParsedDebtCommand {

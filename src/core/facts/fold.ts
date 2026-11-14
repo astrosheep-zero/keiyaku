@@ -1,12 +1,4 @@
-import type {
-  ArcEntry,
-  AttestationEntry,
-  ContractTerms,
-  ContractCoordinates,
-  ContractState,
-  BindEntry,
-  JournalEntry,
-} from "./types.js";
+import type { ArcEntry, AttestationEntry, ContractTerms, ContractState, BindEntry, JournalEntry } from "./types.js";
 import { gatesSatisfied } from "./gate.js";
 import { AuthorityCorruptionError } from "./errors.js";
 
@@ -26,10 +18,6 @@ function cloneTerms(terms: ContractTerms): ContractTerms {
   };
 }
 
-function cloneCoordinates(coordinates: ContractCoordinates): ContractCoordinates {
-  return { ...coordinates };
-}
-
 function stateFromBind(
   id: ContractState["id"],
   head: ContractState["head"],
@@ -40,7 +28,7 @@ function stateFromBind(
   return {
     id,
     head,
-    coordinates: cloneCoordinates(bind.data.coordinates),
+    coordinates: { ...bind.data.coordinates },
     terms: cloneTerms(bind.data.terms),
     delivery: null,
     currentIntegration: null,

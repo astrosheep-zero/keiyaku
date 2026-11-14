@@ -25,6 +25,7 @@ import {
 import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
+  kindWords,
   quotedText,
   renderOpaqueBlock,
   safeText,
@@ -51,10 +52,6 @@ export type AcceptedContractOutcome = Extract<ContractOutcome, { kind: "accepted
 type AcceptedOf<K extends ContractMutationName> = Extract<ContractAnswers[K], { kind: "accepted" }>;
 type PresentationInput = Readonly<{ verdict?: "satisfied" | "unsatisfied"; note?: string; message?: string }>;
 type ContractReceipt = Readonly<{ contractId?: ContractId; issues?: readonly InvocationIssue[] }>;
-
-function words(kind: string): string {
-  return kind.replaceAll("-", " ");
-}
 
 function checkoutBehindRows(path: string, target: string, columns: number): readonly string[] {
   const lines: string[] = [];
@@ -106,7 +103,7 @@ function retainedIssueRows(issue: RetainedIssue, columns: number): readonly stri
         lines,
         " ",
         "worktree follow kept at",
-        [{ text: issue.path, opaque: true }, { text: `· ${words(issue.reason)}` }],
+        [{ text: issue.path, opaque: true }, { text: `· ${kindWords(issue.reason)}` }],
         columns,
       );
       return lines;
@@ -122,7 +119,7 @@ function retainedIssueRows(issue: RetainedIssue, columns: number): readonly stri
         lines,
         "!",
         "target workspace unavailable",
-        [{ text: issue.targetContractId, opaque: true }, { text: words(issue.reason) }],
+        [{ text: issue.targetContractId, opaque: true }, { text: kindWords(issue.reason) }],
         columns,
       );
       return lines;
@@ -490,7 +487,7 @@ export function renderRetry(
 ): string {
   const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
   const lines = outcomeLines("?", operation, "retry", "contractId" in result ? result.contractId : undefined, columns);
-  lines.push(...renderOpaqueBlock(words(result.reason), "  ", columns));
+  lines.push(...renderOpaqueBlock(kindWords(result.reason), "  ", columns));
   if (result.reason === "publication-failed") receiptPayload(lines, "reason", result.diagnostic);
   return lines.join("\n");
 }

@@ -62,6 +62,15 @@ export function gitChildEnvironment(environment?: NodeJS.ProcessEnv): NodeJS.Pro
   return { ...inherited, ...environment };
 }
 
+function gitProcessOptions(repository: GitRepository, args: readonly string[], environment?: NodeJS.ProcessEnv) {
+  return {
+    argv: [repository.gitPath, ...args],
+    cwd: repository.effectiveCwd,
+    env: gitChildEnvironment(environment),
+    ...(repository.signal === undefined ? {} : { signal: repository.signal }),
+  };
+}
+
 function commandError(command: readonly string[], error: unknown): GitPlumbingError {
   const candidate = error as {
     message?: string;
@@ -95,12 +104,7 @@ export async function executeGit(
   const stderr: Buffer[] = [];
   let stderrBytes = 0;
   let inputError: Error | undefined;
-  const owned = spawnCancellableProcess({
-    argv: [repository.gitPath, ...args],
-    cwd: repository.effectiveCwd,
-    env: gitChildEnvironment(environment),
-    ...(repository.signal === undefined ? {} : { signal: repository.signal }),
-  });
+  const owned = spawnCancellableProcess(gitProcessOptions(repository, args, environment));
   const child = owned.child;
   child.stdout!.on("data", (chunk: Buffer) => stdout.push(chunk));
   child.stderr!.on("data", (chunk: Buffer) => {
@@ -174,12 +178,7 @@ export async function runGitPipe(
   const processes: ReturnType<typeof spawnCancellableProcess>[] = [];
   const pending: Promise<unknown>[] = [];
   const start = (args: readonly string[]) => {
-    const owned = spawnCancellableProcess({
-      argv: [repository.gitPath, ...args],
-      cwd: repository.effectiveCwd,
-      env: gitChildEnvironment(),
-      ...(repository.signal === undefined ? {} : { signal: repository.signal }),
-    });
+    const owned = spawnCancellableProcess(gitProcessOptions(repository, args));
     processes.push(owned);
     const { child } = owned;
     const stderr: Buffer[] = [];
@@ -250,15 +249,7 @@ export async function consumeGitStdout(
   args: readonly string[],
   consume: (chunk: Buffer) => void,
 ): Promise<void> {
-  const result = await consumeProcessStdout(
-    {
-      argv: [repository.gitPath, ...args],
-      cwd: repository.effectiveCwd,
-      env: gitChildEnvironment(),
-      ...(repository.signal === undefined ? {} : { signal: repository.signal }),
-    },
-    consume,
-  );
+  const result = await consumeProcessStdout(gitProcessOptions(repository, args), consume);
   const { outcome } = result;
   if (outcome.kind === "terminal" && outcome.code === 0) return;
   const status = outcome.kind === "terminal" ? outcome.code : null;

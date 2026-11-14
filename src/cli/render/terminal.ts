@@ -123,18 +123,6 @@ export function takeDisplayColumns(value: string, maximum: number): Readonly<{ t
   return { text: clusters.slice(0, index).join(""), rest: clusters.slice(index).join("") };
 }
 
-export function takeDisplayColumnsFromEnd(value: string, maximum: number): Readonly<{ text: string; rest: string }> {
-  const clusters = [...GRAPHEMES.segment(value)].map(({ segment }) => segment);
-  let columns = 0;
-  let index = clusters.length;
-  for (; index > 0; index -= 1) {
-    const width = graphemeColumns(clusters[index - 1]!);
-    if (columns + width > maximum) break;
-    columns += width;
-  }
-  return { text: clusters.slice(index).join(""), rest: clusters.slice(0, index).join("") };
-}
-
 export function truncateDisplayText(value: string, maximum: number): string {
   const clean = safeText(value);
   if (displayColumns(clean) <= maximum) return clean;
@@ -467,6 +455,11 @@ export function tone(value: string, kind: SemanticTone, color: boolean): string 
   if (!color) return value;
   const code = kind === "dim" ? 2 : kind === "recent" ? 32 : kind === "attention" ? 33 : 31;
   return `\u001b[${code}m${value}\u001b[0m`;
+}
+
+/** One machine kind as words; every receipt vocabulary spells kinds through this one rule. */
+export function kindWords(kind: string): string {
+  return kind.replaceAll("-", " ");
 }
 
 export function plumbFacts(facts: readonly string[], columns: number): readonly string[] {

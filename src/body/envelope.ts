@@ -7,11 +7,13 @@ function refusal(message: string): never {
   throw new KeiyakuError("invalid-input", message);
 }
 
-function nonblankRaw(document: DocumentNode, node: MarkdownBlockNode): boolean {
+/** Whether one block contributes any bytes beyond whitespace. */
+export function nonblankRaw(document: DocumentNode, node: MarkdownBlockNode): boolean {
   return rawSlice(document, node.span).trim().length > 0;
 }
 
-function topLevelSections(document: DocumentNode): readonly SectionNode[] {
+/** Every top-level H2 section of one parsed document, in source order. */
+export function topLevelSections(document: DocumentNode): readonly SectionNode[] {
   return indexedHeadings(indexDocument(document), { level: 2 }).filter(
     (node): node is SectionNode => node.type === "section",
   );

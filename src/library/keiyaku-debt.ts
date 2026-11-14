@@ -18,7 +18,6 @@ export type DebtUpdateInvocation = UpdateDebtInput & Readonly<{ id: string }>;
 
 const coordinates = (at: KeiyakuAt) => invocationCoordinates({ ...at, use: "none" });
 const absent: DebtAbsent = { kind: "absent" };
-const missing = () => ({ kind: "refused", reason: "debt-missing" }) as const;
 
 export async function debtAdd(at: KeiyakuAt, input: AddDebtInput | AddDebtDocumentInput, document: boolean) {
   const parsed = document ? addDocumentInput(input) : addInput(input);
@@ -36,7 +35,7 @@ export async function debtUpdate(at: KeiyakuAt, input: DebtUpdateInvocation) {
       .debt({ id })
       .update(rest as UpdateDebtInput);
   updateInput(rest).signal?.throwIfAborted();
-  return missing();
+  return { kind: "refused", reason: "debt-missing" } as const;
 }
 export async function debtShow(at: KeiyakuAt, id: string): Promise<DebtShowResult | DebtAbsent> {
   const coord = await coordinates(at);

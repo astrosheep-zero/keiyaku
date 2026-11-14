@@ -11,47 +11,23 @@ import {
   type SnapshotId,
 } from "../core/facts/types.js";
 
+function validatedString<Value>(validate: (value: string) => Value, message: string) {
+  return z.string().transform((value, context) => {
+    try {
+      return validate(value);
+    } catch {
+      context.addIssue({ code: "custom", message });
+      return z.NEVER;
+    }
+  });
+}
+
 // Structural admission reuses the pure identity constructors; physical minting remains distinct.
-export const contractIdSchema = z.string().transform((value, context) => {
-  try {
-    return contractId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid contractId" });
-    return z.NEVER;
-  }
-});
-export const snapshotIdSchema = z.string().transform((value, context) => {
-  try {
-    return snapshotId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid snapshotId" });
-    return z.NEVER;
-  }
-});
-export const contractHeadSchema = z.string().transform((value, context) => {
-  try {
-    return contractHead(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid ContractHead" });
-    return z.NEVER;
-  }
-});
-export const changeIdSchema = z.string().transform((value, context) => {
-  try {
-    return changeId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid changeId" });
-    return z.NEVER;
-  }
-});
-export const mintedSnapshotInputSchema = z.string().transform((value, context) => {
-  try {
-    return mintSnapshotId(value);
-  } catch {
-    context.addIssue({ code: "custom", message: "invalid mintSnapshotId" });
-    return z.NEVER;
-  }
-});
+export const contractIdSchema = validatedString(contractId, "invalid contractId");
+export const snapshotIdSchema = validatedString(snapshotId, "invalid snapshotId");
+export const contractHeadSchema = validatedString(contractHead, "invalid ContractHead");
+export const changeIdSchema = validatedString(changeId, "invalid changeId");
+export const mintedSnapshotInputSchema = validatedString(mintSnapshotId, "invalid mintSnapshotId");
 
 declare const gitObjectIdBrand: unique symbol;
 

@@ -167,10 +167,6 @@ type PreparedProtocolInput<Input> = Readonly<{
  */
 export type ContractStateWitness = Readonly<{ head: ContractHead | null }>;
 
-function contractStateWitness(state: ContractStateWitness): ContractStateWitness {
-  return { head: state.head };
-}
-
 /**
  * A physical worktree capture carried across custody as a witness, never as authority.
  *
@@ -231,7 +227,7 @@ export async function externalPreparation<Artifacts>(
   const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(observation.decision, input.contractId);
   if (state === null) return { kind: "unavailable" };
-  return { kind: "artifacts", witness: contractStateWitness(state), artifacts: await artifacts(observation, state) };
+  return { kind: "artifacts", witness: { head: state.head }, artifacts: await artifacts(observation, state) };
 }
 
 export async function privateStateSeatAttempt<T>(

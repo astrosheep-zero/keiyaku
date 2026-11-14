@@ -17,7 +17,7 @@ import type { Section } from "../kanshi/index.js";
 import type { ContractMembership } from "../protocol/read/status.js";
 import { World, type WorldRoot } from "../world.js";
 import { matchContractCandidates, readContractCandidates } from "./contract-address.js";
-import { requireInput } from "./input.js";
+import { nonblank, requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
 export type AkumaAddressInput = Readonly<{
@@ -66,28 +66,21 @@ export class AkumaWorldScopeError extends KeiyakuError {
   }
 }
 
-function nonblank(value: unknown, label: string): string {
-  if (typeof value !== "string" || value.trim().length === 0)
-    throw new KeiyakuError("invalid-input", `${label} must be a nonblank string`);
-  return value;
+function parseAddress<Value>(selector: string, parse: (value: string) => Value): Value {
+  try {
+    return parse(selector);
+  } catch (error) {
+    if (errorCategory(error) !== "invalid-input") throw error;
+    throw new AkumaAddressError({ kind: "invalid-akuma", selector });
+  }
 }
 
 function parseAddressAlias(selector: string): AkumaAlias {
-  try {
-    return parseReadableAkumaAlias(selector);
-  } catch (error) {
-    if (errorCategory(error) !== "invalid-input") throw error;
-    throw new AkumaAddressError({ kind: "invalid-akuma", selector });
-  }
+  return parseAddress(selector, parseReadableAkumaAlias);
 }
 
 function parseAddressId(selector: string): ReturnType<typeof parseAkumaId> {
-  try {
-    return parseAkumaId(selector);
-  } catch (error) {
-    if (errorCategory(error) !== "invalid-input") throw error;
-    throw new AkumaAddressError({ kind: "invalid-akuma", selector });
-  }
+  return parseAddress(selector, parseAkumaId);
 }
 
 async function directId(path: WorldRoot, selector: string): Promise<AkumaId> {
@@ -179,12 +172,7 @@ type AddressedAkuma = Readonly<{
 
 /** Resolve one selector and prove its birth through the native addressability owner. */
 export async function addressAkuma(input: UncheckedAkumaAddressInput): Promise<AddressedAkuma> {
-  const values = requireInput(input, "Akuma address input");
-  for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "repo"].includes(key)) {
-      throw new KeiyakuError("invalid-input", `Akuma address input has unknown field: ${key}`);
-    }
-  }
+  const values = requireInput(input, "Akuma address input", ["path", "akuma", "repo"]);
   if (values.repo !== undefined) scopeForRepo(values.repo);
   const path = await World.prove(nonblank(values.path, "path"));
   const id = await directId(path, nonblank(values.akuma, "akuma"));
@@ -282,12 +270,7 @@ function canonicalAkumaOrder(selected: ReadonlySet<AkumaId>): readonly AkumaId[]
 type AkumaSetOptions = Readonly<{ contractSelectors?: boolean }>;
 
 async function readAkumaSet(input: UncheckedAkumaAddressInput, options: AkumaSetOptions): Promise<ResolvedAkumaSet> {
-  const values = requireInput(input, "Akuma set address input");
-  for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "repo"].includes(key)) {
-      throw new KeiyakuError("invalid-input", `Akuma set address input has unknown field: ${key}`);
-    }
-  }
+  const values = requireInput(input, "Akuma set address input", ["path", "akuma", "repo"]);
   if (!Array.isArray(values.akuma) || values.akuma.length === 0)
     throw new KeiyakuError("invalid-input", "akuma must be a nonempty selector array");
   const path = await World.prove(nonblank(values.path, "path"));

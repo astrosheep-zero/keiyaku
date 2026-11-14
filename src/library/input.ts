@@ -56,6 +56,13 @@ export function debtOption(value: unknown): DebtId | undefined {
   return canonicalDebtId(value);
 }
 
+export function nonblank(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new KeiyakuError("invalid-input", `${label} must be a nonblank string`);
+  }
+  return value;
+}
+
 export function optionalNonblank(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
   if (typeof value !== "string" || value.trim().length === 0) {

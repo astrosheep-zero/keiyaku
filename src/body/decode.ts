@@ -1,10 +1,11 @@
+import { createHash } from "node:crypto";
 import { KeiyakuError } from "../errors.js";
-import { mintDocumentKey, mintDocumentSegmentKey } from "./keys.js";
 import type { ContractBody, DecodedContractDocument } from "./types.js";
 import { decodeDocumentEnvelope } from "./envelope.js";
 import { criteriaStructure, decodeCriteria } from "./criteria.js";
 import { directChildren, rawSlice, sectionContent } from "../markdown/query.js";
-import type { DocumentNode, SectionNode } from "../markdown/types.js";
+import type { DocumentNode, SectionNode, SourceSpan } from "../markdown/types.js";
+import { documentKey, documentSegmentKey, type DocumentKey, type DocumentSegmentKey } from "../core/facts/types.js";
 import { CONTRACT_SECTIONS, RESERVED_SECTIONS, type ContractSectionName } from "./shape.js";
 import { decodeRegionOrRefusal, regionStructure } from "./region.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
@@ -16,6 +17,18 @@ type RequiredSectionName = {
 
 function refusal(message: string): never {
   throw new KeiyakuError("invalid-input", message);
+}
+
+function digest(value: string): string {
+  return createHash("sha256").update(Buffer.from(value, "utf8")).digest("hex");
+}
+
+function mintDocumentKey(source: string): DocumentKey {
+  return documentKey(`document:sha256:${digest(source)}`);
+}
+
+function mintDocumentSegmentKey(source: string, span: SourceSpan): DocumentSegmentKey {
+  return documentSegmentKey(`segment:sha256:${digest(source.slice(span.start, span.end))}`);
 }
 
 function requireSections(sections: ReadonlyMap<string, SectionNode>): string[] {

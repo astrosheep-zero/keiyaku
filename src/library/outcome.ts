@@ -582,16 +582,17 @@ declare module "../errors.js" {
     readonly tell?: AkumaTellResult | undefined;
   }
 }
+function crossesBoundary(error: unknown): boolean {
+  return (
+    error instanceof KeiyakuError && !(error instanceof AuthorityCorruptionError) && !(error instanceof SettingsError)
+  );
+}
+
 export function validated<Value>(phase: () => Value): Value {
   try {
     return phase();
   } catch (error) {
-    if (
-      error instanceof KeiyakuError &&
-      !(error instanceof AuthorityCorruptionError) &&
-      !(error instanceof SettingsError)
-    )
-      throw error;
+    if (crossesBoundary(error)) throw error;
     throw new KeiyakuError(errorCategory(error), errorDiagnostic(error), { cause: error });
   }
 }
@@ -599,12 +600,7 @@ export async function readContractValue<Value>(operation: () => Promise<Value>):
   try {
     return await operation();
   } catch (error) {
-    if (
-      error instanceof KeiyakuError &&
-      !(error instanceof AuthorityCorruptionError) &&
-      !(error instanceof SettingsError)
-    )
-      throw error;
+    if (crossesBoundary(error)) throw error;
     throw new KeiyakuError(errorCategory(error), errorDiagnostic(error), { cause: error });
   }
 }

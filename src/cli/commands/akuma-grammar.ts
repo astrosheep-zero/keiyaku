@@ -194,14 +194,12 @@ function positiveIndex(raw: FlagValue, option: string, fail: (message: string) =
 }
 
 function validateSet(value: string, fail: (message: string) => never): string {
-  if (value.startsWith("kei/")) return value;
-  if (value.includes("*")) {
+  if (!value.startsWith("kei/") && value.includes("*")) {
     try {
       parseAkumaGlob(value);
     } catch (error) {
       fail(error instanceof Error ? error.message : `invalid Akuma glob: ${value}`);
     }
-    return value;
   }
   return value;
 }

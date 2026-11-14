@@ -45,6 +45,7 @@ import {
   type ContractObservation,
 } from "./read/status.js";
 import type { ProtocolResult, ProtocolTerminal } from "./run.js";
+import { targetLifecycleReasonSchema } from "./result-reasons.js";
 import { protocolTerminalSchema } from "./run.js";
 
 export { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
@@ -58,13 +59,7 @@ export const bindRefusalSchema = z.union([
     .object({ kind: z.enum(["contract-exists", "invalid-after", "unknown-prerequisite"]) })
     .strict()
     .readonly(),
-  z
-    .object({
-      kind: z.enum(["target-contract-missing", "target-contract-terminal"]),
-      targetContractId: contractIdSchema,
-    })
-    .strict()
-    .readonly(),
+  targetLifecycleReasonSchema,
 ]);
 export const amendRefusalSchema = z
   .object({
@@ -72,19 +67,7 @@ export const amendRefusalSchema = z
   })
   .strict()
   .readonly();
-export const deliverRefusalSchema = z.union([
-  z
-    .object({ kind: z.enum(["contract-missing", "terminal"]) })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.enum(["target-contract-missing", "target-contract-terminal"]),
-      targetContractId: contractIdSchema,
-    })
-    .strict()
-    .readonly(),
-]);
+export const deliverRefusalSchema = z.union([activeContractRefusalSchema, targetLifecycleReasonSchema]);
 export const verificationDeclarationRefusalSchema = z
   .object({ kind: z.literal("verification-declaration-invalid") })
   .strict()
@@ -97,13 +80,7 @@ export const verifyRefusalSchema = z
   .strict()
   .readonly();
 export const placementRefusalSchema = z.union([
-  z
-    .object({
-      kind: z.enum(["target-contract-missing", "target-contract-terminal"]),
-      targetContractId: contractIdSchema,
-    })
-    .strict()
-    .readonly(),
+  targetLifecycleReasonSchema,
   targetWorkspaceRefusalSchema,
   z
     .object({ kind: z.enum(["contract-missing", "delivery-missing", "terminal"]) })
@@ -380,8 +357,8 @@ export async function stateOperation(input: MutationOperationInput): Promise<Con
 }
 
 export async function deliveryOperation(input: MutationOperationInput): Promise<DeliverData | null> {
-  const state = (await observeContractAt(input.scope, input.channel, input.contractId)).state;
-  if (state === null || state === undefined || state.delivery === null) return null;
+  const state = await stateOperation(input);
+  if (state === null || state.delivery === null) return null;
   return state.currentIntegration === null
     ? state.delivery.data
     : { ...state.delivery.data, integration: state.currentIntegration };

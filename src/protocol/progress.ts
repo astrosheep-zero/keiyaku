@@ -60,14 +60,6 @@ export function isOperationalFailure(error: unknown): error is Error {
 /** Cancellation is witnessed by this exact signal reason, not by a signal merely being aborted. */
 export function isOperationalStop(error: unknown, signal?: AbortSignal): boolean {
   if (signal?.aborted === true && error === signal.reason) return true;
-  if (
-    error instanceof AuthorityCorruptionError ||
-    error instanceof TypeError ||
-    error instanceof RangeError ||
-    error instanceof ReferenceError ||
-    error instanceof SyntaxError
-  )
-    return false;
   return isOperationalFailure(error);
 }
 

@@ -23,7 +23,13 @@ import {
 } from "../../git/read-observation.js";
 import { gateReports, type GateCurrent } from "../../core/facts/gate.js";
 import { verificationRequirement } from "../../verification/declaration.js";
-import { type ContractId, type ContractState, type JournalEntry, type SnapshotId } from "../../core/facts/types.js";
+import {
+  targetName,
+  type ContractId,
+  type ContractState,
+  type JournalEntry,
+  type SnapshotId,
+} from "../../core/facts/types.js";
 import { projectBoundedList } from "../../bounded-list.js";
 import { observeCurrentPhysicalIssue } from "./observation.js";
 
@@ -498,14 +504,7 @@ export async function readContractObservation(
     ...(title === undefined ? {} : { title }),
     phase: phaseFor(state),
     workspace: facts.workspace,
-    ...(state.coordinates.target === undefined
-      ? {}
-      : {
-          target:
-            typeof state.coordinates.target === "string"
-              ? state.coordinates.target
-              : state.coordinates.target.contractId,
-        }),
+    ...(state.coordinates.target === undefined ? {} : { target: targetName(state.coordinates.target) }),
     ...(facts.targetLag === undefined ? {} : { targetLag: facts.targetLag }),
     ...(state.delivery === null
       ? {}

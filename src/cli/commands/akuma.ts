@@ -12,7 +12,7 @@ import { type CliOutcome, displayContext, resultContext, writeJson, writeStderr,
 import type { CliRuntime } from "../runtime.js";
 import { askRawAnswer, callObservationStream, callRawAnswer, historyRawAnswer } from "../render/akuma-activity.js";
 import { askProgressStream, callObservationHead, renderFailedCallObservation } from "../render/akuma.js";
-import { renderVerb } from "../render/verbs.js";
+import { aliasSelector, renderVerb } from "../render/verbs.js";
 
 async function schemaFromFile(path: string) {
   try {
@@ -23,10 +23,6 @@ async function schemaFromFile(path: string) {
       `cannot read JSON Schema file ${path}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-}
-
-function inputAlias(selector: string): string | undefined {
-  return selector.startsWith("@") ? selector : undefined;
 }
 
 async function promptBody(
@@ -121,7 +117,7 @@ export async function runSpawn(request: VerbRequest<"spawn">, runtime: CliRuntim
 export async function runAsk(request: VerbRequest<"ask" | "tell">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
   const progress =
-    output === "text" ? askProgressStream(undefined, inputAlias(input.akuma), resultContext()) : undefined;
+    output === "text" ? askProgressStream(undefined, aliasSelector(input.akuma), resultContext()) : undefined;
   const driver = new ActivityDriver(process.stderr);
   const observe =
     progress === undefined

@@ -1,6 +1,6 @@
 /** @architectureCompositionRoot */
 import { decodeCanonicalContractDocument } from "../body/render.js";
-import type { ContractId } from "../core/facts/types.js";
+import { targetName, type ContractId } from "../core/facts/types.js";
 import { KeiyakuError } from "../errors.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
@@ -100,10 +100,7 @@ export async function bindKei(
               const value = await bindComplete(accumulator, id, scope, channel, admission, hooks, () =>
                 observeRegion(scope, channel, id, fork.document.region).then((region) => bindValue(handle(id), region)),
               );
-              return Object.defineProperty({ kind: "accepted" as const, contractId: id, ...value }, "kei", {
-                value: value.kei,
-                enumerable: false,
-              });
+              return acceptedBind(id, value);
             }
             if (document === undefined) throw new Error("Markdown bind requires its prepared document");
             return await markdownBind(prepared, document, hooks, scope, channel, accumulator, handle);
@@ -133,6 +130,13 @@ export async function bindKei(
   const projected = project<BindOutcome>("bind", accumulator.snapshot(), projection);
   if (projected.kind === "failed") throw projected.error;
   return projected.outcome;
+}
+
+function acceptedBind(id: ContractId, value: BindValue): Extract<BindOutcome, { kind: "accepted" }> {
+  return Object.defineProperty({ kind: "accepted" as const, contractId: id, ...value }, "kei", {
+    value: value.kei,
+    enumerable: false,
+  });
 }
 
 function bindValue(kei: Kei, region: RegionObservation): BindValue {
@@ -203,20 +207,14 @@ async function markdownBind(
   const value = await bindComplete(accumulator, id, scope, channel, leading, hooks, async () =>
     bindValue(handle(id), await observeRegion(scope, channel, id, document.region)),
   );
-  return Object.defineProperty({ kind: "accepted" as const, contractId: id, ...value }, "kei", {
-    value: value.kei,
-    enumerable: false,
-  });
+  return acceptedBind(id, value);
 }
 
 function retainBindCoordinates<Value>(accumulator: InvocationAccumulator, leading: AcceptedIntent<Value>): void {
   const bind = leading.facts.find((fact) => fact.kind === "bind");
   if (bind?.kind !== "bind") throw new Error("bind receipt requires its admitted coordinates");
   const target = bind.data.coordinates.target;
-  if (target !== undefined)
-    accumulator.extendConclusions(bind.contract, {
-      target: typeof target === "string" ? target : target.contractId,
-    });
+  if (target !== undefined) accumulator.extendConclusions(bind.contract, { target: targetName(target) });
 }
 
 function parseMarkdown(markdown: string) {

@@ -136,8 +136,7 @@ function renderAkumaBoard(
 ): readonly string[] {
   if (section.kind === "absent") return ["AKUMA // absent"];
   if (section.kind === "failed") {
-    const failure = ["AKUMA // unavailable", "", tone(`! ${safeText(section.diagnostic)}`, "alert", context.color)];
-    return failure;
+    return ["AKUMA // unavailable", "", tone(`! ${safeText(section.diagnostic)}`, "alert", context.color)];
   }
   const board = section;
   const rows = board.rows ?? [];

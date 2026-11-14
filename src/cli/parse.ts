@@ -24,7 +24,7 @@ import {
   renderInstallHelp,
   type ParsedInstallCommand,
 } from "./commands/install.js";
-import { parseContractCommand, type ContractTokens } from "./commands/contract-grammar.js";
+import { parseContractCommand, refuse, type ContractTokens } from "./commands/contract-grammar.js";
 import {
   CONTRACT_COMMAND_SPECS,
   renderContractHelp as renderContractHelpForOwner,
@@ -255,10 +255,6 @@ function refuseUnusedRepo(command: ParsedCommand): never {
 
 export function assertExplicitRepoUse(command: ParsedCommand, repo: string | undefined): void {
   if (repo !== undefined && !commandRepoPolicy(command).acceptsExplicit) refuseUnusedRepo(command);
-}
-
-function refuse(command: Command, message: string): never {
-  throw new CliUsageError(message, commandGuide(command, CONTRACT_COMMAND_SPECS[command].usage));
 }
 
 /** The contract surfaces' one scan spec: `-` carries the edge's own stdin input. */

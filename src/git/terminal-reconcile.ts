@@ -1,5 +1,11 @@
-import { lstat } from "node:fs/promises";
-import { CANDIDATE_PIN_REF_NAMESPACE, isKeiyakuOwnedRef, readRef, writeCommit, type GitOid } from "./repository.js";
+import {
+  CANDIDATE_PIN_REF_NAMESPACE,
+  isKeiyakuOwnedRef,
+  pathExists,
+  readRef,
+  writeCommit,
+  type GitOid,
+} from "./repository.js";
 import { contractPhysicalName, gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { withGitReadObservation, type GitDecodeChannel } from "./read-observation.js";
@@ -16,16 +22,6 @@ import {
 import { GitPlumbingError, executeGit, type GitRepository } from "./process.js";
 import { worktreePath } from "./workspace.js";
 import type { Effect, ReconcileAccumulation, ReconcileLag, ReconcileResult, WorktreeTopology } from "./reconcile.js";
-
-async function pathExists(path: string): Promise<boolean> {
-  try {
-    await lstat(path);
-    return true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    throw error;
-  }
-}
 
 type TerminalReconcileInput = Readonly<{
   repository: GitRepository;

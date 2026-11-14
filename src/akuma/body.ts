@@ -213,6 +213,16 @@ export async function recordPluginDiagnostic(paths: AkumaPaths, occurrence: stri
   }
 }
 
+/** The plugin host bag for one Body occurrence; diagnostics are appended to its log. */
+function pluginHost(launch: BodyLaunch, world: WorldRoot, occurrence: string) {
+  return {
+    world,
+    reportDiagnostic: (message: string): void => {
+      void recordPluginDiagnostic(launch.paths, occurrence, message);
+    },
+  };
+}
+
 type BodyExecution = Readonly<{
   launch: BodyLaunch;
   soul: Soul;
@@ -286,42 +296,28 @@ type TurnOutcomeEmitter = Readonly<{
 }>;
 
 async function emitBodyBirth(launch: BodyLaunch, soul: Soul, world: WorldRoot, bodySequence: number): Promise<void> {
-  await emitPluginSignal(
-    {
-      world,
-      reportDiagnostic: (message) => {
-        void recordPluginDiagnostic(launch.paths, "birth", message);
-      },
-    },
-    {
-      kind: "akuma.born",
-      akumaId: soul.id,
-      bodySequence,
-      ...projectAkumaBirth(soul),
-      ...(launch.birthInitiator === undefined ? {} : { initiator: launch.birthInitiator }),
-      ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-    },
-  );
+  await emitPluginSignal(pluginHost(launch, world, "birth"), {
+    kind: "akuma.born",
+    akumaId: soul.id,
+    bodySequence,
+    ...projectAkumaBirth(soul),
+    ...(launch.birthInitiator === undefined ? {} : { initiator: launch.birthInitiator }),
+    ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+  });
 }
 
 function turnStartedEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnStartedEmitter {
-  const reportDiagnostic = (message: string): void => {
-    void recordPluginDiagnostic(launch.paths, "turn started", message);
-  };
   return {
     async emit(turnSequence: number): Promise<void> {
       try {
         const turn = await readTurn(launch.paths, turnSequence);
         if (turn === null) throw new Error(`Committed Turn ${turnSequence} is missing from Heart`);
-        await emitPluginSignal(
-          { world, reportDiagnostic },
-          {
-            kind: "akuma.turn-started",
-            akumaId: soul.id,
-            turnSequence,
-            ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
-          },
-        );
+        await emitPluginSignal(pluginHost(launch, world, "turn started"), {
+          kind: "akuma.turn-started",
+          akumaId: soul.id,
+          turnSequence,
+          ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
+        });
       } catch (error) {
         await recordPluginDiagnostic(launch.paths, "turn started", error);
       }
@@ -330,9 +326,6 @@ function turnStartedEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): T
 }
 
 function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): TurnOutcomeEmitter {
-  const reportDiagnostic = (message: string): void => {
-    void recordPluginDiagnostic(launch.paths, "turn outcome", message);
-  };
   return {
     async emit(turnSequence: number): Promise<void> {
       try {
@@ -340,25 +333,22 @@ function turnOutcomeEmitter(launch: BodyLaunch, soul: Soul, world: WorldRoot): T
         if (turn?.end === undefined) throw new Error(`Committed Turn ${turnSequence} outcome is missing from Heart`);
         const outcome = turn.end.outcome;
         const participants = await readTurnParticipants(launch.paths, turnSequence);
-        await emitPluginSignal(
-          { world, reportDiagnostic },
-          {
-            kind: "akuma.turn-outcome",
-            akumaId: soul.id,
-            bodySequence: turn.bodySequence,
-            turnSequence,
-            at: turn.end.completedAt,
-            ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
-            ...(participants.length === 0 ? {} : { participants }),
-            outcome:
-              outcome.kind === "answered"
-                ? { kind: "answered", text: outcome.answer }
-                : outcome.kind === "canceled"
-                  ? { kind: "canceled" }
-                  : { kind: "failed", reason: outcome.diagnostic },
-            ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-          },
-        );
+        await emitPluginSignal(pluginHost(launch, world, "turn outcome"), {
+          kind: "akuma.turn-outcome",
+          akumaId: soul.id,
+          bodySequence: turn.bodySequence,
+          turnSequence,
+          at: turn.end.completedAt,
+          ...(turn.initiator === undefined ? {} : { initiator: turn.initiator }),
+          ...(participants.length === 0 ? {} : { participants }),
+          outcome:
+            outcome.kind === "answered"
+              ? { kind: "answered", text: outcome.answer }
+              : outcome.kind === "canceled"
+                ? { kind: "canceled" }
+                : { kind: "failed", reason: outcome.diagnostic },
+          ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+        });
       } catch (error) {
         await recordPluginDiagnostic(launch.paths, "turn outcome", error);
       }
@@ -371,9 +361,6 @@ function bodyEndEmitter(
   soul: Soul,
   world: WorldRoot,
 ): (bodySequence: number, end: BodyEnd | "hung", diagnostic?: string) => Promise<void> {
-  const reportDiagnostic = (message: string): void => {
-    void recordPluginDiagnostic(launch.paths, "body end", message);
-  };
   return async (bodySequence, end, diagnostic) => {
     try {
       const latestTurn = await readLatestTurnForBody(launch.paths, bodySequence);
@@ -381,20 +368,17 @@ function bodyEndEmitter(
       const at = latestBody?.sequence === bodySequence ? (latestBody.hung?.at ?? latestBody.endedAt) : undefined;
       const initiator = latestTurn?.initiator;
       const participants = latestTurn === null ? [] : await readTurnParticipants(launch.paths, latestTurn.sequence);
-      await emitPluginSignal(
-        { world, reportDiagnostic },
-        {
-          kind: "akuma.body-ended",
-          akumaId: soul.id,
-          bodySequence,
-          end,
-          ...(at === undefined ? {} : { at }),
-          ...(initiator === undefined ? {} : { initiator }),
-          ...(participants.length === 0 ? {} : { participants }),
-          ...(diagnostic === undefined ? {} : { diagnostic }),
-          ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
-        },
-      );
+      await emitPluginSignal(pluginHost(launch, world, "body end"), {
+        kind: "akuma.body-ended",
+        akumaId: soul.id,
+        bodySequence,
+        end,
+        ...(at === undefined ? {} : { at }),
+        ...(initiator === undefined ? {} : { initiator }),
+        ...(participants.length === 0 ? {} : { participants }),
+        ...(diagnostic === undefined ? {} : { diagnostic }),
+        ...(launch.completion?.contractId === undefined ? {} : { contractId: launch.completion.contractId }),
+      });
     } catch (error) {
       await recordPluginDiagnostic(launch.paths, "body end", error);
     }

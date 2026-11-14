@@ -37,7 +37,6 @@ import {
   type DebtChange,
 } from "./operation-types.js";
 import type { WorldRoot } from "../world.js";
-export type { WorldRoot } from "../world.js";
 import { DebtAuthorityCorruptionError, type DebtPriority, type DebtState } from "./document.js";
 import { debtIdSchema, type DebtId } from "./identity.js";
 import {
@@ -54,7 +53,7 @@ import {
 } from "./operations.js";
 import { boundedListLimit } from "../bounded-list.js";
 import { readBoard } from "./store.js";
-import { addDocumentInput, addInput, closed, record, debtId as id, updateInput } from "./input.js";
+import { addDocumentInput, addInput, fields, debtId as id, updateInput } from "./input.js";
 
 export const debtAbsentSchema = z.strictObject({ kind: z.literal("absent") }).readonly();
 export type DebtAbsent = z.output<typeof debtAbsentSchema>;
@@ -166,8 +165,7 @@ class DebtsHandle {
     this.root = world;
   }
   debt(input: Readonly<{ id: string }>): Debt {
-    const v = record(input, "debt input");
-    closed(v, ["id"], "debt input");
+    const v = fields(input, ["id"], "debt input");
     return new DebtHandle(id(v.id), this.world);
   }
   add(input: AddDebtInput): Promise<DebtMutationResult> {
@@ -177,8 +175,7 @@ class DebtsHandle {
     return addDebtDocument(this.world, addDocumentInput(input));
   }
   async list(input: Readonly<{ selection?: "active" | "closed" | "all"; limit?: number }> = {}): Promise<DebtList> {
-    const v = record(input, "list input");
-    closed(v, ["selection", "limit"], "list input");
+    const v = fields(input, ["selection", "limit"], "list input");
     if (v.selection !== undefined && v.selection !== "active" && v.selection !== "closed" && v.selection !== "all")
       throw new KeiyakuError("invalid-input", "selection must be active, closed, or all");
     return {
@@ -187,18 +184,15 @@ class DebtsHandle {
     };
   }
   async ready(input: Readonly<{ limit?: number }> = {}): Promise<DebtReadyList> {
-    const v = record(input, "ready input");
-    closed(v, ["limit"], "ready input");
+    const v = fields(input, ["limit"], "ready input");
     return readyDebts(this.world, boundedListLimit(v.limit));
   }
   async blocked(input: Readonly<{ limit?: number }> = {}): Promise<BlockedDebtList> {
-    const v = record(input, "blocked input");
-    closed(v, ["limit"], "blocked input");
+    const v = fields(input, ["limit"], "blocked input");
     return blockedDebts(this.world, boundedListLimit(v.limit));
   }
   async read(input: Readonly<{ ids: readonly string[] }>): Promise<DebtShowResult> {
-    const v = record(input, "read input");
-    closed(v, ["ids"], "read input");
+    const v = fields(input, ["ids"], "read input");
     if (!Array.isArray(v.ids) || v.ids.length === 0)
       throw new KeiyakuError("invalid-input", "ids requires at least one DebtId");
     const ids = v.ids.map(id);

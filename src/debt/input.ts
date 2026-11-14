@@ -11,10 +11,13 @@ export function record(value: unknown, label: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-export function closed(value: Record<string, unknown>, allowed: readonly string[], label: string): void {
-  for (const key of Object.keys(value)) {
+/** One closed caller object: an object with only the fields its surface names. */
+export function fields(value: unknown, allowed: readonly string[], label: string): Record<string, unknown> {
+  const recordValue = record(value, label);
+  for (const key of Object.keys(recordValue)) {
     if (!allowed.includes(key)) throw new KeiyakuError("invalid-input", `${label} has unknown field: ${key}`);
   }
+  return recordValue;
 }
 
 export function debtId(value: unknown): DebtId {
@@ -77,8 +80,7 @@ export function addInput(input: unknown): AddDebtInput {
 }
 
 export function addDocumentInput(input: unknown): AddDebtDocumentInput {
-  const v = record(input, "addDocument input");
-  closed(v, ["markdown", "signal"], "addDocument input");
+  const v = fields(input, ["markdown", "signal"], "addDocument input");
   const markdown = text(v.markdown, "markdown");
   if (markdown === undefined) throw new KeiyakuError("invalid-input", "markdown is required");
   const abort = signal(v.signal);

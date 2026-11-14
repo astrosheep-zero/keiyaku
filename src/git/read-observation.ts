@@ -265,15 +265,12 @@ function commitTree(result: GitObjectResult, commit: GitOid): GitOid {
   return gitObjectId(firstLine.slice("tree ".length), "Git state tree");
 }
 
-async function completeTree(
-  channel: GitDecodeChannel,
-  root: GitOid,
-): Promise<
-  Readonly<{
-    paths: ReadonlyMap<string, TreeEntry>;
-    directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
-  }>
-> {
+type TreeObservation = Readonly<{
+  paths: ReadonlyMap<string, TreeEntry>;
+  directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
+}>;
+
+async function completeTree(channel: GitDecodeChannel, root: GitOid): Promise<TreeObservation> {
   const paths = new Map<string, TreeEntry>();
   const directories = new Map<string, ReadonlyMap<string, TreeEntry>>();
   let level = [{ path: "", oid: root }];
@@ -333,12 +330,7 @@ export async function readGitTreeSelection(
   channel: GitDecodeChannel,
   root: GitOid,
   selection: GitTreeSelection,
-): Promise<
-  Readonly<{
-    paths: ReadonlyMap<string, TreeEntry>;
-    directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
-  }>
-> {
+): Promise<TreeObservation> {
   const paths = new Map<string, TreeEntry>();
   const directories = new Map<string, ReadonlyMap<string, TreeEntry>>();
   const readDirectory = async (path: string, oid: GitOid): Promise<ReadonlyMap<string, TreeEntry>> => {
@@ -475,7 +467,7 @@ async function observeEpoch<Value>(
   let failure: { error: unknown } | undefined;
   try {
     let snapshot: GitSnapshot;
-    let treeDirectories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
+    let treeDirectories: TreeObservation["directories"];
     if (commit === null) {
       snapshot = { commit: null, tree: null, paths: new Map() };
       treeDirectories = new Map();

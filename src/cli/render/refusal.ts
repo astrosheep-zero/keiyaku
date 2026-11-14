@@ -7,6 +7,7 @@ import { contractOperationName, shortGitId } from "./contract-observation.js";
 import {
   DEFAULT_CLI_COLUMNS,
   formatNextCall,
+  kindWords,
   orderRefusalFacts,
   renderOpaqueBlock,
   safeText,
@@ -22,10 +23,6 @@ export type RenderableRefusal = KeiyakuRefusal | DirtyWithOption | CliEdgeRefusa
 
 function wrap(lines: string[], text: string, indent: string, columns: number): void {
   lines.push(...renderOpaqueBlock(text, indent, columns));
-}
-
-function words(kind: string): string {
-  return kind.replaceAll("-", " ");
 }
 
 function collectionLines(name: string, members: readonly string[], indent: string): readonly string[] {
@@ -47,7 +44,7 @@ const REFUSAL_WORDS: Readonly<Record<string, string>> = {
 };
 
 function refusalWords(kind: string): string {
-  return REFUSAL_WORDS[kind] ?? words(kind);
+  return REFUSAL_WORDS[kind] ?? kindWords(kind);
 }
 
 function renderDirtyRefusal(
@@ -184,7 +181,7 @@ function refusalFacts(
   if (refusal.kind === "target-workspace-unavailable") {
     return [
       `${indent}reason  target workspace unavailable`,
-      ...targetRefusalLines(target, indent, identity, words(refusal.reason)),
+      ...targetRefusalLines(target, indent, identity, kindWords(refusal.reason)),
     ];
   }
   if (refusal.kind === "target-contract-missing" || refusal.kind === "target-contract-terminal") {

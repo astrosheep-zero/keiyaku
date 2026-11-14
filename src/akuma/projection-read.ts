@@ -6,6 +6,8 @@ import type {
   ClosedTurn,
   CompletedToolRow,
   OpenSnapshotRow,
+  HistoryCursor,
+  HistoryPage,
   OpenTurnRow,
   ReportedFileChange,
   SnapshotRow,
@@ -30,8 +32,6 @@ export function withoutReportedChanges(snapshot: ActivitySnapshot): ActivitySnap
   const { reportedChangesOutside: _outside, ...rest } = snapshot;
   return { ...rest, reportedChanges: [], reportedChangesOmitted: 0 };
 }
-
-import type { HistoryCursor, HistoryPage } from "./projection.js";
 
 function assembleEntries<Row extends SnapshotRow>(
   ledger: TurnLedger,
@@ -200,17 +200,14 @@ export function selectSnapshot(
   const tailCount = Math.min(DEFAULT_TAIL, Math.max(0, input.budget?.tail ?? DEFAULT_TAIL));
   if (ledger.turns.length === 0 && !ledger.rows.some((row) => row.kind === "tell"))
     return { snapshot: { kind: "unborn", entries: [], ...EMPTY_REPORTED }, ordinaryCount: 0 };
+  const receiptTellId = input.aperture === "receipt" ? input.admittedTellId : undefined;
   const pending = ledger.rows.filter(isPendingTell);
   const admittedTell =
-    input.aperture === "receipt" && input.admittedTellId !== undefined
-      ? ledger.rows.find((row) => row.kind === "tell" && row.tellId === input.admittedTellId)
-      : undefined;
+    receiptTellId === undefined
+      ? undefined
+      : ledger.rows.find((row) => row.kind === "tell" && row.tellId === receiptTellId);
   const pins: readonly ActivityRow[] =
-    input.aperture === "receipt" && input.admittedTellId !== undefined
-      ? admittedTell === undefined
-        ? []
-        : [admittedTell]
-      : pending;
+    receiptTellId === undefined ? pending : admittedTell === undefined ? [] : [admittedTell];
   const reported = frontierReportedChanges(ledger, input.executionDir, input.canonicalize);
   if (ledger.openTurn !== undefined) {
     const window = currentTurnWindow(ledger);

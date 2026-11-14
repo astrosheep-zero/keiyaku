@@ -4,9 +4,9 @@ import { decodeContractDocument } from "./decode.js";
 import type { ContractBody, DecodedContractDocument } from "./types.js";
 import type { VerificationDeclaration } from "../verification/declaration.js";
 import { parseToAST } from "../markdown/parse.js";
-import { indexDocument, indexedHeadings, normalizeTitle, rawSlice } from "../markdown/query.js";
-import type { DocumentNode, SectionNode } from "../markdown/types.js";
+import { normalizeTitle, rawSlice } from "../markdown/query.js";
 import { CONTRACT_SECTIONS } from "./shape.js";
+import { topLevelSections } from "./envelope.js";
 
 function content(value: string): string {
   return value.trimEnd();
@@ -86,12 +86,6 @@ export function decodeCanonicalContractDocument(
   return rendered === decoded.document.bytes ? decoded : decodeContractDocument(rendered, options);
 }
 
-function sections(document: DocumentNode): readonly SectionNode[] {
-  return indexedHeadings(indexDocument(document), { level: 2 }).filter(
-    (node): node is SectionNode => node.type === "section",
-  );
-}
-
 export function renderAmendedContractBody(
   currentSource: string,
   body: ContractBody,
@@ -100,13 +94,13 @@ export function renderAmendedContractBody(
   const current = parseToAST(currentSource);
   const renderedSource = renderContractBody(body);
   const rendered = parseToAST(renderedSource);
-  const currentSections = sections(current);
+  const currentSections = topLevelSections(current);
   const preserved = new Map(currentSections.map((node) => [normalizeTitle(node.title), rawSlice(current, node.span)]));
   const first = currentSections[0];
   const prefix = first === undefined ? currentSource : currentSource.slice(0, first.span.start);
   return (
     prefix +
-    sections(rendered)
+    topLevelSections(rendered)
       .map((node) => {
         const name = normalizeTitle(node.title);
         return changedSections.has(name)
