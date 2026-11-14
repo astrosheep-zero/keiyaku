@@ -1,14 +1,12 @@
-import { extendContractsForAdmissionAt, observeContractsForAdmissionAt } from "../git/observe.js";
+import {
+  extendContractsForAdmissionAt,
+  observeContractsForAdmissionAt,
+  selectExplicitTarget,
+  type BindTargetSelection,
+} from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import { contractState } from "../core/facts/observation.js";
-import {
-  contractId,
-  sameTarget,
-  type ContractId,
-  type ContractTerms,
-  type ContractTarget,
-} from "../core/facts/types.js";
-import { normalizeTargetBranch } from "../git/observe.js";
+import { sameTarget, type ContractId, type ContractTerms, type ContractTarget } from "../core/facts/types.js";
 import { readRef } from "../git/repository.js";
 import { resolveContractTarget, type TargetWorkspaceRefusal } from "../git/target.js";
 import { acquireTargetPlacementFence } from "../git/target-placement.js";
@@ -40,28 +38,10 @@ type Amendment = Readonly<{ source: ContractTerms; target?: ContractTarget }> &
   ReturnType<NonNullable<AmendOperationInput["deriveAmendment"]>>;
 type TargetInputRefusal = Readonly<{ kind: "invalid-target" | "target-missing" }> | TargetWorkspaceRefusal;
 type AmendmentRefusal = AmendRefusal | VerificationDeclarationRefusal | TargetInputRefusal;
-type TargetSelection =
-  | Readonly<{ kind: "branch"; target: string }>
-  | Readonly<{ kind: "contract"; contractId: ContractId }>;
-
-async function selectTarget(
-  input: AmendOperationInput,
-): Promise<TargetSelection | undefined | { kind: "invalid-target" }> {
-  if (input.target === undefined) return undefined;
-  if (input.target.startsWith("kei/")) {
-    try {
-      return { kind: "contract", contractId: contractId(input.target) };
-    } catch {
-      return { kind: "invalid-target" };
-    }
-  }
-  const target = await normalizeTargetBranch(input.scope, input.target);
-  return target === null ? { kind: "invalid-target" } : { kind: "branch", target };
-}
 
 async function prepareAmendmentAt(
   input: AmendOperationInput,
-  selection: TargetSelection | undefined,
+  selection: Extract<BindTargetSelection, { kind: "explicit" | "contract" }> | undefined,
   amendment: Amendment | undefined,
   observation: GitDecisionObservation,
 ): Promise<
@@ -84,7 +64,7 @@ async function prepareAmendmentAt(
     const resolved = await resolveContractTarget(input.scope, selection.contractId);
     if (resolved.kind === "refused") refusal = resolved.refusal;
     else target = resolved.target;
-  } else if (selection?.kind === "branch") {
+  } else if (selection?.kind === "explicit") {
     if ((await readRef(input.scope, selection.target)) === null) refusal = { kind: "target-missing" };
     else target = selection.target;
   }
@@ -144,8 +124,8 @@ async function extendPrerequisiteClosureAt(
 }
 
 export async function amendOperation(input: AmendOperationInput): Promise<IntentOutcome<Amendment, AmendmentRefusal>> {
-  const selection = await selectTarget(input);
-  if (selection?.kind === "invalid-target") return { kind: "refused", refusal: selection };
+  const selection = input.target === undefined ? undefined : await selectExplicitTarget(input.scope, input.target);
+  if (selection === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
   let source = input.source;
   if (source === undefined) {
     const initial = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);

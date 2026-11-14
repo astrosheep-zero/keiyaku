@@ -8,6 +8,7 @@ import {
   type Retry,
 } from "../protocol/result-reasons.js";
 import { placementReasonSchema } from "../protocol/completion.js";
+import { amendRefusalSchema } from "../protocol/operations.js";
 
 export const nukeConfirmationRefusalSchema = z.strictObject({
   kind: z.literal("nuke-confirmation-mismatch"),
@@ -55,22 +56,9 @@ export const operationRefusalSchemas = {
     declarationReasonSchema,
   ]),
   amend: z.union([
-    z
-      .strictObject({
-        kind: z.enum([
-          "contract-missing",
-          "terminal",
-          "terms-moved",
-          "unknown-prerequisite",
-          "cyclic-prerequisite",
-          "cyclic-target",
-          "invalid-target",
-          "target-missing",
-        ]),
-      })
-      .readonly(),
+    amendRefusalSchema,
+    z.strictObject({ kind: z.enum(["invalid-target", "target-missing"]) }).readonly(),
     declarationReasonSchema,
-    targetLifecycleReasonSchema,
     targetWorkspaceReasonSchema,
   ]),
   deliver: z.union([

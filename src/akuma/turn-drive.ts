@@ -298,23 +298,18 @@ async function retireProviderCustody(
   ): Promise<Readonly<{ kind: "retired" }> | Readonly<{ kind: "held"; error: unknown }>> => {
     const deadline = new AbortController();
     try {
-      return await Promise.race([
-        operation().then(
-          async () => {
-            try {
-              await attempt.closed;
-              return { kind: "retired" as const };
-            } catch (error: unknown) {
-              return { kind: "held" as const, error };
-            }
-          },
-          (error: unknown) => ({ kind: "held" as const, error }),
-        ),
-        abortableDelay(CONTROL_RESPONSE_MS, deadline.signal).then(() => ({
-          kind: "held" as const,
-          error: new Error(`provider custody remained live after ${CONTROL_RESPONSE_MS}ms`),
-        })),
+      await Promise.race([
+        (async () => {
+          await operation();
+          await attempt.closed;
+        })(),
+        abortableDelay(CONTROL_RESPONSE_MS, deadline.signal).then(() => {
+          throw new Error(`provider custody remained live after ${CONTROL_RESPONSE_MS}ms`);
+        }),
       ]);
+      return { kind: "retired" };
+    } catch (error: unknown) {
+      return { kind: "held", error };
     } finally {
       deadline.abort();
     }

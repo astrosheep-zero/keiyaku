@@ -55,14 +55,7 @@ type TellExecutionInput = Readonly<{
 
 type AskExecutionInput = TellExecutionInput & Readonly<{ timeoutMs?: number; schemaJson?: string }>;
 
-export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
-  if (input.wait === true) {
-    const { akumaId, tellId, wake, interrupt, ...observation } = await executeObservedTellAkuma(input);
-    return completeTell(
-      { akumaId, tellId, ...(wake === undefined ? {} : { wake }), ...(interrupt === undefined ? {} : { interrupt }) },
-      observation.kind === "invalid-output" ? { kind: "failed", diagnostic: observation.diagnostic } : observation,
-    );
-  }
+async function admitExecutionTell(input: AskExecutionInput) {
   input.signal?.throwIfAborted();
   const owner = new AkumaOwner(input.id, input.path);
   const admission =
@@ -72,12 +65,25 @@ export async function executeTellAkuma(input: TellExecutionInput): Promise<Akuma
   if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
   if (admission.kind === "unavailable")
     throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
-  let tell: TellResult = {
+  const receipt: TellResult = {
     ...pendingTellReceipt(admission.tell),
     ...("barrier" in admission && admission.barrier !== undefined
       ? { interruption: { kind: "pending", bodySequence: admission.barrier.bodySequence } }
       : {}),
   };
+  return { owner, admission, receipt };
+}
+
+export async function executeTellAkuma(input: TellExecutionInput): Promise<AkumaTellResult> {
+  if (input.wait === true) {
+    const { akumaId, tellId, wake, interrupt, ...observation } = await executeObservedTellAkuma(input);
+    return completeTell(
+      { akumaId, tellId, ...(wake === undefined ? {} : { wake }), ...(interrupt === undefined ? {} : { interrupt }) },
+      observation.kind === "invalid-output" ? { kind: "failed", diagnostic: observation.diagnostic } : observation,
+    );
+  }
+  const { owner, admission, receipt } = await admitExecutionTell(input);
+  let tell = receipt;
   try {
     tell = await ("wake" in admission
       ? admission.wake
@@ -186,27 +192,13 @@ export async function executeAskAkuma(input: AskExecutionInput): Promise<AkumaAs
 }
 
 async function executeObservedTellAkuma(input: AskExecutionInput): Promise<TextAskResult> {
-  input.signal?.throwIfAborted();
-  const owner = new AkumaOwner(input.id, input.path);
-  const admission =
-    input.interrupt === true
-      ? await owner.admitInterrupt(input.body, input)
-      : await owner.admitTell(input.body, input.tellId, input.recordedAt, tellWakeRuntime(input.spawn), input);
-  if (admission.kind === "not-born") throw new AkumaNotBornError(input.id);
-  if (admission.kind === "unavailable")
-    throw new AkumaProviderError(`Tell interrupt unavailable: ${admission.evidence}`);
+  const { owner, admission, receipt } = await admitExecutionTell(input);
   const observing = new AbortController();
   const signal = input.signal === undefined ? observing.signal : AbortSignal.any([input.signal, observing.signal]);
   const wake =
     "wake" in admission
       ? admission.wake
       : owner.completeInterruptAdmission(admission, tellWakeRuntime(input.spawn), signal);
-  const receipt: TellResult = {
-    ...pendingTellReceipt(admission.tell),
-    ...("barrier" in admission && admission.barrier !== undefined
-      ? { interruption: { kind: "pending", bodySequence: admission.barrier.bodySequence } }
-      : {}),
-  };
   try {
     return await observeAdmittedTellAkuma({
       ...input,

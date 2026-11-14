@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { contractId, type BindData, type ContractId } from "../core/facts/types.js";
+import type { BindData, ContractId } from "../core/facts/types.js";
 import {
   resolveContractTarget,
   targetRef,
@@ -10,7 +10,7 @@ import { acquireTargetPlacementFence } from "../git/target-placement.js";
 import { decideBind, type BindInput, type BindRefusal } from "../core/verbs/bind.js";
 import { gitObjectIdForSnapshot } from "../git/identity.js";
 import {
-  normalizeTargetBranch,
+  selectExplicitTarget,
   observeBindCoordinates,
   type BindCoordinatesObservation,
   type BindTargetSelection,
@@ -183,17 +183,9 @@ export async function bindOperation(
 ): Promise<IntentOutcome<Readonly<{ contractId: ContractId }>, BindRefusalUnion>> {
   let selection: BindTargetSelection = input.targetSelection;
   if (selection.kind === "explicit") {
-    if (selection.target.startsWith("kei/")) {
-      try {
-        selection = { kind: "contract", contractId: contractId(selection.target) };
-      } catch {
-        return { kind: "refused", refusal: { kind: "invalid-target" } };
-      }
-    } else {
-      const normalized = await normalizeTargetBranch(input.scope, selection.target);
-      if (normalized === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
-      selection = { kind: "explicit", target: normalized };
-    }
+    const explicit = await selectExplicitTarget(input.scope, selection.target);
+    if (explicit === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
+    selection = explicit;
   }
   const at = new Date().toISOString();
   const id = input.contractId;

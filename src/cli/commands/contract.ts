@@ -49,10 +49,8 @@ export async function acquireContractRequest(
     if (isBlankInput(bytes)) throw new CliUsageError("review requires a nonblank summary");
     return { name: request.name, input: { ...request.input, summary: bytes }, output: request.output };
   }
-  if (request.name === "amend") {
-    if (isBlankInput(bytes)) throw new CliUsageError("amend requires a nonblank stdin document");
-    return { name: request.name, input: { ...request.input, markdown: bytes }, output: request.output };
-  }
+  if (request.name === "amend" && isBlankInput(bytes))
+    throw new CliUsageError("amend requires a nonblank stdin document");
   if (request.name === "bind")
     return { name: request.name, input: { ...request.input, markdown: bytes }, output: request.output };
   return { name: request.name, input: { ...request.input, markdown: bytes }, output: request.output };

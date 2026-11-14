@@ -2,6 +2,7 @@ import { decodeJournal } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { foldJournal } from "../core/facts/fold.js";
 import {
+  contractId,
   type ContractId,
   type ContractState,
   type ContractTarget,
@@ -109,6 +110,21 @@ export type BindTargetSelection =
   | Readonly<{ kind: "contract"; contractId: ContractId; inherited?: Exclude<ContractTarget, string> }>
   | Readonly<{ kind: "current-branch" }>
   | Readonly<{ kind: "targetless" }>;
+
+export async function selectExplicitTarget(
+  repository: GitRepository,
+  input: string,
+): Promise<Extract<BindTargetSelection, { kind: "explicit" | "contract" }> | null> {
+  if (input.startsWith("kei/")) {
+    try {
+      return { kind: "contract", contractId: contractId(input) };
+    } catch {
+      return null;
+    }
+  }
+  const target = await normalizeTargetBranch(repository, input);
+  return target === null ? null : { kind: "explicit", target };
+}
 
 const TARGET_COORDINATES_FORMAT = "%(refname)%00%(objectname)%00";
 
