@@ -13,6 +13,7 @@ import {
   callFailureLines,
   askRawAnswer,
   inputObservation,
+  observationCompletedAt,
   tellControlLines,
   tellPayloadLines,
   type ObservedCallHead,
@@ -56,8 +57,14 @@ export function askProgressStream(
     flush: () => stream.flush(),
     conclude: (result) => {
       const controls = tellControlLines(result, context);
+      const observation = inputObservation(result);
+      const completedAt = observationCompletedAt(observation);
       return [
-        stream.conclude({ kind: "observed", observation: inputObservation(result) }),
+        stream.conclude({
+          kind: "observed",
+          observation,
+          ...(completedAt === undefined ? {} : { completedAt }),
+        }),
         ...subordinateLines([
           ...(controls.length === 0 && askRawAnswer(result) !== undefined ? [] : [`input ${result.tellId}`]),
           ...controls,
@@ -83,11 +90,14 @@ export function waitedTellProgress(
     { cursor: "admission", answerSeparator: true, now: () => context.now },
   );
   const admitted = stream.admitted({ rows: [tellAdmissionRow(input.prompt, context, result.wake)] });
+  const observation = inputObservation(result);
+  const completedAt = observationCompletedAt(observation);
   return [
     ...admitted,
     stream.conclude({
       kind: "observed",
-      observation: inputObservation(result),
+      observation,
+      ...(completedAt === undefined ? {} : { completedAt }),
     }),
     ...subordinateLines([`input ${result.tellId}`, ...tellControlLines(result, context)]),
     ...(askRawAnswer(result) === undefined ? [] : [askRawAnswer(result)!]),

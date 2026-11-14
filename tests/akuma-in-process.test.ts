@@ -12,7 +12,7 @@ import { renderVerb } from "../src/cli/render/verbs.js";
 import type { BodyLauncher, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
-import { fixtureAdapter } from "./support/akuma-tell.js";
+import { fixtureAdapter, settledInput } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory, waitForCondition } from "./support/process.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
@@ -170,7 +170,7 @@ test(
         timeoutMs: 20_000,
         signal: t.signal,
       });
-      assert.deepEqual(selectedAnswer.input, { kind: "answered", answer: "selected-answer" });
+      assert.deepEqual(settledInput(selectedAnswer.input), { kind: "answered", answer: "selected-answer" });
       const events = nativeEvents(world);
       assert.equal(new Set(events.map((event) => event.pid)).size, 1);
       assert.ok(events.every((event) => event.pid === process.pid));

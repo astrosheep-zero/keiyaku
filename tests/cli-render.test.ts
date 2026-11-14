@@ -2681,23 +2681,36 @@ test("a plural wait text renders one compact line per observation and unreadable
 test("an observing call's conclusion asserts real waiting", () => {
   const settledAtMs = Date.parse(AKUMA_ACTIVITY_AT);
   const id = "aku/worker/abcd0044";
-  // A call already answered at its first look names no duration.
-  const answered = callObservationStream(
-    { columns: 120, color: false },
-    { id, contract: { kind: "none" }, facts: [] },
-    { now: () => settledAtMs + 10_000 },
+  const head = { id, contract: { kind: "none" as const }, facts: [] };
+  const context = { columns: 120, color: false };
+  // A wait that began four seconds before its input settled states its witnessed duration.
+  const waiting = callObservationStream(context, head, {
+    now: () => settledAtMs,
+    admittedAt: new Date(settledAtMs - 4_000).toISOString(),
+  });
+  const witnessed = waiting.conclude(
+    callObservation({ kind: "answered", answer: "the answer", completedAt: AKUMA_ACTIVITY_AT }),
   );
-  const conclusion = answered.conclude(callObservation({ kind: "answered", answer: "the answer" }));
-  assert.equal(conclusion.split("\n").at(-3), "✓ answered");
-  assert.ok(conclusion.endsWith("\n\n"), "the progress channel owns the answer separator");
+  assert.equal(witnessed.split("\n").at(-3), "✓ answered — 4s");
+  assert.ok(witnessed.endsWith("\n\n"), "the progress channel owns the answer separator");
+
+  // A call already answered at its first look names no duration.
+  const answered = callObservationStream(context, head, { now: () => settledAtMs + 10_000 });
+  const settled = answered.conclude(
+    callObservation({ kind: "answered", answer: "the answer", completedAt: AKUMA_ACTIVITY_AT }),
+  );
+  assert.equal(settled.split("\n").at(-3), "✓ answered");
+
+  // An absent settlement instant never fabricates one.
+  const unrecorded = callObservationStream(context, head, { now: () => settledAtMs + 10_000 });
+  assert.equal(
+    unrecorded.conclude(callObservation({ kind: "answered", answer: "the answer" })).split("\n").at(-3),
+    "✓ answered",
+  );
 
   // A deadline carries the observed elapsed wait rather than manufacturing an ending.
   let now = settledAtMs - 45_000;
-  const bounded = callObservationStream(
-    { columns: 120, color: false },
-    { id, contract: { kind: "none" }, facts: [] },
-    { now: () => now },
-  );
+  const bounded = callObservationStream(context, head, { now: () => now });
   const running = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id,
@@ -2827,8 +2840,10 @@ test("a streamed observing call opens one framed head and never replays a settle
   assert.doesNotMatch(text, /second|@scout|kei\/demo/u, "the head never recurs and the newest row is still moving");
 
   now = settledAtMs + 1_000;
-  const conclusion = stream.conclude(callObservation({ kind: "answered", answer: "the answer" }));
-  assert.equal(conclusion, `?  run    \$ second\n✓ answered\n\n`);
+  const conclusion = stream.conclude(
+    callObservation({ kind: "answered", answer: "the answer", completedAt: AKUMA_ACTIVITY_AT }),
+  );
+  assert.equal(conclusion, `?  run    \$ second\n✓ answered — 4s\n\n`);
   assert.doesNotMatch(conclusion, /the answer|kei\/demo|@scout/u, "no head or answer replay");
 });
 

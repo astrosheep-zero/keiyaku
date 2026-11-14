@@ -1,10 +1,12 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import assert from "node:assert/strict";
 import { join } from "node:path";
 import { akumaWithLauncher, type Akuma } from "../../src/akuma/akuma-instance.js";
 import type { BodyLauncher } from "../../src/akuma/body-launch.js";
 import { driveAkumaBody } from "../../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart } from "../../src/akuma/heart/index.js";
 import { allocateAkumaDirectory } from "../../src/akuma/identity.js";
+import type { AkumaTellResult } from "../../src/akuma/selection-observation.js";
 import {
   createProviderAttempt,
   type ProviderAdapter,
@@ -36,6 +38,14 @@ export function answering(answer: string): ProviderAdapter {
 
 export async function settleFixtureBodies(bodies: readonly Promise<unknown>[]): Promise<void> {
   await Promise.all(bodies.map((body) => body.catch(() => undefined)));
+}
+
+/** A settled observation carries its witnessed settlement instant; compare everything else exactly. */
+export function settledInput(input: AkumaTellResult["input"]): unknown {
+  if (input?.kind !== "answered") assert.fail("expected an answered input");
+  const { completedAt, ...settled } = input;
+  assert.equal(typeof completedAt, "string");
+  return settled;
 }
 
 export function fixtureLauncher(

@@ -46,6 +46,7 @@ import {
   installAkumaBodyPidReceipt,
 } from "./support/process.js";
 import { AkumaOwner, isolateSquareFixtureLedger } from "./support/akuma-composition.js";
+import { settledInput } from "./support/akuma-tell.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
 
@@ -248,7 +249,7 @@ test("local spawn waits for its empty Body and retains native config through wak
       await pending.catch(() => undefined);
     }
     akumaId = result.akumaId;
-    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: '{"ok":true}' });
     const history = await PublicAkuma.select(world, result.akumaId).history();
     const tells = history.rows.filter((row) => row.kind === "tell");
     assert.equal(tells.length, 1);
@@ -261,7 +262,7 @@ test("local spawn waits for its empty Body and retains native config through wak
     const reopened = PublicAkuma.select(await World.at(world), result.akumaId);
     await reopened.idle({ timeoutMs: 10_000 });
     const continued = await reopened.tell("continue", { wait: true, timeoutMs: 10_000 });
-    assert.deepEqual(continued.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.deepEqual(settledInput(continued.input), { kind: "answered", answer: '{"ok":true}' });
     assert.deepEqual((await readSoul(pathsForAkumaId(world, result.akumaId)))?.provider.config, configured.config);
     const answered = (await reopened.history()).rows.find(
       (row) => row.kind === "outcome" && row.outcome.kind === "answered",
@@ -436,7 +437,7 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
       signal: t.signal,
     });
     child = result.akumaId;
-    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: '{"ok":true}' });
     const tell = await readTell(pathsForAkumaId(world, result.akumaId), result.tellId!);
     assert.ok(tell?.binding);
     assert.deepEqual(
@@ -644,7 +645,7 @@ test("native birth retains its captured host callback for the resulting handle",
       throw new Error("mutated callback must not run");
     };
     const result = await child.tell("answer", { wait: true, signal: t.signal });
-    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: '{"ok":true}' });
     await child.history();
     assert.deepEqual(diagnostics, [
       "plugin fail signal: birth observer failed",
@@ -786,7 +787,7 @@ test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn sett
       },
     });
     assert.equal(result.input?.kind, "answered");
-    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: '{"ok":true}' });
     assert.equal(result.tellId, observedTellId);
     operationFailed = false;
   } finally {

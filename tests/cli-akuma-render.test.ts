@@ -472,7 +472,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
     kind: "spawned",
     akumaId: id,
     tellId: "tell-bound",
-    input: { kind: "answered", answer: "exact answer" },
+    input: { kind: "answered", answer: "exact answer", completedAt: AKUMA_ACTIVITY_AT },
   });
 
   const progress = askProgressStream(undefined, undefined, context);
@@ -483,6 +483,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
     tellId: "tell-bound",
     kind: "answered",
     answer: "exact answer",
+    completedAt: AKUMA_ACTIVITY_AT,
   });
   const tellTranscript = [...admission, ...tellFrame, ...tellConclusion].join("\n");
   const callTranscript = [...callFrame, callConclusion].join("\n");
@@ -496,7 +497,7 @@ test("call and bounded Tell share one input frame and pinned conclusion", () => 
   assert.equal(tellFrame.length, 0, "the admitted Tell receipt is not replayed by observation");
   assert.equal(tellConclusion.length, 1);
   assert.equal(tellConclusion[0], callConclusion);
-  assert.match(callConclusion, /✓ answered/u, "both adapters share one input-wait conclusion");
+  assert.match(callConclusion, /✓ answered — 5s/u, "both adapters share one witnessed input-wait duration");
 });
 
 test("ask activity starts at admission and includes a later settlement of an older tool", () => {

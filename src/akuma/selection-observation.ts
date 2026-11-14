@@ -120,8 +120,12 @@ export const tellFailureSchema = z.union([
 ]);
 type TellFailure = z.output<typeof tellFailureSchema>;
 const akumaTextObservationSchema = z.union([
-  z.strictObject({ kind: z.literal("answered"), answer: z.string() }).readonly(),
-  z.strictObject({ kind: z.literal("failed"), diagnostic: z.string() }).readonly(),
+  z
+    .strictObject({ kind: z.literal("answered"), answer: z.string(), completedAt: z.string().exactOptional() })
+    .readonly(),
+  z
+    .strictObject({ kind: z.literal("failed"), diagnostic: z.string(), completedAt: z.string().exactOptional() })
+    .readonly(),
   z.strictObject({ kind: z.literal("unanswered") }).readonly(),
   z.strictObject({ kind: z.literal("deadline") }).readonly(),
 ]);
@@ -147,9 +151,16 @@ export const akumaTellResultSchema = z.union([
     .readonly(),
 ]);
 export const akumaAskObservationSchema = z.union([
-  z.strictObject({ kind: z.literal("answered"), answer: z.json() }).readonly(),
+  z.strictObject({ kind: z.literal("answered"), answer: z.json(), completedAt: z.string().exactOptional() }).readonly(),
   akumaTextObservationSchema.options[1],
-  z.strictObject({ kind: z.literal("invalid-output"), diagnostic: z.string(), answer: z.string() }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("invalid-output"),
+      diagnostic: z.string(),
+      answer: z.string(),
+      completedAt: z.string().exactOptional(),
+    })
+    .readonly(),
   akumaTextObservationSchema.options[2],
   akumaTextObservationSchema.options[3],
 ]);

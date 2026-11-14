@@ -10,7 +10,7 @@ import { renderVerb } from "../src/cli/render/verbs.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { Settings } from "../src/settings.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
-import { answering } from "./support/akuma-tell.js";
+import { answering, settledInput } from "./support/akuma-tell.js";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
 import { HeldAkumaLeash, readSeal, readSoul, readTell } from "../src/akuma/heart/index.js";
@@ -205,7 +205,7 @@ test(
       },
     });
     assert.equal(result.input?.kind, "answered");
-    assert.deepEqual(result.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: '{"ok":true}' });
     const input = trace()[0]?.[1] as { akumaIds: string[] };
     assert.deepEqual(input.akumaIds, [result.akumaId]);
     const tell = await readTell(pathsForAkumaId(world, result.akumaId), result.tellId!);

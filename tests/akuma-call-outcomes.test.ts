@@ -25,7 +25,7 @@ import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import type { SpawnProgress } from "../src/library/akuma-creation.js";
 import type { AskProgress } from "../src/akuma/akuma-selection-execution.js";
 import { runCli } from "./support/cli-fixtures.js";
-import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
+import { answering, bornWorld, fixtureLauncher, settleFixtureBodies, settledInput } from "./support/akuma-tell.js";
 import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
 import { assertWireRoundTrip, assertWireConformance } from "./support/schema-parity.js";
@@ -72,7 +72,7 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   assert.equal(result.kind, "failed");
   if (result.kind !== "failed") assert.fail("Dispatch must stop the operation");
   assert.deepEqual(result.failures.map(failure => failure.stage), ["dispatch"]);
-  assert.deepEqual(result.input, { kind: "answered", answer: "exact text answer" });
+  assert.deepEqual(settledInput(result.input), { kind: "answered", answer: "exact text answer" });
   assert.equal((await readSoul(pathsForAkumaId(world, result.akumaId)))?.id, result.akumaId);
   assert.ok(result.tellId);
   assert.equal((await readTell(pathsForAkumaId(world, result.akumaId), result.tellId))?.body, "answer");
@@ -170,7 +170,7 @@ test("Tell failure and exact Ask precedence retain answer and historical wake re
   assert.equal(told.kind, "failed");
   if (told.kind !== "failed") assert.fail("Tell must keep its wake stop");
   assert.deepEqual(told.failures, [{ stage: "wake", diagnostic: "historical wake failed", logPath }]);
-  assert.deepEqual(told.input, { kind: "answered", answer: '{"ok":true}' });
+  assert.deepEqual(settledInput(told.input), { kind: "answered", answer: '{"ok":true}' });
   assertWireRoundTrip(akumaTellResultSchema, told);
   assert.equal(classifyVerb("tell", input, { kind: "returned", value: told }), "failed");
   const toldText = renderVerb("tell", input, { kind: "returned", value: told }, context);

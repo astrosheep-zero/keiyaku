@@ -208,9 +208,25 @@ test("packaged prompt-free spawn births without admitting a Tell", { timeout: 12
     const born = await runPackagedCli(["-C", world, "spawn", "worker", "--bare"], { cwd: world, env });
     assert.equal(born.code, 0, born.stderr);
     assert.match(born.stdout, /^✓ spawned aku\/worker\/[0-9a-f]{8}$/mu, "the receipt leads with verdict and identity");
+    assert.equal(
+      born.stdout.trimEnd().split("\n").length,
+      1,
+      `a birth without --workdir claims no execution directory:\n${born.stdout}`,
+    );
     assert.doesNotMatch(born.stdout, /└─|├─/u, "an action receipt grows no identity tree");
     assert.equal(born.stderr, "", "prompt-free birth has no progress or Tell output");
     assert.doesNotMatch(born.stdout, /tell/u, "prompt-free birth admits no Tell");
+
+    const located = await runPackagedCli(["-C", world, "spawn", "worker", "--bare", "--workdir", world], {
+      cwd: world,
+      env,
+    });
+    assert.equal(located.code, 0, located.stderr);
+    assert.match(located.stdout, /^✓ spawned aku\/worker\/[0-9a-f]{8}$/mu, "the receipt leads with verdict and identity");
+    assert.ok(
+      located.stdout.split("\n").includes(`  ${await realpath(world)}`),
+      `an explicit --workdir is the indented execution directory:\n${located.stdout}`,
+    );
   } finally {
     await removeTempDirectory(root);
   }
@@ -286,7 +302,7 @@ test(
       });
       assert.equal(answered.code, 0, answered.stderr);
       assert.equal(answered.stdout, "the answer", "an answered observing call writes its bytes exactly once");
-      assert.match(answered.stderr, /^✓ answered$/mu);
+      assert.match(answered.stderr, /^✓ answered — \d+s$/mu, "a settled input wait names its witnessed duration");
       // The final narration may be observed while its Turn is still open. Closing must account for
       // that in-flight row with `?`, even when the later Heart projection folds it into the answer.
       const answerNarration = answered.stderr.split("\n").filter((line) => line.includes("the answer"));
@@ -308,7 +324,7 @@ test(
         1,
         `the admitted input appears once:\n${tell.stderr}`,
       );
-      assert.match(tell.stderr, /✓ answered\n\n/u, "the progress channel separates the raw answer");
+      assert.match(tell.stderr, /✓ answered — \d+s\n\n$/u, "the progress channel separates the raw answer");
 
       const silent = await runPackagedCli(["-C", world, "spawn", "silent", "--bare", "--wait", "20s", "prompt"], {
         cwd: world,
@@ -316,7 +332,7 @@ test(
       });
       assert.equal(silent.code, 0, silent.stderr);
       assert.equal(silent.stdout, "", "a valid empty answer writes zero stdout bytes");
-      assert.match(silent.stderr, /^✓ answered$/mu, "the conclusion distinguishes an empty answer from silence");
+      assert.match(silent.stderr, /^✓ answered — \d+s$/mu, "the conclusion distinguishes an empty answer from silence");
     } finally {
       await removeTempDirectory(root);
     }
@@ -339,7 +355,7 @@ test("packaged observing call bounds nine eligible tools across polling callback
     assert.deepEqual(tools, [1, 2, 3], `one command prints the first three settled tools:\n${result.stderr}`);
     assert.equal(result.stderr.match(/··· +6 omitted/gu)?.length, 1, result.stderr);
     assert.ok(result.stderr.indexOf("$ tool-3") < result.stderr.indexOf("6 omitted"));
-    assert.match(result.stderr, /^✓ answered$/mu, "the final conclusion remains on stderr");
+    assert.match(result.stderr, /^✓ answered — \d+s$/mu, "the final conclusion remains on stderr");
   } finally {
     await removeTempDirectory(root);
   }

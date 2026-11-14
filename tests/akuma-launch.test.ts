@@ -7,7 +7,7 @@ import { Akuma } from "../src/akuma/index.js";
 import { readHeart } from "../src/akuma/heart/index.js";
 import { runProcess } from "../src/runtime/proc/run.js";
 import { appendNodeOptionsImport, temporaryDirectory } from "./support/process.js";
-import { bornWorld } from "./support/akuma-tell.js";
+import { bornWorld, settledInput } from "./support/akuma-tell.js";
 import { pathToFileURL } from "node:url";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
@@ -83,7 +83,7 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus str
       signal: context.signal,
     });
     assert.equal(result.input?.kind, "answered");
-    assert.deepEqual(result.input, { kind: "answered", answer: "parent answer" });
+    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: "parent answer" });
     await Promise.all(bodies);
     assert.deepEqual(submissions, ["parent", "child"], "births submit no provider prompt");
     assert.equal(launches.length, 4);

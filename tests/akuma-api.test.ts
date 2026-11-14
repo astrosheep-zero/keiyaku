@@ -139,12 +139,12 @@ test("standalone Akuma operations never read optional Alias or Debt authority", 
     assert.equal(Array.isArray((await selected.history()).rows), true);
     assert.equal((await selected.idle({ timeoutMs: 0 })).status.id, value.allocated.id);
     const asked = await selected.tell("standalone", { wait: true, timeoutMs: 5_000 });
-    assert.deepEqual(asked.input, { kind: "answered", answer: "standalone answer" });
+    assert.deepEqual(settledInput(asked.input), { kind: "answered", answer: "standalone answer" });
     assert.ok(["killed", "already-stopped", "already-killed"].includes(await selected.kill()));
   });
 });
 
-import { answering, bornWorld, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
+import { answering, bornWorld, fixtureLauncher, settleFixtureBodies, settledInput } from "./support/akuma-tell.js";
 import { akumaWithLauncher } from "../src/akuma/akuma-instance.js";
 import type { BodyLauncher } from "../src/akuma/body-launch.js";
 
@@ -407,7 +407,7 @@ test("standalone tell admits and optionally observes its text answer", async () 
     await settle();
     const second = await born("a1000021", answering("second answer"));
     const asked = await second.akuma.tell("await answer", { wait: true });
-    assert.deepEqual(asked.input, { kind: "answered", answer: "second answer" });
+    assert.deepEqual(settledInput(asked.input), { kind: "answered", answer: "second answer" });
   });
 });
 

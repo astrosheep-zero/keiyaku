@@ -772,11 +772,17 @@ export function callObservationStream(
           : [`input ${result.tellId}`]),
         ...tellControlLines(result.wake === undefined ? {} : { wake: result.wake }, context),
       ];
-      if (result.input !== undefined)
+      if (result.input !== undefined) {
+        const completedAt = observationCompletedAt(result.input);
         return [
-          stream.conclude({ kind: "observed", observation: result.input }),
+          stream.conclude({
+            kind: "observed",
+            observation: result.input,
+            ...(completedAt === undefined ? {} : { completedAt }),
+          }),
           ...subordinateLines([...failures, ...controls]),
         ].join("\n");
+      }
       if (result.kind !== "failed") return "";
       return stream.conclude({
         kind: "failed",
@@ -907,6 +913,13 @@ export function inputObservation(result: AkumaAskResult | AkumaTellResult): Akum
   if (result.kind === "failed" && "failures" in result)
     return result.input ?? { kind: "failed", diagnostic: result.failures[0].diagnostic };
   return result;
+}
+
+/** The settlement instant a settled observation carries; an open observation has none. */
+export function observationCompletedAt(observation: AkumaAskObservation): string | undefined {
+  return observation.kind === "answered" || observation.kind === "failed" || observation.kind === "invalid-output"
+    ? observation.completedAt
+    : undefined;
 }
 
 export function askRawAnswer(result: AkumaAskResult | AkumaTellResult): string | undefined {

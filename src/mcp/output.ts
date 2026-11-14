@@ -11,6 +11,14 @@ const contractRow = contracts.shape.rows.unwrap().unwrap().element.unwrap();
 const akumaRow = akumas.shape.rows.unwrap().unwrap().element.unwrap();
 const associated = akuma.shape.contract.unwrap().options[0];
 const work = akuma.shape.work.unwrap().omit({ turn: true, activeTools: true, latestActivity: true });
+const spawn = verbs.spawn.normal.unwrap();
+const spawnText = spawn.shape.input.unwrap();
+/** Routing keeps the settled text answer but not the presentation-only settlement instant. */
+const textObservation = z.union([
+  spawnText.options[0].unwrap().omit({ completedAt: true }).readonly(),
+  spawnText.options[1],
+  spawnText.options[2],
+]);
 const gateProblem = z.strictObject({
   gate: z.string(),
   requirement: z.string(),
@@ -65,10 +73,15 @@ export const mcpOutputSchemas = {
       placement: placement.exactOptional(),
       continuation: continuation.exactOptional(),
     }),
-  spawn: verbs.spawn.normal.unwrap().omit({ dispatchWarning: true, alias: true, wake: true }),
+  spawn: spawn
+    .omit({ dispatchWarning: true, alias: true, wake: true })
+    .extend({ input: textObservation.exactOptional() }),
   fork: verbs.fork.normal.unwrap().omit({ dispatchWarning: true }),
   ask: z.union([
-    verbs.ask.normal.options[0].unwrap().omit({ interrupt: true, wake: true }).extend({ answer: z.unknown() }),
+    verbs.ask.normal.options[0]
+      .unwrap()
+      .omit({ interrupt: true, wake: true, completedAt: true })
+      .extend({ answer: z.unknown() }),
     verbs.ask.normal.options[1].unwrap().omit({ interrupt: true, wake: true }),
     verbs.ask.normal.options[2].unwrap().omit({ interrupt: true, wake: true }),
   ]),
@@ -195,8 +208,11 @@ const projections = {
     };
   },
   spawn(value: Normal<"spawn">) {
-    const { dispatchWarning: _dispatch, alias: _alias, wake: _wake, ...routing } = value;
-    return routing;
+    const { dispatchWarning: _dispatch, alias: _alias, wake: _wake, input, ...routing } = value;
+    if (input === undefined) return routing;
+    if (input.kind !== "answered") return { ...routing, input };
+    const { completedAt: _completedAt, ...settled } = input;
+    return { ...routing, input: settled };
   },
   fork(value: Normal<"fork">) {
     const { dispatchWarning: _dispatch, ...routing } = value;
@@ -204,7 +220,9 @@ const projections = {
   },
   ask(value: Normal<"ask">) {
     const { interrupt: _interrupt, wake: _wake, ...routing } = value;
-    return routing;
+    if (routing.kind !== "answered") return routing;
+    const { completedAt: _completedAt, ...settled } = routing;
+    return settled;
   },
   wait: (value: Normal<"wait">) => value,
   status: projectStatus,

@@ -94,13 +94,16 @@ function askObservation(
 ): AkumaAskObservation & { answer?: string } {
   if (observed.outcome === null) return observed.reason === "deadline" ? { kind: "deadline" } : { kind: "unanswered" };
   if (observed.outcome.kind === "canceled") return { kind: "unanswered" };
+  const completedAt = observed.completedAt === null ? {} : { completedAt: observed.completedAt };
   if (observed.outcome.kind === "answered")
-    return { kind: "answered", answer: observed.outcome.answerJson ?? observed.outcome.answer };
-  if (observed.outcome.kind === "failed") return { kind: "failed", diagnostic: observed.outcome.diagnostic };
+    return { kind: "answered", answer: observed.outcome.answerJson ?? observed.outcome.answer, ...completedAt };
+  if (observed.outcome.kind === "failed")
+    return { kind: "failed", diagnostic: observed.outcome.diagnostic, ...completedAt };
   return {
     kind: "invalid-output",
     diagnostic: observed.outcome.diagnostic,
     answer: observed.outcome.answer,
+    ...completedAt,
   };
 }
 
