@@ -1,4 +1,6 @@
-import { realpath } from "node:fs/promises";
+import { realpath } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { projectAkumaBirth } from "./caller.js";
 import {
   readStatusFacts,
@@ -18,6 +20,7 @@ import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
 import {
   DEFAULT_TAIL,
   projectTurns,
+  reportedChangePaths,
   selectHistory,
   selectSnapshot,
   type ActivityHistory,
@@ -30,6 +33,9 @@ import { abortableDelay } from "./abort.js";
 import type { WorldRoot } from "../world.js";
 import type { AkumaRosterRow, AkumaStatus } from "./akuma.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
+
+/** Native resolution answers on-disk case as well as symlinks; the portable form keeps the caller's spelling. */
+const realpathNative = promisify(realpath.native);
 
 export async function rosterListRow(paths: AkumaPaths, expected: AkumaId): Promise<AkumaRosterRow> {
   const snapshot = await readHeart(paths);
@@ -136,30 +142,95 @@ type StatusObservationInput = Readonly<{
   admittedTellId?: string;
 }>;
 
-function snapshotSelection(input: StatusObservationInput, executionDir?: string) {
+function snapshotSelection(
+  input: StatusObservationInput,
+  executionDir?: string,
+  canonicalize?: (absolutePath: string) => string,
+) {
   if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
     throw new TypeError("ordinary budget must be a nonnegative safe integer");
   return {
     aperture: input.aperture,
     budget: { tail: Math.min(DEFAULT_TAIL, input.ordinaryBudget ?? DEFAULT_TAIL) },
     ...(executionDir === undefined ? {} : { executionDir }),
+    ...(canonicalize === undefined ? {} : { canonicalize }),
     ...(input.admittedTellId === undefined ? {} : { admittedTellId: input.admittedTellId }),
   };
+}
+
+type LiveSelectionMemo = Readonly<{
+  facts: Awaited<ReturnType<typeof readStatusFacts>>;
+  ledger: TurnLedger;
+  options: ReturnType<typeof snapshotSelection>;
+  selected: ReturnType<typeof selectSnapshot>;
+  anchorsChanged: number;
+}>;
+
+/** Canonical resolutions of reported-change anchors, so projection itself stays synchronous. */
+function createCanonicalAnchors() {
+  const resolved = new Map<string, string>();
+  let changed = 0;
+  return {
+    changed: () => changed,
+    clear: (): void => {
+      resolved.clear();
+      changed = 0;
+    },
+    /** Answer from what is already resolved; an unresolved directory stays lexical. */
+    canonicalize(absolutePath: string): string {
+      const hit = resolved.get(absolutePath);
+      if (hit !== undefined) return hit;
+      const dir = resolved.get(dirname(absolutePath));
+      return dir === undefined ? absolutePath : join(dir, basename(absolutePath));
+    },
+    async resolve(absolutePaths: readonly string[]): Promise<void> {
+      for (const absolutePath of new Set(absolutePaths)) {
+        if (resolved.has(absolutePath)) continue;
+        try {
+          resolved.set(absolutePath, await realpathNative(absolutePath));
+          changed += 1;
+          continue;
+        } catch {
+          // A deleted or not-yet-existing leaf still belongs to its canonical directory.
+        }
+        const dir = dirname(absolutePath);
+        if (resolved.has(dir)) continue;
+        try {
+          resolved.set(dir, await realpathNative(dir));
+          changed += 1;
+        } catch {
+          // An unresolvable directory stays lexical without caching the transient error.
+        }
+      }
+    },
+  };
+}
+
+function reusableSelection(
+  memo: LiveSelectionMemo | undefined,
+  ledger: TurnLedger,
+  options: ReturnType<typeof snapshotSelection>,
+  anchorsChanged: number,
+): ReturnType<typeof selectSnapshot> | undefined {
+  if (memo === undefined || memo.ledger !== ledger || memo.anchorsChanged !== anchorsChanged) return undefined;
+  if (
+    memo.options.aperture !== options.aperture ||
+    memo.options.admittedTellId !== options.admittedTellId ||
+    memo.options.budget.tail !== options.budget.tail ||
+    memo.options.executionDir !== options.executionDir
+  )
+    return undefined;
+  return memo.selected;
 }
 
 /** Private to a live wait: retain only this member's current frontier and last selection. */
 export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
   const reader = createStatusFactReader(paths);
-  let memo:
-    | Readonly<{
-        facts: Awaited<ReturnType<typeof readStatusFacts>>;
-        ledger: TurnLedger;
-        options: ReturnType<typeof snapshotSelection>;
-        selected: ReturnType<typeof selectSnapshot>;
-      }>
-    | undefined;
+  const anchors = createCanonicalAnchors();
+  let memo: LiveSelectionMemo | undefined;
   const clear = (): void => {
     reader.clear();
+    anchors.clear();
     memo = undefined;
   };
   return {
@@ -186,16 +257,17 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
           (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
         const facts = await reader.read(input, signal);
         const ledger = memo?.facts === facts ? memo.ledger : projectTurns(facts);
-        const options = snapshotSelection(input, await realpath(soul.cwd).catch(() => undefined));
-        const selected =
-          memo?.ledger === ledger &&
-          memo.options.aperture === options.aperture &&
-          memo.options.admittedTellId === options.admittedTellId &&
-          memo.options.budget.tail === options.budget.tail &&
-          memo.options.executionDir === options.executionDir
-            ? memo.selected
-            : selectSnapshot(ledger, options);
-        memo = { facts, ledger, options, selected };
+        const executionDir = await realpathNative(soul.cwd).catch(() => undefined);
+        if (executionDir !== undefined)
+          await anchors.resolve(reportedChangePaths(ledger).map((reported) => resolve(executionDir, reported)));
+        const options = snapshotSelection(
+          input,
+          executionDir,
+          executionDir === undefined ? undefined : anchors.canonicalize,
+        );
+        const anchorsChanged = anchors.changed();
+        const selected = reusableSelection(memo, ledger, options, anchorsChanged) ?? selectSnapshot(ledger, options);
+        memo = { facts, ledger, options, selected, anchorsChanged };
         const lastActivityAt = ledger.rows.findLast((row) => row.kind !== "turn")?.at;
         return {
           status: {

@@ -75,6 +75,7 @@ export const capabilityPolicy = {
     {
       module: "node:fs",
       owners: [
+        { source: "akuma/akuma-observe.ts", symbols: ["realpath"] },
         { source: "cli/draft.ts" },
         { source: "coordination/**" },
         { source: "git/**" },

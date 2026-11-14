@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
-import { join } from "node:path";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { rm, symlink, writeFile } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { Akumas } from "../src/library/akumas.js";
 import { akumaObservationSchema } from "../src/akuma/selection-observation.js";
@@ -88,6 +90,55 @@ test("chatty status keeps latest intent, observed activity age, current tools an
   } finally {
     leash.release();
     value.close();
+  }
+});
+
+test("reported changes partition by canonical containment through symlinks and case aliases", async () => {
+  const value = await fixture();
+  const { paths, id } = value.allocated;
+  const outsideRoot = mkdtempSync(join(tmpdir(), "keiyaku-outside-"));
+  const aliasRoot = mkdtempSync(join(tmpdir(), "keiyaku-alias-"));
+  const alias = join(aliasRoot, "worktree");
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  try {
+    await leash.birth(paths, value.soul);
+    const api = Akumas.of(await World.at(value.root));
+    const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+    const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
+    const at = "2026-08-08T00:00:01.000Z";
+    const append = (event: Parameters<typeof appendActivity>[1]["event"]) =>
+      appendActivity(paths, { turnSequence: turn.sequence, at, event });
+
+    await symlink(value.root, alias, "dir");
+    await writeFile(join(value.root, "kept.ts"), "kept\n");
+    const deleted = join(value.root, "deleted.ts");
+    await writeFile(deleted, "gone\n");
+    await rm(deleted);
+    const escape = join(value.root, "escape");
+    await symlink(outsideRoot, escape, "dir");
+    const swapCase = (text: string): string =>
+      [...text].map((letter) => (letter === letter.toLowerCase() ? letter.toUpperCase() : letter.toLowerCase())).join("");
+    const swappedRoot = join(dirname(value.root), swapCase(basename(value.root)));
+    const caseFolds = (() => {
+      try { return realpathSync.native(swappedRoot) === value.root; } catch { return false; }
+    })();
+    const caseAlias = join(swappedRoot, "Case-Alias.ts");
+    if (caseFolds) await writeFile(join(value.root, "Case-Alias.ts"), "case\n");
+
+    const inside = [join(alias, "kept.ts"), join(alias, "deleted.ts"), ...(caseFolds ? [caseAlias] : [])];
+    const outside = [join(outsideRoot, "scratch.ts"), join(escape, "leak.ts")];
+    await append({ type: "tool", phase: "completed", id: "changes", name: "Edit",
+      call: { kind: "fileChange", changes: [...inside, ...outside].map(path => ({ op: "update", path })) },
+      result: { status: "ok" } });
+
+    const json = akumaObservationSchema.parse(JSON.parse(JSON.stringify(await api.status({ akuma: id }))));
+    assert.deepEqual(json.changes?.map(change => change.path), inside);
+    assert.equal(json.outsideChanges, outside.length);
+  } finally {
+    leash.release();
+    value.close();
+    rmSync(outsideRoot, { recursive: true, force: true });
+    rmSync(aliasRoot, { recursive: true, force: true });
   }
 });
 

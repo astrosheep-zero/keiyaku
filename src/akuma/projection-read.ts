@@ -120,11 +120,13 @@ function aggregateReportedChanges(changes: readonly ReportedFileChange[]): reado
 function summarizeReportedChanges(
   rows: readonly (OpenTurnRow | UnsettledToolRow)[],
   executionDir?: string,
+  canonicalize?: (absolutePath: string) => string,
 ): ReportedChangeSummary {
   const files = aggregateReportedChanges(flattenReportedChanges(rows));
   const inside = files.filter((change) => {
     if (executionDir === undefined) return true;
-    const path = relative(executionDir, resolve(executionDir, change.path));
+    const absolute = resolve(executionDir, change.path);
+    const path = relative(executionDir, canonicalize === undefined ? absolute : canonicalize(absolute));
     return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
   });
   const outside = files.length - inside.length;
@@ -134,10 +136,21 @@ function summarizeReportedChanges(
     ...(outside === 0 ? {} : { reportedChangesOutside: outside }),
   };
 }
-function frontierReportedChanges(ledger: TurnLedger, executionDir?: string): ReportedChangeSummary {
-  if (ledger.openTurn !== undefined) return summarizeReportedChanges(ledger.openTurn.rows, executionDir);
+function frontierRows(ledger: TurnLedger): readonly (OpenTurnRow | UnsettledToolRow)[] {
+  if (ledger.openTurn !== undefined) return ledger.openTurn.rows;
   const closed = ledger.turns.findLast((turn): turn is ClosedTurn => turn.kind === "closed");
-  return closed === undefined ? EMPTY_REPORTED : summarizeReportedChanges(closed.rows, executionDir);
+  return closed?.rows ?? [];
+}
+function frontierReportedChanges(
+  ledger: TurnLedger,
+  executionDir?: string,
+  canonicalize?: (absolutePath: string) => string,
+): ReportedChangeSummary {
+  return summarizeReportedChanges(frontierRows(ledger), executionDir, canonicalize);
+}
+/** Raw reported spellings on the current frontier, before containment partitioning. */
+export function reportedChangePaths(ledger: TurnLedger): readonly string[] {
+  return flattenReportedChanges(frontierRows(ledger)).map((change) => change.path);
 }
 function isPendingTell(row: ActivityRow): row is TellRow {
   return row.kind === "tell" && row.state === "pending";
@@ -181,6 +194,7 @@ export function selectSnapshot(
     budget?: Readonly<{ tail: number }>;
     executionDir?: string;
     admittedTellId?: string;
+    canonicalize?: (absolutePath: string) => string;
   }>,
 ): Readonly<{ snapshot: ActivitySnapshot; ordinaryCount: number }> {
   const tailCount = Math.min(DEFAULT_TAIL, Math.max(0, input.budget?.tail ?? DEFAULT_TAIL));
@@ -197,7 +211,7 @@ export function selectSnapshot(
         ? []
         : [admittedTell]
       : pending;
-  const reported = frontierReportedChanges(ledger, input.executionDir);
+  const reported = frontierReportedChanges(ledger, input.executionDir, input.canonicalize);
   if (ledger.openTurn !== undefined) {
     const window = currentTurnWindow(ledger);
     const opening = openingInput(ledger);

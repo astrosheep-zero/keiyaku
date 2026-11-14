@@ -658,4 +658,10 @@ export function projectTurns(
   return finishLedger(state, retained);
 }
 
-export { DEFAULT_TAIL, selectHistory, selectSnapshot, withoutReportedChanges } from "./projection-read.js";
+export {
+  DEFAULT_TAIL,
+  reportedChangePaths,
+  selectHistory,
+  selectSnapshot,
+  withoutReportedChanges,
+} from "./projection-read.js";
