@@ -844,13 +844,17 @@ function snapshotCore(
   options: SnapshotCoreOptions,
 ): Readonly<{ activity: readonly string[]; head: readonly string[]; facts: readonly string[] }> {
   const activity = currentWorkLines(view.work, context);
+  // A source later than the observation reads as the whole word `now`, so the surface only appends
+  // a unit suffix when the age actually names a unit.
+  const activityAge =
+    view.lastActivityAt === undefined
+      ? undefined
+      : ageText(view.lastActivityAt, new Date(context.now ?? Date.now()).toISOString());
   const contextFacts = [
     safeText(view.cwd),
-    ...(view.lastActivityAt === undefined
+    ...(activityAge === undefined
       ? []
-      : [
-          `${view.life} · last activity ${ageText(view.lastActivityAt, new Date(context.now ?? Date.now()).toISOString())} ago`,
-        ]),
+      : [`${view.life} · last activity ${activityAge === "now" ? activityAge : `${activityAge} ago`}`]),
   ];
   const facts = [
     ...contractFacts(view.contract ?? { kind: "none" }, context.columns - SUBORDINATE_INDENT.length),

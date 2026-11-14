@@ -263,6 +263,21 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
   assert.match(text, /⧗ pending tell$/u);
 });
 
+test("activity age writes a suffix only when the age names a unit", () => {
+  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
+    birth: DIRECT_BIRTH,
+    id: "aku/worker/abcd1234",
+    life: "running",
+    timeline: openAkumaSnapshot([]),
+  });
+  const observedAt = Date.parse(AKUMA_ACTIVITY_AT);
+  const text = (lastActivityAt: string, now: number) =>
+    snapshotText({ ...observation(status), lastActivityAt }, { ...DEFAULT_CONTEXT, now });
+  assert.match(text(new Date(observedAt + 2_000).toISOString(), observedAt), /^ {2}running · last activity now$/mu);
+  assert.match(text(AKUMA_ACTIVITY_AT, observedAt + 19_000), /^ {2}running · last activity 19s ago$/mu);
+  assert.doesNotMatch(text(AKUMA_ACTIVITY_AT, observedAt + 19_000), /now/u);
+});
+
 test("Akuma observation failures name the target and reason without carrier words", () => {
   const first = parseAkumaId("aku/worker/abcd0102").id;
   const second = parseAkumaId("aku/intern/33dd4670").id;
