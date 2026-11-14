@@ -414,7 +414,7 @@ test("standalone tell admits and optionally observes its text answer", async () 
   });
 });
 
-test("schema ask decodes JSON and typed failures stay distinct", async () => {
+test("schema ask parses JSON and typed failures stay distinct", async () => {
   await withWaitedTellFixture(async ({ born, settle }) => {
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, additionalProperties: false };
     const decoded = await born("a1000002", answering('{"ok":true}'));

@@ -13,7 +13,7 @@ import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering, settledInput } from "./support/akuma-tell.js";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
-import { HeldAkumaLeash, readSeal, readSoul, readTell } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, finishBodyIfIdle, readSeal, readSoul, readTell } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, pathsForAkumaId, type AkumaId } from "../src/akuma/identity.js";
 import type {
   CallInitialTellAdmission,
@@ -43,6 +43,8 @@ async function birth(launch: ChildBodyLaunch, createdAt = AT): Promise<void> {
   if (leash === null) throw new Error("expected a free child leash");
   try {
     await leash.birth(launch.paths, { ...launch.seed, createdAt });
+    const body = await leash.recordBody(launch.paths, { leashTakenAt: createdAt });
+    await finishBodyIfIdle(launch.paths, { sequence: body.sequence, at: createdAt });
   } finally {
     leash.release();
   }

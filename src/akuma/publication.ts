@@ -219,10 +219,10 @@ async function awaitAsleepBirth(paths: AkumaPaths, signal?: AbortSignal): Promis
     deadline: performance.now() + BIRTH_TIMEOUT_MS,
     ...(signal === undefined ? {} : { signal }),
   });
-  if (leash === null) throw new Error("Forked Akuma did not finish its birth body");
+  if (leash === null) throw new Error("Akuma did not finish its birth body");
   try {
     if ((await readHeart(paths)).latestBody?.end !== "exited") {
-      throw new Error("Forked Akuma birth body did not exit cleanly");
+      throw new Error("Akuma birth body did not exit cleanly");
     }
   } finally {
     leash.release();
@@ -399,6 +399,7 @@ export async function publishPreparedCall(prepared: PreparedCall): Promise<Prepa
   try {
     child = await launchAkuma({
       allocated,
+      awaitAsleep: true,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       launch: async (ready) => {
         return await input.spawn({

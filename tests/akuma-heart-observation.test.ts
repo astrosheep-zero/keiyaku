@@ -5,7 +5,7 @@ import test from "node:test";
 import { bornDirectAkuma, heartFixture } from "./support/akuma-fixtures.js";
 import { temporaryDirectory } from "./support/process.js";
 import { BodySupervisor } from "../src/akuma/body-supervisor.js";
-import { observeAdmittedAskAkuma } from "../src/akuma/akuma-selection-execution.js";
+import { observeAdmittedTellAkuma } from "../src/akuma/akuma-selection-execution.js";
 import { recordTell, beginTurn, bindTellsToTurn, endTurn, breakBody, readTell } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { World } from "../src/world.js";
@@ -129,7 +129,7 @@ test("ask preserves the launch gap, then returns an explicit failed wake without
   let release!: (value: typeof receipt) => void;
   const wake = new Promise<typeof receipt>((resolve) => { release = resolve; });
   let rounds = 0;
-  const result = await observeAdmittedAskAkuma({
+  const result = await observeAdmittedTellAkuma({
     path: root, id: parent.id, tellId: "asked", wake,
     signal: AbortSignal.timeout(2000),
     onObserve: { observe: async () => {

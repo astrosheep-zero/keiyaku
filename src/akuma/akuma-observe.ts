@@ -268,7 +268,7 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
         const anchorsChanged = anchors.changed();
         const selected = reusableSelection(memo, ledger, options, anchorsChanged) ?? selectSnapshot(ledger, options);
         memo = { facts, ledger, options, selected, anchorsChanged };
-        const lastActivityAt = ledger.rows.findLast((row) => row.kind !== "turn")?.at;
+        const lastActivityAt = snapshot.lastActivityAt;
         return {
           status: {
             id: soul.id,
@@ -282,7 +282,7 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
             ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
             ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
             timeline: selected.snapshot,
-            ...(lastActivityAt === undefined ? {} : { lastActivityAt }),
+            ...(lastActivityAt === null ? {} : { lastActivityAt }),
           },
           ordinarySelected: selected.ordinaryCount,
           rows: ledger.rows,

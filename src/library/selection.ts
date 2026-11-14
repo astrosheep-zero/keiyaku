@@ -386,7 +386,7 @@ export async function askAkuma(
     { akumaIds: [addressed.id] },
     callerSignal,
     async () => {
-      const result = await executeAskAkuma({
+      return await executeAskAkuma({
         spawn,
         path: addressed.path,
         id: addressed.id,
@@ -399,7 +399,6 @@ export async function askAkuma(
         ...(input.observe === undefined ? {} : { onObserve: input.observe }),
         ...(callerSignal === undefined ? {} : { signal: callerSignal }),
       });
-      return result.kind === "answered" ? { ...result, answer: JSON.parse(result.answer) } : result;
     },
   );
 }

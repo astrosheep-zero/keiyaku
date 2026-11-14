@@ -49,6 +49,7 @@ test("chatty status keeps latest intent, observed activity age, current tools an
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
     const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
     assert.equal((await api.status({ akuma: id })).lastActivityAt, undefined, "a Turn opening alone is not activity");
+    assert.equal((await api.list()).rows?.find(row => row.id === id)?.lastActivityAt, undefined);
     const at = "2026-08-08T00:00:01.000Z";
     const append = (event: Parameters<typeof appendActivity>[1]["event"]) =>
       appendActivity(paths, { turnSequence: turn.sequence, at, event });
@@ -80,12 +81,17 @@ test("chatty status keeps latest intent, observed activity age, current tools an
     for (const content of ["watch current work", "3 outside worktree"])
       assert.ok(text.includes(content), content);
     for (const path of outside) assert.ok(!text.includes(path));
-    await endTurn(paths, { turnSequence: turn.sequence, completedAt: at,
+    const settledAt = "2026-08-08T00:00:02.000Z";
+    await endTurn(paths, { turnSequence: turn.sequence, completedAt: settledAt,
       outcome: { kind: "answered", answer: "done", session: { sessionId: "status-trunk" } } });
-    await finishBodyIfIdle(paths, { sequence: body.sequence, at });
+    await finishBodyIfIdle(paths, { sequence: body.sequence, at: settledAt });
     leash.release();
     const asleep = await api.status({ akuma: id });
     assert.equal(asleep.life, "asleep");
+    assert.equal(asleep.lastActivityAt, at, "Turn ending does not advance activity");
+    const listed = (await api.list()).rows?.find(row => row.id === id);
+    assert.equal(listed?.lastActivityAt, asleep.lastActivityAt);
+    assert.equal(listed?.lifeAt, settledAt, "Body settlement advances life time independently");
     assert.match(snapshotText(asleep, DEFAULT_CONTEXT), /asleep · last activity \S+ ago/u);
   } finally {
     leash.release();

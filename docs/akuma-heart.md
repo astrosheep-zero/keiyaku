@@ -89,14 +89,21 @@ the omitted narration's durable identity, so the correlation is projected
 evidence rather than a consumer's re-comparison of text, and truncated or
 differing narration is never named as that duplicate.
 
+The latest retained activity time is the time of the last retained input,
+provider narration, or explicit progress report in durable timeline order.
+Turn transitions are lifecycle structure, not activity, whether opening or
+ending a Turn. Status and roster consume this one Heart-owned definition;
+absence of retained activity leaves its time unknown.
+
 Recent roster observations derive their activity order and bounded extent solely
 from that Heart projection. Custody metadata may conservatively bound which
 unread Hearts need opening, but it is never returned, treated as activity, used
 for lifecycle judgment, or allowed to choose membership, order, or extent.
-Default inactive retirement uses the same Heart timestamps and life projection
-as its semantic age; filesystem metadata only bounds which Hearts need opening
-and never decides staleness. Heart gains no durable activity index, cache,
-daemon, or migration for that read or for retention. When those private bounds
+Default inactive retirement measures semantic age from the later of that
+activity time and durable life time, including Body settlement; it does not
+count arbitrary Heart writes as activity. Filesystem metadata only bounds which
+Hearts need opening and never decides staleness. Heart gains no durable activity
+index, cache, daemon, or migration for that read or for retention. When those private bounds
 cannot prove the semantic observation, the remaining candidates are observed
 through fixed bounded concurrency before the roster observation is returned.
 

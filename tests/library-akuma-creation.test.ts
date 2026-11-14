@@ -163,8 +163,8 @@ test("prompt-free bare Akumas.spawn reports born without admitting a Tell", asyn
       history.rows.some((row) => row.kind === "tell"),
       false,
     );
-    // Soul may precede the first Body. The PID-receipt cleanup below awaits
-    // this prompt-free publication's natural exit rather than racing a kill.
+    // Birth is settled, but PID-receipt cleanup still awaits physical process
+    // departure before removing this publication's execution directory.
     operationFailed = false;
   } finally {
     try {
@@ -202,7 +202,7 @@ test("prompt-free Akumas.spawn refuses wait options", async () => {
   );
 });
 
-test("local spawn waits for its empty Body and retains native config through wake and fork", async (t) => {
+test("prompt-free spawn settles before immediate Ask and retains native config through wake and fork", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
@@ -213,14 +213,14 @@ test("local spawn waits for its empty Body and retains native config through wak
   let akumaId: string | undefined;
   let operationFailed = true;
   try {
-    const pending = Akumas.of(world).spawn({
+    const api = Akumas.of(world);
+    const pending = api.spawn({
       akumaName: "worker",
-      body: "schema-call",
       cwd: world,
       ...configured.placement,
-      mode: "wait",
     });
-    void pending.catch(() => undefined);
+    let spawnSettled = false;
+    void pending.then(() => { spawnSettled = true; }, () => { spawnSettled = true; });
     let result: Awaited<typeof pending>;
     try {
       const readyPath = join(emptyPublicationBarrier, "ready");
@@ -231,6 +231,7 @@ test("local spawn waits for its empty Body and retains native config through wak
       const whileHeld = await readHeart(pathsForAkumaId(world, parseAkumaId(held.id).id));
       assert.equal(whileHeld.latestBody?.end, undefined);
       assert.deepEqual(whileHeld.pending, []);
+      assert.equal(spawnSettled, false, "spawn cannot return while its empty birth Body is running");
 
       writeFileSync(join(emptyPublicationBarrier, "release"), "release\n");
       result = await pending;
@@ -240,7 +241,16 @@ test("local spawn waits for its empty Body and retains native config through wak
       await pending.catch(() => undefined);
     }
     akumaId = result.akumaId;
-    assert.deepEqual(settledInput(result.input), { kind: "answered", answer: '{"ok":true}' });
+    const asked = await api.ask({
+      akuma: result.akumaId,
+      body: "schema-call",
+      schema: { type: "object" },
+      signal: t.signal,
+    });
+    assert.equal(result.kind, "spawned");
+    assert.equal(asked.kind, "answered");
+    if (asked.kind !== "answered") assert.fail(JSON.stringify(asked));
+    assert.deepEqual(asked.answer, { ok: true });
     const history = await PublicAkuma.select(world, result.akumaId).history();
     const tells = history.rows.filter((row) => row.kind === "tell");
     assert.equal(tells.length, 1);
@@ -520,8 +530,8 @@ test("call without a host preserves log-only diagnostics", async (t) => {
     );
     assert.ok(readFileSync(log, "utf8").includes("plugin birth failed: plugin fail signal: birth-only failure"));
     assert.deepEqual(stderr, []);
-    // Prompt-free birth can precede its Body fact. The PID-receipt cleanup owns
-    // and awaits that process's natural empty publication exit, without a kill race.
+    // The PID-receipt cleanup awaits physical process departure after the
+    // empty publication's durable settlement, without a kill race.
     operationFailed = false;
   } finally {
     await cleanupSpawnCapableFixtureForTest(t, {
@@ -542,10 +552,16 @@ test("a Tell admitted while an empty Body is deciding to put down is still drive
   const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
   const restoreIdleBarrier = installAkumaBodyIdleFinishBarrier(barrier);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
-  let child: PublicAkuma | undefined;
+  let birth: Promise<PublicAkuma> | undefined;
   let operationFailed = true;
   try {
-    child = await PublicAkuma.birth("worker", { root: world, cwd: world, ...configured.placement });
+    birth = PublicAkuma.birth("worker", { root: world, cwd: world, ...configured.placement });
+    void birth.catch(() => undefined);
+    await waitForCondition("Body idle-finish barrier", () => existsSync(join(barrier, "idle-ready")), {
+      terminalState: settlementProbe(birth, () => "birth settled before its empty Body could finish"),
+    });
+    const child = (await Akumas.of(world).list()).rows?.[0];
+    assert.ok(child);
     const paths = pathsForAkumaId(world, child.id);
     const terminalState = async () => {
       const body = (await readHeart(paths)).latestBody;
@@ -555,9 +571,6 @@ test("a Tell admitted while an empty Body is deciding to put down is still drive
       if (body?.hung !== undefined) return `Body ${body.sequence}: ${body.hung.diagnostic}`;
       return body?.end === undefined ? null : `Body ${body.sequence}: ${body.end}`;
     };
-    await waitForCondition("Body idle-finish barrier", () => existsSync(join(barrier, "idle-ready")), {
-      terminalState,
-    });
     await waitForCondition("Body periodic observation barrier", () => existsSync(join(barrier, "observation-ready")), {
       terminalState,
     });
@@ -584,10 +597,12 @@ test("a Tell admitted while an empty Body is deciding to put down is still drive
     const turn = await readTurn(paths, turnSequence);
     assert.equal(turn?.end?.outcome.kind, "answered");
     if (turn?.end?.outcome.kind === "answered") assert.equal(turn.end.outcome.answer, '{"ok":true}');
+    await birth;
     operationFailed = false;
   } finally {
     writeFileSync(join(barrier, "release"), "release\n");
     writeFileSync(join(barrier, "observation-release"), "release\n");
+    await birth?.catch(() => undefined);
     try {
       await cleanupSpawnCapableFixtureForTest(t, {
         fixturePath: raw.path,

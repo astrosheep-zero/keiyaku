@@ -150,7 +150,7 @@ async function answered(root: string, akumaName: string, suffix: string) {
 }
 
 test(
-  "facade ask admits, decodes, and addresses an alias through the World-bound face",
+  "facade ask admits, parses JSON, and addresses an alias through the World-bound face",
   { timeout: 15_000 },
   async (t) => {
     const root = fixtureRoot(t, "keiyaku-facade-ask-");
@@ -205,7 +205,7 @@ test("facade ask refuses path selection and invalid timeout before addressing", 
 });
 
 test(
-  "ask holds its requester resource before admission through exact observation and decoding",
+  "ask holds its requester resource before admission through exact observation and JSON parsing",
   { timeout: 15_000 },
   async (t) => {
     const world = await World.at(fixtureRoot(t, "keiyaku-ask-scope-"));

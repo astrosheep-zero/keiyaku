@@ -102,8 +102,9 @@ an arbitrary foreign error property does not establish confirmed admission.
 A spawn composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a spawn without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a spawn awaits the text answer to that first Tell without withdrawing it at the deadline.
 Akuma execution owns that admission and wake. Library composes surrounding
 Dispatch and Alias facts. Structured input is a separate Ask after birth; its
-schema admission keeps the ordinary busy refusal while the empty birth Body is
-still settling or concurrent work is running.
+admission follows a successful prompt-free spawn only after its empty birth Body
+has settled cleanly asleep. An immediate Ask or Tell therefore does not contend
+with its own birth; concurrent work retains the ordinary busy refusal.
 
 After a successful spawn or fork has made its new Akuma durable, and outside that
 birth transaction, one best-effort inactive-retention sweep may follow. It can

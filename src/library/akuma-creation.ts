@@ -25,7 +25,7 @@ import { AkumaOwner } from "../akuma/akuma-owner.js";
 import type { BodyLauncher } from "../akuma/body-launch.js";
 import {
   liveStatusObservationSchema,
-  observeAdmittedAskAkuma,
+  observeAdmittedTellAkuma,
   type AskObserver,
 } from "../akuma/akuma-selection-execution.js";
 import type { AkumaStatus } from "../akuma/akuma.js";
@@ -433,7 +433,7 @@ async function settleCall(
         wake: _wake,
         interrupt: _interrupt,
         ...observation
-      } = await observeAdmittedAskAkuma({
+      } = await observeAdmittedTellAkuma({
         ...parsed,
         id: admitted.id,
         tellId: receipt.admission.tellId,

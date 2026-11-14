@@ -53,7 +53,8 @@ tool, or the latest settled narration or input when no active tool supplies it.
 The native owner derives it from the same frontier using neutral activity
 formatting and exposes clipping; omission establishes neither inactivity nor
 idle. Its latest retained activity time is observation evidence for every life
-state, absent when no row remains and never inferred from a Turn opening.
+state, with the same Heart-owned meaning as the roster's activity time
+([akuma-heart.md](akuma-heart.md)).
 Exact history and live observation retain their full typed interpretation;
 status does not remove their capability. Reported changes
 are a read-time summary of successful file-change activity on that same frontier,

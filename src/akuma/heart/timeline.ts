@@ -30,20 +30,17 @@ export function lastActivityAt(database: DatabaseSync): string | null {
   const row = database
     .prepare(
       `SELECT CASE timeline.kind
-      WHEN 'turn-start' THEN started_turn.started_at
       WHEN 'call' THEN calls.at
       WHEN 'activity' THEN activity.at
       WHEN 'report' THEN reports.at
       WHEN 'tell' THEN tells.recorded_at
-      WHEN 'turn-end' THEN ended_turn.completed_at
     END AS at
     FROM timeline
-    LEFT JOIN turns AS started_turn ON timeline.kind = 'turn-start' AND started_turn.sequence = timeline.sequence
     LEFT JOIN calls ON timeline.kind = 'call' AND calls.sequence = timeline.sequence
     LEFT JOIN activity ON timeline.kind = 'activity' AND activity.sequence = timeline.sequence
     LEFT JOIN reports ON timeline.kind = 'report' AND reports.sequence = timeline.sequence
     LEFT JOIN tells ON timeline.kind = 'tell' AND tells.sequence = timeline.sequence
-    LEFT JOIN turns AS ended_turn ON timeline.kind = 'turn-end' AND ended_turn.end_sequence = timeline.sequence
+    WHERE timeline.kind IN ('call', 'activity', 'report', 'tell')
     ORDER BY timeline.sequence DESC LIMIT 1`,
     )
     .get() as { at: string | null } | undefined;

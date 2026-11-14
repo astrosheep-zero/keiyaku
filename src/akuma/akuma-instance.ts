@@ -141,7 +141,7 @@ class AkumaHandle {
       { akumaIds: [this.id] },
       signal,
       async () => {
-        const result = await executeAskAkuma({
+        return await executeAskAkuma({
           spawn: this.spawn,
           path: this.root,
           id: this.id,
@@ -153,7 +153,6 @@ class AkumaHandle {
           ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
           ...(signal === undefined ? {} : { signal }),
         });
-        return result.kind === "answered" ? { ...result, answer: JSON.parse(result.answer) } : result;
       },
     );
   }

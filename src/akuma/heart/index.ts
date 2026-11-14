@@ -307,7 +307,7 @@ export function createStatusFactReader(paths: AkumaPaths) {
   };
 }
 
-type LifeSnapshot = Pick<HeartSnapshot, "soul" | "latestBody" | "latestSession" | "latestKill"> &
+type LifeSnapshot = Pick<HeartSnapshot, "soul" | "latestBody" | "latestSession" | "latestKill" | "lastActivityAt"> &
   Readonly<{ hasPendingTell: boolean }>;
 
 /** Lifecycle probes do not load narration, Tell bodies, or delivery histories. */
@@ -324,12 +324,20 @@ export async function readLifeSnapshot(
         latestSession: latestSessionFact(heart),
         latestKill: latestKillFact(heart),
         hasPendingTell: hasPendingTell(heart),
+        lastActivityAt: readLastActivityAt(heart),
       }),
       signal,
     );
   } catch (error) {
     if (isHeartAbsent(error))
-      return { soul: null, latestBody: null, latestSession: null, latestKill: null, hasPendingTell: false };
+      return {
+        soul: null,
+        latestBody: null,
+        latestSession: null,
+        latestKill: null,
+        hasPendingTell: false,
+        lastActivityAt: null,
+      };
     throw error;
   }
 }

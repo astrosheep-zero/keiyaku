@@ -9,7 +9,6 @@ export const BIRTH_TIMEOUT_MS = 30_000;
 export type CallInitialTell = Readonly<{
   tellId: string;
   body: string;
-  schemaJson?: string;
   initiator?: string;
 }>;
 
@@ -106,7 +105,6 @@ export async function admitCallInitialTell(
     id: input.initialTell.tellId,
     body: input.initialTell.body,
     recordedAt: input.now?.() ?? new Date().toISOString(),
-    ...(input.initialTell.schemaJson === undefined ? {} : { schemaJson: input.initialTell.schemaJson }),
     ...(input.initialTell.initiator === undefined ? {} : { initiator: input.initialTell.initiator }),
   });
   if (recorded.kind === "not-born") return recorded;

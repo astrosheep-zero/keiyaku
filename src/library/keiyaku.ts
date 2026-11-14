@@ -198,8 +198,7 @@ export class Keiyaku {
         return this.#fork(request.input);
       case "tell":
       case "ask":
-        return this.#tell({
-          ...request.input,
+        return this.#tell(request, {
           ...signal,
           ...(observe === undefined
             ? {}
@@ -519,18 +518,28 @@ export class Keiyaku {
     });
   }
 
-  async #tell({ prompt, ...input }: ExecutionInput<"tell" | "ask"> & Readonly<{ observe?: AskObserver }>) {
+  async #tell(
+    request: Extract<VerbRequest, { name: "tell" | "ask" }>,
+    controls: KeiyakuRunOptions & Readonly<{ observe?: AskObserver }>,
+  ) {
     const { at, akumas } = await this.#akumas();
     const initiator = deliveryOwner(this.#input.environment);
-    const native = {
-      ...input,
-      body: prompt,
+    const common = {
+      ...controls,
+      body: request.input.prompt,
       ...(at.repo === undefined ? {} : { repo: at.repo }),
       ...(initiator === undefined ? {} : { initiator }),
     };
-    if ("schema" in native) return akumas.ask(native);
-    const { wait, ...tell } = native;
-    return akumas.tell({ ...tell, ...(wait === undefined ? {} : { wait: true, timeoutMs: waitTimeout(wait) }) });
+    if (request.name === "ask") {
+      const { prompt: _prompt, ...input } = request.input;
+      return akumas.ask({ ...input, ...common });
+    }
+    const { prompt: _prompt, wait, ...input } = request.input;
+    return akumas.tell({
+      ...input,
+      ...common,
+      ...(wait === undefined ? {} : { wait: true, timeoutMs: waitTimeout(wait) }),
+    });
   }
 
   async #kill(input: ExecutionInput<"kill">) {
