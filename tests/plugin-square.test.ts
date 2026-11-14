@@ -169,7 +169,7 @@ test("direct cards preserve exact full content, frozen Owners and generic presen
     rows.map((row) => row.key),
     [1, 2, 3].map((n) => key("aku/forms/1234abcd", `turn/${n}`)),
   );
-  const bodies = [`✓ done\n${answer}`, "× failed\nfailure detail", "○ canceled"];
+  const presentations = [{ label: "done", body: answer }, { label: "failed", body: "failure detail" }, { label: "canceled", body: "" }];
   for (const [index, row] of rows.entries()) {
     assert.ok(isCardPresentation(row.details));
     const at = (row.details as { at?: number }).at;
@@ -180,7 +180,7 @@ test("direct cards preserve exact full content, frozen Owners and generic presen
       author: "aku/forms/1234abcd",
       ref: row.key.split("/").slice(-2).join("/"),
       at,
-      body: bodies[index],
+      ...presentations[index],
     });
   }
   assert.deepEqual(
@@ -203,19 +203,21 @@ test("alias-first card snapshots keep identity keys and do not follow later alia
   await bind("audit");
   await f.turn(id, 1, [f.alice, f.bob]);
   await f.plugin.signals!["akuma.body-ended"]!({ kind: "akuma.body-ended", akumaId: id, bodySequence: 1,
-    end: "broke-off", at: "2026-11-09T00:00:00Z", participants: [f.alice] });
+    end: "broke-off", diagnostic: "provider disappeared", at: "2026-11-09T00:00:00Z", participants: [f.alice] });
   const before = await f.cards();
   assert.deepEqual(before.map(card => card.key), [key(id, "report/1"), key(id, "turn/1"), key(id, "body/1")]);
-  const bodies = ["▸ update\nprogress", `✓ done\nanswer ${id} 1`, "× interrupted\nbroke-off"];
+  const presentations = [{ label: "update", body: "progress" }, { label: "done", body: `answer ${id} 1` }, { label: "broke-off", body: "provider disappeared" }];
   for (const [index, card] of before.entries()) {
     const label = index === 0 ? "@reviewer" : "@audit, @reviewer";
     assert.ok(isCardPresentation(card.details));
     assert.equal(card.details.author, label);
-    assert.equal(card.details.body, bodies[index]);
+    assert.equal((card.details as { label?: string }).label, presentations[index]?.label);
+    assert.equal(card.details.body, presentations[index]?.body);
     assert.equal((card.details as { at?: number }).at, Date.parse("2026-11-09T00:00:00Z"));
     assert.ok(card.text.startsWith(`\`${label}\``));
     assert.ok(card.text.split("---\n\n")[1]?.includes(`\`${id}\``));
   }
+  assert.match(before[2]!.text, /× interrupted\nbroke-off: provider disappeared/u);
   assert.equal((await f.cards(f.bob))[0]?.text, before[1]?.text);
   await bind("reviewer", other); await bind("audit", other);
   await f.turn(id, 2);
@@ -262,7 +264,7 @@ test("early and late exact suppression survive producer restart and remain Owner
   assert.equal((await f.cards()).length, 0);
   assert.equal((await f.cards(f.bob)).length, 1);
   await f.turn("aku/early/1234abcd", 2);
-  const report = "progress\n".repeat(2000);
+  const report = "✓ done\nThis is report content, not the report label.\n" + "progress\n".repeat(2000);
   await f.plugin.signals!["akuma.reported"]!({
     kind: "akuma.reported",
     akumaId: "aku/early/1234abcd",
@@ -284,7 +286,7 @@ test("early and late exact suppression survive producer restart and remain Owner
     author: "aku/early/1234abcd",
     ref: "report/1",
     at,
-    body: `▸ update\n${report}`,
+    label: "update", body: report,
   });
   assert.equal((await f.cards(f.bob)).some((card) => card.key === reportCard.key), false);
   assert.equal((await f.cards()).length, 2);
@@ -530,6 +532,9 @@ test("Body dedup tracks committed recipients independently and reports retain ex
     (await f.cards(f.bob)).map((card) => card.key),
     [key("aku/body/1234abcd", "body/1")],
   );
+  const bodyCard = (await f.cards(f.bob))[0]!;
+  assert.deepEqual(bodyCard.details, { kind: "presentation", origin: "Keiyaku", author: "aku/body/1234abcd",
+    ref: "body/1", label: "hung", body: "" });
   await f.plugin.signals!["akuma.reported"]!({
     kind: "akuma.reported",
     akumaId: "aku/body/1234abcd",
