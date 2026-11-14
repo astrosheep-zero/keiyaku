@@ -401,7 +401,7 @@ test("Pi loads the root package without host-provided dependency warnings", asyn
   assert.deepEqual(result.warnings, []);
   assert.equal(packageJson.dependencies?.["@earendil-works/pi-coding-agent"], undefined);
   assert.equal(packageJson.peerDependencies?.["@earendil-works/pi-coding-agent"], "*");
-  assert.equal(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"], "^1.4.0");
+  assert.equal(packageJson.devDependencies?.["@earendil-works/pi-coding-agent"], "^1.5.2");
 });
 
 type Handler = (event: unknown, context: ExtensionContext) => unknown;

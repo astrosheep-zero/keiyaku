@@ -65,7 +65,7 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@earendil-works/pi-coding-agent": "^1.5.2",
     "@getpaseo/plugin": "0.14.0",
     "@getpaseo/server": "0.14.0",
     "@types/cross-spawn": "^6.0.6",
