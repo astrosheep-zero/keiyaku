@@ -4,6 +4,7 @@ import { spawnStdioProcess, type StdioProcess } from "../../../runtime/proc/stdi
 import { abortable } from "../../abort.js";
 import {
   AgentEventChannel,
+  launchPrompt,
   type AttemptCustody,
   type ProviderAdapter,
   type Session,
@@ -210,10 +211,7 @@ function beginAcpPrompt(
   void agent
     .request<AcpSdk.PromptResponse, AcpSdk.PromptRequest>(acp.methods.agent.session.prompt, {
       sessionId,
-      prompt: [
-        { type: "text", text: input.body },
-        ...input.launchTells.map(({ text }) => ({ type: "text" as const, text })),
-      ],
+      prompt: [{ type: "text", text: launchPrompt(input.body, input.launchTells, input.schemaJson) }],
     })
     .then(
       (response) => turn.finish(promptResult(response), () => child.endInputAndDrain()),

@@ -279,6 +279,30 @@ test("Grok Build admits a live tell on the exact native broadcast before the int
   assert.deepEqual(await finishTurn(controlled, attempt, session), { kind: "answered", answer: "" });
 });
 
+test("Grok Build carries the Turn schema on start while live tells stay schema-free", async () => {
+  const controlled = nativeGrokProcess({ interject: "broadcast", stallPrompt: true });
+  const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
+  const attempt = grokProvider(controlled).start({ ...freshInput(), schemaJson });
+  const session = await attempt.result;
+  const receipt = session.tell!({ id: "tell-1", text: "change direction" });
+  await controlled.interjectStarted;
+  assert.deepEqual(await receipt, { kind: "accepted", fence: "tell-1" });
+
+  const prompt = parsedFrames(controlled.clientFrames).find(
+    (frame) => frame["method"] === acp.methods.agent.session.prompt,
+  );
+  assert.deepEqual((prompt?.params as { prompt?: unknown } | undefined)?.prompt, [
+    {
+      type: "text",
+      text: `native grok work\n\nRespond with JSON matching this JSON Schema and no other text:\n\n${schemaJson}`,
+    },
+  ]);
+  assert.deepEqual(controlled.interjections, [
+    { sessionId: NATIVE_SESSION_ID, text: "change direction", interjectionId: "tell-1" },
+  ]);
+  assert.deepEqual(await finishTurn(controlled, attempt, session), { kind: "answered", answer: "" });
+});
+
 test("Grok Build waits for the native broadcast when the interject RPC already answered queued", async () => {
   const controlled = nativeGrokProcess({ interject: "silent", stallPrompt: true });
   const { attempt, session } = await startSession(controlled);

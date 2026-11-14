@@ -241,7 +241,9 @@ without discovering or freezing external native defaults or files.
 Option admission happens once before identity allocation. Prompt and
 structured-answer changes apply only when the provider begins a new Turn,
 never as live-tell mutation. Persisted records are not rewritten during option
-admission.
+admission. An adapter whose protocol has no separate structured-answer channel
+carries the admitted schema in the Turn prompt instead of discarding it, while
+an adapter that cannot honor an admitted option refuses explicitly.
 Where an agent offers session configuration selectors, the adapter applies
 admitted model and effort choices before the first prompt of each new or
 resumed native session. Missing choices and unconfirmed selections fail that

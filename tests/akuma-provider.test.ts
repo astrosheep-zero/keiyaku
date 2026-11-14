@@ -994,8 +994,7 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
     ["initialize", "new", "prompt"],
   );
   assert.deepEqual((records[2]!.params as { prompt: unknown }).prompt, [
-    { type: "text", text: "build" },
-    { type: "text", text: "then test" },
+    { type: "text", text: "build\n\nthen test" },
   ]);
   assert.deepEqual((records[2]!.argv as readonly string[]).slice(-7), [
     "--model",
@@ -1034,6 +1033,40 @@ test("ACP load retains the exact session ID without a fork or live tell capabili
   const load = acpLog(fake.log).find((record) => record.kind === "load")!;
   assert.equal((load.params as { sessionId: string }).sessionId, "retained-session");
   assert.equal("_meta" in (load.params as object), false);
+});
+
+test("ACP composes the admitted schema into fresh and resumed Turn prompts", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-acp-schema-");
+  const fake = fakeAcp(root);
+  const provider = createAcpProvider(fake.execution);
+  const schemaJson = '{"type":"object","properties":{"ok":{"type":"boolean"}}}';
+  const schemaPrompt = `Respond with JSON matching this JSON Schema and no other text:\n\n${schemaJson}`;
+  const run = async (resume: boolean) => {
+    const attempt = resume
+      ? provider.resume!({
+          ...DRIVE_DEFAULTS,
+          body: "continue",
+          launchTells: [],
+          cwd: root,
+          options: {},
+          schemaJson,
+          session: { kind: "resume", coordinate: { sessionId: "retained-session" } },
+        })
+      : provider.start(freshInput("build", { cwd: root, schemaJson }));
+    const drive = await attempt.result;
+    for await (const _event of drive.events) {
+      /* drain */
+    }
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+    await attempt.closed;
+  };
+  await run(false);
+  await run(true);
+  const prompts = acpLog(fake.log).filter((record) => record.kind === "prompt");
+  assert.deepEqual(
+    prompts.map((record) => (record.params as { prompt: unknown }).prompt),
+    [`build\n\n${schemaPrompt}`, `continue\n\n${schemaPrompt}`].map((text) => [{ type: "text", text }]),
+  );
 });
 
 test("ACP applies model then effort session selectors before prompting on fresh and resumed sessions", async (context) => {
