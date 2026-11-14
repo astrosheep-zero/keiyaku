@@ -2020,7 +2020,8 @@ test("generic tool rows preserve observed JSON arguments", () => {
     [
       [1, "future_tool", preview({ alpha: 1, beta: "x", gamma: { delta: [true, null] } })],
       [2, "silent"],
-      [3, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
+      [3, "silent", preview({})],
+      [4, "future_tool", { json: '{"alpha":1,"beta":"long', truncated: true }],
     ],
     200,
   );
@@ -2031,7 +2032,8 @@ test("generic tool rows preserve observed JSON arguments", () => {
     "nested compact JSON keeps types and order",
   );
   assert.match(text, /future_tool\s+\{"alpha":1,"beta":"long…/u, "a truncated capture keeps its explicit ellipsis");
-  assert.match(text, /^ {3}silent …$/mu, "an unavailable body keeps a visible placeholder");
+  assert.match(text, /^ {3}silent$/mu, "an absent argument preview keeps the tool identity alone");
+  assert.match(text, /^ {3}silent +\{\}$/mu, "an explicitly empty argument object stays visibly empty");
 });
 
 test("generic tool rows keep failure diagnostics beside argument previews", () => {
@@ -2054,7 +2056,7 @@ test("generic tool rows keep failure diagnostics beside argument previews", () =
   const legacy = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id,
     events: [completedTool(1, "mystery", { kind: "other" }, { status: "error", message: "refused" })],
   }, {}, { columns: 120, color: false });
-  assert.match(legacy, /mystery\s+… — error · refused$/mu);
+  assert.match(legacy, /mystery — error · refused$/mu);
   assert.equal((legacy.match(/refused/gu) ?? []).length, 1, "a name-only failure states its diagnostic once");
 });
 

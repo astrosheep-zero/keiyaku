@@ -133,11 +133,14 @@ concrete work observed rather than substituting a broad category; a tool row
 names the actual tool observed with a bounded argument preview, and a partial
 capture truncates visibly. Rendering does not interpret foreign command or
 parameter dialects: retained commands and paths use the shared bounded
-payload discipline. Native tool rows preserve a nonempty work preview and the
-semantic trailer of read ranges, diffstats, durations, and exit/error status
-within the terminal width. Status and World render the native owner's concrete
-current-action summary with its retained coordinate and visible clipping;
-renderers never reconstruct tool state or expand omitted activity. Native history
+payload discipline. Native tool rows keep their observed work preview together
+with the semantic trailer of read ranges, diffstats, durations, and exit/error
+status within the terminal width. A row whose provider supplied no preview
+carries the tool identity alone; the truncation mark means a partial capture,
+never a missing one, and an explicitly empty argument object stays visibly
+empty. Status and World render the native owner's concrete current-action
+summary with its retained coordinate and visible clipping; renderers never
+reconstruct tool state or expand omitted activity. Native history
 keeps observed result diagnostics, expanding a cut inline diagnostic into a
 bounded continuation block. Diagnostics that fit are shown whole; longer
 captures name their omission. Gate evidence keeps its compact visual

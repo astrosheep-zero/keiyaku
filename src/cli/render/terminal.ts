@@ -214,10 +214,11 @@ export function renderBoundedPayload(input: BoundedPayload): readonly string[] {
     const diagnostic = safeText(input.trailer.diagnostic).replace(/\s+/gu, " ").trim();
     const extra = diagnostic === "" ? "" : `${suffix === "" ? " — " : " · "}${diagnostic}`;
     const extraWidth = displayColumns(extra);
-    const [firstBody] = GRAPHEMES.segment(input.text || "…");
-    const bodyMinimum = displayColumns(firstBody!.segment) + omissionWidth;
-    // Reserve one body grapheme plus its omission and any diagnostic omission before clipping the prefix.
-    // All budgets are nonnegative; sharing spare cells monotonically keeps wider rows from reducing the body allowance.
+    const [firstBody] = GRAPHEMES.segment(input.text);
+    const bodyMinimum = firstBody === undefined ? 0 : displayColumns(firstBody.segment) + omissionWidth;
+    // Reserve the body's first grapheme plus its omission and any diagnostic omission before clipping the prefix.
+    // An absent preview reserves nothing, so the tool identity keeps its full width; sharing spare cells
+    // monotonically keeps wider rows from reducing the body allowance.
     const minimumPayload = bodyMinimum + (extra === "" ? 0 : omissionWidth);
     const prefixWidth = Math.min(
       displayColumns(input.first),
@@ -232,7 +233,7 @@ export function renderBoundedPayload(input: BoundedPayload): readonly string[] {
     const body = renderFoldedPayload({
       ...input,
       first,
-      text: input.text || "…",
+      text: input.text,
       columns: columns - displayColumns(suffix) - diagnosticReserve,
       maxLines: 1,
     })[0]!;
