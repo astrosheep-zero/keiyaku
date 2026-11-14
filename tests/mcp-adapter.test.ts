@@ -250,6 +250,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     await client.close();
     await adapter.close();
   });
+  assert.ok(client.getInstructions());
+  assert.equal(client.getInstructions(), client.getServerVersion()?.description);
   const { tools } = await client.listTools();
   const excluded = ["nuke", "settings", "debt.doctor", "debt.addDocument"];
   assert.deepEqual(

@@ -5,6 +5,9 @@ World-path capabilities, signal delivery, and failure isolation. Plugins are
 optional observers of named Keiyaku semantics; they own neither the product
 facts that cause a signal nor any public result.
 
+The MCP server alone owns Keiyaku's descriptive text; Pi relies on that owner
+rather than duplicating it in its registration.
+
 ## Contract And Selection
 
 Keiyaku owns the closed signal vocabulary and the stable public plugin contract.

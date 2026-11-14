@@ -52,8 +52,7 @@ export default function keiyakuExtension(
   pi.registerMcpServer("keiyaku", {
     command: process.execPath,
     args: [fileURLToPath(new URL("../../build/src/mcp/index.js", import.meta.url))],
-    description: "Agent work ledger for a Git repository. Contracts: bind, amend, arc, deliver, verify, review, abandon, reconcile. Akumas: spawn, fork, tell, ask, kill, wait, history, report. Read and inspect: show, status, ls, region, kanshi, whoami. Debts: debt_add, debt_update. show and ls also read Debts; wait and history also support Contracts.",
-    timeout: 600,
+    timeout: 900,
   });
   registerAkumaTools(pi);
   let close: (() => void) | undefined;

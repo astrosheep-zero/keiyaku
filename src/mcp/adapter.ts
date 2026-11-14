@@ -198,7 +198,10 @@ function describeTools(): Tool[] {
 }
 
 function createMcpServer(version: string): Server {
-  return new Server({ name: "keiyaku", version, description: SERVER_DESCRIPTION }, { capabilities: { tools: {} } });
+  return new Server(
+    { name: "keiyaku", version, description: SERVER_DESCRIPTION },
+    { capabilities: { tools: {} }, instructions: SERVER_DESCRIPTION },
+  );
 }
 
 export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ server: Server; close(): Promise<void> }> {
