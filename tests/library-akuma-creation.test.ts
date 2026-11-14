@@ -1,22 +1,19 @@
 import { accepted } from "./support/library-verbs.js";
 import { present } from "./support/library-verbs.js";
-import { temporaryDirectory, restoreEnvironmentValues } from "./support/process.js";
+import { temporaryDirectory } from "./support/process.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
 import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   realpathSync,
-  rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test, { after } from "node:test";
+import test from "node:test";
 import { AkumaNameError, loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { harnessOwner } from "@astrosheep/square";
 import {
@@ -49,18 +46,12 @@ import { AkumaOwner, isolateSquareFixtureLedger } from "./support/akuma-composit
 import { settledInput } from "./support/akuma-tell.js";
 import { makeGitRepository } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
+import { isolateUserHome } from "./support/user-home.js";
 
 // Body plugin Settings use the process home, independently of the explicit
 // Archetype home below. Keep ambient observers out of these owned fixtures:
 // their bounded birth/end callbacks can legitimately outlive the departure budget.
-const USER_HOME_NAMES = ["HOME", "USERPROFILE"] as const;
-const priorUserHome = Object.fromEntries(USER_HOME_NAMES.map((name) => [name, process.env[name]]));
-const isolatedUserHome = mkdtempSync(join(tmpdir(), "keiyaku-akuma-creation-home-"));
-for (const name of USER_HOME_NAMES) process.env[name] = isolatedUserHome;
-after(() => {
-  restoreEnvironmentValues(priorUserHome);
-  rmSync(isolatedUserHome, { recursive: true, force: true });
-});
+isolateUserHome();
 
 async function repositoryFixture() {
   const raw = makeGitRepository();

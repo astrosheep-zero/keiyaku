@@ -14,6 +14,9 @@ import { createNativeClient } from "../src/akuma/providers/opencode-sdk/native-h
 import { waitReady } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import { opencodeFixture, until } from "./support/opencode-v2.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 async function server(handler: http.RequestListener) {
   const sockets = new Set<Socket>();

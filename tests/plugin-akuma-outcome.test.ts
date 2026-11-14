@@ -2,12 +2,11 @@ import { akumaWithLauncher } from "../src/akuma/akuma-instance.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
-import test, { after, type TestContext } from "node:test";
+import test, { type TestContext } from "node:test";
 import { Akuma, Akumas, KeiyakuError, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
@@ -18,6 +17,7 @@ import { driveAkumaBody } from "../src/akuma/body.js";
 import { bornBody } from "./support/akuma-fixtures.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { deferred, restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
 
 const AT = "2026-10-14T00:00:00.000Z";
 type Signal = Readonly<{ kind: "akuma.outcome-observed"; akumaId: string; historyId: string; observer?: string }>;
@@ -26,19 +26,9 @@ type Signal = Readonly<{ kind: "akuma.outcome-observed"; akumaId: string; histor
  * A World resolves user Settings through the process home, so the plugins configured for
  * the developer or machine running this file would activate inside every fixture below and
  * their diagnostics would be counted as this file's own fixtures. This file therefore owns
- * one empty user coordinate: `os.homedir()` names the process home from HOME on POSIX and
- * from USERPROFILE on Windows, so both are pointed at it and only each fixture's project
- * plugins stay selected.
+ * one empty user coordinate and only each fixture's project plugins stay selected.
  */
-const USER_HOME_NAMES = ["HOME", "USERPROFILE"] as const;
-const priorUserHome = Object.fromEntries(USER_HOME_NAMES.map((name) => [name, process.env[name]]));
-const isolatedUserHome = mkdtempSync(join(tmpdir(), "keiyaku-plugin-outcome-home-"));
-for (const name of USER_HOME_NAMES) process.env[name] = isolatedUserHome;
-
-after(() => {
-  restoreEnvironmentValues(priorUserHome);
-  rmSync(isolatedUserHome, { recursive: true, force: true });
-});
+const isolatedUserHome = isolateUserHome();
 
 function recordingPlugin(world: WorldRoot, fail = false) {
   const output = join(world, "observations.jsonl");
@@ -724,3 +714,45 @@ test(
     }
   },
 );
+
+test("the isolated user home reaches an executed Body as user-scope plugin settings", async (t) => {
+  const target = await bornWorld(temporaryDirectory(t, "keiyaku-outcome-user-home-"), "0b500024");
+  const output = join(target.world, "user-scope.jsonl");
+  mkdirSync(join(target.world, "plugins"), { recursive: true });
+  writeFileSync(
+    join(target.world, "plugins", "user-scope.mjs"),
+    `
+    import { appendFileSync } from "node:fs";
+    export default {
+      manifest: { id: "user-scope", apiVersion: 1 },
+      activate(context) { return { signals: {
+        "akuma.turn-outcome": (signal) => appendFileSync(context.config.output, JSON.stringify(signal) + "\\n")
+      } }; }
+    };
+  `,
+  );
+  const settingsDirectory = join(isolatedUserHome, ".keiyaku");
+  mkdirSync(settingsDirectory, { recursive: true });
+  writeFileSync(
+    join(settingsDirectory, "settings.json"),
+    JSON.stringify({
+      plugins: { "user-scope": { package: "./plugins/user-scope.mjs", config: { output } } },
+    }),
+  );
+  try {
+    await driveAkumaBody(
+      { paths: target.allocated.paths, initialBody: "user scope" },
+      answering("from the user home"),
+      { spawn: noBodyLaunch, now: () => AT },
+    );
+  } finally {
+    rmSync(settingsDirectory, { recursive: true, force: true });
+  }
+  const outcomes = readFileSync(output, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(outcomes.length, 1);
+  assert.equal(outcomes[0].kind, "akuma.turn-outcome");
+  assert.deepEqual(outcomes[0].outcome, { kind: "answered", text: "from the user home" });
+});

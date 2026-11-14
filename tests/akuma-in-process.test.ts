@@ -16,6 +16,9 @@ import { fixtureAdapter, settledInput } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory, waitForCondition } from "./support/process.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 const cli = resolve("src/cli/index.ts");
 const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;

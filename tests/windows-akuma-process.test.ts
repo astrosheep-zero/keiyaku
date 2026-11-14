@@ -20,6 +20,9 @@ import {
   restoreEnvironmentValues,
   waitForProcessExit as waitForExit,
 } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 const IMAGE_SUBSYSTEM_WINDOWS_GUI = 2;
 const CONSOLE_PROBE_TIMEOUT_MS = 20_000;

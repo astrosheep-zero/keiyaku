@@ -5,16 +5,13 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  mkdtempSync,
-  rmSync,
   symlinkSync,
   unlinkSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import test, { after, type TestContext } from "node:test";
+import test, { type TestContext } from "node:test";
 import { moveAlias, readAliases, tryAcquireAliasCustody } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
@@ -32,16 +29,11 @@ import { World, type WorldRoot } from "../src/world.js";
 import { answering } from "./support/akuma-tell.js";
 import { appointedWorktreePath, cachedRepositoryAt, makeGitRepository } from "./support/git.js";
 import { accepted, bind, present } from "./support/library-verbs.js";
-import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
+import { temporaryDirectory } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
 
 // Retention fixtures own their user Settings, independent of the invoking host's observers.
-const priorUserHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
-const isolatedUserHome = mkdtempSync(join(tmpdir(), "keiyaku-retention-home-"));
-Object.assign(process.env, { HOME: isolatedUserHome, USERPROFILE: isolatedUserHome });
-after(() => {
-  restoreEnvironmentValues(priorUserHome);
-  rmSync(isolatedUserHome, { recursive: true, force: true });
-});
+isolateUserHome();
 
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const OLD = "2020-01-01T00:00:00.000Z";

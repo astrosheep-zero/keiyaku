@@ -49,6 +49,9 @@ import { pluginRuntime } from "../src/plugin/runtime.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { Akuma } from "../src/akuma/index.js";
 import { World } from "../src/world.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 /** Lifecycle watchdogs exclude optional default-observer startup and delivery. */
 function bodyTestDirectory(prefix: string): string {

@@ -23,6 +23,9 @@ import type {
 import { prepareCall, publishPreparedCall, type PreparedCallRecipe } from "../src/akuma/publication.js";
 import { World } from "../src/world.js";
 import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 const AT = "2026-08-09T00:00:00.000Z";
 

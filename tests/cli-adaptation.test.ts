@@ -20,6 +20,9 @@ import {
   waitForPidReceiptExit,
 } from "./support/process.js";
 import { contractMarkdown } from "./support/markdown.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 test("show reads native bytes once for explicit and contextual Contract selection", async (t) => {
   const repository = makeGitRepository();

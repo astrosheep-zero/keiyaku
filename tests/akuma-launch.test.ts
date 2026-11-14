@@ -16,6 +16,9 @@ import { fixtureAdapter } from "./support/akuma-tell.js";
 import { createProviderAttempt, type DriveInput, type ProviderAdapter } from "../src/akuma/provider.js";
 import { deferred } from "./support/process.js";
 import { World } from "../src/world.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 test("one composed launcher reaches birth, first Tell, and nested birth plus structured ask", async (context) => {
   const world = await World.at(temporaryDirectory(context, "keiyaku-launch-propagation-"));

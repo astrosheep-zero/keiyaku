@@ -46,6 +46,9 @@ import { accepted, commitCandidate, document, present, repositoryWithMain } from
 import { withGitShim } from "./support/git.js";
 import { runCli } from "./support/cli-fixtures.js";
 import { assertWireConformance } from "./support/schema-parity.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 test("coordinate composition preserves native branches and rejects collisions at construction", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.bind.input);

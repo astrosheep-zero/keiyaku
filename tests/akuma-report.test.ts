@@ -23,6 +23,9 @@ import { createProviderAttempt } from "../src/akuma/provider.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { temporaryDirectory } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 const AT = "2026-10-30T00:00:00.000Z";
 

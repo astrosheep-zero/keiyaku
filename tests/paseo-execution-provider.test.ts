@@ -34,6 +34,9 @@ import {
   recordReport,
   activitySlice,
 } from "../src/akuma/heart/index.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 type NativeClient = ReturnType<NonNullable<PaseoDependencies["createClient"]>>;
 type TimelineHandler = Parameters<DaemonClient["subscribeAgentTimeline"]>[1];

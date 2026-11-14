@@ -30,6 +30,9 @@ import { bornBody } from "./support/akuma-fixtures.js";
 import { bornWorld, fixtureAdapter, fixtureLauncher, answering, settleFixtureBodies } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory } from "./support/process.js";
 import { assertWireRoundTrip, assertWireConformance } from "./support/schema-parity.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 test("Akuma result wire schemas preserve real observations and mutations", async (context) => {
   const directory = temporaryDirectory(context, "akuma-wire-");

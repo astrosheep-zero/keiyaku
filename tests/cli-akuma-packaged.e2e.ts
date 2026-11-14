@@ -1,4 +1,4 @@
-import { removeTempDirectory, restoreEnvironmentValues } from "./support/process.js";
+import { removeTempDirectory } from "./support/process.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
@@ -10,24 +10,17 @@ import { fileURLToPath } from "node:url";
 import { displayColumns } from "../src/cli/render/terminal.js";
 import { Akumas, type AkumaKillResult } from "../src/index.js";
 import { World, type WorldRoot } from "../src/world.js";
+import { isolateUserHome } from "./support/user-home.js";
 
 const packagedCli = fileURLToPath(new URL("../build/src/cli/index.js", import.meta.url));
 const acpSdk = import.meta.resolve("@agentclientprotocol/sdk");
 /**
  * The empty process home this file owns. A runtime without an explicit home coordinate reads the
- * process home, which Node resolves from HOME on POSIX and USERPROFILE on Windows, so a plugin the
- * developer selected in their own user settings would activate in every child here and its import
- * diagnostic would land in asserted stderr. Both variables are moved before any World or child
- * environment is captured; KEIYAKU_HOME stays the fixtures' own akumaName coordinate.
+ * process home, so a plugin the developer selected in their own user settings would activate in
+ * every child here and its import diagnostic would land in asserted stderr. KEIYAKU_HOME stays the
+ * fixtures' own akumaName coordinate.
  */
-const processHome = mkdtempSync(join(tmpdir(), "keiyaku-packaged-home-"));
-const ambientHome = { HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
-process.env.HOME = processHome;
-process.env.USERPROFILE = processHome;
-test.after(async () => {
-  restoreEnvironmentValues(ambientHome);
-  await removeTempDirectory(processHome);
-});
+isolateUserHome();
 
 /** The ACP agent every observing-call scenario in this file drives through a real CLI process. */
 function fakeAgentSource(): string {

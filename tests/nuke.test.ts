@@ -29,6 +29,9 @@ import { Debts } from "../src/debt/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { settlementProbe, waitForCondition } from "./support/process.js";
 import { captureOutput, cliJson } from "./support/cli-fixtures.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 

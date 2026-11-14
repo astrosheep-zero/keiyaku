@@ -6,6 +6,9 @@ import * as pi from "@earendil-works/pi-coding-agent";
 import { Akuma, AkumaHost, Akumas, World } from "../src/index.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { recordRetainedFixtureRoot, temporaryDirectory, waitForCondition } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 const root = resolve(import.meta.dirname, import.meta.url.endsWith(".js") ? "../.." : "..");
 const shippedExtension = join(root, "build/plugins/pi/keiyaku.ts");

@@ -55,6 +55,9 @@ import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { debtAuthorityFile } from "./support/debt.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 let fixtureHistory = 0;
 

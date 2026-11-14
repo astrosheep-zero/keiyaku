@@ -29,6 +29,9 @@ import { answering, bornWorld, fixtureLauncher, settleFixtureBodies, settledInpu
 import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
 import { assertWireRoundTrip, assertWireConformance } from "./support/schema-parity.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 const context = { columns: 100, color: false };
 

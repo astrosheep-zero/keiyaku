@@ -15,6 +15,9 @@ import { contractId } from "../src/core/facts/types.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { makeGitRepository } from "./support/git.js";
 import { temporaryDirectory } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 function recordingProvider(seen: DriveInput[]): ProviderAdapter {
   const drive = (input: DriveInput) => createProviderAttempt(input.signal, async () => {

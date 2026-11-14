@@ -45,6 +45,9 @@ import {
 import { canonicalDocument } from "../src/akuma/schema.js";
 import { World } from "../src/world.js";
 import { debtAuthorityFile } from "./support/debt.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 /**
  * Bounds the seed-Tell binding wait and ends it on a dead outcome: a settled driving pump, a missing

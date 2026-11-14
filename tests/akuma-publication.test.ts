@@ -11,6 +11,9 @@ import { publishAkuma } from "../src/akuma/publication.js";
 import { World } from "../src/world.js";
 import { allocatedHeart, noBodyLaunch } from "./support/akuma-fixtures.js";
 import { deferred as promiseBarrier, temporaryDirectory } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 /** Publish one worker under the fixture root; the launch body stays at the call site. */
 function publishWorker(

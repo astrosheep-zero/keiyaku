@@ -49,6 +49,9 @@ import {
 import { decodeSoul, decodeSoulRow, encodeSoulRow } from "../src/akuma/heart/soul.js";
 import { HeartAuthorityCorruptionError } from "../src/akuma/heart/facts.js";
 import { errorCategory, KeiyakuError } from "../src/errors.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 async function fixture() {
   return await soulFixture("keiyaku-akuma-heart-");

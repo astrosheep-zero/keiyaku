@@ -63,6 +63,9 @@ import { World, type WorldRoot } from "../src/world.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { withHeartTransaction } from "../src/akuma/heart/storage.js";
 import { insertBodyFact } from "../src/akuma/heart/rows.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
