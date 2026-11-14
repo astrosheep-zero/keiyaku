@@ -198,7 +198,7 @@ export const verbs = Object.freeze({
   },
   amend: {
     description:
-      "Rewrite an active Contract's terms, prerequisites (after), or gates. markdown is H2 edits such as ## Replace: Objective, not a new Contract. Returns only what changed.",
+      "Rewrite an active Contract's terms, target, prerequisites (after), or gates. markdown is H2 edits such as ## Replace: Objective, not a new Contract. Returns only what changed.",
     input: z.union(
       amendInputSchemas.map((branch) =>
         (
@@ -210,6 +210,9 @@ export const verbs = Object.freeze({
               "Replacement prerequisite Contract IDs (kei/...); pass [] to clear prerequisites.",
             ),
             gates: branch.shape.gates.describe("Replacement acceptance gate names; pass [] to clear all gates."),
+            target: branch.shape.target.describe(
+              "Explicit existing branch or active Contract destination; omission retains the current target.",
+            ),
           }) as typeof branch
         )
           .extend(contract)

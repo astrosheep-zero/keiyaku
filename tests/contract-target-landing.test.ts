@@ -5,6 +5,7 @@ import test from "node:test";
 import { Keis, Repo } from "../src/index.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
+import { cliJson } from "./support/cli-fixtures.js";
 
 test("a child lands into the appointed parent without changing parent authority or main", async () => {
   const raw = repositoryWithMain({ files: { "base.txt": "base\n" } });
@@ -230,6 +231,71 @@ test("fork inherits the exact target incarnation and refuses a replacement", asy
     assert.equal(refused.reason.kind, "target-workspace-unavailable");
     if (refused.reason.kind === "target-workspace-unavailable") assert.equal(refused.reason.reason, "replaced");
   }
+});
+
+test("explicit retarget recovers a child of an accepted or abandoned parent with fresh verification", async (t) => {
+  for (const disposition of ["accepted", "abandoned"] as const) await t.test(disposition, async () => {
+    const raw = repositoryWithMain();
+    const contracts = Keis.of(await Repo.at({ path: raw.path }));
+    const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: [] }));
+    const parentId = present(await parent.kei.state()).id;
+    const child = accepted(await contracts.bind({
+      markdown: document("test -f child.txt"), target: parentId, gates: ["reviewed", "verified"],
+    }));
+    const path = child.worktreePath!;
+    writeFileSync(join(path, "child.txt"), "child\n");
+    raw.run(["-C", path, "add", "child.txt"]);
+    raw.run(["-C", path, "commit", "--quiet", "-m", "child"]);
+    const childHead = raw.run(["-C", path, "rev-parse", "HEAD"]).trim();
+    accepted(await child.kei.review({ verdict: "satisfied", summary: "Child patch reviewed" }));
+    const oldVerification = accepted(await child.kei.verify());
+    const before = present(await child.kei.state());
+    if (disposition === "accepted") accepted(await parent.kei.deliver());
+    else accepted(await parent.kei.abandon());
+    const stranded = await child.kei.deliver();
+    assert.equal(stranded.kind, "refused");
+    if (stranded.kind === "refused") assert.equal(stranded.reason.kind, "target-contract-terminal");
+
+    const amended = await cliJson<{ kind: string; target?: string }>([
+      "-C", raw.path, "amend", before.id, "--target", "main",
+    ], { environment: {} });
+    assert.equal(amended.value.kind, "accepted", amended.stdout);
+    assert.equal(amended.value.target, "refs/heads/main");
+    const state = present(await child.kei.state());
+    assert.equal(state.coordinates.start, before.coordinates.start);
+    assert.equal(state.coordinates.target, "refs/heads/main");
+    assert.deepEqual(state.attestations, before.attestations, "amend must not rewrite testimony");
+    assert.equal(raw.run(["-C", path, "rev-parse", "HEAD"]).trim(), childHead);
+    const preview = await child.kei.previewDelivery();
+    assert.equal(preview.kind, "ready");
+    if (preview.kind !== "ready") assert.fail("retargeted candidate unavailable");
+    assert.deepEqual(preview.unmetGates?.map(({ gate, state }) => ({ gate, state })), [{ gate: "verified", state: "stale" }]);
+    const fresh = accepted(await child.kei.verify());
+    if (disposition === "abandoned") assert.equal(fresh.snapshot, oldVerification.snapshot, "equal-head retarget still needs a fresh check");
+    assert.ok(fresh.checks[0]?.kind === "terminal");
+    assert.equal(fresh.checks[0].admission, "admitted");
+    const delivered = accepted(await child.kei.deliver());
+    assert.equal(delivered.placement?.kind, "placed", JSON.stringify(delivered));
+    const final = present(await child.kei.state());
+    assert.equal(final.terminal?.kind, "claimed");
+    assert.equal(final.currentIntegration?.snapshot, fresh.snapshot);
+    assert.equal(final.attestations.filter((entry) => entry.data.gate === "reviewed").length, 1);
+    assert.equal(final.attestations.filter((entry) => entry.data.gate === "verified").length, 2);
+    assert.equal(raw.run(["show", "main:child.txt"]), "child\n");
+    assert.equal(existsSync(path), false);
+  });
+});
+
+test("amend refuses a transitive destination cycle without changing authority", async () => {
+  const raw = repositoryWithMain();
+  const contracts = Keis.of(await Repo.at({ path: raw.path }));
+  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const before = present(await parent.kei.state());
+  const child = accepted(await contracts.bind({ markdown: document(), target: before.id, gates: [] }));
+  const refused = await parent.kei.amend({ target: present(await child.kei.state()).id });
+  assert.equal(refused.kind, "refused", JSON.stringify(refused));
+  if (refused.kind === "refused") assert.equal(refused.reason.kind, "cyclic-target");
+  assert.deepEqual(present(await parent.kei.state()), before);
 });
 
 test("a parent terminal before placement cannot receive an already delivered child", async () => {

@@ -1,5 +1,7 @@
 import {
   changeId,
+  entryUlid,
+  type EntryUlid,
   documentKey,
   documentSegmentKey,
   snapshotId,
@@ -17,6 +19,7 @@ export type DependencyKey = Readonly<
   | { readonly kind: "segment"; readonly value: DocumentSegmentKey }
   | { readonly kind: "snapshot"; readonly value: SnapshotId }
   | { readonly kind: "change"; readonly value: ChangeId }
+  | { readonly kind: "target"; readonly value: EntryUlid }
 >;
 
 function keyTuple(key: DependencyKey): readonly [DependencyKey["kind"], string] {
@@ -47,6 +50,8 @@ function parseKey(value: unknown, index: number): DependencyKey {
         return { kind: "snapshot", value: snapshotId(value[1]) };
       case "change":
         return { kind: "change", value: changeId(value[1]) };
+      case "target":
+        return { kind: "target", value: entryUlid(value[1]) };
       default:
         throw new AuthorityCorruptionError(`unknown dependency key kind '${value[0]}'`);
     }
@@ -108,6 +113,7 @@ function currentKeys(state: ContractState): ReadonlySet<string> {
   return new Set([
     encodeKey({ kind: "document", value: state.terms.document.key }),
     ...state.terms.segments.map((value) => encodeKey({ kind: "segment", value })),
+    ...(state.targetRevision === undefined ? [] : [encodeKey({ kind: "target", value: state.targetRevision })]),
     ...(integration === undefined
       ? []
       : [
@@ -124,7 +130,13 @@ export function currentSubjectPredicate(state: ContractState): (subject: Depende
   return (subject) => {
     const known = current.get(subject);
     if (known !== undefined) return known;
-    const value = decodeDependencyKeySet(subject).encodedKeys.every((key) => available.has(key));
+    const decoded = decodeDependencyKeySet(subject);
+    // Snapshot-only testimony cannot cross a target change, even when the new target has the same head.
+    const snapshotTargetCurrent =
+      state.targetRevision === undefined ||
+      !decoded.keys.some((key) => key.kind === "snapshot") ||
+      decoded.keys.some((key) => key.kind === "target" && key.value === state.targetRevision);
+    const value = snapshotTargetCurrent && decoded.encodedKeys.every((key) => available.has(key));
     current.set(subject, value);
     return value;
   };

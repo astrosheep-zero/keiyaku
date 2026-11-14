@@ -117,7 +117,10 @@ export const bindEntrySchema = factSchema(
   "bind",
   z.strictObject({ coordinates: contractCoordinatesSchema, terms: contractTermsSchema }).readonly(),
 );
-export const amendEntrySchema = factSchema("amend", contractTermsSchema);
+export const amendEntrySchema = factSchema(
+  "amend",
+  contractTermsSchema.unwrap().extend({ target: contractTargetSchema.exactOptional() }).readonly(),
+);
 export const deliverEntrySchema = factSchema("deliver", deliverDataSchema);
 export const reintegratedEntrySchema = factSchema(
   "reintegrated",
@@ -159,6 +162,7 @@ export const contractStateSchema = z
     id: contractIdSchema,
     head: contractHeadSchema.nullable(),
     coordinates: contractCoordinatesSchema,
+    targetRevision: entryUlidSchema.exactOptional(),
     terms: contractTermsSchema,
     delivery: deliverEntrySchema.nullable(),
     currentIntegration: deliverDataSchema.unwrap().shape.integration.nullable(),

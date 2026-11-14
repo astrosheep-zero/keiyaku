@@ -35,6 +35,7 @@ const bindFields = {
   ...regionFields,
 };
 const amendFields = {
+  target: z.string().exactOptional(),
   changedSections: z.array(z.string()).min(1).readonly().exactOptional(),
   gatesChanged: z.literal(true).exactOptional(),
   afterChanged: z.literal(true).exactOptional(),

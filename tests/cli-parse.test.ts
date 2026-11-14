@@ -353,6 +353,9 @@ test("bind and amend retain complete after snapshots and mixed gate selectors", 
   assert.deepEqual(parseArgv(["amend", "kei/example", "--gates", "default"]), {
     command: { name: "amend", input: { contract: "kei/example", gates: ["default"] }, output: "text" },
   });
+  assert.deepEqual(parseArgv(["amend", "kei/example", "--target", "main"]), {
+    command: { name: "amend", input: { contract: "kei/example", target: "main" }, output: "text" },
+  });
   assert.deepEqual(parseArgv(["bind", "--gates", "", "-"]), {
     command: { name: "bind", input: { gates: [] }, acquire: { markdown: true }, output: "text" },
   });
@@ -370,7 +373,7 @@ test("bind and amend retain complete after snapshots and mixed gate selectors", 
   }
   assert.throws(
     () => parseArgv(["amend", "kei/example"]),
-    /amend requires stdin or --after, --clear-after, or --gates/,
+    /amend requires stdin or --after, --clear-after, --gates, or --target/,
   );
   assert.throws(
     () => parseArgv(["amend", "kei/example", "--after", "kei/one", "--clear-after", "-"]),

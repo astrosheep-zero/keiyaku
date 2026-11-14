@@ -217,8 +217,13 @@ function validateData(kind: JournalEntry["kind"], value: unknown): unknown {
         terms: termsValue(object.terms, `${path}.terms`),
       } satisfies BindData;
     }
-    case "amend":
-      return termsValue(value, path) satisfies AmendData;
+    case "amend": {
+      const object = requireRecord(value, path);
+      return {
+        ...termsValue(object, path),
+        ...(object.target === undefined ? {} : { target: targetValue(object.target, `${path}.target`) }),
+      } satisfies AmendData;
+    }
     case "deliver": {
       const object = requireRecord(value, path);
       requireKeys(object, ["tenderSnapshot", "integration", "method", "policy"], path);

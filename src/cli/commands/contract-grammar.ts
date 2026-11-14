@@ -92,15 +92,24 @@ function parseAmend(parts: ContractTokens): CliRequest {
   if (parts.flags["clear-after"] === true && after.length > 0)
     refuse("amend", "--clear-after and --after are mutually exclusive");
   const gates = parseGateNames(parts, "amend");
-  if (!parts.stdin && parts.flags.after === undefined && parts.flags["clear-after"] !== true && gates === undefined) {
-    refuse("amend", "amend requires stdin or --after, --clear-after, or --gates");
+  const target = optionalFlag(parts.flags, "target");
+  if (
+    !parts.stdin &&
+    parts.flags.after === undefined &&
+    parts.flags["clear-after"] !== true &&
+    gates === undefined &&
+    target === undefined
+  ) {
+    refuse("amend", "amend requires stdin or --after, --clear-after, --gates, or --target");
   }
   const input = {
     ...(contract === undefined ? {} : { contract }),
     ...(parts.flags["clear-after"] === true ? { after: [] } : parts.flags.after === undefined ? {} : { after }),
     ...(gates === undefined ? {} : { gates }),
+    ...(target === undefined ? {} : { target }),
   };
   if (parts.stdin) return { name: "amend", input, acquire: { markdown: true }, output: parts.output };
+  if (target !== undefined) return { name: "amend", input: { ...input, target }, output: parts.output };
   return {
     name: "amend",
     input: gates === undefined ? { ...input, after } : { ...input, gates },

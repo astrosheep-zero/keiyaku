@@ -78,6 +78,7 @@ import {
   type ContractWaitOptions,
   type ContractWaitResult,
 } from "./contract-wait.js";
+import { targetName } from "../core/facts/types.js";
 import { prepareAmendDocument } from "../body/amend.js";
 import { decodeArcDocument } from "../body/arc.js";
 import { decodeContractDocument } from "../body/decode.js";
@@ -245,13 +246,14 @@ export class Kei {
       const derived = values.gates === undefined ? undefined : derivedGates(this.composition, gateNames(values.gates));
       return {
         markdown: values.markdown,
+        target: values.target,
         gates: derived,
         prerequisites: values.after === undefined ? undefined : normalizedList(values.after, "after", callerContractId),
       };
     });
   }
   async amend(input: AmendInput): Promise<AmendOutcome> {
-    const { markdown, gates, prerequisites } = this.amendInput(input);
+    const { markdown, target, gates, prerequisites } = this.amendInput(input);
     const hooks = derivedHooks(this.composition);
     const amendmentPlan = markdown === undefined ? undefined : validated(() => prepareAmendDocument(markdown));
     let changedSections: ReadonlySet<string> | undefined;
@@ -261,6 +263,7 @@ export class Kei {
         channel,
         contractId: this.id,
         progress: accumulator,
+        ...(target === undefined ? {} : { target }),
         deriveAmendment: (source) => {
           const current = persistedDocument(source.document.bytes);
           const amendment = amendmentPlan === undefined ? undefined : validated(() => amendmentPlan(current));
@@ -282,7 +285,10 @@ export class Kei {
         return admission.kind === "refused"
           ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
           : { contractId: this.id, ...compactRetry(admission.reason) };
-      const changes = changedAmendTerms(admission.value.source, admission.value.terms);
+      const changes = {
+        ...changedAmendTerms(admission.value.source, admission.value.terms),
+        ...(admission.value.target === undefined ? {} : { target: targetName(admission.value.target) }),
+      };
       const sections =
         changedSections === undefined || changedSections.size === 0 ? {} : { changedSections: [...changedSections] };
       accumulator.extendConclusions(this.id, { ...sections, ...changes });
@@ -684,6 +690,15 @@ function attestationHistory(entry: Extract<JournalEntry, { kind: "attestation" }
   };
 }
 
+function historyTarget(target: ContractState["coordinates"]["target"], full: boolean) {
+  return target === undefined
+    ? {}
+    : {
+        target: typeof target === "string" ? target : { kind: "contract" as const, contractId: target.contractId },
+        ...(full && typeof target === "object" ? { targetIncarnation: target.worktree } : {}),
+      };
+}
+
 function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, full: boolean): ContractHistoryEvent {
   const common = { id: entry.entry, at: entry.at };
   switch (entry.kind) {
@@ -694,18 +709,12 @@ function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, ful
         ...common,
         kind: "bind",
         start: coordinates.start,
-        ...(target === undefined
-          ? {}
-          : {
-              target:
-                typeof target === "string" ? target : { kind: "contract" as const, contractId: target.contractId },
-            }),
+        ...historyTarget(target, full),
         ...(full
           ? {
               document: bound.document.bytes,
               gates: bound.gates,
               after: bound.after,
-              ...(typeof target === "object" ? { targetIncarnation: target.worktree } : {}),
             }
           : {
               ...(bound.gates.length === 0 ? {} : { gates: bound.gates }),
@@ -717,6 +726,7 @@ function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, ful
       return {
         ...common,
         kind: "amend",
+        ...historyTarget(entry.data.target, full),
         ...changedHistoryTerms(terms, entry.data),
         ...(full ? { document: entry.data.document.bytes, gates: entry.data.gates, after: entry.data.after } : {}),
       };

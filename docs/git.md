@@ -86,8 +86,15 @@ fresh integration, and an unavailable recorded commit is skipped rather than
 blocking preparation. This reuse creates no additional identity or evidence
 authority; Verification still judges the exact snapshot and requirement.
 Evidence captured before delivery applies when a later delivery names that same
-integration. Target or candidate movement requires a different snapshot and
-never retargets earlier testimony.
+integration under the same target selection. Target or candidate movement never
+retargets earlier testimony. Explicit target amendment uses the existing
+prospective integration and reintegration machinery against the new destination,
+not a new worktree or an automatic rebase of worker bytes. Conflicts retain the
+same refusal and explicit handoff semantics as target movement; reconciliation
+retains the appointed workspace and repairs custody without overwriting edits.
+A concurrent target amendment spends an older target-fenced placement or
+reintegration attempt; that attempt cannot silently switch destinations while
+holding the former destination's custody.
 
 Content identity consumes the complete canonical patch without retaining that
 intermediate patch in the caller. A producer failure, consumer failure, or

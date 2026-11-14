@@ -3,7 +3,7 @@ import type { ProtocolProgress } from "./progress.js";
 import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
-import { targetName, type ContractId, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
+import { sameTarget, targetName, type ContractId, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
 import { observeContractsForAdmissionAt, observeGitForAdmissionAt } from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
@@ -258,6 +258,13 @@ export async function admitPlacement<ExtraRefusal = never>(
     contracts: [input.contractId],
     attempts,
     decide: decidePlacement,
+    preparation: {
+      external: () => ({ kind: "prepared", prepared: input }),
+      assemble: (observation) =>
+        sameTarget(contractState(observation.decision, input.contractId)?.coordinates.target, target)
+          ? { kind: "prepared", input }
+          : { kind: "stale" },
+    },
     ...(admission.progress === undefined ? {} : { progress: admission.progress }),
     observe: (observedRepository, observedChannel, contracts) =>
       observeGitForAdmissionAt(observedRepository, observedChannel, contracts),

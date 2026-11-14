@@ -1,18 +1,33 @@
 import type { DecideInput, OfferDecision, Preparation } from "../decide.js";
-import { prerequisitesReach, samePrerequisites } from "../facts/eligibility.js";
-import { activeContract, prerequisiteStatus } from "../facts/observation.js";
+import { prerequisitesReach, samePrerequisites, targetCycles } from "../facts/eligibility.js";
+import {
+  activeContract,
+  prerequisiteStatus,
+  targetContractRefusal,
+  targetContractIdRefusal,
+  type TargetContractRefusal,
+} from "../facts/observation.js";
 import { journalEntry, type AmendData, type ContractId, type ContractTerms } from "../facts/types.js";
 
 export type AmendInput<Failure = never> = Readonly<{
   contractId: ContractId;
   at: string;
   source?: ContractTerms;
+  targetContract?: ContractId;
   preparation?: Preparation<AmendData, Failure>;
 }>;
 
-export type AmendRefusal = Readonly<{
-  kind: "contract-missing" | "terminal" | "terms-moved" | "unknown-prerequisite" | "cyclic-prerequisite";
-}>;
+export type AmendRefusal =
+  | Readonly<{
+      kind:
+        | "contract-missing"
+        | "terminal"
+        | "terms-moved"
+        | "unknown-prerequisite"
+        | "cyclic-prerequisite"
+        | "cyclic-target";
+    }>
+  | TargetContractRefusal;
 
 export function decideAmend<Failure>({
   input,
@@ -46,8 +61,15 @@ export function decideAmend<Failure>({
   if (!termsCurrent) {
     return { kind: "refused", refusal: { kind: "terms-moved" } };
   }
+  if (input.targetContract !== undefined) {
+    const refusal = targetContractIdRefusal(observation, input.targetContract);
+    if (refusal !== undefined) return { kind: "refused", refusal };
+  }
   if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
   const { data } = input.preparation;
+  const targetRefusal = targetContractRefusal(observation, data.target);
+  if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
+  if (targetCycles(id, data.target, observation)) return { kind: "refused", refusal: { kind: "cyclic-target" } };
   const prerequisites = prerequisiteStatus(data.after, observation);
   if (prerequisites === "unknown") {
     return { kind: "refused", refusal: { kind: "unknown-prerequisite" } };

@@ -35,6 +35,8 @@ export const contractHistoryEventSchema = z.union([
     targetIncarnation: z.strictObject({ id: z.string(), identity: z.string() }).readonly().exactOptional(),
   }),
   historyEvent("amend", {
+    target: historyTarget.exactOptional(),
+    targetIncarnation: z.strictObject({ id: z.string(), identity: z.string() }).readonly().exactOptional(),
     changedSections: z.array(z.string()).readonly().exactOptional(),
     gates: historyGates,
     after: historyAfter,
@@ -110,6 +112,8 @@ export type KeisOptions = Readonly<{
 }>;
 
 export type AmendInput = Readonly<{
+  /** Explicit existing branch or active Contract; omission retains the target. */
+  target?: string;
   markdown?: string;
   after?: readonly ContractId[];
   gates?: readonly string[];

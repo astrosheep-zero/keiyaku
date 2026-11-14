@@ -35,6 +35,10 @@ never conflict handoff. Each check's subject is that exact captured integration
 snapshot. Reuse of an already-recorded integration with matching tree and
 predecessor permits evidence before or after delivery to apply to an unchanged
 delivery. Changed target or candidate cannot retarget earlier testimony.
+Explicit target amendment requires fresh Verification even when the new
+destination has the same head and prospective integration bytes. The captured
+snapshot includes its target-change dependency, so testimony arriving after a
+concurrent retarget still speaks only for its original capture.
 
 Each selected declaration executes in its own independent clean scratch with
 project-configured setup and cleanup, including cleanup after setup or

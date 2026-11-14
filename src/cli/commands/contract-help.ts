@@ -73,15 +73,20 @@ export const CONTRACT_COMMAND_SPECS = {
   amend: {
     positional: "optional",
     stdin: "optional",
-    flags: { after: "repeat", "clear-after": "boolean", gates: "raw-value", json: "boolean" },
+    flags: { after: "repeat", "clear-after": "boolean", gates: "raw-value", target: "value", json: "boolean" },
     usage:
-      "amend [<contract>|@name] [--after <kei/...> [--after <kei/...>]... | --clear-after] [--gates <name,...>] [--repo <path>] [-]",
-    purpose: "Change a Contract's document, prerequisites, or acceptance gates.",
+      "amend [<contract>|@name] [--after <kei/...> [--after <kei/...>]... | --clear-after] [--gates <name,...>] [--target <branch|kei/...>] [--repo <path>] [-]",
+    purpose: "Change a Contract's document, target, prerequisites, or acceptance gates.",
     details: [
       "Gates are checked at integration: reviewed needs a satisfied review;",
       "verified needs satisfied evidence for every declaration. --gates <name,...> replaces them with",
       "reviewed, verified, or configured groups (see keiyaku settings).",
       'Omitting --gates keeps them; --gates "" clears them.',
+      "",
+      "--target explicitly selects an existing local branch or active Contract destination.",
+      "Omission keeps the current target, even after its Contract is accepted or abandoned.",
+      "Self-targets and destination cycles refuse. Use refs/heads/kei/... for a branch named kei/....",
+      "Retargeting requires fresh verify; unchanged candidate content keeps its review.",
       "",
       "stdin is an amendment; each heading is one edit:",
       "  ## Context|Objective|Design|Region|Criteria|Verification|<extension>  (replace, or add a new extension)",

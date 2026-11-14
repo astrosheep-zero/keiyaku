@@ -1,5 +1,6 @@
 import type { ArcEntry, AttestationEntry, ContractTerms, ContractState, BindEntry, JournalEntry } from "./types.js";
 import { gatesSatisfied } from "./gate.js";
+import { sameTarget } from "./types.js";
 import { AuthorityCorruptionError } from "./errors.js";
 
 function foldError(message: string): never {
@@ -57,7 +58,13 @@ function foldEntry(state: ContractState, entry: JournalEntry, attestations: Atte
     case "bind":
       foldError("bind may appear only once");
     case "amend":
-      return { ...state, terms: cloneTerms(entry.data) };
+      return {
+        ...state,
+        terms: cloneTerms(entry.data),
+        ...(entry.data.target === undefined || sameTarget(state.coordinates.target, entry.data.target)
+          ? {}
+          : { coordinates: { ...state.coordinates, target: entry.data.target }, targetRevision: entry.entry }),
+      };
     case "deliver":
       return { ...state, delivery: entry, currentIntegration: { ...entry.data.integration } };
     case "reintegrated":

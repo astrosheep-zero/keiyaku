@@ -81,7 +81,7 @@ residue while leaving both the full text and native answer intact.
 The caller already knows the operation and supplied context. A renderer may
 receive that context explicitly; it never scrapes stored facts to recover an
 input echo or invents a second outcome. Amendment reports actual changed
-sections and independently changed obligations and prerequisites, rather than
+sections and independently changed target, obligations, and prerequisites, rather than
 returning the entire replacement document. Arc reports its admitted chapter
 identity; its supplied title remains invocation context. Binding preserves its
 native Contract capability. Delivery returns the captured identities; explicitly

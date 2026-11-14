@@ -106,6 +106,7 @@ type VerifyRequirementInput = Readonly<{
   gates: readonly Gate[];
   at: string;
   snapshot: SnapshotId;
+  targetRevision?: import("../core/facts/types.js").EntryUlid;
   requirement: RequirementId;
   declaration: VerificationDeclaration;
   index: number;
@@ -231,7 +232,10 @@ async function verificationStep(
 /** Execute one declaration and record testimony only when its gate is selected. */
 export async function verifyRequirement(input: VerifyRequirementInput): Promise<VerificationResult> {
   const snapshot = input.snapshot;
-  const subject = dependencyKeySet([{ kind: "snapshot", value: snapshot }]);
+  const subject = dependencyKeySet([
+    { kind: "snapshot", value: snapshot },
+    ...(input.targetRevision === undefined ? [] : [{ kind: "target" as const, value: input.targetRevision }]),
+  ]);
 
   const execution = await executeVerification({
     repository: input.repository,

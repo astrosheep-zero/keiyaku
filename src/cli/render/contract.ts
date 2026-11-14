@@ -309,12 +309,18 @@ function bind(result: AcceptedOf<"bind">, columns: number, color: boolean): stri
 
 function amend(result: AcceptedOf<"amend">, columns: number, color: boolean): string {
   const lines = titleLines("✓", "amended", result.contractId, columns);
-  if (result.changedSections === undefined && result.gatesChanged === undefined && result.afterChanged === undefined)
+  if (
+    result.changedSections === undefined &&
+    result.gatesChanged === undefined &&
+    result.afterChanged === undefined &&
+    result.target === undefined
+  )
     receiptRow(lines, " ", "terms", [{ text: "unchanged" }], columns);
   if (result.changedSections !== undefined)
     receiptRow(lines, " ", "changed sections", [{ text: result.changedSections.join(" · ") }], columns);
   if (result.gatesChanged === true) receiptRow(lines, " ", "gates", [{ text: "changed" }], columns);
   if (result.afterChanged === true) receiptRow(lines, " ", "after", [{ text: "changed" }], columns);
+  if (result.target !== undefined) receiptRow(lines, " ", "target", [{ text: result.target }], columns);
   lines.push(
     ...deviations(result, columns, color),
     ...contractIssueLines(result, columns, { mode: "receipt" }),

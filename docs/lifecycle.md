@@ -10,9 +10,13 @@ A Contract is bound from binding until it is either accepted or abandoned;
 delivery is a recorded fact on a bound Contract, never a phase of its own.
 Binding alone places the Contract in its bound phase; there is no pre-phase.
 Terminal state is a journal-derived read model, never a separate record.
-Binding fixes coordinates and initial terms. Amendment may replace
-active terms, including declared dependencies and gates, but can neither change
-coordinates nor reopen a terminal Contract.
+Binding fixes the start and workspace coordinates and initial terms. Amendment
+may replace active terms, including declared dependencies and gates, and may
+explicitly select a different target. It cannot change the start or workspace
+coordinates or reopen a terminal Contract. Target amendment never follows a
+former destination automatically: an active child may explicitly leave either an
+accepted or abandoned destination for an existing branch or an active Contract.
+Self-targeting and cycles through Contract destinations are refused.
 
 `after` is an explicit, acyclic relation for work that must build on another
 Contract's settled outcome or needs deliberate sequencing. It is not a Region
@@ -46,7 +50,11 @@ handoff base before projecting the judged conflict. Review records observed
 worktree before a delivery and is not delivery authorization. A satisfied
 review may request trailing placement; an unsatisfied review never does.
 Review and delivery share the candidate's worktree-content identity when it
-becomes relevant, while target movement alone does not make a review stale. A
+becomes relevant, while target movement or explicit retargeting alone does not
+make a review stale. Review judges the candidate patch relative to the immutable
+start, not the destination-relative presentation diff. Retargeting can change
+that presentation without changing the reviewed patch; resolution that changes
+the candidate bytes is judged by the ordinary patch-id rule. A
 changed candidate content identity makes prior testimony stale with an explicit
 candidate-content-change reason; the reason names the pinned target when one
 exists and includes the previous and current ChangeIds.

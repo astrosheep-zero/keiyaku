@@ -241,6 +241,7 @@ export async function verifyOperation(input: VerifyOperationInput): Promise<Veri
       repository: input.scope,
       contractId: state.id,
       gates: state.terms.gates,
+      ...(state.targetRevision === undefined ? {} : { targetRevision: state.targetRevision }),
       at: timestamp(),
       snapshot,
       declaration,

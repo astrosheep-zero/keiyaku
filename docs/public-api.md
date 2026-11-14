@@ -92,6 +92,10 @@ in what omission means: an omitted target copies the source target including
 its physical incarnation, a deliberately absent target clears it, and an
 explicit target overrides it. Forking retains the source start even when the
 destination changes.
+Amendment accepts an explicit existing branch or active Contract destination
+through that same target boundary. Omission preserves the effective target;
+it neither selects the invocation branch nor inherits a former destination's
+landing target. Target eligibility is owned by [lifecycle.md](lifecycle.md).
 Gates remain opaque public words; the package does not infer a custom gate's meaning or manufacture its producer.
 
 A Contract wait observes the addressed journals themselves, without requiring an

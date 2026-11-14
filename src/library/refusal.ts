@@ -57,10 +57,21 @@ export const operationRefusalSchemas = {
   amend: z.union([
     z
       .strictObject({
-        kind: z.enum(["contract-missing", "terminal", "terms-moved", "unknown-prerequisite", "cyclic-prerequisite"]),
+        kind: z.enum([
+          "contract-missing",
+          "terminal",
+          "terms-moved",
+          "unknown-prerequisite",
+          "cyclic-prerequisite",
+          "cyclic-target",
+          "invalid-target",
+          "target-missing",
+        ]),
       })
       .readonly(),
     declarationReasonSchema,
+    targetLifecycleReasonSchema,
+    targetWorkspaceReasonSchema,
   ]),
   deliver: z.union([
     previewRefusalSchema,

@@ -38,6 +38,7 @@ function eventLine(event: ContractHistoryEvent, dispatches: readonly ContractHis
         ...(event.changedSections ?? []),
         ...(event.gates === undefined ? [] : ["gates"]),
         ...(event.after === undefined ? [] : ["after"]),
+        ...(event.target === undefined ? [] : [`target ${targetName(event.target)}`]),
       ];
       return `amended${changed.length === 0 ? "" : ` · ${changed.join(" · ")}`}`;
     }
@@ -73,6 +74,7 @@ function semanticBody(event: ContractHistoryEvent): readonly string[] {
     case "amend":
       return [
         ...listFact("changed sections", event.changedSections),
+        ...(event.target === undefined ? [] : [`  target  ${targetName(event.target)}`]),
         ...listFact("gates", event.gates),
         ...listFact("after", event.after),
       ];

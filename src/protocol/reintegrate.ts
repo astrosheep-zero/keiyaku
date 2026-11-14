@@ -2,6 +2,7 @@ import type { ProtocolProgress } from "./progress.js";
 import { contractState, targetContractRefusal } from "../core/facts/observation.js";
 import {
   targetName,
+  sameTarget,
   type ContractId,
   type ContractState,
   type ContractTarget,
@@ -132,7 +133,8 @@ function assembleReintegrationAttempt(
       : STALE_PRIVATE_STATE_PREPARATION;
   }
   if (external.kind === "unavailable") return STALE_PRIVATE_STATE_PREPARATION;
-  if (external.witness.head !== state.head) return STALE_PRIVATE_STATE_PREPARATION;
+  if (external.witness.head !== state.head || !sameTarget(state.coordinates.target, input.target))
+    return STALE_PRIVATE_STATE_PREPARATION;
   if (state.delivery === null || state.currentIntegration === null) {
     return { kind: "unavailable", refusal: { kind: "delivery-missing" } };
   }

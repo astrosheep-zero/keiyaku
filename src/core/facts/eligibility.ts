@@ -1,5 +1,20 @@
 import { contractState, type ContractsObservation } from "./observation.js";
-import type { ContractId } from "./types.js";
+import type { ContractId, ContractTarget } from "./types.js";
+
+/** Decide whether a destination chain would cycle through the amended Contract. */
+export function targetCycles(
+  contract: ContractId,
+  target: ContractTarget | undefined,
+  observation: ContractsObservation,
+): boolean {
+  const visited = new Set<ContractId>([contract]);
+  while (target !== undefined && typeof target !== "string") {
+    if (visited.has(target.contractId)) return true;
+    visited.add(target.contractId);
+    target = contractState(observation, target.contractId)?.coordinates.target;
+  }
+  return false;
+}
 
 /** Decide whether resulting prerequisites reach the amended contract. */
 export function prerequisitesReach(

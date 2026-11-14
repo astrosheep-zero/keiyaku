@@ -61,12 +61,21 @@ export const bindRefusalSchema = z.union([
     .readonly(),
   targetLifecycleReasonSchema,
 ]);
-export const amendRefusalSchema = z
-  .object({
-    kind: z.enum(["contract-missing", "terminal", "terms-moved", "unknown-prerequisite", "cyclic-prerequisite"]),
-  })
-  .strict()
-  .readonly();
+export const amendRefusalSchema = z.union([
+  z
+    .strictObject({
+      kind: z.enum([
+        "contract-missing",
+        "terminal",
+        "terms-moved",
+        "unknown-prerequisite",
+        "cyclic-prerequisite",
+        "cyclic-target",
+      ]),
+    })
+    .readonly(),
+  targetLifecycleReasonSchema,
+]);
 export const deliverRefusalSchema = z.union([activeContractRefusalSchema, targetLifecycleReasonSchema]);
 export const verificationDeclarationRefusalSchema = z
   .object({ kind: z.literal("verification-declaration-invalid") })

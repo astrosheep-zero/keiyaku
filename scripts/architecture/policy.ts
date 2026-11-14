@@ -325,8 +325,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("workspace-place.ts"),
       ],
     },
-    {
-      source: "protocol/bind.ts",
+    ...["protocol/bind.ts", "protocol/amend.ts"].map((source) => ({
+      source,
       allow: protocolOwner.allow,
       deny: [
         ...protocolOwner.deny.filter((rule) => rule !== targetPlacementRuntime),
@@ -336,7 +336,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
           "recoverTargetPlacement",
         ]),
       ],
-    },
+    })),
     { source: "protocol/review.ts", ...leadingAdmissionOwner },
     {
       source: "protocol/deliver.ts",

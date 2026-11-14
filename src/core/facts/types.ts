@@ -106,6 +106,15 @@ export function targetName(target: ContractTarget): string {
   return typeof target === "string" ? target : target.contractId;
 }
 
+export function sameTarget(left: ContractTarget | undefined, right: ContractTarget | undefined): boolean {
+  if (typeof left !== "object" || typeof right !== "object") return left === right;
+  return (
+    left.contractId === right.contractId &&
+    left.worktree.id === right.worktree.id &&
+    left.worktree.identity === right.worktree.identity
+  );
+}
+
 export type ContractCoordinates = Readonly<{
   start: SnapshotId;
   target?: ContractTarget;
@@ -128,7 +137,7 @@ export type BindData = Readonly<{
   terms: ContractTerms;
 }>;
 
-export type AmendData = ContractTerms;
+export type AmendData = ContractTerms & Readonly<{ target?: ContractTarget }>;
 
 export type DeliverData = Readonly<{
   note?: string;
@@ -225,6 +234,7 @@ export type ContractState = Readonly<{
   id: ContractId;
   head: ContractHead | null;
   coordinates: ContractCoordinates;
+  targetRevision?: EntryUlid;
   terms: ContractTerms;
   delivery: DeliverEntry | null;
   currentIntegration: CurrentIntegration | null;
