@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, rmSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const artifact = resolve(root, "build/src/runtime/proc/windows-launch.exe");
@@ -29,14 +30,18 @@ function assertArchive(path) {
 
 assertWindowsArtifact(artifact);
 if (process.env.npm_lifecycle_event === "postpack" && process.env.npm_config_dry_run !== "true") {
-  const output = execFileSync("npm", ["pack", "--json", "--ignore-scripts"], { cwd: root, encoding: "utf8" });
-  const archive = JSON.parse(output)[0]?.filename;
-  if (typeof archive !== "string")
-    throw new Error("npm pack did not return its tarball path for Windows launcher inspection");
-  const archivePath = resolve(root, archive);
+  const destination = mkdtempSync(join(tmpdir(), "keiyaku-verify-pack-"));
   try {
-    assertArchive(archivePath);
+    const output = execFileSync(
+      "npm",
+      ["pack", "--json", "--ignore-scripts", "--pack-destination", destination],
+      { cwd: root, encoding: "utf8" },
+    );
+    const archive = JSON.parse(output)[0]?.filename;
+    if (typeof archive !== "string")
+      throw new Error("npm pack did not return its tarball path for Windows launcher inspection");
+    assertArchive(resolve(destination, archive));
   } finally {
-    rmSync(archivePath, { force: true });
+    rmSync(destination, { recursive: true, force: true });
   }
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   copyFileSync,
   existsSync,
@@ -123,7 +124,11 @@ test("published package installs one keiyaku CLI and runs against a real reposit
   assert.equal(packageManifest.name, "@astrosheep/keiyaku");
   assert.equal(installedPackage.name, "@astrosheep/keiyaku");
   assert.equal(installedPackage.version, packageManifest.version);
-  assert.deepEqual(installedPackage.bin, { kei: "build/src/cli/index.js", keiyaku: "build/src/cli/index.js" });
+  assert.deepEqual(installedPackage.bin, {
+    kei: "build/src/cli/index.js",
+    keiyaku: "build/src/cli/index.js",
+    "keiyaku-mcp": "build/src/mcp/index.js",
+  });
 
   const installedBuild = join(installed, "node_modules", "@astrosheep", "keiyaku", "build");
   for (const host of ["claude", "codex", "opencode"]) {
@@ -260,5 +265,38 @@ test("packaging refuses a missing or corrupt Windows launcher artifact", () => {
     assert.equal(readdirSync(packed).filter((name) => name.endsWith(".tgz")).length, 0);
   } finally {
     rmSync(fixture, { recursive: true, force: true });
+  }
+});
+
+test("postpack verification keeps the caller's explicit pack destination intact", () => {
+  const fixture = mkdtempSync(join(tmpdir(), "keiyaku-pack-destination-"));
+  const destination = join(fixture, "destination");
+  const cache = mkdtempSync(join(tmpdir(), "keiyaku-pack-destination-cache-"));
+  mkdirSync(join(fixture, "scripts"), { recursive: true });
+  mkdirSync(join(fixture, "build", "src", "runtime", "proc"), { recursive: true });
+  mkdirSync(destination);
+  copyFileSync(join(root, "package.json"), join(fixture, "package.json"));
+  copyFileSync(join(root, "scripts", "verify-package.js"), join(fixture, "scripts", "verify-package.js"));
+  copyFileSync(
+    join(root, "build", "src", "runtime", "proc", "windows-launch.exe"),
+    join(fixture, "build", "src", "runtime", "proc", "windows-launch.exe"),
+  );
+  try {
+    const [entry] = JSON.parse(
+      npmCommand(["pack", "--json", "--pack-destination", destination, "--cache", cache], fixture),
+    ) as [{ readonly filename: string; readonly shasum: string }];
+    assert.ok(entry, "npm pack reported no tarball");
+    assert.deepEqual(readdirSync(destination), [entry.filename]);
+    const archive = join(destination, entry.filename);
+    assert.equal(createHash("sha1").update(readFileSync(archive)).digest("hex"), entry.shasum);
+    assert.ok(
+      command("tar", ["-tzf", archive], fixture)
+        .split(/\r?\n/u)
+        .includes("package/build/src/runtime/proc/windows-launch.exe"),
+    );
+    assert.equal(readdirSync(fixture).filter((name) => name.endsWith(".tgz")).length, 0);
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+    rmSync(cache, { recursive: true, force: true });
   }
 });
