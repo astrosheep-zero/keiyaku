@@ -43,6 +43,7 @@ import {
   temporaryDirectory,
 } from "./support/process.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
+import { withGitShim } from "./support/git.js";
 import { runCli } from "./support/cli-fixtures.js";
 import { assertWireConformance } from "./support/schema-parity.js";
 
@@ -768,6 +769,50 @@ test("SDK deliver selects native preview or placement with one text-only tool", 
   assert.equal(repository.run(["show", "refs/heads/main:dirty.txt"]).trim(), "unfinished work");
   assert.equal(present(await bound.kei.state()).terminal?.kind, "claimed");
   assert.equal(existsSync(bound.worktreePath), false);
+});
+
+test("SDK amend reports a returned publication retry as retryable", async (t) => {
+  const repository = repositoryWithMain();
+  const home = temporaryDirectory(t, "kei-mcp-retry-home-");
+  const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
+    markdown: document(), target: null, gates: [],
+  }));
+  const input = { contract: bound.contractId, markdown: document("exit 0") };
+  const environment = { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home };
+  await withGitShim(
+    [
+      'if [ "$1" = "update-ref" ]; then',
+      "  cat >/dev/null",
+      '  printf "forced publication failure\\n" >&2',
+      "  exit 42",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    {},
+    async (gitPath) => {
+      const shimmed = { ...environment, KEIYAKU_GIT_PATH: gitPath };
+      const value = await Keiyaku.at({ cwd: repository.path, environment: shimmed, home }).run("amend", input);
+      assert.ok(value.kind === "retry" && value.reason === "publication-failed", JSON.stringify(value));
+      assert.match(value.diagnostic, /forced publication failure/u);
+      const adapter = createKeiyakuMcpServer({ cwd: repository.path, environment: shimmed, version: "test" });
+      const client = new Client({ name: "retryable-publication", version: "1" });
+      const [a, b] = InMemoryTransport.createLinkedPair();
+      await Promise.all([client.connect(a), adapter.server.connect(b)]);
+      t.after(async () => { await client.close(); await adapter.close(); });
+      await client.listTools();
+      const response = await client.callTool({ name: "amend", arguments: input });
+      assert.equal(
+        response._meta?.["keiyaku/disposition"],
+        classifyVerb("amend", input, { kind: "returned", value }),
+      );
+      assert.equal(response.isError, true);
+      assert.equal(response.structuredContent, undefined);
+      const blocks = response.content as { type: string; text: string }[];
+      assert.equal(blocks.length, 1);
+      assert.equal(blocks[0]?.text.split("\n")[0], "retryable");
+      assert.doesNotMatch(blocks[0]!.text, /"category"/u);
+    },
+  );
 });
 
 test("cancelled SDK wait retires without changing its Contract", async (t) => {
