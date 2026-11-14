@@ -273,6 +273,10 @@ async function fakeTransport(t: TestContext, options: Readonly<{ timeoutMs?: num
   const directory = await mkdtemp(join(tmpdir(), "paseo-sdk-fake-"));
   const entry = join(directory, "sdk.mjs");
   await writeFile(entry, FAKE_SDK);
+  // A manifest beside the entry makes this directory the package root, so
+  // discovery stops in one read instead of probing every ancestor.
+  await writeFile(join(directory, "package.json"), JSON.stringify({ name: "@astrosheep/keiyaku", version: "0.0.0",
+    type: "module", exports: { ".": "./sdk.mjs" } }));
   const observed = await import(pathToFileURL(entry).href) as {
     tellStarted: { promise: Promise<AbortSignal> };
     streams: { signal: AbortSignal; returned: boolean }[];
@@ -579,7 +583,13 @@ test("ended and invalid streams release their readers without reopening", async 
 });
 
 test("an idle frame is never bounded by the ordinary request timeout", async (t) => {
-  const { transport, set } = await fakeTransport(t, { timeoutMs: 400 });
+  const { transport, set, entry } = await fakeTransport(t, { timeoutMs: 400 });
+  // Entry discovery and cold module loading belong to startup, never to one
+  // bounded request; prove readiness on its own generous clock first.
+  const warm = createSdkTransport({ entry, timeoutMs: 5_000 });
+  await set({});
+  assert.deepEqual(await warm.status("/world", "aku/test/1", new AbortController().signal), {});
+  await warm.close();
   await set({ streamHistory: frame(1) });
   const stream = transport.stream("/world", "aku/test/1", new AbortController().signal)[Symbol.asyncIterator]();
   assert.deepEqual(pulled(await stream.next()), [1], "opening the subscription is one bounded handshake");
