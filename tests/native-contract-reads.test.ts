@@ -246,6 +246,85 @@ test("history propagates native cancellation during optional Dispatch enrichment
   );
 });
 
+test("history reports internal unavailable Dispatch enrichment when the Dispatch blob read fails", async (t) => {
+  const raw = repositoryWithMain();
+  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ markdown: document(), target: null }));
+  accepted(await bound.kei.amend({ markdown: "## Replace: Objective\n\nRetained amended objective.\n" }));
+  const semantic = await bound.kei.history();
+  assert.ok(semantic.kind === "contract");
+  const complete = await bound.kei.history({ full: true });
+  assert.ok(complete.kind === "contract");
+  const akumaId = parseAkumaId("aku/worker/00000004").id;
+  const git = await repositoryAt(raw.path);
+  assert.equal(
+    (await publishDispatch({ repository: git, akumaId, contractId: bound.contractId })).kind,
+    "dispatched",
+  );
+  const healthy = await bound.kei.history({ full: true });
+  assert.ok(healthy.kind === "contract");
+  assert.equal(healthy.dispatches, undefined);
+  assert.deepEqual(
+    healthy.events.filter((event) => event.kind === "dispatch").map((event) => event.akumaId),
+    [akumaId],
+  );
+  const snapshot = await withGitDecodeChannel(git, (channel) =>
+    withGitReadObservation(git, channel, (observation) => observation.snapshot),
+  );
+  const dispatch = [...snapshot.paths].find(([path]) => path.startsWith("dispatch/"))![1];
+  const home = temporaryDirectory(t, "history-internal-home-");
+  await withGitShim(
+    [
+      'if [ "$1 $2" = "cat-file --batch" ]; then',
+      "  while IFS= read -r oid; do",
+      '    if [ "$oid" = "$KEIYAKU_BROKEN_OID" ]; then',
+      '      printf "%s blob\\n" "$oid"',
+      "    else",
+      '      printf "%s\\n" "$oid" | "$KEIYAKU_REAL_GIT" cat-file --batch',
+      "    fi",
+      "  done",
+      "  exit 0",
+      "fi",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    { KEIYAKU_BROKEN_OID: dispatch.oid },
+    async (gitPath) => {
+      const environment = {
+        HOME: home,
+        USERPROFILE: home,
+        KEIYAKU_HOME: home,
+        KEIYAKU_GIT_PATH: gitPath,
+      };
+      const kei = Keis.of(await Repo.at({ path: raw.path, gitPath })).kei({ id: bound.contractId });
+      const facet = Keiyaku.at({ cwd: raw.path, environment, home });
+      for (const full of [false, true]) {
+        const history = await kei.history({ full });
+        assert.ok(history.kind === "contract");
+        assert.deepEqual(history.events, full ? complete.events : semantic.events);
+        assert.equal(history.dispatches?.kind, "unavailable");
+        assert.equal(history.dispatches?.category, "internal");
+        const diagnostic = history.dispatches?.diagnostic ?? "";
+        assert.match(diagnostic, /unexpected header/u);
+        assert.ok(diagnostic.includes(dispatch.oid));
+        assertWireRoundTrip(contractHistorySchema, history);
+        assertWireRoundTrip(Keiyaku.verbs.history.output, history);
+        assert.equal(
+          classifyVerb("history", { selector: bound.contractId, full }, { kind: "returned", value: history }),
+          "accepted",
+        );
+        assert.deepEqual(await facet.run("history", { selector: bound.contractId, full }), history);
+        const argv = ["-C", raw.path, "history", bound.contractId, ...(full ? ["--full"] : [])];
+        const text = await runCli(argv, { environment });
+        assert.equal(text.exit, 0, text.stderr);
+        assert.equal(text.stderr, "");
+        assert.ok(text.stdout.includes(`history  ${bound.contractId}`));
+        assert.match(text.stdout, full ? /changed sections  Objective/u : /bound to targetless/u);
+        assert.ok(text.stdout.includes("! Dispatch history unavailable · internal · "));
+        assert.doesNotMatch(text.stdout, /authority-corruption/u);
+      }
+    },
+  );
+});
+
 test("history preserves observation and decode-channel retirement failures", async (t) => {
   const raw = repositoryWithMain();
   const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ markdown: document(), target: null }));
