@@ -26,6 +26,5 @@ Pi has built-in MCP. Add a server to ~/.pi/agent/mcp.json or the project's
   }
 }
 
-Exposure applies to the whole server. The client timeout is independent of Keiyaku
-timeoutMs; ask, wait, or verify may need longer. Reload Pi after configuration changes.
+Exposure applies to the whole server. The client timeout is independent of Keiyaku timeout; ask, wait, or verify may need longer. Reload Pi after configuration changes.
 `;

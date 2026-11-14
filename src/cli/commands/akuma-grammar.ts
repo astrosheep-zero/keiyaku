@@ -215,12 +215,15 @@ function parseWait(
   const selectors = rawSelectors.map((value) => validateSet(value, fail));
   if (selectors.some((value) => value.startsWith("kei/")) && selectors.some((value) => !value.startsWith("kei/")))
     fail("wait cannot mix Contract and Akuma selectors");
+  const timeout =
+    flags.timeout === undefined ? undefined : stringFlag(flags.timeout, "--timeout requires a duration", fail);
+  if (timeout !== undefined) parseDuration(timeout, "--timeout", fail);
   return {
     name: "wait",
     input: {
       selectors,
       ...(completion === undefined ? {} : { completion }),
-      ...(flags.timeout === undefined ? {} : { timeoutMs: parseDuration(flags.timeout, "--timeout", fail) }),
+      ...(timeout === undefined ? {} : { timeout }),
     },
     output,
   };

@@ -437,7 +437,7 @@ test("wait accepts a plural selection without an explicit completion mode", () =
   });
   assert.deepEqual(command(["wait", "aku/claude/1234abcd", "@peer", "--timeout", "5m"]), {
     name: "wait",
-    input: { selectors: ["aku/claude/1234abcd", "@peer"], timeoutMs: 300_000 },
+    input: { selectors: ["aku/claude/1234abcd", "@peer"], timeout: "5m" },
     output: "text",
   });
   assert.deepEqual(command(["wait", "aku/*/*", "--all"]), {

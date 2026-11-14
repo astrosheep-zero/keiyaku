@@ -50,11 +50,7 @@ import {
 } from "./contract-outcomes.js";
 import { contractHistorySchema } from "./contract-types.js";
 import { guidanceSchema, guidanceNormalSchema } from "./kei.js";
-import {
-  contractWaitDurationSchema,
-  contractWaitResultSchema,
-  contractWaitNormalResultSchema,
-} from "./contract-wait.js";
+import { contractWaitResultSchema, contractWaitNormalResultSchema } from "./contract-wait.js";
 import { reconcileResultSchema } from "./reconcile.js";
 import { akumaHistoryResultSchema, historySelectionSchemas } from "./selection.js";
 import { whoamiFactsSchema } from "./keiyaku-identity.js";
@@ -471,10 +467,10 @@ export const verbs = Object.freeze({
             .enum(["any", "all"])
             .exactOptional()
             .describe('Wake when "any" selected target settles/changes (default) or wait for "all".'),
-          timeoutMs: contractWaitDurationSchema
+          timeout: waitDuration
             .exactOptional()
             .describe(
-              'Observation deadline in integer milliseconds; returns reason "deadline" without canceling work.',
+              'Observation deadline as an integer duration with unit ms, s, m, or h; returns reason "deadline" without canceling work.',
             ),
         })
         .readonly(),
@@ -491,9 +487,11 @@ export const verbs = Object.freeze({
             .enum(["any", "all"])
             .exactOptional()
             .describe('Wake when "any" selected target settles/changes (default) or wait for "all".'),
-          timeoutMs: timeout.describe(
-            'Observation deadline in integer milliseconds; returns reason "deadline" without canceling work.',
-          ),
+          timeout: waitDuration
+            .exactOptional()
+            .describe(
+              'Observation deadline as an integer duration with unit ms, s, m, or h; returns reason "deadline" without canceling work.',
+            ),
         })
         .readonly(),
     ]),

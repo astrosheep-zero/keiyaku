@@ -22,7 +22,6 @@ test("packaged stdio server launches from its documented Pi configuration", asyn
   assert.equal(server.command, "keiyaku-mcp");
   assert.equal(server.exposure, "direct");
   assert.equal(server.timeout, 600);
-  assert.match(help, /timeoutMs/);
   const binDir = join(root, "bin");
   mkdirSync(binDir);
   if (process.platform !== "win32") symlinkSync(bin, join(binDir, server.command));

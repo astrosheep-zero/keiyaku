@@ -547,15 +547,21 @@ export class Keiyaku {
     return await akumas.kill({ ...input, ...(at.repo === undefined ? {} : { repo: at.repo }) });
   }
 
-  async #wait({ selectors, ...input }: ExecutionInput<"wait">) {
+  async #wait({ selectors, timeout, ...input }: ExecutionInput<"wait">) {
+    const timeoutMs = timeout === undefined ? {} : { timeoutMs: waitTimeout(timeout) };
     const contracts = selectors.filter((selector) => selector.startsWith("kei/"));
     if (contracts.length > 0) {
       const at = await this.#coordinates("required", true);
       if (at.repo === undefined) throw new KeiyakuUsageError("Contract wait requires a repository");
-      return await Keis.of(at.repo).wait({ contracts, ...input });
+      return await Keis.of(at.repo).wait({ contracts, ...input, ...timeoutMs });
     }
     const { at, akumas } = await this.#akumas();
-    return await akumas.wait({ akuma: selectors, ...input, ...(at.repo === undefined ? {} : { repo: at.repo }) });
+    return await akumas.wait({
+      akuma: selectors,
+      ...input,
+      ...timeoutMs,
+      ...(at.repo === undefined ? {} : { repo: at.repo }),
+    });
   }
 
   async #history({ selector, ...input }: VerbInput<"history">) {
