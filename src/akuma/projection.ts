@@ -3,6 +3,7 @@ import {
   toolResultSchema,
   fileChangeSchema,
   diffstatSchema,
+  permissionRequestSchema,
   type AgentEvent,
   type ToolCall,
   type ToolResult,
@@ -69,6 +70,21 @@ export const publicToolResultSchema = toolResultSchema
     exitCode: toolResultSchema.shape.exitCode.unwrap().exactOptional(),
   })
   .strict()
+  .readonly();
+
+export const publicPermissionRequestSchema = permissionRequestSchema
+  .extend({ tool: permissionRequestSchema.shape.tool.unwrap().exactOptional() })
+  .strict()
+  .readonly();
+const permissionRowSchema = z
+  .strictObject({
+    kind: z.literal("permission"),
+    sequence: countSchema,
+    turnSequence: countSchema,
+    at: timestampSchema,
+    requests: z.array(publicPermissionRequestSchema).readonly(),
+    truncated: z.literal(true).exactOptional(),
+  })
   .readonly();
 
 const tellDeliverySchema = z
@@ -177,6 +193,7 @@ const openToolRowSchema = toolRowSchema
   .refine((row) => row.state !== "active" || row.durationMs === undefined, "active tool has no duration")
   .readonly();
 const snapshotFactRowSchema = z.union([
+  permissionRowSchema,
   reportRowSchema,
   callRowSchema,
   textRowSchema("said"),
@@ -261,7 +278,8 @@ type SaidRow = z.output<ReturnType<typeof textRowSchema>>;
 type ThoughtRow = z.output<ReturnType<typeof textRowSchema>>;
 type NoteRow = z.output<ReturnType<typeof textRowSchema>>;
 export type ReportRow = z.output<typeof reportFactSchema>;
-type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow | ReportRow;
+export type PermissionRow = z.output<typeof permissionRowSchema>;
+type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow | ReportRow | PermissionRow;
 export type { TellRow } from "./heart/facts.js";
 export type OutcomeRow = z.output<typeof outcomeRowSchema>;
 
@@ -305,6 +323,7 @@ export type ReportedFileChange = z.output<typeof reportedFileChangeSchema>;
 export type ActivitySnapshot = z.output<typeof activitySnapshotSchema>;
 
 export const activityRowSchema = z.union([
+  permissionRowSchema,
   turnRowSchema,
   callRowSchema,
   reportRowSchema,
@@ -447,6 +466,15 @@ function publicResult(result: ToolResult): CompletedToolRow["state"] {
 }
 
 function narrationRow(fact: Extract<TimelineFact, { event: unknown }>, event: AgentEvent): TurnNarrationRow | null {
+  if (event.type === "permission")
+    return {
+      kind: "permission",
+      sequence: fact.sequence,
+      turnSequence: fact.turnSequence,
+      at: fact.at,
+      requests: event.requests.map(({ tool, ...request }) => ({ ...request, ...(tool === undefined ? {} : { tool }) })),
+      ...(event.truncated === true ? { truncated: true } : {}),
+    };
   if (event.type !== "assistant" && event.type !== "thought" && event.type !== "note") return null;
   return {
     kind: event.type === "assistant" ? "said" : event.type,

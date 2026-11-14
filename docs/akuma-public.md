@@ -45,11 +45,20 @@ is unnamed returns the model to unknown. Descriptive birth origin, caller,
 provider environment, opaque configuration and system prompts remain outside
 this actionable status. A standalone handle may retain its frozen birth
 observation; composed addressed status answers current work without repeating it.
+For an open Turn, current-work status distinguishes an observed native approval
+wait from ordinary execution and names the pending action, resources, and tool
+when the provider supplied them. The current wait remains visible independently
+of the ordinary activity window; an answered request clears it, and a closed
+Turn never carries it forward. This is observed work, not a new life state,
+permission policy, or a channel for answering the request. Absence of such
+evidence never proves that the provider cannot be waiting.
+
 A status snapshot reports semantic current work: an open or idle frontier,
 pending input, exact retained activity coordinates and the latest known outcome
 identity and verdict. It does not carry a terminal-chat timeline or answer
-preview. One optional bounded current-action summary names the selected active
-tool, or the latest settled narration or input when no active tool supplies it.
+preview. One optional bounded current-action summary names the pending approval,
+the selected active tool, or the latest settled narration or input when neither
+supplies it.
 The native owner derives it from the same frontier using neutral activity
 formatting and exposes clipping; omission establishes neither inactivity nor
 idle. Its latest retained activity time is observation evidence for every life

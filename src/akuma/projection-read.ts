@@ -213,8 +213,10 @@ export function selectSnapshot(
     const window = currentTurnWindow(ledger);
     const opening = openingInput(ledger);
     const latestSaid = window.findLast((row) => row.kind === "said");
+    const permission = window.findLast((row) => row.kind === "permission");
     const pinSet = new Set<ActivityRow>([
       ...window.filter(isProtectedTool),
+      ...(permission === undefined ? [] : [permission]),
       ...(latestSaid === undefined ? [] : [latestSaid]),
       ...pins,
       ...(opening === undefined ? [] : [opening]),

@@ -4,7 +4,13 @@ import type { AkumaStatus } from "../../akuma/akuma.js";
 import type { KillEvidence } from "../../akuma/heart/index.js";
 import type { ActivityRow } from "../../akuma/projection.js";
 import { parseExactHistorySelector } from "../../akuma/identity.js";
-import { renderDiffstat, toolRepr, type ToolRepr, type CurrentWork } from "../../akuma/status-projection.js";
+import {
+  permissionText,
+  renderDiffstat,
+  toolRepr,
+  type ToolRepr,
+  type CurrentWork,
+} from "../../akuma/status-projection.js";
 import type {
   AkumaAskObservation,
   AkumaAskResult,
@@ -153,6 +159,7 @@ function rowText(row: Exclude<RenderRow, { kind: "tool" }>): Readonly<{
       lines: row.kind === "said" || row.kind === "thought" ? 2 : row.kind === "tell" || row.kind === "call" ? 1 : 2,
     };
   }
+  if (row.kind === "permission") return { text: permissionText(row), lines: 2 };
   if (row.kind === "outcome")
     return row.outcome.kind === "answered"
       ? { text: row.outcome.answer, lines: 3 }
@@ -200,6 +207,7 @@ function rowPrefix(
     return { first, continuation: " ".repeat(displayColumns(first)) };
   }
   if (row.kind === "note") return actionPrefix(ACTION_MARGIN, "note", columns);
+  if (row.kind === "permission") return actionPrefix(ACTION_MARGIN, "approval", columns);
   if (row.kind === "outcome")
     return {
       first: row.outcome.kind === "answered" ? TOP_ANSWER : row.outcome.kind === "canceled" ? "○ " : TOP_FAILURE,
@@ -960,7 +968,7 @@ export function historyRawAnswer(result: AkumaHistoryResult, historyId: string |
       return `${prefix}${tool.label} ${tool.text}${tool.suffix}${tool.diagnostic === "" ? "" : ` · ${tool.diagnostic}`}`;
     }
     const kind = row.kind === "tell" && row.state === "pending" ? "pending-tell" : row.kind;
-    return `${kind}: ${row.text}`;
+    return `${kind}: ${rowText(row).text}`;
   }
   if (result.kind === "akuma-report") return result.text;
   if (result.kind !== "akuma-exact") return undefined;

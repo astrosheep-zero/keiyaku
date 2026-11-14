@@ -1,5 +1,12 @@
 import { z } from "zod";
-import { type ActiveToolRow, type ActivityRow, type ActivitySnapshot, type ToolRow } from "./projection.js";
+import {
+  publicPermissionRequestSchema,
+  type PermissionRow,
+  type ActiveToolRow,
+  type ActivityRow,
+  type ActivitySnapshot,
+  type ToolRow,
+} from "./projection.js";
 import { turnHistoryIdSchema } from "./identity.js";
 
 const sequence = z.number().int().nonnegative().safe();
@@ -10,6 +17,15 @@ export const currentWorkSchema = z
     turn: z.strictObject({ sequence, bodySequence: sequence }).readonly().exactOptional(),
     activeTools: z.array(coordinate).nonempty().readonly().exactOptional(),
     latestActivity: sequence.exactOptional(),
+    awaiting: z
+      .strictObject({
+        kind: z.literal("permission"),
+        id: sequence,
+        requests: z.array(publicPermissionRequestSchema).nonempty().readonly(),
+        clipped: z.literal(true).exactOptional(),
+      })
+      .readonly()
+      .exactOptional(),
     pending: z
       .array(z.strictObject({ id: sequence, tellId: z.string() }).readonly())
       .nonempty()
@@ -154,9 +170,20 @@ export function toolRepr(row: ToolRow): ToolRepr {
   return { ...core, suffix: `${core.suffix}${suffix}`, diagnostic };
 }
 
+/** A neutral observation of approval work, not a policy or a response channel. */
+export function permissionText(row: PermissionRow): string {
+  if (row.requests.length === 0) return "Approval wait cleared";
+  return `Awaiting approval: ${row.requests
+    .map((request) =>
+      [request.action, ...(request.tool === undefined ? [] : [request.tool]), ...request.resources].join(" · "),
+    )
+    .join("; ")}`;
+}
+
 function currentAction(row: ActivityRow): CurrentWork["summary"] {
   let text: string;
-  if (row.kind === "tool") {
+  if (row.kind === "permission") text = permissionText(row);
+  else if (row.kind === "tool") {
     const tool = toolRepr(row);
     text = `${tool.label} ${tool.text}${tool.suffix}${tool.diagnostic === "" ? "" : ` · ${tool.diagnostic}`}`;
   } else if (row.kind === "call" || row.kind === "tell" || row.kind === "said") text = row.text;
@@ -174,6 +201,12 @@ function currentAction(row: ActivityRow): CurrentWork["summary"] {
   };
 }
 
+function awaitedPermission(snapshot: ActivitySnapshot, rows: readonly ActivityRow[]): PermissionRow | undefined {
+  if (snapshot.kind !== "open") return undefined;
+  const latest = rows.findLast((row) => row.kind === "permission");
+  return latest?.requests.length ? latest : undefined;
+}
+
 /** One semantic projection of the already selected retained frontier. */
 export function projectCurrentWork(snapshot: ActivitySnapshot): CurrentWork {
   if (snapshot.kind === "unborn") return { kind: "idle" };
@@ -182,7 +215,9 @@ export function projectCurrentWork(snapshot: ActivitySnapshot): CurrentWork {
   const pending = rows.flatMap((row) =>
     row.kind === "tell" && row.state === "pending" ? [{ id: row.sequence, tellId: row.tellId }] : [],
   );
+  const awaiting = awaitedPermission(snapshot, rows);
   const selected =
+    awaiting ??
     active.at(-1) ??
     rows.findLast((row) => row.kind === "said" || row.kind === "call" || (row.kind === "tell" && row.state === "told"));
   const summary = selected === undefined ? undefined : currentAction(selected);
@@ -197,6 +232,16 @@ export function projectCurrentWork(snapshot: ActivitySnapshot): CurrentWork {
       ? {}
       : {
           activeTools: active.map((row) => ({ id: row.sequence, turnSequence: row.turnSequence, toolId: row.toolId })),
+        }),
+    ...(awaiting === undefined
+      ? {}
+      : {
+          awaiting: {
+            kind: "permission",
+            id: awaiting.sequence,
+            requests: awaiting.requests,
+            ...(awaiting.truncated === true ? { clipped: true as const } : {}),
+          },
         }),
     ...(latest < 0 ? {} : { latestActivity: latest }),
     ...(pending.length === 0 ? {} : { pending }),

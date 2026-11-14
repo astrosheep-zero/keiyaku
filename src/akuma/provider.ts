@@ -11,7 +11,7 @@ const OBSERVED_TEXT_TRUNCATION_MARKER = "\n…[truncated]";
 export const AGENT_EVENT_QUEUE_LIMIT = 256;
 
 export { decodeAgentEvent } from "./heart/activity-schema.js";
-export type { AgentEvent, SearchScope, ToolCall, ToolResult } from "./heart/activity-schema.js";
+export type { AgentEvent, PermissionRequest, SearchScope, ToolCall, ToolResult } from "./heart/activity-schema.js";
 import type { AgentEvent, ToolCall, ToolResult, ToolInput } from "./heart/activity-schema.js";
 
 function boundedToolCall(call: ToolCall): Readonly<{ value: ToolCall; truncated: boolean }> {
@@ -117,6 +117,26 @@ export function encodeAgentEvent(event: AgentEvent): AgentEvent {
       return event.model === undefined
         ? { type: event.type }
         : { type: event.type, model: boundedEventText(event.model) };
+    case "permission":
+      return marked(
+        {
+          type: event.type,
+          requests: event.requests.slice(0, 32).map((request) => ({
+            id: request.id,
+            action: boundedEventText(request.action),
+            resources: request.resources.slice(0, 32).map(boundedEventText),
+            ...(request.tool === undefined ? {} : { tool: boundedEventText(request.tool) }),
+          })),
+        },
+        event.requests.length > 32 ||
+          event.requests.some(
+            (request) =>
+              request.action.length > AGENT_EVENT_TEXT_LIMIT ||
+              (request.tool !== undefined && request.tool.length > AGENT_EVENT_TEXT_LIMIT) ||
+              request.resources.length > 32 ||
+              request.resources.some((resource) => resource.length > AGENT_EVENT_TEXT_LIMIT),
+          ),
+      );
     case "assistant":
       return marked(
         { type: event.type, text: boundedEventText(event.text) },
@@ -252,24 +272,22 @@ export function unknownEvent(kind: string): Extract<AgentEvent, { type: "unknown
 
 type EventWaiter = Readonly<{ resolve(value: IteratorResult<AgentEvent>): void }>;
 
-// Slow consumers may lose reconstructible narration, but session coordinates,
-// notes, error events, and the latest runtime-model observation stay
-// observable. The one queue reserves a single model slot, so that observation
-// never competes for narration admission and no overflow can hide the model a
-// Turn proved it ran. A full protected queue replaces one protected item with a
-// bounded aggregate note; `end` ignores later emission.
+// Slow consumers may lose reconstructible narration, but the latest model and
+// permission state each have a reserved slot. Superseding an obsolete state
+// (including an empty permission set) cannot compete with narration or overflow.
+// A full protected narration queue coalesces errors; `end` ignores later emission.
 function isErrorEvent(event: AgentEvent): boolean {
   if (event.type === "note") return true;
   if (event.type === "tool" && event.phase === "completed") return event.result.status === "error";
   return event.type === "unknown" && /(?:error|fail|abort|cancel|stop|terminal)/iu.test(event.kind);
 }
 
-function isModelEvent(event: AgentEvent): boolean {
-  return event.type === "model";
+function isStateEvent(event: AgentEvent): boolean {
+  return event.type === "model" || event.type === "permission";
 }
 
 function isReconstructibleEvent(event: AgentEvent): boolean {
-  return event.type !== "session" && !isModelEvent(event) && !isErrorEvent(event);
+  return event.type !== "session" && !isStateEvent(event) && !isErrorEvent(event);
 }
 
 const AGENT_EVENT_OVERFLOW_PREFIX = "Agent event queue overflow";
@@ -292,13 +310,8 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
       waiter.resolve({ done: false, value: event });
       return;
     }
-    if (isModelEvent(event)) {
-      // Model evidence is control state, never narration: it occupies the
-      // queue's one reserved model slot, so a narration flood and a full
-      // protected queue both leave it observable. An unconsumed predecessor is
-      // obsolete, and superseding it is what keeps the newest fact, an unnamed
-      // one clearing the confirmation it disconfirms.
-      const obsolete = this.queued.findIndex(isModelEvent);
+    if (isStateEvent(event)) {
+      const obsolete = this.queued.findIndex((queued) => queued.type === event.type);
       if (obsolete === -1) this.queued.push(event);
       else this.queued[obsolete] = event;
       return;
@@ -318,9 +331,9 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
           }
           this.overflowMarker = undefined;
         }
-        const protectedItem = this.queued.findIndex((queued) => queued.type !== "session" && !isModelEvent(queued));
+        const protectedItem = this.queued.findIndex((queued) => queued.type !== "session" && !isStateEvent(queued));
         const replacement =
-          protectedItem === -1 ? this.queued.findIndex((queued) => !isModelEvent(queued)) : protectedItem;
+          protectedItem === -1 ? this.queued.findIndex((queued) => !isStateEvent(queued)) : protectedItem;
         this.overflowCount += 1;
         const marker = overflowEvent(this.overflowCount);
         this.queued[replacement] = marker;
@@ -332,9 +345,9 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
     this.queued.push(event);
   }
 
-  /** Narration and protected slots; the reserved model slot is not one of them. */
+  /** State snapshots do not spend ordinary narration slots. */
   private narrationCount(): number {
-    return this.queued.length - Number(this.queued.some(isModelEvent));
+    return this.queued.reduce((count, event) => count + Number(!isStateEvent(event)), 0);
   }
 
   end(): void {

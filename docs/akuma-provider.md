@@ -167,6 +167,16 @@ history only: deleting retained activity never changes recovery, resume, fork,
 outcome, failure, or life. Complete answers and native fork coordinates remain
 Turn authority; sessions remain resume authority.
 
+Native permission requests and their replies produce one provider-neutral
+observation of the attempt's currently pending approvals. It preserves native
+request identity and the action, resources, and tool actually observed; a reply
+removes only its matching request, and an empty observation clears the wait.
+Adapters correlate this evidence to their admitted execution rather than
+inferring a request from a busy session, a denial, or a running tool. This
+observation grants no permission and promises no response capability. Its latest
+bounded value supersedes an older unconsumed value, including when narration
+overflows, so an obsolete ask cannot outlive an observed reply.
+
 One runtime-model observation is provider-neutral and typed: the model an
 attempt's own native evidence proves it is actually running. An adapter reports
 the effective model its startup selected, the model named on a native response,

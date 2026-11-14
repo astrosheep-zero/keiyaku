@@ -49,12 +49,20 @@ const toolEventSchema = z.union([
   z.object({ ...toolFields, phase: z.literal("completed"), result: toolResultSchema }),
 ]);
 
+export const permissionRequestSchema = z.object({
+  id: text,
+  action: text,
+  resources: z.array(text).readonly(),
+  tool: text.optional(),
+});
+
 export const agentEventSchema = z.union([
   z.object({ type: z.literal("session"), coordinate: resumeCoordinateSchema }),
   // One provider-neutral runtime-model observation in the shared agent-event
   // vocabulary. Body admits it into the Soul's single current model; it is
   // never appended to activity, so compaction cannot lose or resurrect it.
   z.object({ type: z.literal("model"), model: text.optional() }),
+  z.object({ type: z.literal("permission"), requests: z.array(permissionRequestSchema).readonly(), truncated }),
   z.object({ type: z.literal("assistant"), text, truncated }),
   z.object({ type: z.literal("thought"), text, truncated }),
   toolEventSchema,
@@ -62,6 +70,7 @@ export const agentEventSchema = z.union([
   z.object({ type: z.literal("unknown"), kind: text, truncated }),
 ]);
 
+export type PermissionRequest = z.infer<typeof permissionRequestSchema>;
 export type SearchScope = z.infer<typeof searchScopeSchema>;
 export type ToolInput = z.infer<typeof toolInputSchema>;
 export type ToolCall = z.infer<typeof toolCallSchema>;

@@ -72,6 +72,7 @@ export const INTEGRATION_TEST_FILES = [
   "tests/akuma-in-process.test.ts",
   "tests/akuma-launch.test.ts",
   "tests/akuma-observation.test.ts",
+  "tests/akuma-permission.test.ts",
   "tests/akuma-physical.test.ts",
   "tests/akuma-prepared-call.test.ts",
   "tests/akuma-provider.test.ts",

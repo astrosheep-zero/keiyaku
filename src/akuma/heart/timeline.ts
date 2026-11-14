@@ -76,6 +76,9 @@ export function pruneActivityFacts(database: DatabaseSync, limit: number, protec
       UNION ${pendingTellProtectionSql}
     ), protected(sequence) AS (
       SELECT sequence FROM protected_turns
+      UNION SELECT MAX(sequence) FROM activity
+        WHERE turn_sequence IN (SELECT sequence FROM turns WHERE end_sequence IS NULL)
+        AND json_extract(event_json, '$.type') = 'permission' GROUP BY turn_sequence
       UNION SELECT sequence FROM calls WHERE turn_sequence IN (SELECT sequence FROM protected_turns)
       UNION SELECT end_sequence FROM turns WHERE sequence IN (SELECT sequence FROM protected_turns) AND end_sequence IS NOT NULL
       UNION ${pendingTellSequencesSql}

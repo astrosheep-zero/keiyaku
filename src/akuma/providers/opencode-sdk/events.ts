@@ -3,6 +3,7 @@ import {
   noteEvent,
   otherToolCall,
   type AgentEvent,
+  type PermissionRequest,
   type ToolCall,
   type ToolResult,
 } from "../../provider.js";
@@ -14,6 +15,7 @@ type State = {
   sessionId?: string;
   tools: Map<string, { name: string; call?: ToolCall }>;
   completed: Set<string>;
+  permissions: Map<string, PermissionRequest>;
 };
 
 export function diagnostic(value: unknown): string {
@@ -165,6 +167,25 @@ function toolInputStarted(data: NativeData, state: State): void {
   if (typeof data.id === "string" && typeof data.name === "string") state.tools.set(data.id, { name: data.name });
 }
 
+function permissionEvent(type: string, data: NativeData, events: Emitter, state: State): void {
+  const id = text(type === "permission.asked" ? data.id : data.requestID);
+  if (id === undefined) return;
+  if (type === "permission.asked") {
+    const action = text(data.action);
+    if (action === undefined || !Array.isArray(data.resources)) return;
+    const source = object(data.source);
+    const tool =
+      source?.type === "tool" && typeof source.id === "string" ? state.tools.get(source.id)?.name : undefined;
+    state.permissions.set(id, {
+      id,
+      action,
+      resources: data.resources.filter((value): value is string => typeof value === "string"),
+      ...(tool === undefined ? {} : { tool }),
+    });
+  } else if (!state.permissions.delete(id)) return;
+  events.emit({ type: "permission", requests: [...state.permissions.values()] });
+}
+
 /** Only complete native values enter narration. The caller enforces submission/step correlation. */
 export function mapEvent(value: unknown, events: Emitter, state: State): void {
   const event = object(value);
@@ -173,6 +194,10 @@ export function mapEvent(value: unknown, events: Emitter, state: State): void {
   if (state.sessionId !== undefined && data.sessionID !== state.sessionId) return;
   const type = event.type;
   switch (type) {
+    case "permission.asked":
+    case "permission.replied":
+      permissionEvent(type, data, events, state);
+      return;
     case "session.step.started":
       stepStarted(data, events);
       return;
@@ -203,5 +228,10 @@ export function mapEvent(value: unknown, events: Emitter, state: State): void {
   }
 }
 export function createEventState(sessionId?: string): State {
-  return { ...(sessionId === undefined ? {} : { sessionId }), tools: new Map(), completed: new Set() };
+  return {
+    ...(sessionId === undefined ? {} : { sessionId }),
+    tools: new Map(),
+    completed: new Set(),
+    permissions: new Map(),
+  };
 }
