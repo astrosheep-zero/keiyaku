@@ -133,6 +133,11 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   const contractStatus = await Kanshi.of({ world: worldA, repo: repoB }).contract(contract);
   assert.deepEqual(withoutObservationTimes(await facet.status({ id: contract })), withoutObservationTimes(contractStatus));
   assert.deepEqual(withoutObservationTimes(await facet.kanshi({})), withoutObservationTimes(await Kanshi.of({ world: worldA, repo: repoB }).board()));
+  const nativeRegion = (selection = {}) => Kanshi.of({ world: worldA, repo: repoB }).region(selection);
+  assert.deepEqual(await facet.region({}), await nativeRegion());
+  assert.deepEqual(await facet.region({ contract }), await nativeRegion({ kind: "contract", contract }));
+  assert.deepEqual(await facet.region({ paths: ["src/**"] }), await nativeRegion({ kind: "path", patterns: ["src/**"] }));
+  await assert.rejects(facet.region({ contract, paths: ["src/**"] }), KeiyakuUsageError);
   assert.deepEqual(
     await facet.wait({ selectors: [contract], timeoutMs: 0 }),
     await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 }),

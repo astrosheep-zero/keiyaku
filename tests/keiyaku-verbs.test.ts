@@ -208,3 +208,19 @@ test("wire validation and classification reject malformed calls before observati
   assert.equal(classifyVerb("show", {}, { kind: "returned", value: { kind: "missing" } }), "refused");
   assert.equal(classifyVerb("show", {}, { kind: "threw", error: new TypeError("unexpected") }), "failed");
 });
+
+test("region uses one strict object and refuses contract with paths before discovery", async () => {
+  const input = Keiyaku.verbs.region.input;
+  for (const valid of [{}, { contract: "kei/example" }, { paths: ["src/**"] }])
+    assert.equal(input.safeParse(valid).success, true, JSON.stringify(valid));
+  const contradictory = { contract: "kei/example", paths: ["src/**"] };
+  for (const invalid of [contradictory, { paths: [] }, { contract: "kei/example", extra: true }])
+    assert.equal(input.safeParse(invalid).success, false, JSON.stringify(invalid));
+  const facet = Keiyaku.at({ cwd: "/missing-region-contradiction", environment: {} });
+  await assert.rejects(facet.run("region", contradictory), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuUsageError);
+    assert.match(error.message, /contract and paths are mutually exclusive/u);
+    assert.equal(classifyVerb("region", contradictory, { kind: "threw", error }), "usage");
+    return true;
+  });
+});

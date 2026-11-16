@@ -622,27 +622,26 @@ export const verbs = Object.freeze({
   region: {
     description:
       "Before parallel work: which files active Contracts claim to change and where those claims overlap. Advisory only; no locks, no conflict prediction.",
-    input: z.union([
-      z.strictObject({}).readonly(),
-      z
-        .strictObject({
-          contract: text.describe(
-            "Contract selector (kei/...) whose declared Region and overlaps to inspect; mutually exclusive with paths.",
+    input: z
+      .strictObject({
+        contract: optText.describe(
+          "Contract selector (kei/...) whose declared Region and overlaps to inspect; mutually exclusive with paths.",
+        ),
+        paths: z
+          .array(text)
+          .min(1)
+          .readonly()
+          .refine((paths): paths is readonly [string, ...string[]] => paths.length > 0)
+          .exactOptional()
+          .describe(
+            "Nonempty repository-relative path or glob patterns to check against active Contract Regions; mutually exclusive with contract.",
           ),
-        })
-        .readonly(),
-      z
-        .strictObject({
-          paths: z
-            .array(text)
-            .min(1)
-            .readonly()
-            .describe(
-              "Nonempty repository-relative path or glob patterns to check against active Contract Regions; mutually exclusive with contract.",
-            ),
-        })
-        .readonly(),
-    ]),
+      })
+      .refine(
+        (input) => !(input.contract !== undefined && input.paths !== undefined),
+        "contract and paths are mutually exclusive",
+      )
+      .readonly(),
     output: regionResultSchema,
     effect: "read",
   },

@@ -637,21 +637,16 @@ export class Keiyaku {
     });
   }
 
-  async #region(input: Readonly<{ contract?: string; paths?: readonly string[] }> = {}) {
+  async #region(input: ParsedInput<"region"> = {}) {
     const at = await this.#coordinates("required");
     if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
     const repo = at.repo;
-    let selected: KanshiRegionSelection;
-    if (input.paths !== undefined) {
-      const [first, ...rest] = input.paths;
-      if (first === undefined) throw new KeiyakuUsageError("Region query requires one or more path patterns");
-      selected = { kind: "path", patterns: [first, ...rest] };
-    } else {
-      selected =
-        input.contract === undefined
+    const selected: KanshiRegionSelection =
+      input.paths !== undefined
+        ? { kind: "path", patterns: input.paths }
+        : input.contract === undefined
           ? { kind: "declarations" }
           : { kind: "contract", contract: await this.#resolve(Keis.of(repo), input.contract, at.cwd) };
-    }
     const result = await Kanshi.of({ world: at.world, repo }).region(selected);
     if (result.kind === "absent") throw new Error("Region observation with a Repo cannot be absent");
     return result;

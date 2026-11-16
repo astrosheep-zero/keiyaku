@@ -64,6 +64,18 @@ test("coordinate composition preserves native branches and rejects collisions at
   assert.throws(() => mcpInputSchema(z.strictObject({ cwd: z.string() })), /coordinate collides.*cwd/u);
 });
 
+test("MCP region composes one optional object with the shared contradiction check", () => {
+  const schema = mcpInputSchema(Keiyaku.verbs.region.input);
+  for (const valid of [{}, { contract: "kei/example" }, { paths: ["src/**"] }])
+    assert.equal(schema.safeParse(valid).success, true, JSON.stringify(valid));
+  for (const invalid of [
+    { contract: "kei/example", paths: ["src/**"] },
+    { paths: [] },
+    { extra: true },
+  ])
+    assert.equal(schema.safeParse(invalid).success, false, JSON.stringify(invalid));
+});
+
 test("MCP spawn uses akumaName, accepts a bare alias, and points a missing name to ls", async (t) => {
   const cwd = temporaryDirectory(t, "mcp-akuma-name-");
   const environment = { HOME: cwd, USERPROFILE: cwd, KEIYAKU_HOME: cwd };
@@ -213,6 +225,8 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["debt.update", { id: "debt/example", state: "paused" }],
     ["debt.add", { title: " \n" }],
     ["amend", { contract: "kei/example" }],
+    ["region", { contract: "kei/example", paths: ["src/**"] }],
+    ["region", { paths: [] }],
     ["whoami", { input: {} }],
     ["kanshi", { extra: true }],
     ["ls", { selector: "aku/", mine: true }],
@@ -268,6 +282,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.deepEqual(publishedProperties("debt_update"), [
     "body", "cwd", "id", "needs", "note", "priority", "state", "title",
   ]);
+  assert.deepEqual(publishedProperties("region"), ["contract", "cwd", "paths", "repo"]);
+  assert.equal(tools.find((tool) => tool.name === "region")!.inputSchema.required, undefined);
   let unknown: McpError | undefined;
   await assert.rejects(
     () => client.callTool({ name: "no-such-tool", arguments: {} }),
