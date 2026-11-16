@@ -135,10 +135,8 @@ export function installAkumaBodyPidReceipt(receiptPath: string): () => void {
   process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT = receiptPath;
   process.env.NODE_OPTIONS = appendNodeOptionsImport(akumaBodyPidReceiptImport(), previousNodeOptions);
   return () => {
-    if (previousReceipt === undefined) delete process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT;
-    else process.env.KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT = previousReceipt;
-    if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
-    else process.env.NODE_OPTIONS = previousNodeOptions;
+    restoreEnvironment("KEIYAKU_TEST_AKUMA_BODY_PID_RECEIPT", previousReceipt);
+    restoreEnvironment("NODE_OPTIONS", previousNodeOptions);
   };
 }
 
@@ -148,10 +146,8 @@ export function installAkumaBodyEmptyPublicationBarrier(barrierPath: string): ()
   process.env.KEIYAKU_TEST_AKUMA_BODY_EMPTY_PUBLICATION_BARRIER = barrierPath;
   process.env.NODE_OPTIONS = appendNodeOptionsImport(akumaBodyPidReceiptImport(), previousNodeOptions);
   return () => {
-    if (previousBarrier === undefined) delete process.env.KEIYAKU_TEST_AKUMA_BODY_EMPTY_PUBLICATION_BARRIER;
-    else process.env.KEIYAKU_TEST_AKUMA_BODY_EMPTY_PUBLICATION_BARRIER = previousBarrier;
-    if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
-    else process.env.NODE_OPTIONS = previousNodeOptions;
+    restoreEnvironment("KEIYAKU_TEST_AKUMA_BODY_EMPTY_PUBLICATION_BARRIER", previousBarrier);
+    restoreEnvironment("NODE_OPTIONS", previousNodeOptions);
   };
 }
 
@@ -161,10 +157,8 @@ export function installAkumaBodyIdleFinishBarrier(barrierPath: string): () => vo
   process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER = barrierPath;
   process.env.NODE_OPTIONS = appendNodeOptionsImport(akumaBodyPidReceiptImport(), previousNodeOptions);
   return () => {
-    if (previousBarrier === undefined) delete process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER;
-    else process.env.KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER = previousBarrier;
-    if (previousNodeOptions === undefined) delete process.env.NODE_OPTIONS;
-    else process.env.NODE_OPTIONS = previousNodeOptions;
+    restoreEnvironment("KEIYAKU_TEST_AKUMA_BODY_IDLE_FINISH_BARRIER", previousBarrier);
+    restoreEnvironment("NODE_OPTIONS", previousNodeOptions);
   };
 }
 

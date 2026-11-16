@@ -4,6 +4,7 @@ import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import {
   activityFact,
+  allocatedHeart,
   bornBody,
   bornLineageAkuma,
   claudeBodyLaunch,
@@ -45,7 +46,6 @@ import {
   endTurn,
   finishBodyIfIdle,
   HeldAkumaLeash,
-  initializeHeart,
   probeLeash,
   readHeart,
   recordTell,
@@ -67,8 +67,6 @@ import { insertBodyFact } from "../src/akuma/heart/rows.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
-
-const CLAUDE_EXECUTION = { name: "claude", kind: "claude-agent-sdk" } as const;
 
 type DeferredBodyEnd = Readonly<{
   started: string;
@@ -574,8 +572,7 @@ test("turn owner folds a rejected completion while the event stream remains open
   let driving: ReturnType<typeof driveAkumaBody> | undefined;
   try {
     const world = await World.at(root);
-    const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "deadbeef" });
-    await initializeHeart(allocated.paths);
+    const allocated = await allocatedHeart(world, "claude", "deadbeef");
     driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
       spawn: noBodyLaunch,
       now: () => "2026-08-24T00:00:00.000Z",
@@ -597,23 +594,13 @@ test("turn owner folds a rejected completion while the event stream remains open
 
 async function answeredSource(root: string, suffix: string, bare?: boolean) {
   const world = await World.at(root);
-  const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => suffix });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(world, "claude", suffix);
   await driveAkumaBody(
-    {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        akumaName: "claude",
-        description: "Fork source",
-        ...(bare === undefined ? {} : { bare }),
-        provider: CLAUDE_EXECUTION,
-        options: { model: "fixture-model" },
-        origin: { kind: "direct" },
-        cwd: world,
-      },
-      initialBody: "work",
-    },
+    claudeBodyLaunch(allocated, world, "work", {}, {
+      description: "Fork source",
+      ...(bare === undefined ? {} : { bare }),
+      options: { model: "fixture-model" },
+    }),
     provider,
     { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
@@ -1350,8 +1337,7 @@ test("wait timeout returns the same running status carrier", async (context) => 
 
 test("an answered Turn without a fork point remains visible and keeps its answer", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-no-fork-point-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "f0a10006" });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "claude", "f0a10006");
   const noPointProvider: ProviderAdapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
     const { promise: eventsFinished, resolve: finishEvents } = promiseBarrier<void>();
     custody.own({ closed: eventsFinished, forceDispose: async () => {} });
@@ -1370,19 +1356,10 @@ test("an answered Turn without a fork point remains visible and keeps its answer
     };
   }));
   await driveAkumaBody(
-    {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        akumaName: "claude",
-        description: "No fork point",
-        provider: CLAUDE_EXECUTION,
-        options: { model: "fixture-model" },
-        origin: { kind: "direct" },
-        cwd: root,
-      },
-      initialBody: "work",
-    },
+    claudeBodyLaunch(allocated, root, "work", {}, {
+      description: "No fork point",
+      options: { model: "fixture-model" },
+    }),
     noPointProvider,
     { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
@@ -1556,8 +1533,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
   const empty = await world.list();
   assert.equal(empty.rows, undefined, "an empty roster omits rows");
   assert.equal(empty.more, undefined, "a complete roster omits more");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "1234abcd" });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "claude", "1234abcd");
   await moveAlias({ world: root as WorldRoot, alias: parseAkumaAlias("@early"), akumaId: allocated.id });
   const unbornRows = (await world.list()).rows;
   assert.ok(unbornRows !== undefined);
@@ -1568,19 +1544,9 @@ test("public Akuma handles separate compact list rows from full status and wait"
   await assert.rejects(world.list({ akumaName: "not/a-name" }), /Akuma name/);
   await assert.rejects(world.list({ unknown: true } as never), /unknown field: unknown/);
 
-  const launch: BodyLaunch = {
-    paths: allocated.paths,
-    seed: {
-      id: allocated.id,
-      akumaName: "claude",
-      description: "Fixture akuma",
-      provider: CLAUDE_EXECUTION,
-      options: {},
-      origin: { kind: "direct" },
-      cwd: root,
-    },
-    initialBody: "work",
-  };
+  const launch = claudeBodyLaunch(allocated, root, "work", {}, {
+    description: "Fixture akuma",
+  });
   await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
@@ -1755,22 +1721,11 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
   const root = temporaryDirectory(context, "keiyaku-akuma-lineage-cache-");
   const world = Akumas.of(await World.at(root));
   const caller = { kind: "external", integration: "test", id: "birth" } as const;
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "ca110010" });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "claude", "ca110010");
   await driveAkumaBody(
-    {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        akumaName: "claude",
-        provider: CLAUDE_EXECUTION,
-        options: {},
-        origin: { kind: "direct" },
-        cwd: root,
-        caller,
-      },
-      initialBody: "work",
-    },
+    claudeBodyLaunch(allocated, root, "work", {}, {
+      caller,
+    }),
     provider,
     { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
@@ -1824,8 +1779,7 @@ test("a wrong lineage cache edge cannot fabricate members or their ancestor chai
     createdAt: "2026-08-08T00:00:04.000Z",
     caller: akumaCaller(stranger.id),
   });
-  const unborn = await allocateAkumaDirectory({ worldRoot: proved, akumaName: "intern", draw: () => "ca110015" });
-  await initializeHeart(unborn.paths);
+  const unborn = await allocatedHeart(proved, "intern", "ca110015");
 
   // Forged edges: an unrelated worker looks like a direct child, its real child
   // keeps a true edge (so only full-chain verification exposes the forgery), and
@@ -2051,21 +2005,9 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   const root = temporaryDirectory(context, "keiyaku-akuma-interrupt-idle-");
   const seat = join(root, "seat");
   mkdirSync(seat);
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "1d1e0001" });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "claude", "1d1e0001");
   await driveAkumaBody(
-    {
-      paths: allocated.paths,
-      seed: {
-        id: allocated.id,
-        akumaName: "claude",
-        provider: CLAUDE_EXECUTION,
-        options: {},
-        origin: { kind: "direct" },
-        cwd: seat,
-      },
-      initialBody: "first",
-    },
+    claudeBodyLaunch(allocated, seat, "first"),
     provider,
     { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
   );
@@ -2311,102 +2253,87 @@ test("kill returns unavailable when an unsettled Body keeps the leash", async ()
   }
 });
 
-test("Project Archetype definitions shadow Home while Home remains the fallback", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-project-archetypes-"));
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-project-archetypes-home-"));
-  try {
-    mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
-    mkdirSync(join(home, "akumas"));
-    writeFileSync(join(root, ".keiyaku", "akumas", "project-only.md"), "---\nprovider: claude\n---\nProject only.\n");
-    writeFileSync(join(home, "akumas", "home-only.md"), "---\nprovider: claude\n---\nHome only.\n");
-    writeFileSync(
-      join(root, ".keiyaku", "akumas", "shared.md"),
-      "---\nprovider: claude\ndescription: Project\n---\nProject body.\n",
-    );
-    writeFileSync(join(home, "akumas", "shared.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
+test("Project Archetype definitions shadow Home while Home remains the fallback", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-project-archetypes-");
+  const home = temporaryDirectory(context, "keiyaku-akuma-project-archetypes-home-");
+  mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+  mkdirSync(join(home, "akumas"));
+  writeFileSync(join(root, ".keiyaku", "akumas", "project-only.md"), "---\nprovider: claude\n---\nProject only.\n");
+  writeFileSync(join(home, "akumas", "home-only.md"), "---\nprovider: claude\n---\nHome only.\n");
+  writeFileSync(
+    join(root, ".keiyaku", "akumas", "shared.md"),
+    "---\nprovider: claude\ndescription: Project\n---\nProject body.\n",
+  );
+  writeFileSync(join(home, "akumas", "shared.md"), "---\nprovider: claude\ndescription: Home\n---\nHome body.\n");
 
-    const settingsValue = await Settings.load({ cwd: root, home });
-    const catalog = await Akumas.akumaNames({ cwd: root, home });
-    assert.deepEqual(catalog, {
-      kind: "akuma-name-catalogue",
-      rows: [{ name: "home-only" }, { name: "project-only" }, { name: "shared", description: "Project" }],
-    });
+  const settingsValue = await Settings.load({ cwd: root, home });
+  const catalog = await Akumas.akumaNames({ cwd: root, home });
+  assert.deepEqual(catalog, {
+    kind: "akuma-name-catalogue",
+    rows: [{ name: "home-only" }, { name: "project-only" }, { name: "shared", description: "Project" }],
+  });
 
-    const cli = await cliJson<Readonly<{ rows?: readonly unknown[]; more?: true }>>(
-      ["-C", root, "ls", "aku/"],
-      { environment: { KEIYAKU_HOME: home } },
-    );
-    assert.deepEqual(cli.value, catalog);
+  const cli = await cliJson<Readonly<{ rows?: readonly unknown[]; more?: true }>>(
+    ["-C", root, "ls", "aku/"],
+    { environment: { KEIYAKU_HOME: home } },
+  );
+  assert.deepEqual(cli.value, catalog);
 
-    const shared = await loadPreparedArchetype({ name: "shared", cwd: root, home, settings: settingsValue });
-    assert.equal(shared.path, join(root, ".keiyaku", "akumas", "shared.md"));
-    assert.equal(shared.description, "Project");
-    const fallback = await loadPreparedArchetype({ name: "home-only", cwd: root, home, settings: settingsValue });
-    assert.equal(fallback.path, join(home, "akumas", "home-only.md"));
+  const shared = await loadPreparedArchetype({ name: "shared", cwd: root, home, settings: settingsValue });
+  assert.equal(shared.path, join(root, ".keiyaku", "akumas", "shared.md"));
+  assert.equal(shared.description, "Project");
+  const fallback = await loadPreparedArchetype({ name: "home-only", cwd: root, home, settings: settingsValue });
+  assert.equal(fallback.path, join(home, "akumas", "home-only.md"));
 
-    await assert.rejects(
-      loadPreparedArchetype({ name: "missing", cwd: root, home, settings: settingsValue }),
-      (error: unknown) =>
-        error instanceof AkumaNameError &&
-        error.searched.join("\n") ===
-          [join(root, ".keiyaku", "akumas", "missing.md"), join(home, "akumas", "missing.md")].join("\n"),
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
-  }
+  await assert.rejects(
+    loadPreparedArchetype({ name: "missing", cwd: root, home, settings: settingsValue }),
+    (error: unknown) =>
+      error instanceof AkumaNameError &&
+      error.searched.join("\n") ===
+        [join(root, ".keiyaku", "akumas", "missing.md"), join(home, "akumas", "missing.md")].join("\n"),
+  );
 });
 
-test("dotted akumaName file stems join the catalogue as canonical names", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-dotted-root-"));
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-dotted-home-"));
-  try {
-    mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
-    mkdirSync(join(home, "akumas"));
-    writeFileSync(join(home, "akumas", "review.v2.md"), "---\nprovider: claude\n---\nDotted.\n");
-    writeFileSync(join(home, "akumas", "bad..stem.md"), "---\nprovider: claude\n---\nNot canonical.\n");
-    writeFileSync(join(home, "akumas", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
+test("dotted akumaName file stems join the catalogue as canonical names", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-dotted-root-");
+  const home = temporaryDirectory(context, "keiyaku-akuma-dotted-home-");
+  mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+  mkdirSync(join(home, "akumas"));
+  writeFileSync(join(home, "akumas", "review.v2.md"), "---\nprovider: claude\n---\nDotted.\n");
+  writeFileSync(join(home, "akumas", "bad..stem.md"), "---\nprovider: claude\n---\nNot canonical.\n");
+  writeFileSync(join(home, "akumas", ".edge.md"), "---\nprovider: claude\n---\nNot canonical.\n");
 
-    const catalog = await Akumas.akumaNames({ cwd: root, home });
-    assert.deepEqual(catalog, { kind: "akuma-name-catalogue", rows: [{ name: "review.v2" }] });
+  const catalog = await Akumas.akumaNames({ cwd: root, home });
+  assert.deepEqual(catalog, { kind: "akuma-name-catalogue", rows: [{ name: "review.v2" }] });
 
-    const settingsValue = await Settings.load({ cwd: root, home });
-    const dotted = await loadPreparedArchetype({ name: "review.v2", cwd: root, home, settings: settingsValue });
-    assert.equal(dotted.path, join(home, "akumas", "review.v2.md"));
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
-  }
+  const settingsValue = await Settings.load({ cwd: root, home });
+  const dotted = await loadPreparedArchetype({ name: "review.v2", cwd: root, home, settings: settingsValue });
+  assert.equal(dotted.path, join(home, "akumas", "review.v2.md"));
 });
 
-test("hidden archetypes stay callable but leave the catalogue", async () => {
-  const root = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hidden-root-"));
-  const home = mkdtempSync(join(tmpdir(), "keiyaku-akuma-hidden-home-"));
-  try {
-    mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
-    mkdirSync(join(home, "akumas"));
-    writeFileSync(join(home, "akumas", "visible.md"), "---\nprovider: claude\n---\nVisible.\n");
-    writeFileSync(join(home, "akumas", "secret.md"), "---\nprovider: claude\nhidden: true\n---\nSecret.\n");
-    writeFileSync(join(home, "akumas", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
+test("hidden archetypes stay callable but leave the catalogue", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-hidden-root-");
+  const home = temporaryDirectory(context, "keiyaku-akuma-hidden-home-");
+  mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+  mkdirSync(join(home, "akumas"));
+  writeFileSync(join(home, "akumas", "visible.md"), "---\nprovider: claude\n---\nVisible.\n");
+  writeFileSync(join(home, "akumas", "secret.md"), "---\nprovider: claude\nhidden: true\n---\nSecret.\n");
+  writeFileSync(join(home, "akumas", "child.md"), "---\nbase: secret\n---\nChild of a hidden base.\n");
 
-    const catalog = await Akumas.akumaNames({ cwd: root, home });
-    assert.deepEqual(catalog, { kind: "akuma-name-catalogue", rows: [{ name: "child" }, { name: "visible" }] });
-    assert.deepEqual(await Akumas.akumaNames({ cwd: root, home, limit: 1 }), {
-      kind: "akuma-name-catalogue",
-      rows: [{ name: "child" }],
-      more: true,
-    });
+  const catalog = await Akumas.akumaNames({ cwd: root, home });
+  assert.deepEqual(catalog, { kind: "akuma-name-catalogue", rows: [{ name: "child" }, { name: "visible" }] });
+  assert.deepEqual(await Akumas.akumaNames({ cwd: root, home, limit: 1 }), {
+    kind: "akuma-name-catalogue",
+    rows: [{ name: "child" }],
+    more: true,
+  });
 
-    const settingsValue = await Settings.load({ cwd: root, home });
-    const hidden = await loadPreparedArchetype({ name: "secret", cwd: root, home, settings: settingsValue });
-    assert.equal(hidden.path, join(home, "akumas", "secret.md"));
+  const settingsValue = await Settings.load({ cwd: root, home });
+  const hidden = await loadPreparedArchetype({ name: "secret", cwd: root, home, settings: settingsValue });
+  assert.equal(hidden.path, join(home, "akumas", "secret.md"));
 
-    writeFileSync(join(home, "akumas", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');
-    await assert.rejects(Akumas.akumaNames({ cwd: root, home }), /hidden must be a boolean/u);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
-  }
+  writeFileSync(join(home, "akumas", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');
+  await assert.rejects(Akumas.akumaNames({ cwd: root, home }), /hidden must be a boolean/u);
 });
 
 test("list omits unreadable Hearts instead of reporting unborn, while direct status fails", async (context) => {
@@ -2434,20 +2361,14 @@ test("list omits unreadable Hearts instead of reporting unborn, while direct sta
   assert.equal(existsSync(noise), true);
 
   rmSync(heartCut.paths.directory, { recursive: true, force: true });
-  const leashCut = await allocateAkumaDirectory({
-    worldRoot: root,
-    akumaName: "claude",
-    draw: () => "c1000002",
-  });
-  await initializeHeart(leashCut.paths);
+  const leashCut = await allocatedHeart(root, "claude", "c1000002");
   unlinkSync(leashCut.paths.leash);
   assert.deepEqual((await world.list()).rows, [{ id: visible.id, life: "unborn" }]);
 });
 
 test("kill gives the Body a grace window to abort its owned provider session", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-kill-");
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "fedcba98" });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "claude", "fedcba98");
   let aborted = false;
   const { promise: completion, resolve: settle } = promiseBarrier<{ kind: "failed"; diagnostic: string }>();
   const { promise: started, resolve: markStarted } = promiseBarrier<void>();
@@ -2471,18 +2392,7 @@ test("kill gives the Body a grace window to abort its owned provider session", a
       completion,
     };
   }));
-  const launch: BodyLaunch = {
-    paths: allocated.paths,
-    seed: {
-      id: allocated.id,
-      akumaName: "claude",
-      provider: CLAUDE_EXECUTION,
-      options: {},
-      origin: { kind: "direct" },
-      cwd: root,
-    },
-    initialBody: "keep working",
-  };
+  const launch = claudeBodyLaunch(allocated, root, "keep working");
   const body = driveAkumaBody(launch, running, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
   await started;
 

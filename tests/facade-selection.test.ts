@@ -49,7 +49,7 @@ import { serializeDebtDocument, type DebtDocument } from "../src/debt/document.j
 import { Debts, type DebtId } from "../src/debt/index.js";
 import { World } from "../src/world.js";
 import { observeAkumaRoster, readAkumaCompleteRoster } from "../src/akuma/akuma.js";
-import { bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
+import { allocatedHeart, bornBody, bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { Akuma as NativeAkuma } from "../src/akuma/index.js";
 import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
@@ -128,8 +128,7 @@ function debtCatalogDocument(id: DebtId, updatedAt: string): DebtDocument {
 }
 
 async function answered(root: string, akumaName: string, suffix: string) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName, draw: () => suffix });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, akumaName, suffix);
   await driveAkumaBody(
     {
       paths: allocated.paths,

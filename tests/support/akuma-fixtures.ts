@@ -113,8 +113,7 @@ export function turnEndFact(
 /** A fresh Heart-initialized World root with an allocated claude Akuma; the caller closes it. */
 export async function heartFixture(prefix: string) {
   const root = await World.at(mkdtempSync(join(tmpdir(), prefix)));
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => "1234abcd" });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "claude", "1234abcd");
   return { root, allocated, close: () => rmSync(root, { recursive: true, force: true }) };
 }
 
@@ -137,8 +136,7 @@ export async function soulFixture(prefix: string) {
 /** One born claude Body under a fresh Heart: the invariant direct-origin,
  * default-options life; createdAt is the scenario's exact time. */
 export async function bornBody(root: string, suffix: string, createdAt: string) {
-  const allocated = await allocateAkumaDirectory({ worldRoot: root, akumaName: "claude", draw: () => suffix });
-  await initializeHeart(allocated.paths);
+  const allocated = await allocatedHeart(root, "claude", suffix);
   const holder = (await HeldAkumaLeash.try(allocated.paths))!;
   await holder.birth(allocated.paths, {
     id: allocated.id,
@@ -187,6 +185,9 @@ export function claudeBodyLaunch(
   cwd: string,
   initialBody: string,
   extra: Omit<BodyLaunch, "paths" | "seed" | "initialBody"> = {},
+  seed: Partial<Pick<NonNullable<BodyLaunch["seed"]>,
+    "description" | "options" | "bare" | "caller"
+  >> = {},
 ): BodyLaunch {
   return {
     paths: allocated.paths,
@@ -197,6 +198,7 @@ export function claudeBodyLaunch(
       options: {},
       origin: { kind: "direct" },
       cwd,
+      ...seed,
     },
     initialBody,
     ...extra,

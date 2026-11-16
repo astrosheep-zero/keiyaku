@@ -13,7 +13,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import { AkumaNameError, loadPreparedArchetype } from "../src/akuma/archetype.js";
 import { harnessOwner } from "@astrosheep/square";
 import {
@@ -52,6 +52,26 @@ import { isolateUserHome } from "./support/user-home.js";
 // Archetype home below. Keep ambient observers out of these owned fixtures:
 // their bounded birth/end callbacks can legitimately outlive the departure budget.
 isolateUserHome();
+
+// Bind one direct-call fixture's PID receipt; the scenario keeps cleanup and restore order.
+function bodyReceiptFixture(t: TestContext, fixturePath: string) {
+  const pidReceiptPath = join(fixturePath, "body-pids");
+  const restore = installAkumaBodyPidReceipt(pidReceiptPath);
+  return {
+    restore,
+    async cleanup(
+      operationFailed: boolean,
+      options: Readonly<{ timeoutMs?: number; expectRetainedEvidence?: boolean }> = {},
+    ) {
+      await cleanupSpawnCapableFixtureForTest(t, {
+        fixturePath,
+        pidReceiptPath,
+        operationFailed,
+        ...options,
+      });
+    },
+  };
+}
 
 async function repositoryFixture() {
   const raw = makeGitRepository();
@@ -130,10 +150,9 @@ async function directCallFixture(options: Readonly<{ holdAnswer?: boolean }> = {
 
 test("prompt-free bare Akumas.spawn reports born without admitting a Tell", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const bodyPidReceipt = join(raw.path, "body-pids");
   // Existing Body receipt instrumentation is installed before the call and stays
   // installed until the fixture owner has proven physical departure.
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   let operationFailed = true;
   try {
     const result = await Akumas.of(world).spawn({
@@ -171,13 +190,9 @@ test("prompt-free bare Akumas.spawn reports born without admitting a Tell", asyn
       // The existing spawn-capable fixture owner proves the recorded Body left
       // before anything removes the repository; an unproved departure retains the
       // evidence and fails instead of deleting it.
-      await cleanupSpawnCapableFixtureForTest(t, {
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        operationFailed,
-      });
+      await departure.cleanup(operationFailed);
     } finally {
-      restoreBodyPidReceipt();
+      departure.restore();
     }
   }
 });
@@ -204,10 +219,9 @@ test("prompt-free Akumas.spawn refuses wait options", async () => {
 
 test("prompt-free spawn settles before immediate Ask and retains native config through wake and fork", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
   mkdirSync(emptyPublicationBarrier);
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   const restoreEmptyPublicationBarrier = installAkumaBodyEmptyPublicationBarrier(emptyPublicationBarrier);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
@@ -284,15 +298,10 @@ test("prompt-free spawn settles before immediate Ask and retains native config t
         await PublicAkuma.select(world, akumaId)
           .kill()
           .catch(() => undefined);
-      await cleanupSpawnCapableFixtureForTest(t, {
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
+      await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
     } finally {
       restoreEmptyPublicationBarrier();
-      restoreBodyPidReceipt();
+      departure.restore();
       restoreSquareLedger();
     }
   }
@@ -303,10 +312,9 @@ test("local Akumas.spawn starts its zero observation budget after birth", async 
   // provider answer until the zero-budget observation has returned instead of
   // racing a real child process against the first observation.
   const { raw, world, configured, releaseAnswer } = await directCallFixture({ holdAnswer: true });
-  const bodyPidReceipt = join(raw.path, "body-pids");
   const emptyPublicationBarrier = join(raw.path, "empty-publication-barrier");
   mkdirSync(emptyPublicationBarrier);
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   const restoreEmptyPublicationBarrier = installAkumaBodyEmptyPublicationBarrier(emptyPublicationBarrier);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
@@ -371,15 +379,10 @@ test("local Akumas.spawn starts its zero observation budget after birth", async 
           .kill()
           .catch(() => undefined);
       await wake?.catch(() => undefined);
-      await cleanupSpawnCapableFixtureForTest(t, {
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
+      await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
     } finally {
       restoreEmptyPublicationBarrier();
-      restoreBodyPidReceipt();
+      departure.restore();
       restoreSquareLedger();
     }
   }
@@ -387,8 +390,7 @@ test("local Akumas.spawn starts its zero observation budget after birth", async 
 
 test("bounded call preserves logs and captures diagnostics without duplicate emission or callback authority", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   const output = join(world, "plugin-signals.jsonl");
   mkdirSync(join(world, "plugins"), { recursive: true });
   writeFileSync(
@@ -481,20 +483,14 @@ test("bounded call preserves logs and captures diagnostics without duplicate emi
       await PublicAkuma.select(world, child)
         .kill()
         .catch(() => undefined);
-    await cleanupSpawnCapableFixtureForTest(t, {
-      fixturePath: raw.path,
-      pidReceiptPath: bodyPidReceipt,
-      timeoutMs: 15_000,
-      operationFailed,
-    });
-    restoreBodyPidReceipt();
+    await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
+    departure.restore();
   }
 });
 
 test("call without a host preserves log-only diagnostics", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   mkdirSync(join(world, "plugins"), { recursive: true });
   writeFileSync(
     join(world, "plugins", "fail.mjs"),
@@ -534,22 +530,16 @@ test("call without a host preserves log-only diagnostics", async (t) => {
     // empty publication's durable settlement, without a kill race.
     operationFailed = false;
   } finally {
-    await cleanupSpawnCapableFixtureForTest(t, {
-      fixturePath: raw.path,
-      pidReceiptPath: bodyPidReceipt,
-      timeoutMs: 15_000,
-      operationFailed,
-    });
-    restoreBodyPidReceipt();
+    await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
+    departure.restore();
   }
 });
 
 test("a Tell admitted while an empty Body is deciding to put down is still driven", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const bodyPidReceipt = join(raw.path, "body-pids");
   const barrier = join(raw.path, "idle-finish-barrier");
   mkdirSync(barrier);
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   const restoreIdleBarrier = installAkumaBodyIdleFinishBarrier(barrier);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let birth: Promise<PublicAkuma> | undefined;
@@ -604,16 +594,13 @@ test("a Tell admitted while an empty Body is deciding to put down is still drive
     writeFileSync(join(barrier, "observation-release"), "release\n");
     await birth?.catch(() => undefined);
     try {
-      await cleanupSpawnCapableFixtureForTest(t, {
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
+      await departure.cleanup(operationFailed, {
         timeoutMs: 60_000,
-        operationFailed,
         expectRetainedEvidence: operationFailed,
       });
     } finally {
       restoreIdleBarrier();
-      restoreBodyPidReceipt();
+      departure.restore();
       restoreSquareLedger();
     }
   }
@@ -621,8 +608,7 @@ test("a Tell admitted while an empty Body is deciding to put down is still drive
 
 test("native birth retains its captured host callback for the resulting handle", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   mkdirSync(join(world, "plugins"), { recursive: true });
   writeFileSync(
     join(world, "plugins", "fail.mjs"),
@@ -660,20 +646,14 @@ test("native birth retains its captured host callback for the resulting handle",
     await child.kill();
     operationFailed = false;
   } finally {
-    await cleanupSpawnCapableFixtureForTest(t, {
-      fixturePath: raw.path,
-      pidReceiptPath: bodyPidReceipt,
-      timeoutMs: 15_000,
-      operationFailed,
-    });
-    restoreBodyPidReceipt();
+    await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
+    departure.restore();
   }
 });
 
 test("Akumas.spawn preserves its child when initial Tell admission fails", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let akumaId: string | undefined;
   let admissionCalls = 0;
@@ -709,14 +689,9 @@ test("Akumas.spawn preserves its child when initial Tell admission fails", async
         await PublicAkuma.select(world, akumaId)
           .kill()
           .catch(() => undefined);
-      await cleanupSpawnCapableFixtureForTest(t, {
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
+      await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
     } finally {
-      restoreBodyPidReceipt();
+      departure.restore();
       restoreSquareLedger();
     }
   }
@@ -724,8 +699,7 @@ test("Akumas.spawn preserves its child when initial Tell admission fails", async
 
 test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn settles before observation", async (t) => {
   const { raw, world, configured } = await directCallFixture();
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let observedTellId: string | undefined;
   let operationFailed = true;
@@ -798,14 +772,9 @@ test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn sett
     operationFailed = false;
   } finally {
     try {
-      await cleanupSpawnCapableFixtureForTest(t, {
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
+      await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
     } finally {
-      restoreBodyPidReceipt();
+      departure.restore();
       restoreSquareLedger();
     }
   }
@@ -816,8 +785,7 @@ test("admission-only spawn retains its canonical execution directory", async (t)
   const workdir = join(world, "actual-workdir");
   mkdirSync(workdir);
   symlinkSync(workdir, join(world, "linked-workdir"), "dir");
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let operationFailed = true;
   try {
@@ -839,9 +807,9 @@ test("admission-only spawn retains its canonical execution directory", async (t)
     operationFailed = false;
   } finally {
     try {
-      await cleanupSpawnCapableFixtureForTest(t, { fixturePath: raw.path, pidReceiptPath: bodyPidReceipt, timeoutMs: 15_000, operationFailed });
+      await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
     } finally {
-      restoreBodyPidReceipt();
+      departure.restore();
       restoreSquareLedger();
     }
   }
@@ -870,8 +838,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
       },
     }),
   );
-  const bodyPidReceipt = join(raw.path, "body-pids");
-  const restoreBodyPidReceipt = installAkumaBodyPidReceipt(bodyPidReceipt);
+  const departure = bodyReceiptFixture(t, raw.path);
   const restoreSquareLedger = isolateSquareFixtureLedger(raw.path);
   let operationFailed = true;
   let bound: Awaited<ReturnType<ReturnType<typeof Keis.of>["bind"]>> | undefined;
@@ -978,14 +945,9 @@ test("Contract association never selects the Akuma execution workdir", async (t)
         await accepted(bound)
           .kei.abandon({})
           .catch(() => undefined);
-      await cleanupSpawnCapableFixtureForTest(t, {
-        fixturePath: raw.path,
-        pidReceiptPath: bodyPidReceipt,
-        timeoutMs: 15_000,
-        operationFailed,
-      });
+      await departure.cleanup(operationFailed, { timeoutMs: 15_000 });
     } finally {
-      restoreBodyPidReceipt();
+      departure.restore();
       restoreSquareLedger();
     }
   }
