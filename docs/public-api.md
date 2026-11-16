@@ -76,6 +76,12 @@ Contract fact. Markdown is decoded only at the library edge; public callers do
 not receive a decoded document, direct journal writer, Git handle, placement
 operation, or private verification runner.
 
+Amendment takes one object whose every business field is optional, and an
+amendment that names none is a request for no change rather than an empty
+replacement: the active Contract answers unchanged and admits no fact. A field
+the caller omitted is not a field the caller replaced, so only an explicit
+empty selection clears a list it names.
+
 A bind target carries exactly three caller intents, and this chapter is their
 sole owner. An explicit target is either a caller-selected existing branch or an active
 Contract's appointed managed worktree. A branch is canonicalized at the

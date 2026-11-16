@@ -10,7 +10,7 @@ import { sameTarget, type ContractId, type ContractTerms, type ContractTarget } 
 import { readRef } from "../git/repository.js";
 import { resolveContractTarget, type TargetWorkspaceRefusal } from "../git/target.js";
 import { acquireTargetPlacementFence } from "../git/target-placement.js";
-import { decideAmend, type AmendInput, type AmendRefusal } from "../core/verbs/amend.js";
+import { decideAmend, type AmendEdit, type AmendRefusal } from "../core/verbs/amend.js";
 import {
   VERIFIED,
   type VerificationDeclarationPreparation,
@@ -34,29 +34,46 @@ type AmendOperationInput = MutationOperationInput &
     }>;
   }>;
 
+/** No target selection and no document derivation is one amendment that requests no change. */
+function requestsEdit(input: AmendOperationInput): boolean {
+  return input.target !== undefined || input.deriveAmendment !== undefined;
+}
+
 type Amendment = Readonly<{ source: ContractTerms; target?: ContractTarget }> &
   ReturnType<NonNullable<AmendOperationInput["deriveAmendment"]>>;
 type TargetInputRefusal = Readonly<{ kind: "invalid-target" | "target-missing" }> | TargetWorkspaceRefusal;
 type AmendmentRefusal = AmendRefusal | VerificationDeclarationRefusal | TargetInputRefusal;
 
+/** An amendment either admits terms or answers that the Contract already stands as asked. */
+export type AmendAdmission = IntentOutcome<Amendment, AmendmentRefusal> | Readonly<{ kind: "unchanged" }>;
+
+/** Empty intent keeps the owner's existence and terminal judgment and admits nothing. */
+async function unchangedAmend(input: AmendOperationInput): Promise<AmendAdmission> {
+  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const decision = decideAmend<never>({
+    input: { contractId: input.contractId, at: timestamp() },
+    attempt: { entryUlids: [] },
+    observation: observation.decision,
+  });
+  return decision.kind === "offer" ? { kind: "unchanged" } : decision;
+}
+
 async function prepareAmendmentAt(
   input: AmendOperationInput,
   selection: Extract<BindTargetSelection, { kind: "explicit" | "contract" }> | undefined,
-  amendment: Amendment | undefined,
+  amendment: Amendment,
   observation: GitDecisionObservation,
 ): Promise<
   Readonly<{
     observation: GitDecisionObservation;
     target?: ContractTarget;
-    preparation?: AmendInput<AmendmentRefusal>["preparation"];
+    preparation: AmendEdit<AmendmentRefusal>["preparation"];
   }>
 > {
   const state = contractState(observation.decision, input.contractId);
-  if (amendment !== undefined) {
-    observation = await extendPrerequisiteClosureAt(input.channel, observation, [
-      ...new Set([...(state?.terms.after ?? []), ...amendment.terms.after]),
-    ]);
-  }
+  observation = await extendPrerequisiteClosureAt(input.channel, observation, [
+    ...new Set([...(state?.terms.after ?? []), ...amendment.terms.after]),
+  ]);
   let target: ContractTarget | undefined;
   let refusal: TargetInputRefusal | undefined;
   if (selection?.kind === "contract") {
@@ -69,18 +86,16 @@ async function prepareAmendmentAt(
     else target = selection.target;
   }
   if (sameTarget(state?.coordinates.target, target)) target = undefined;
-  const preparation: AmendInput<AmendmentRefusal>["preparation"] =
-    amendment === undefined
-      ? undefined
-      : refusal !== undefined
-        ? { kind: "refused", refusal }
-        : amendment.verification.kind === "prepared" || !amendment.terms.gates.includes(VERIFIED)
-          ? { kind: "prepared", data: { ...amendment.terms, ...(target === undefined ? {} : { target }) } }
-          : { kind: "refused", refusal: amendment.verification.refusal };
+  const preparation: AmendEdit<AmendmentRefusal>["preparation"] =
+    refusal !== undefined
+      ? { kind: "refused", refusal }
+      : amendment.verification.kind === "prepared" || !amendment.terms.gates.includes(VERIFIED)
+        ? { kind: "prepared", data: { ...amendment.terms, ...(target === undefined ? {} : { target }) } }
+        : { kind: "refused", refusal: amendment.verification.refusal };
   return {
     observation,
     ...(target === undefined ? {} : { target }),
-    ...(preparation === undefined ? {} : { preparation }),
+    preparation,
   };
 }
 
@@ -123,7 +138,8 @@ async function extendPrerequisiteClosureAt(
   return current;
 }
 
-export async function amendOperation(input: AmendOperationInput): Promise<IntentOutcome<Amendment, AmendmentRefusal>> {
+export async function amendOperation(input: AmendOperationInput): Promise<AmendAdmission> {
+  if (!requestsEdit(input)) return await unchangedAmend(input);
   const selection = input.target === undefined ? undefined : await selectExplicitTarget(input.scope, input.target);
   if (selection === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
   let source = input.source;
@@ -136,11 +152,13 @@ export async function amendOperation(input: AmendOperationInput): Promise<Intent
     source === undefined || input.deriveAmendment === undefined
       ? undefined
       : { source, ...input.deriveAmendment(source) };
+  // A requested edit must carry observed terms; only a Contract that appeared after observation has none.
+  if (amendment === undefined) throw new Error("requested amendment is missing its observed source terms");
   const incoming =
     selection?.kind === "contract" ? await acquireTargetPlacementFence(input.scope, selection.contractId) : undefined;
   try {
-    return protocolSeatClose<IntentOutcome<Amendment, AmendmentRefusal>>(
-      await withPrivateStatePublicationSeat<IntentOutcome<Amendment, AmendmentRefusal>>(input.scope, async (seat) => {
+    return protocolSeatClose<AmendAdmission>(
+      await withPrivateStatePublicationSeat<AmendAdmission>(input.scope, async (seat) => {
         const attempts = mintAttempts({ entryCount: 1 });
         for (let index = 0; index < attempts.length; index += 1) {
           const { observation, target, preparation } = await prepareAmendmentAt(
@@ -153,14 +171,16 @@ export async function amendOperation(input: AmendOperationInput): Promise<Intent
             input: {
               contractId: input.contractId,
               at: timestamp(),
-              ...(amendment === undefined ? {} : { source: amendment.source }),
-              ...(selection?.kind === "contract" ? { targetContract: selection.contractId } : {}),
-              ...(preparation === undefined ? {} : { preparation }),
+              edit: {
+                source: amendment.source,
+                preparation,
+                ...(selection?.kind === "contract" ? { targetContract: selection.contractId } : {}),
+              },
             },
             attempt: attempts[index]!,
             observation: observation.decision,
           });
-          if (decision.kind === "refused") return decision;
+          if (decision.kind !== "offer") return decision;
           const admission = await admitDecidedOffer({
             ...input,
             seat,
@@ -168,10 +188,8 @@ export async function amendOperation(input: AmendOperationInput): Promise<Intent
             attempt: attempts[index]!,
             offer: decision.offer,
           });
-          if (admission.kind === "accepted") {
-            if (amendment === undefined) throw new Error("accepted amendment is missing its document derivation");
+          if (admission.kind === "accepted")
             return admitted(admission, { ...amendment, ...(target === undefined ? {} : { target }) });
-          }
           if (admission.kind === "publication-failed") return { kind: "retry", reason: admission };
           if (admission.kind === "collision" && index + 1 === attempts.length)
             return { kind: "retry", reason: admission };

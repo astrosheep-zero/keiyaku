@@ -237,7 +237,7 @@ export class Keiyaku {
     // Generic output describes the wire form; the same execution retains the native handle.
     return this.run("bind", input, run) as Promise<BindOutcome>;
   }
-  amend(input: VerbInput<"amend">, run?: VerbRunFor<"amend">): Promise<VerbOutput<"amend">> {
+  amend(input: VerbInput<"amend"> = {}, run?: VerbRunFor<"amend">): Promise<VerbOutput<"amend">> {
     return this.run("amend", input, run);
   }
   arc(input: VerbInput<"arc">, run?: VerbRunFor<"arc">): Promise<VerbOutput<"arc">> {

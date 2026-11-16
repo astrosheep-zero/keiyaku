@@ -25,10 +25,13 @@ An owner supplies each described verb's business input as one object, including
 operations with no business fields. Typed calls and generic execution cross that
 same boundary, with the same business inputs and optional execution controls.
 Omitted business input has the same meaning on both faces when the operation
-accepts an empty input. Cancellation belongs to execution rather than business
-intent; an already-cancelled invocation stops before coordinate discovery or
-product observation. After entry, cancellation reaches native owners that support
-it without inventing interruption for other operations. Pure caller constraints
+accepts an empty input. An amendment's fields are all optional, so both faces
+carry a request that names none straight to the Contract owner's unchanged
+answer instead of inventing a replacement. Cancellation belongs to execution
+rather than business intent; an already-cancelled invocation stops before
+coordinate discovery or product observation. After entry, cancellation reaches
+native owners that support it without inventing interruption for other
+operations. Pure caller constraints
 are declared with their producing owner
 and checked before coordinate discovery, World establishment, or product
 observation; validation never resolves a product merely to judge input shape.

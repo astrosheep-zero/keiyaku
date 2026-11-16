@@ -106,6 +106,8 @@ import { observeChangedRegion } from "./region.js";
 import { compactReason, compactRetry } from "../protocol/result-reasons.js";
 
 type AcceptedIntent<Value> = Extract<IntentOutcome<Value>, { kind: "accepted" }>;
+/** An amendment's library conclusion: admitted terms, or the fact that no change was requested. */
+type AmendConclusion = AmendOutcome | Readonly<{ kind: "unchanged"; contractId: ContractId }>;
 
 export const guidanceNormalSchema = z.strictObject({ kind: z.literal("present"), guidance: z.string() }).readonly();
 export const guidanceSchema = z.union([
@@ -255,32 +257,40 @@ export class Kei {
   async amend(input: AmendInput): Promise<AmendOutcome> {
     const { markdown, target, gates, prerequisites } = this.amendInput(input);
     const hooks = derivedHooks(this.composition);
+    const requestsChange =
+      markdown !== undefined || target !== undefined || gates !== undefined || prerequisites !== undefined;
     const amendmentPlan = markdown === undefined ? undefined : validated(() => prepareAmendDocument(markdown));
     let changedSections: ReadonlySet<string> | undefined;
-    return await this.local("amend", async (accumulator, channel, scope): Promise<AmendOutcome> => {
+    const concluded = await this.local<AmendConclusion>("amend", async (accumulator, channel, scope) => {
       const admission = await amendOperation({
         scope,
         channel,
         contractId: this.id,
         progress: accumulator,
         ...(target === undefined ? {} : { target }),
-        deriveAmendment: (source) => {
-          const current = persistedDocument(source.document.bytes);
-          const amendment = amendmentPlan === undefined ? undefined : validated(() => amendmentPlan(current));
-          const amended =
-            amendment === undefined ? current : validated(() => decodeContractDocument(amendment.document));
-          changedSections =
-            amendment === undefined
-              ? undefined
-              : new Set(
-                  [...amendment.changedSections].filter(
-                    (section) => sectionValue(current, section) !== sectionValue(amended, section),
-                  ),
-                );
-          const terms = contractTerms(amended, gates ?? source.gates, prerequisites ?? source.after);
-          return { terms, verification: documentDerivation(amended).verification };
-        },
+        ...(requestsChange
+          ? {
+              deriveAmendment: (source: ContractTerms) => {
+                const current = persistedDocument(source.document.bytes);
+                const amendment = amendmentPlan === undefined ? undefined : validated(() => amendmentPlan(current));
+                const amended =
+                  amendment === undefined ? current : validated(() => decodeContractDocument(amendment.document));
+                changedSections =
+                  amendment === undefined
+                    ? undefined
+                    : new Set(
+                        [...amendment.changedSections].filter(
+                          (section) => sectionValue(current, section) !== sectionValue(amended, section),
+                        ),
+                      );
+                const terms = contractTerms(amended, gates ?? source.gates, prerequisites ?? source.after);
+                return { terms, verification: documentDerivation(amended).verification };
+              },
+            }
+          : {}),
       });
+      // No requested change is the same answer as before: an accepted amendment that changed nothing.
+      if (admission.kind === "unchanged") return { kind: "unchanged", contractId: this.id };
       if (admission.kind !== "accepted")
         return admission.kind === "refused"
           ? { kind: "refused", contractId: this.id, reason: compactReason(admission.refusal) }
@@ -311,6 +321,7 @@ export class Kei {
       });
       return { kind: "accepted", contractId: this.id, ...value };
     });
+    return concluded.kind === "unchanged" ? { kind: "accepted", contractId: this.id } : concluded;
   }
 
   /** One promise with an optional observation callback; observation never delays custody. */

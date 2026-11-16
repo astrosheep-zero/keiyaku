@@ -80,9 +80,11 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 Bind target selection, including the omitted-target default and fork
 inheritance, is owned by [public-api.md](public-api.md); the edge only adapts
 its literal option grammar onto those intents and inspects no Git state itself.
-The edge resolves the invocation worktree coordinate once and hands that same
-resolved coordinate to the operation, so the Contract owner reads it rather
-than any ambient directory.
+The edge passes exactly the fields the caller named and never synthesizes a
+replacement for an omitted amend option, so a bare amendment reaches the owner
+as the no-op it is. The edge resolves the invocation worktree coordinate once
+and hands that same resolved coordinate to the operation, so the Contract owner
+reads it rather than any ambient directory.
 
 Delivery's dry-run form selects the read-only mode of the same invocation verb,
 which calls the dedicated native preview owner. Unused or mutation-only options

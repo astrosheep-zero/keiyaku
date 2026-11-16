@@ -246,7 +246,6 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["debt.update", { id: "debt/example" }],
     ["debt.update", { id: "debt/example", state: "paused" }],
     ["debt.add", { title: " \n" }],
-    ["amend", { contract: "kei/example" }],
     ["region", { contract: "kei/example", paths: ["src/**"] }],
     ["region", { paths: [] }],
     ["whoami", { input: {} }],
@@ -501,6 +500,15 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const repo = await Repo.at({ path: otherRepo.path });
   const prerequisite = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: [] }));
   const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"], after: [prerequisite.contractId] }));
+  // MCP carries the same empty amendment: no field named means no replacement is synthesized.
+  const unchanged = await client.callTool({ name: "amend", arguments: {
+    repo: otherRepo.path, contract: bound.contractId,
+  } });
+  assert.equal(unchanged.isError, false, JSON.stringify(unchanged));
+  assert.equal(unchanged._meta?.["keiyaku/disposition"], "accepted");
+  const retained = present(await bound.kei.state());
+  assert.deepEqual(retained.terms.after, [prerequisite.contractId]);
+  assert.deepEqual(retained.terms.gates, ["reviewed"]);
   const cleared = await client.callTool({ name: "amend", arguments: {
     repo: otherRepo.path, contract: bound.contractId, after: [], gates: [],
   } });

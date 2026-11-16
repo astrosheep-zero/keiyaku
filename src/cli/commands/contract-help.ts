@@ -88,6 +88,8 @@ export const CONTRACT_COMMAND_SPECS = {
       "Self-targets and destination cycles refuse. Use refs/heads/kei/... for a branch named kei/....",
       "Retargeting requires fresh verify; unchanged candidate content keeps its review.",
       "",
+      "Naming no edit at all reports the active Contract unchanged and writes nothing.",
+      "",
       "stdin is an amendment; each heading is one edit:",
       "  ## Context|Objective|Design|Region|Criteria|Verification|<extension>  (replace, or add a new extension)",
       "  ## Replace: Context|Objective|Design|Region|Criteria|Verification|<extension>",

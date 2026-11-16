@@ -9,12 +9,18 @@ import {
 } from "../facts/observation.js";
 import { journalEntry, type AmendData, type ContractId, type ContractTerms } from "../facts/types.js";
 
+/** What one amendment replaces: the source terms it stamps and the terms it asks for. */
+export type AmendEdit<Failure = never> = Readonly<{
+  source: ContractTerms;
+  targetContract?: ContractId;
+  preparation: Preparation<AmendData, Failure>;
+}>;
+
 export type AmendInput<Failure = never> = Readonly<{
   contractId: ContractId;
   at: string;
-  source?: ContractTerms;
-  targetContract?: ContractId;
-  preparation?: Preparation<AmendData, Failure>;
+  /** Absent when the amendment requests no change: an ordinary no-op, not an empty edit. */
+  edit?: AmendEdit<Failure>;
 }>;
 
 export type AmendRefusal =
@@ -29,18 +35,20 @@ export type AmendRefusal =
     }>
   | TargetContractRefusal;
 
+/** The owner's answer for a well-formed amendment request, including one that asks for nothing. */
+export type AmendDecision<Failure> = OfferDecision<AmendRefusal | Failure> | Readonly<{ kind: "unchanged" }>;
+
 export function decideAmend<Failure>({
   input,
   attempt,
   observation,
-}: DecideInput<AmendInput<Failure>>): OfferDecision<AmendRefusal | Failure> {
+}: DecideInput<AmendInput<Failure>>): AmendDecision<Failure> {
   const id = input.contractId;
   const current = activeContract(observation, id);
   if ("kind" in current) return { kind: "refused", refusal: current };
-  if (input.preparation === undefined || input.source === undefined) {
-    throw new Error("existing contract requires an amend preparation and source terms");
-  }
-  const source = input.source;
+  const edit = input.edit;
+  if (edit === undefined) return { kind: "unchanged" };
+  const source = edit.source;
   const termsCurrent =
     source.document.key === current.terms.document.key &&
     source.segments.length === current.terms.segments.length &&
@@ -61,12 +69,12 @@ export function decideAmend<Failure>({
   if (!termsCurrent) {
     return { kind: "refused", refusal: { kind: "terms-moved" } };
   }
-  if (input.targetContract !== undefined) {
-    const refusal = targetContractIdRefusal(observation, input.targetContract);
+  if (edit.targetContract !== undefined) {
+    const refusal = targetContractIdRefusal(observation, edit.targetContract);
     if (refusal !== undefined) return { kind: "refused", refusal };
   }
-  if (input.preparation.kind === "refused") return { kind: "refused", refusal: input.preparation.refusal };
-  const { data } = input.preparation;
+  if (edit.preparation.kind === "refused") return { kind: "refused", refusal: edit.preparation.refusal };
+  const { data } = edit.preparation;
   const targetRefusal = targetContractRefusal(observation, data.target);
   if (targetRefusal !== undefined) return { kind: "refused", refusal: targetRefusal };
   if (targetCycles(id, data.target, observation)) return { kind: "refused", refusal: { kind: "cyclic-target" } };

@@ -116,8 +116,7 @@ test("decision accessor rejects a missing key, while explicit null is domain abs
         input: {
           contractId: id,
           at: "2026-08-07T00:00:00Z",
-          source: terms(),
-          preparation: { kind: "prepared", data: terms() },
+          edit: { source: terms(), preparation: { kind: "prepared", data: terms() } },
         },
         attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
         observation: new Map([[dependency, null]]),
@@ -136,8 +135,7 @@ test("decision accessor rejects a missing key, while explicit null is domain abs
     input: {
       contractId: id,
       at: "2026-08-07T00:00:00Z",
-      source: terms(),
-      preparation: { kind: "prepared", data: terms() },
+      edit: { source: terms(), preparation: { kind: "prepared", data: terms() } },
     },
     attempt: { entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV")] },
     observation,
@@ -227,8 +225,7 @@ test("amend refuses direct and transitive prerequisite cycles", () => {
       input: {
         contractId: a,
         at: "2026-08-07T00:00:01Z",
-        source: current.terms,
-        preparation: { kind: "prepared" as const, data: terms(after) },
+        edit: { source: current.terms, preparation: { kind: "prepared" as const, data: terms(after) } },
       },
       attempt,
       observation: new Map([

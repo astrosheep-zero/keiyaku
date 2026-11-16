@@ -12,7 +12,12 @@ Binding alone places the Contract in its bound phase; there is no pre-phase.
 Terminal state is a journal-derived read model, never a separate record.
 Binding fixes the start and workspace coordinates and initial terms. Amendment
 may replace active terms, including declared dependencies and gates, and may
-explicitly select a different target. It cannot change the start or workspace
+explicitly select a different target. An amendment names only what it replaces;
+an omitted field is not a replacement, so no declared dependency or gate is
+cleared without an explicit empty selection. One that names no replacement at
+all is an ordinary no-op: an active Contract answers unchanged, admits no fact,
+and starts no post-admission work, while a missing or terminal Contract refuses
+it as it refuses any other amendment. It cannot change the start or workspace
 coordinates or reopen a terminal Contract. Target amendment never follows a
 former destination automatically: an active child may explicitly leave either an
 accepted or abandoned destination for an existing branch or an active Contract.

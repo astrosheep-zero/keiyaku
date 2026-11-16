@@ -371,10 +371,13 @@ test("bind and amend retain complete after snapshots and mixed gate selectors", 
   for (const value of [" ,--strict", "BAD GATE!!", "Strict"]) {
     assert.throws(() => parseArgv(["bind", "--gates", value, "-"]), /--gates name must match/u);
   }
-  assert.throws(
-    () => parseArgv(["amend", "kei/example"]),
-    /amend requires stdin or --after, --clear-after, --gates, or --target/,
-  );
+  // An amendment that names no edit stays that way: omission never synthesizes clearing fields.
+  assert.deepEqual(parseArgv(["amend", "kei/example"]), {
+    command: { name: "amend", input: { contract: "kei/example" }, output: "text" },
+  });
+  assert.deepEqual(parseArgv(["amend"]), {
+    command: { name: "amend", input: {}, output: "text" },
+  });
   assert.throws(
     () => parseArgv(["amend", "kei/example", "--after", "kei/one", "--clear-after", "-"]),
     /mutually exclusive/,

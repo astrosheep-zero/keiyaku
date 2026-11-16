@@ -9,7 +9,8 @@ import { canonicalDebtId, type DebtId } from "../debt/identity.js";
 import type { DocumentDerivation } from "../protocol/operations.js";
 import { gateRequirements, prepareVerificationDeclaration } from "../verification/declaration.js";
 
-const amendFields = z.strictObject({
+/** Every amendment field is optional; naming none requests an unchanged, fact-free amendment. */
+export const amendInputSchema = z.strictObject({
   target: z
     .string()
     .refine((value) => value.trim() !== "", "target must be nonblank")
@@ -18,13 +19,6 @@ const amendFields = z.strictObject({
   after: z.array(z.string()).readonly().exactOptional(),
   gates: z.array(z.string()).readonly().exactOptional(),
 });
-export const amendInputSchemas = [
-  amendFields.required({ markdown: true }),
-  amendFields.required({ after: true }),
-  amendFields.required({ gates: true }),
-  amendFields.required({ target: true }),
-] as const;
-export const amendInputSchema = z.union(amendInputSchemas);
 
 export function requireMarkdown(value: unknown, label = "markdown"): string {
   if (typeof value !== "string") throw new KeiyakuError("invalid-input", `${label} must be a string`);

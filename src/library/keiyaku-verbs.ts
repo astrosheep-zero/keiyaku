@@ -4,7 +4,7 @@ export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiya
 import { durationSchema } from "../akuma/call-input.js";
 import { parseDuration } from "../duration.js";
 import { addDebtInputSchema, updateDebtInputSchema } from "../debt/input.js";
-import { amendInputSchemas } from "./input.js";
+import { amendInputSchema } from "./input.js";
 import { askProgressSchema } from "../akuma/akuma-selection-execution.js";
 import { akumaReportResultSchema } from "../akuma/akuma-instance.js";
 import { akumaIdSchema } from "../akuma/identity.js";
@@ -192,27 +192,22 @@ export const verbs = Object.freeze({
   },
   amend: {
     description:
-      "Rewrite an active Contract's terms, target, prerequisites (after), or gates. markdown is H2 edits such as ## Replace: Objective, not a new Contract. Returns only what changed.",
-    input: z.union(
-      amendInputSchemas.map((branch) =>
-        (
-          branch.extend({
-            markdown: branch.shape.markdown.describe(
-              "Replacement Contract Markdown document or section-level amendment.",
-            ),
-            after: branch.shape.after.describe(
-              "Replacement prerequisite Contract IDs (kei/...); pass [] to clear prerequisites.",
-            ),
-            gates: branch.shape.gates.describe("Replacement acceptance gate names; pass [] to clear all gates."),
-            target: branch.shape.target.describe(
-              "Explicit existing branch or active Contract destination; omission retains the current target.",
-            ),
-          }) as typeof branch
-        )
-          .extend(contract)
-          .readonly(),
-      ),
-    ),
+      "Rewrite an active Contract's terms, target, prerequisites (after), or gates; naming none reports the Contract unchanged and writes nothing. markdown is H2 edits such as ## Replace: Objective, not a new Contract. Returns only what changed.",
+    input: amendInputSchema
+      .extend({
+        markdown: amendInputSchema.shape.markdown.describe(
+          "Replacement Contract Markdown document or section-level amendment.",
+        ),
+        after: amendInputSchema.shape.after.describe(
+          "Replacement prerequisite Contract IDs (kei/...); pass [] to clear prerequisites.",
+        ),
+        gates: amendInputSchema.shape.gates.describe("Replacement acceptance gate names; pass [] to clear all gates."),
+        target: amendInputSchema.shape.target.describe(
+          "Explicit existing branch or active Contract destination; omission retains the current target.",
+        ),
+      })
+      .extend(contract)
+      .readonly(),
     output: amendOutcomeSchema,
     effect: "write",
   },

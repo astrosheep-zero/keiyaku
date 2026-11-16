@@ -376,7 +376,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [
         ...libraryOwner.allow.filter((rule) => rule.target !== "library/**"),
         any("library/keiyaku-classify.ts"),
-        any("library/input.ts", ["amendInputSchemas"]),
+        any("library/input.ts", ["amendInputSchema"]),
         any("library/contract-outcomes.ts"),
         any("library/contract-types.ts"),
         any("library/kei.ts", ["Guidance", "guidanceSchema", "guidanceNormalSchema"]),
