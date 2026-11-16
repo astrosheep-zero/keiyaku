@@ -126,7 +126,13 @@ the label is omitted without another observation or a new result envelope.
 Ordinary catalogue rows keep their shape.
 
 Kanshi owns what a composite report means; this chapter owns its terminal
-projection. Debt owns Debt facts and [cli-debt.md](cli-debt.md) owns their
+projection. The World board nests selected Akumas beneath their displayed
+Contract with native life, activity, and bounded current work. The shared
+Contract identity appears once; association inventories do not duplicate Akuma
+rows. Other selected Akumas retain their observed links separately. Section
+omission and failure evidence remain visible even when every displayed Akuma
+is nested. The board adds no age-based intervention judgment or chat preview.
+Debt owns Debt facts and [cli-debt.md](cli-debt.md) owns their
 Debt-facing presentation. Contract, Git, and Akuma renderers receive their
 facts from their respective public results. Activity summaries retain the
 concrete work observed rather than substituting a broad category; a tool row

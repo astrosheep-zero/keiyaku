@@ -1,4 +1,6 @@
 import { accepted, present } from "./support/library-verbs.js";
+import { isolateUserHome } from "./support/user-home.js";
+isolateUserHome();
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -684,14 +686,12 @@ test("thin catalogue reads no current frontiers while World keeps its original a
       const body = await born.leash.recordBody(born.paths, { leashTakenAt: at });
       const turn = await beginTurn(born.paths, { bodySequence: body.sequence, startedAt: at });
       await endTurn(born.paths, { turnSequence: turn.sequence, completedAt: at, outcome: { kind: "answered", session: { sessionId: `session-${index}` }, answer: `answer ${index}` } });
-      await breakBody(born.paths, { sequence: body.sequence, end: "put-down", at });
     } finally { born.leash.release(); }
   }
   const catalogue = await Akumas.of(world).list({ limit: 10 });
   assertWireRoundTrip(akumaCatalogueSchema, catalogue);
   assert.equal(catalogue.more, true);
   assert.deepEqual(reads, []);
-  assert.equal(catalogue.rows![3]!.id, "aku/worker/00000007");
   reads.length = 0;
   const view = Kanshi.of({ world });
   const report = await view.board();
@@ -742,7 +742,9 @@ test("birthless members retain associations without timelines and born snapshot 
   assert.equal(report.akumas.kind, "present");
   if (report.akumas.kind !== "present") assert.fail("missing Akumas");
   assert.deepEqual(report.akumas.rows!.find(row => row.id === born.id)?.work, { kind: "unavailable", diagnostic: "selected Heart became unreadable" });
-  assert.deepEqual(reads, [born.id], "birthless leading positions never backfill from the fourth row");
+  assert.deepEqual(report.akumas.rows!.map(row => row.id), catalogue.rows!.map(row => row.id));
+  assert.deepEqual(reads, catalogue.rows!.slice(0, 3).filter(row => row.id === born.id || row.id === peer.id).map(row => row.id),
+    "snapshots use positions in the owner's selected page");
 });
 
 test("catalogue Alias failures survive empty and readable membership; source failures stay hard", async (t) => {

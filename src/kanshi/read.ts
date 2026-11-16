@@ -219,7 +219,7 @@ async function contractsAt(
   aliases: Section<readonly AliasBinding[]>,
 ): Promise<BoardSection<ContractKanshiBoard>> {
   try {
-    const source = await readContractCatalogue(observation, limit);
+    const source = await readContractCatalogue(observation, limit, "active");
     const rows = (source.rows ?? []).map((row) => {
       const associations = contractAssociations(row.id, holders, dispatches, aliases);
       return { ...row, ...(associations.length === 0 ? {} : { associations }) };
@@ -315,7 +315,10 @@ export async function observeKanshi(input: KanshiInput, options: KanshiBoardOpti
   const [aliases, akumaProduct, debts] = await Promise.all([
     aliasesAt(world),
     contract === undefined && world !== null
-      ? akumaRowsAt(world, akumaLimit, undefined, undefined, { snapshotRows: ROSTER_SNAPSHOT_ROWS }).then(
+      ? akumaRowsAt(world, akumaLimit, undefined, undefined, {
+          selection: "active",
+          snapshotRows: ROSTER_SNAPSHOT_ROWS,
+        }).then(
           ({ kind: _kind, observedAt: _observedAt, ...rows }): BoardSection<AkumaKanshiWorld> => ({
             kind: "present",
             ...rows,

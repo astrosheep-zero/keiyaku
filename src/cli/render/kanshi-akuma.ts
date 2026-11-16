@@ -160,4 +160,4 @@ function formatAge(source: string | null | undefined, observedAt: string): strin
   return ageText(source, observedAt);
 }
 
-export { akumaLabel, associationFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard };
+export { akumaLabel, akumaRowLines, associationFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard };

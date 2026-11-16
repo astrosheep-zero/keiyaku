@@ -40,13 +40,15 @@ present with Alias marked unavailable, while readable alias values remain the
 Alias owner's and attached Contract rosters derive availability from that
 section fact.
 
-The World Debt section is a recent bounded catalogue. It attaches only
-relationships already observed for those rows. A selected Contract retains its
+The World Debt section is a bounded active catalogue, using the Debt owner's
+selection before its display limit. It attaches only relationships already
+observed for those rows. A selected Contract retains its
 explicit DebtHolder observation; it does not discover a collection of owned
 Debts. Holder failure leaves that association unavailable while independently
 readable World Debt rows remain visible.
 
-The bare World Contract section is likewise a recent bounded catalogue. A
+The bare World Contract section is likewise a bounded active catalogue using
+the Contract owner's selection before its display limit. A
 selected Contract retains its exact owner observation, so the convenience of a
 World aperture never weakens the detail that selection asks the Contract owner
 to explain. Its judgment is phase-driven: active Contracts foreground the
@@ -59,8 +61,21 @@ that aperture is unavailable rather than missing; Kanshi uses missing only
 when the Contract observation is complete enough to establish absence.
 
 The selector-free World report identifies its composite family and reuses the
-native thin catalogue rows. Contract catalogue rows retain physical attention
-and availability rather than expanded addressed detail. Akuma catalogue rows
+native thin catalogue rows. Each product owns which members are active; Kanshi
+consumes that selection without a second lifecycle classifier. The active
+Contract page is the board's centre: each selected Akuma associated with a
+displayed Contract appears once beneath it. Other selected Akumas remain
+visible separately with their observed association, including links to
+Contracts outside the page, terminal Contracts, and missing Contracts. Failed
+Contract or association observation never hides readable Akumas or establishes
+that their association is absent. Grouping preserves each owner's order within
+its displayed group and does not expand any catalogue aperture. Native rows,
+section availability, association evidence, and bounded omissions remain
+available independently of text grouping. No priority, responsibility, or need
+for intervention is inferred from age, grouping, or lack of motion.
+
+Contract catalogue rows retain physical attention and availability rather than
+expanded addressed detail. Akuma catalogue rows
 retain life and associations; a bounded separate current-work observation adds
 the native semantic frontier and concrete current-action summary from the same
 read. No terminal-chat timeline or answer preview belongs in the World report.
