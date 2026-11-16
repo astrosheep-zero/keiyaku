@@ -12,8 +12,11 @@ import { dispatchAssociations } from "./selection.js";
 import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import { World, worldRootSchema, type WorldRoot } from "../world.js";
 
-/** Environment attribution is explicit invocation input, never SDK admission. */
-export async function akumaCallerFromEnvironment(environment: NodeJS.ProcessEnv): Promise<AkumaCaller | undefined> {
+/** Actor declarations win; an explicit caller bypasses native host decoding. */
+export async function akumaCallerFromEnvironment(
+  environment: NodeJS.ProcessEnv,
+  caller?: AkumaCaller,
+): Promise<AkumaCaller | undefined> {
   const id = environment.KEIYAKU_ACTOR_ID;
   const world = environment.KEIYAKU_ACTOR_WORLD;
   if ((id === undefined) !== (world === undefined)) {
@@ -23,6 +26,7 @@ export async function akumaCallerFromEnvironment(environment: NodeJS.ProcessEnv)
     const resolved = await World.resolve({ cwd: world, repositoryRoot: world });
     return decodeAkumaCaller({ kind: "akuma", akumaId: id, world: resolved.candidate });
   }
+  if (caller !== undefined) return caller;
   const hosts = [
     { integration: "codex", variable: "CODEX_THREAD_ID", id: environment.CODEX_THREAD_ID },
     { integration: "pi", variable: "PI_SESSION_ID", id: environment.PI_SESSION_ID },
@@ -90,9 +94,9 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function selfFrom(environment: NodeJS.ProcessEnv): Promise<WhoamiFacts["self"]> {
+async function selfFrom(environment: NodeJS.ProcessEnv, explicit?: AkumaCaller): Promise<WhoamiFacts["self"]> {
   try {
-    const caller = await akumaCallerFromEnvironment(environment);
+    const caller = await akumaCallerFromEnvironment(environment, explicit);
     return caller === undefined ? { kind: "none" } : callerFact(caller);
   } catch (error) {
     return { kind: "invalid", diagnostic: reason(error) };
@@ -183,9 +187,16 @@ async function callerProfile(
   }
 }
 
-export async function whoami(coordinates: WhoamiCoordinates, environment: NodeJS.ProcessEnv): Promise<WhoamiFacts> {
+export async function whoami(
+  coordinates: WhoamiCoordinates,
+  environment: NodeJS.ProcessEnv,
+  caller?: AkumaCaller,
+): Promise<WhoamiFacts> {
   const world = coordinates.world !== null && (await World.established(coordinates.world)) ? coordinates.world : null;
-  const [self, contextContract] = await Promise.all([selfFrom(environment), contextualContract(coordinates, world)]);
+  const [self, contextContract] = await Promise.all([
+    selfFrom(environment, caller),
+    contextualContract(coordinates, world),
+  ]);
   const initiator = self.kind === "akuma" ? await currentTurn(self) : undefined;
   return {
     self,

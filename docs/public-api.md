@@ -1,7 +1,8 @@
 # Public API
 
-The ESM package exposes exactly two entries: the package root and the plugin
-entry. The root exposes Kei as the native Contract handle and Keis as the
+The ESM package exposes the package root, the plugin entry, and a dedicated Pi
+registration entry. The Pi entry exposes integration registration alone; it
+provides no general execution facade. The root exposes Kei as the native Contract handle and Keis as the
 Repo-bound Contract collection, Akuma as the standalone single-Akuma product, Akumas as the World-bound
 plural Akuma composition, Debt as its independent product, Kanshi as an immutable
 coordinate-bound composition for World, addressed Contract, count and Region
@@ -9,7 +10,7 @@ observation, Settings as a loader and immutable loaded value, Plugin types,
 Repo, World, and the named `nuke` operation. No other subpath, compatibility
 alias, or other generic mixed orchestration facade exists. The one invocation
 facet is `Keiyaku`, owned by [public-keiyaku.md](public-keiyaku.md). No private
-execution, composition, or storage mechanism is reachable from either entry.
+execution, composition, or storage mechanism is reachable from these entries.
 
 ## Composition Boundary
 

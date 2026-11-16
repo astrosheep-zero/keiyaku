@@ -224,13 +224,22 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
       KEIYAKU_ACTOR_ID: born.allocated.id,
       KEIYAKU_ACTOR_WORLD: world,
     };
-    const facet = Keiyaku.at({ cwd: world, environment, home });
+    const facet = Keiyaku.at({
+      cwd: world, environment, home,
+      caller: { kind: "external", integration: "pi", id: "ignored-by-actor" },
+    });
     const native = Akuma.select(world, born.allocated.id);
     const recorded = await facet.report({ text: "facet milestone" });
     assert.equal(recorded.kind, "recorded");
     if (recorded.kind !== "recorded") assert.fail("report was not recorded");
+    const explicitActor = Keiyaku.at({
+      cwd: world, environment: { PI_SESSION_ID: "inherited-host" }, home,
+      caller: { kind: "akuma", world, akumaId: born.allocated.id },
+    });
+    assert.equal((await explicitActor.report({ text: "explicit actor milestone" })).kind, "recorded");
     const history = await native.history();
     assert.ok(history.rows.some((row) => row.kind === "report" && row.text === "facet milestone"));
+    assert.ok(history.rows.some((row) => row.kind === "report" && row.text === "explicit actor milestone"));
     assert.deepEqual(
       await facet.history({ selector: born.allocated.id }),
       await Akumas.of(world).history({ akuma: born.allocated.id }),

@@ -17,7 +17,7 @@ import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { renderContractCatalogue } from "../src/cli/render/catalog.js";
 import { gateRequirementFacts } from "../src/cli/render/contract-observation.js";
 import { unmetRequirementLines } from "../src/cli/render/receipt.js";
-import { mcpOutputSchemas, projectMcpOutput } from "../src/mcp/output.js";
+import { modelOutputSchemas as mcpOutputSchemas, projectModelOutput as projectMcpOutput } from "../src/library/model-tools.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";

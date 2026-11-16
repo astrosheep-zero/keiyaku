@@ -70,6 +70,9 @@ test("published package installs one keiyaku CLI and runs against a real reposit
     "build/plugins/opencode/index.js",
     "build/plugins/opencode/package.json",
     "build/plugins/pi/keiyaku.ts",
+    "plugins/pi/keiyaku.ts",
+    "build/src/pi/index.js",
+    "build/src/pi/index.d.ts",
     "build/skills/keiyaku-akuma/SKILL.md",
     "build/skills/keiyaku-akuma/references/automation.md",
   ]) assert.ok(archivePaths.includes(`package/${path}`), `missing packed asset: ${path}`);

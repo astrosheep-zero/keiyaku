@@ -21,6 +21,10 @@
     "./plugin": {
       "types": "./build/src/plugin/public.d.ts",
       "import": "./build/src/plugin/public.js"
+    },
+    "./pi": {
+      "types": "./build/src/pi/index.d.ts",
+      "import": "./build/src/pi/index.js"
     }
   },
   "bin": {

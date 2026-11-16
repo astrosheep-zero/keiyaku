@@ -13,8 +13,6 @@ export const capabilityPolicy = {
     {
       module: "zod",
       owners: [
-        { source: "mcp/adapter.ts", symbols: ["z"] },
-        { source: "mcp/output.ts", symbols: ["z"] },
         { source: "bounded-list.ts", symbols: ["z"] },
         { source: "region.ts", symbols: ["z"] },
         { source: "settings.ts", symbols: ["z"] },
@@ -187,7 +185,7 @@ export const capabilityPolicy = {
     { capability: "function-constructor", owners: [] },
     { capability: "math-random", owners: [] },
     { capability: "module-mutable-state", owners: ["plugin/runtime.ts"] },
-    { capability: "date-now", owners: ["cli/**", "mcp/adapter.ts", "protocol/**"] },
+    { capability: "date-now", owners: ["cli/**", "mcp/adapter.ts", "pi/index.ts", "protocol/**"] },
     { capability: "new-date-current", owners: ["akuma/**", "dispatch/**", "kanshi/**", "protocol/**", "debt/**"] },
     {
       capability: "process-argv",
@@ -204,6 +202,7 @@ export const capabilityPolicy = {
         "akuma/**",
         "cli/**",
         "mcp/index.ts",
+        "pi/index.ts",
         "git/**",
         "runtime/proc/**",
         "scripts/**",

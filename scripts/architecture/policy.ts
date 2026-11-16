@@ -199,7 +199,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
     { source: "errors.ts", allow: [] },
     {
-      source: "mcp/output.ts",
+      source: "library/model-tools.ts",
       allow: [any("library/keiyaku-verbs.ts"), runtime("protocol/result-leaves.ts", ["snapshotChangeSchema"])],
     },
     {
@@ -208,10 +208,23 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("mcp/**"),
         any("library/keiyaku.ts"),
         any("library/keiyaku-verbs.ts"),
+        any("library/model-tools.ts"),
         any("library/outcome.ts", ["projectFailure"]),
         any("cli/render/verbs.ts"),
         any("cli/render/terminal.ts", ["DEFAULT_CLI_COLUMNS"]),
         any("cli/version.ts", ["installedPackageVersion"]),
+      ],
+    },
+    {
+      source: "pi/**",
+      allow: [
+        any("library/keiyaku.ts"),
+        any("library/keiyaku-verbs.ts"),
+        any("library/model-tools.ts"),
+        any("library/outcome.ts", ["projectFailure"]),
+        any("cli/render/verbs.ts"),
+        any("cli/render/terminal.ts", ["DEFAULT_CLI_COLUMNS"]),
+        any("mcp/description.ts", ["SERVER_DESCRIPTION"]),
       ],
     },
     { source: "scripts/**", allow: [any("scripts/**")] },

@@ -9,7 +9,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { Keis, Repo } from "../src/index.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 
-test("packaged stdio server launches from its documented Pi configuration", async (t) => {
+test("packaged stdio server launches from its documented standalone configuration", async (t) => {
   const root = mkdtempSync(join(tmpdir(), "kei-mcp-stdio-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const manifest = JSON.parse(readFileSync("package.json", "utf8"));

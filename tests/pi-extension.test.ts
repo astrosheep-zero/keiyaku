@@ -443,22 +443,15 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
   return { command, handlers, tools, mcpServers };
 }
 
-test("Pi registers MCP and the explicit Keiyaku command without native tools", () => {
+test("Pi registers codemode tools and the explicit Keiyaku command without MCP", () => {
   const { handlers, tools, mcpServers } = install(async () => {
     throw new Error("status must not run while loading");
   });
 
   assert.deepEqual([...handlers.keys()], ["session_start", "agent_settled", "session_shutdown"]);
-  assert.deepEqual(tools, []);
-  assert.equal(mcpServers.length, 1);
-  const { name, config } = mcpServers[0]!;
-  assert.equal(name, "keiyaku");
-  assert.ok("command" in config);
-  assert.equal(config.command, process.execPath);
-  assert.equal(Object.hasOwn(config, "description"), false);
-  assert.equal(config.timeout, 900);
-  assert.equal(config.args?.length, 1);
-  assert.ok(existsSync(config.args![0]!));
+  assert.ok(tools.some((tool) => tool.name === "keiyaku_kanshi"));
+  assert.ok(tools.every((tool) => tool.exposure === "codemode"));
+  assert.deepEqual(mcpServers, []);
 });
 
 test("Pi command runs one text status and does not refresh when dismissed", async () => {

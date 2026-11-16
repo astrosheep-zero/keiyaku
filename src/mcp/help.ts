@@ -13,8 +13,11 @@ detail. Native calls and CLI --json retain complete owner answers. Errors return
 classification. An unsatisfied verification verdict is a normal answer.
 Administration and raw import stay on the CLI.
 
-Pi has built-in MCP. Add a server to ~/.pi/agent/mcp.json or the project's
-.pi/mcp.json, for example:
+Pi uses the shipped Keiyaku extension's native keiyaku_* tools through codemode,
+not this server. The extension activates codemode when loaded; SDK hosts must
+load codemode themselves. No Keiyaku MCP configuration is needed in Pi.
+
+Other MCP clients can launch the standalone server over stdio, for example:
 
 {
   "mcpServers": {
@@ -26,5 +29,5 @@ Pi has built-in MCP. Add a server to ~/.pi/agent/mcp.json or the project's
   }
 }
 
-Exposure applies to the whole server. The client timeout is independent of Keiyaku timeout; ask, wait, or verify may need longer. Reload Pi after configuration changes.
+Exposure applies to the whole server where supported by the client. The client timeout is independent of Keiyaku timeout; ask, wait, or verify may need longer.
 `;

@@ -17,7 +17,8 @@ function fixture(readers: Readers) {
   const pi = {
     on(name: string, handler: Handler) { handlers.set(name, [...(handlers.get(name) ?? []), handler]); },
     registerTool(tool: { name: string }) { tools.push(tool.name); },
-    registerMcpServer() {},
+    getAllTools: () => [{ name: "codemode", reachesTools: () => "all" }],
+    getActiveTools: () => ["codemode"],
     registerCommand(name: string) { commands.push(name); },
     registerFlag() {}, getFlag() { return false; },
   } as unknown as ExtensionAPI;
@@ -53,7 +54,7 @@ test("only TUI starts asynchronous observations; scope and section availability 
   assert.deepEqual(calls, []);
   assert.deepEqual(f.writes, []);
   assert.deepEqual(f.commands, ["keiyaku"]);
-  assert.deepEqual(f.tools, []);
+  assert.ok(f.tools.includes("keiyaku_kanshi"));
   for (const mode of ["rpc", "json", "print"]) {
     const ctx = f.context(mode);
     f.emit("session_start", ctx); f.emit("agent_settled", ctx); f.emit("session_shutdown", ctx);

@@ -1,5 +1,5 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { fileURLToPath } from "node:url";
+import { registerKeiyakuTools } from "@astrosheep/keiyaku/pi";
 import { Kanshi, NoGitWorldError, Repo, World } from "@astrosheep/keiyaku";
 
 type ExecResult = Readonly<{ stdout: string; stderr: string; code: number }>;
@@ -48,11 +48,7 @@ export default function keiyakuExtension(
   pi: ExtensionAPI,
   readers: StatusReaders = { repo: Repo.at, world: World.resolve, counts: (scope) => Kanshi.of(scope).counts() },
 ): void {
-  pi.registerMcpServer("keiyaku", {
-    command: process.execPath,
-    args: [fileURLToPath(new URL("../../build/src/mcp/index.js", import.meta.url))],
-    timeout: 900,
-  });
+  registerKeiyakuTools(pi);
   let close: (() => void) | undefined;
   let refresh: (() => void) | undefined;
   pi.on("session_start", (_event, ctx) => {

@@ -28,7 +28,7 @@ import { errorCategory } from "../errors.js";
 import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
-import type { AkumaCaller } from "../akuma/caller.js";
+import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import * as debt from "./keiyaku-debt.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import { validateAkumaName } from "../identity/normalize.js";
@@ -39,6 +39,7 @@ export type KeiyakuAt = Readonly<{
   environment: Readonly<Record<string, string | undefined>>;
   home?: string;
   repo?: string;
+  caller?: AkumaCaller;
 }>;
 
 type ParsedInput<K extends VerbName> = z.output<(typeof verbs)[K]["input"]>;
@@ -58,7 +59,8 @@ export class Keiyaku {
   readonly #input: KeiyakuAt;
 
   private constructor(input: KeiyakuAt) {
-    this.#input = { ...input, environment: { ...input.environment } };
+    const caller = decodeAkumaCaller(input.caller);
+    this.#input = { ...input, environment: { ...input.environment }, ...(caller === undefined ? {} : { caller }) };
   }
 
   static at(input: KeiyakuAt): Keiyaku {
@@ -465,7 +467,7 @@ export class Keiyaku {
   }
 
   #caller() {
-    return akumaCallerFromEnvironment(this.#input.environment);
+    return akumaCallerFromEnvironment(this.#input.environment, this.#input.caller);
   }
 
   async #akumas(use: "optional" | "required" = "optional") {
@@ -541,17 +543,19 @@ export class Keiyaku {
 
   async #report(input: ExecutionInput<"report">) {
     await this.#coordinates("none");
-    const environment = this.#input.environment;
-    if (environment.KEIYAKU_ACTOR_ID === undefined || environment.KEIYAKU_ACTOR_WORLD === undefined)
-      throw new KeiyakuUsageError("report requires explicit KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD");
     let caller;
     try {
-      caller = await akumaCallerFromEnvironment(environment);
+      caller = await this.#caller();
     } catch (error) {
       if (error instanceof WorldError) throw new KeiyakuUsageError(error.message);
       throw error;
     }
-    if (caller?.kind !== "akuma") throw new KeiyakuUsageError("report requires explicit Akuma identity");
+    if (caller?.kind !== "akuma")
+      throw new KeiyakuUsageError(
+        this.#input.caller === undefined
+          ? "report requires explicit KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD"
+          : "report requires explicit Akuma identity",
+      );
     return Akuma.select(caller.world, caller.akumaId).report(
       input.text,
       input.signal === undefined ? {} : { signal: input.signal },
@@ -562,7 +566,7 @@ export class Keiyaku {
     if (mine !== true) return undefined;
     let caller: AkumaCaller | undefined;
     try {
-      caller = await akumaCallerFromEnvironment(this.#input.environment);
+      caller = await this.#caller();
     } catch (error) {
       throw new KeiyakuUsageError(error instanceof Error ? error.message : String(error));
     }
@@ -621,7 +625,7 @@ export class Keiyaku {
   }
 
   async #whoami() {
-    return await whoami(await this.#coordinates("optional"), this.#input.environment);
+    return await whoami(await this.#coordinates("optional"), this.#input.environment, this.#input.caller);
   }
 
   async #settings() {

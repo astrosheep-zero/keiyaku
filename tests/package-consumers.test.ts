@@ -18,7 +18,7 @@ function externalConsumer(context: TestContext): string {
   return directory;
 }
 
-test("built package supports branded Contract, standalone Akuma, Akumas, Debt, Kanshi and plugin consumers", (context) => {
+test("built package supports native products, plugin and Pi registration consumers", (context) => {
   const directory = externalConsumer(context);
   mkdirSync(join(directory, "node_modules", "@types"), { recursive: true });
   symlinkSync(
@@ -36,7 +36,7 @@ test("built package supports branded Contract, standalone Akuma, Akumas, Debt, K
     mkdirSync(dirname(slot), { recursive: true });
     symlinkSync(join(installedModules, name), slot, "dir");
   }
-  const examples = ["contract", "akumas", "debt", "kanshi", "plugin"].map((name) => name + ".ts");
+  const examples = ["contract", "akumas", "debt", "kanshi", "plugin", "pi"].map((name) => name + ".ts");
   for (const example of examples) {
     copyFileSync(join(root, "tests", "fixtures", "consumers", example), join(directory, example));
   }
@@ -167,13 +167,16 @@ void [word, arbitraryGate, kind, category, gates, actions];
         'assert.equal("Delivery" in root, false);',
         'assert.equal(plugin.manifest.id, "square");',
         'assert.equal(typeof plugin.activate, "function");',
-        // Only root and plugin are package entries; every retired subpath promise is gone.
+        'const pi = await import("@astrosheep/keiyaku/pi");',
+        'assert.deepEqual(Object.keys(pi), ["registerKeiyakuTools"]);',
+        'assert.equal("registerKeiyakuTools" in root, false);',
+        // Dedicated registration does not expose private catalogue, projection or execution.
         "const require = createRequire(import.meta.url);",
         'for (const specifier of ["@astrosheep/keiyaku/debt", "@astrosheep/keiyaku/kanshi", "@astrosheep/keiyaku/akuma", "@astrosheep/keiyaku/akumas"]) {',
         "  assert.throws(() => require.resolve(specifier), /ERR_PACKAGE_PATH_NOT_EXPORTED/u, specifier);",
         "}",
         // Private composition, execution, and configuration helpers stay off the root entry.
-        'for (const name of ["gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiHandle"]) {',
+        'for (const name of ["gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiHandle", "classifyVerb", "renderVerb", "describeModelTools", "projectModelOutput"]) {',
         "  assert.equal(name in root, false, name);",
         "}",
         'assert.ok(require.resolve("@astrosheep/keiyaku-plugin-square").endsWith("index.js"));',

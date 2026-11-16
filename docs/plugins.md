@@ -5,8 +5,18 @@ World-path capabilities, signal delivery, and failure isolation. Plugins are
 optional observers of named Keiyaku semantics; they own neither the product
 facts that cause a signal nor any public result.
 
-The MCP server alone owns Keiyaku's descriptive text; Pi relies on that owner
-rather than duplicating it in its registration.
+Pi registers native tools reached through codemode, not a Keiyaku MCP server.
+The MCP-owned descriptive text, model tool catalogue, and compact result
+projection are shared with Pi rather than copied. Both edges invoke the same
+invocation facet and preserve its classification and rendering; neither owns
+another execution layer. Pi retains its status presentation and command.
+
+Registration alone does not expose these tools directly to the model. Pi
+activates a registered codemode capability at session start; when none is
+available it warns once rather than falling back to direct exposure. Each call
+captures the current session's identity and invocation directory independently.
+Workers remain detached from the Pi session; cancelling observation or retiring
+the session does not stop admitted work.
 
 ## Contract And Selection
 

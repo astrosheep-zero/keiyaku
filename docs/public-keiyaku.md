@@ -37,8 +37,9 @@ and checked before coordinate discovery, World establishment, or product
 observation; validation never resolves a product merely to judge input shape.
 Contradictory caller intent remains usage, distinct from an execution failure.
 
-MCP publishes the facet's operations subject to the administration and raw-import
-exclusion owned by [cli.md](cli.md). Structured output is reserved for routing
+MCP and Pi publish the facet's operations through one internal model tool
+catalogue, subject to the administration and raw-import exclusion owned by
+[cli.md](cli.md). Structured output is reserved for routing
 operations: it projects normal owner answers onto compact facts needed to choose
 the next call. Every normal answer of such a tool carries that projection,
 including an answered negative verdict. Native callers and CLI JSON retain the
@@ -68,14 +69,23 @@ capabilities, not invocation conveniences.
 
 The invocation World is distinct from an explicitly selected Contract Repo:
 selecting a Repo never retargets the World. The facet adapts caller-supplied
-coordinates, Contract selection, and environment-derived caller and
-initiator attribution. These declarations are not authentication. Akuma
+coordinates, Contract selection, explicit caller declarations, and independently
+selected initiator attribution. These declarations are not authentication. Akuma
 execution directories remain independent of Contract association. Product
 surfaces neither depend on the facet nor require it to operate.
 
-Ambiguous native harness caller declarations are refused rather than guessed.
-The diagnostic names every conflicting environment variable so the caller can
-identify the competing declarations without disclosing their values.
+A complete environment actor declaration takes precedence over an explicit
+caller; otherwise an explicit caller takes precedence over native environment
+attribution. A partial actor declaration is always invalid. An explicit caller
+suppresses native host decoding entirely, including inherited or ambiguous host
+identities. All caller-dependent operations use this same selection, including
+identity observation, caller-scoped listing, creation, and actor-only operations.
+Caller selection never rewrites notification initiator attribution.
+
+Without an explicit caller, ambiguous native harness caller declarations are
+refused rather than guessed. The diagnostic names every conflicting environment
+variable so the caller can identify the competing declarations without disclosing
+their values.
 
 Debt invocation resolves the caller's World independently of a selected Repo.
 World-only Debt mutations and Akuma progress reports do not accept repository
@@ -92,7 +102,7 @@ World observation. A missing Contract is refused; a failed exact Contract read
 is an operational failure. Catalogues identify their Contract, Akuma-instance, akumaName, or Debt family even
 when empty or unavailable. Instance caller selection and Debt lifecycle selection
 belong only to their respective owners and precede bounding. Invocation caller
-scoping selects only this invocation's environment-derived identity; absent or
+scoping selects only this invocation's effective caller identity; absent or
 ambiguous identity is usage. The native Akumas composition independently retains
 explicit caller selection. There is no
 cross-family catalogue, category status, or plural status result.

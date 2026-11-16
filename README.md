@@ -307,11 +307,12 @@ thinking option id. Spawn with
 npm install -g @astrosheep/keiyaku
 ```
 
-Pi's shipped extension registers the Keiyaku MCP server, adds a live status
-entry, and supplies the `/keiyaku` Kanshi overlay. The overlay still invokes
-`keiyaku` from `PATH`; MCP calls use the registered server. See
-[`plugins/pi/README.md`](plugins/pi/README.md) for MCP exposure and status
-refresh.
+Pi's shipped extension registers native `keiyaku_*` tools reached through
+codemode, adds a live status entry, and supplies the `/keiyaku` Kanshi overlay.
+It activates codemode at session start and registers no Keiyaku MCP server.
+Native calls carry the invoking session's caller identity and leave workers
+detached; the overlay alone still invokes `keiyaku` from `PATH`. See
+[`plugins/pi/README.md`](plugins/pi/README.md) for tool access and status refresh.
 
 Node ≥ 22.19. Product law lives in [`docs/`](docs/README.md).
 
@@ -324,8 +325,8 @@ into each host package so native installations are self-contained. The separate
 harness plugin. Installation recipes and harness package metadata select the built
 assets under `build/plugins` and `build/skills`, except the Pi package metadata,
 which selects the TypeScript extension and `skills/`. Build a source checkout
-before loading that extension so its package-root SDK is available; published
-packages already include the SDK build.
+before loading that extension so its package-root SDK and Pi registration
+subpath are available; published packages already include both compiled entries.
 
 Building from source also builds the Windows launcher with Zig 0.14.1 or later. Install
 that system tool separately and make `zig` available on `PATH`, or set
