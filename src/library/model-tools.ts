@@ -2,17 +2,69 @@ import { isDeepStrictEqual } from "node:util";
 import { z } from "zod";
 import { verbs, type VerbName, type VerbOutput } from "./keiyaku-verbs.js";
 import { snapshotChangeSchema } from "../protocol/result-leaves.js";
+import {
+  akumaCatalogueSchema,
+  akumaCatalogueRowSchema,
+  akumaObservationSchema,
+  observedAkumaWaitItemSchema,
+  dispatchAssociationSchema,
+  currentWorkSchema,
+  contractCatalogueSchema,
+  contractSummarySchema,
+  contractNormalStatusSchema,
+  akumaNameCatalogSchema,
+  akumaNameCatalogRowSchema,
+  debtListSchema,
+  debtSummarySchema,
+  contractIdSchema,
+  akumaIdSchema,
+} from "./keiyaku-verbs.js";
 
 const bind = verbs.bind.normal.unwrap();
 const verify = verbs.verify.normal.unwrap();
-const contract = verbs.status.normal.options[0].unwrap();
-const akuma = verbs.status.normal.options[1].unwrap();
-const contracts = verbs.ls.normal.options[0].unwrap();
-const akumas = verbs.ls.normal.options[1].unwrap();
-const contractRow = contracts.shape.rows.unwrap().unwrap().element.unwrap();
-const akumaRow = akumas.shape.rows.unwrap().unwrap().element.unwrap();
-const associated = akuma.shape.contract.unwrap().options[0];
-const work = akuma.shape.work.unwrap().omit({ turn: true, activeTools: true, latestActivity: true });
+const contract = contractNormalStatusSchema.unwrap();
+const akuma = akumaObservationSchema.unwrap();
+const associated = dispatchAssociationSchema.options[1].unwrap().omit({ kind: true });
+const association = z.union([
+  associated,
+  dispatchAssociationSchema.options[2],
+  z.strictObject({ kind: z.literal("unavailable") }),
+]);
+const work = currentWorkSchema.unwrap().omit({ turn: true, activeTools: true, latestActivity: true });
+const contractStatus = contract.omit({ kind: true, targetObservation: true }).meta({ id: "ContractStatus" });
+const akumaStatus = akuma
+  .omit({ kind: true, contract: true, work: true })
+  .extend({
+    contract: association.exactOptional(),
+    work,
+  })
+  .meta({ id: "AkumaStatus" });
+const contractListRow = contractSummarySchema.meta({ id: "ContractRow" });
+const akumaListRow = akumaCatalogueRowSchema
+  .unwrap()
+  .extend({ contract: association.exactOptional() })
+  .meta({ id: "AkumaRow" });
+const contractWaitRow = contractSummarySchema
+  .unwrap()
+  .omit({ attention: true })
+  .extend({
+    changed: z.literal(true).exactOptional(),
+    terminal: z.enum(["claimed", "abandoned"]).exactOptional(),
+  })
+  .meta({ id: "ContractWaitRow" });
+const akumaWaitRow = observedAkumaWaitItemSchema
+  .unwrap()
+  .omit({ kind: true, outcome: true })
+  .extend({
+    verdict: z.enum(["answered", "failed", "canceled"]).exactOptional(),
+    turn: z.string().exactOptional(),
+    answer: z.string().exactOptional(),
+    diagnostic: z.string().exactOptional(),
+  })
+  .meta({ id: "AkumaWaitRow" });
+const unknownWaitRow = z.strictObject({ id: z.union([contractIdSchema, akumaIdSchema]), unknown: z.literal(true) });
+const nameModelRow = akumaNameCatalogRowSchema.meta({ id: "AkumaNameRow" });
+const debtModelRow = debtSummarySchema.meta({ id: "DebtRow" });
 const spawn = verbs.spawn.normal.unwrap();
 const gateProblem = z.strictObject({
   gate: z.string(),
@@ -79,28 +131,28 @@ export const modelOutputSchemas = {
     verbs.ask.normal.options[1].unwrap().omit({ interrupt: true, wake: true }),
     verbs.ask.normal.options[2].unwrap().omit({ interrupt: true, wake: true }),
   ]),
-  wait: verbs.wait.normal,
-  status: z.union([
-    contract.omit({ targetObservation: true, issue: true, holder: true, roster: true }).extend({
-      holder: contract.shape.holder.unwrap().options[0].exactOptional(),
-      roster: z.array(z.strictObject({ id: z.string(), aliases: z.array(z.string()).exactOptional() })).exactOptional(),
-    }),
-    akuma.omit({ changes: true, moreChanges: true, outsideChanges: true, contract: true, work: true }).extend({
-      contract: associated.exactOptional(),
-      work,
-    }),
-  ]),
+  wait: z.strictObject({
+    reason: verbs.wait.normal.unwrap().shape.reason,
+    members: z.array(z.union([contractWaitRow, akumaWaitRow, unknownWaitRow])).nonempty(),
+  }),
+  status: z.union([contractStatus, akumaStatus]),
   ls: z.union([
-    contracts.omit({ rows: true }).extend({
-      rows: z
-        .array(contractRow.omit({ attention: true }).extend({ hasAttention: z.literal(true).exactOptional() }))
-        .exactOptional(),
-    }),
-    akumas.omit({ aliasesError: true, rows: true }).extend({
-      rows: z.array(akumaRow.omit({ contract: true }).extend({ contract: associated.exactOptional() })).exactOptional(),
-    }),
-    verbs.ls.normal.options[2],
-    verbs.ls.normal.options[3],
+    contractCatalogueSchema
+      .unwrap()
+      .omit({ kind: true, rows: true })
+      .extend({ rows: z.array(contractListRow).exactOptional() }),
+    akumaCatalogueSchema
+      .unwrap()
+      .omit({ kind: true, rows: true })
+      .extend({ rows: z.array(akumaListRow).exactOptional() }),
+    akumaNameCatalogSchema
+      .unwrap()
+      .omit({ kind: true, rows: true })
+      .extend({ rows: z.array(nameModelRow).exactOptional() }),
+    debtListSchema
+      .unwrap()
+      .omit({ kind: true, rows: true })
+      .extend({ rows: z.array(debtModelRow).exactOptional() }),
   ]),
   "debt.add": verbs["debt.add"].normal,
 } as const;
@@ -130,44 +182,53 @@ function projectPlacement(
 
 function projectStatus(value: Normal<"status">) {
   if (value.kind === "contract") {
-    const { targetObservation: _target, issue: _issue, holder, roster, ...routing } = value;
-    return {
-      ...routing,
-      holder: typeof holder === "string" ? holder : undefined,
-      roster: Array.isArray(roster) ? roster.map(({ id, aliases }) => ({ id, aliases })) : undefined,
-    };
+    const { kind: _kind, targetObservation: _target, ...routing } = value;
+    return routing;
   }
-  const {
-    changes: _changes,
-    moreChanges: _more,
-    outsideChanges: _outside,
-    contract: association,
-    work: frontier,
-    ...routing
-  } = value;
+  const { kind: _kind, contract: association, work: frontier, ...routing } = value;
   const { turn: _turn, activeTools: _tools, latestActivity: _latest, ...work } = frontier;
-  return { ...routing, contract: association?.kind === "associated" ? association : undefined, work };
+  return { ...routing, contract: projectAssociation(association), work };
+}
+
+function projectAssociation(
+  value: z.output<typeof akuma>["contract"] | z.output<typeof akumaCatalogueRowSchema>["contract"],
+) {
+  if (value?.kind !== "associated") return value;
+  const { kind: _kind, ...association } = value;
+  return association;
+}
+
+function projectWait(value: Normal<"wait">) {
+  return {
+    reason: value.reason,
+    members: value.members.map((member) => {
+      if (member.kind === "contract") {
+        const { presence, summary, ...row } = member.observation;
+        return presence === "unknown" ? { id: row.id, unknown: true } : { ...summary, ...row };
+      }
+      const observation = member.observation;
+      if (observation.kind === "unknown") return { id: observation.id, unknown: true };
+      const { kind: _kind, outcome, ...row } = observation;
+      if (outcome === undefined) return row;
+      const { kind: verdict, historyId: turn, ...answer } = outcome;
+      return { ...row, verdict, turn, ...answer };
+    }),
+  };
 }
 
 function projectList(value: Normal<"ls">) {
-  if (value.kind === "contract-catalogue") {
-    const { rows, ...catalogue } = value;
-    return {
-      ...catalogue,
-      rows: rows?.map(({ attention, ...row }) => ({ ...row, hasAttention: attention?.length ? true : undefined })),
-    };
-  }
   if (value.kind === "akuma-catalogue") {
-    const { aliasesError: _aliases, rows, ...catalogue } = value;
+    const { kind: _kind, rows, ...catalogue } = value;
     return {
       ...catalogue,
       rows: rows?.map(({ contract, ...row }) => ({
         ...row,
-        contract: contract?.kind === "associated" ? contract : undefined,
+        contract: projectAssociation(contract),
       })),
     };
   }
-  return value;
+  const { kind: _kind, ...catalogue } = value;
+  return catalogue;
 }
 
 const projections = {
@@ -207,7 +268,7 @@ const projections = {
     const { completedAt: _completedAt, ...settled } = routing;
     return settled;
   },
-  wait: (value: Normal<"wait">) => value,
+  wait: projectWait,
   status: projectStatus,
   ls: projectList,
   "debt.add": (value: Normal<"debt.add">) => value,

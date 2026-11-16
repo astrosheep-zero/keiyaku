@@ -19,7 +19,7 @@ import { z } from "zod";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { classifyVerb, type VerbInput, type VerbName, type VerbOutput } from "../src/library/keiyaku-verbs.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
-import { modelInputSchema as mcpInputSchema, normalizeModelSchema as normalizeMcpSchema } from "../src/library/model-tools.js";
+import { modelInputSchema as mcpInputSchema, normalizeModelSchema as normalizeMcpSchema, modelOutputSchemas, projectModelOutput } from "../src/library/model-tools.js";
 import { Keiyaku, KeiyakuUsageError } from "../src/library/keiyaku.js";
 import { projectFailure } from "../src/library/outcome.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
@@ -339,11 +339,16 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     for (const [key, schema] of Object.entries(properties)) {
       assert.equal(schema.anyOf, undefined, `${tool.name}.${key}`);
     }
+    assert.equal(JSON.stringify(tool.inputSchema).includes('"$ref"'), false);
     new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.inputSchema)));
     if (schemaTools.has(tool.name)) {
       assert.ok("normal" in entry);
       assert.ok(tool.outputSchema);
       new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(tool.outputSchema)));
+      if (["status", "wait", "ls"].includes(tool.name)) {
+        assert.ok(tool.outputSchema.$defs);
+        assert.ok(JSON.stringify(tool.outputSchema).includes('"$ref"'));
+      }
     } else assert.equal(tool.outputSchema, undefined);
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
@@ -424,7 +429,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const unblocked = await client.callTool({ name: "ls", arguments: { selector: "debt/" } });
   assert.equal(unblocked.isError, false);
   assert.deepEqual(unblocked.structuredContent, {
-    kind: "debt-catalogue", rows: [{ id: child, title: "Check the repair", priority: 2, disposition: "ready" }],
+    rows: [{ id: child, title: "Check the repair", priority: 2, disposition: "ready" }],
   });
   const reopened = await client.callTool({
     name: "debt_update",
@@ -441,7 +446,6 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const reopenedList = await client.callTool({ name: "ls", arguments: { selector: "debt/" } });
   assert.equal(reopenedList.isError, false);
   assert.deepEqual(reopenedList.structuredContent, {
-    kind: "debt-catalogue",
     rows: [
       { id: child, title: "Check the repair", priority: 2, disposition: "blocked" },
       { id, title: "Fix the roof", priority: 2, disposition: "ready" },
@@ -468,7 +472,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   ] as const) {
     const listed = await client.callTool({ name: "ls", arguments: { selector: "debt/", ...input } });
     assert.equal(listed.isError, false);
-    assert.deepEqual(listed.structuredContent, await facet.ls({ selector: "debt/", ...input }));
+    assert.deepEqual(listed.structuredContent, JSON.parse(JSON.stringify(projectModelOutput("ls", await facet.ls({ selector: "debt/", ...input })))));
   }
 
   const first = mkdtempSync(join(tmpdir(), "kei-mcp-first-"));
@@ -554,10 +558,11 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     const response = await client.callTool({ name, arguments: { cwd: first, repo: otherRepo.path, ...input } });
     assert.equal(response.isError, false, name);
     if (schemaTools.has(name)) {
+      if (expected.kind === "contract-absent") assert.fail("explicit Repo must observe a Contract family");
       const stripPanels = (key: string, value: unknown) => ["observedAt", "targetObservation"].includes(key) ? undefined : value;
       assert.deepEqual(
         JSON.parse(JSON.stringify(response.structuredContent, stripPanels)),
-        JSON.parse(JSON.stringify(expected, stripPanels)),
+        JSON.parse(JSON.stringify(projectModelOutput(name as "ls" | "status", expected), stripPanels)),
         name,
       );
     } else assert.equal(response.structuredContent, undefined);
@@ -615,7 +620,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.match(JSON.stringify(failedWorld.content), /unavailable/u);
 });
 
-test("SDK routing keeps optional panel failures in text without publishing unavailable wrappers", async (t) => {
+test("SDK routing preserves optional observation failures and attention in structured output", async (t) => {
   const repository = repositoryWithMain();
   const world = await World.at(repository.path);
   const environment = { HOME: repository.path, USERPROFILE: repository.path, KEIYAKU_HOME: repository.path };
@@ -642,27 +647,29 @@ test("SDK routing keeps optional panel failures in text without publishing unava
   for (const id of [bound.contractId, worker.id]) {
     const response = await client.callTool({ name: "status", arguments: { selector: id } });
     assert.equal(response.isError, false, JSON.stringify(response));
-    const projected = response.structuredContent!;
-    assert.equal(Object.hasOwn(projected, "holder"), false);
-    assert.equal(Object.hasOwn(projected, "roster"), false);
-    assert.equal(Object.hasOwn(projected, "contract"), false);
+    const projected = response.structuredContent as Record<string, unknown>;
+    assert.equal(Object.hasOwn(projected, "holder"), id === bound.contractId);
+    assert.equal(Object.hasOwn(projected, "roster"), id === bound.contractId);
+    assert.equal(Object.hasOwn(projected, "contract"), id === worker.id);
     assert.match(JSON.stringify(response.content), /association unavailable/u);
     const native = await facet.status({ selector: id });
     if (native.kind === "contract") {
       assert.deepEqual(native.holder, { kind: "unavailable" });
       assert.deepEqual(native.roster, { kind: "unavailable" });
+      assert.deepEqual(projected.holder, native.holder);
+      assert.deepEqual(projected.roster, native.roster);
     } else {
       assert.ok(native.kind === "akuma" && native.contract?.kind === "failed");
     }
   }
   const contracts = await client.callTool({ name: "ls", arguments: { selector: "kei/" } });
-  const rows = (contracts.structuredContent as { rows: { id: string; hasAttention: true }[] }).rows;
-  assert.deepEqual(rows.map(({ id, hasAttention }) => ({ id, hasAttention })), [{ id: bound.contractId, hasAttention: true }]);
-  assert.equal(Object.hasOwn(rows[0]!, "attention"), false);
+  const rows = (contracts.structuredContent as { rows: { id: string; attention: unknown }[] }).rows;
+  assert.equal(rows[0]?.id, bound.contractId);
+  assert.deepEqual(rows[0]?.attention, [{ kind: "workspace-unavailable", path: bound.worktreePath }]);
   const akumas = await client.callTool({ name: "ls", arguments: { selector: "aku/*", selection: "all" } });
   assert.equal(akumas.isError, false);
-  assert.equal(Object.hasOwn(akumas.structuredContent!, "aliasesError"), false);
-  assert.equal(Object.hasOwn((akumas.structuredContent as { rows: object[] }).rows[0]!, "contract"), false);
+  assert.equal(Object.hasOwn(akumas.structuredContent!, "aliasesError"), true);
+  assert.deepEqual((akumas.structuredContent as { rows: { contract: unknown }[] }).rows[0]!.contract, { kind: "unavailable" });
   assert.match(JSON.stringify(akumas.content), /aliases unavailable/u);
 });
 
@@ -680,10 +687,10 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
   const absentDebt = await client.callTool({ name: "ls", arguments: { cwd: temporaryDirectory(t, "mcp-absent-debt-"), selector: "debt/" } });
   assert.equal(absentDebt.isError, true);
   await World.at(repository.path);
-  for (const [selector, kind] of [["kei/", "contract-catalogue"], ["aku/", "akuma-name-catalogue"], ["aku/*", "akuma-catalogue"], ["debt/", "debt-catalogue"]] as const) {
+  for (const selector of ["kei/", "aku/", "aku/*", "debt/"] as const) {
     const response = await client.callTool({ name: "ls", arguments: { selector } });
     assert.equal(response.isError, false);
-    assert.equal((response.structuredContent as { kind: string }).kind, kind);
+    assert.equal(Object.hasOwn(response.structuredContent!, "kind"), false);
     assert.equal((response.structuredContent as { rows?: unknown }).rows, undefined);
   }
   const bound = accepted(await facet.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
@@ -1055,7 +1062,7 @@ test("MCP waits omit timeout for terminal Contracts and idle Akumas", { timeout:
   for (const selector of [bound.contractId, worker.id]) {
     const response = await client.callTool({ name: "wait", arguments: { selectors: [selector] } }, undefined, { signal: t.signal });
     assert.equal(response.isError, false, JSON.stringify(response));
-    const result = Keiyaku.verbs.wait.normal.parse(response.structuredContent);
+    const result = modelOutputSchemas.wait.parse(response.structuredContent);
     assert.equal(result.reason, "completed");
   }
 });
@@ -1078,9 +1085,11 @@ test("SDK waits distinguish observed failed/canceled work from an unreadable pee
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:01.000Z", outcome });
     const response = await client.callTool({ name: "wait", arguments: { selectors: [born.allocated.id], timeout: "0ms" } });
     assert.equal(response.isError, false);
-    const value = Keiyaku.verbs.wait.normal.parse(response.structuredContent);
-    assert.ok(value.members[0]?.kind === "akuma" && value.members[0].observation.kind === "observed");
-    assert.equal(value.members[0].observation.outcome?.kind, outcome.kind);
+    const value = modelOutputSchemas.wait.parse(response.structuredContent);
+    const member = value.members[0];
+    assert.ok(member && "verdict" in member);
+    assert.equal(member.verdict, outcome.kind);
+    assert.match(member.turn ?? "", /^turn\/\d+$/u);
   }
   const peer = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "feed0024", createdAt: "2026-10-30T00:00:00.000Z" });
   writeFileSync(peer.paths.heart, "not a Heart database\n");
@@ -1205,8 +1214,8 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     assert.equal(child.input, undefined);
     const waited = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
     assert.equal(waited.isError, false);
-    const completion = Keiyaku.verbs.wait.normal.parse(waited.structuredContent);
-    assert.ok(completion.members[0]?.kind === "akuma" && completion.members[0].observation.kind === "observed");
+    const completion = modelOutputSchemas.wait.parse(waited.structuredContent);
+    assert.ok(completion.members[0] && "life" in completion.members[0]);
     const told = await client.callTool({
       name: "tell", arguments: { akuma: child.akumaId, prompt: "structured" },
     });
@@ -1214,7 +1223,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     assert.match(JSON.stringify(told.content), /tell|told/u);
     const toldWait = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
     assert.equal(toldWait.isError, false, JSON.stringify(toldWait));
-    assert.equal(Keiyaku.verbs.wait.normal.parse(toldWait.structuredContent).reason, "completed");
+    assert.equal(modelOutputSchemas.wait.parse(toldWait.structuredContent).reason, "completed");
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] };
     const result = await client.callTool({
       name: "ask",

@@ -3,16 +3,18 @@ import { AkumaNotBornError } from "./akuma-errors.js";
 import {
   createLiveStatusReader,
   defaultWaitComplete,
+  executionProgress,
   readWaitComplete,
   waitForObservation,
   type LiveStatusObservation,
+  type WaitStatusObservation,
   type WaitReason,
   type OutcomeObserver,
 } from "./akuma-observe.js";
 import { pathsForAkumaId } from "./identity.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { AkumaUnobserved, AkumaWaitItem, AkumaWaitOutcome } from "./selection-observation.js";
-import type { OutcomeRow } from "./projection.js";
+import { projectTurns, type OutcomeRow } from "./projection.js";
 
 type WaitExecutionInput = Readonly<{
   path: WorldRoot;
@@ -45,7 +47,8 @@ async function observeWaitRound(
   ids: readonly AkumaStatus["id"][],
   readerFor: (id: AkumaStatus["id"]) => ReturnType<typeof createLiveStatusReader>,
   signal?: AbortSignal,
-  witnessed?: (item: AkumaWaitItem, observation?: LiveStatusObservation) => void,
+  witnessed?: (item: AkumaWaitItem) => void,
+  mode = { lightweight: false, recent: false },
 ): Promise<WaitRound> {
   const read = (id: AkumaStatus["id"], ordinaryBudget?: number) =>
     readerFor(id).read({ aperture: "monitoring", ...(ordinaryBudget === undefined ? {} : { ordinaryBudget }) }, signal);
@@ -57,10 +60,15 @@ async function observeWaitRound(
   for (const id of ids) {
     signal?.throwIfAborted();
     try {
-      const observed = await read(id, remaining);
-      observations.push(observed);
-      witnessed?.(completionItem(observed), observed);
-      remaining -= observed.ordinarySelected;
+      if (mode.lightweight) {
+        const item = completionSnapshot(await readerFor(id).wait(mode.recent, signal));
+        witnessed?.(item);
+      } else {
+        const observed = await read(id, remaining);
+        observations.push(observed);
+        witnessed?.(completionItem(observed));
+        remaining -= observed.ordinarySelected;
+      }
     } catch (error) {
       signal?.throwIfAborted();
       if (error instanceof AkumaNotBornError) {
@@ -111,17 +119,41 @@ function completionItem({ status, rows }: LiveStatusObservation): AkumaWaitItem 
     kind: "observed",
     id: status.id,
     life: status.life,
+    ...(status.lastActivityAt === undefined ? {} : { lastActivityAt: status.lastActivityAt }),
     ...(pending ? { pending: true } : {}),
     ...(outcome === undefined ? {} : { outcome: waitOutcome(outcome) }),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
   };
 }
 
+function completionSnapshot(snapshot: WaitStatusObservation): AkumaWaitItem {
+  const turn = snapshot.turn;
+  const outcome = turn?.end === undefined ? undefined : projectTurns([turn, turn.end]).latestOutcome;
+  let events;
+  let eventsUnavailable = snapshot.activityDiagnostic;
+  if (snapshot.activity !== undefined && snapshot.life === "running") {
+    try {
+      events = projectTurns(snapshot.activity.rows).rows.slice(-3);
+    } catch (error) {
+      eventsUnavailable = diagnostic(error);
+    }
+  }
+  return {
+    kind: "observed",
+    id: snapshot.id,
+    life: snapshot.life,
+    ...(snapshot.lastActivityAt === null ? {} : { lastActivityAt: snapshot.lastActivityAt }),
+    ...(snapshot.hasPendingTell ? { pending: true } : {}),
+    ...(outcome === undefined ? {} : { outcome: waitOutcome(outcome) }),
+    ...(events === undefined ? {} : { events }),
+    ...(eventsUnavailable === undefined ? {} : { eventsUnavailable: diagnostic(eventsUnavailable) }),
+  };
+}
+
 /** Private observation custody shared by native and invocation set waits. */
-export function createAkumaWaitObserver(path: WorldRoot, ids: readonly AkumaStatus["id"][]) {
+export function createAkumaWaitObserver(path: WorldRoot, ids: readonly AkumaStatus["id"][], lightweight = false) {
   const readers = new Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>();
   const items = new Map<AkumaStatus["id"], AkumaWaitItem>();
-  const observations = new Map<AkumaStatus["id"], LiveStatusObservation>();
   const readerFor = (id: AkumaStatus["id"]) => {
     let reader = readers.get(id);
     if (reader === undefined) {
@@ -133,15 +165,17 @@ export function createAkumaWaitObserver(path: WorldRoot, ids: readonly AkumaStat
   return {
     items,
     satisfied: (id: AkumaStatus["id"]) => {
-      const observation = observations.get(id);
-      return items.get(id)?.kind === "observed" && observation !== undefined && defaultWaitComplete(observation.status);
+      const item = items.get(id);
+      return item?.kind === "observed" && executionProgress(item.life, item.pending === true) !== "advancing";
     },
-    observe: (signal?: AbortSignal) =>
-      observeWaitRound(ids, readerFor, signal, (item, observation) => {
-        items.set(item.id, item);
-        if (observation === undefined) observations.delete(item.id);
-        else observations.set(item.id, observation);
-      }),
+    observe: (signal?: AbortSignal, recent = false) =>
+      observeWaitRound(ids, readerFor, signal, (item) => items.set(item.id, item), { lightweight, recent }),
+    unavailableRecent(message: string): void {
+      for (const [id, item] of items) {
+        if (item.kind === "observed" && item.life === "running" && item.events === undefined)
+          items.set(id, { ...item, eventsUnavailable: diagnostic(message) });
+      }
+    },
     probe: (completion: "any" | "all", signal?: AbortSignal) =>
       readWaitComplete(path, ids, completion, signal, (id) =>
         readerFor(id)
@@ -152,9 +186,8 @@ export function createAkumaWaitObserver(path: WorldRoot, ids: readonly AkumaStat
           }),
       ),
     async notify(observer?: OutcomeObserver): Promise<void> {
-      for (const { status, rows } of observations.values()) {
-        const outcome = rows.findLast((row): row is OutcomeRow => row.kind === "outcome");
-        if (outcome !== undefined) await observer?.(status.id, [`turn/${outcome.turnSequence}`]);
+      for (const item of items.values()) {
+        if (item.kind === "observed" && item.outcome !== undefined) await observer?.(item.id, [item.outcome.historyId]);
       }
     },
     clear: () => {
@@ -191,5 +224,6 @@ export async function executeWaitAkuma(input: WaitExecutionInput): Promise<Nativ
 }
 
 function diagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  const message = error instanceof Error ? error.message : String(error);
+  return message.length <= 500 ? message : `${message.slice(0, 500)}...`;
 }

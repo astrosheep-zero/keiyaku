@@ -15,6 +15,7 @@ import {
   readHeart,
   readSeal,
   type HeartSnapshot,
+  type WaitFacts,
 } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
 import {
@@ -135,6 +136,7 @@ type BudgetedStatusObservation = Readonly<{
  * an observation loop is still streaming.
  */
 export type LiveStatusObservation = BudgetedStatusObservation & Readonly<{ rows: readonly ActivityRow[] }>;
+export type WaitStatusObservation = WaitFacts & Readonly<{ id: AkumaId; life: AkumaStatus["life"] }>;
 
 type StatusObservationInput = Readonly<{
   aperture: "monitoring" | "receipt";
@@ -239,6 +241,10 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
       return (await bornObservation(paths, expected, () => reader.life(signal))).currentLife;
     },
     tellOutcome: reader.tellOutcome,
+    async wait(recent: boolean, signal?: AbortSignal): Promise<WaitStatusObservation> {
+      const observed = await bornObservation(paths, expected, () => reader.wait(recent, signal));
+      return { ...observed.snapshot, id: expected, life: observed.currentLife };
+    },
     async complete(signal?: AbortSignal): Promise<boolean> {
       try {
         const observed = await bornObservation(paths, expected, () => reader.life(signal));

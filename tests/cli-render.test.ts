@@ -2152,7 +2152,7 @@ test("a sleeping worker retains its outcome coordinate and completion judgment",
     {},
     { columns: 80, color: false },
   );
-  assert.equal(returned, `✓ ${sleeping.id} — the answer`, "wait prints its own compact result, not the status panel");
+  assert.equal(returned, `✓ ${sleeping.id} — answered\n  turn/1 · answered\n  the answer`, "wait keeps the complete exact-turn answer without a status panel");
   assert.doesNotMatch(returned, /─|✓ answer|came back/u, "no panel, no separate answer row, no retired life label");
 });
 
@@ -2623,7 +2623,7 @@ test("multiple says each print their first three tools as they settle", () => {
   assert.match(text, /first[\s\S]*\$ tool-7[\s\S]*··· +1 omitted[\s\S]*last[\s\S]*\$ tool-12[\s\S]*··· +1 omitted/u);
 });
 
-test("a plural wait text renders one compact line per observation and unreadable peer", () => {
+test("a plural wait text renders compact facts, exact-turn outcomes and unreadable peers", () => {
   const first = parseAkumaId("aku/worker/abcd0006").id;
   const second = parseAkumaId("aku/worker/abcd0007").id;
   const missing = parseAkumaId("aku/worker/abcd0008").id;
@@ -2647,8 +2647,8 @@ test("a plural wait text renders one compact line per observation and unreadable
   );
   assert.equal(
     text,
-    [`✓ ${first} — the answer`, `● ${second} — running`, `! ${missing} — observation failed · window lost`].join("\n"),
-    "one compact result line per member, then one honest failure line",
+    [`✓ ${first} — answered`, "  turn/1 · answered", "  the answer", `● ${second} — running`, `! ${missing} — observation failed · window lost`].join("\n"),
+    "compact member facts with a complete labeled answer and an honest failure line",
   );
   assert.doesNotMatch(text, /of \d+ done/u, "no completion count and no scoreboard");
   assert.doesNotMatch(text, /waited|\d{2}:\d{2}|─/u, "no elapsed wait, clock, or status panel");

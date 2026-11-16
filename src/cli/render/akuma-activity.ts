@@ -909,10 +909,6 @@ function foldedSummary(value: string): string {
   return safeText(value).replace(/\s+/gu, " ").trim();
 }
 
-function preview(value: string, fallback: string): string {
-  return foldedSummary(value) || fallback;
-}
-
 function waitLine(mark: string, subject: string, summary: string, columns: number): string {
   const head = `${mark} ${subject}`;
   const room = columns - displayColumns(head) - displayColumns(WAIT_SUMMARY_SEPARATOR);
@@ -939,26 +935,22 @@ function waitSummary(member: Extract<AkumaWaitItem, { kind: "observed" }>): Wait
       : outcome === undefined
         ? { mark: "✓", state: "completed" }
         : outcome.kind === "answered"
-          ? { mark: "✓", state: preview(outcome.answer, "answered") }
+          ? { mark: "✓", state: "answered" }
           : outcome.kind === "canceled"
             ? { mark: "○", state: "canceled" }
-            : { mark: "!", state: preview(outcome.diagnostic, "failed") });
+            : { mark: "!", state: "failed" });
   return {
     ...observed,
     summary: [
       observed.state,
       ...(pending && life !== undefined ? ["pending tell"] : []),
-      ...(outcome?.kind === "failed" && (life !== undefined || pending) ? [preview(outcome.diagnostic, "failed")] : []),
+      ...(outcome?.kind === "failed" && (life !== undefined || pending) ? ["failed"] : []),
       ...(member.strandedReason === undefined ? [] : [member.strandedReason]),
     ].join(FACT_SEPARATOR),
   };
 }
 
-/**
- * One wait's final text: one compact line per observed member, then one failure line per member
- * the wait could not read. A wait opens no frame and extracts no separate answer, so an answer is
- * visible only as the snapshot's own bounded summary.
- */
+/** Compact final facts, actual recent events, and an exact-turn full outcome; never a live frame. */
 export function waitText(result: AkumaWaitResult, presentation: AkumaPresentation, context: TextRenderContext): string {
   const alias = result.results.length === 1 ? presentation.alias : undefined;
   return result.results
@@ -973,7 +965,30 @@ export function waitText(result: AkumaWaitResult, presentation: AkumaPresentatio
           context.columns,
         );
       const { mark, summary } = waitSummary(member);
-      return waitLine(mark, identity(member.id, alias), summary, context.columns);
+      const outcome = member.outcome;
+      const payload =
+        outcome?.kind === "answered" ? outcome.answer : outcome?.kind === "failed" ? outcome.diagnostic : undefined;
+      return [
+        waitLine(mark, identity(member.id, alias), summary, context.columns),
+        ...(member.lastActivityAt === undefined ? [] : [`  activity ${safeText(member.lastActivityAt)}`]),
+        ...groupedRows(member.events ?? [], context),
+        ...(member.eventsUnavailable === undefined
+          ? []
+          : diagnosticLines("recent activity", member.eventsUnavailable, context.columns, { state: "unavailable" })),
+        ...(outcome === undefined ? [] : [`  ${outcome.historyId} · ${outcome.kind}`]),
+        ...(payload === undefined
+          ? []
+          : renderBoundedPayload({
+              text: payload,
+              first: "  ",
+              continuation: "  ",
+              columns: context.columns,
+              maxLines: Number.MAX_SAFE_INTEGER,
+              quote: "",
+              preserveLines: true,
+              truncated: false,
+            })),
+      ].join("\n");
     })
     .join("\n");
 }

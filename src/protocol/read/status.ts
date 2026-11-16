@@ -297,7 +297,7 @@ function summaryVerdict(current: GateCurrent): ContractSummaryGate["verdict"] {
   return current.verdict;
 }
 
-function summaryFor({ state, bindAt }: SelectedContractState): ContractSummary {
+export function summaryFor({ state, bindAt }: Pick<SelectedContractState, "state" | "bindAt">): ContractSummary {
   const document = documentFor(state);
   const title = titleFor(document);
   const gates = gateReports(state).reports.map((report) => ({

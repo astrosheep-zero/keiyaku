@@ -136,14 +136,34 @@ function waitEvidence(
       signal?: AbortSignal,
       initialOnly = false,
     ): Promise<InvocationWaitResult> {
-      // Preserve the native deadline-edge snapshot after the last cheap probe.
-      if (reason === "deadline" && !initialOnly) await akumas?.observe(signal);
-      return { kind: "wait", reason: conclusion() ?? reason, members: members() };
+      // Mandatory final processing has its own bounded read allowance, not a new wait.
+      if (reason === "deadline" && !initialOnly && akumas !== undefined) {
+        const bound = AbortSignal.timeout(5_000);
+        try {
+          await akumas.observe(signal === undefined ? bound : AbortSignal.any([signal, bound]), true);
+        } catch (error) {
+          signal?.throwIfAborted();
+          if (!bound.aborted) throw error;
+          akumas.unavailableRecent("recent activity observation deadline");
+        }
+      }
+      const finalReason = conclusion() ?? reason;
+      const finalMembers = members().map((member): InvocationWaitMember => {
+        if (finalReason === "deadline" || member.kind !== "akuma" || member.observation.kind !== "observed")
+          return member;
+        const { events: _events, eventsUnavailable: _unavailable, ...observation } = member.observation;
+        return { kind: "akuma", observation };
+      });
+      return { kind: "wait", reason: finalReason, members: finalMembers };
     },
   };
 }
 
-function pacedAkumaRounds(observer: ReturnType<typeof createAkumaWaitObserver>, completion: "any" | "all") {
+function pacedAkumaRounds(
+  observer: ReturnType<typeof createAkumaWaitObserver>,
+  completion: "any" | "all",
+  initialRecent: boolean,
+) {
   let initial = true;
   let next = 0;
   return {
@@ -162,7 +182,7 @@ function pacedAkumaRounds(observer: ReturnType<typeof createAkumaWaitObserver>, 
         if (!ready) return;
       }
       initial = false;
-      await observer.observe(signal);
+      await observer.observe(signal, initialRecent);
     },
   };
 }
@@ -175,7 +195,8 @@ async function observeSubjects(
   const contracts = subjects.flatMap((subject) => (subject.kind === "contract" ? [subject.id] : []));
   const journals =
     contracts.length === 0 ? undefined : createContractWaitObserver(scopeForRepo(input.repo!), contracts);
-  const akumas = addressed === undefined ? undefined : createAkumaWaitObserver(addressed.path, addressed.orderedIds);
+  const akumas =
+    addressed === undefined ? undefined : createAkumaWaitObserver(addressed.path, addressed.orderedIds, true);
   const deadline = input.timeoutMs === undefined ? Infinity : performance.now() + input.timeoutMs;
   const stop = new AbortController();
   const signal = input.signal === undefined ? stop.signal : AbortSignal.any([input.signal, stop.signal]);
@@ -191,7 +212,8 @@ async function observeSubjects(
   // Like native waits, zero still takes an initial snapshot; positive bounds also cover reads.
   if (input.timeoutMs !== undefined && input.timeoutMs > 0) schedule();
   const { conclusion, answer } = waitEvidence(subjects, journals, akumas, input.completion);
-  const akumaRounds = akumas === undefined ? undefined : pacedAkumaRounds(akumas, input.completion ?? "any");
+  const akumaRounds =
+    akumas === undefined ? undefined : pacedAkumaRounds(akumas, input.completion ?? "any", input.timeoutMs === 0);
   const observe = async (): Promise<InvocationWaitResult> => {
     let reason: InvocationWaitResult["reason"] | undefined;
     let failure: { error: unknown } | undefined;

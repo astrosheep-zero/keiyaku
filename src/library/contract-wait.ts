@@ -8,6 +8,7 @@ import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import { callerContractId, optionalSignal, requireInput } from "./input.js";
 import { readContractValue } from "./outcome.js";
+import { contractSummarySchema, summaryFor, type ContractSummary } from "../protocol/read/status.js";
 
 const waitDurationDiagnostic = "timeoutMs must be a nonnegative finite integer millisecond duration";
 export const contractWaitDurationSchema = z
@@ -25,6 +26,7 @@ export const contractWaitMemberSchema = z
     changed: z.literal(true).exactOptional(),
     presence: z.enum(["missing", "unknown"]).exactOptional(),
     terminal: z.enum(["claimed", "abandoned"]).exactOptional(),
+    summary: contractSummarySchema.exactOptional(),
   })
   .readonly();
 function waitResultSchema<Reason extends z.ZodType, Members extends z.ZodType>(reason: Reason, contracts: Members) {
@@ -52,6 +54,7 @@ type WaitObservation = Readonly<{
   changed: boolean;
   present: boolean | null;
   terminal: "claimed" | "abandoned" | null;
+  summary?: ContractSummary;
 }>;
 
 export type ContractWaitMember = z.output<typeof contractWaitMemberSchema>;
@@ -134,6 +137,7 @@ function waitResult(members: readonly WaitObservation[], reason: ContractWaitRes
           ? { presence: "missing" as const }
           : {}),
       ...(member.terminal === null ? {} : { terminal: member.terminal }),
+      ...(member.summary === undefined ? {} : { summary: member.summary }),
     })),
   };
 }
@@ -161,15 +165,24 @@ export function createContractWaitObserver(scope: RepositoryScope, ids: readonly
           return ids.map((id) => {
             const record = observed.journals.get(id);
             if (record === undefined) throw new Error(`missing requested contract observation: ${id}`);
-            return record.state;
+            return {
+              state: record.state,
+              ...(record.state === null
+                ? {}
+                : {
+                    summary: summaryFor({ state: record.state, bindAt: record.entries[0]!.at }),
+                  }),
+            };
           });
         }),
       );
       signal?.throwIfAborted();
       members = members.map((member, index) => {
-        const state = states[index] ?? null;
+        const { state, summary } = states[index]!;
+        const { summary: _previous, ...prior } = member;
         return {
-          ...member,
+          ...prior,
+          ...(summary === undefined ? {} : { summary }),
           baseline: initialized ? member.baseline : (state?.head ?? null),
           changed: member.changed || (initialized && state !== null && state.head !== member.baseline),
           present: state !== null,

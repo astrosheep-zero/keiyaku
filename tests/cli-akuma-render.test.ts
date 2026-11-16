@@ -344,7 +344,7 @@ function singleWait(status: LiveStatusObservation["status"], columns = 120, alia
   );
 }
 
-test("wait renders one compact line per member from its final public snapshot", () => {
+test("wait renders compact member facts and complete labeled outcomes", () => {
   const members = [
     waitStatus("aku/worker/abcd0103", "asleep", idleAkumaSnapshot([], failedOutcome(1, "provider 503"))),
     waitStatus("aku/worker/abcd0105", "killed", idleAkumaSnapshot([], answeredOutcome(1, "stale answer"))),
@@ -362,22 +362,26 @@ test("wait renders one compact line per member from its final public snapshot", 
   assert.equal(
     text,
     [
-      "! aku/worker/abcd0103 — provider 503",
+      "! aku/worker/abcd0103 — failed",
+      "  turn/1 · failed",
+      "  provider 503",
       "× aku/worker/abcd0105 — killed",
+      "  turn/1 · answered",
+      "  stale answer",
       "? aku/worker/abcd0106 — hung",
       "! aku/worker/abcd0107 — untidy",
       "! aku/worker/abcd0108 — stranded · resume-unsupported",
       "⧗ aku/worker/abcd0109 — pending tell",
       "● aku/worker/abcd0110 — running · pending tell",
     ].join("\n"),
-    "one left-flowing line per member, in result order, with a stopped life over any older answer",
+    "member order and stopped life stay explicit beside an exact-turn outcome",
   );
   assert.doesNotMatch(text, /\n\n/u, "no blank block separators");
   assert.doesNotMatch(text, /\d{2}:\d{2}/u, "no wall clocks");
-  assert.doesNotMatch(text, /─|changes|debts|stale answer/u, "no frame, timeline, change, Debt, or stale answer dump");
+  assert.doesNotMatch(text, /─|changes|debts/u, "no full status frame, change or Debt dump");
 });
 
-test("wait bounds its summary to the terminal and never truncates identity", () => {
+test("wait wraps its full answer without truncating identity or payload", () => {
   const id = "aku/worker/abcd0111";
   const status = waitStatus(
     id,
@@ -386,12 +390,12 @@ test("wait bounds its summary to the terminal and never truncates identity", () 
   );
   const narrow = singleWait(status, 40);
   assert.ok(narrow.startsWith(`✓ ${id} — `), "the mark, complete identity, and separator survive");
-  assert.match(narrow, /…$/u, "a bounded summary exposes its own truncation");
+  assert.ok(narrow.endsWith("cannot fit"), "the answer tail remains complete at narrow width");
   const wide = singleWait(status, 200);
   assert.equal(
     wide,
-    `✓ ${id} — a very long answered preview that cannot fit`,
-    "available width keeps the whole preview",
+    `✓ ${id} — answered\n  turn/1 · answered\n  a very long answered preview that cannot fit`,
+    "the exact turn labels the complete answer",
   );
 });
 

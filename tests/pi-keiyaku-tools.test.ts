@@ -7,6 +7,7 @@ import * as sdk from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { Akuma, World } from "../src/index.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { SERVER_DESCRIPTION } from "../src/mcp/description.js";
@@ -171,6 +172,11 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
       assert.deepEqual(tool.parameters, expected.inputSchema);
       assert.deepEqual(tool.annotations, expected.annotations);
       assert.deepEqual(native.session.getToolDefinition(tool.name)?.outputSchema, expected.outputSchema);
+      assert.equal(JSON.stringify(tool.parameters).includes('"$ref"'), false);
+      if (["ls", "status", "wait"].includes(expected.name)) {
+        assert.ok(expected.outputSchema?.$defs);
+        assert.ok(JSON.stringify(expected.outputSchema).includes('"$ref"'));
+      }
     }
     const read = await native.run(`
       const ns = await describeNamespace("keiyaku");
@@ -224,6 +230,18 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     await native.run(`text(await tools.keiyaku_ls({selector: "aku/*", mine: true}));`);
     const mine = resultFor(native.results, "keiyaku_ls").structuredContent as { rows: { id: string }[] };
     assert.deepEqual(mine.rows.map((row) => row.id), [id]);
+    await native.run(`
+      text(await tools.keiyaku_status({selector: ${JSON.stringify(id)}}));
+      text(await tools.keiyaku_wait({selectors: [${JSON.stringify(id)}], timeout: "0ms"}));
+    `);
+    for (const name of ["keiyaku_ls", "keiyaku_status", "keiyaku_wait"]) {
+      const result = resultFor(native.results, name);
+      assert.equal(result.isError, false, text(result));
+      const schema = native.session.getToolDefinition(name)?.outputSchema;
+      assert.ok(schema);
+      const validation = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(schema)))(result.structuredContent);
+      assert.equal(validation.valid, true, validation.errorMessage);
+    }
 
     const observing = deferred<void>();
     native.session.subscribe((event) => {

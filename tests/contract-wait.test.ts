@@ -76,7 +76,9 @@ test("Contract waits witness their own journal changes and preserve plural progr
   accepted(await second.handle.abandon());
   const terminal = await second.handle.wait({ timeoutMs: 0 });
   assert.equal(terminal.reason, "terminal");
-  assert.deepEqual(terminal.contracts, [{ id: second.id, terminal: "abandoned" }]);
+  assert.equal(terminal.contracts[0]?.id, second.id);
+  assert.equal(terminal.contracts[0]?.terminal, "abandoned");
+  assert.equal(terminal.contracts[0]?.summary?.phase, "abandoned");
 });
 
 test("terminal baselines satisfy any and all without inventing changes", async () => {
@@ -126,7 +128,10 @@ test("terminal baselines satisfy any and all without inventing changes", async (
     assert.equal(json.exit, 0);
     assert.equal(json.value.kind, "wait");
     assert.equal(json.value.reason, "completed");
-    assert.deepEqual(json.value.members, [{ kind: "contract", observation: { id, terminal: label === "accepted" ? "claimed" : label } }]);
+    assert.ok(json.value.members[0]?.kind === "contract");
+    assert.equal(json.value.members[0].observation.id, id);
+    assert.equal(json.value.members[0].observation.terminal, label === "accepted" ? "claimed" : label);
+    assert.equal(json.value.members[0].observation.summary?.phase, label === "accepted" ? "claimed" : label);
   }
 });
 
@@ -220,7 +225,9 @@ test("CLI Contract waits need no Akuma World", async (context) => {
     const json = await cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", first.id, "--timeout", "0ms"], { environment, cwd });
     assert.equal(json.exit, 0);
     assert.equal(json.value.reason, "deadline");
-    assert.deepEqual(json.value.members, [{ kind: "contract", observation: { id: first.id } }]);
+    assert.ok(json.value.members[0]?.kind === "contract");
+    assert.equal(json.value.members[0].observation.id, first.id);
+    assert.equal(json.value.members[0].observation.summary?.title, "First wait subject");
     barrier.reset();
     const observing = cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", first.id, "--timeout", "10s"], { environment, cwd });
     await barrier.reads();
@@ -228,7 +235,9 @@ test("CLI Contract waits need no Akuma World", async (context) => {
     const result = await observing;
     assert.equal(result.exit, 0);
     assert.equal(result.value.reason, "completed");
-    assert.deepEqual(result.value.members, [{ kind: "contract", observation: { id: first.id, changed: true } }]);
+    assert.ok(result.value.members[0]?.kind === "contract");
+    assert.equal(result.value.members[0].observation.changed, true);
+    assert.equal(result.value.members[0].observation.summary?.id, first.id);
     const missing = await runCli(["--repo", repository.path, "wait", "kei/not-present", "--timeout", "0ms"], { environment, cwd });
     assert.notEqual(missing.exit, 0);
     assert.match(missing.stdout + missing.stderr, /kei\/not-present/u);

@@ -625,6 +625,13 @@ export function latestTurnFactForBody(database: DatabaseSync, bodySequence: numb
   return row === undefined ? null : decodeTurnRow(row);
 }
 
+export function latestTurnFact(database: DatabaseSync): TurnFact | null {
+  const latest = database.prepare("SELECT sequence FROM turns ORDER BY sequence DESC LIMIT 1").get() as
+    | { sequence: number }
+    | undefined;
+  return latest === undefined ? null : turnFact(database, latest.sequence);
+}
+
 export function turnFact(database: DatabaseSync, turnSequence: number): TurnFact | null {
   const row = database
     .prepare(

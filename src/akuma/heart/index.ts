@@ -44,6 +44,7 @@ import {
   latestKillFact,
   latestSessionFact,
   latestTurnFactForBody,
+  latestTurnFact,
   lastAnsweredTurnFact,
   pauseFact,
   sessionFactForCoordinate,
@@ -276,6 +277,21 @@ export function createStatusFactReader(paths: AkumaPaths) {
   let memo: Readonly<{ batch: ReturnType<typeof readStatusBatch>; facts: ActivitySlice["rows"] }> | undefined;
   return {
     life: (signal?: AbortSignal) => readLifeSnapshot(paths, signal, reader.read),
+    wait: (recent: boolean, signal?: AbortSignal): Promise<WaitFacts> =>
+      reader.read((heart) => {
+        const snapshot = lifeSnapshot(heart);
+        const turn = latestTurnFact(heart);
+        let activity: ActivityFactSlice | undefined;
+        let activityDiagnostic: string | undefined;
+        if (recent) {
+          try {
+            activity = activityFactSlice(heart);
+          } catch (error) {
+            activityDiagnostic = error instanceof Error ? error.message : String(error);
+          }
+        }
+        return { ...snapshot, turn, activity, activityDiagnostic };
+      }, signal),
     tellOutcome: (id: string, signal?: AbortSignal) =>
       reader.read((heart) => {
         const tell = tellFact(heart, id);
@@ -310,6 +326,24 @@ export function createStatusFactReader(paths: AkumaPaths) {
 type LifeSnapshot = Pick<HeartSnapshot, "soul" | "latestBody" | "latestSession" | "latestKill" | "lastActivityAt"> &
   Readonly<{ hasPendingTell: boolean }>;
 
+export type WaitFacts = LifeSnapshot &
+  Readonly<{
+    turn: TurnFact | null;
+    activity: ActivityFactSlice | undefined;
+    activityDiagnostic: string | undefined;
+  }>;
+
+function lifeSnapshot(heart: DatabaseSync): LifeSnapshot {
+  return {
+    soul: soulFact(heart),
+    latestBody: latestBodyFact(heart),
+    latestSession: latestSessionFact(heart),
+    latestKill: latestKillFact(heart),
+    hasPendingTell: hasPendingTell(heart),
+    lastActivityAt: readLastActivityAt(heart),
+  };
+}
+
 /** Lifecycle probes do not load narration, Tell bodies, or delivery histories. */
 export async function readLifeSnapshot(
   paths: AkumaPaths,
@@ -317,17 +351,7 @@ export async function readLifeSnapshot(
   read: HeartRead = (body, signal) => withReadOnlyHeart(paths, body, signal),
 ): Promise<LifeSnapshot> {
   try {
-    return await read(
-      (heart) => ({
-        soul: soulFact(heart),
-        latestBody: latestBodyFact(heart),
-        latestSession: latestSessionFact(heart),
-        latestKill: latestKillFact(heart),
-        hasPendingTell: hasPendingTell(heart),
-        lastActivityAt: readLastActivityAt(heart),
-      }),
-      signal,
-    );
+    return await read(lifeSnapshot, signal);
   } catch (error) {
     if (isHeartAbsent(error))
       return {

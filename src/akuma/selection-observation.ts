@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { akumaStatusSchema } from "./akuma.js";
 import { currentWorkSchema } from "./status-projection.js";
+import { activityRowSchema } from "./projection.js";
 import { diffstatSchema } from "./heart/activity-schema.js";
 import type { TellResult } from "./call-initial-tell.js";
 import { dispatchAssociationSchema } from "./dispatch-association.js";
@@ -68,18 +69,21 @@ const waitOutcomeSchema = z.union([
   z.strictObject({ kind: z.literal("canceled"), historyId: turnHistoryIdSchema }).readonly(),
 ]);
 export type AkumaWaitOutcome = z.output<typeof waitOutcomeSchema>;
-const observedWaitItemSchema = z
+export const observedAkumaWaitItemSchema = z
   .strictObject({
     kind: z.literal("observed"),
     id: akumaIdSchema,
     life: akumaStatusSchema.unwrap().shape.life,
+    lastActivityAt: akumaCatalogueRowSchema.unwrap().shape.lastActivityAt,
+    events: z.array(activityRowSchema).max(3).readonly().exactOptional(),
+    eventsUnavailable: z.string().exactOptional(),
     pending: z.literal(true).exactOptional(),
     outcome: waitOutcomeSchema.exactOptional(),
     strandedReason: z.literal("resume-unsupported").exactOptional(),
   })
   .readonly();
 export const akumaWaitItemSchema = z.union([
-  observedWaitItemSchema,
+  observedAkumaWaitItemSchema,
   z.strictObject({ kind: z.literal("unobserved"), id: akumaIdSchema, diagnostic: z.string() }).readonly(),
   z.strictObject({ kind: z.literal("missing"), id: akumaIdSchema }).readonly(),
 ]);
@@ -92,7 +96,7 @@ function waitResultSchema<Item extends z.ZodType>(item: Item) {
     })
     .readonly();
 }
-export const akumaWaitNormalResultSchema = waitResultSchema(observedWaitItemSchema);
+export const akumaWaitNormalResultSchema = waitResultSchema(observedAkumaWaitItemSchema);
 export const akumaWaitResultSchema = waitResultSchema(akumaWaitItemSchema);
 export const akumaKillResultSchema = z
   .strictObject({

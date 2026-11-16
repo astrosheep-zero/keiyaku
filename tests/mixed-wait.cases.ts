@@ -6,7 +6,8 @@ import test, { type TestContext } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Akumas, Keis, Keiyaku, Repo, World, type InvocationWaitResult } from "../src/index.js";
-import { finishBodyIfIdle } from "../src/akuma/heart/index.js";
+import { appendActivity, beginTurn, endTurn, finishBodyIfIdle } from "../src/akuma/heart/index.js";
+import { modelOutputSchemas, projectModelOutput } from "../src/library/model-tools.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
@@ -53,7 +54,10 @@ test("mixed any wakes from either native owner; all retains its original Contrac
     await f.amend();
     const changed = await first;
     assert.equal(changed.reason, "completed");
-    assert.deepEqual(changed.members[0], { kind: "contract", observation: { id: f.bound.contractId, changed: true } });
+    assert.ok(changed.members[0]?.kind === "contract");
+    assert.equal(changed.members[0].observation.changed, true);
+    assert.equal(changed.members[0].observation.summary?.title, "Library verbs");
+    assert.equal(changed.members[0].observation.summary?.phase, "bound");
 
     barrier.reset();
     const all = facet.run("wait", { selectors, completion: "all", timeout: "1200ms" });
@@ -61,7 +65,9 @@ test("mixed any wakes from either native owner; all retains its original Contrac
     accepted(await f.bound.kei.arc({ markdown: "# Still waiting\n\nThis is a new journal fact.\n" }));
     const deadline = await all;
     assert.equal(deadline.reason, "deadline");
-    assert.deepEqual(deadline.members[0], { kind: "contract", observation: { id: f.bound.contractId, changed: true } });
+    assert.ok(deadline.members[0]?.kind === "contract");
+    assert.equal(deadline.members[0].observation.changed, true);
+    assert.equal(deadline.members[0].observation.summary?.id, f.bound.contractId);
     assert.ok(deadline.members[1]?.kind === "akuma" && deadline.members[1].observation.kind === "observed");
     assert.equal(deadline.members[1].observation.life, "running");
     assertWireConformance(Keiyaku.verbs.wait.normal, deadline);
@@ -95,7 +101,9 @@ test("mixed all waits for both members, freezing aliases/globs and first-seen or
     const result = await pending;
     assert.equal(result.reason, "completed");
     assert.deepEqual(observations(result).map(member => member.id), [f.worker.allocated.id, f.bound.contractId]);
-    assert.deepEqual(result.members[1], { kind: "contract", observation: { id: f.bound.contractId, changed: true } });
+    assert.ok(result.members[1]?.kind === "contract");
+    assert.equal(result.members[1].observation.changed, true);
+    assert.equal(result.members[1].observation.summary?.id, f.bound.contractId);
     assertWireConformance(Keiyaku.verbs.wait.normal, result);
   });
 });
@@ -199,6 +207,84 @@ test("a failed peer observation remains identified failure, not group completion
   });
 });
 
+test("deadline wait returns three actual events and settled wait keeps the complete exact-turn answer", async t => {
+  const f = await fixture(t);
+  const paths = f.worker.allocated.paths;
+  const turn = await beginTurn(paths, { bodySequence: f.worker.body.sequence, startedAt: AT });
+  await appendActivity(paths, { turnSequence: turn.sequence, at: AT, event: {
+    type: "tool", id: "edit", name: "edit", phase: "completed", result: { status: "ok" },
+    call: { kind: "fileChange", changes: [{ op: "update", path: "source.ts", diffstat: { added: 2, removed: 1 } }] },
+  } });
+  const adapter = createKeiyakuMcpServer({ cwd: f.world, environment: f.environment, version: "test" });
+  const client = new Client({ name: "full-wait-and-changes", version: "1" });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  await Promise.all([client.connect(a), adapter.server.connect(b)]);
+  t.after(async () => { await client.close(); await adapter.close(); });
+  const tools = (await client.listTools()).tools;
+  for (const name of ["status", "wait", "ls"]) assert.ok(tools.find(tool => tool.name === name)?.outputSchema?.$defs);
+  const status = await client.callTool({ name: "status", arguments: { selector: f.worker.allocated.id } });
+  assert.equal(status.isError, false);
+  const projectedStatus = modelOutputSchemas.status.parse(status.structuredContent);
+  assert.ok("changes" in projectedStatus);
+  assert.deepEqual(projectedStatus.changes, [{ path: "source.ts", diffstat: { added: 2, removed: 1 } }]);
+  const sequences = [];
+  for (const text of ["first", "second", "same", "same", "last"]) {
+    sequences.push(await appendActivity(paths, { turnSequence: turn.sequence, event: { type: "assistant", text }, at: AT }));
+  }
+  const input = { selectors: [f.worker.allocated.id], timeout: "0ms" };
+  const running = await f.facet().wait(input);
+  const member = running.members[0];
+  assert.ok(member?.kind === "akuma" && member.observation.kind === "observed");
+  assert.equal(member.observation.life, "running");
+  assert.equal(member.observation.lastActivityAt, AT);
+  assert.deepEqual(member.observation.events?.map(event => event.sequence), sequences.slice(-3));
+  assert.deepEqual(member.observation.events?.map(event => event.kind === "said" ? event.text : event.kind), ["same", "same", "last"]);
+  assert.equal(Object.hasOwn(member.observation, "provider"), false);
+  assert.equal(Object.hasOwn(member.observation, "changes"), false);
+  const text = await runCli(["wait", f.worker.allocated.id, "--timeout", "0ms"], { cwd: f.world, environment: f.environment });
+  assert.equal(text.exit, 0);
+  assert.equal((text.stdout.match(/same/gu) ?? []).length, 2);
+
+  const answer = `answer begins\n${"full answer ".repeat(1000)}\n  exact answer tail`;
+  await endTurn(paths, { turnSequence: turn.sequence, completedAt: AT, outcome: { kind: "answered", answer, session: { sessionId: "answer" } } });
+  await f.finish();
+  const settled = await f.facet().wait(input);
+  const response = await client.callTool({ name: "wait", arguments: input });
+  assert.equal(response.isError, false);
+  assert.deepEqual(response.structuredContent, JSON.parse(JSON.stringify(projectModelOutput("wait", settled))));
+  const projected = modelOutputSchemas.wait.parse(response.structuredContent);
+  const row = projected.members[0];
+  assert.ok(row && "verdict" in row);
+  assert.equal(row.verdict, "answered");
+  assert.equal(row.turn, `turn/${turn.sequence}`);
+  assert.equal(row.answer, answer);
+  assert.equal(Object.hasOwn(row, "events"), false);
+  const completedText = await runCli(["wait", f.worker.allocated.id, "--timeout", "0ms"], { cwd: f.world, environment: f.environment });
+  assert.match(completedText.stdout, new RegExp(`turn/${turn.sequence}`, "u"));
+  assert.ok(completedText.stdout.includes("exact answer tail"));
+  assert.equal((completedText.stdout.match(/full answer/gu) ?? []).length, 1000);
+});
+
+test("deadline activity decoding failure preserves its member outcome and readable peers", async t => {
+  const f = await fixture(t);
+  const paths = f.worker.allocated.paths;
+  const turn = await beginTurn(paths, { bodySequence: f.worker.body.sequence, startedAt: AT });
+  await appendActivity(paths, { turnSequence: turn.sequence, event: { type: "assistant", text: "activity" }, at: AT });
+  await endTurn(paths, { turnSequence: turn.sequence, completedAt: AT, outcome: { kind: "failed", diagnostic: "exact failure" } });
+  const database = new DatabaseSync(paths.heart);
+  try { database.prepare("UPDATE activity SET event_json = ?").run("{}"); }
+  finally { database.close(); }
+  const result = await f.facet().wait({ selectors: [f.worker.allocated.id, f.bound.contractId], completion: "all", timeout: "0ms" });
+  assert.equal(result.reason, "deadline");
+  const member = result.members[0];
+  assert.ok(member?.kind === "akuma" && member.observation.kind === "observed");
+  assert.equal(member.observation.outcome?.kind, "failed");
+  assert.match(member.observation.eventsUnavailable ?? "", /Invalid/u);
+  assert.ok(result.members[1]?.kind === "contract");
+  assert.equal(result.members[1].observation.summary?.id, f.bound.contractId);
+  assertWireConformance(Keiyaku.verbs.wait.normal, result);
+});
+
 test("mixed SDK, CLI and MCP share one object input and ordered native evidence", async t => {
   const f = await fixture(t);
   const input = { selectors: [f.worker.allocated.id, f.bound.contractId], completion: "all" as const, timeout: "0ms" };
@@ -220,6 +306,7 @@ test("mixed SDK, CLI and MCP share one object input and ordered native evidence"
   assert.ok(tool.inputSchema.properties?.selectors);
   const result = await client.callTool({ name: "wait", arguments: input });
   assert.equal(result.isError, false);
-  assert.deepEqual(result.structuredContent, expected);
+  assert.deepEqual(result.structuredContent, JSON.parse(JSON.stringify(projectModelOutput("wait", expected))));
+  assertWireConformance(modelOutputSchemas.wait, result.structuredContent);
   assert.equal((result.content as { text: string }[])[0]?.text, text.stdout.trimEnd());
 });

@@ -288,10 +288,15 @@ visible, settled rows never replay, and failures are never hidden by compaction.
 A wait is not a stream and opens no live frame. Its compact projection preserves
 the invocation's global conclusion, frozen member order and complete identities,
 without recomputing satisfaction. Contract change, terminal, missing and unknown
-remain distinct. Akuma summaries retain native life, pending input, unsupported
-resume and unreadable diagnostics; stopped life takes precedence over an older
-answer. Unobserved peers remain unknown, and running peers remain running.
-Single-target aliases supplement identity. Summary text is bounded, never identity.
+remain distinct beside thin journal summary facts. Akuma summaries retain native
+life, pending input, known unsupported resume and unreadable diagnostics; stopped
+life takes precedence over an older answer. An exact-turn outcome is labeled
+and its answer text remains complete, including an older settled answer rather
+than implying new work. Running deadline members render their bounded native
+recent events and any local activity unavailability, never a full status panel.
+Unobserved peers remain unknown, and running peers remain running.
+Single-target aliases supplement identity. Summary text is bounded, never identity
+or the full outcome payload.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a
 warning or a separate report; it groups by related Contract and renders

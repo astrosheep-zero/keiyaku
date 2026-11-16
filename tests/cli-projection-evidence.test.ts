@@ -19,6 +19,8 @@ import { gateRequirementFacts } from "../src/cli/render/contract-observation.js"
 import { unmetRequirementLines } from "../src/cli/render/receipt.js";
 import { modelOutputSchemas as mcpOutputSchemas, projectModelOutput as projectMcpOutput } from "../src/library/model-tools.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
+import { assertWireConformance } from "./support/schema-parity.js";
+import { akumaObservationSchema } from "../src/akuma/selection-observation.js";
 import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
@@ -43,6 +45,62 @@ import {
   reportedFileChange,
   snapshotRow,
 } from "./support/kanshi-activity.js";
+
+test("model status keeps current work, last outcome and reported changes without internal turn coordinates", () => {
+  const value = akumaObservationSchema.parse({
+    kind: "akuma", id: "aku/worker/12345678", life: "running", cwd: "/work", provider: "fixture",
+    work: {
+      kind: "open", turn: { sequence: 1, bodySequence: 1 },
+      activeTools: [{ id: 2, turnSequence: 1, toolId: "read" }], latestActivity: 3,
+      summary: { id: 2, text: "read source.ts" }, pending: [{ id: 3, tellId: "next" }],
+      outcome: { historyId: "turn/1", activityId: 4, verdict: "answered" },
+    },
+    changes: [{ path: "source.ts", diffstat: { added: 2, removed: 1 } }],
+    moreChanges: true, outsideChanges: 1,
+  });
+  const projected = JSON.parse(JSON.stringify(projectMcpOutput("status", value)));
+  assert.deepEqual(projected.changes, value.changes);
+  assert.equal(projected.moreChanges, true);
+  assert.equal(projected.outsideChanges, 1);
+  assert.deepEqual(projected.work, {
+    kind: "open", summary: value.work.summary, pending: value.work.pending, outcome: value.work.outcome,
+  });
+  assert.deepEqual(mcpOutputSchemas.status.parse(projected), projected);
+});
+
+test("compact Contract status distinguishes empty observations, unavailable authority and diagnostic evidence", () => {
+  const empty = projectMcpOutput("status", contractDetail());
+  const native = contractDetail({
+    issue: { kind: "unavailable", diagnostic: "cannot observe checkout" },
+    holder: { kind: "unavailable" }, roster: { kind: "unavailable" },
+  });
+  const projected = JSON.parse(JSON.stringify(projectMcpOutput("status", native)));
+  assert.notDeepEqual(projected, empty);
+  assert.deepEqual(projected.issue, native.issue);
+  assert.deepEqual(projected.holder, native.holder);
+  assert.deepEqual(projected.roster, native.roster);
+  assertWireConformance(mcpOutputSchemas.status, projected);
+
+  const attached = contractDetail({
+    issue: { kind: "target-checkout-retained" },
+    roster: [{ id: "aku/worker/12345678", aliasesUnavailable: true }],
+  });
+  const roster = JSON.parse(JSON.stringify(projectMcpOutput("status", attached)));
+  assert.deepEqual(roster.issue, attached.issue);
+  assert.deepEqual(roster.roster, attached.roster);
+  assertWireConformance(mcpOutputSchemas.status, roster);
+});
+
+test("compact Contract catalogue retains actual workspace, target and merge attention", () => {
+  const rows = [
+    contractSummary({ id: contractId("kei/workspace"), attention: [{ kind: "workspace-unavailable", path: "/work/missing" }] }),
+    contractSummary({ id: contractId("kei/target"), attention: [{ kind: "target-unknown", subject: "main" }] }),
+    contractSummary({ id: contractId("kei/merge"), attention: [{ kind: "merge-in-progress", path: "/work/conflict", conflicts: 2 }] }),
+  ];
+  const projected = JSON.parse(JSON.stringify(projectMcpOutput("ls", contractCatalog(rows))));
+  assert.deepEqual(projected.rows, rows);
+  assertWireConformance(mcpOutputSchemas.ls, projected);
+});
 
 test("spawn preserves a definition failure instead of reporting a missing Akuma", async (t) => {
   const root = temporaryDirectory(t, "keiyaku-cli-definition-");

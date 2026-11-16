@@ -188,8 +188,13 @@ stopped life, whether pending input exists, concurrent failure and the exact
 settled answer or outcome coordinate, with unreadable and missing subjects
 distinguished. It may use the owner's lightweight completion probe to skip
 expensive running snapshots; an internal custom completion judge observes fully.
-The final judgment uses the same native status evidence as an addressed read,
-without repeating its complete timeline. Every return says whether it completed
+Invocation waiting reuses native lifecycle evidence without full status,
+provider discovery or reported changes. It preserves complete exact-turn
+outcomes and, for running deadline members, bounded actual recent events in
+native order and capture limits. Life, outcome and events share an observed
+frontier, never future evidence from a later read. Activity failure is local;
+final processing is bounded and cancellable after the observation deadline,
+never history polled during waiting. Every return says whether it completed
 or reached the deadline; completion wins when the final deadline-edge observation
 satisfies the judgment. A deadline
 remains a current observation rather than manufacturing a lifecycle arm.

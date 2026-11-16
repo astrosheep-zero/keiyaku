@@ -159,5 +159,12 @@ or exceptional propagation. Contract-only observation requires no Akuma World.
 Native single-family SDK waits remain independent operations with their own
 interfaces. Composition retains the Akuma owner's lightweight completion
 observation discipline: waiting on unfinished work does not repeatedly load its
-full monitoring detail. History selects one subject. A caller-input error is distinguishable from an owner refusal or
+full monitoring detail. Returned Contract members include thin journal-derived
+summary facts from their witnessed observation, without physical workspace or
+target enrichment. Akuma members preserve native life, available activity time
+and full exact-turn outcomes; optional association already known to the
+observation does not justify new joins. Still-running deadline members retain
+a bounded tail of actual recent events from the same observed frontier, with
+local unavailability rather than loss of the member's outcome. Waiting is not
+a full status read or reported-change observation. History selects one subject. A caller-input error is distinguishable from an owner refusal or
 an unexpected failure, and adds no authority to the facet.
