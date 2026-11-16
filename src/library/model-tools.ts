@@ -308,49 +308,24 @@ export function modelInputSchema(input: z.core.$ZodType, worldOnly = false): z.Z
 
 type JsonSchema = z.core.JSONSchema.BaseSchema;
 
-/** Remove annotations only at schema positions; property names and authored JSON stay intact. */
-function cleanSchema(schema: JsonSchema): JsonSchema {
-  const cleaned: JsonSchema = {};
-  for (const [key, value] of Object.entries(schema)) {
-    if (key === "$schema" || (key === "readOnly" && typeof value === "boolean")) continue;
-    if (["properties", "patternProperties", "$defs", "definitions", "dependentSchemas"].includes(key)) {
-      cleaned[key] = Object.fromEntries(
-        Object.entries(value as Record<string, JsonSchema | boolean>).map(([name, child]) => [
-          name,
-          typeof child === "boolean" ? child : cleanSchema(child),
-        ]),
-      );
-    } else if (["anyOf", "oneOf", "allOf", "prefixItems"].includes(key)) {
-      cleaned[key] = (value as (JsonSchema | boolean)[]).map((child) =>
-        typeof child === "boolean" ? child : cleanSchema(child),
-      );
-    } else if (
-      [
-        "items",
-        "additionalProperties",
-        "unevaluatedProperties",
-        "not",
-        "if",
-        "then",
-        "else",
-        "contains",
-        "propertyNames",
-      ].includes(key) &&
-      typeof value === "object" &&
-      value !== null
-    ) {
-      cleaned[key] = cleanSchema(value as JsonSchema);
-    } else cleaned[key] = value;
-  }
-  if (
-    cleaned.anyOf?.every((branch) => typeof branch === "object" && branch.type === "string") &&
-    cleaned.anyOf.some((branch) => typeof branch === "object" && Object.keys(branch).length === 1) &&
-    (cleaned.type === undefined || cleaned.type === "string")
-  ) {
-    delete cleaned.anyOf;
-    cleaned.type = "string";
-  }
-  return cleaned;
+/** Zod visits schema positions; authored const/default JSON is not traversed. */
+export function modelJsonSchema(schema: z.ZodType): JsonSchema {
+  const { $schema: _dialect, ...json } = z.toJSONSchema(schema, {
+    io: "input",
+    override: ({ jsonSchema }) => {
+      delete jsonSchema.$schema;
+      if (typeof jsonSchema.readOnly === "boolean") delete jsonSchema.readOnly;
+      if (
+        jsonSchema.anyOf?.every((branch) => typeof branch === "object" && branch.type === "string") &&
+        jsonSchema.anyOf.some((branch) => typeof branch === "object" && Object.keys(branch).length === 1) &&
+        (jsonSchema.type === undefined || jsonSchema.type === "string")
+      ) {
+        delete jsonSchema.anyOf;
+        jsonSchema.type = "string";
+      }
+    },
+  });
+  return json;
 }
 
 function sharedSchema(alternatives: readonly (JsonSchema | boolean)[]): JsonSchema | boolean {
@@ -384,9 +359,8 @@ function sharedSchema(alternatives: readonly (JsonSchema | boolean)[]): JsonSche
 
 /** Advertise shared structure; native verb validation owns cross-field admission. */
 export function normalizeModelSchema(schema: JsonSchema, input = false): JsonSchema {
-  const cleaned = cleanSchema(schema);
-  if (!input || cleaned.anyOf === undefined) return cleaned;
-  const { anyOf: branches, ...root } = cleaned;
+  if (!input || schema.anyOf === undefined) return schema;
+  const { anyOf: branches, ...root } = schema;
   if (
     !branches.every(
       (branch) => typeof branch === "object" && branch.type === "object" && branch.additionalProperties === false,
@@ -419,11 +393,11 @@ export function describeModelTools() {
   const entries = Object.entries(verbs).filter(([name]) => !excluded.has(name as VerbName));
   return entries.map(([name, entry]) => {
     const schema = normalizeModelSchema(
-      z.toJSONSchema(modelInputSchema(entry.input, NO_REPO_TOOLS.has(name as VerbName)), { io: "input" }),
+      modelJsonSchema(modelInputSchema(entry.input, NO_REPO_TOOLS.has(name as VerbName))),
       true,
     );
     const outputSchema = hasOutputSchema(name)
-      ? normalizeModelSchema(z.toJSONSchema(modelOutputSchemas[name], { io: "input" }))
+      ? normalizeModelSchema(modelJsonSchema(modelOutputSchemas[name]))
       : undefined;
     return {
       verb: name as VerbName,

@@ -18,7 +18,7 @@ import { z } from "zod";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { classifyVerb, type VerbInput, type VerbName, type VerbOutput } from "../src/library/keiyaku-verbs.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
-import { modelInputSchema as mcpInputSchema, normalizeModelSchema as normalizeMcpSchema, modelOutputSchemas, projectModelOutput } from "../src/library/model-tools.js";
+import { modelInputSchema as mcpInputSchema, modelJsonSchema, normalizeModelSchema as normalizeMcpSchema, modelOutputSchemas, projectModelOutput } from "../src/library/model-tools.js";
 import { Keiyaku, KeiyakuUsageError } from "../src/library/keiyaku.js";
 import { projectFailure } from "../src/library/outcome.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
@@ -171,17 +171,21 @@ test("bad spawn workdir agrees on CLI usage and MCP failure category", async (t)
 });
 
 test("schema cleanup retains authored property names and values", () => {
-  const schema = normalizeMcpSchema(JSON.parse(JSON.stringify({
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    type: "object", readOnly: true,
-    properties: {
-      readOnly: { type: "boolean", readOnly: true },
-      payload: { const: { readOnly: true, $schema: "authored" } },
-    },
-  })));
+  const authored = { readOnly: true, $schema: "authored", nested: { readOnly: false } };
+  const schema = modelJsonSchema(z.strictObject({
+    readOnly: z.boolean().readonly(),
+    payload: z.unknown().meta({ const: authored }),
+    defaults: z.unknown().meta({ default: authored }),
+  }).readonly());
   assert.deepEqual(schema, {
     type: "object",
-    properties: { readOnly: { type: "boolean" }, payload: { const: { readOnly: true, $schema: "authored" } } },
+    properties: {
+      readOnly: { type: "boolean" },
+      payload: { const: authored },
+      defaults: { default: authored },
+    },
+    required: ["readOnly", "payload", "defaults"],
+    additionalProperties: false,
   });
 });
 
