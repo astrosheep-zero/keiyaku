@@ -43,24 +43,21 @@ const AKUMA_COMMAND_SPECS = {
     flags: {
       contract: "value",
       alias: "value",
-      wait: "value",
       bare: "boolean",
       json: "boolean",
     },
     usage:
-      "spawn <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--bare] [--wait <duration>] [<prompt> | -]",
+      "spawn <akuma-name> [--contract <kei/...>] [--repo <path>] [--workdir <path>] [--alias <name>] [--bare] [<prompt> | -]",
     purpose: "Spawn a new Akuma into the world.",
     details: [
       "Use keiyaku ls aku/ to list available Akuma names.",
       "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
-      "--wait requires a prompt.",
       "--bare omits Keiyaku's runtime instruction section for this birth and its later execution; personality, tools, permissions, and report remain unchanged.",
       "Generic ACP needs --bare: it has no verified native runtime-instruction channel. Existing sessions without the section are not retrofitted; ordinary resume retains existing native instructions.",
-      "By default, spawn returns after birth and optional first Tell admission; --wait also waits for its first answer, up to the given duration.",
+      "Spawn returns birth and optional first Tell admission, not an answer. Observe work separately with wait.",
       "--contract records an association, not the work or execution directory; include the Contract and worktree context in the prompt as needed. --repo requires --contract.",
       "--workdir selects where the Akuma works; relative paths resolve from the invocation directory selected by -C/--cwd, or the process cwd when omitted. Without --workdir, the invocation directory is used.",
       "--alias <name> gives the new Akuma the selector @name instead of aku/<id>; an existing @name is reassigned to this Akuma.",
-      "With --wait, completed activity streams on stderr and the final answer is written to stdout once.",
     ].join("\n"),
   },
   wait: {
@@ -80,15 +77,13 @@ const AKUMA_COMMAND_SPECS = {
   tell: {
     arity: 1,
     stdin: true,
-    flags: { interrupt: "boolean", wait: "value", json: "boolean" },
-    usage: "tell <aku/...|@name> [--interrupt] [--wait <duration>] (<prompt> | -)",
-    purpose: "Tell an Akuma something, optionally observing its answer.",
+    flags: { interrupt: "boolean", json: "boolean" },
+    usage: "tell <aku/...|@name> [--interrupt] (<prompt> | -)",
+    purpose: "Admit new orders for an Akuma.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt admits the Tell and asks current work to yield; the Tell remains admitted even if yielding cannot be confirmed.",
-      "--wait bounds how long to block for the answer; the Tell stays admitted past the deadline.",
-      "Without --wait, returns after Tell admission.",
-      "With observation, completed activity streams on stderr and the final answer is written to stdout once.",
+      "Returns Tell admission, not an answer. Observe work separately with wait, or use ask for a structured answer.",
     ].join("\n"),
   },
   ask: {
@@ -335,25 +330,19 @@ function parseTell(
   fail: (message: string) => never,
 ): Extract<PendingRequest, { name: "tell" | "ask" }> {
   const output = flags.json === true ? "json" : "text";
-  const wait = flags.wait === undefined ? undefined : stringFlag(flags.wait, "--wait requires a duration", fail);
-  const timeoutMs = wait === undefined ? undefined : parseDuration(wait, "--wait", fail);
   const input = {
     akuma: subject,
     ...(flags.interrupt === true ? { interrupt: true } : {}),
   };
-  return action === "tell"
-    ? {
-        name: action,
-        input: { ...input, ...(wait === undefined ? {} : { wait }) },
-        acquire: { prompt },
-        output,
-      }
-    : {
-        name: action,
-        input: { ...input, ...(timeoutMs === undefined ? {} : { timeoutMs }) },
-        acquire: { prompt, schema: stringFlag(flags.schema, "ask requires --schema <file>", fail) },
-        output,
-      };
+  if (action === "tell") return { name: action, input, acquire: { prompt }, output };
+  const wait = flags.wait === undefined ? undefined : stringFlag(flags.wait, "--wait requires a duration", fail);
+  const timeoutMs = wait === undefined ? undefined : parseDuration(wait, "--wait", fail);
+  return {
+    name: action,
+    input: { ...input, ...(timeoutMs === undefined ? {} : { timeoutMs }) },
+    acquire: { prompt, schema: stringFlag(flags.schema, "ask requires --schema <file>", fail) },
+    output,
+  };
 }
 
 function parseSpawn(
@@ -372,16 +361,12 @@ function parseSpawn(
       fail(error instanceof Error ? error.message : "invalid Akuma alias");
     }
   }
-  const wait = flags.wait === undefined ? undefined : stringFlag(flags.wait, "--wait requires a duration", fail);
-  if (wait !== undefined) parseDuration(wait, "--wait", fail);
-  if (prompt === undefined && flags.wait !== undefined) fail("spawn --wait requires a prompt");
   return {
     name: "spawn",
     input: {
       akumaName,
       ...(typeof flags.contract === "string" ? { contract: flags.contract } : {}),
       ...(alias === undefined ? {} : { alias }),
-      ...(wait === undefined ? {} : { wait }),
       ...(flags.bare === true ? { bare: true } : {}),
     },
     acquire: { ...(prompt === undefined ? {} : { prompt }) },

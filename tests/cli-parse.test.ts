@@ -128,7 +128,7 @@ test("global coordinates are independent of command position", () => {
     input: { akuma: "@worker", at: "turn/1", bare: true },
     output: "text",
   });
-  assert.throws(() => parseArgv(["spawn", "worker", "--wait", "1s"]), /spawn --wait requires a prompt/u);
+  assert.throws(() => parseArgv(["spawn", "worker", "--wait", "1s"]), /option --wait is not valid for spawn/u);
 
   assert.throws(() => parseArgv(["spawn", "worker", "-d", "prompt"]), /option -d is not valid for spawn/u);
   assert.throws(() => parseArgv(["spawn", "worker", "--detach", "prompt"]), /option --detach is not valid for spawn/u);
@@ -480,19 +480,14 @@ test("wait accepts mixed selector families while kill takes one expanding select
   assert.throws(() => command(["kill", "kei/example", "aku/work*/12*"]), /kill accepts one Akuma selector/u);
 });
 
-test("tell parses text observation and ask requires a schema document", () => {
+test("tell admits text without observation and ask requires a schema document", () => {
   assert.deepEqual(command(["tell", "@worker", "continue"]), {
     name: "tell",
     input: { akuma: "@worker" },
     acquire: { prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });
-  assert.deepEqual(command(["tell", "@worker", "--wait", "0ms", "continue"]), {
-    name: "tell",
-    input: { akuma: "@worker", wait: "0ms" },
-    acquire: { prompt: { kind: "argument", value: "continue" } },
-    output: "text",
-  });
+  assert.throws(() => command(["tell", "@worker", "--wait", "0ms", "continue"]), /option --wait is not valid for tell/u);
   assert.deepEqual(command(["ask", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
     name: "ask",
     input: { akuma: "aku/worker/1234abcd", timeoutMs: 300_000 },
@@ -503,10 +498,9 @@ test("tell parses text observation and ask requires a schema document", () => {
     name: "ask", input: { akuma: "@worker" },
     acquire: { prompt: { kind: "stdin" }, schema: "answer.json" }, output: "text",
   });
-  assert.throws(() => parseArgv(["tell", "@worker", "--wait"]), /--wait requires a value/u);
+  assert.throws(() => parseArgv(["tell", "@worker", "--wait"]), /option --wait is not valid for tell/u);
   assert.throws(() => parseArgv(["ask", "@worker", "continue"]), CliUsageError);
-  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "--interrupt", "continue"]), /--wait requires a value/u);
-  assert.throws(() => parseArgv(["tell", "@worker", "--wait", "later", "continue"]), /integer duration/u);
+
   assert.throws(() => parseArgv(["tell", "@worker"]), /requires a prompt/u);
 });
 

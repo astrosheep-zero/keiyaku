@@ -136,7 +136,7 @@ test("retired status guidance is a usage refusal before World or guidance acquis
   assert.equal(read.mock.callCount(), 0);
 });
 
-test("CLI ask returns JSON and invalid-output while tell observes text", { timeout: 60_000 }, async (t) => {
+test("CLI ask returns JSON and invalid-output while tell returns admission", { timeout: 60_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-tell-"));
   const home = temporaryDirectory(t, "keiyaku-cli-tell-home-");
   const world = await World.at(root);
@@ -157,9 +157,12 @@ test("CLI ask returns JSON and invalid-output while tell observes text", { timeo
     );
     await waitForPidReceiptExit(receipt, 60_000, { requireBirth: true });
     const runtime = { environment: { KEIYAKU_HOME: home }, signal: t.signal, readStdin: async () => "answer this" };
-    const text = await runCli(["-C", root, "tell", born.id, "--wait", "60s", "-"], runtime);
+    const text = await runCli(["-C", root, "tell", born.id, "-"], runtime);
     assert.equal(text.exit, 0, text.stderr);
-    assert.equal(text.stdout, answer);
+    assert.ok(text.stdout.includes(born.id), text.stdout);
+    const waited = await runCli(["-C", root, "wait", born.id, "--timeout", "30s"], runtime);
+    assert.equal(waited.exit, 0, waited.stderr);
+    assert.ok(waited.stdout.includes(answer), waited.stdout);
     const decoded = await cliJson<{ kind: string; answer: unknown }>(
       ["-C", root, "ask", born.id, "--schema", schema, "-"], runtime,
     );
@@ -224,14 +227,18 @@ test("an observer-held leash cannot strand the original Tell", async (t) => {
     observation = born.status();
     void observation.catch(() => undefined);
     await waitForCondition("observer acquired the exclusive leash before Tell admission", () => contended);
-    const result = await runCli(["-C", root, "tell", born.id, "--wait", "60s", "answer this"], {
+    const result = await runCli(["-C", root, "tell", born.id, "answer this"], {
       environment: { KEIYAKU_HOME: home },
       signal: t.signal,
     });
     await observation;
     assert.equal(contended, true, "the observer held the actual admission leash across launch");
     assert.equal(result.exit, 0, result.stderr);
-    assert.equal(result.stdout, "acp-answer", result.stderr);
+    const waited = await runCli(["-C", root, "wait", born.id, "--timeout", "60s"], {
+      environment: { KEIYAKU_HOME: home }, signal: t.signal,
+    });
+    assert.equal(waited.exit, 0, waited.stderr);
+    assert.match(waited.stdout, /acp-answer/u);
     assert.deepEqual((await readHeart(paths)).pending, []);
     operationFailed = false;
   } finally {

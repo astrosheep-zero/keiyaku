@@ -10,7 +10,6 @@ import {
 } from "../src/akuma/projection.js";
 import {
   activityStream,
-  callObservationStream,
   DEFAULT_CONTEXT,
   frameRule,
   historyText,
@@ -68,15 +67,6 @@ function observation(
     }),
     ...(status.timeline.reportedChangesOmitted === 0 ? {} : { moreChanges: true }),
   };
-}
-
-function running(id: string, rows: readonly OpenSnapshotRow[]) {
-  return liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id,
-    life: "running",
-    timeline: openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
-  });
 }
 
 function liveObservation(status: LiveStatusObservation["status"], rows: readonly ActivityRow[]) {
@@ -463,58 +453,6 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   assert.equal(askRawAnswer({ ...answer, answer: "decoded scalar" }), '"decoded scalar"');
 });
 
-test("call and bounded Tell share one input frame and pinned conclusion", () => {
-  const id = parseAkumaId("aku/worker/deadbeef").id;
-  const context = { columns: 100, color: false };
-  const startedAt = Date.parse(AKUMA_ACTIVITY_AT) - 5_000;
-  const tell = {
-    admission: { fact: "recorded" as const, tellId: "tell-bound" },
-    row: {
-      kind: "tell" as const,
-      sequence: 1,
-      at: new Date(startedAt).toISOString(),
-      tellId: "tell-bound",
-      text: "continue",
-      state: "told" as const,
-      deliveries: [],
-    },
-    wake: { kind: "told" as const },
-  };
-  const status = running(id, [tell.row]);
-  const call = callObservationStream(context, { id, contract: { kind: "none" }, facts: [] }, { now: () => startedAt });
-  const callFrame = call.observe({ status, rows: [tell.row] });
-  const callConclusion = call.conclude({
-    kind: "spawned",
-    akumaId: id,
-    tellId: "tell-bound",
-    input: { kind: "answered", answer: "exact answer", completedAt: AKUMA_ACTIVITY_AT },
-  });
-
-  const progress = askProgressStream(undefined, undefined, context);
-  const admission = progress.admitted(tell, id);
-  const tellFrame = progress.observe(liveObservation(status, [tell.row]));
-  const tellConclusion = progress.conclude({
-    akumaId: id,
-    tellId: "tell-bound",
-    kind: "answered",
-    answer: "exact answer",
-    completedAt: AKUMA_ACTIVITY_AT,
-  });
-  const tellTranscript = [...admission, ...tellFrame, ...tellConclusion].join("\n");
-  const callTranscript = [...callFrame, callConclusion].join("\n");
-  assert.equal(admission[0], id, "the shared stream opens the identity frame before the Tell receipt");
-  assert.equal(tellTranscript.match(/▸ continue/gu)?.length, 1);
-  assert.ok(tellTranscript.indexOf("continue") > tellTranscript.indexOf(`${id}\n`));
-  assert.equal(tellTranscript.split(id).length - 1, 1, "the transcript contains exactly one identity frame");
-  assert.equal(callTranscript.match(/▸ continue/gu)?.length, 1);
-  assert.ok(callTranscript.indexOf("continue") > callTranscript.indexOf(`${id}\n`));
-  assert.equal(callTranscript.split(id).length - 1, 1, "the call transcript contains exactly one identity frame");
-  assert.equal(tellFrame.length, 0, "the admitted Tell receipt is not replayed by observation");
-  assert.equal(tellConclusion.length, 1);
-  assert.equal(tellConclusion[0], callConclusion);
-  assert.match(callConclusion, /✓ answered — 5s/u, "both adapters share one witnessed input-wait duration");
-});
-
 test("ask activity starts at admission and includes a later settlement of an older tool", () => {
   const id = parseAkumaId("aku/worker/deadbeef").id;
   const at = (minute: number) => `2026-01-01T10:${String(minute).padStart(2, "0")}:00.000Z`;
@@ -739,18 +677,6 @@ test("tool rows render unknown diffstat as ~ and known as +a -r", () => {
  */
 const SPECIMEN_ID = parseAkumaId("aku/worker/1234abcd").id;
 
-function tellSpecimenRow(text: string, state: "told" | "pending") {
-  return {
-    kind: "tell" as const,
-    sequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    tellId: "tell/specimen",
-    text,
-    state,
-    deliveries: [],
-  };
-}
-
 function compactTell(extra: Omit<Extract<AkumaTellResult, { kind: "admitted" }>, "kind" | "akumaId" | "tellId"> | Omit<Extract<AkumaTellResult, { kind: "failed" }>, "akumaId" | "tellId"> = {}): AkumaTellResult {
   return { kind: "admitted", akumaId: SPECIMEN_ID, tellId: "tell/specimen", ...extra };
 }
@@ -821,27 +747,18 @@ test("shared ask rendering serializes JSON answers and retains non-answer conclu
   assert.match(deadline, /pending tell/u);
   assert.doesNotMatch(deadline, /waited|NaN/u);
   assert.equal(render({ kind: "deadline" }), deadline);
-  const spawn = spawned({ tellId: "tell/specimen", input: { kind: "deadline" } });
-  const renderedSpawn = renderVerb("spawn", { akumaName: "worker" }, { kind: "returned", value: spawn }, context);
-  assert.match(renderedSpawn, /pending tell/u);
-  assert.doesNotMatch(renderedSpawn, /waited|NaN/u);
-  assert.equal(
-    renderVerb("spawn", { akumaName: "worker" }, { kind: "returned", value: spawn }, context),
-    renderedSpawn,
-  );
 });
 
 test("every action receipt leads with a verdict and subject, then indented evidence", () => {
   const context = { columns: 100, color: false };
   assert.deepEqual(
-    renderCallText(spawned(), false, context, { cwd: "/work/repo" }).split("\n"),
+    renderCallText(spawned(), context, { cwd: "/work/repo" }).split("\n"),
     ["✓ spawned aku/worker/1234abcd", "  /work/repo"],
     "a prompt-free birth is an action receipt with its invocation directory subordinate",
   );
   assert.deepEqual(
     renderCallText(
       spawned({ alias: { kind: "moved", previousAkumaId: parseAkumaId("aku/worker/9999beef").id } }),
-      false,
       context,
       { cwd: "/work/repo", contractId: contractId("kei/example-1234"), alias: "@reviewer" },
     ).split("\n"),
@@ -856,7 +773,6 @@ test("every action receipt leads with a verdict and subject, then indented evide
   assert.deepEqual(
     renderCallText(
       spawned({ kind: "failed", failures: [{ stage: "dispatch", failure: { kind: "infrastructure", diagnostic: "busy" } }] }),
-      false,
       context,
       { cwd: "/work/repo" },
     ).split("\n"),
@@ -866,7 +782,6 @@ test("every action receipt leads with a verdict and subject, then indented evide
   assert.deepEqual(
     renderCallText(
       spawned({ kind: "failed", failures: [{ stage: "birth", kind: "infrastructure", diagnostic: "window lost" }] }),
-      false,
       context,
       { cwd: "/work/repo" },
     ).split("\n"),
@@ -879,7 +794,6 @@ test("every action receipt leads with a verdict and subject, then indented evide
         tellId: "tell/specimen",
         kind: "failed", failures: [{ stage: "tell", kind: "infrastructure", diagnostic: "window lost", attemptedTellId: "tell/attempted" }],
       }),
-      false,
       context,
       { cwd: "/work/repo", prompt: "exact prompt" },
     ).split("\n"),
@@ -896,7 +810,6 @@ test("every action receipt leads with a verdict and subject, then indented evide
   assert.deepEqual(
     renderCallText(
       spawned({ dispatchWarning: "private-state-seat-close-failed seat closed late" }),
-      false,
       context,
       { contractId: contractId("kei/example-1234"), cwd: "/work/repo" },
     ).split("\n"),
@@ -1097,48 +1010,4 @@ test("a narrow panel never truncates a copyable identity", () => {
     lines.some((line) => line.includes("👩‍💻")),
     "wide graphemes survive wrapping",
   );
-});
-
-test("a failed observing call keeps a known directory and its admitted Tell input exactly once", () => {
-  const context = { columns: 100, color: false };
-  const head = {
-    id: SPECIMEN_ID,
-    alias: "@scout",
-    contract: { kind: "associated" as const, contractId: contractId("kei/demo") },
-    facts: [] as readonly string[],
-  };
-  const failedObservation = (wake?: AkumaTellResult["wake"]): SpawnResult => ({
-    ...spawned({ tellId: "tell/specimen", ...(wake === undefined ? {} : { wake }) }),
-    kind: "failed", failures: [{ stage: "observation", diagnostic: "window lost" }],
-  });
-  const stream = callObservationStream(context, { ...head, cwd: "/work/repo" }, { prompt: "exact prompt" });
-  const lines = stream.conclude(failedObservation()).split("\n");
-  const headLines = [`${SPECIMEN_ID} (@scout) · kei/demo`, "  /work/repo"];
-  assert.deepEqual(
-    lines.slice(0, 3),
-    [...headLines, frameRule(headLines, context.columns)],
-    "the failure panel states the known directory above the boundary and fabricates nothing",
-  );
-  assert.match(lines[3]!, /^▸ exact prompt$/u, "the admitted input is the panel's first evidence");
-  assert.equal(lines[4], "! observation failed window lost");
-
-  // A Tell row that already settled on the timeline is that evidence; the close must not replay it.
-  const observedStream = callObservationStream(context, head, { prompt: "exact prompt" });
-  const settledRow = tellSpecimenRow("exact prompt", "told");
-  const settled = observedStream.observe({ status: running(SPECIMEN_ID, [settledRow]), rows: [settledRow] });
-  const observedText = [...settled, observedStream.conclude(failedObservation())].join("\n");
-  assert.equal((observedText.match(/exact prompt/gu) ?? []).length, 1, "a settled admission row is never replayed");
-  assert.match(observedText, /! observation failed window lost/u);
-  assert.ok(observedText.includes("input tell/specimen"), "stream close retains the admitted input coordinate");
-
-  // An admission that never settled was never printed, so closing on it prints it once.
-  const pendingRow = tellSpecimenRow("exact prompt", "pending");
-  const pendingStream = callObservationStream(context, head, { prompt: "exact prompt" });
-  const pendingSettled = pendingStream.observe({
-    status: running(SPECIMEN_ID, [pendingRow]),
-    rows: [pendingRow],
-  });
-  const pendingText = [...pendingSettled, pendingStream.conclude(failedObservation({ kind: "pending" }))].join("\n");
-  assert.equal((pendingText.match(/exact prompt/gu) ?? []).length, 1);
-  assert.match(pendingText, /⧗ exact prompt/u);
 });

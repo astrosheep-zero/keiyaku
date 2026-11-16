@@ -1,15 +1,13 @@
 # Keiyaku in Pi
 
-The existing Pi package entry `plugins/pi/keiyaku.ts` supplies `/keiyaku` (the
-status overlay) and registers the package's MCP server for each Pi session. The
-24 MCP tools use `codemode` exposure; no separate `mcp.json` entry or global
-`keiyaku-mcp` binary is required. The ten native Akuma tools are temporarily registered with
-Pi's `hidden` exposure while their design is unfinished: they are not declared
-to the model, discoverable, or callable, even if selected explicitly. The CLI
-and `/keiyaku` command remain available. The implementation is retained for
-development. It imports only the supported
-`@astrosheep/keiyaku` package root. Build the checkout before loading it locally;
-an installed npm package already carries its built SDK.
+The existing Pi package entry `plugins/pi/keiyaku.ts` registers the package's
+MCP server for each Pi session, supplies `/keiyaku` (the Kanshi overlay), and
+keeps a live status entry. The registered server publishes the shared Keiyaku
+MCP tools with Pi's `codemode` exposure; no separate `mcp.json` entry or global
+`keiyaku-mcp` binary is required. The extension registers no Pi model tools of
+its own. It imports only the supported `@astrosheep/keiyaku` package root. Build
+the checkout before loading it locally; an installed npm package already
+carries its built SDK.
 
 ```sh
 # Existing installation path; no separate experimental package
@@ -18,102 +16,39 @@ keiyaku install pi
 pi --extension ./plugins/pi/keiyaku.ts
 ```
 
-## Native status
+## Status sampler
 
 Interactive Pi sessions show a compact status entry with the current World's
 running Akuma, active Contracts, and open Debts across all namespaces. A zero
 is an observed empty count; `-` means absent and `?` means unknown or failed.
 The entry refreshes after each completed read (five seconds later) and when the
 agent settles. It starts with the session and is removed on shutdown or reload;
-non-terminal modes do not run the sampler. The `/keiyaku` overlay and native
-tools are unchanged.
+non-terminal modes do not run the sampler.
 
-## Native tools
+## `/keiyaku`
 
-All tools return the SDK result in `details`, `structuredContent`, and JSON
-text. Typed refusals and partial birth results remain data. An exceptional
-failure retaining a born Akuma also retains its identity in structured error
-data. No native tool shells out to the CLI.
+`/keiyaku` opens a centered, read-only overlay of `keiyaku kanshi` from `PATH`.
+It is available only with an interactive UI; a failed read shows
+`status unavailable`.
 
-| Tool | Parameters |
-| --- | --- |
-| `akuma_spawn` | `akuma` definition name, `body`; optional `workdir`, `detach`, `bare`, `wait`, `timeoutMs` |
-| `akuma_status` | `akuma`; optional `repo` |
-| `akuma_list` | optional `akumaName`, `limit` |
-| `akuma_definitions` | optional `limit` |
-| `akuma_tell` | `akuma`, `body`; optional `interrupt`, `detach`, `repo`, `wait`, `timeoutMs` |
-| `akuma_ask` | `akuma`, `body`, `schema`; optional `interrupt`, `detach`, `timeoutMs`, `repo` |
-| `akuma_wait` | `akuma` array; optional `completion` (`any` or `all`), `timeoutMs`, `repo` |
-| `akuma_history` | `akuma`; optional `id`, `last`, `before`, `since`, `limit`, `repo` |
-| `akuma_fork` | `akuma`, `at`; optional `detach`, `bare`, `repo` |
-| `akuma_kill` | one `akuma` selector; optional `repo` |
+## MCP server
 
-`akuma_spawn` supports every configured provider, not only Pi. Default
-`detach: false` launches in the calling Pi session's in-process host scope.
-Default `wait: false` returns after birth and first-input admission; these are
-**independent choices**. `wait: true` observes the first answer for up to five
-minutes by default. `timeoutMs` on spawn requires `wait: true`.
-Spawn and Fork pass `bare` through to the SDK: it omits only Keiyaku runtime
-instructions and remains frozen through wake and inherited by forks. Providers
-without a verified runtime-instruction channel retain their explicit refusal
-unless the caller opts out.
-
-```json
-{"akuma":"worker","body":"Inspect the parser without changing files."}
-{"akuma":"worker","body":"Run the checks.","detach":true,"wait":true,"timeoutMs":300000}
-```
-
-Tell, Ask and Fork explicitly select future launch hosting through their own
-`detach` option, also defaulting to false. A running Body never moves hosts. A
-sleeping Akuma can be woken in the current session even if another host created
-it. Ordinary CLI defaults and `--wait` semantics are unchanged.
-
-World resolves from Pi's `ctx.cwd`. Relative `workdir` and `repo` paths resolve
-there too; `repo` supplies Git association/selector context, not a different
-World. Caller attribution comes from the current Pi session manager, not ambient
-parent Akuma or harness environment declarations. Single targets accept IDs or
-World-local aliases. Wait accepts a batch of IDs, aliases or globs. Kill accepts
-one selector, including a glob or Contract selector (the latter needs `repo`),
-which may expand to several Akumas with one stop result per member. History `id` and Fork `at` are exact returned `turn/n`
-identities. Exact history cannot combine with paging or `last`.
-
-Ask/Wait are unbounded unless `timeoutMs` is supplied. Tell observes its exact
-text answer with `wait: true`; its optional `timeoutMs` requires that choice.
-Deadline or tool abort ends observation, not admitted work. Ask requires a JSON
-Schema document as the provider answer contract and returns parsed JSON without
-local schema validation. Tell and spawn carry text only. Schema input to busy
-work retains the SDK refusal.
+The extension registers a stdio server named `keiyaku` for the current session
+and runs the built MCP entry with the running Node executable. The server
+publishes the shared invocation facet's MCP tools, so tool inputs, results, and
+refusals keep their ordinary MCP semantics. Pi's `/mcp` view and exposure
+settings apply to the registered server.
 
 ## Lifetime
 
-The extension owns one `AkumaHost.inProcess()` scope per Pi session. Orderly
-`session_shutdown` closes only that scope's exact in-process launches, including
-setup and automatic succession. It never kills by AkuId, so an older session
-cannot stop a foreign host's later wake of the same identity. Detached work
-survives. Reload and session replacement follow Pi's shutdown/start lifecycle.
-
-Native tools use the same local SDK composition in external and provider-owned
-Pi sessions. Each session owns its own in-process host scope and caller identity.
-CLI operations in native tool children likewise run their ordinary local owners.
-
-In-process hosting is shared lifetime, not a sandbox: arbitrary extensions can
-block or terminate the runtime. A noncooperative tool/provider can remain
-physically live after the Body records hung and releases its leash. Scope close
-rejects with that exact launch's retained failure; it never reports physical
-retirement based on a later Body's status. Abrupt host death has no graceful
-cleanup guarantee, and no daemon or persisted host policy recovers live objects.
-Child model usage is not rolled into an already-returned parent tool result.
+Loading the extension registers the MCP server and `/keiyaku` command. In a TUI
+session it starts the status sampler on `session_start`, refreshes it after each
+read and on `agent_settled`, and stops it on `session_shutdown` or reload.
+Non-TUI modes run no sampler. Pi owns the MCP connection lifetime.
 
 ## Verification
 
 ```sh
 npm run build
-npm test -- tests/akuma-in-process.test.ts tests/pi-akuma-tools.test.ts tests/pi-extension.test.ts tests/package-consumers.test.ts
+npm test -- tests/pi-extension.test.ts tests/pi-status.test.ts tests/mcp-adapter.test.ts tests/package-consumers.test.ts
 ```
-
-The native-tool tests verify that the built package's default extension keeps
-the tools hidden. An explicit development fixture registers the same implementation
-with direct exposure and executes a deterministic offline model through real Pi tool calls,
-SDK operations, Heart/leash, subprocess tools and detached launches. They do not
-replace the Body engine or depend on model credentials. These are not real-model
-quality or OS sandbox tests.

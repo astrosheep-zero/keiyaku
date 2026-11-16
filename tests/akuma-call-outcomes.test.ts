@@ -17,14 +17,11 @@ import { readAliases, moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import { repositoryAt } from "../src/git/repository.js";
-import { classifyVerb, type VerbInput, type VerbOutput, type VerbRun } from "../src/library/keiyaku-verbs.js";
+import { classifyVerb, type VerbInput, type VerbOutput } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { KeiyakuError } from "../src/index.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
-import type { SpawnProgress } from "../src/library/akuma-creation.js";
-import type { AskProgress } from "../src/akuma/akuma-selection-execution.js";
-import { runCli } from "./support/cli-fixtures.js";
 import { answering, bornWorld, fixtureLauncher, settleFixtureBodies, settledInput } from "./support/akuma-tell.js";
 import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
 import { temporaryDirectory } from "./support/process.js";
@@ -66,12 +63,8 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   const alias = parseAkumaAlias("@unchanged");
   await moveAlias({ world, alias, akumaId: parent.akumaId });
   writeFileSync(join(git.commonDirectory, "refs", "heads", "keiyaku-state.lock"), "fixture publication stop\n");
-  const input = { akumaName: "worker", prompt: "answer", wait: "5m" };
-  const progress: SpawnProgress[] = [];
-  const result = await api.spawn({ akumaName: "worker", home, cwd: world, body: input.prompt, mode: "wait", contract: bound.kei, alias, observe: {
-    admitted: (tell, id, head) => { progress.push({ kind: "admitted", tell, id, head }); },
-    observe: (observation) => { progress.push({ kind: "live", observation }); },
-  } });
+  const input = { akumaName: "worker", prompt: "answer" };
+  const result = await api.spawn({ akumaName: "worker", home, cwd: world, body: input.prompt, mode: "wait", contract: bound.kei, alias });
   assert.equal(result.kind, "failed");
   if (result.kind !== "failed") assert.fail("Dispatch must stop the operation");
   assert.deepEqual(result.failures.map(failure => failure.stage), ["dispatch"]);
@@ -84,17 +77,7 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   const completion = { kind: "returned" as const, value: result };
   assert.equal(classifyVerb("spawn", input, completion), "failed");
   const text = renderVerb("spawn", input, completion, context);
-  for (const evidence of [result.akumaId, result.tellId, "dispatch failed", "exact text answer"]) assert.ok(text.includes(evidence), text);
-  const streamRun = t.mock.method(Keiyaku.prototype, "run", async (_name: string, _input: unknown, run?: VerbRun<SpawnProgress>) => {
-    for (const event of progress) await run?.observe?.(event);
-    return result;
-  });
-  try {
-    const cli = await runCli(["-C", world, "spawn", "worker", "--wait", "60s", "answer"]);
-    assert.equal(cli.exit, 3, cli.stderr);
-    assert.equal(cli.stdout, "exact text answer");
-    for (const evidence of [result.akumaId, result.tellId, "dispatch failed"]) assert.ok(cli.stderr.includes(evidence), cli.stderr);
-  } finally { streamRun.mock.restore(); }
+  for (const evidence of [result.akumaId, result.tellId, "dispatch failed"]) assert.ok(text.includes(evidence), text);
 
   const failedObservation = t.mock.method(AkumaOwner.prototype, "tellOutcome", async () => { throw new Error("observation unavailable"); });
   const stopped = await api.spawn({ akumaName: "worker", home, cwd: world, body: "again", mode: "wait", contract: bound.kei });
@@ -129,7 +112,6 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   assert.deepEqual(aliasStopped.failures.map(failure => failure.stage), ["alias"]);
   const aliasText = renderVerb("spawn", input, { kind: "returned", value: aliasStopped }, context);
   assert.match(aliasText, /alias failed/u);
-  assert.ok(aliasText.includes("exact text answer"));
   assertWireRoundTrip(spawnResultSchema, aliasStopped);
 
   const response = await mcpCall(t, world, "spawn", input, result);
@@ -165,11 +147,7 @@ test("Tell failure and exact Ask precedence retain answer and historical wake re
   t.mock.method(AkumaOwner.prototype, "admitTell", async () => ({ kind: "admitted", tell: fact,
     wake: Promise.resolve({ ...receipt, wake: { kind: "failed", diagnostic: "historical wake failed", child: { log: { path: logPath } } } }) }));
   const input = { akuma: fixture.allocated.id, prompt: "answer", schema: {} };
-  const progress: AskProgress[] = [];
-  const told = await api.tell({ akuma: fixture.allocated.id, body: "answer", wait: true, observe: {
-    admitted: (tell, id) => { progress.push({ kind: "admitted", tell, id }); },
-    observe: (observation) => { progress.push({ kind: "live", observation }); },
-  } });
+  const told = await api.tell({ akuma: fixture.allocated.id, body: "answer", wait: true });
   assert.equal(told.kind, "failed");
   if (told.kind !== "failed") assert.fail("Tell must keep its wake stop");
   assert.deepEqual(told.failures, [{ stage: "wake", diagnostic: "historical wake failed", logPath }]);
@@ -177,16 +155,6 @@ test("Tell failure and exact Ask precedence retain answer and historical wake re
   assertWireRoundTrip(akumaTellResultSchema, told);
   assert.equal(classifyVerb("tell", input, { kind: "returned", value: told }), "failed");
   const toldText = renderVerb("tell", input, { kind: "returned", value: told }, context);
-  const streamRun = t.mock.method(Keiyaku.prototype, "run", async (_name: string, _input: unknown, run?: VerbRun<AskProgress>) => {
-    for (const event of progress) await run?.observe?.(event);
-    return told;
-  });
-  try {
-    const cli = await runCli(["-C", root, "tell", fixture.allocated.id, "--wait", "60s", "answer"]);
-    assert.equal(cli.exit, 3, cli.stderr);
-    assert.equal(cli.stdout, '{"ok":true}');
-    for (const evidence of [original.tellId, fixture.allocated.id, "historical wake failed", logPath]) assert.ok(cli.stderr.includes(evidence), cli.stderr);
-  } finally { streamRun.mock.restore(); }
   const asked = await api.ask({ akuma: fixture.allocated.id, body: "answer", schema: {} });
   assert.equal(asked.kind, "answered");
   if (asked.kind !== "answered") assert.fail("exact answer must win");
@@ -195,7 +163,8 @@ test("Tell failure and exact Ask precedence retain answer and historical wake re
   assertWireConformance(Keiyaku.verbs.ask.normal, asked);
   assert.equal(classifyVerb("ask", input, { kind: "returned", value: asked }), "accepted");
   const askText = renderVerb("ask", input, { kind: "returned", value: asked }, context);
-  for (const text of [toldText, askText]) for (const evidence of [original.tellId, fixture.allocated.id, "historical wake failed", logPath, '{"ok":true}']) assert.ok(text.includes(evidence), text);
+  for (const text of [toldText, askText]) for (const evidence of [fixture.allocated.id, "historical wake failed", logPath]) assert.ok(text.includes(evidence), text);
+  for (const evidence of [original.tellId, '{"ok":true}']) assert.ok(askText.includes(evidence), askText);
   const { wake: _wake, ...pure } = asked;
   assert.equal(renderVerb("ask", input, { kind: "returned", value: pure }, context), '{"ok":true}');
   const failedObservation = t.mock.method(AkumaOwner.prototype, "tellOutcome", async () => ({ reason: "completed", outcome: { kind: "failed", diagnostic: "observed failure" }, completedAt: null }));

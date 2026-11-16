@@ -657,14 +657,6 @@ export type InputWaitStream = Readonly<{
   opened: () => boolean;
 }>;
 
-/**
- * The call-observation projection of one input wait: the same admitted/observe/frame/flush/opened
- * lifetime with the closing judgment from the native compact spawn result.
- */
-export type CallObservationStream = Readonly<
-  Omit<InputWaitStream, "conclude"> & { conclude: (result: SpawnResult) => string }
->;
-
 function failedOutcomeDiagnostic(status: LiveStatusObservation["status"]): string | undefined {
   const outcome = status.timeline.kind === "idle" ? status.timeline.outcome : undefined;
   return outcome !== undefined && outcome.outcome.kind === "failed" ? outcome.outcome.diagnostic : undefined;
@@ -748,58 +740,6 @@ export function inputWaitStream(
     return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;
   };
   return { admitted: admit, observe, frame, flush, conclude, opened: () => opened };
-}
-
-export function callObservationStream(
-  context: TextRenderContext,
-  head: ObservedCallHead,
-  options: Readonly<{ now?: () => number | undefined; admittedAt?: string; prompt?: string }> = {},
-): CallObservationStream {
-  const stream = inputWaitStream(context, () => head, {
-    cursor: "empty",
-    answerSeparator: true,
-    ...(options.now === undefined ? {} : { now: options.now }),
-  });
-  stream.admitted({ ...(options.admittedAt === undefined ? {} : { at: options.admittedAt }), rows: [] });
-  const settledTells = new Set<string>();
-  return {
-    ...stream,
-    observe: (observation) => {
-      for (const row of observation.rows) if (row.kind === "tell" && row.state === "told") settledTells.add(row.tellId);
-      return stream.observe(observation);
-    },
-    conclude: (result) => {
-      const failures = result.kind === "failed" ? callFailureLines(result.failures, context) : [];
-      const controls = [
-        ...(result.tellId === undefined || callRawAnswer(result, false) !== undefined
-          ? []
-          : [`input ${result.tellId}`]),
-        ...tellControlLines(result.wake === undefined ? {} : { wake: result.wake }, context),
-      ];
-      if (result.input !== undefined) {
-        const completedAt = observationCompletedAt(result.input);
-        return [
-          stream.conclude({
-            kind: "observed",
-            observation: result.input,
-            ...(completedAt === undefined ? {} : { completedAt }),
-          }),
-          ...subordinateLines([...failures, ...controls]),
-        ].join("\n");
-      }
-      if (result.kind !== "failed") return "";
-      return stream.conclude({
-        kind: "failed",
-        evidence: [
-          ...(result.tellId === undefined || settledTells.has(result.tellId) || options.prompt === undefined
-            ? []
-            : [tellAdmissionRow(options.prompt, context, result.wake)]),
-          ...failures,
-          ...controls,
-        ],
-      });
-    },
-  };
 }
 
 function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
@@ -916,13 +856,6 @@ type AkumaPresentation = Readonly<{
   alias?: string;
 }>;
 
-export function inputObservation(result: AkumaAskResult | AkumaTellResult): AkumaAskObservation {
-  if (result.kind === "admitted") return result.input ?? { kind: "unanswered" };
-  if (result.kind === "failed" && "failures" in result)
-    return result.input ?? { kind: "failed", diagnostic: result.failures[0].diagnostic };
-  return result;
-}
-
 /** The settlement instant a settled observation carries; an open observation has none. */
 export function observationCompletedAt(observation: AkumaAskObservation): string | undefined {
   return observation.kind === "answered" || observation.kind === "failed" || observation.kind === "invalid-output"
@@ -930,23 +863,8 @@ export function observationCompletedAt(observation: AkumaAskObservation): string
     : undefined;
 }
 
-export function askRawAnswer(result: AkumaAskResult | AkumaTellResult): string | undefined {
-  if (result.kind === "admitted" || (result.kind === "failed" && "failures" in result))
-    return result.input?.kind === "answered" ? result.input.answer : undefined;
+export function askRawAnswer(result: AkumaAskResult): string | undefined {
   return result.kind === "answered" ? JSON.stringify(result.answer) : undefined;
-}
-
-export function callRawAnswer(result: SpawnResult, streamed: boolean): string | undefined {
-  if (result.input?.kind !== "answered") return streamed ? "" : undefined;
-  if (
-    !streamed &&
-    (result.kind === "failed" ||
-      result.wake !== undefined ||
-      result.alias !== undefined ||
-      result.dispatchWarning !== undefined)
-  )
-    return undefined;
-  return result.input.answer;
 }
 
 export function historyRawAnswer(result: AkumaHistoryResult, historyId: string | undefined): string | undefined {

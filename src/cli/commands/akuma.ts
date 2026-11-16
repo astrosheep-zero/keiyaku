@@ -6,12 +6,11 @@ import { readFile } from "node:fs/promises";
 import { canonicalDocument } from "../../akuma/schema.js";
 import { classifyVerb, verbs } from "../../library/keiyaku-verbs.js";
 import type { AskProgress } from "../../akuma/akuma-selection-execution.js";
-import type { SpawnProgress } from "../../library/akuma-creation.js";
 import { ActivityDriver } from "../activity.js";
-import { type CliOutcome, displayContext, resultContext, writeJson, writeStderr, writeStdout } from "../streams.js";
+import { type CliOutcome, displayContext, resultContext, writeJson, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
-import { askRawAnswer, callObservationStream, callRawAnswer, historyRawAnswer } from "../render/akuma-activity.js";
-import { askProgressStream, callObservationHead, renderFailedCallObservation } from "../render/akuma.js";
+import { askRawAnswer, historyRawAnswer } from "../render/akuma-activity.js";
+import { askProgressStream } from "../render/akuma.js";
 import { aliasSelector, renderVerb } from "../render/verbs.js";
 
 async function schemaFromFile(path: string) {
@@ -65,56 +64,7 @@ function emitAnswer(body: string, exact: boolean): void {
   else writeStdout(body);
 }
 
-export async function runSpawn(request: VerbRequest<"spawn">, runtime: CliRuntime): Promise<CliOutcome> {
-  const { input, output } = request;
-  let stream: ReturnType<typeof callObservationStream> | undefined;
-  const driver = new ActivityDriver(process.stderr);
-  const observing = input.wait !== undefined && output === "text";
-  const observe = observing
-    ? (event: SpawnProgress): void => {
-        if (event.kind === "admitted") {
-          stream = callObservationStream(resultContext(), callObservationHead({ akumaId: event.id, ...event.head }), {
-            admittedAt: event.tell.row.at,
-          });
-          driver.redraw(stream.frame());
-        } else {
-          driver.settle(stream?.observe(event.observation) ?? [], stream?.frame() ?? []);
-        }
-      }
-    : undefined;
-  try {
-    const result = await runtime.facet.run("spawn", input, {
-      signal: runtime.signal,
-      ...(observe === undefined ? {} : { observe }),
-    });
-    let streamed = stream !== undefined;
-    if (stream !== undefined) driver.conclude(stream.conclude(result));
-    else if (observing && result.kind === "failed") {
-      writeStderr(
-        renderFailedCallObservation(
-          result,
-          resultContext(),
-          input.prompt === undefined ? {} : { prompt: input.prompt },
-        ),
-      );
-      streamed = true;
-    }
-    const completion = { kind: "returned" as const, value: result };
-    if (output === "json") writeJson(result);
-    else if (streamed) {
-      const raw = callRawAnswer(result, true);
-      emitAnswer(raw ?? "", raw !== undefined);
-    } else {
-      const raw = callRawAnswer(result, false);
-      emitAnswer(renderVerb("spawn", input, completion, displayContext()), raw !== undefined);
-    }
-    return classifyVerb("spawn", input, completion);
-  } finally {
-    driver.close(stream?.flush() ?? []);
-  }
-}
-
-export async function runAsk(request: VerbRequest<"ask" | "tell">, runtime: CliRuntime): Promise<CliOutcome> {
+export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
   const progress =
     output === "text" ? askProgressStream(undefined, aliasSelector(input.akuma), resultContext()) : undefined;
@@ -131,10 +81,7 @@ export async function runAsk(request: VerbRequest<"ask" | "tell">, runtime: CliR
       signal: runtime.signal,
       ...(observe === undefined ? {} : { observe }),
     };
-    const result =
-      request.name === "ask"
-        ? await runtime.facet.run("ask", request.input, run)
-        : await runtime.facet.run("tell", request.input, run);
+    const result = await runtime.facet.run("ask", request.input, run);
     if (progress !== undefined) driver.conclude(progress.conclude(result).join("\n"));
     const completion = { kind: "returned" as const, value: result };
     if (output === "json") writeJson(result);

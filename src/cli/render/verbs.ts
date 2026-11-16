@@ -7,7 +7,6 @@ import { KeiyakuArcDocumentError, KeiyakuUsageError } from "../../library/keiyak
 import { KeiyakuError, projectFailure } from "../../library/outcome.js";
 import {
   askRawAnswer,
-  callRawAnswer,
   historyRawAnswer,
   historyText,
   snapshotText,
@@ -236,13 +235,13 @@ function renderKill(input: VerbInput<"kill">, value: VerbOutput<"kill">, context
   return renderKillText(value, aliasSelector(input.akuma), context);
 }
 
-function renderAsk(
+function renderInput(
   input: VerbInput<"ask" | "tell">,
   result: VerbOutput<"ask" | "tell">,
   context: TextRenderContext,
 ): string {
   const selectedAlias = aliasSelector(input.akuma);
-  if ((result.kind === "admitted" || (result.kind === "failed" && "failures" in result)) && result.input === undefined)
+  if (result.kind === "admitted" || (result.kind === "failed" && "failures" in result))
     return tellText(result, input.prompt, selectedAlias, context);
   const answer = askRawAnswer(result);
   return answer !== undefined && tellControlLines(result, context).length === 0
@@ -263,10 +262,8 @@ function spawnPresentation(input: VerbInput<"spawn">) {
   };
 }
 
-/** Spawn's optional observation carries text. */
 function renderSpawn(input: VerbInput<"spawn">, result: VerbOutput<"spawn">, context: TextRenderContext): string {
-  const raw = callRawAnswer(result, false);
-  return raw ?? renderCallText(result, false, context, spawnPresentation(input));
+  return renderCallText(result, context, spawnPresentation(input));
 }
 
 function renderReport(result: VerbOutput<"report">, context: TextRenderContext): string {
@@ -346,7 +343,7 @@ export function renderVerb<K extends VerbName>(
       return renderForkText(value as VerbOutput<"fork">, input as VerbInput<"fork">);
     case "tell":
     case "ask":
-      return renderAsk(input as VerbInput<"ask" | "tell">, value as VerbOutput<"ask" | "tell">, context);
+      return renderInput(input as VerbInput<"ask" | "tell">, value as VerbOutput<"ask" | "tell">, context);
     case "kill":
       return renderKill(input as VerbInput<"kill">, value as VerbOutput<"kill">, context);
     case "wait":

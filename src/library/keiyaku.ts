@@ -17,7 +17,6 @@ import { Kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
 import { Akumas } from "./akumas.js";
 import { waitInvocation } from "./keiyaku-wait.js";
 import type { AskObserver } from "../akuma/akuma-selection-execution.js";
-import type { SpawnWaitObserver } from "./akuma-creation.js";
 import { deliveryOwner } from "./keiyaku-attribution.js";
 import { akumaCallerFromEnvironment } from "./keiyaku-identity.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
@@ -181,23 +180,12 @@ export class Keiyaku {
     const signal = run?.signal === undefined ? {} : { signal: run.signal };
     const observe = run?.observe;
     switch (request.name) {
-      case "spawn": {
-        return this.#spawn({
-          ...request.input,
-          ...signal,
-          ...(observe === undefined
-            ? {}
-            : {
-                observe: {
-                  admitted: (tell, id, head) => notify({ kind: "admitted", tell, id, head }),
-                  observe: (observation) => notify({ kind: "live", observation }),
-                },
-              }),
-        });
-      }
+      case "spawn":
+        return this.#spawn({ ...request.input, ...signal });
       case "fork":
         return this.#fork(request.input);
       case "tell":
+        return this.#tell(request, signal);
       case "ask":
         return this.#tell(request, {
           ...signal,
@@ -447,15 +435,7 @@ export class Keiyaku {
     return await library.reconcile({ ...input, contract: id });
   }
 
-  async #spawn({
-    prompt,
-    wait,
-    contract,
-    workdir,
-    alias,
-    observe,
-    ...input
-  }: ExecutionInput<"spawn"> & Readonly<{ observe?: SpawnWaitObserver }>) {
+  async #spawn({ prompt, contract, workdir, alias, ...input }: ExecutionInput<"spawn">) {
     const at = await this.#coordinates(contract === undefined ? "none" : "required");
     const cwd =
       workdir === undefined
@@ -473,7 +453,6 @@ export class Keiyaku {
       contract === undefined ? undefined : Keis.of(at.repo!).kei({ id: this.#fullId(Keis.of(at.repo!), contract) });
     return await Akumas.of(world).spawn({
       ...input,
-      ...(wait === undefined ? {} : { mode: "wait", timeoutMs: waitTimeout(wait) }),
       cwd,
       settings: configuration,
       ...(alias === undefined ? {} : { alias: alias as AkumaAlias }),
@@ -482,18 +461,6 @@ export class Keiyaku {
       ...(selected === undefined ? {} : { contract: selected }),
       ...(caller === undefined ? {} : { caller }),
       ...(initiator === undefined ? {} : { initiator }),
-      ...(observe === undefined
-        ? {}
-        : {
-            observe: {
-              ...(observe.observe === undefined ? {} : { observe: observe.observe }),
-              ...(observe.admitted === undefined
-                ? {}
-                : {
-                    admitted: (tell, id, head) => observe.admitted!(tell, id, { ...head, cwd }),
-                  }),
-            },
-          }),
     });
   }
 
@@ -535,12 +502,8 @@ export class Keiyaku {
       const { prompt: _prompt, ...input } = request.input;
       return akumas.ask({ ...input, ...common });
     }
-    const { prompt: _prompt, wait, ...input } = request.input;
-    return akumas.tell({
-      ...input,
-      ...common,
-      ...(wait === undefined ? {} : { wait: true, timeoutMs: waitTimeout(wait) }),
-    });
+    const { prompt: _prompt, ...input } = request.input;
+    return akumas.tell({ ...input, ...common });
   }
 
   async #kill(input: ExecutionInput<"kill">) {

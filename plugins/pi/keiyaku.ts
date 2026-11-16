@@ -1,7 +1,6 @@
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { fileURLToPath } from "node:url";
 import { Kanshi, NoGitWorldError, Repo, World } from "@astrosheep/keiyaku";
-import { registerAkumaTools } from "./akuma-tools.ts";
 
 type ExecResult = Readonly<{ stdout: string; stderr: string; code: number }>;
 
@@ -54,7 +53,6 @@ export default function keiyakuExtension(
     args: [fileURLToPath(new URL("../../build/src/mcp/index.js", import.meta.url))],
     timeout: 900,
   });
-  registerAkumaTools(pi);
   let close: (() => void) | undefined;
   let refresh: (() => void) | undefined;
   pi.on("session_start", (_event, ctx) => {

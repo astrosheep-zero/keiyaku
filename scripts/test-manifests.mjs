@@ -136,7 +136,6 @@ export const INTEGRATION_TEST_FILES = [
   "tests/nuke.test.ts",
   "tests/package-consumers.test.ts",
   "tests/path-coordinates.test.ts",
-  "tests/pi-akuma-tools.test.ts",
   "tests/pi-native-identity.test.ts",
   "tests/pi-virtual-model.test.ts",
   "tests/plugin-akuma-outcome.test.ts",

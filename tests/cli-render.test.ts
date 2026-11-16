@@ -22,11 +22,9 @@ import {
 } from "../src/core/facts/types.js";
 import type { ReconcileCompletion } from "../src/library/reconcile.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
-import type { SpawnResult } from "../src/library/akuma-creation.js";
 import {
   DEFAULT_CONTEXT,
   activityStream,
-  callObservationStream,
   frameRule,
   historyText as nativeHistoryText,
   snapshotText,
@@ -153,10 +151,6 @@ function activityRows(timeline: ActivitySnapshot): readonly ActivityRow[] {
   return timeline.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
 }
 
-function live(status: LiveStatusObservation["status"], rows: readonly ActivityRow[] = activityRows(status.timeline)) {
-  return { status, rows };
-}
-
 function liveActivity(snapshot: ActivitySnapshot, rows: readonly ActivityRow[] = activityRows(snapshot)) {
   return { snapshot, rows };
 }
@@ -183,15 +177,6 @@ const genericLines = (rows: readonly GenericFixture[], columns: number) =>
   nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId("aku/worker/abcd1234").id,
     events: rows.map(([sequence, name, input]) => genericTool(sequence, name, input)),
   }, {}, { columns, color: false }).split("\n").slice(2);
-function callObservation(observation: NonNullable<SpawnResult["input"]>): SpawnResult {
-  return {
-    kind: "spawned",
-    akumaId: parseAkumaId("aku/worker/abcd0044").id,
-    tellId: "tell/call-render",
-    input: observation,
-  };
-}
-
 /** One native Debt summary row; scenario deltas are explicit overrides. */
 function debtSummary(overrides: Partial<DebtSummary> = {}): DebtSummary {
   return {
@@ -2373,7 +2358,7 @@ test("current attempt boundaries consume the projection opening identity", () =>
   assert.deepEqual(activityStream(context).seed(liveActivity(openAkumaSnapshot([named, activity]))), []);
 });
 
-test("call and ask stream projected overlapping tool completions once in completion order", () => {
+test("ask streams projected overlapping tool completions once in completion order", () => {
   const id = parseAkumaId("aku/worker/abcd0104").id;
   const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
   const tool = (sequence: number, phase: "started" | "completed", name: string): TimelineFact =>
@@ -2427,11 +2412,6 @@ test("call and ask stream projected overlapping tool completions once in complet
       rows: ledger.rows,
     };
   };
-  const call = callObservationStream(
-    { columns: 120, color: false },
-    { id, contract: { kind: "none" }, facts: [] },
-    { now: () => Date.parse(at(1)) },
-  );
   const ask = askProgressStream(undefined, undefined, { columns: 120, color: false });
   const admissionRow = projection(first).rows.find((row) => row.kind === "tell");
   assert.ok(admissionRow?.kind === "tell");
@@ -2439,18 +2419,13 @@ test("call and ask stream projected overlapping tool completions once in complet
     { admission: { tellId: "tell/overlap" }, row: admissionRow, wake: { kind: "told" } },
     id,
   );
-  const streams = [
-    (value: ReturnType<typeof projection>) => call.observe(value),
-    (value: ReturnType<typeof projection>) => ask.observe(value),
-  ];
-  for (const observe of streams) {
-    observe(projection(first));
-    const b = observe(projection(second)).join("\n");
-    const a = observe(projection(third)).join("\n");
-    assert.match(b, /\$ B[\s\S]*between tools/u);
-    assert.match(a, /\$ A/u);
-    assert.deepEqual(observe(projection(third)), []);
-  }
+  const observe = (value: ReturnType<typeof projection>) => ask.observe(value);
+  observe(projection(first));
+  const b = observe(projection(second)).join("\n");
+  const a = observe(projection(third)).join("\n");
+  assert.match(b, /\$ B[\s\S]*between tools/u);
+  assert.match(a, /\$ A/u);
+  assert.deepEqual(observe(projection(third)), []);
 });
 
 test("narrative selection is partition-invariant and repeated pending snapshots do not replay", () => {
@@ -2680,50 +2655,6 @@ test("a plural wait text renders one compact line per observation and unreadable
   assert.doesNotMatch(text, /\n\n/u, "no blank block separators");
 });
 
-test("an observing call's conclusion asserts real waiting", () => {
-  const settledAtMs = Date.parse(AKUMA_ACTIVITY_AT);
-  const id = "aku/worker/abcd0044";
-  const head = { id, contract: { kind: "none" as const }, facts: [] };
-  const context = { columns: 120, color: false };
-  // A wait that began four seconds before its input settled states its witnessed duration.
-  const waiting = callObservationStream(context, head, {
-    now: () => settledAtMs,
-    admittedAt: new Date(settledAtMs - 4_000).toISOString(),
-  });
-  const witnessed = waiting.conclude(
-    callObservation({ kind: "answered", answer: "the answer", completedAt: AKUMA_ACTIVITY_AT }),
-  );
-  assert.equal(witnessed.split("\n").at(-3), "✓ answered — 4s");
-  assert.ok(witnessed.endsWith("\n\n"), "the progress channel owns the answer separator");
-
-  // A call already answered at its first look names no duration.
-  const answered = callObservationStream(context, head, { now: () => settledAtMs + 10_000 });
-  const settled = answered.conclude(
-    callObservation({ kind: "answered", answer: "the answer", completedAt: AKUMA_ACTIVITY_AT }),
-  );
-  assert.equal(settled.split("\n").at(-3), "✓ answered");
-
-  // An absent settlement instant never fabricates one.
-  const unrecorded = callObservationStream(context, head, { now: () => settledAtMs + 10_000 });
-  assert.equal(
-    unrecorded.conclude(callObservation({ kind: "answered", answer: "the answer" })).split("\n").at(-3),
-    "✓ answered",
-  );
-
-  // A deadline carries the observed elapsed wait rather than manufacturing an ending.
-  let now = settledAtMs - 45_000;
-  const bounded = callObservationStream(context, head, { now: () => now });
-  const running = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id,
-    life: "running",
-    timeline: openAkumaSnapshot([]),
-  });
-  bounded.observe({ status: running, rows: [] });
-  now = settledAtMs;
-  assert.match(bounded.conclude(callObservation({ kind: "deadline" })), /● running — waited 45s/u);
-});
-
 test("an any-mode completion keeps an incomplete peer's own state honest", () => {
   const complete = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
@@ -2802,98 +2733,6 @@ test("terminal width counts grapheme clusters rather than code points", () => {
     false,
     "ZWJ survives terminal-safe truncation",
   );
-});
-
-test("a streamed observing call opens one framed head and never replays a settled snapshot", () => {
-  const id = "aku/worker/abcd0030";
-  const settledAtMs = Date.parse(AKUMA_ACTIVITY_AT);
-  let now = settledAtMs - 4_000;
-  const head = {
-    id,
-    alias: "@scout",
-    contract: { kind: "associated" as const, contractId: contractId("kei/demo") },
-    facts: [],
-    cwd: "/work/repo",
-  };
-  const stream = callObservationStream({ columns: 100, color: false }, head, { now: () => now });
-  const running = (entries: Parameters<typeof openAkumaSnapshot>[0]) =>
-    liveStatusObservationSchema.unwrap().shape.status.parse({
-      birth: DIRECT_BIRTH,
-      id,
-      life: "running",
-      timeline: openAkumaSnapshot(entries),
-    });
-  const tool = (sequence: number, command: string) =>
-    snapshotRow(completedTool(sequence, "bash", { kind: "run", command }));
-  const headLines = [`${id} (@scout) · kei/demo`, "  /work/repo"];
-  const opening = stream.observe(
-    live(running([snapshotRow(activeTool(1, "bash", { kind: "run", command: "first" }))])),
-  );
-  assert.deepEqual(
-    opening,
-    [...headLines, frameRule(headLines)],
-    "the head opens once, with the invocation's known execution directory above the boundary",
-  );
-  assert.doesNotMatch(opening.join("\n"), /cwd |✓ run/u, "no labelled directory row and no fabricated activity");
-  const growing = running([tool(1, "first"), snapshotRow(activeTool(2, "bash", { kind: "run", command: "second" }))]);
-  const text = stream.observe(live(growing)).join("\n");
-  assert.deepEqual(stream.observe(live(growing)), [], "a settled row never streams twice");
-  assert.match(text, /^ {3}run +\$ first$/mu);
-  assert.doesNotMatch(text, /second|@scout|kei\/demo/u, "the head never recurs and the newest row is still moving");
-
-  now = settledAtMs + 1_000;
-  const conclusion = stream.conclude(
-    callObservation({ kind: "answered", answer: "the answer", completedAt: AKUMA_ACTIVITY_AT }),
-  );
-  assert.equal(conclusion, `?  run    \$ second\n✓ answered — 4s\n\n`);
-  assert.doesNotMatch(conclusion, /the answer|kei\/demo|@scout/u, "no head or answer replay");
-});
-
-test("a streamed observing call concludes truthfully when its stream never opened", () => {
-  const id = "aku/worker/abcd0031";
-  const head = { id, contract: { kind: "none" as const }, facts: [] };
-  let now = 10_000;
-  const runningStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
-  now = 40_000;
-  const opened = runningStream.conclude(callObservation({ kind: "deadline" })).split("\n");
-  assert.deepEqual(opened.slice(0, 2), [id, frameRule([id])]);
-  assert.ok(opened.includes("⧗ pending tell — waited 30s"));
-  assert.ok(opened.includes("  input tell/call-render"), "deadline keeps the admitted input coordinate");
-  assert.ok(runningStream.opened());
-
-  const observedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => now });
-  observedStream.observe(
-    live(
-      liveStatusObservationSchema.unwrap().shape.status.parse({
-        birth: DIRECT_BIRTH,
-        id,
-        life: "running",
-        timeline: openAkumaSnapshot([]),
-      }),
-    ),
-  );
-  now = 55_000;
-  const observed = observedStream.conclude(callObservation({ kind: "deadline" })).split("\n");
-  assert.ok(
-    observed.includes("● running — waited 15s"),
-    "a caller deadline states the observed life rather than naming the deadline",
-  );
-
-  const failedStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
-  const failed = failedStream
-    .conclude({
-      akumaId: parseAkumaId(id).id,
-      tellId: "tell/call-render",
-      kind: "failed", failures: [{ stage: "observation", diagnostic: "window lost" }],
-    })
-    .split("\n");
-  assert.deepEqual(failed.slice(0, 2), [id, frameRule([id])]);
-  assert.ok(failed.includes("! observation failed window lost"));
-
-  const outcomeStream = callObservationStream({ columns: 80, color: false }, head, { now: () => 0 });
-  const outcomeText = outcomeStream.conclude({ kind: "failed", akumaId: parseAkumaId(id).id,
-    tellId: "tell/call-render", failures: [{ stage: "observation", diagnostic: "provider 503" }] });
-  assert.match(outcomeText, /! observation failed provider 503/u);
 });
 
 test("failed sections preserve each owner diagnostic", () => {

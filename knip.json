@@ -11,8 +11,7 @@
         "tests/fixtures/consumers/*.ts",
         "plugins/pi/keiyaku.ts",
         "plugins/paseo/plugin/index.server.ts",
-        "experiments/**/*.test.ts",
-        "experiments/pi-inprocess/extension.ts"
+        "experiments/**/*.test.ts"
       ],
       "project": [
         "src/**/*.ts",

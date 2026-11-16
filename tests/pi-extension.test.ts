@@ -443,14 +443,13 @@ function install(execute: (command: string, args: string[]) => Promise<ExecResul
   return { command, handlers, tools, mcpServers };
 }
 
-test("Pi keeps unfinished native tools hidden while preserving the explicit Keiyaku command", () => {
+test("Pi registers MCP and the explicit Keiyaku command without native tools", () => {
   const { handlers, tools, mcpServers } = install(async () => {
     throw new Error("status must not run while loading");
   });
 
-  assert.deepEqual([...handlers.keys()], ["session_start", "session_shutdown", "agent_settled"]);
-  assert.equal(tools.length, 10);
-  assert.ok(tools.every((tool) => tool.exposure === "hidden"));
+  assert.deepEqual([...handlers.keys()], ["session_start", "agent_settled", "session_shutdown"]);
+  assert.deepEqual(tools, []);
   assert.equal(mcpServers.length, 1);
   const { name, config } = mcpServers[0]!;
   assert.equal(name, "keiyaku");

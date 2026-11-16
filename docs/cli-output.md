@@ -269,16 +269,15 @@ identities. Native observations retain complete identities without becoming a
 second result model. Its final receipt preserves partial admissions, retained
 failure scenes, operational stops, and the ordinary completion judgment.
 
-An observing spawn, an observing tell, and an ask share one input-wait
-presentation discipline. Witnessed timeline activity streams once in owner order on the
-progress channel; active work stays in the redrawable frame until it settles.
-Closing preserves unresolved activity rather than inventing completion.
-Observing tell begins at its own admitted input, leaving earlier work to history.
-Its answer belongs to that
-input's exact terminal Turn. Stdout carries text answer bytes for tell and spawn,
-and serialized JSON for ask, once; the verb determines that projection. Deadline and failure preserve the observed life and explicit
-cause without fabricating an answer. Bounded omissions remain visible, settled
-rows never replay, and failures are never hidden by compaction.
+Spawn and tell stop at their birth or admission receipt, without an answer or
+live observation frame. Ask streams witnessed timeline activity once in owner
+order on the progress channel; active work stays in the redrawable frame until
+it settles. Closing preserves unresolved activity rather than inventing
+completion. Observation begins at Ask's own admitted input, leaving earlier work
+to history, and its answer belongs to that input's exact terminal Turn. Stdout
+carries serialized JSON once. Deadline and failure preserve the observed life
+and explicit cause without fabricating an answer. Bounded omissions remain
+visible, settled rows never replay, and failures are never hidden by compaction.
 
 A wait is not a stream and opens no live frame. Its compact projection preserves
 the invocation's global conclusion, frozen member order and complete identities,

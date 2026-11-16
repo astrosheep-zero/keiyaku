@@ -1,18 +1,16 @@
 import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
 import type { TellResult } from "../../akuma/body.js";
 import type { AkumaId } from "../../akuma/identity.js";
-import type { AkumaAskResult, AkumaTellResult, AkumaKillResult } from "../../akuma/selection-observation.js";
-import type { ForkResult, SpawnResult, SpawnWaitHead } from "../../library/akuma-creation.js";
+import type { AkumaAskResult, AkumaKillResult } from "../../akuma/selection-observation.js";
+import type { ForkResult, SpawnResult } from "../../library/akuma-creation.js";
 import {
   actionReceipt,
-  callObservationStream,
   inputWaitStream,
   killResultText,
   subordinateLines,
   tellAdmissionRow,
   callFailureLines,
   askRawAnswer,
-  inputObservation,
   observationCompletedAt,
   tellControlLines,
   tellPayloadLines,
@@ -25,7 +23,7 @@ type AskProgress = Readonly<{
   observe: (observation: LiveStatusObservation) => readonly string[];
   frame: () => readonly string[];
   flush: () => readonly string[];
-  conclude: (result: AkumaAskResult | AkumaTellResult) => readonly string[];
+  conclude: (result: AkumaAskResult) => readonly string[];
 }>;
 
 export function askProgressStream(
@@ -38,7 +36,7 @@ export function askProgressStream(
   const stream = inputWaitStream(
     context,
     () => {
-      if (target === undefined) throw new Error("Tell progress used before admission");
+      if (target === undefined) throw new Error("Ask progress used before admission");
       return { id: target, ...(alias === undefined ? {} : { alias }), contract: { kind: "none" }, facts: [] };
     },
     { cursor: "admission", answerSeparator: true, ...(now === undefined ? {} : { now }) },
@@ -57,7 +55,7 @@ export function askProgressStream(
     flush: () => stream.flush(),
     conclude: (result) => {
       const controls = tellControlLines(result, context);
-      const observation = inputObservation(result);
+      const observation = result;
       const completedAt = observationCompletedAt(observation);
       return [
         stream.conclude({
@@ -75,7 +73,7 @@ export function askProgressStream(
 }
 
 export function waitedTellProgress(
-  result: AkumaAskResult | AkumaTellResult,
+  result: AkumaAskResult,
   input: Readonly<{ prompt: string; alias?: string }>,
   context: TextRenderContext,
 ): string {
@@ -90,7 +88,7 @@ export function waitedTellProgress(
     { cursor: "admission", answerSeparator: true, now: () => context.now },
   );
   const admitted = stream.admitted({ rows: [tellAdmissionRow(input.prompt, context, result.wake)] });
-  const observation = inputObservation(result);
+  const observation = result;
   const completedAt = observationCompletedAt(observation);
   return [
     ...admitted,
@@ -106,23 +104,13 @@ export function waitedTellProgress(
 }
 
 type SpawnPresentation = Readonly<{ prompt?: string; cwd?: string; alias?: string; contractId?: string }>;
-/** The shared frame consumes owner evidence and explicit invocation context. */
-export function callObservationHead(
-  input: SpawnResult | (SpawnWaitHead & Readonly<{ akumaId: string }>),
-  presentation: SpawnPresentation = {},
-): ObservedCallHead {
-  const failures = "failures" in input ? (input.failures ?? []) : [];
+function spawnHead(input: SpawnResult, presentation: SpawnPresentation = {}): ObservedCallHead {
+  const failures = input.kind === "failed" ? input.failures : [];
   const alias = failures.some((failure) => failure.stage === "dispatch" || failure.stage === "alias")
     ? undefined
-    : "aliasName" in input
-      ? input.aliasName
-      : presentation.alias;
-  const contractId = failures.some((failure) => failure.stage === "dispatch")
-    ? undefined
-    : "contractId" in input
-      ? input.contractId
-      : presentation.contractId;
-  const cwd = "cwd" in input ? input.cwd : presentation.cwd;
+    : presentation.alias;
+  const contractId = failures.some((failure) => failure.stage === "dispatch") ? undefined : presentation.contractId;
+  const cwd = presentation.cwd;
   const facts = [
     ...(input.dispatchWarning === undefined ? [] : [`dispatch lag ${safeText(input.dispatchWarning)}`]),
     ...(input.alias === undefined ? [] : [`alias moved · previous ${input.alias.previousAkumaId}`]),
@@ -137,7 +125,7 @@ export function callObservationHead(
 }
 
 function spawnEvidence(result: SpawnResult, context: TextRenderContext, input: SpawnPresentation): readonly string[] {
-  const head = callObservationHead(result, input);
+  const head = spawnHead(result, input);
   return [
     ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
     ...(head.cwd === undefined ? [] : [safeText(head.cwd)]),
@@ -151,18 +139,8 @@ function spawnEvidence(result: SpawnResult, context: TextRenderContext, input: S
   ];
 }
 
-export function renderCallText(
-  result: SpawnResult,
-  streamed: boolean,
-  context: TextRenderContext,
-  input: SpawnPresentation = {},
-): string {
-  if (streamed) return "";
-  const head = callObservationHead(result, input);
-  if (result.input !== undefined) {
-    const stream = callObservationStream(context, head, { now: () => context.now });
-    return [stream.conclude(result), ...(result.input.kind === "answered" ? [result.input.answer] : [])].join("\n");
-  }
+export function renderCallText(result: SpawnResult, context: TextRenderContext, input: SpawnPresentation = {}): string {
+  const head = spawnHead(result, input);
   return actionReceipt({
     mark: result.kind === "failed" ? "!" : "✓",
     verb: "spawned",
@@ -178,7 +156,7 @@ export function renderSpawnFailure(
   context: TextRenderContext,
   input: SpawnPresentation = {},
 ): string {
-  const head = callObservationHead(result, input);
+  const head = spawnHead(result, input);
   return actionReceipt({
     mark: "!",
     verb: "spawn failed",
@@ -186,15 +164,6 @@ export function renderSpawnFailure(
     ...(head.alias === undefined ? {} : { alias: head.alias }),
     evidence: [...spawnEvidence(result, context, input), `reason ${safeText(diagnostic)}`],
   }).join("\n");
-}
-
-export function renderFailedCallObservation(
-  result: SpawnResult,
-  context: TextRenderContext,
-  input: SpawnPresentation = {},
-): string {
-  const failure = callObservationStream(context, callObservationHead(result, input), input);
-  return failure.conclude(result);
 }
 
 export function renderForkText(receipt: ForkResult, input: Readonly<{ akuma: string; at: string }>): string {

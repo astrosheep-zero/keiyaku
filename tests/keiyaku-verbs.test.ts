@@ -187,6 +187,8 @@ test("wire validation and classification reject malformed calls before observati
     }
   }
   for (const [name, inputs] of [
+    ["spawn", [{ akumaName: "worker", prompt: "work", wait: "5m" }]],
+    ["tell", [{ akuma: "@worker", prompt: "work", wait: "5m" }]],
     ["show", [{ ids: ["debt/a"] }, { id: ["debt/a"] },
       { id: "aku/worker/1234abcd" }, { id: "debt/" }, { id: "@*" }, { id: "@" }]],
     ["kill", [{ akuma: ["aku/worker/1234abcd"] }, { akuma: " " }]],

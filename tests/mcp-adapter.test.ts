@@ -230,10 +230,8 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["ls", { selector: "kei/", mine: false }],
     ["ls", { selector: "kei/", selection: "all" }],
     ["spawn", { akumaName: "worker", writableDirectories: [cwd] }],
-    ["spawn", { akumaName: "worker", wait: "10m" }],
-    ["spawn", { akumaName: "worker", prompt: "work", wait: "0.5s" }],
-    ["spawn", { akumaName: "worker", prompt: "work", wait: "9007199254740992ms" }],
-    ["tell", { akuma: "@worker", prompt: "work", wait: "bad" }],
+    ["spawn", { akumaName: "worker", prompt: "work", wait: "10m" }],
+    ["tell", { akuma: "@worker", prompt: "work", wait: "10m" }],
     ["tell", { akuma: "@worker", prompt: "work", wait: true }],
     ["tell", { akuma: "@worker", prompt: "work", timeoutMs: 0 }],
     ["show", { ids: ["debt/example"] }],
@@ -343,9 +341,13 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["tell", "wait", "string"], ["wait", "timeout", "string"], ["history", "last", "boolean"], ["show", "id", "string"], ["kill", "akuma", "string"]]) {
+  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "timeout", "string"], ["history", "last", "boolean"], ["show", "id", "string"], ["kill", "akuma", "string"]]) {
     const properties = tools.find((tool) => tool.name === name)!.inputSchema.properties as Record<string, { type?: string }>;
     assert.equal(properties[key!]!.type, type);
+  }
+  for (const name of ["spawn", "tell"]) {
+    const properties = tools.find(tool => tool.name === name)!.inputSchema.properties!;
+    assert.equal(Object.hasOwn(properties, "wait"), false);
   }
   assert.deepEqual(tools.find(tool => tool.name === "wait")!.inputSchema.required, ["selectors"]);
   assert.ok(!tools.find(tool => tool.name === "show")!.inputSchema.required?.includes("id"));
@@ -1107,7 +1109,7 @@ lines.on("line", line => {
   try {
     await Promise.all([adapter.server.connect(b), client.connect(a)]);
     await client.listTools();
-    const spawned = await client.callTool({ name: "spawn", arguments: { akumaName: "worker", prompt: "work", wait: "30s" } });
+    const spawned = await client.callTool({ name: "spawn", arguments: { akumaName: "worker", prompt: "work" } });
     assert.equal(spawned.isError, false, JSON.stringify(spawned));
     const source = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
     assert.equal((await Akuma.select(world, source.akumaId).idle({ timeoutMs: 30_000 })).reason, "completed");
@@ -1172,21 +1174,23 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     await client.listTools();
     const spawned = await client.callTool({
       name: "spawn",
-      arguments: { akumaName: "acp-worker", prompt: "structured", bare: true, wait: "30s" },
+      arguments: { akumaName: "acp-worker", prompt: "structured", bare: true },
     });
     assert.equal(spawned.isError, false, JSON.stringify(spawned));
     const child = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
-    assert.deepEqual(child.input, { kind: "answered", answer: '{"ok":true}' });
+    assert.equal(child.input, undefined);
     const waited = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
     assert.equal(waited.isError, false);
     const completion = Keiyaku.verbs.wait.normal.parse(waited.structuredContent);
     assert.ok(completion.members[0]?.kind === "akuma" && completion.members[0].observation.kind === "observed");
     const told = await client.callTool({
-      name: "tell", arguments: { akuma: child.akumaId, prompt: "structured", wait: "30s" },
+      name: "tell", arguments: { akuma: child.akumaId, prompt: "structured" },
     });
     assert.equal(told.isError, false, JSON.stringify(told));
-    assert.deepEqual(told.content, [{ type: "text", text: '{"ok":true}' }]);
-    assert.equal((await Akuma.select(world, child.akumaId).idle({ timeoutMs: 30_000 })).reason, "completed");
+    assert.match(JSON.stringify(told.content), /tell|told/u);
+    const toldWait = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
+    assert.equal(toldWait.isError, false, JSON.stringify(toldWait));
+    assert.equal(Keiyaku.verbs.wait.normal.parse(toldWait.structuredContent).reason, "completed");
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] };
     const result = await client.callTool({
       name: "ask",

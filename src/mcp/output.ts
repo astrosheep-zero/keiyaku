@@ -13,13 +13,6 @@ const akumaRow = akumas.shape.rows.unwrap().unwrap().element.unwrap();
 const associated = akuma.shape.contract.unwrap().options[0];
 const work = akuma.shape.work.unwrap().omit({ turn: true, activeTools: true, latestActivity: true });
 const spawn = verbs.spawn.normal.unwrap();
-const spawnText = spawn.shape.input.unwrap();
-/** Routing keeps the settled text answer but not the presentation-only settlement instant. */
-const textObservation = z.union([
-  spawnText.options[0].unwrap().omit({ completedAt: true }).readonly(),
-  spawnText.options[1],
-  spawnText.options[2],
-]);
 const gateProblem = z.strictObject({
   gate: z.string(),
   requirement: z.string(),
@@ -75,9 +68,7 @@ export const mcpOutputSchemas = {
       placement: placement.exactOptional(),
       continuation: continuation.exactOptional(),
     }),
-  spawn: spawn
-    .omit({ dispatchWarning: true, alias: true, wake: true })
-    .extend({ input: textObservation.exactOptional() }),
+  spawn: spawn.omit({ dispatchWarning: true, alias: true, wake: true, input: true }),
   fork: verbs.fork.normal.unwrap().omit({ dispatchWarning: true }),
   ask: z.union([
     verbs.ask.normal.options[0]
@@ -202,11 +193,8 @@ const projections = {
     };
   },
   spawn(value: Normal<"spawn">) {
-    const { dispatchWarning: _dispatch, alias: _alias, wake: _wake, input, ...routing } = value;
-    if (input === undefined) return routing;
-    if (input.kind !== "answered") return { ...routing, input };
-    const { completedAt: _completedAt, ...settled } = input;
-    return { ...routing, input: settled };
+    const { dispatchWarning: _dispatch, alias: _alias, wake: _wake, input: _input, ...routing } = value;
+    return routing;
   },
   fork(value: Normal<"fork">) {
     const { dispatchWarning: _dispatch, ...routing } = value;

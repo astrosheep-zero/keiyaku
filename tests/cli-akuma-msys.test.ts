@@ -7,7 +7,6 @@ import { parseArgv } from "../src/cli/parse.js";
 import type { ParsedCommandInvocation } from "../src/cli/runtime.js";
 import { renderCallText, renderForkText } from "../src/cli/render/akuma.js";
 import { contractId } from "../src/core/facts/types.js";
-import { callRawAnswer } from "../src/cli/render/akuma-activity.js";
 
 const world = "D:\\dev\\repo with $tag\\it's" as WorldRoot;
 const akuma = "aku/worker/1234abcd" as AkumaId;
@@ -33,7 +32,7 @@ test("spawn defaults to detached birth and rejects removed detach flags", () => 
   });
   assert.throws(() => parseArgv(["spawn", "worker", "-d", "prompt"]), /option -d is not valid for spawn/u);
   assert.throws(() => parseArgv(["spawn", "worker", "--detach", "prompt"]), /option --detach is not valid for spawn/u);
-  const text = renderCallText(spawned(), false, context, { cwd: world });
+  const text = renderCallText(spawned(), context, { cwd: world });
   assert.equal(text, [`✓ spawned ${akuma}`, `  ${world}`].join("\n"), "verdict, subject, and invocation directory");
   assert.doesNotMatch(text, /^─+$|running|completed/mu, "detached spawn has no timeline or observation conclusion");
   assert.doesNotMatch(text, /cwd|->|keiyaku wait|to wait|📁|└─|├─/u);
@@ -43,7 +42,6 @@ test("a contract-bound spawn receipt indents contract, invocation context, and a
   const previous = parseAkumaId("aku/worker/0000beef").id;
   const text = renderCallText(
     spawned({ alias: { kind: "moved", previousAkumaId: previous } }),
-    false,
     context,
     { cwd: world, contractId: contractId("kei/tree-receipt"), alias: "@sapling" },
   );
@@ -67,19 +65,9 @@ test("a fork receipt names its source without inventing extra evidence", () => {
 
 test("prompt-free spawn renders its born identity without a Tell receipt", () => {
   const result = spawned();
-  const text = renderCallText(result, false, context, { cwd: world });
+  const text = renderCallText(result, context, { cwd: world });
   assert.equal(text, [`✓ spawned ${akuma}`, `  ${world}`].join("\n"));
   assert.doesNotMatch(text, /tell|answer|cwd|->/u);
-});
-
-test("an observing call writes its answer once without repeating cwd or the outcome row", () => {
-  const result = spawned({
-    tellId: "tell/msys",
-    input: { kind: "answered", answer: "final answer" },
-  });
-  const raw = callRawAnswer(result, false);
-  assert.equal(raw, "final answer");
-  assert.doesNotMatch(raw ?? "", /cwd/u);
 });
 
 test("a detached call keeps its born child, execution directory, and native failure evidence", () => {
@@ -88,7 +76,6 @@ test("a detached call keeps its born child, execution directory, and native fail
       tellId: "tell/msys",
       kind: "failed", failures: [{ stage: "tell", kind: "infrastructure", diagnostic: "window lost" }],
     }),
-    false,
     context,
     { cwd: world, prompt: "prompt" },
   );
@@ -109,7 +96,7 @@ test("a detached call keeps its born child, execution directory, and native fail
 test("detached spawn keeps alias and independent partial failures", () => {
   const aliased = spawned();
   assert.match(
-    renderCallText(aliased, false, context, { cwd: world, alias: "@ship" }),
+    renderCallText(aliased, context, { cwd: world, alias: "@ship" }),
     /aku\/worker\/1234abcd \(@ship\)/u,
   );
 
@@ -124,7 +111,7 @@ test("detached spawn keeps alias and independent partial failures", () => {
     },
   ];
   for (const { result, diagnostic } of failures) {
-    const text = renderCallText(result, false, context, { cwd: world });
+    const text = renderCallText(result, context, { cwd: world });
     assert.ok(text.split("\n").includes(`  ${diagnostic}`), diagnostic);
     assert.match(
       text.split("\n")[0]!,

@@ -57,11 +57,11 @@ test("category status refuses invalid combinations before reading the invocation
   }
 });
 
-test("observing spawn rejects an invalid workdir without establishing a World", async (context) => {
+test("spawn rejects an invalid workdir without establishing a World", async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-spawn-invalid-workdir-"));
   context.after(() => rmSync(root, { recursive: true, force: true }));
   const result = await captureOutput(() =>
-    main(["-C", root, "spawn", "worker", "--workdir", "missing", "--wait", "1s", "prompt"]),
+    main(["-C", root, "spawn", "worker", "--workdir", "missing", "prompt"]),
   );
   assert.equal(result.exit, 64);
   assert.equal(result.stdout, "");

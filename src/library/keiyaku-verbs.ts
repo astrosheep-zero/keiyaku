@@ -28,7 +28,6 @@ import { settingsSchema } from "../settings.js";
 import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
 import {
-  spawnProgressSchema,
   spawnResultSchema,
   spawnNormalResultSchema,
   forkResultSchema,
@@ -361,22 +360,15 @@ export const verbs = Object.freeze({
   },
   spawn: {
     description:
-      "Birth a new Akuma from akumaName (ls aku/), with an optional first order. contract only marks whose work it is; give it a workdir and the terms yourself. A failed result with an akumaId still left an Akuma alive.",
+      "Birth a new Akuma from akumaName (ls aku/), with an optional first order. Returns birth and admission, not an answer; observe separately with wait. contract only marks whose work it is; give it a workdir and the terms yourself. A failed result with an akumaId still left an Akuma alive.",
     input: z
       .strictObject({
         ...spawnFields,
-        wait: waitDuration
-          .exactOptional()
-          .describe(
-            "Wait for the opening turn's text answer up to this duration (e.g. 10m); requires prompt. The deadline never kills the Akuma. Omit to return after birth and admission.",
-          ),
-        prompt: nonblank.exactOptional().describe("Opening instruction text; omit to birth idle. Required with wait."),
+        prompt: nonblank.exactOptional().describe("Opening instruction text; omit to birth idle."),
       })
-      .refine((input) => input.wait === undefined || input.prompt !== undefined, "spawn wait requires prompt")
       .readonly(),
     output: spawnResultSchema,
     normal: spawnNormalResultSchema,
-    progress: spawnProgressSchema,
     effect: "write",
   },
   fork: {
@@ -397,19 +389,13 @@ export const verbs = Object.freeze({
   },
   tell: {
     description:
-      "Give an Akuma new orders: steers its current work or wakes it. Returns once accepted; wait (e.g. 10m) also returns that turn's answer. A timeout ends the waiting, not the work.",
+      "Give an Akuma new orders: steers its current work or wakes it. Returns admission, not an answer. Observe work separately with wait, or use ask for a structured answer.",
     input: z
       .strictObject({
         ...tellFields,
-        wait: waitDuration
-          .exactOptional()
-          .describe(
-            "Wait for this exact turn's text answer up to this duration (e.g. 10m). Omit to return after admission; the deadline never retracts the Tell or kills the Akuma.",
-          ),
       })
       .readonly(),
     output: akumaTellResultSchema,
-    progress: askProgressSchema,
     effect: "write",
   },
   ask: {

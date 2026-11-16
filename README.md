@@ -307,10 +307,11 @@ thinking option id. Spawn with
 npm install -g @astrosheep/keiyaku
 ```
 
-Pi's shipped extension provides native `akuma_*` tools through the public SDK,
-plus the `/keiyaku` status overlay. The overlay still invokes `keiyaku` from
-`PATH`; native tools do not. See [`plugins/pi/README.md`](plugins/pi/README.md)
-for host lifetime and detached work.
+Pi's shipped extension registers the Keiyaku MCP server, adds a live status
+entry, and supplies the `/keiyaku` Kanshi overlay. The overlay still invokes
+`keiyaku` from `PATH`; MCP calls use the registered server. See
+[`plugins/pi/README.md`](plugins/pi/README.md) for MCP exposure and status
+refresh.
 
 Node ≥ 22.19. Product law lives in [`docs/`](docs/README.md).
 

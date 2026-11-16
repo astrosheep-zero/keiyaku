@@ -60,6 +60,12 @@ Observation uses the dedicated Contract preview operation; submission uses nativ
 delivery admission. Both return their existing native answers without an envelope,
 and the selected mode supplies presentation context without becoming authority.
 
+Invocation spawn returns birth and optional first Tell admission; invocation tell
+returns admission. Neither bundles answer observation. Existing work is observed
+through wait, while ask admits structured input and observes its exact answer.
+Standalone Akuma and Akumas SDK observation and hosting remain independent
+capabilities, not invocation conveniences.
+
 The invocation World is distinct from an explicitly selected Contract Repo:
 selecting a Repo never retargets the World. The facet adapts caller-supplied
 coordinates, Contract selection, and environment-derived caller and

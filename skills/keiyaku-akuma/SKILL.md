@@ -11,7 +11,7 @@ description: >-
 Use `Akumas` to delegate implementation, review, verification, or parallel
 research.
 
-## 1. Aliases And Operations (`spawn`, `tell`, `wait`)
+## 1. Aliases And Operations (`spawn`, `tell`, `wait`, `ask`)
 
 - **Give every worker an `@alias` at birth:** assign a role or lane alias when
   spawning an `Akuma` (`@deliverer`, `@reviewer`, `@scout`). Aliases make
@@ -20,14 +20,18 @@ research.
   that `@alias` to a replacement worker. Spawning an akumaName name (`worker`,
   `review-akuma`) always spawns a new instance — address the existing `@alias`
   or `AkuId` with `tell` to continue with the same worker.
-- **Detached `spawn` + `wait` for real work:** launch workers detached, then
-  supervise them together with `wait` (wakes on any settlement by default, or
-  all; a wait deadline never kills workers). `wait` on `kei/...` waits for a
-  `Contract`'s next journal change or terminal state.
-- **Observed `tell` for single-turn answers:** submits an instruction and
-  observes that exact `Turn`'s answer (a deadline). Without the observation
-  deadline there is no wait. For a structured JSON answer, use `ask` instead:
-  a prompt plus a JSON Schema answer contract, also observed.
+- **`spawn` and `tell` admit; `wait` observes:** `spawn` returns after birth and
+  optional first `Tell` admission, and `tell` returns after submission. Neither
+  waits for an answer. Supervise with a separate
+  `wait <aku/...|@name|kei/...>... --timeout <duration>`: it wakes on any
+  settlement by default (or every selected member with `--all`), accepts mixed
+  Contract and Akuma selectors, and a deadline never kills workers. A
+  `kei/...` member waits for the `Contract`'s next journal change or terminal
+  state.
+- **Use `ask` for answers:** `ask` submits a prompt plus a JSON Schema answer
+  contract and observes the answer; `ask --wait <duration>` bounds that
+  observation. Follow an admission-only `tell` with `wait` when you need its
+  settlement.
 - **`tell` vs. interrupting `tell`:** `tell` queues steering instructions
   without blocking; request an interrupt only when the worker is on the wrong
   track and should yield its current attempt first.

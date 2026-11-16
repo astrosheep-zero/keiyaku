@@ -53,7 +53,7 @@ test("only TUI starts asynchronous observations; scope and section availability 
   assert.deepEqual(calls, []);
   assert.deepEqual(f.writes, []);
   assert.deepEqual(f.commands, ["keiyaku"]);
-  assert.equal(f.tools.length, 10);
+  assert.deepEqual(f.tools, []);
   for (const mode of ["rpc", "json", "print"]) {
     const ctx = f.context(mode);
     f.emit("session_start", ctx); f.emit("agent_settled", ctx); f.emit("session_shutdown", ctx);

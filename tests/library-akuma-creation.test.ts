@@ -811,7 +811,7 @@ test("ordinary Akumas.spawn stays bound to its first Turn when a later Turn sett
   }
 });
 
-test("observing spawn displays the same canonical workdir as the native result", async (t) => {
+test("admission-only spawn retains its canonical execution directory", async (t) => {
   const { raw, world, configured } = await directCallFixture();
   const workdir = join(world, "actual-workdir");
   mkdirSync(workdir);
@@ -822,20 +822,20 @@ test("observing spawn displays the same canonical workdir as the native result",
   let operationFailed = true;
   try {
     const environment = { KEIYAKU_HOME: configured.home };
-    let admittedCwd: string | undefined;
     const result = await Keiyaku.at({ cwd: world, environment, home: configured.home }).spawn({
-      akumaName: "worker", prompt: "inspect workdir", wait: "20s",
+      akumaName: "worker", prompt: "inspect workdir",
       workdir: "linked-workdir", bare: true,
-    }, { observe: (event) => { if (event.kind === "admitted") admittedCwd = event.head.cwd; } });
+    });
+    assert.equal(result.input, undefined);
     const soul = await readSoul(pathsForAkumaId(world, result.akumaId));
-    assert.equal(admittedCwd, soul?.cwd);
     assert.equal(soul?.cwd, realpathSync(workdir));
     const output = await runCli(
-      ["-C", world, "spawn", "worker", "--bare", "--wait", "20s", "--workdir", "linked-workdir", "inspect workdir"],
+      ["-C", world, "spawn", "worker", "--bare", "--workdir", "linked-workdir", "inspect workdir"],
       { environment },
     );
     assert.equal(output.exit, 0, output.stderr);
-    assert.equal(output.stderr.split("\n")[1], `  ${soul?.cwd}`);
+    assert.ok(output.stdout.includes("linked-workdir"), output.stdout);
+    assert.equal(output.stderr, "");
     operationFailed = false;
   } finally {
     try {

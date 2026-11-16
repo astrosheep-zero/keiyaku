@@ -11,7 +11,7 @@ import {
 import { projectFailure, KeiyakuError } from "../library/outcome.js";
 import { classifyVerb, type VerbInput, type VerbName } from "../library/keiyaku-verbs.js";
 import type { ExecutionObserver } from "../protocol/execution-observation.js";
-import { acquireAkumaRequest, runSpawn, runAsk, runAkumaHistory } from "./commands/akuma.js";
+import { acquireAkumaRequest, runAsk, runAkumaHistory } from "./commands/akuma.js";
 import { acquireContractRequest, admitBindMarkdown, runContractRequest } from "./commands/contract.js";
 import { installOutcome, installHarnesses, renderInstallText } from "./commands/install.js";
 import { runDebtCommand } from "./commands/debt.js";
@@ -267,9 +267,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
             : await acquireContractRequest(command, runtime)
           : command;
     }
-    if (request.name === "spawn") return await runSpawn(request, runtime);
-    if (request.name === "ask" || (request.name === "tell" && request.input.wait !== undefined))
-      return await runAsk(request, runtime);
+    if (request.name === "ask") return await runAsk(request, runtime);
     if (request.name === "history" && !request.input.selector.startsWith("kei/"))
       return await runAkumaHistory(request, runtime);
     return await runContractRequest(request, runtime, selectedAlias);

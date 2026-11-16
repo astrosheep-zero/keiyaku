@@ -62,6 +62,7 @@ async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime, alias?
   const cancellable =
     progressing ||
     request.name === "wait" ||
+    request.name === "spawn" ||
     request.name === "tell" ||
     request.name === "fork" ||
     request.name === "kill";
