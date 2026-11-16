@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import test from "node:test";
+import { requireOwner } from "@astrosheep/square";
 import {
   Akuma,
   Akumas,
@@ -26,7 +27,7 @@ import { temporaryDirectory } from "./support/process.js";
 
 test("Debt facet preserves native lifecycle, flat World listing, and absent World", async (t) => {
   const cwd = temporaryDirectory(t, "debt-facet-");
-  const facet = Keiyaku.at({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
+  const facet = Keiyaku.for({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
   assert.deepEqual(await facet.show({ selector: "debt/missing" }), { kind: "absent" });
   assert.deepEqual(await facet.ls({ selector: "debt/" }), { kind: "debt-catalogue", absent: true });
   assert.deepEqual(await facet.debtDoctor({}), { kind: "absent" });
@@ -57,7 +58,7 @@ const markdown = contractMarkdown("Invocation fixture", {
 test("construction captures explicit inputs synchronously without observing cwd", async (t) => {
   const home = temporaryDirectory(t, "keiyaku-invocation-home-");
   const missing = join(home, "missing");
-  const facet = Keiyaku.at({ cwd: missing, environment: {}, home });
+  const facet = Keiyaku.for({ cwd: missing, environment: {}, home });
   assert.ok(facet instanceof Keiyaku);
   await assert.rejects(facet.ls({ selector: "kei/" }), /invocation cwd is not an existing directory/u);
 
@@ -70,13 +71,13 @@ test("construction captures explicit inputs synchronously without observing cwd"
     { cwd: home, environment: {}, repo: 1 },
   ])
     assert.throws(
-      () => Keiyaku.at(input as never),
+      () => Keiyaku.for(input as never),
       (error: unknown) =>
         error instanceof KeiyakuUsageError && error.category === "invalid-input",
     );
 
   const environment: Record<string, string> = { PI_SESSION_ID: "captured" };
-  const captured = Keiyaku.at({ cwd: home, environment, home });
+  const captured = Keiyaku.for({ cwd: home, environment, home });
   environment.PI_SESSION_ID = "changed";
   assert.deepEqual((await captured.whoami({})).self, { kind: "external", id: "pi:captured" });
 });
@@ -99,7 +100,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
     draw: "1234abcd",
     createdAt: "2026-08-08T00:00:00.000Z",
   });
-  const facet = Keiyaku.at({ cwd: first.path, repo: relative(first.path, second.path), environment: {}, home });
+  const facet = Keiyaku.for({ cwd: first.path, repo: relative(first.path, second.path), environment: {}, home });
   const bound = accepted(await facet.bind({ markdown, gates: ["reviewed"] }));
   const contract = bound.contractId;
   assert.equal((await Keis.of(repoA).list({})).rows, undefined, "an empty catalogue omits rows");
@@ -149,7 +150,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   const short = `@${contract.slice("kei/".length)}`;
   assert.deepEqual(await facet.show({ selector: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
 
-  const other = Keiyaku.at({ cwd: second.path, environment: {}, home });
+  const other = Keiyaku.for({ cwd: second.path, environment: {}, home });
   assert.deepEqual(await other.ls({ selector: "debt/" }), await Debts.of(worldB).list({ selection: "active" }));
   const selectedOtherWorkers = await other.ls({ selector: "aku/*" });
   if (selectedOtherWorkers.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
@@ -166,7 +167,7 @@ test("native Contract results, verification progress and cancellation pass throu
   const home = temporaryDirectory(t, "keiyaku-invocation-verify-");
   const repository = repositoryWithCommit();
   const repo = await Repo.at({ path: repository.path });
-  const facet = Keiyaku.at({ cwd: repository.path, environment: {}, home });
+  const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home });
   const bound = accepted(
     await Keis.of(repo).bind({
       markdown: document("printf invocation-progress"),
@@ -224,29 +225,28 @@ test("report uses the explicit Akuma execution and returns native evidence", asy
       KEIYAKU_ACTOR_ID: born.allocated.id,
       KEIYAKU_ACTOR_WORLD: world,
     };
-    const facet = Keiyaku.at({
+    const facet = Keiyaku.for({
       cwd: world, environment, home,
-      caller: { kind: "external", integration: "pi", id: "ignored-by-actor" },
+      identity: { owner: requireOwner("pi:ignored-by-actor") },
     });
     const native = Akuma.select(world, born.allocated.id);
     const recorded = await facet.report({ text: "facet milestone" });
     assert.equal(recorded.kind, "recorded");
     if (recorded.kind !== "recorded") assert.fail("report was not recorded");
-    const explicitActor = Keiyaku.at({
+    const external = Keiyaku.for({
       cwd: world, environment: { PI_SESSION_ID: "inherited-host" }, home,
-      caller: { kind: "akuma", world, akumaId: born.allocated.id },
+      identity: { owner: requireOwner("pi:current-host") },
     });
-    assert.equal((await explicitActor.report({ text: "explicit actor milestone" })).kind, "recorded");
+    await assert.rejects(external.report({ text: "not an actor" }), /explicit Akuma execution identity/u);
     const history = await native.history();
     assert.ok(history.rows.some((row) => row.kind === "report" && row.text === "facet milestone"));
-    assert.ok(history.rows.some((row) => row.kind === "report" && row.text === "explicit actor milestone"));
     assert.deepEqual(
       await facet.history({ selector: born.allocated.id }),
       await Akumas.of(world).history({ akuma: born.allocated.id }),
     );
     for (const invalid of [{ ...environment, KEIYAKU_ACTOR_ID: "invalid" }, {}]) {
       await assert.rejects(
-        Keiyaku.at({ cwd: world, environment: invalid, home }).report({ text: "bad" }),
+        Keiyaku.for({ cwd: world, environment: invalid, home }).report({ text: "bad" }),
         (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
       );
     }
@@ -259,7 +259,7 @@ test("typed and generic waits omit timeout for terminal Contracts and idle Akuma
   const home = temporaryDirectory(t, "keiyaku-wait-omitted-home-");
   const repository = repositoryWithCommit();
   const world = await World.at(repository.path);
-  const facet = Keiyaku.at({ cwd: world, environment: {}, home });
+  const facet = Keiyaku.for({ cwd: world, environment: {}, home });
   const bound = accepted(await facet.bind({ markdown, target: null, gates: ["reviewed"] }));
   accepted(await bound.kei.abandon());
   const worker = await bornLineageAkuma({
@@ -276,7 +276,7 @@ test("typed and generic waits omit timeout for terminal Contracts and idle Akuma
 
 test("valid mixed wait reaches coordinate discovery rather than a family-shape refusal", async (t) => {
   const home = temporaryDirectory(t, "keiyaku-invocation-wait-");
-  const facet = Keiyaku.at({ cwd: join(home, "missing"), environment: {}, home });
+  const facet = Keiyaku.for({ cwd: join(home, "missing"), environment: {}, home });
   await assert.rejects(
     facet.wait({ selectors: ["kei/example", "aku/worker/1234abcd"] }),
     /invocation cwd is not an existing directory/u,

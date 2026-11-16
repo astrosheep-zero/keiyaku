@@ -74,14 +74,14 @@ test("the invocation facet answers an empty amendment from the Contract selector
   const repository = repositoryWithMain();
   const bound = await bind(repository, { gates: [] });
   const before = await stateOf(repository, bound.contractId);
-  const facet = Keiyaku.at({ cwd: repository.path, environment: {} });
+  const facet = Keiyaku.for({ cwd: repository.path, environment: {} });
   const worktree = bound.worktreePath;
   assert.ok(worktree, "a targetless Contract reports its appointed worktree");
 
   for (const outcome of [
     await facet.run("amend", { contract: bound.contractId }),
     await facet.amend({ contract: bound.contractId }),
-    await Keiyaku.at({ cwd: worktree, environment: {} }).amend(),
+    await Keiyaku.for({ cwd: worktree, environment: {} }).amend(),
   ]) {
     assert.deepEqual(outcome, { kind: "accepted", contractId: bound.contractId });
   }

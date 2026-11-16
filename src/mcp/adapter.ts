@@ -69,7 +69,7 @@ export function createKeiyakuMcpServer(input: McpAdapterInput): Readonly<{ serve
         ...(repo === undefined ? {} : { repo }),
       });
       if (!parsed.success) throw new KeiyakuUsageError(parsed.error.message);
-      const facet = Keiyaku.at({
+      const facet = Keiyaku.for({
         cwd: resolve(cwd, parsed.data.cwd ?? "."),
         environment,
         ...(!("repo" in parsed.data) || parsed.data.repo === undefined ? {} : { repo: parsed.data.repo }),

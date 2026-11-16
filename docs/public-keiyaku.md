@@ -69,20 +69,33 @@ capabilities, not invocation conveniences.
 
 The invocation World is distinct from an explicitly selected Contract Repo:
 selecting a Repo never retargets the World. The facet adapts caller-supplied
-coordinates, Contract selection, explicit caller declarations, and independently
-selected initiator attribution. These declarations are not authentication. Akuma
+coordinates, Contract selection, and an optional host Owner supplied once as
+invocation identity. The identity is host context, never model business input.
+Construction validates and snapshots it synchronously, without reading product
+state or altering the captured environment. Invalid or blank identity refuses
+rather than falling back. These declarations are not authentication. Akuma
 execution directories remain independent of Contract association. Product
 surfaces neither depend on the facet nor require it to operate.
 
-A complete environment actor declaration takes precedence over an explicit
-caller; otherwise an explicit caller takes precedence over native environment
-attribution. A partial actor declaration is always invalid. An explicit caller
+A complete environment actor declaration takes precedence over host identity;
+otherwise the supplied Owner takes precedence over native environment
+attribution. A partial actor declaration is always invalid. Supplied identity
 suppresses native host decoding entirely, including inherited or ambiguous host
 identities. All caller-dependent operations use this same selection, including
 identity observation, caller-scoped listing, creation, and actor-only operations.
-Caller selection never rewrites notification initiator attribution.
+At this integration boundary, representable session Owners retain existing
+external caller coordinates. Other Owners, including agent-discriminated Owners,
+retain their full opaque identity as Square external attribution rather than
+collapsing distinct hosts or inventing sessions. Existing durable facts are never
+rewritten.
 
-Without an explicit caller, ambiguous native harness caller declarations are
+Notification attribution is independent of actor selection. An explicit
+nonblank environment redirect wins, followed by the supplied host Owner, then
+the existing environment-only recipient selection. An actor never substitutes
+its own identity for that recipient. Without supplied identity, environment
+fallback behavior is unchanged.
+
+Without supplied identity, ambiguous native harness caller declarations are
 refused rather than guessed. The diagnostic names every conflicting environment
 variable so the caller can identify the competing declarations without disclosing
 their values.

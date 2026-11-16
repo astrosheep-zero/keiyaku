@@ -30,7 +30,7 @@ async function fixture(t: TestContext) {
   const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"] }));
   const worker = await bornBody(world, "abcd0001", AT);
   t.after(() => worker.holder.release());
-  const facet = (gitPath?: string) => Keiyaku.at({ cwd: world, home, environment: {
+  const facet = (gitPath?: string) => Keiyaku.for({ cwd: world, home, environment: {
     ...environment, ...(gitPath === undefined ? {} : { KEIYAKU_GIT_PATH: gitPath }),
   } });
   const finish = async () => {

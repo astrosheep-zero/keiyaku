@@ -67,7 +67,7 @@ test("default Contract history is semantic; explicit full history retains each h
   );
   assertWireRoundTrip(contractHistorySchema, semantic);
 
-  const facet = Keiyaku.at({
+  const facet = Keiyaku.for({
     cwd: repository.path,
     environment: {},
     home: temporaryDirectory(t, "history-full-home-"),
@@ -149,7 +149,7 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
       ],
     ]),
   );
-  const facet = Keiyaku.at({ cwd: raw.path, environment: {}, home: temporaryDirectory(t, "history-corruption-home-") });
+  const facet = Keiyaku.for({ cwd: raw.path, environment: {}, home: temporaryDirectory(t, "history-corruption-home-") });
   for (const full of [false, true]) {
     const history = await bound.kei.history({ full });
     assert.ok(history.kind === "contract");
@@ -295,7 +295,7 @@ test("history reports internal unavailable Dispatch enrichment when the Dispatch
         KEIYAKU_GIT_PATH: gitPath,
       };
       const kei = Keis.of(await Repo.at({ path: raw.path, gitPath })).kei({ id: bound.contractId });
-      const facet = Keiyaku.at({ cwd: raw.path, environment, home });
+      const facet = Keiyaku.for({ cwd: raw.path, environment, home });
       for (const full of [false, true]) {
         const history = await kei.history({ full });
         assert.ok(history.kind === "contract");
@@ -359,7 +359,7 @@ test("guidance preserves exact requested bytes and distinguishes missing authori
   const repository = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: repository.path }));
   const bound = accepted(await contracts.bind({ markdown: document(), target: null }));
-  const facet = Keiyaku.at({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "guidance-home-") });
+  const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "guidance-home-") });
   const guidance = await bound.kei.guidance();
   assert.ok(guidance.kind === "present");
   assert.ok(guidance.guidance.includes("## Objective"));

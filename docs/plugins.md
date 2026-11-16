@@ -14,7 +14,9 @@ another execution layer. Pi retains its status presentation and command.
 Registration alone does not expose these tools directly to the model. Pi
 activates a registered codemode capability at session start; when none is
 available it warns once rather than falling back to direct exposure. Each call
-captures the current session's identity and invocation directory independently.
+captures the current session's Owner and invocation directory independently,
+supplying that Owner once to the invocation facet for caller and notification
+attribution. Inherited host identity cannot replace this current session.
 Workers remain detached from the Pi session; cancelling observation or retiring
 the session does not stop admitted work.
 
@@ -83,9 +85,10 @@ recipients remain undeliverable. Missing attribution stays silent, and optional
 integration failure never refuses a native operation.
 
 The submitting integration edge selects an opaque host Owner as optional
-initiator attribution. An explicit integration Owner wins; otherwise exactly one
-native host identity supplies it, with the external host fallback used only when
-no native identity exists. Ambiguous or missing host identity selects nothing.
+initiator attribution. An explicit environment redirect wins, followed by the
+supplied invocation Owner; otherwise exactly one native host identity supplies
+it, with the external host fallback used only when no native identity exists.
+Ambiguous or missing host identity selects nothing.
 The Claude child marker does not veto an explicit native session, because ordinary
 tool subprocesses also carry it; child-only identity still selects nothing.
 Generic Akuma core persists and forwards attribution unchanged and never

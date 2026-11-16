@@ -75,7 +75,7 @@ test("ls --mine selects this process caller's World-local descendants", async (t
     caller: { kind: "external", integration: "other", id: "elsewhere" },
   });
   const environment = { KEIYAKU_EXTERNAL_CALLER: "test:root" };
-  const facet = Keiyaku.at({ cwd: root, environment });
+  const facet = Keiyaku.for({ cwd: root, environment });
   const selectedFacet = await facet.ls({ selector: "aku/*", mine: true, selection: "settled" });
   assert.equal(selectedFacet.kind, "akuma-catalogue");
   if (selectedFacet.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
@@ -83,7 +83,7 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   const { observedAt: _nativeTime, ...nativeList } = await Akumas.of(root).list({ caller: external, selection: "settled" });
   assert.deepEqual(facetList, nativeList);
   const childEnvironment = { KEIYAKU_ACTOR_ID: direct.id, KEIYAKU_ACTOR_WORLD: root };
-  const selectedChild = await Keiyaku.at({ cwd: root, environment: childEnvironment }).ls({ selector: "aku/*", mine: true, selection: "settled" });
+  const selectedChild = await Keiyaku.for({ cwd: root, environment: childEnvironment }).ls({ selector: "aku/*", mine: true, selection: "settled" });
   if (selectedChild.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
   const { observedAt: _childTime, ...childList } = selectedChild;
   const { observedAt: _nativeChildTime, ...nativeChildList } = await Akumas.of(root).list({
@@ -152,7 +152,7 @@ test("ls --mine selects this process caller's World-local descendants", async (t
 
 test("ls --mine JSON usage failure retains a single-line native diagnostic", async (t) => {
   const root = await World.at(temporaryDirectory(t, "keiyaku-cli-caller-json-refusal-"));
-  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  const facet = Keiyaku.for({ cwd: root, environment: {} });
   let diagnostic = "";
   await assert.rejects(facet.ls({ selector: "aku/*", mine: true }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuUsageError);
@@ -172,7 +172,7 @@ test("ls --mine JSON usage failure retains a single-line native diagnostic", asy
 
 test("ls caller selection refuses absent identity and non-Akuma catalogues", async (t) => {
   const root = await World.at(temporaryDirectory(t, "keiyaku-cli-caller-refusal-"));
-  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  const facet = Keiyaku.for({ cwd: root, environment: {} });
   await assert.rejects(
     facet.ls({ selector: "aku/*", mine: true }),
     (error: unknown) => error instanceof KeiyakuUsageError && /listing the caller's own Akumas requires a caller identity/u.test(error.message),

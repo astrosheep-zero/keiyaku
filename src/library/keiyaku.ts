@@ -1,5 +1,6 @@
 /** @architectureCompositionRoot */
 import { isAbsolute, resolve } from "node:path";
+import { requireOwner, type Owner } from "@astrosheep/square";
 import { parseDuration } from "../duration.js";
 import { ZodError, type z } from "zod";
 import {
@@ -28,18 +29,18 @@ import { errorCategory } from "../errors.js";
 import { invocationCoordinates, KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 import { whoami } from "./keiyaku-identity.js";
 import { nukeKeiyaku } from "./nuke.js";
-import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
+import type { AkumaCaller } from "../akuma/caller.js";
 import * as debt from "./keiyaku-debt.js";
 import type { AkumaAlias } from "../identity/selector.js";
 import { validateAkumaName } from "../identity/normalize.js";
 export { KeiyakuArcDocumentError, KeiyakuUsageError } from "./keiyaku-coordinates.js";
 
-export type KeiyakuAt = Readonly<{
+export type KeiyakuFor = Readonly<{
   cwd: string;
   environment: Readonly<Record<string, string | undefined>>;
   home?: string;
   repo?: string;
-  caller?: AkumaCaller;
+  identity?: Readonly<{ owner: Owner }>;
 }>;
 
 type ParsedInput<K extends VerbName> = z.output<(typeof verbs)[K]["input"]>;
@@ -56,14 +57,29 @@ function waitTimeout(wait: string): number {
 
 export class Keiyaku {
   static readonly verbs: typeof verbs = verbs;
-  readonly #input: KeiyakuAt;
+  readonly #input: KeiyakuFor;
 
-  private constructor(input: KeiyakuAt) {
-    const caller = decodeAkumaCaller(input.caller);
-    this.#input = { ...input, environment: { ...input.environment }, ...(caller === undefined ? {} : { caller }) };
+  private constructor(input: KeiyakuFor) {
+    let owner: Owner | undefined;
+    const identity = input.identity;
+    if (identity !== undefined) {
+      try {
+        if (typeof identity !== "object" || identity === null || Array.isArray(identity))
+          throw new Error("identity must be an object");
+        owner = requireOwner(identity.owner);
+        if (!owner.trim()) throw new Error("owner must be nonblank");
+      } catch (error) {
+        throw new KeiyakuUsageError(`invalid identity: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    this.#input = {
+      ...input,
+      environment: { ...input.environment },
+      ...(owner === undefined ? {} : { identity: { owner } }),
+    };
   }
 
-  static at(input: KeiyakuAt): Keiyaku {
+  static for(input: KeiyakuFor): Keiyaku {
     if (typeof input?.cwd !== "string" || !isAbsolute(input.cwd))
       throw new KeiyakuUsageError("cwd must be an absolute string");
     if (
@@ -444,7 +460,7 @@ export class Keiyaku {
         ? at.cwd
         : await canonicalBirthCwd(resolve(at.cwd, workdir), `workdir is not an existing directory: ${workdir}`);
     const caller = await this.#caller();
-    const initiator = deliveryOwner(this.#input.environment);
+    const initiator = deliveryOwner(this.#input.environment, this.#input.identity?.owner);
     const world = at.candidateWorld ?? (await at.establishWorld());
     await World.at(world);
     const configuration = await Settings.load({
@@ -467,7 +483,7 @@ export class Keiyaku {
   }
 
   #caller() {
-    return akumaCallerFromEnvironment(this.#input.environment, this.#input.caller);
+    return akumaCallerFromEnvironment(this.#input.environment, this.#input.identity?.owner);
   }
 
   async #akumas(use: "optional" | "required" = "optional") {
@@ -479,7 +495,7 @@ export class Keiyaku {
   async #fork(input: VerbInput<"fork">) {
     const { at, akumas } = await this.#akumas();
     const caller = await this.#caller();
-    const initiator = deliveryOwner(this.#input.environment);
+    const initiator = deliveryOwner(this.#input.environment, this.#input.identity?.owner);
     return await akumas.fork({
       ...input,
       ...(at.repo === undefined ? {} : { repo: at.repo }),
@@ -493,7 +509,7 @@ export class Keiyaku {
     controls: KeiyakuRunOptions & Readonly<{ observe?: AskObserver }>,
   ) {
     const { at, akumas } = await this.#akumas();
-    const initiator = deliveryOwner(this.#input.environment);
+    const initiator = deliveryOwner(this.#input.environment, this.#input.identity?.owner);
     const common = {
       ...controls,
       body: request.input.prompt,
@@ -552,9 +568,9 @@ export class Keiyaku {
     }
     if (caller?.kind !== "akuma")
       throw new KeiyakuUsageError(
-        this.#input.caller === undefined
+        this.#input.identity === undefined
           ? "report requires explicit KEIYAKU_ACTOR_ID and KEIYAKU_ACTOR_WORLD"
-          : "report requires explicit Akuma identity",
+          : "report requires explicit Akuma execution identity",
       );
     return Akuma.select(caller.world, caller.akumaId).report(
       input.text,
@@ -627,7 +643,7 @@ export class Keiyaku {
   }
 
   async #whoami() {
-    return await whoami(await this.#coordinates("optional"), this.#input.environment, this.#input.caller);
+    return await whoami(await this.#coordinates("optional"), this.#input.environment, this.#input.identity?.owner);
   }
 
   async #settings() {

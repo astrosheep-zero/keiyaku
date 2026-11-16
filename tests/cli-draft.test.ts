@@ -87,7 +87,7 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
   assert.equal(existsSync(absent), false);
 
   const repository = repositoryWithMain();
-  const facet = Keiyaku.at({ cwd: repository.path, environment: {}, home: root });
+  const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home: root });
   const markdown = document();
   const refusal = await facet.run("bind", { markdown, target: "missing-target" });
   assert.equal(refusal.kind, "refused");

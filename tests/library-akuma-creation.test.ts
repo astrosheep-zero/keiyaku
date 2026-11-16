@@ -822,7 +822,7 @@ test("admission-only spawn retains its canonical execution directory", async (t)
   let operationFailed = true;
   try {
     const environment = { KEIYAKU_HOME: configured.home };
-    const result = await Keiyaku.at({ cwd: world, environment, home: configured.home }).spawn({
+    const result = await Keiyaku.for({ cwd: world, environment, home: configured.home }).spawn({
       akumaName: "worker", prompt: "inspect workdir",
       workdir: "linked-workdir", bare: true,
     });

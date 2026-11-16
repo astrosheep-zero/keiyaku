@@ -397,7 +397,7 @@ const policy: KeisOptions = {};
 const reconcile: KeisReconcile = Keis.of(repo, policy).reconcile;
 const host = AkumaHost.inProcess();
 const close: Promise<void> = host.close();
-const api = Keiyaku.at({ cwd: "/explicit/cwd", environment: {} });
+const api = Keiyaku.for({ cwd: "/explicit/cwd", environment: {} });
 const run: KeiyakuRunOptions = { signal: AbortSignal.abort() };
 const bind: Promise<BindOutcome> = api.bind({ markdown: "terms" }, run);
 bind.then(answer => { if (answer.kind === "accepted") { const handle: Kei = answer.kei; void handle.id; } });

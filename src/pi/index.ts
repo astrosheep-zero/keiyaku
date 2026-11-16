@@ -1,4 +1,5 @@
 import { resolve } from "node:path";
+import { harnessOwner } from "@astrosheep/square";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Keiyaku, KeiyakuUsageError } from "../library/keiyaku.js";
 import {
@@ -40,10 +41,10 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
             ...(repo === undefined ? {} : { repo }),
           });
           if (!parsed.success) throw new KeiyakuUsageError(parsed.error.message);
-          const facet = Keiyaku.at({
+          const facet = Keiyaku.for({
             cwd: resolve(ctx.cwd, parsed.data.cwd ?? "."),
             environment,
-            caller: { kind: "external", integration: "pi", id: ctx.sessionManager.getSessionId() },
+            identity: { owner: harnessOwner({ channel: "pi", session: ctx.sessionManager.getSessionId() }) },
             ...(!("repo" in parsed.data) || parsed.data.repo === undefined ? {} : { repo: parsed.data.repo }),
             ...(home === undefined ? {} : { home }),
           });

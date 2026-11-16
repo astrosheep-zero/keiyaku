@@ -143,8 +143,8 @@ retain the requested operation's missing-Contract refusal. Parsing selects each
 catalogue's described owner operation directly.
 
 An Akuma-instance `ls` may restrict its roster to the invocation's own caller,
-derived from its captured environment. This selection stays World-local and
-includes direct and transitive descendants. Explicit selection of another caller
+derived from the facet's captured invocation identity and environment. This
+selection stays World-local and includes direct and transitive descendants. Explicit selection of another caller
 belongs to the independent native Akumas surface. Absent or ambiguous identity,
 and caller scoping on a Contract, Debt, or akumaName catalogue, refuse at the
 usage boundary rather than returning a misleading empty list.
@@ -159,10 +159,11 @@ preserving the owner's interruption and cancellation semantics.
 
 Spawn, fork, tell, and ask select the submitting process's opaque host Owner at
 the invocation facet and pass it unchanged as optional initiator attribution.
-A nonblank explicit integration Owner wins; otherwise one unambiguous native
-host coordinate supplies attribution, with the external host fallback used only
-when no native coordinate exists. Ambiguous, absent, or child-only host identity
-selects nothing and never refuses native operation. Selection is synchronous and
+An explicit nonblank environment redirect wins, followed by the supplied
+invocation Owner; otherwise one unambiguous native host coordinate supplies
+attribution, with the external host fallback used only when no native coordinate
+exists. Ambiguous, absent, or child-only host identity selects nothing and never
+refuses native operation. Selection is synchronous and
 reads no notification artifact or membership. The Body uses frozen input and
 Turn recipients, never its environment to reconstruct the submitting Owner.
 Caller lineage remains independent from notification attribution.
@@ -170,9 +171,10 @@ Caller lineage remains independent from notification attribution.
 Direct spawn and fork derive optional declared caller attribution at the invocation facet:
 a complete Akuma-and-World environment pair wins over external integration
 attribution, and an incomplete pair refuses rather than inventing a World.
-The supplied World is canonicalized here. Without Akuma custody, the enclosing
-native host session supplies external attribution. Conflicting native host
-identities refuse rather than select an arbitrary parent. Only when no native
+The supplied World is canonicalized here. Without Akuma custody, supplied host
+identity selects external attribution before environment decoding. Without that
+identity, the enclosing native host session supplies external attribution.
+Conflicting native host identities refuse rather than select an arbitrary parent. Only when no native
 host identity is declared does the edge use the explicit external-integration
 fallback. These declarations remain attribution, not authentication or authority;
 the underlying product surfaces do not infer them from an environment.

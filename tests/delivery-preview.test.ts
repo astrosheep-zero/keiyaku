@@ -253,7 +253,7 @@ test("native, invocation and CLI preview preserve authority, refs, real indexes 
   );
   assert.equal(cli.exit, 0, cli.stderr);
   assert.deepEqual(cli.value, preview);
-  const facet = Keiyaku.at({ cwd: worktree, repo: repository.path, environment: {} });
+  const facet = Keiyaku.for({ cwd: worktree, repo: repository.path, environment: {} });
   const input = { contract: bound.contractId, dryRun: true as const, includeDirty: true, showDiff: true };
   const observations: ExecutionObservation[] = [];
   assert.deepEqual(await facet.deliver(input, { observe: (event) => { observations.push(event); } }), preview);
@@ -347,7 +347,7 @@ test("cancelling invocation dry-run preserves native abort and partial preview i
   ].join("\n"), { KEIYAKU_TEST_BARRIER: barrier }, async (gitPath) => {
     const controller = new AbortController();
     const reason = new Error("stop preview in target probe");
-    const facet = Keiyaku.at({ cwd: worktree, repo: repository.path, environment: { KEIYAKU_GIT_PATH: gitPath } });
+    const facet = Keiyaku.for({ cwd: worktree, repo: repository.path, environment: { KEIYAKU_GIT_PATH: gitPath } });
     const pending = facet.deliver({ contract: bound.contractId, dryRun: true }, { signal: controller.signal });
     // Attach the rejection consumer before waiting on the in-flight process barrier.
     const rejection = assert.rejects(pending, (error: unknown) => {
@@ -429,7 +429,7 @@ test("preview names overlapping dirty target checkout while normal delivery stil
 
   assert.deepEqual(custodySnapshot(repository, worktree), before);
   assert.deepEqual(await bound.kei.history(), history);
-  const facet = Keiyaku.at({ cwd: worktree, repo: repository.path, environment: {} });
+  const facet = Keiyaku.for({ cwd: worktree, repo: repository.path, environment: {} });
   const observations: ExecutionObservation[] = [];
   const delivered = accepted(await facet.deliver({}, { observe: (event) => {
     observations.push(event);

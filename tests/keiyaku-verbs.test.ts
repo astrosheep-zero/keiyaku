@@ -49,7 +49,7 @@ export type DebtCancellationIsExecution = Assert<
 >;
 
 test("every invocation checks pre-abort before discovery, including native bind", async () => {
-  const facet = Keiyaku.at({ cwd: "/missing-keiyaku-preabort", environment: {} });
+  const facet = Keiyaku.for({ cwd: "/missing-keiyaku-preabort", environment: {} });
   const reason = new Error("cancelled before discovery");
   const signal = AbortSignal.abort(reason);
   for (const name of Object.keys(Keiyaku.verbs) as VerbName[]) {
@@ -74,7 +74,7 @@ test("every invocation checks pre-abort before discovery, including native bind"
 test("verb runner preserves native bind, show and review results", async (t) => {
   const home = temporaryDirectory(t, "keiyaku-verbs-home-");
   const repository = repositoryWithMain();
-  const facet = Keiyaku.at({ cwd: repository.path, environment: {}, home });
+  const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home });
   const bindInput = { markdown: document(), target: null, gates: ["reviewed"] };
   assert.equal(Keiyaku.verbs.bind.input.safeParse(bindInput).success, true);
   const bound = accepted(await facet.bind(bindInput));
@@ -97,7 +97,7 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   assert.equal(classifyVerb("show", showInput, { kind: "returned", value: guidance }), "accepted");
   assertWireRoundTrip(Keiyaku.verbs.show.output, guidance);
 
-  const contextual = Keiyaku.at({ cwd: bound.worktreePath, environment: {}, home });
+  const contextual = Keiyaku.for({ cwd: bound.worktreePath, environment: {}, home });
   assert.deepEqual(await contextual.show(showInput), guidance);
   await assert.rejects(contextual.show({} as never), KeiyakuUsageError);
   await assert.rejects(contextual.run("show", {} as never), KeiyakuUsageError);
@@ -134,7 +134,7 @@ test("native ask and wire run return parsed JSON", async (t) => {
     const restore = installAkumaBodyPidReceipt(receipt);
     let operationFailed = true;
     try {
-      const facet = Keiyaku.at({ cwd: root, environment: {}, home });
+      const facet = Keiyaku.for({ cwd: root, environment: {}, home });
       const result = mode === "native"
         ? await facet.ask({ akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeoutMs: 30_000 })
         : await facet.run("ask", { akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeoutMs: 30_000 });
@@ -156,7 +156,7 @@ test("native ask and wire run return parsed JSON", async (t) => {
 
 test("wire validation and classification reject malformed calls before observation", async (t) => {
   const home = temporaryDirectory(t, "keiyaku-verbs-invalid-");
-  const facet = Keiyaku.at({ cwd: join(home, "missing"), environment: {}, home });
+  const facet = Keiyaku.for({ cwd: join(home, "missing"), environment: {}, home });
   for (const input of [
     { verdict: "satisfied" },
     { verdict: "satisfied", summary: " \t\n" },
@@ -240,7 +240,7 @@ test("ls uses one strict object and refuses inapplicable filters before discover
     { selector: "kei/", extra: true },
   ])
     assert.equal(input.safeParse(invalid).success, false, JSON.stringify(invalid));
-  const facet = Keiyaku.at({ cwd: join(temporaryDirectory(t, "keiyaku-verbs-ls-"), "missing"), environment: {} });
+  const facet = Keiyaku.for({ cwd: join(temporaryDirectory(t, "keiyaku-verbs-ls-"), "missing"), environment: {} });
   for (const inapplicable of [
     { selector: "aku/", selection: "all" },
     { selector: "kei/", mine: false },
@@ -260,7 +260,7 @@ test("region uses one strict object and refuses contract with paths before disco
   const contradictory = { contract: "kei/example", paths: ["src/**"] };
   for (const invalid of [contradictory, { paths: [] }, { contract: "kei/example", extra: true }])
     assert.equal(input.safeParse(invalid).success, false, JSON.stringify(invalid));
-  const facet = Keiyaku.at({ cwd: "/missing-region-contradiction", environment: {} });
+  const facet = Keiyaku.for({ cwd: "/missing-region-contradiction", environment: {} });
   await assert.rejects(facet.run("region", contradictory), (error: unknown) => {
     assert.ok(error instanceof KeiyakuUsageError);
     assert.match(error.message, /contract and paths are mutually exclusive/u);

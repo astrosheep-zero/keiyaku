@@ -1,9 +1,10 @@
 import { harnessOwner, type Owner } from "@astrosheep/square";
 
 /** Select attribution at the submitting edge; no host or artifact lookup. */
-export function deliveryOwner(environment: NodeJS.ProcessEnv): Owner | undefined {
+export function deliveryOwner(environment: NodeJS.ProcessEnv, owner?: Owner): Owner | undefined {
   const explicit = environment.KEIYAKU_INITIATOR?.trim();
   if (explicit) return explicit as Owner;
+  if (owner !== undefined) return owner;
   if (environment.CLAUDE_CODE_CHILD_SESSION === "1" && !environment.CLAUDE_CODE_SESSION_ID?.trim()) return undefined;
   const coordinates = [
     ["CLAUDE_CODE_SESSION_ID", "claude-code"],

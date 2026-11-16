@@ -543,7 +543,7 @@ test("native, invocation and CLI listings select lifecycle before bounding the W
   const zebra = acceptedId(await debts.add({ title: "Zebra", priority: 2 }));
   const alpha = acceptedId(await debts.add({ title: "Alpha", priority: 2, needs: [zebra] }));
 
-  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  const facet = Keiyaku.for({ cwd: root, environment: {} });
   const cases = [
     { input: {}, ids: [alpha, zebra] },
     { input: { selection: "settled" }, ids: [done, dropped] },
@@ -574,7 +574,7 @@ test("native, invocation and CLI listings select lifecycle before bounding the W
 test("listing failures retain corrupt authority and unavailable custody rather than empty pages", async (t) => {
   const { root, debts } = await world();
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  const facet = Keiyaku.for({ cwd: root, environment: {} });
   assert.deepEqual(await facet.ls({ selector: "debt/" }), { kind: "debt-catalogue" });
   const id = acceptedId(await debts.add({ title: "Readable" }));
   const corrupt = join(root, ".keiyaku", "debts", "broken.md");
@@ -767,7 +767,7 @@ test("Debt batch detail retains prerequisite endpoints and readable peers from o
   const prerequisiteOwner = batch.items[2];
   assert.ok(prerequisiteOwner?.kind === "found");
   assert.deepEqual(prerequisiteOwner.needs, [{ id: removed, state: "missing" }]);
-  const facet = Keiyaku.at({ cwd: root, environment: {} });
+  const facet = Keiyaku.for({ cwd: root, environment: {} });
   const complete = await facet.show({ selector: first });
   assert.equal(complete.kind, "debt-complete");
   if (complete.kind === "debt-complete") assert.deepEqual(complete.items, [prerequisiteOwner]);

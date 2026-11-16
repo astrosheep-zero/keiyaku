@@ -1,5 +1,6 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
+import { decodeHarnessOwner, harnessOwner, type Owner } from "@astrosheep/square";
 import { contractIdSchema } from "../git/identity.js";
 import { AkumaOwner } from "../akuma/akuma-owner.js";
 import { KeiyakuError } from "../errors.js";
@@ -9,13 +10,36 @@ import { Keis } from "./contract-composition.js";
 import { NoGitWorldError, Repo } from "./repo.js";
 import { observeNamedAddress } from "./address.js";
 import { dispatchAssociations } from "./selection.js";
-import { decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
+import { akumaCallerSchema, decodeAkumaCaller, type AkumaCaller } from "../akuma/caller.js";
 import { World, worldRootSchema, type WorldRoot } from "../world.js";
 
-/** Actor declarations win; an explicit caller bypasses native host decoding. */
+function callerFromOwner(owner: Owner): AkumaCaller {
+  const coordinate = decodeHarnessOwner(owner);
+  // Only session-only native coordinates have an existing lineage representation.
+  // Keep other Owners whole, especially agents sharing one harness session.
+  if (
+    coordinate !== undefined &&
+    coordinate.agent === undefined &&
+    ["pi", "codex", "claude-code", "opencode", "paseo"].includes(coordinate.channel)
+  ) {
+    const caller = akumaCallerSchema.safeParse({
+      kind: "external",
+      integration: coordinate.channel === "claude-code" ? "claude" : coordinate.channel,
+      id: coordinate.session,
+    });
+    try {
+      if (caller.success && harnessOwner(coordinate) === owner) return caller.data;
+    } catch {
+      // A valid opaque Owner need not be representable as a harness coordinate.
+    }
+  }
+  return { kind: "external", integration: "square", id: owner };
+}
+
+/** Actor declarations win; a host Owner bypasses native environment decoding. */
 export async function akumaCallerFromEnvironment(
   environment: NodeJS.ProcessEnv,
-  caller?: AkumaCaller,
+  owner?: Owner,
 ): Promise<AkumaCaller | undefined> {
   const id = environment.KEIYAKU_ACTOR_ID;
   const world = environment.KEIYAKU_ACTOR_WORLD;
@@ -26,7 +50,7 @@ export async function akumaCallerFromEnvironment(
     const resolved = await World.resolve({ cwd: world, repositoryRoot: world });
     return decodeAkumaCaller({ kind: "akuma", akumaId: id, world: resolved.candidate });
   }
-  if (caller !== undefined) return caller;
+  if (owner !== undefined) return callerFromOwner(owner);
   const hosts = [
     { integration: "codex", variable: "CODEX_THREAD_ID", id: environment.CODEX_THREAD_ID },
     { integration: "pi", variable: "PI_SESSION_ID", id: environment.PI_SESSION_ID },
@@ -94,7 +118,7 @@ function reason(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function selfFrom(environment: NodeJS.ProcessEnv, explicit?: AkumaCaller): Promise<WhoamiFacts["self"]> {
+async function selfFrom(environment: NodeJS.ProcessEnv, explicit?: Owner): Promise<WhoamiFacts["self"]> {
   try {
     const caller = await akumaCallerFromEnvironment(environment, explicit);
     return caller === undefined ? { kind: "none" } : callerFact(caller);
@@ -190,11 +214,11 @@ async function callerProfile(
 export async function whoami(
   coordinates: WhoamiCoordinates,
   environment: NodeJS.ProcessEnv,
-  caller?: AkumaCaller,
+  owner?: Owner,
 ): Promise<WhoamiFacts> {
   const world = coordinates.world !== null && (await World.established(coordinates.world)) ? coordinates.world : null;
   const [self, contextContract] = await Promise.all([
-    selfFrom(environment, caller),
+    selfFrom(environment, owner),
     contextualContract(coordinates, world),
   ]);
   const initiator = self.kind === "akuma" ? await currentTurn(self) : undefined;

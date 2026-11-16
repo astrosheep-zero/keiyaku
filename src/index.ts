@@ -10,7 +10,7 @@ export type { Guidance } from "./library/kei.js";
 export type { Delivery } from "./library/delivery.js";
 export type { LifecycleSelection } from "./bounded-list.js";
 export { Keiyaku, KeiyakuArcDocumentError, KeiyakuUsageError } from "./library/keiyaku.js";
-export type { KeiyakuAt } from "./library/keiyaku.js";
+export type { KeiyakuFor } from "./library/keiyaku.js";
 export type { InvocationWaitMember, InvocationWaitResult } from "./library/keiyaku-wait.js";
 export type {
   KeiyakuRunOptions,

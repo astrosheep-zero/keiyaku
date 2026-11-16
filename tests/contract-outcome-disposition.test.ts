@@ -17,7 +17,7 @@ test("delivery accepts an identical target through native, CLI and MCP outcomes"
   const repository = repositoryWithMain();
   const home = temporaryDirectory(t, "keiyaku-disposition-home-");
   const environment = { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home };
-  const facet = Keiyaku.at({ cwd: repository.path, environment, home });
+  const facet = Keiyaku.for({ cwd: repository.path, environment, home });
   const bound = accepted(await facet.bind({
     markdown: document(), target: "refs/heads/main", gates: ["reviewed"],
   }));

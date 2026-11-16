@@ -45,7 +45,7 @@ test("Contract catalogues select terminal journals under one order without retir
         const bounded = await traced.list({ selection, limit: 1 });
         assert.deepEqual(bounded.rows, complete.rows?.slice(0, 1));
         assert.equal(bounded.more, selection === "active" ? undefined : true);
-        const facet = await Keiyaku.at({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "selection-home-") })
+        const facet = await Keiyaku.for({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "selection-home-") })
           .ls({ selector: "kei/", selection, limit: 1 });
         assert.ok(facet.kind === "contract-catalogue");
         assert.deepEqual(facet.rows, bounded.rows);
@@ -99,7 +99,7 @@ test("Akuma lifecycle selection filters before the bound and intersects caller d
   assert.equal(settledMine.more, undefined);
   assert.equal((await world.list({ selection: "all" })).rows?.length, 5);
 
-  const facet = Keiyaku.at({ cwd: root, environment: {}, caller });
+  const facet = Keiyaku.for({ cwd: root, environment: { KEIYAKU_EXTERNAL_CALLER: `${caller.integration}:${caller.id}` } });
   const selected = await facet.ls({ selector: "aku/*", mine: true, selection: "settled", limit: 1 });
   assert.ok(selected.kind === "akuma-catalogue");
   assert.deepEqual(selected.rows, settledMine.rows?.slice(0, 1));

@@ -220,7 +220,7 @@ test("real flat and native calls reject contradictory intent before coordinate I
   await Promise.all([client.connect(a), adapter.server.connect(b)]);
   t.after(async () => { await client.close(); await adapter.close(); });
   await client.listTools();
-  const facet = Keiyaku.at({ cwd, environment, home: cwd });
+  const facet = Keiyaku.for({ cwd, environment, home: cwd });
   const invalid: readonly (readonly [VerbName, Record<string, unknown>])[] = [
     ["bind", { markdown: "terms", forkOf: "kei/source" }],
     ["bind", { markdown: "terms", actor: "operator" }],
@@ -360,7 +360,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   for (const name of ["ls", "report", "reconcile"])
     assert.ok(tools.some((tool) => tool.name === name));
   assert.equal(existsSync(join(cwd, ".keiyaku")), false);
-  const native = await Keiyaku.at({ cwd, environment, home: cwd }).run("whoami", {});
+  const native = await Keiyaku.for({ cwd, environment, home: cwd }).run("whoami", {});
   const result = await client.callTool({ name: "whoami", arguments: {} });
   assert.equal(result.structuredContent, undefined);
   assert.deepEqual(result.content, [
@@ -414,7 +414,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   });
   assert.equal(done.isError, false);
   assert.equal(done.structuredContent, undefined);
-  const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { selector: id });
+  const completed = await Keiyaku.for({ cwd, environment, home: cwd }).run("show", { selector: id });
   assert.ok(completed.kind === "debt-complete" && completed.items[0]?.kind === "found");
   assert.equal(completed.items[0].state, "done");
   assert.equal(completed.items[0].note, "finished");
@@ -430,7 +430,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   });
   assert.equal(reopened.isError, false);
   assert.equal(reopened.structuredContent, undefined);
-  const reopenedDetail = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { selector: id });
+  const reopenedDetail = await Keiyaku.for({ cwd, environment, home: cwd }).run("show", { selector: id });
   assert.ok(reopenedDetail.kind === "debt-complete" && reopenedDetail.items[0]?.kind === "found");
   assert.equal(reopenedDetail.items[0].state, "open");
   assert.equal(reopenedDetail.items[0].body, undefined);
@@ -454,7 +454,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     (await client.callTool({ name: "ls", arguments: { selector: "debt/" } })).structuredContent,
     reopenedList.structuredContent,
   );
-  const facet = Keiyaku.at({ cwd, environment, home: cwd });
+  const facet = Keiyaku.for({ cwd, environment, home: cwd });
   await facet.debtAdd({ title: "Low priority", priority: 3 });
   await facet.debtAdd({ title: "High priority", priority: 0 });
   const dropped = accepted(await facet.debtAdd({ title: "Dropped", priority: 1 }));
@@ -492,7 +492,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.match(JSON.stringify(listB.structuredContent), /Second world/);
   const otherRepo = repositoryWithMain();
   t.after(() => rmSync(otherRepo.path, { recursive: true, force: true }));
-  const foreign = await Keiyaku.at({ cwd: otherRepo.path, environment, home: cwd }).run("debt.add", { title: "Foreign repo world" });
+  const foreign = await Keiyaku.for({ cwd: otherRepo.path, environment, home: cwd }).run("debt.add", { title: "Foreign repo world" });
   assert.equal(foreign.kind, "accepted");
   const badCoordinate = await client.callTool({ name: "ls", arguments: { cwd: " ", selector: "debt/" } });
   assert.equal(badCoordinate._meta?.["keiyaku/disposition"], "usage");
@@ -553,7 +553,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
       );
     } else assert.equal(response.structuredContent, undefined);
   }
-  const killingFacet = Keiyaku.at({ cwd: first, repo: otherRepo.path, environment, home: cwd });
+  const killingFacet = Keiyaku.for({ cwd: first, repo: otherRepo.path, environment, home: cwd });
   const killInput = { akuma: worker.id };
   const nativeKill = await killingFacet.kill(killInput);
   assert.deepEqual(nativeKill.results, [{ id: worker.id, outcome: "already-stopped" }]);
@@ -577,7 +577,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(missing.structuredContent, undefined);
   assert.equal(missing.isError, true);
   assert.equal((missing.content as { text: string }[])[0]?.text.split("\n")[0], "refused");
-  assert.deepEqual(await Keiyaku.at({ cwd, repo: otherRepo.path, environment, home: cwd }).run("status", { id: "kei/missing-mcp-status" }),
+  assert.deepEqual(await Keiyaku.for({ cwd, repo: otherRepo.path, environment, home: cwd }).run("status", { id: "kei/missing-mcp-status" }),
     { kind: "contract-missing", id: "kei/missing-mcp-status" });
   assert.equal(missing._meta?.["keiyaku/disposition"], "refused");
   assert.equal(process.cwd(), processCwd);
@@ -600,7 +600,7 @@ test("SDK routing keeps optional panel failures in text without publishing unava
   const repository = repositoryWithMain();
   const world = await World.at(repository.path);
   const environment = { HOME: repository.path, USERPROFILE: repository.path, KEIYAKU_HOME: repository.path };
-  const facet = Keiyaku.at({ cwd: repository.path, environment });
+  const facet = Keiyaku.for({ cwd: repository.path, environment });
   const bound = accepted(await facet.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
   const worker = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a2000031", createdAt: "2026-08-10T00:00:00.000Z" });
   const git = await repositoryAt(repository.path);
@@ -657,7 +657,7 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
   await Promise.all([adapter.server.connect(serverTransport), client.connect(clientTransport)]);
   t.after(async () => { await client.close(); await adapter.close(); });
   await client.listTools();
-  const facet = Keiyaku.at({ cwd: repository.path, environment, home: repository.path });
+  const facet = Keiyaku.for({ cwd: repository.path, environment, home: repository.path });
   const absentDebt = await client.callTool({ name: "ls", arguments: { cwd: temporaryDirectory(t, "mcp-absent-debt-"), selector: "debt/" } });
   assert.equal(absentDebt.isError, true);
   await World.at(repository.path);
@@ -852,7 +852,7 @@ test("SDK amend reports a returned publication retry as retryable", async (t) =>
     {},
     async (gitPath) => {
       const shimmed = { ...environment, KEIYAKU_GIT_PATH: gitPath };
-      const value = await Keiyaku.at({ cwd: repository.path, environment: shimmed, home }).run("amend", input);
+      const value = await Keiyaku.for({ cwd: repository.path, environment: shimmed, home }).run("amend", input);
       assert.ok(value.kind === "retry" && value.reason === "publication-failed", JSON.stringify(value));
       assert.match(value.diagnostic, /forced publication failure/u);
       const adapter = createKeiyakuMcpServer({ cwd: repository.path, environment: shimmed, version: "test" });
@@ -896,7 +896,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   await client.listTools();
   const reconcileInput = { contract: before.id };
   const reconciled = await client.callTool({ name: "reconcile", arguments: reconcileInput });
-  const nativeReconcile = await Keiyaku.at({
+  const nativeReconcile = await Keiyaku.for({
     cwd: repository.path,
     environment: { HOME: repository.path, USERPROFILE: repository.path, KEIYAKU_HOME: repository.path },
     home: repository.path,
@@ -923,14 +923,14 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   const mintedInput = { selector: wire.contractId };
   const minted = await client.callTool({ name: "show", arguments: mintedInput });
   assert.equal(minted.isError, false);
-  const mintedGuidance = await Keiyaku.at({ cwd: repository.path, environment: {} }).run("show", mintedInput);
+  const mintedGuidance = await Keiyaku.for({ cwd: repository.path, environment: {} }).run("show", mintedInput);
   assert.ok(mintedGuidance.kind === "present");
   const missingInput = { selector: "kei/missing-mcp-contract" };
   const absent = await client.callTool({ name: "show", arguments: missingInput });
   assert.equal(absent.structuredContent, undefined);
   assert.equal(absent.isError, true);
   assert.equal((absent.content as { text: string }[])[0]?.text.split("\n")[0], "refused");
-  assert.deepEqual(await Keiyaku.at({ cwd: repository.path, environment: {} }).run("show", missingInput), { kind: "missing" });
+  assert.deepEqual(await Keiyaku.for({ cwd: repository.path, environment: {} }).run("show", missingInput), { kind: "missing" });
   assert.equal(absent._meta?.["keiyaku/disposition"], classifyVerb("show", missingInput, { kind: "returned", value: { kind: "missing" } }));
   const preAborted = new AbortController();
   preAborted.abort();

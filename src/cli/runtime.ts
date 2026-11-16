@@ -223,7 +223,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
     assertExplicitRepoUse(command, invocation.repo);
     const runtime: CliRuntime = {
       environment,
-      facet: Keiyaku.at({
+      facet: Keiyaku.for({
         cwd: resolve(input.cwd ?? process.cwd(), invocation.cwd ?? "."),
         environment,
         ...(home === undefined ? {} : { home }),

@@ -31,7 +31,7 @@ test("CLI adapts public Contract selector refusals without owning matching", asy
   assert.deepEqual(await Keis.of(repo).resolve({ selector }), {
     kind: "refused", refusal: { kind: "unknown-short-selector", selector },
   });
-  const facet = Keiyaku.at({ cwd: repo.cwd, environment: {} });
+  const facet = Keiyaku.for({ cwd: repo.cwd, environment: {} });
   await assert.rejects(facet.show({ selector }), KeiyakuUsageError);
   await assert.rejects(facet.show({} as never), KeiyakuUsageError);
 });
@@ -68,7 +68,7 @@ test("CLI list and status families preserve their native owner answers", async (
     [["ls", "kei/", "--limit", "1"], await Keis.of(repo).list({ limit: 1 })],
     [["ls", "aku/*/*", "--limit", "1"], await Akumas.of(world).list({ repo, limit: 1 })],
     [["ls", "aku/"], await Akumas.akumaNames({ cwd: world, home: world })],
-    [["ls", "debt/"], await Keiyaku.at({ cwd: world, environment: {}, home: world }).ls({ selector: "debt/" })],
+    [["ls", "debt/"], await Keiyaku.for({ cwd: world, environment: {}, home: world }).ls({ selector: "debt/" })],
     [["status", bound.contractId], await Kanshi.of({ world, repo }).contract(bound.contractId)],
     [["status", worker.id], await Akumas.of(world).status({ akuma: worker.id, repo })],
     [["kanshi"], await Kanshi.of({ world, repo }).board()],
@@ -85,7 +85,7 @@ test("CLI list and status families preserve their native owner answers", async (
 
 test("exact Contract status without a Repo keeps the usage boundary", async (t) => {
   const cwd = temporaryDirectory(t, "cli-status-no-repo-");
-  const facet = Keiyaku.at({ cwd, environment: {} });
+  const facet = Keiyaku.for({ cwd, environment: {} });
   await assert.rejects(facet.status({ id: "kei/example" }), KeiyakuUsageError);
   const result = await captureOutput(() => main(["-C", cwd, "status", "kei/example", "--json"]));
   assert.equal(result.exit, 64);
