@@ -26,6 +26,7 @@ export const LOCAL_TEST_FILES = [
   "tests/debt-world-context.test.ts",
   "tests/dependency-currentness.test.ts",
   "tests/duration.test.ts",
+  "tests/execution-progress.test.ts",
   "tests/fold.test.ts",
   "tests/gate-requirements.test.ts",
   "tests/lifecycle.test.ts",

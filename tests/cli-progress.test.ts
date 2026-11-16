@@ -139,8 +139,8 @@ test("TTY progress refreshes one ticking line, returns after output, and persist
   );
   renderer.finish();
 
-  assert.match(stream.text, /\r\x1b\[2Kverify  ● setup · check 1\/1 · npm ci · snapshot snapshot · check-one · 0s/u);
-  assert.match(stream.text, /\r\x1b\[2Kverify  ● setup · check 1\/1 · npm ci · snapshot snapshot · check-one · 42s/u);
+  assert.match(stream.text, /\r\x1b\[2Kverify  ● setup · check 1\/1 · npm ci · 0s/u);
+  assert.match(stream.text, /\r\x1b\[2Kverify  ● setup · check 1\/1 · npm ci · 42s/u);
   assert.match(stream.text, /stdout\n  hello\n\r\x1b\[2Kverify/u);
   assert.match(stream.text, /verify  ✓ 1\/1 checks · 42s\n$/u);
 });
@@ -181,7 +181,7 @@ test("non-TTY progress does not repeat a phase coordinate and never prints a pha
   const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
   await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
   await renderer.consume(phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0" }));
-  assert.equal(stream.text, "✓ declaration 1/1 · snapshot snapshot · check-one\n");
+  assert.equal(stream.text, "✓ declaration 1/1\n");
   assert.doesNotMatch(stream.text, /●/u);
 });
 
@@ -199,7 +199,7 @@ test("non-TTY progress emits sparse boundaries, bounded output, and no key-value
 
   assert.match(stream.text, /stdout\n  x/u);
   assert.match(stream.text, /\[live output truncated\]/u);
-  assert.match(stream.text, /✓ setup · check 1\/1 · npm ci · snapshot snapshot · check-one · 42s\n/u);
+  assert.match(stream.text, /✓ setup · check 1\/1 · npm ci · 42s\n/u);
   assert.doesNotMatch(stream.text, /●/u);
   assert.doesNotMatch(stream.text, /(?:cwd|hook|declaration|elapsed)=/u);
 });
@@ -238,7 +238,7 @@ test("live output consolidates adjacent chunks by stream and resets at the next 
   assert.equal((stream.text.match(/^stderr$/gmu) ?? []).length, 1);
   assert.match(stream.text, /stdout\n  stdout onestdout two\nstderr\n  stderr one\n/u);
   assert.match(stream.text, /stderr\n  stderr one\nstdout\n  stdout three\n/u);
-  assert.match(stream.text, /stdout\n  stdout next\n✓ declaration 1\/1 · snapshot snapshot · check-one\n/u);
+  assert.match(stream.text, /stdout\n  stdout next\n✓ declaration 1\/1\n/u);
 });
 
 test("live output applies one cumulative UTF-8-safe stream budget", async () => {

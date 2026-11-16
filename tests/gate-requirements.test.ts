@@ -14,7 +14,9 @@ import {
   type ContractState,
   type JournalEntry,
 } from "../src/core/facts/types.js";
-import { dependencyKeySet } from "../src/core/subject.js";
+import { currentSubjectPredicate, dependencyKeySet } from "../src/core/subject.js";
+import { unmetGateProblems, requirementProblemSchema } from "../src/protocol/completion.js";
+import { gateCurrentSchema } from "../src/protocol/result-leaves.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
 import { uniqueEntryUlid } from "./support/journal.js";
 
@@ -120,6 +122,40 @@ test("stale and missing requirements stay distinct and historical subjects canno
     stale.map((report) => report.current.kind),
     ["stale", "missing"],
   );
+});
+
+test("stale explanations preserve currentness, content precedence, and unknown causes", () => {
+  const previousSnapshot = snapshotId("older");
+  const old = { ...attestation(first), subject: dependencyKeySet([{ kind: "snapshot", value: previousSnapshot }]) };
+  const state = delivered(old);
+  const report = gateReports(state);
+  const reason = { kind: "snapshot-changed", previousSnapshot, currentSnapshot: snapshotId("candidate") };
+  assert.equal(currentSubjectPredicate(state)(old.subject), false);
+  assert.equal(report.satisfied, false);
+  assert.deepEqual(report.reports[0]!.requirements[0]!.current, {
+    kind: "stale", priorVerdict: "satisfied", reason,
+  });
+  const current = report.reports[0]!.requirements[0]!.current;
+  assert.deepEqual(gateCurrentSchema.parse(current), current);
+  const problem = unmetGateProblems(report.reports)[0]!;
+  assert.deepEqual(problem, { gate: selectedGate, requirement: first, state: "stale", reason });
+  assert.deepEqual(requirementProblemSchema.parse(problem), problem);
+
+  const content = delivered({ ...old, subject: dependencyKeySet([
+    { kind: "snapshot", value: previousSnapshot }, { kind: "change", value: changeId("old-patch") },
+  ]) });
+  assert.deepEqual(gateReports(content).reports[0]!.requirements[0]!.current, {
+    kind: "stale", priorVerdict: "satisfied",
+    reason: { kind: "candidate-content-changed", previousChange: changeId("old-patch"), currentChange: changeId("patch") },
+  });
+  assert.deepEqual(unmetGateProblems(gateReports(content).reports)[0], {
+    gate: selectedGate, requirement: first, state: "stale", previousContentId: "old-patch", currentContentId: "patch",
+  });
+  const unavailable = { ...state, delivery: null, currentIntegration: null };
+  assert.equal(currentSubjectPredicate(unavailable)(old.subject), false);
+  assert.deepEqual(gateReports(unavailable).reports[0]!.requirements[0]!.current, { kind: "stale", priorVerdict: "satisfied" });
+  const unrelated = delivered({ ...old, subject: dependencyKeySet([{ kind: "document", value: documentKey("old-document") }]) });
+  assert.deepEqual(gateReports(unrelated).reports[0]!.requirements[0]!.current, { kind: "stale", priorVerdict: "satisfied" });
 });
 
 test("changing current obligations preserves matching evidence and removes only the removed obligation", () => {

@@ -71,8 +71,7 @@ test("contextual verify accumulates selected checks and completes an already del
     ["missing"],
   );
   const text = renderAccepted("verify", value, { columns: 400, color: false });
-  assert.match(text, /check 1\s+executed/u);
-  assert.match(text, /verdict\s+satisfied/u);
+  assert.match(text, /✓ check 1\s+satisfied · recorded/u);
   assert.match(text, /awaiting verification/u);
   const status = await runCli(["-C", raw.path, "status", id], { environment: {} });
   assert.match(status.stdout, /✓ verification 1/u);
@@ -108,7 +107,7 @@ test("pre-delivery verify always executes and distinguishes admission reuse from
   assert.equal(check.admission, "reused");
   assert.match(
     renderAccepted("verify", second, { columns: 400, color: false }),
-    /check 1\s+executed[\s\S]*attestation\s+reused/u,
+    /✓ check 1\s+satisfied · reused/u,
   );
   const delivered = accepted(
     (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value,
@@ -129,9 +128,12 @@ test("full verify exposes mixed verdicts, independent scratches, and requirement
   assert.ok(failed.retainedPath);
   assert.equal(readFileSync(resolve(failed.retainedPath, "own-file"), "utf8"), "owned\n");
   const text = renderAccepted("verify", result, { columns: 400, color: false });
-  assert.match(text, /check 1\s+executed[\s\S]*verdict\s+unsatisfied/u);
-  assert.match(text, /check 2\s+executed[\s\S]*verdict\s+satisfied/u);
-  assert.ok(text.includes(failed.requirement));
+  assert.match(text, /× check 1\s+unsatisfied · recorded/u);
+  assert.match(text, /✓ check 2\s+satisfied · recorded/u);
+  assert.equal(text.split("\n").filter((line) => line.trimStart().startsWith("snapshot ")).length, 1);
+  const wire = JSON.parse(JSON.stringify(result));
+  assert.deepEqual(wire.checks.map((check: { requirement: string }) => check.requirement), result.checks.map((check) => check.requirement));
+  assert.equal(wire.snapshot, result.snapshot);
   assert.ok(text.includes(failed.retainedPath));
   accepted(
     await Keis.of(await Repo.at({ path: raw.path }))
@@ -184,6 +186,9 @@ test("review-only verify executes selected and full checks without recording tes
   assert.equal(readFileSync(runs, "utf8"), "second\nfirst\nsecond\n");
   assert.deepEqual(await observeContract(repository, id), before);
   assert.equal(full.placement, undefined);
+  const unrecorded = renderAccepted("verify", full, { columns: 400, color: false });
+  assert.match(unrecorded, /× check 1\s+unsatisfied · not recorded/u);
+  assert.match(unrecorded, /✓ check 2\s+satisfied · not recorded/u);
   const delivered = accepted((await cliJson<DeliverOutcome>(
     ["-C", raw.path, "deliver", id], { environment: {} },
   )).value);
@@ -213,9 +218,9 @@ test("verify captures dirty bytes only with explicit authorization and streams p
   const index = raw.run(["-C", worktree, "ls-files", "--stage"]);
   const result = await runCli(["-C", worktree, "verify", "--include-dirty"], { environment: {} });
   assert.equal(result.exit, 0, result.stderr);
-  assert.match(result.stdout, /check 1\s+executed/u);
+  assert.match(result.stdout, /✓ check 1\s+satisfied · recorded/u);
   assert.match(result.stderr, /dirty/u);
-  assert.match(result.stderr, /declaration 1\/1 · snapshot [0-9a-f]+ · verification:sha256:/u);
+  assert.match(result.stderr, /✓ declaration 1\/1 · \d+s/u);
   assert.equal(raw.run(["-C", worktree, "ls-files", "--stage"]), index);
   assert.equal((await observeContract(repository, id)).state?.delivery, null);
 });

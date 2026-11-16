@@ -15,6 +15,10 @@ import test from "node:test";
 import { namedValueLines } from "../src/cli/render/value.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { renderContractCatalogue } from "../src/cli/render/catalog.js";
+import { gateRequirementFacts } from "../src/cli/render/contract-observation.js";
+import { unmetRequirementLines } from "../src/cli/render/receipt.js";
+import { mcpOutputSchemas, projectMcpOutput } from "../src/mcp/output.js";
+import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
@@ -348,6 +352,31 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
     color: false,
   });
   assert.doesNotMatch(world, /integration result|verification satisfied/u);
+});
+
+test("stale snapshot evidence keeps native identities across observations, receipts, JSON and MCP", () => {
+  const reason = {
+    kind: "snapshot-changed" as const,
+    previousSnapshot: snapshotId("abcdef01" + "1".repeat(32)),
+    currentSnapshot: snapshotId("abcdef02" + "2".repeat(32)),
+  };
+  const current = { kind: "stale" as const, reason };
+  assert.deepEqual(gateRequirementFacts({ gate: "verified", requirements: [{ index: 2, current }] }),
+    ["! verification 2 · stale · snapshot changed abcdef01 -> abcdef02"]);
+  const requirement = requirementId("verification:sha256:historical-check");
+  const problem = { gate: "verified", requirement, state: "stale" as const, reason };
+  const receipt = unmetRequirementLines([problem], 400).join("\n");
+  assert.ok(receipt.includes(`verification ${requirement}`), "unmapped historical requirements keep a stable coordinate");
+  assert.ok(receipt.includes("stale  snapshot changed abcdef01 -> abcdef02"));
+  const value = {
+    kind: "accepted" as const, contractId: contractId("kei/snapshot-reason"),
+    snapshot: reason.previousSnapshot, checks: [],
+    placement: { kind: "gates-unsatisfied" as const, unmet: [problem] },
+  };
+  assert.deepEqual(verifyOutcomeSchema.parse(value), value);
+  const projected = JSON.parse(JSON.stringify(projectMcpOutput("verify", value)));
+  assert.deepEqual(mcpOutputSchemas.verify.parse(projected), projected);
+  assert.deepEqual((projected as typeof value).placement.unmet[0]?.reason, reason);
 });
 
 test("audit separates its observation outcome from complete candidate coordinates", () => {

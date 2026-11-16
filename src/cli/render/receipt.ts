@@ -5,7 +5,7 @@ import type {
   RequirementProblem,
   VerificationCheck,
 } from "../../index.js";
-import { contractOperationName, requirementDisplayName } from "./contract-observation.js";
+import { contractOperationName, requirementDisplayName, staleReasonFact } from "./contract-observation.js";
 import { renderRefusalFacts } from "./refusal.js";
 import {
   DEFAULT_CLI_COLUMNS,
@@ -103,6 +103,7 @@ function unmetRequirementLines(unmet: readonly RequirementProblem[], columns: nu
       problem.state === "stale"
         ? [
             { text: "stale" },
+            ...(problem.reason === undefined ? [] : [{ text: staleReasonFact(problem.reason) }]),
             ...(problem.previousContentId === undefined || problem.currentContentId === undefined
               ? []
               : [
@@ -419,43 +420,34 @@ export function gatesAwaitLines(placement: PlacementStop | undefined): readonly 
 /** The performed work and its admission conclusion, with no aggregate gate testimony. */
 export function verificationCheckLines(
   checks: readonly VerificationCheck[],
-  snapshot: string,
   columns: number,
   addressed: string,
   surface?: TextRenderContext["surface"],
 ): readonly string[] {
-  const ids = abbreviateGitIds([snapshot]);
   const lines: string[] = [];
   for (const check of checks) {
-    receiptRow(
-      lines,
-      " ",
-      `check ${check.index}`,
-      [
-        { text: check.kind === "terminal" ? "executed" : "execution stopped" },
-        { text: check.requirement, opaque: true },
-        { text: `· snapshot ${displayGitId(snapshot, ids)}` },
-      ],
-      columns,
-    );
-    if (check.kind !== "terminal") {
+    if (check.kind === "stopped") {
+      receiptRow(lines, "!", `check ${check.index}`, [{ text: "execution stopped" }], columns);
       lines.push(...stopLines(check.stop, columns, addressed, undefined, surface));
     } else {
-      receiptRow(lines, check.verdict === "satisfied" ? "✓" : "×", "verdict", [{ text: check.verdict }], columns);
-      if (check.verdict === "unsatisfied") receiptPayload(lines, "summary", check.summary);
       const admission = check.admission;
-      if (typeof admission === "string")
-        receiptRow(
-          lines,
-          " ",
-          "attestation",
-          [{ text: admission === "unrecorded" ? "not recorded" : admission }],
-          columns,
-        );
-      else {
-        receiptRow(lines, "!", "admission", [{ text: "stopped" }], columns);
-        lines.push(...stopLines(admission, columns, addressed, undefined, surface));
-      }
+      const recording =
+        typeof admission !== "string"
+          ? "admission stopped"
+          : admission === "unrecorded"
+            ? "not recorded"
+            : admission === "admitted"
+              ? "recorded"
+              : "reused";
+      receiptRow(
+        lines,
+        check.verdict === "satisfied" ? "✓" : "×",
+        `check ${check.index}`,
+        [{ text: `${check.verdict} · ${recording}` }],
+        columns,
+      );
+      if (check.verdict === "unsatisfied") receiptPayload(lines, "summary", check.summary);
+      if (typeof admission !== "string") lines.push(...stopLines(admission, columns, addressed, undefined, surface));
     }
     if (check.retainedPath !== undefined)
       receiptRow(lines, " ", "scratch retained", [{ text: check.retainedPath, opaque: true }], columns);
@@ -631,7 +623,26 @@ export function executionEvidenceLines(
   surface?: TextRenderContext["surface"],
 ): readonly string[] {
   const lines: string[] = [];
-  for (const admission of receipt.admitted ?? []) lines.push(...admittedLines(admission, columns, receipt.contractId));
+  if (receipt.snapshot !== undefined)
+    receiptRow(
+      lines,
+      " ",
+      "snapshot",
+      [{ text: displayGitId(receipt.snapshot, abbreviateGitIds([receipt.snapshot])) }],
+      columns,
+    );
+  if (receipt.checks !== undefined)
+    lines.push(...verificationCheckLines(receipt.checks, columns, receipt.contractId ?? "", surface));
+  for (const admission of receipt.admitted ?? []) {
+    const shownByCheck =
+      admission.kind === "attestation" &&
+      (admission.contractId === undefined || admission.contractId === receipt.contractId) &&
+      receipt.checks?.some(
+        (check) =>
+          check.kind === "terminal" && check.admission === "admitted" && check.requirement === admission.requirement,
+      );
+    if (!shownByCheck) lines.push(...admittedLines(admission, columns, receipt.contractId));
+  }
   if (receipt.placement !== undefined)
     lines.push(...placementEvidenceLines(receipt.placement, columns, receipt.contractId ?? "", surface));
   for (const effect of receipt.effects ?? []) lines.push(...effectLines(effect, columns, receipt.contractId));

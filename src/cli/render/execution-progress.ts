@@ -1,5 +1,4 @@
 import type { ExecutionObservation } from "../../protocol/execution-observation.js";
-import { shortGitId } from "./contract-observation.js";
 import { StatusLine, type StatusLineOptions, type StatusLineStream } from "./status-line.js";
 import { renderOpaqueBlock, safeText, type TextRenderContext } from "./terminal.js";
 
@@ -26,11 +25,9 @@ function elapsed(ms: number): string {
 }
 
 function phaseDetail(observation: Extract<ExecutionObservation, { kind: "verification" }>["observation"]): string {
-  const detail =
-    observation.phase === "declaration"
-      ? `declaration ${observation.index}/${observation.total}`
-      : `${observation.phase} · check ${observation.index}/${observation.total}${observation.name === undefined ? "" : ` · ${safeText(observation.name)}`}`;
-  return `${detail} · snapshot ${shortGitId(observation.snapshot)} · ${safeText(observation.requirement)}`;
+  return observation.phase === "declaration"
+    ? `declaration ${observation.index}/${observation.total}`
+    : `${observation.phase} · check ${observation.index}/${observation.total}${observation.name === undefined ? "" : ` · ${safeText(observation.name)}`}`;
 }
 
 function phaseMark(outcome: string | undefined): "✓" | "×" | "?" {

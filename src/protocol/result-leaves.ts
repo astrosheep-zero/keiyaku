@@ -34,6 +34,14 @@ export const candidateContentChangeSchema = z
     currentChange: changeIdSchema,
   })
   .readonly();
+export const snapshotChangeSchema = z
+  .strictObject({
+    kind: z.literal("snapshot-changed"),
+    previousSnapshot: snapshotIdSchema,
+    currentSnapshot: snapshotIdSchema,
+  })
+  .readonly();
+export const gateStaleReasonSchema = z.union([candidateContentChangeSchema, snapshotChangeSchema]);
 export const gateCurrentSchema = z.union([
   z.strictObject({ kind: z.literal("missing") }).readonly(),
   z
@@ -48,7 +56,7 @@ export const gateCurrentSchema = z.union([
     .strictObject({
       kind: z.literal("stale"),
       priorVerdict: verdictSchema,
-      reason: candidateContentChangeSchema.exactOptional(),
+      reason: gateStaleReasonSchema.exactOptional(),
     })
     .readonly(),
 ]);

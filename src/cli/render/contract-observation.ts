@@ -1,4 +1,10 @@
-import type { ContractAfterEdge, ContractDetail, ContractGateReport, ContractSummary } from "../../index.js";
+import type {
+  ContractAfterEdge,
+  ContractDetail,
+  ContractGateReport,
+  ContractSummary,
+  GateStaleReason,
+} from "../../index.js";
 import type { ContractDetailWorkspace } from "../../protocol/read/status.js";
 
 const GIT_OBJECT_ID = /^[0-9a-f]{40}$/iu;
@@ -86,12 +92,35 @@ export function requirementDisplayName(
     : `${name} ${requirement.requirement}`;
 }
 
+export function staleReasonFact(reason: GateStaleReason): string {
+  switch (reason.kind) {
+    case "snapshot-changed": {
+      const ids = abbreviateGitIds([reason.previousSnapshot, reason.currentSnapshot]);
+      return `snapshot changed ${displayGitId(reason.previousSnapshot, ids)} -> ${displayGitId(reason.currentSnapshot, ids)}`;
+    }
+    case "candidate-content-changed": {
+      const ids = abbreviateGitIds([reason.previousChange, reason.currentChange]);
+      return `candidate content changed ${displayGitId(reason.previousChange, ids)} -> ${displayGitId(reason.currentChange, ids)}${reason.target === undefined ? "" : ` · ${reason.target}`}`;
+    }
+    default: {
+      const exhaustive: never = reason;
+      return exhaustive;
+    }
+  }
+}
+
 /** Currentness is supplied by the owner for every requirement; rendering never aggregates testimony. */
 export function gateRequirementFacts(report: ContractGateReport): readonly string[] {
-  return report.requirements.map(
-    (requirement) =>
-      `${gateGlyph(requirement)} ${requirementDisplayName(report.gate, requirement)}${requirement.current.kind === "stale" ? " · stale" : requirement.current.kind === "missing" ? " · missing" : ""}`,
-  );
+  return report.requirements.map((requirement) => {
+    const current = requirement.current;
+    const detail =
+      current.kind === "stale"
+        ? ` · stale${current.reason === undefined ? "" : ` · ${staleReasonFact(current.reason)}`}`
+        : current.kind === "missing"
+          ? " · missing"
+          : "";
+    return `${gateGlyph(requirement)} ${requirementDisplayName(report.gate, requirement)}${detail}`;
+  });
 }
 
 /** Every unresolved prerequisite edge names the condition that still blocks the candidate. */

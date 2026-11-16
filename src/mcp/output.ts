@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { verbs, type VerbName, type VerbOutput } from "../library/keiyaku-verbs.js";
+import { snapshotChangeSchema } from "../protocol/result-leaves.js";
 
 const bind = verbs.bind.normal.unwrap();
 const verify = verbs.verify.normal.unwrap();
@@ -24,6 +25,7 @@ const gateProblem = z.strictObject({
   requirement: z.string(),
   state: z.enum(["missing", "stale", "unsatisfied"]),
   summary: z.string().exactOptional(),
+  reason: snapshotChangeSchema.exactOptional(),
 });
 const stops = [
   z.strictObject({ kind: z.literal("delivery-missing") }),
@@ -123,7 +125,13 @@ function projectPlacement(
     kind: value.kind,
     unmet: value.unmet.map((problem) => {
       const { gate, requirement, state } = problem;
-      return { gate, requirement, state, ...("summary" in problem ? { summary: problem.summary } : {}) };
+      return {
+        gate,
+        requirement,
+        state,
+        ...("summary" in problem ? { summary: problem.summary } : {}),
+        ...("reason" in problem && problem.reason !== undefined ? { reason: problem.reason } : {}),
+      };
     }),
   };
 }

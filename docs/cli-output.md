@@ -41,13 +41,11 @@ help, not on receipt rows. Journal blobs, entry ids, and record-field
 enumeration stay out of ordinary text. Ordinary JSON receipts likewise omit
 raw journal records and internal custody; explicitly requested full history
 retains historical content without duplicating storage envelopes. Verification
-evidence remains associated with its exact
-captured snapshot and individual requirement: a verify receipt exposes every
-executed check's verdict or stop, current declaration position, requirement, and
-admission reuse or stop when recording is selected. Ungated execution explicitly
-states that no testimony was recorded; this is neither a failure nor an admission
-stop. Delivery and review receipts consume standing evidence without claiming a
-producer run. When a
+receipts name the captured snapshot once and each check's verdict or stop,
+declaration position, and recording conclusion compactly. Full identities remain
+in JSON; unmapped requirements keep stable coordinates. Reuse, unrecorded execution,
+and admission stops stay distinct. Delivery and review consume standing evidence
+without claiming a producer run. When a
 verified snapshot lands, the landing names that same identity and its destination
 movement. Successful internal retirement is not an ordinary receipt inventory;
 failed removal retains its diagnostic path.
@@ -73,7 +71,9 @@ the target's non-movement and closes on `⧗ awaiting <events>` (omitted when
 every unmet requirement already holds a recorded verdict, which alarms on its
 own row); and failed keeps its stop rows. Placement names its final integration
 after any necessary reintegration. Requirement states are met or unmet
-while recorded verdicts are satisfied or unsatisfied. A dependent stop on unmet
+while recorded verdicts are satisfied or unsatisfied. Native stale reasons retain
+abbreviated before/after identities, never an inferred cause or failed execution.
+A dependent stop on unmet
 requirements speaks the same pending vocabulary. Internal refusal kinds never
 print on receipts.
 
@@ -263,8 +263,9 @@ progress channel while one complete final result remains on stdout; on a
 terminal the only liveness evidence is a ticking status line, and a quiet
 interval never claims that a command is hung or alive. Terminal cancellation
 asks the owned operation to stop and waits for its truthful final receipt
-rather than replacing it with an early exit. Verification observations name the
-current declaration position, requirement, and exact snapshot without becoming a
+rather than replacing it with an early exit. Verification text names declaration
+position and useful phase, timing, hook, or failure facts, not repeated opaque
+identities. Native observations retain complete identities without becoming a
 second result model. Its final receipt preserves partial admissions, retained
 failure scenes, operational stops, and the ordinary completion judgment.
 

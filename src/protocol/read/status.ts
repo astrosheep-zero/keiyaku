@@ -2,7 +2,7 @@ import { errorCategory } from "../../errors.js";
 import { z } from "zod";
 import { contractIdSchema, contractJournalPaths, snapshotIdSchema } from "../../git/identity.js";
 import { type ContractTargetLag as GitContractTargetLag } from "../../git/workspace.js";
-import { gateSchema } from "../result-leaves.js";
+import { gateSchema, gateStaleReasonSchema } from "../result-leaves.js";
 import {
   activeContractJournalPaths,
   observeActiveContractJournals,
@@ -111,7 +111,7 @@ export type ContractCatalogue = z.output<typeof contractCatalogueSchema>;
 
 const detailCurrentSchema = z.union([
   z.strictObject({ kind: z.literal("missing") }).readonly(),
-  z.strictObject({ kind: z.literal("stale") }).readonly(),
+  z.strictObject({ kind: z.literal("stale"), reason: gateStaleReasonSchema.exactOptional() }).readonly(),
   z
     .strictObject({
       kind: z.literal("attested"),
@@ -493,7 +493,9 @@ export async function readContractObservation(
                 verdict: current.verdict,
                 ...(current.summary === undefined ? {} : { summary: current.summary }),
               }
-            : { kind: current.kind },
+            : current.kind === "stale"
+              ? { kind: current.kind, ...(current.reason === undefined ? {} : { reason: current.reason }) }
+              : { kind: current.kind },
       };
     }),
   }));

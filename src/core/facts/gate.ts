@@ -6,14 +6,21 @@ import {
   type ContractState,
   type Gate,
   type RequirementId,
+  type SnapshotId,
 } from "./types.js";
 
-export type GateStaleReason = Readonly<{
-  kind: "candidate-content-changed";
-  target?: string;
-  previousChange: ChangeId;
-  currentChange: ChangeId;
-}>;
+export type GateStaleReason =
+  | Readonly<{
+      kind: "candidate-content-changed";
+      target?: string;
+      previousChange: ChangeId;
+      currentChange: ChangeId;
+    }>
+  | Readonly<{
+      kind: "snapshot-changed";
+      previousSnapshot: SnapshotId;
+      currentSnapshot: SnapshotId;
+    }>;
 
 export type GateCurrent =
   | Readonly<{ kind: "attested"; verdict: "satisfied" | "unsatisfied"; summary?: string; at: string }>
@@ -30,16 +37,20 @@ export type GateReport = Readonly<{
 
 function staleReason(state: ContractState, previous: AttestationEntry): GateStaleReason | undefined {
   const target = state.coordinates.target;
-  const currentChange = state.currentIntegration?.changeId ?? state.delivery?.data.integration.changeId;
-  if (currentChange === undefined) return undefined;
-  const previousChange = dependencyKeys(previous.data.subject).find((key) => key.kind === "change")?.value;
-  if (previousChange === undefined || previousChange === currentChange) return undefined;
-  return {
-    kind: "candidate-content-changed",
-    ...(target === undefined ? {} : { target: targetName(target) }),
-    previousChange,
-    currentChange,
-  };
+  const integration = state.currentIntegration ?? state.delivery?.data.integration;
+  if (integration === undefined) return undefined;
+  const keys = dependencyKeys(previous.data.subject);
+  const previousChange = keys.find((key) => key.kind === "change")?.value;
+  if (previousChange !== undefined && previousChange !== integration.changeId)
+    return {
+      kind: "candidate-content-changed",
+      ...(target === undefined ? {} : { target: targetName(target) }),
+      previousChange,
+      currentChange: integration.changeId,
+    };
+  const previousSnapshot = keys.find((key) => key.kind === "snapshot")?.value;
+  if (previousSnapshot === undefined || previousSnapshot === integration.snapshot) return undefined;
+  return { kind: "snapshot-changed", previousSnapshot, currentSnapshot: integration.snapshot };
 }
 
 export type GateReports = Readonly<{

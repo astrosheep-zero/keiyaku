@@ -199,6 +199,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
   zones: [
     { source: "errors.ts", allow: [] },
     {
+      source: "mcp/output.ts",
+      allow: [any("library/keiyaku-verbs.ts"), runtime("protocol/result-leaves.ts", ["snapshotChangeSchema"])],
+    },
+    {
       source: "mcp/**",
       allow: [
         any("mcp/**"),
@@ -320,7 +324,12 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("core/**"),
         any("git/**"),
         any("protocol/read/**"),
-        runtime("protocol/result-leaves.ts", ["contractTargetSchema", "gateCurrentSchema", "gateSchema"]),
+        runtime("protocol/result-leaves.ts", [
+          "contractTargetSchema",
+          "gateCurrentSchema",
+          "gateSchema",
+          "gateStaleReasonSchema",
+        ]),
         any("verification/declaration.ts", ["verificationRequirement"]),
         any("workspace-place.ts"),
       ],
@@ -855,6 +864,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/akumas.ts"),
         any("core/facts/errors.ts", ["AuthorityCorruptionError"]),
         types("core/facts/types.ts"),
+        types("core/facts/gate.ts", ["GateStaleReason"]),
         any("library/kei.ts", ["Kei", "Guidance"]),
         any("library/keiyaku.ts"),
         any("library/keiyaku-verbs.ts", [

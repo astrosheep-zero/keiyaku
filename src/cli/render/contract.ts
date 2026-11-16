@@ -439,8 +439,15 @@ function review(
 
 function verify(result: AcceptedOf<"verify">, columns: number, surface: TextRenderContext["surface"]): string {
   const lines = titleLines("✓", "verify", result.contractId, columns);
+  receiptRow(
+    lines,
+    " ",
+    "snapshot",
+    [{ text: displayGitId(result.snapshot, abbreviateGitIds([result.snapshot])) }],
+    columns,
+  );
   lines.push(
-    ...verificationCheckLines(result.checks, result.snapshot, columns, result.contractId, surface),
+    ...verificationCheckLines(result.checks, columns, result.contractId, surface),
     ...trailingPlacementLines(result, columns, surface),
   );
   return lines.join("\n");

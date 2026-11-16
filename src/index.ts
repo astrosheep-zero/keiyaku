@@ -84,6 +84,7 @@ export type {
   FactKind,
   SnapshotId,
 } from "./core/facts/types.js";
+export type { GateStaleReason } from "./core/facts/gate.js";
 export { Kanshi } from "./kanshi/index.js";
 export type {
   KanshiScopeInput,

@@ -180,8 +180,10 @@ Verification, or placement. Dirty bytes require explicit capture authorization;
 Git's private-index custody preserves the caller's real index and worktree
 bytes. Recovery describes resolution of the final worktree bytes with dirty
 capture, without requiring staging. Review may report observed unmerged paths
-without making them a blanket refusal. A stale gate may explain changed
-candidate content; target movement alone is not that explanation.
+without making them a blanket refusal. Stale evidence preserves its native owner's
+known reason and complete identities, distinguishing candidate-content and
+snapshot changes from an unknown cause. Consumers never infer a Git cause,
+recompute currentness, or turn successful execution into a failed check.
 
 Region overlap is advisory planning evidence. Known absence of overlaps and an
 unavailable overlap observation are distinct. Neither overlap nor observation

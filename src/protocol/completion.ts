@@ -2,7 +2,7 @@ import { z } from "zod";
 import { targetName, type ContractId } from "../core/facts/types.js";
 import { snapshotIdSchema, contractIdSchema } from "../git/identity.js";
 import { deliveryDiffScopeSchema } from "../git/integration.js";
-import { requirementIdSchema, gateSchema } from "./result-leaves.js";
+import { requirementIdSchema, gateSchema, snapshotChangeSchema } from "./result-leaves.js";
 import type { GateReport } from "../core/facts/gate.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
@@ -43,6 +43,7 @@ export const requirementProblemSchema = z.union([
     .strictObject({
       ...requirementCoordinate,
       state: z.literal("stale"),
+      reason: snapshotChangeSchema.exactOptional(),
       previousContentId: z.string().min(1).exactOptional(),
       currentContentId: z.string().min(1).exactOptional(),
     })
@@ -74,10 +75,12 @@ export function unmetGateProblems(reports: readonly GateReport[]): readonly Requ
             state: "stale",
             ...(current.reason === undefined
               ? {}
-              : {
-                  previousContentId: current.reason.previousChange,
-                  currentContentId: current.reason.currentChange,
-                }),
+              : current.reason.kind === "snapshot-changed"
+                ? { reason: current.reason }
+                : {
+                    previousContentId: current.reason.previousChange,
+                    currentContentId: current.reason.currentChange,
+                  }),
           },
         ];
       }),

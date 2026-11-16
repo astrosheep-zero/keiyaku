@@ -86,7 +86,12 @@ currently declared requirement has current satisfied testimony. Missing, stale,
 and current unsatisfied evidence remain distinguishable for each requirement.
 Singleton and multiple-requirement gates use this same judgment; there is no
 aggregate attestation or producer-specific gate arbitration. No renderer,
-protocol adapter, or board recomputes it.
+protocol adapter, or board recomputes it. Stale testimony explains a known
+candidate-content change first, otherwise a known difference between its captured
+snapshot dependency and the current integration. Both explanations retain the
+previous and current identities. A snapshot mismatch does not establish why it
+changed; absent integration supplies no such explanation. These reasons describe
+unmet evidence, not failed execution, and leave currentness and selection unchanged.
 
 Producer methodology for `verified` belongs to
 [verification.md](verification.md). Selection makes its current requirements
