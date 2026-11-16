@@ -8,7 +8,6 @@ import {
   entityLines,
   identityLine,
   RECENT_TONE_MS,
-  renderSectionBlock,
   safeText,
   tone,
   type SemanticTone,
@@ -105,50 +104,50 @@ function akumaRowLines(
   ];
 }
 
-function akumaBoardRows(
-  board: AkumaKanshiWorld,
-  rows: readonly AkumaKanshiRow[],
-  observedAt: string,
-  context: TextRenderContext,
-  caller?: string,
-): readonly string[] {
-  const aliasesUnavailable = board.aliasesError !== undefined;
-  const rendered = renderSectionBlock({
-    name: "AKUMA",
-    rows: rows.map((row) => akumaRowLines(row, aliasesUnavailable, observedAt, context, caller)),
-    hasMore: board.more === true,
-  });
-  return [`AKUMA // ${rows.length} recent`, ...rendered.slice(1)];
-}
-
 /**
  * One Akuma board section. The World board omits an empty section because its other
  * sections already say what the World holds; a standalone catalogue states its
  * own emptiness. A failed Alias observation belongs to the
  * section, so an empty roster still states its emptiness rather than dropping that
- * evidence.
+ * evidence. `rows` narrows a present section to one already-partitioned subset.
  */
 function renderAkumaBoard(
   section: BoardSection<AkumaKanshiWorld>,
   observedAt: string,
   context: TextRenderContext & Readonly<{ caller?: string }>,
   emptyRows: readonly string[] = [emptyCatalogue("akuma")],
+  rows: readonly AkumaKanshiRow[] | undefined = section.kind === "present" ? (section.rows ?? []) : [],
 ): readonly string[] {
   if (section.kind === "absent") return ["AKUMA // absent"];
   if (section.kind === "failed") {
     return ["AKUMA // unavailable", "", tone(`! ${safeText(section.diagnostic)}`, "alert", context.color)];
   }
-  const board = section;
-  const rows = board.rows ?? [];
-  const aliasFailure = board.aliasesError;
+  const aliasesUnavailable = section.aliasesError !== undefined;
   if (rows.length === 0) {
-    if (aliasFailure === undefined) return emptyRows;
+    // A non-empty complete page narrowed to no rows has all its evidence nested elsewhere.
+    if ((section.rows ?? []).length > 0) {
+      const evidence = [
+        ...(section.aliasesError === undefined
+          ? []
+          : [tone(`! aliases unavailable · ${safeText(section.aliasesError)}`, "alert", context.color)]),
+        ...(section.more === true ? ["…"] : []),
+      ];
+      return evidence.length === 0 ? [] : ["AKUMA", "", ...evidence];
+    }
+    const empty = emptyRows.length === 0 && section.aliasesError !== undefined ? [emptyCatalogue("akuma")] : emptyRows;
     return [
-      ...(emptyRows.length === 0 ? [emptyCatalogue("akuma")] : emptyRows),
-      tone(`! aliases unavailable · ${aliasFailure}`, "alert", context.color),
+      ...empty,
+      ...(section.aliasesError === undefined
+        ? []
+        : [tone(`! aliases unavailable · ${section.aliasesError}`, "alert", context.color)]),
     ];
   }
-  return akumaBoardRows(board, rows, observedAt, context, context.caller);
+  return [
+    `AKUMA // ${rows.length} recent`,
+    "",
+    ...rows.flatMap((row) => akumaRowLines(row, aliasesUnavailable, observedAt, context, context.caller)),
+    ...(section.more === true ? ["…"] : []),
+  ];
 }
 
 function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {

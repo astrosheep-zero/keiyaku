@@ -65,7 +65,6 @@ const TOOL_BUDGET = 3;
 
 type StatusTimeline = LiveStatusObservation["status"]["timeline"];
 type RenderRow = ActivityRow;
-type RenderEntry = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
 type RenderedSnapshot = StatusTimeline;
 type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows: readonly ActivityRow[] }>;
 type CurrentTurnBoundary = Readonly<{ row: RenderRow; turnSequence: number }>;
@@ -78,9 +77,6 @@ type DisplayAssociation =
   | Readonly<{ kind: "none" }>
   | Readonly<{ kind: "associated"; contractId: string }>
   | Readonly<{ kind: "failed"; diagnostic: string }>;
-function associatedContractId(contract: DisplayAssociation): string | undefined {
-  return contract.kind === "associated" ? contract.contractId : undefined;
-}
 
 /** The one human-fact separator of this family. */
 const FACT_SEPARATOR = " · ";
@@ -96,15 +92,8 @@ export function subordinateLines(lines: readonly string[]): readonly string[] {
 /**
  * The one observation identity line: complete Akuma identity, optional alias as a parenthetical
  * supplement, and a known associated Contract inline behind the shared separator.
- */
-function panelIdentity(id: string, alias?: string, contract?: DisplayAssociation): string {
-  const contractId = contract === undefined ? undefined : associatedContractId(contract);
-  return `${identity(id, alias)}${contractId === undefined ? "" : `${FACT_SEPARATOR}${contractId}`}`;
-}
-
-/**
- * Identity and its static coordinates. The execution directory and any already-exposed effective
- * actions belong above the content boundary; an absent coordinate is an absent line.
+ * The execution directory and any already-exposed effective actions belong above the content
+ * boundary; an absent coordinate is an absent line.
  */
 export function panelHead(
   id: string,
@@ -112,7 +101,9 @@ export function panelHead(
   contract: DisplayAssociation | undefined,
   context: readonly string[] = [],
 ): readonly string[] {
-  return [panelIdentity(id, alias, contract), ...subordinateLines(context)];
+  const contractId = contract?.kind === "associated" ? contract.contractId : undefined;
+  const line = `${identity(id, alias)}${contractId === undefined ? "" : `${FACT_SEPARATOR}${contractId}`}`;
+  return [line, ...subordinateLines(context)];
 }
 
 /**
@@ -270,7 +261,7 @@ function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {
 }
 
 function groupedEntries(
-  entries: readonly RenderEntry[],
+  entries: readonly StreamEmission[],
   context: TextRenderContext,
   view: RowView = {},
 ): readonly string[] {
@@ -548,18 +539,6 @@ function lifeConclusion(life: AkumaStatus["life"], pending: boolean): Readonly<{
   return { mark: "!", verb: life };
 }
 
-function conclusionMarkVerb(
-  status: LiveStatusObservation["status"] | undefined,
-  outcome: "answered" | "failed" | "unanswered" | "life",
-): Readonly<{ mark: string; verb: string }> {
-  if (outcome === "failed" || (status !== undefined && failedOutcomeDiagnostic(status) !== undefined))
-    return { mark: "!", verb: "failed" };
-  if (outcome === "answered") return { mark: "✓", verb: "answered" };
-  if (outcome === "unanswered") return { mark: "○", verb: "unanswered" };
-  if (status === undefined) return { mark: "⧗", verb: "pending tell" };
-  return lifeConclusion(status.life, !defaultWaitComplete(status));
-}
-
 function durationText(durationMs: number): string {
   const seconds = Math.max(0, Math.round(durationMs / 1000));
   if (seconds < 60) return `${seconds}s`;
@@ -570,21 +549,9 @@ function durationText(durationMs: number): string {
  * One wait-style conclusion for every observer of an input-bound Tell. A target
  * that settled at or after this wait began keeps its duration, a target already
  * settled names no duration, and an unfinished target carries the elapsed wait.
+ * An ended wait is the deadline itself, so it never reads a pinned completion.
  */
-function waitConclusionRow(
-  input: Readonly<{ at?: number; startedAt: number; complete: boolean; end?: number; mark: string; verb: string }>,
-): string {
-  const duration = input.complete
-    ? input.at !== undefined && input.at >= input.startedAt
-      ? ` — ${durationText(Math.max(0, input.at - input.startedAt))}`
-      : ""
-    : input.end === undefined || !Number.isFinite(input.startedAt)
-      ? ""
-      : ` — waited ${durationText(Math.max(0, input.end - input.startedAt))}`;
-  return `${input.mark} ${input.verb}${duration}`;
-}
-
-export function inputWaitConclusion(
+function waitConclusion(
   observation: AkumaAskObservation,
   input: Readonly<{
     startedAt: number;
@@ -593,28 +560,31 @@ export function inputWaitConclusion(
     status?: LiveStatusObservation["status"];
   }>,
 ): readonly string[] {
-  const end = input.now;
-  const complete = observation.kind !== "deadline";
+  const ended = observation.kind === "deadline";
   const pinned = input.completedAt == null ? Number.NaN : Date.parse(input.completedAt);
-  const at = complete ? (Number.isFinite(pinned) ? pinned : undefined) : end;
-  const conclusion = conclusionMarkVerb(
-    input.status,
-    observation.kind === "answered"
-      ? "answered"
-      : observation.kind === "failed" || observation.kind === "invalid-output"
-        ? "failed"
-        : observation.kind === "unanswered"
-          ? "unanswered"
-          : "life",
-  );
+  const at = ended ? input.now : Number.isFinite(pinned) ? pinned : undefined;
+  const failed =
+    observation.kind === "failed" ||
+    observation.kind === "invalid-output" ||
+    (input.status !== undefined && failedOutcomeDiagnostic(input.status) !== undefined);
+  const state = failed
+    ? { mark: "!", verb: "failed" }
+    : observation.kind === "answered"
+      ? { mark: "✓", verb: "answered" }
+      : observation.kind === "unanswered"
+        ? { mark: "○", verb: "unanswered" }
+        : input.status === undefined
+          ? { mark: "⧗", verb: "pending tell" }
+          : lifeConclusion(input.status.life, !defaultWaitComplete(input.status));
+  const elapsed = ended
+    ? at === undefined || !Number.isFinite(input.startedAt)
+      ? ""
+      : ` — waited ${durationText(Math.max(0, at - input.startedAt))}`
+    : at !== undefined && at >= input.startedAt
+      ? ` — ${durationText(Math.max(0, at - input.startedAt))}`
+      : "";
   return [
-    waitConclusionRow({
-      ...(at === undefined ? {} : { at }),
-      startedAt: input.startedAt,
-      complete,
-      ...(end === undefined ? {} : { end }),
-      ...conclusion,
-    }),
+    `${state.mark} ${state.verb}${elapsed}`,
     ...(observation.kind === "failed" || observation.kind === "invalid-output"
       ? [`! ${safeText(observation.diagnostic)}`]
       : []),
@@ -728,7 +698,7 @@ export function inputWaitStream(
     } else {
       const currentTime = now();
       lines.push(
-        ...inputWaitConclusion(result.observation, {
+        ...waitConclusion(result.observation, {
           startedAt,
           ...(result.completedAt === undefined ? {} : { completedAt: result.completedAt }),
           ...(currentTime === undefined ? {} : { now: currentTime }),
@@ -756,11 +726,6 @@ function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
 
 type SnapshotView = AkumaObservation;
 
-type SnapshotCoreOptions = Readonly<{
-  alias?: string;
-  facts?: readonly string[];
-}>;
-
 export function currentWorkLines(work: CurrentWork, context: TextRenderContext): readonly string[] {
   const summary = work.summary;
   return [
@@ -782,35 +747,6 @@ export function currentWorkLines(work: CurrentWork, context: TextRenderContext):
   ];
 }
 
-function snapshotCore(
-  view: SnapshotView,
-  context: TextRenderContext,
-  options: SnapshotCoreOptions,
-): Readonly<{ activity: readonly string[]; head: readonly string[]; facts: readonly string[] }> {
-  const activity = currentWorkLines(view.work, context);
-  // A source later than the observation reads as the whole word `now`, so the surface only appends
-  // a unit suffix when the age actually names a unit.
-  const activityAge =
-    view.lastActivityAt === undefined
-      ? undefined
-      : ageText(view.lastActivityAt, new Date(context.now ?? Date.now()).toISOString());
-  const contextFacts = [
-    safeText(view.cwd),
-    ...(activityAge === undefined
-      ? []
-      : [`${view.life} · last activity ${activityAge === "now" ? activityAge : `${activityAge} ago`}`]),
-  ];
-  const facts = [
-    ...contractFacts(view.contract ?? { kind: "none" }, context.columns - SUBORDINATE_INDENT.length),
-    ...(options.facts ?? []),
-  ];
-  return {
-    activity,
-    head: panelHead(view.id, options.alias, view.contract, contextFacts),
-    facts,
-  };
-}
-
 function snapshotConclusion(status: AkumaObservation): string {
   const conclusion = lifeConclusion(status.life, status.work.pending !== undefined);
   return `${conclusion.mark} ${conclusion.verb}${status.strandedReason === undefined ? "" : ` · ${status.strandedReason}`}`;
@@ -819,15 +755,29 @@ function snapshotConclusion(status: AkumaObservation): string {
 export function snapshotText(
   view: SnapshotView,
   context: TextRenderContext,
-  options: SnapshotCoreOptions = {},
+  options: Readonly<{ alias?: string }> = {},
 ): string {
-  const core = snapshotCore(view, context, options);
+  // A source later than the observation reads as the whole word `now`, so the surface only appends
+  // a unit suffix when the age actually names a unit.
+  const activityAge =
+    view.lastActivityAt === undefined
+      ? undefined
+      : ageText(view.lastActivityAt, new Date(context.now ?? Date.now()).toISOString());
+  const head = panelHead(view.id, options.alias, view.contract, [
+    safeText(view.cwd),
+    ...(activityAge === undefined
+      ? []
+      : [`${view.life} · last activity ${activityAge === "now" ? activityAge : `${activityAge} ago`}`]),
+  ]);
   const conclusion = snapshotConclusion(view);
-  const content = [...core.activity, ...(conclusion.length === 0 ? [] : [conclusion])];
+  const content = [...currentWorkLines(view.work, context), ...(conclusion.length === 0 ? [] : [conclusion])];
   return [
-    ...core.head,
-    ...(content.length === 0 ? [] : [frameRule(core.head, context.columns), ...content]),
-    ...subordinateLines([...renderReportedChangeLines(view), ...core.facts]),
+    ...head,
+    ...(content.length === 0 ? [] : [frameRule(head, context.columns), ...content]),
+    ...subordinateLines([
+      ...renderReportedChangeLines(view),
+      ...contractFacts(view.contract ?? { kind: "none" }, context.columns - SUBORDINATE_INDENT.length),
+    ]),
   ].join("\n");
 }
 
@@ -896,14 +846,6 @@ export function historyRawAnswer(result: AkumaHistoryResult, historyId: string |
 
 /** One compact wait result line: an observed life mark, the complete identity, a bounded summary. */
 const WAIT_SUMMARY_SEPARATOR = " — ";
-type WaitState = Readonly<{ mark: string; state: string }>;
-const WAIT_LIFE: Partial<Record<AkumaStatus["life"], WaitState>> = {
-  running: { mark: "●", state: "running" },
-  killed: { mark: "×", state: "killed" },
-  hung: { mark: "?", state: "hung" },
-  untidy: { mark: "!", state: "untidy" },
-  stranded: { mark: "!", state: "stranded" },
-};
 
 function foldedSummary(value: string): string {
   return safeText(value).replace(/\s+/gu, " ").trim();
@@ -921,30 +863,29 @@ function waitLine(mark: string, subject: string, summary: string, columns: numbe
 /**
  * The final public snapshot as one wait summary. A stopped life stays explicit over any older
  * outcome; pending input stays visible beside the life it belongs to; a sleeping member without
- * pending input shows its current answered preview or failed diagnostic, else completion. The
- * mark reports the observed life, never continuing liveness.
+ * pending input shows its settled outcome, else completion. The mark reports the observed life,
+ * never continuing liveness.
  */
-function waitSummary(member: Extract<AkumaWaitItem, { kind: "observed" }>): WaitState & Readonly<{ summary: string }> {
+function waitSummary(
+  member: Extract<AkumaWaitItem, { kind: "observed" }>,
+): Readonly<{ mark: string; summary: string }> {
   const pending = member.pending !== undefined;
   const outcome = member.outcome;
-  const life = WAIT_LIFE[member.life];
   const observed =
-    life ??
-    (pending
-      ? { mark: "⧗", state: "pending tell" }
-      : outcome === undefined
-        ? { mark: "✓", state: "completed" }
-        : outcome.kind === "answered"
-          ? { mark: "✓", state: "answered" }
-          : outcome.kind === "canceled"
-            ? { mark: "○", state: "canceled" }
-            : { mark: "!", state: "failed" });
+    member.life === "asleep" && !pending && outcome !== undefined
+      ? outcome.kind === "answered"
+        ? { mark: "✓", verb: "answered" }
+        : outcome.kind === "canceled"
+          ? { mark: "○", verb: "canceled" }
+          : { mark: "!", verb: "failed" }
+      : lifeConclusion(member.life, pending);
+  const stopped = member.life !== "asleep";
   return {
-    ...observed,
+    mark: observed.mark,
     summary: [
-      observed.state,
-      ...(pending && life !== undefined ? ["pending tell"] : []),
-      ...(outcome?.kind === "failed" && (life !== undefined || pending) ? ["failed"] : []),
+      observed.verb,
+      ...(pending && stopped ? ["pending tell"] : []),
+      ...(outcome?.kind === "failed" && (stopped || pending) ? ["failed"] : []),
       ...(member.strandedReason === undefined ? [] : [member.strandedReason]),
     ].join(FACT_SEPARATOR),
   };

@@ -36,7 +36,14 @@ import {
   type SemanticTone,
   type TextRenderContext,
 } from "./terminal.js";
-import { associationFact, formatAge, NARROW_COLUMNS, renderAkuma, akumaRowLines } from "./kanshi-akuma.js";
+import {
+  associationFact,
+  formatAge,
+  NARROW_COLUMNS,
+  renderAkumaBoard,
+  akumaLabel,
+  akumaRowLines,
+} from "./kanshi-akuma.js";
 import { contractDetailMark, contractMark, debtDispositionMark } from "./marks.js";
 import { dispositionText } from "./debt.js";
 
@@ -176,14 +183,8 @@ function linkedAkumaRows(row: ContractKanshiDetail): readonly string[] {
   if (roster === undefined) return [];
   if ("kind" in roster) return ["  akuma association unavailable"];
   return roster.map((attached) => {
-    const aliases =
-      attached.aliases !== undefined
-        ? attached.aliases.map((alias) => safeText(alias)).join(" ")
-        : attached.aliasesUnavailable === true
-          ? "aliases unavailable"
-          : "";
-    const identity = [safeText(attached.id), aliases.length === 0 ? "" : `(${aliases})`].filter(Boolean).join(" ");
-    return `  akuma  ${identity}`;
+    const aliases = safeText(akumaLabel(attached, attached.aliasesUnavailable === true));
+    return `  akuma  ${safeText(attached.id)}${aliases === "" ? "" : ` ${aliases}`}`;
   });
 }
 
@@ -324,18 +325,7 @@ function renderUngroupedAkumas(
   rows: readonly AkumaKanshiRow[],
   context: TextRenderContext,
 ): readonly string[] {
-  const section = report.akumas;
-  if (section.kind !== "present") return renderAkuma(report, context);
-  if (rows.length > 0 || (section.rows?.length ?? 0) === 0)
-    return renderAkuma({ ...report, akumas: { ...section, rows } }, context);
-  // Section evidence belongs to the complete Akuma page, including nested children.
-  const evidence = [
-    ...(section.aliasesError === undefined
-      ? []
-      : [tone(`! aliases unavailable · ${safeText(section.aliasesError)}`, "alert", context.color)]),
-    ...(section.more === true ? ["…"] : []),
-  ];
-  return evidence.length === 0 ? [] : ["AKUMA", "", ...evidence];
+  return renderAkumaBoard(report.akumas, report.observedAt, context, [], rows);
 }
 
 export function renderKanshiText(
