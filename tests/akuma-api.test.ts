@@ -430,6 +430,17 @@ test("schema ask parses JSON and typed failures stay distinct", async () => {
       assert.equal(recorded?.schemaJson, canonicalDocument(schema).jsonText);
     }
 
+    for (const [draw, text, type, expected] of [
+      ["a1000022", "42", "number", 42], ["a1000023", "null", "null", null],
+    ] as const) {
+      const scalar = await born(draw, answering(text));
+      const result = await scalar.akuma.ask("structured", { schema: { type } });
+      assert.ok(result.kind === "answered");
+      assert.equal(result.answer, expected);
+    }
+    const empty = await born("a1000024", answering(""));
+    assert.equal((await empty.akuma.ask("structured", { schema: { type: "string" } })).kind, "invalid-output");
+
     const invalid = await born("a1000003", answering("not-json"));
     assert.deepEqual((await invalid.akuma.ask("structured", { schema })).kind, "invalid-output");
 

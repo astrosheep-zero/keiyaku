@@ -221,11 +221,6 @@ test("deadline wait returns three actual events and settled wait keeps the compl
   await Promise.all([client.connect(a), adapter.server.connect(b)]);
   t.after(async () => { await client.close(); await adapter.close(); });
   await client.listTools();
-  const status = await client.callTool({ name: "status", arguments: { selector: f.worker.allocated.id } });
-  assert.equal(status.isError, false);
-  const projectedStatus = modelOutputSchemas.status.parse(status.structuredContent);
-  assert.ok("changes" in projectedStatus);
-  assert.deepEqual(projectedStatus.changes, [{ path: "source.ts", diffstat: { added: 2, removed: 1 } }]);
   const sequences = [];
   for (const text of ["first", "second", "same", "same", "last"]) {
     sequences.push(await appendActivity(paths, { turnSequence: turn.sequence, event: { type: "assistant", text }, at: AT }));

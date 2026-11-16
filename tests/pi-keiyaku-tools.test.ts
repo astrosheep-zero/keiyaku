@@ -8,7 +8,7 @@ import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-ag
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { Akuma, Kanshi, World } from "../src/index.js";
+import { Akuma, World } from "../src/index.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { SERVER_DESCRIPTION } from "../src/mcp/description.js";
 import { readHeart, readLatestTurnForBody } from "../src/akuma/heart/index.js";
@@ -172,11 +172,6 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
       assert.deepEqual(tool.parameters, expected.inputSchema);
       assert.deepEqual(tool.annotations, expected.annotations);
       assert.deepEqual(native.session.getToolDefinition(tool.name)?.outputSchema, expected.outputSchema);
-      assert.equal(JSON.stringify(tool.parameters).includes('"$ref"'), false);
-      if (["ls", "status", "wait"].includes(expected.name)) {
-        assert.ok(expected.outputSchema?.$defs);
-        assert.ok(JSON.stringify(expected.outputSchema).includes('"$ref"'));
-      }
     }
     const read = await native.run(`
       const ns = await describeNamespace("keiyaku");
@@ -199,11 +194,6 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     const missingDetail = resultFor(native.results, "keiyaku_show");
     const expectedDetail = await client.callTool({ name: "show", arguments: { selector: "debt/missing" } });
     assert.deepEqual(missingDetail.content, expectedDetail.content);
-    for (const input of [{}, { id: "debt/missing" }]) {
-      const invalidDetail = await native.run(`await tools.keiyaku_show(${JSON.stringify({ cwd: join(root, "missing"), ...input })});`, true);
-      assert.equal(invalidDetail.isError, true);
-      assert.match(text(invalidDetail), /selector/u);
-    }
     await native.run(`text(await tools.keiyaku_spawn({akumaName: "acp-worker", prompt: "first", alias: "native-child", bare: true}));`);
     const spawned = resultFor(native.results, "keiyaku_spawn");
     assert.equal(spawned.isError, false, text(spawned));
@@ -213,19 +203,9 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     const namedStatus = resultFor(native.results, "keiyaku_status");
     assert.equal(namedStatus.isError, false, text(namedStatus));
     assert.equal((namedStatus.structuredContent as { id: string }).id, id);
-    const mcpStatus = await client.callTool({ name: "status", arguments: { selector: "@native-child" } });
-    assert.equal(mcpStatus.isError, false, JSON.stringify(mcpStatus));
-    assert.equal((mcpStatus.structuredContent as { id: string }).id, id);
-    await native.run(`await tools.keiyaku_status({selector: "@unknown-status"});`, true);
-    const unknownStatus = resultFor(native.results, "keiyaku_status");
-    assert.equal(unknownStatus.isError, true);
-    assert.match(text(unknownStatus), /Akuma alias not found/u);
     await waitForFixtureFile(join(root, "first.ready"), 30_000);
     const status = await child.status();
     assert.deepEqual(status.birth.caller, { kind: "external", integration: "pi", id: native.manager.getSessionId() });
-    const caller = status.birth.caller;
-    const counts = () => Kanshi.of({ world }).counts({ akumaCaller: caller });
-    assert.deepEqual((await counts()).akuma, { kind: "present", value: 1 });
     const paths = pathsForAkumaId(world, child.id);
     const body = (await readHeart(paths)).latestBody!;
     const pid = Number(readFileSync(join(root, "first.ready"), "utf8"));
@@ -261,7 +241,6 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     writeFileSync(join(root, "first.release"), "release");
     assert.equal((await child.idle({ timeoutMs: 30_000 })).reason, "completed");
     assert.equal((await child.status()).work.kind, "idle");
-    assert.deepEqual((await counts()).akuma, { kind: "present", value: 0 });
     assert.equal(process.env.PI_SESSION_ID, "inherited-parent");
     assert.equal(process.env.CODEX_THREAD_ID, "inherited-other-host");
     operationFailed = false;

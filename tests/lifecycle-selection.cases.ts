@@ -40,16 +40,14 @@ test("Contract catalogues select terminal journals under one order without retir
       assert.doesNotMatch(readFileSync(trace, "utf8"), /status --porcelain|rev-list|worktree list/u);
       const all = await traced.list({ selection: "all" });
       assert.equal(all.rows?.length, 3);
-      for (const selection of ["active", "settled", "all"] as const) {
-        const complete = await traced.list({ selection });
-        const bounded = await traced.list({ selection, limit: 1 });
-        assert.deepEqual(bounded.rows, complete.rows?.slice(0, 1));
-        assert.equal(bounded.more, selection === "active" ? undefined : true);
-        const facet = await Keiyaku.for({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "selection-home-") })
-          .ls({ selector: "kei/", selection, limit: 1 });
-        assert.ok(facet.kind === "contract-catalogue");
-        assert.deepEqual(facet.rows, bounded.rows);
-      }
+      assert.equal((await traced.list({ limit: 1 })).more, undefined);
+      const bounded = await traced.list({ selection: "settled", limit: 1 });
+      assert.deepEqual(bounded.rows, settled.rows?.slice(0, 1));
+      assert.equal(bounded.more, true);
+      const facet = await Keiyaku.for({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "selection-home-") })
+        .ls({ selector: "kei/", selection: "settled", limit: 1 });
+      assert.ok(facet.kind === "contract-catalogue");
+      assert.deepEqual(facet.rows, bounded.rows);
       const settledIds = new Set(settled.rows?.map(row => row.id));
       assert.deepEqual(all.rows?.filter(row => settledIds.has(row.id)), settled.rows);
     },

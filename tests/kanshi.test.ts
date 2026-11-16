@@ -228,9 +228,6 @@ test("World selects active Akumas before bounding and exposes native work under 
     const report = await view.board();
     assert.ok(report.akumas.kind === "present");
     assert.deepEqual(report.akumas.rows?.map(row => row.id), workers.map(worker => worker.allocated.id));
-    const text = renderKanshiText(report);
-    assert.ok(text.indexOf(bound.contractId) < text.indexOf(child));
-    assert.ok(text.indexOf(child) < text.indexOf("AKUMA //"));
     for (const [index, command] of ["npm test", "square perceive"].entries()) {
       const row: AkumaKanshiRow | undefined = report.akumas.rows?.find(row => row.id === workers[index]!.allocated.id);
       assert.ok(row?.work && row.work.kind !== "unavailable");

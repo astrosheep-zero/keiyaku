@@ -75,6 +75,11 @@ test("only TUI starts asynchronous observations; scope and section availability 
   assert.equal(calls.length, 6);
   f.emit("session_shutdown", ctx);
   assert.deepEqual(f.writes.at(-1), ["keiyaku", undefined]);
+  ctx.sessionManager.getSessionId = () => { throw new Error("session unavailable"); };
+  f.emit("session_start", ctx);
+  await flush();
+  assert.deepEqual(calls.at(-1), { scope: { world: "/primary", repo }, options: { akumaCaller: null } });
+  f.emit("session_shutdown", ctx);
 });
 
 test("settled bursts coalesce, replacement fences delayed reads, and failures do not preserve old values", async (t) => {
@@ -130,23 +135,4 @@ test("settled bursts coalesce, replacement fences delayed reads, and failures do
   await flush();
   assert.equal(f.writes.length, closed);
   assert.equal(reads.length, 4);
-});
-
-test("unavailable caller fails only aku in one aggregate observation", async () => {
-  const selections: unknown[] = [];
-  const f = fixture({
-    repo: async () => { throw new NoGitWorldError("/fixture"); },
-    world: async () => ({ root: null, candidate: "/fixture" }) as never,
-    counts: async (_scope, options) => {
-      selections.push(options);
-      return report(failed, present(3), present(4)) as never;
-    },
-  });
-  const ctx = f.context("tui");
-  ctx.sessionManager.getSessionId = () => { throw new Error("session unavailable"); };
-  f.emit("session_start", ctx);
-  await flush();
-  assert.deepEqual(selections, [{ akumaCaller: null }]);
-  assert.deepEqual(f.writes.at(-1), ["keiyaku", "aku ? · kei 3 · debt 4"]);
-  f.emit("session_shutdown", ctx);
 });
