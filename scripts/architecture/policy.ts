@@ -21,6 +21,7 @@ const contractOwner = {
   allow: [
     errorBase,
     runtime("akuma/identity.ts", ["akumaIdSchema"]),
+    types("bounded-list.ts", ["LifecycleSelection"]),
     any("body/**"),
     any("contract-guidance.ts"),
     any("contract-worktree.ts"),
@@ -79,6 +80,7 @@ const targetPlacementRuntime = runtime("git/target-placement.ts");
 const libraryOwner = {
   allow: [
     errorBase,
+    types("bounded-list.ts", ["LifecycleSelection"]),
     any("akuma/**"),
     any("alias/**"),
     any("body/**"),
@@ -397,6 +399,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/keiyaku-verbs.ts",
       allow: [
         ...libraryOwner.allow.filter((rule) => rule.target !== "library/**"),
+        runtime("bounded-list.ts", ["lifecycleSelectionSchema"]),
         any("library/keiyaku-classify.ts"),
         any("library/input.ts", ["amendInputSchema"]),
         any("library/contract-outcomes.ts"),
@@ -510,6 +513,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("protocol/placement.ts"),
         any("protocol/run.ts"),
       ],
+    },
+    {
+      source: "library/contract-composition.ts",
+      allow: [...contractOwner.allow, runtime("bounded-list.ts", ["lifecycleSelection"])],
+      deny: contractOwner.deny,
     },
     { source: "library/contract*.ts", ...contractOwner },
     { source: "library/contract/**", ...contractOwner },
@@ -862,6 +870,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "index.ts",
       allow: [
+        types("bounded-list.ts", ["LifecycleSelection"]),
         any("errors.ts", ["KeiyakuError", "KeiyakuErrorCategory", "KeiyakuErrorOptions", "NextCall"]),
         any("body-host.ts", ["AkumaHost", "AkumaHostScope"]),
         any("akuma/index.ts"),

@@ -1,4 +1,5 @@
 import { KeiyakuError } from "../errors.js";
+import { lifecycleSelection, type LifecycleSelection } from "../bounded-list.js";
 import { z } from "zod";
 import {
   debtRefSchema,
@@ -174,12 +175,11 @@ class DebtsHandle {
   addDocument(input: AddDebtDocumentInput): Promise<DebtMutationResult> {
     return addDebtDocument(this.world, addDocumentInput(input));
   }
-  async list(input: Readonly<{ selection?: "active" | "closed" | "all"; limit?: number }> = {}): Promise<DebtList> {
+  async list(input: Readonly<{ selection?: LifecycleSelection; limit?: number }> = {}): Promise<DebtList> {
     const v = fields(input, ["selection", "limit"], "list input");
-    if (v.selection !== undefined && v.selection !== "active" && v.selection !== "closed" && v.selection !== "all")
-      throw new KeiyakuError("invalid-input", "selection must be active, closed, or all");
+    const selection = lifecycleSelection(v.selection);
     return {
-      ...(await listDebts(this.world, v.selection ?? "active", boundedListLimit(v.limit))),
+      ...(await listDebts(this.world, selection, boundedListLimit(v.limit))),
       kind: "debt-catalogue",
     };
   }

@@ -16,8 +16,8 @@ leaf help and the parser, not this chapter.
 
 The Debt CLI adapts through the invocation facet, preserving native answers.
 Root listing calls Debt's native list, and addressed reads use the same Debt
-owner. Listing defaults to open work, with explicit terminal or complete
-selection applied before bounding. Readiness and blocking remain Debt-owned
+owner. Listing uses Debt's active or settled classification, defaulting to active
+work, with explicit settled or complete selection applied before bounding. Readiness and blocking remain Debt-owned
 graph views. The CLI offers no expression language or custom catalogue order.
 The Debt CLI acquires only the input a selected verb permits and refuses an
 ambiguous, surplus, or ill-formed request before invoking Debt. Catalogues cover

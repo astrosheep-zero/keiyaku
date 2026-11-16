@@ -4,7 +4,7 @@ import { listAkumaNameDefinitions, type AkumaNameCatalog, type AkumaNameCatalogI
 import type { AkumaCaller } from "../akuma/caller.js";
 import type { AkumaRosterInput } from "../akuma/akuma.js";
 import { observeAkumaRoster, readAkumaTimeline, rosterInput } from "../akuma/akuma.js";
-import { boundedListLimit } from "../bounded-list.js";
+import { boundedListLimit, type LifecycleSelection } from "../bounded-list.js";
 import { boundedMap } from "../akuma/read-pool.js";
 import { projectCurrentWork } from "../akuma/status-projection.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
@@ -90,14 +90,20 @@ class AkumasHandle {
   }
 
   async list(input: AkumaListInput = {}): Promise<AkumaList> {
-    const { repo, ...native } = requireInput(input, "Akumas.list input", ["repo", "akumaName", "caller", "limit"]);
+    const { repo, ...native } = requireInput(input, "Akumas.list input", [
+      "repo",
+      "akumaName",
+      "caller",
+      "selection",
+      "limit",
+    ]);
     if (repo !== undefined && !(repo instanceof Repo))
       throw new KeiyakuError("invalid-input", "Akumas.list repo must be a Repo");
     const selection = rosterInput(native, true);
     const limit = boundedListLimit(native.limit);
     const path = await World.prove(this.#world);
     const [roster, aliases] = await Promise.all([
-      akumaRowsAt(path, limit, selection.akumaName, selection.caller),
+      akumaRowsAt(path, limit, selection.akumaName, selection.caller, { selection: selection.selection ?? "active" }),
       aliasesAt(path),
     ]);
     if (repo === undefined) return joinedAkumas(roster, aliases, { kind: "absent" });
@@ -220,9 +226,9 @@ export async function akumaRowsAt(
   limit: number,
   name?: string,
   caller?: AkumaCaller,
-  snapshotRows = 0,
+  options: Readonly<{ snapshotRows?: number; selection?: LifecycleSelection }> = {},
 ): Promise<AkumaList> {
-  const source = await observeAkumaRoster(world, limit, name, caller);
+  const source = await observeAkumaRoster(world, limit, name, caller, options.selection);
   const rows = await boundedMap([...(source.rows ?? []).entries()], async ([index, row]): Promise<AkumaKanshiRow> => {
     if (row.kind === "unborn") {
       const { kind: _kind, ...summary } = row;
@@ -230,7 +236,7 @@ export async function akumaRowsAt(
     }
     const { kind: _kind, caller, ...facts } = row;
     const summary = { ...facts, ...(caller?.kind === "akuma" ? { parentAkumaId: caller.akumaId } : {}) };
-    if (index >= snapshotRows) return summary;
+    if (index >= (options.snapshotRows ?? 0)) return summary;
     try {
       return { ...summary, work: projectCurrentWork(await readAkumaTimeline(world, row.id)) };
     } catch (error) {

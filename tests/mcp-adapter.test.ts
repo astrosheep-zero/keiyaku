@@ -69,12 +69,14 @@ test("MCP ls composes one object with the shared applicability checks", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.ls.input);
   for (const valid of [
     { selector: "kei/" },
-    { selector: "debt/", selection: "closed", limit: 1 },
+    { selector: "debt/", selection: "settled", limit: 1 },
+    { selector: "kei/", selection: "all" },
+    { selector: "aku/*", selection: "settled", mine: true },
     { selector: "aku/*", mine: false },
   ])
     assert.equal(schema.safeParse(valid).success, true, JSON.stringify(valid));
   for (const invalid of [
-    { selector: "kei/", selection: "all" },
+    { selector: "aku/", selection: "all" },
     { selector: "kei/", mine: false },
     { selector: "debt/", mine: true },
     { selector: "aku/", mine: true },
@@ -229,7 +231,7 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["debt.add", { title: "Unwritten", actor: "operator" }],
     ["ls", { selector: "kei/", mine: true }],
     ["ls", { selector: "kei/", mine: false }],
-    ["ls", { selector: "kei/", selection: "all" }],
+    ["ls", { selector: "aku/", selection: "all" }],
     ["spawn", { akumaName: "worker", writableDirectories: [cwd] }],
     ["spawn", { akumaName: "worker", prompt: "work", wait: "10m" }],
     ["tell", { akuma: "@worker", prompt: "work", wait: "10m" }],
@@ -459,7 +461,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal((await facet.debtUpdate({ id: dropped.id, state: "drop" })).kind, "accepted");
   for (const input of [
     { limit: 1 },
-    { selection: "closed", limit: 1 },
+    { selection: "settled", limit: 1 },
     { selection: "all", limit: 1 },
   ] as const) {
     const listed = await client.callTool({ name: "ls", arguments: { selector: "debt/", ...input } });
@@ -529,11 +531,11 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(history.isError, false, JSON.stringify(history));
   const last = await client.callTool({ name: "history", arguments: { cwd: first, selector: worker.id, last: true } });
   assert.equal(last.isError, false, JSON.stringify(last));
-  const catalogue = await Akumas.of(world).list({ repo, limit: 1 });
+  const catalogue = await Akumas.of(world).list({ repo, limit: 1, selection: "all" });
   assert.deepEqual(catalogue.rows?.[0]?.contract, { kind: "associated", contractId: bound.contractId });
   for (const [name, input, expected] of [
     ["ls", { selector: "kei/", limit: 1 }, await Keis.of(repo).list({ limit: 1 })],
-    ["ls", { selector: "aku/*", limit: 1 }, catalogue],
+    ["ls", { selector: "aku/*", limit: 1, selection: "all" }, catalogue],
     ["ls", { selector: "aku/" }, await Akumas.akumaNames({ cwd: world, home: cwd })],
 
     ["status", { id: bound.contractId }, await Kanshi.of({ world, repo }).contract(bound.contractId)],
@@ -638,7 +640,7 @@ test("SDK routing keeps optional panel failures in text without publishing unava
   const rows = (contracts.structuredContent as { rows: { id: string; hasAttention: true }[] }).rows;
   assert.deepEqual(rows.map(({ id, hasAttention }) => ({ id, hasAttention })), [{ id: bound.contractId, hasAttention: true }]);
   assert.equal(Object.hasOwn(rows[0]!, "attention"), false);
-  const akumas = await client.callTool({ name: "ls", arguments: { selector: "aku/*" } });
+  const akumas = await client.callTool({ name: "ls", arguments: { selector: "aku/*", selection: "all" } });
   assert.equal(akumas.isError, false);
   assert.equal(Object.hasOwn(akumas.structuredContent!, "aliasesError"), false);
   assert.equal(Object.hasOwn((akumas.structuredContent as { rows: object[] }).rows[0]!, "contract"), false);

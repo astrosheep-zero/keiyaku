@@ -195,7 +195,7 @@ test("wire validation and classification reject malformed calls before observati
       { ids: ["debt/a"] }, { selector: ["debt/a"] }, { selector: "" }, { selector: " " },
       { selector: "aku/worker/1234abcd" }, { selector: "debt/" }, { selector: "@*" }, { selector: "@" }]],
     ["kill", [{ akuma: ["aku/worker/1234abcd"] }, { akuma: " " }]],
-    ["ls", [{ selector: "kei/", selection: "all" }, { selector: "debt/", mine: true },
+    ["ls", [{ selector: "aku/", selection: "all" }, { selector: "debt/", mine: true },
       { selector: "aku/", mine: true }, { selector: "aku/*", caller: "aku/intern/00000001" }, { selector: "aku/*", selection: "closed" }]],
     ["status", [{}, { id: "debt/a" }, { id: "aku/*" }, { ids: ["kei/a", "kei/b"] }]],
   ] as const) for (const input of inputs) {
@@ -220,14 +220,16 @@ test("ls uses one strict object and refuses inapplicable filters before discover
   const input = Keiyaku.verbs.ls.input;
   for (const valid of [
     { selector: "kei/" },
-    { selector: "debt/", selection: "closed", limit: 1 },
+    { selector: "debt/", selection: "settled", limit: 1 },
+    { selector: "kei/", selection: "all" },
+    { selector: "aku/*", selection: "settled", mine: true },
     { selector: "aku/" },
     { selector: "aku/*", mine: false },
     { selector: "aku/worker" },
   ])
     assert.equal(input.safeParse(valid).success, true, JSON.stringify(valid));
   for (const invalid of [
-    { selector: "kei/", selection: "all" },
+    { selector: "aku/", selection: "all" },
     { selector: "kei/", mine: false },
     { selector: "debt/", mine: true },
     { selector: "aku/", mine: true },
@@ -240,7 +242,7 @@ test("ls uses one strict object and refuses inapplicable filters before discover
     assert.equal(input.safeParse(invalid).success, false, JSON.stringify(invalid));
   const facet = Keiyaku.at({ cwd: join(temporaryDirectory(t, "keiyaku-verbs-ls-"), "missing"), environment: {} });
   for (const inapplicable of [
-    { selector: "kei/", selection: "all" },
+    { selector: "aku/", selection: "all" },
     { selector: "kei/", mine: false },
   ] as const)
     await assert.rejects(facet.run("ls", inapplicable), (error: unknown) => {

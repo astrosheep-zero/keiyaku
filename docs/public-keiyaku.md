@@ -100,8 +100,13 @@ observation. The independent selector-free Kanshi read owns the World report;
 status requires one complete Contract or Akuma identity and never falls back to
 World observation. A missing Contract is refused; a failed exact Contract read
 is an operational failure. Catalogues identify their Contract, Akuma-instance, akumaName, or Debt family even
-when empty or unavailable. Instance caller selection and Debt lifecycle selection
-belong only to their respective owners and precede bounding. Invocation caller
+when empty or unavailable. Contract, Debt, and Akuma-instance catalogues share
+active, settled, or complete selection, defaulting to active: still in play versus
+at rest. Each product owns its lifecycle classification and retains its own row
+vocabulary; invocation never reclassifies it. Lifecycle selection is refused for
+akumaName definitions. Instance caller selection remains instance-only and
+intersects lifecycle selection before bounding; the remainder describes that
+filtered set. Invocation caller
 scoping selects only this invocation's effective caller identity; absent or
 ambiguous identity is usage. The native Akumas composition independently retains
 explicit caller selection. There is no

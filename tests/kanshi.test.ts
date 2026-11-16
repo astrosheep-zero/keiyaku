@@ -732,8 +732,10 @@ test("birthless members retain associations without timelines and born snapshot 
   const catalogue = await Akumas.of(world).list({ repo });
   assertWireRoundTrip(akumaCatalogueSchema, catalogue);
   assert.deepEqual(reads, []);
-  assert.deepEqual(catalogue.rows!.map(row => row.id), [unborn.id, born.id, stillborn.id, peer.id]);
-  for (const row of catalogue.rows!.filter(row => row.life === "unborn" || row.life === "stillborn"))
+  assert.deepEqual(catalogue.rows!.map(row => row.id), [unborn.id, born.id, peer.id]);
+  const all = await Akumas.of(world).list({ repo, selection: "all" });
+  assert.deepEqual(all.rows!.map(row => row.id), [unborn.id, born.id, stillborn.id, peer.id]);
+  for (const row of all.rows!.filter(row => row.life === "unborn" || row.life === "stillborn"))
     assert.deepEqual(row.contract, { kind: "associated", contractId: "kei/catalogue" });
   reads.length = 0;
   const report = await Kanshi.of({ world, repo }).board();

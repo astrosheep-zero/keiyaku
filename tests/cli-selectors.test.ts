@@ -106,11 +106,11 @@ test("instance listing preserves bounded native rows and reads no Debt authority
     root: world, akumaName: "worker", draw: index.toString(16).padStart(8, "0"),
     createdAt: `2026-08-09T00:00:0${index}.000Z`,
   });
-  const owner = await Akumas.of(world).list({ limit: 2 });
+  const owner = await Akumas.of(world).list({ limit: 2, selection: "all" });
   await moveAlias({ world, alias: parseAkumaAlias("@recent"), akumaId: owner.rows![0]!.id });
   mkdirSync(join(world, ".keiyaku", "debts"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not Debt authority\n");
-  const listed = await cliJson<AkumaList>(["-C", world, "ls", "aku/*/*", "--limit", "2"], { environment: {} });
+  const listed = await cliJson<AkumaList>(["-C", world, "ls", "aku/*/*", "--all", "--limit", "2"], { environment: {} });
   assert.equal(listed.exit, 0, listed.stderr);
   assert.deepEqual(listed.value.rows?.map(row => row.id), owner.rows!.map(row => row.id));
   assert.equal(listed.value.more, true);

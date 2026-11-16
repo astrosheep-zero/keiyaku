@@ -185,7 +185,11 @@ Tell and kill return their primary evidence; ask returns its input-bound observa
 
 `Akumas.list` is one bounded recent-activity roster observation and preserves
 the owner's membership, semantic order, and observed extent; it does not count
-or reopen the whole roster. Reading it is observation only and never retires an
+or reopen the whole roster. It defaults to active instances and may select settled
+instances or both, using the Akuma owner's classification without renaming life.
+Lifecycle and caller restrictions intersect before the bound; the remainder
+refers only to matching instances. akumaName definitions have no lifecycle
+selection. Reading it is observation only and never retires an
 entry. Its optional caller selection narrows that one World's roster to the
 selected caller's directly and transitively descended Akumas; the caller
 closure is completed across akumaNames before any akumaName filter, activity

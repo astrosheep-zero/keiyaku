@@ -1,6 +1,7 @@
 /** @architectureCompositionRoot */
 import type { ContractId } from "../core/facts/types.js";
 import { KeiyakuError } from "../errors.js";
+import { lifecycleSelection } from "../bounded-list.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import {
   contractCatalogueOperation,
@@ -129,19 +130,20 @@ async function reconcileKeiyaku(
 }
 
 export async function listKeis(scope: RepositoryScope, input: ContractListInput): Promise<ContractList> {
-  const values = requireInput(input, "Keis.list input");
-  for (const key of Object.keys(values)) {
-    if (key !== "limit") throw new KeiyakuError("invalid-input", `Keis.list input has unknown field: ${key}`);
-  }
+  const values = requireInput(input, "Keis.list input", ["selection", "limit"]);
+  const selection = lifecycleSelection(values.selection);
   const limit = values.limit;
-  if (limit === undefined) {
-    return readContractValue(() =>
-      withGitDecodeChannel(scope, (channel) => contractCatalogueOperation({ scope, channel })),
-    );
-  }
-  if (typeof limit !== "number") throw new KeiyakuError("invalid-input", "Contract list limit must be a number");
+  if (limit !== undefined && typeof limit !== "number")
+    throw new KeiyakuError("invalid-input", "Contract list limit must be a number");
   return readContractValue(() =>
-    withGitDecodeChannel(scope, (channel) => contractCatalogueOperation({ scope, channel, limit })),
+    withGitDecodeChannel(scope, (channel) =>
+      contractCatalogueOperation({
+        scope,
+        channel,
+        selection,
+        ...(limit === undefined ? {} : { limit }),
+      }),
+    ),
   );
 }
 

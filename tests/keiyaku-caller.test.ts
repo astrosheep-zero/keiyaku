@@ -59,7 +59,7 @@ test("one effective caller selection serves spawn, whoami, mine and actor-only o
       const child = Akuma.select(world, spawned.akumaId);
       assert.equal((await child.idle({ timeoutMs: 30_000 })).reason, "completed");
       assert.deepEqual((await child.status()).birth.caller, expectedCaller);
-      const mine = await facet.ls({ selector: "aku/*", mine: true });
+      const mine = await facet.ls({ selector: "aku/*", mine: true, selection: "all" });
       assert.equal(mine.kind, "akuma-catalogue");
       if (mine.kind !== "akuma-catalogue") assert.fail("expected Akuma list");
       assert.deepEqual(mine.rows?.map((row) => row.id), [spawned.akumaId]);

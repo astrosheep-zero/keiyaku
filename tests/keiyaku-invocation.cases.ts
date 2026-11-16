@@ -38,7 +38,7 @@ test("Debt facet preserves native lifecycle, flat World listing, and absent Worl
   for (const id of [first.id, second.id])
     assert.deepEqual(await facet.show({ selector: id }), await Debts.of(world).read({ ids: [id] }));
   assert.equal((await facet.debtUpdate({ id: first.id, state: "done", note: "finished" })).kind, "accepted");
-  for (const selection of ["active", "closed", "all"] as const)
+  for (const selection of ["active", "settled", "all"] as const)
     assert.deepEqual(await facet.ls({ selector: "debt/", selection, limit: 1 }), await Debts.of(world).list({ selection, limit: 1 }));
 });
 
@@ -117,9 +117,9 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.deepEqual(await facet.ls({ selector: "debt/" }), nativeDebts);
   assert.equal(nativeDebts.kind, "debt-catalogue");
   assert.equal(nativeDebts.rows![0]?.id, debtA);
-  const nativeWorkers = await Akumas.of(worldA).list({ akumaName: "worker", repo: repoB });
+  const nativeWorkers = await Akumas.of(worldA).list({ akumaName: "worker", repo: repoB, selection: "all" });
   assert.equal(nativeWorkers.rows![0]?.id, worker.id);
-  const selectedWorkers = await facet.ls({ selector: "aku/worker" });
+  const selectedWorkers = await facet.ls({ selector: "aku/worker", selection: "all" });
   if (selectedWorkers.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
   const { observedAt: _facetWorkersAt, ...facetWorkers } = selectedWorkers;
   const { observedAt: _nativeWorkersAt, ...comparableWorkers } = nativeWorkers;

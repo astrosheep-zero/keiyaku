@@ -229,8 +229,10 @@ The native roster is an internal bounded recent-activity observation. Reading it
 status, history, wait, tell, ask, or any other observation
 never retires an entry. Its order is the later of each readable Heart's life and
 activity evidence, with complete identity breaking equal activity and
-untimestamped rows following timestamped rows. The observation says whether another readable member lies
-beyond its bounded result without claiming a total or a frozen continuation.
+untimestamped rows following timestamped rows. A lifecycle-selected roster uses
+the Akuma owner's active or settled classification before bounding, together with
+any caller selection. The observation says whether another readable matching member
+lies beyond its bounded result without claiming a total or a frozen continuation.
 It supplies identity, life evidence, recent activity, and pending-work information
 without loading each history. Alias and current-work enrichment belong to the
 World-bound catalogue composition. Frozen caller attribution remains available to the owner for exact

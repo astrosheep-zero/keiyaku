@@ -72,6 +72,12 @@ not retire; it permanently refuses same-identity succession even after physical
 leash release. A later body may supersede untidy history but never hung history.
 Stopping a Body preserves Soul, sessions, history, and pending tells.
 
+Catalogue classification is independent of whether an observation can finish:
+running, unborn, stranded, hung, and untidy Akumas are active, still in play;
+asleep, killed, and stillborn Akumas are settled, at rest. Stuck execution remains
+active rather than disappearing from the flagship's unresolved work. This
+classification changes neither life evidence nor succession or retention judgment.
+
 ## Inactive Retention
 
 The default retention age for an inactive Akuma is fifteen days. No setting,

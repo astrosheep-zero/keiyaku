@@ -131,7 +131,10 @@ native stop evidence. Wait retains caller-selected batching.
 
 `ls` routes Contract rows through the Repo-bound Contract collection, Akuma instances
 through `Akumas.of(world).list`, akumaNames through their definition owner, and
-Debts through the native World-wide Debt list with its default open-work selection.
+Debts through the native World-wide Debt list. Contract, Debt, and Akuma-instance
+catalogues use their owners' active or settled classification, default to active,
+and permit settled or complete selection before bounding; akumaName catalogues
+refuse lifecycle selection.
 Contract-only selection, including region lookup, delegates to the public
 Contract resolver owned by [public-api.md](public-api.md). The edge renders its
 typed refusal evidence as invocation diagnostics without owning candidate

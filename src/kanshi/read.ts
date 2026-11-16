@@ -315,7 +315,7 @@ export async function observeKanshi(input: KanshiInput, options: KanshiBoardOpti
   const [aliases, akumaProduct, debts] = await Promise.all([
     aliasesAt(world),
     contract === undefined && world !== null
-      ? akumaRowsAt(world, akumaLimit, undefined, undefined, ROSTER_SNAPSHOT_ROWS).then(
+      ? akumaRowsAt(world, akumaLimit, undefined, undefined, { snapshotRows: ROSTER_SNAPSHOT_ROWS }).then(
           ({ kind: _kind, observedAt: _observedAt, ...rows }): BoardSection<AkumaKanshiWorld> => ({
             kind: "present",
             ...rows,

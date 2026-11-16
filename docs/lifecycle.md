@@ -10,6 +10,9 @@ A Contract is bound from binding until it is either accepted or abandoned;
 delivery is a recorded fact on a bound Contract, never a phase of its own.
 Binding alone places the Contract in its bound phase; there is no pre-phase.
 Terminal state is a journal-derived read model, never a separate record.
+For catalogue selection, bound Contracts are active; accepted and abandoned
+Contracts are settled. Active means still in play, while settled means at rest;
+this classification neither changes phase nor reopens terminal authority.
 Binding fixes the start and workspace coordinates and initial terms. Amendment
 may replace active terms, including declared dependencies and gates, and may
 explicitly select a different target. An amendment names only what it replaces;

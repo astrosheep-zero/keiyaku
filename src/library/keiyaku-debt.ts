@@ -12,8 +12,12 @@ import { addInput, addDocumentInput, record, debtId, updateInput } from "../debt
 import { parseDebtCreationDocument } from "../debt/document.js";
 import { invocationCoordinates } from "./keiyaku-coordinates.js";
 import type { KeiyakuAt } from "./keiyaku.js";
+import type { LifecycleSelection } from "../bounded-list.js";
 
-type DebtListInvocation = Readonly<{ selection?: "active" | "closed" | "all"; limit?: number }>;
+type DebtListInvocation = Readonly<{
+  selection?: LifecycleSelection;
+  limit?: number;
+}>;
 export type DebtUpdateInvocation = UpdateDebtInput & Readonly<{ id: string }>;
 
 const coordinates = (at: KeiyakuAt) => invocationCoordinates({ ...at, use: "none" });

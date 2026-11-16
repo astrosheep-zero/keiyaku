@@ -55,8 +55,8 @@ test("command family and leaf help expose executable usage and flags", () => {
   const statusHelp = renderContractHelp("status");
   assert.match(statusHelp, /status <kei\/\.\.\.\|aku\/\.\.\.\|@name>/u);
   const lsHelp = renderContractHelp("ls");
-  assert.match(lsHelp, /--mine \[--limit <count>\]/u);
-  assert.match(lsHelp, /ls debt\[\/\] \[--closed \| --all\] \[--limit <count>\]/u);
+  assert.match(lsHelp, /--mine \[--settled \| --all\] \[--limit <count>\]/u);
+  assert.match(lsHelp, /ls debt\[\/\] \[--settled \| --all\] \[--limit <count>\]/u);
 });
 
 test("leaf help and usage refusals share accepted invocation options", () => {

@@ -1,5 +1,6 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
+import { lifecycleSelectionSchema } from "../bounded-list.js";
 export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
 import { durationSchema } from "../akuma/call-input.js";
 import { parseDuration } from "../duration.js";
@@ -103,11 +104,10 @@ const commonBind = {
 const jsonDocument = z.record(z.string(), z.unknown()).readonly();
 const contractSelector = text.startsWith("kei/");
 const akumaSelector = text.regex(/^(?!kei\/)/u);
-const debtSelection = z
-  .enum(["active", "closed", "all"])
+const catalogueSelection = lifecycleSelectionSchema
   .exactOptional()
   .describe(
-    'Debt lifecycle filter (valid only with "debt"/"debt/"): "active" (open, default), "closed" (done or drop), or "all".',
+    'Lifecycle selection for Contract, Debt, and Akuma-instance catalogues: "active" (still in play, default), "settled" (at rest), or "all". Not valid for akumaName values (aku/).',
   );
 const catalogueSelector =
   'Catalogue path selector: "kei"/"kei/", "debt"/"debt/", "aku"/"aku/" (akumaName values), or "aku/*" / "aku/*/*" / "aku/<name>" / "aku/<name>/*" (instances).';
@@ -117,14 +117,17 @@ const lsInputSchema = z
       .regex(/^(?:kei|debt|aku)\/?$|^aku\/(?:\*(?:\/\*)?|[^/*]+(?:\/\*|\/)?)$/u)
       .describe(catalogueSelector),
     limit: positive.exactOptional().describe("Maximum rows to return (positive integer)."),
-    selection: debtSelection,
+    selection: catalogueSelection,
     mine: optBool.describe(
       "When true on an Akuma-instance selector, restrict to direct and transitive descendants of this server environment's caller identity.",
     ),
   })
   .superRefine(({ selector, selection, mine }, context) => {
-    if (selection !== undefined && selector !== "debt" && selector !== "debt/")
-      context.addIssue({ code: "custom", message: "selection is valid only with a Debt catalogue" });
+    if (selection !== undefined && (selector === "aku" || selector === "aku/"))
+      context.addIssue({
+        code: "custom",
+        message: "selection is valid only with a Contract, Debt, or Akuma-instance catalogue",
+      });
     if (mine !== undefined && (!selector.startsWith("aku/") || selector === "aku/"))
       context.addIssue({ code: "custom", message: "mine is valid only with an Akuma-instance catalogue" });
   })
@@ -576,7 +579,7 @@ export const verbs = Object.freeze({
   },
   ls: {
     description:
-      "List ids of one kind: active Contracts (kei/), open Debts (debt/), akumaName values you can birth (aku/), or existing Akumas (aku/*).",
+      "List ids of one kind: Contracts (kei/), Debts (debt/), Akuma instances (aku/*), or akumaName values you can birth (aku/). Lifecycle selection is active (default), settled, or all; akumaName values have no lifecycle selection.",
     input: lsInputSchema,
     output: z.union([contractCatalogueSchema, akumaCatalogueSchema, akumaNameCatalogSchema, debtCatalogueSchema]),
     normal: z.union([contractCatalogueSchema, akumaCatalogueSchema, akumaNameCatalogSchema, debtListSchema]),

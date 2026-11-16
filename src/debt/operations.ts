@@ -19,7 +19,7 @@ import {
 import { allocateLocalId, deriveLocalStem, type DebtId } from "./identity.js";
 import { nukeDebtAuthority, readBoard, readDebtDocument, replaceAuthority, withDebtLocks } from "./store.js";
 import type { WorldRoot } from "../world.js";
-import { boundedListLimit, projectBoundedList } from "../bounded-list.js";
+import { boundedListLimit, projectBoundedList, type LifecycleSelection } from "../bounded-list.js";
 import { advanceDebtTimestamp } from "./view.js";
 export type {
   AddDebtDocumentInput,
@@ -182,7 +182,7 @@ function readPage<T>(
 }
 export async function listDebts(
   world: WorldRoot,
-  selection: "active" | "closed" | "all",
+  selection: LifecycleSelection,
   limit?: number,
 ): Promise<Extract<DebtReadPage<DebtSummary>, { kind: "present" }>> {
   const selectedLimit = boundedListLimit(limit);

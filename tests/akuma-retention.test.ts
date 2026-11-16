@@ -159,7 +159,7 @@ test("a successful call runs the maintenance pass while read-only observations n
   const old = await oldAkuma(world, "a0000001");
   const recent = await oldAkuma(world, "a0000002", new Date().toISOString());
 
-  const listed = await Akumas.of(world).list();
+  const listed = await Akumas.of(world).list({ selection: "all" });
   assert.ok(listed.rows?.some((row) => row.id === old.id));
   await Akumas.of(world).status({ akuma: old.id });
   await Akumas.of(world).history({ akuma: old.id });
@@ -470,7 +470,7 @@ test("one corrupt candidate is retained without failing the sweep or the ordinar
   ageAkuma(corrupt, OLD);
   const eligible = await oldAkuma(world, "0bad0002");
 
-  const listed = await Akumas.of(world).list();
+  const listed = await Akumas.of(world).list({ selection: "all" });
   assert.equal(existsSync(corrupt.paths.directory), true);
   assert.equal(existsSync(eligible.paths.heart), true, "list alone must not retire");
   assert.ok(listed.rows?.every((row) => row.id !== corrupt.id));

@@ -339,7 +339,7 @@ test("native spawn failure after Soul durability retains TypeError cause and dir
   );
   const [directory] = await childRuns(world);
   assert.ok(directory);
-  assert.ok((await api.list()).rows?.some(row => row.id === confirmedBirth.akumaId && row.life !== "unborn" && row.life !== "stillborn"));
+  assert.ok((await api.list({ selection: "all" })).rows?.some(row => row.id === confirmedBirth.akumaId && row.life !== "unborn" && row.life !== "stillborn"));
 });
 
 test("an abort after confirmed birth keeps the child and its native reason", async (context) => {

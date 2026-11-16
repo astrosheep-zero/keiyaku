@@ -2,7 +2,8 @@ import { KeiyakuError } from "../errors.js";
 import { akumaBirthSchema, akumaCallerKey, decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { readdir, stat } from "node:fs/promises";
 import { z } from "zod";
-import { projectBoundedList } from "../bounded-list.js";
+import { projectBoundedList, lifecycleSelection, type LifecycleSelection } from "../bounded-list.js";
+import { akumaLifecycle } from "./heart/facts.js";
 import type { WorldRoot } from "../world.js";
 import { rosterListRow } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
@@ -63,6 +64,7 @@ export type AkumaCompleteList = Readonly<{
 export type AkumaRosterInput = Readonly<{
   akumaName?: string;
   caller?: AkumaCaller;
+  selection?: LifecycleSelection;
   limit?: number;
 }>;
 
@@ -189,16 +191,17 @@ export async function countRunningAkuma(path: WorldRoot): Promise<number> {
 export function rosterInput(
   input: AkumaRosterInput | Readonly<{ akumaName?: string }>,
   allowLimit: boolean,
-): Readonly<{ akumaName?: string; caller?: AkumaCaller }> {
+): Readonly<{ akumaName?: string; caller?: AkumaCaller; selection?: LifecycleSelection }> {
   if (typeof input !== "object" || input === null || Array.isArray(input))
     throw new KeiyakuError("invalid-input", "Akuma list input must be an object");
-  const allowed = allowLimit ? ["akumaName", "caller", "limit"] : ["akumaName", "caller"];
+  const allowed = allowLimit ? ["akumaName", "caller", "selection", "limit"] : ["akumaName", "caller"];
   const unknown = Object.keys(input).find((key) => !allowed.includes(key));
   if (unknown !== undefined) throw new KeiyakuError("invalid-input", `Akuma list input has unknown field: ${unknown}`);
   const caller = decodeAkumaCaller((input as AkumaRosterInput).caller);
   return {
     ...(input.akumaName === undefined ? {} : { akumaName: validateAkumaName(input.akumaName) }),
     ...(caller === undefined ? {} : { caller }),
+    ...(allowLimit ? { selection: lifecycleSelection((input as AkumaRosterInput).selection) } : {}),
   };
 }
 
@@ -321,6 +324,7 @@ async function pageCallerRows(
   candidates: readonly ActivityCandidate[],
   limit: number,
   admit?: (row: AkumaRosterRow) => Promise<MemberVerdict>,
+  selection: LifecycleSelection = "all",
 ): Promise<CallerPage> {
   const rows: AkumaRosterRow[] = [];
   let skipped = 0;
@@ -333,7 +337,7 @@ async function pageCallerRows(
     for (const row of observed.rows) {
       const verdict = admit === undefined ? "included" : await admit(row);
       if (verdict === "invalid-cache") return { rows, skipped, invalid: true };
-      if (verdict === "included") rows.push(row);
+      if (verdict === "included" && (selection === "all" || akumaLifecycle(row.life) === selection)) rows.push(row);
       else if (verdict === "unknown") skipped += 1;
     }
     rows.sort(compareRows);
@@ -383,6 +387,7 @@ async function readCallerPage(
   limit: number,
   selected: string | undefined,
   caller: AkumaCaller,
+  selection: LifecycleSelection = "all",
 ): Promise<CallerPage> {
   const known = await knownAkuma(path);
   const cached = await readAkumaLineage(path, known.rows);
@@ -392,6 +397,7 @@ async function readCallerPage(
     limit,
     // A cache-proposed identity without a born Soul cannot justify inclusion.
     async (row) => (row.kind === "born" ? await verifyCallerMember(verification, row.id, row.caller) : "invalid-cache"),
+    selection,
   );
   if (!attempted.invalid) return { ...attempted, skipped: attempted.skipped + cached.skipped };
   // One wrong edge makes the whole disposable record untrustworthy.
@@ -400,6 +406,8 @@ async function readCallerPage(
   const repaired = await pageCallerRows(
     await callerCandidates(known.rows, direct.edges, caller, path, selected),
     limit,
+    undefined,
+    selection,
   );
   if (direct.skipped === 0) await rebuildAkumaLineage(path, direct.edges);
   return { ...repaired, skipped: repaired.skipped + direct.skipped };
@@ -424,15 +432,16 @@ export async function observeAkumaRoster(
   limit: number,
   selected?: string,
   caller?: AkumaCaller,
+  selection: LifecycleSelection = "all",
 ): Promise<AkumaRosterPage> {
   const observedAt = new Date().toISOString();
   if (caller !== undefined) {
-    const page = await readCallerPage(path, limit, selected, caller);
+    const page = await readCallerPage(path, limit, selected, caller, selection);
     const bounded = projectBoundedList(page.rows, limit);
     return rosterResult(observedAt, bounded.rows, bounded.hasMore || page.skipped > 0);
   }
   const known = await knownAkuma(path, selected);
-  const ranked = await pageCallerRows(await freshnessOrdered(known.rows), limit);
+  const ranked = await pageCallerRows(await freshnessOrdered(known.rows), limit, undefined, selection);
   const bounded = projectBoundedList(ranked.rows, limit);
   return rosterResult(observedAt, bounded.rows, bounded.hasMore);
 }

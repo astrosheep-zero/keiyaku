@@ -580,14 +580,15 @@ export class Keiyaku {
 
   async #ls(input: VerbInput<"ls">) {
     const bound = input.limit === undefined ? {} : { limit: input.limit };
+    const lifecycle = input.selection === undefined ? {} : { selection: input.selection };
     if (input.selector === "kei" || input.selector === "kei/") {
       const at = await this.#coordinates("required");
-      return Keis.of(at.repo!).list(bound);
+      return Keis.of(at.repo!).list({ ...bound, ...lifecycle });
     }
     if (input.selector === "debt" || input.selector === "debt/")
       return debt.debtLs(this.#input, {
         ...bound,
-        ...(input.selection === undefined ? {} : { selection: input.selection }),
+        ...lifecycle,
       });
     if (input.selector === "aku" || input.selector === "aku/") {
       const at = await this.#coordinates("none");
@@ -603,6 +604,7 @@ export class Keiyaku {
     const caller = await this.#resolveLsCaller(input.mine);
     return akumas.list({
       ...bound,
+      ...lifecycle,
       ...(akumaName === undefined ? {} : { akumaName }),
       ...(caller === undefined ? {} : { caller }),
       ...(at.repo === undefined ? {} : { repo: at.repo }),

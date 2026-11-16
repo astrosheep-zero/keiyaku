@@ -1,6 +1,7 @@
 import {
   debtNonblankTextSchema,
   debtStateSchema,
+  debtLifecycle,
   debtPrioritySchema,
   type DebtDocument,
   type DebtState,
@@ -8,6 +9,7 @@ import {
 import { debtIdSchema, type DebtId } from "./identity.js";
 import { nonEmptyDebtValues, nonEmptyDebtArraySchema } from "./operation-types.js";
 import { z } from "zod";
+import type { LifecycleSelection } from "../bounded-list.js";
 
 export const debtRefSchema = z
   .strictObject({
@@ -81,7 +83,7 @@ export const debtDoctorIssueSchema = z.union([
 ]);
 export type DebtDoctorIssue = z.output<typeof debtDoctorIssueSchema>;
 
-const terminal = (state: DebtState): boolean => state === "done" || state === "drop";
+const terminal = (state: DebtState): boolean => debtLifecycle(state) === "settled";
 const sorted = <T extends { id: string }>(values: Iterable<T>): readonly T[] =>
   [...values].sort((a, b) => Buffer.compare(Buffer.from(a.id), Buffer.from(b.id)));
 export function debtRef(board: DebtBoard, id: DebtId): DebtRef {
@@ -125,9 +127,9 @@ export function projectDebtSummary(board: DebtBoard, debt: DebtDocument): DebtSu
     disposition: debtDisposition(board, debt),
   };
 }
-export function projectRows(board: DebtBoard, selection: "active" | "closed" | "all"): readonly DebtSummary[] {
+export function projectRows(board: DebtBoard, selection: LifecycleSelection): readonly DebtSummary[] {
   return [...board.debts.values()]
-    .filter((debt) => selection === "all" || (selection === "closed") === terminal(debt.state))
+    .filter((debt) => selection === "all" || debtLifecycle(debt.state) === selection)
     .map((debt) => projectDebtSummary(board, debt))
     .sort(compareDebtRows);
 }

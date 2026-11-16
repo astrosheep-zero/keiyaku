@@ -546,7 +546,7 @@ test("native, invocation and CLI listings select lifecycle before bounding the W
   const facet = Keiyaku.at({ cwd: root, environment: {} });
   const cases = [
     { input: {}, ids: [alpha, zebra] },
-    { input: { selection: "closed" }, ids: [done, dropped] },
+    { input: { selection: "settled" }, ids: [done, dropped] },
     { input: { selection: "all" }, ids: [done, dropped, alpha, zebra] },
   ] as const;
   for (const { input, ids } of cases) {
@@ -558,7 +558,7 @@ test("native, invocation and CLI listings select lifecycle before bounding the W
     assert.deepEqual(bounded.rows?.map((row) => row.id) ?? [], ids.slice(0, 1));
     assert.equal(bounded.more, ids.length > 1 ? true : undefined);
     assert.deepEqual(await facet.run("ls", { selector: "debt/", ...input, limit: 1 }), bounded);
-    const flags = "selection" in input ? [input.selection === "closed" ? "--closed" : "--all"] : [];
+    const flags = "selection" in input ? [input.selection === "settled" ? "--settled" : "--all"] : [];
     for (const selector of ["debt", "debt/"]) {
       const cli = await cliJson(["-C", root, "ls", selector, ...flags, "--limit", "1"], { environment: {} });
       assert.equal(cli.exit, 0, cli.stderr);
@@ -841,7 +841,8 @@ test("public inputs reject unknown fields before observing authority", async () 
   assert.throws(() => debts.debt({ id }).update({ state: "started" } as never), /Invalid option/u);
   assert.throws(() => debts.debt({ id }).update({ state: "done", extra: true } as never), /Unrecognized key/u);
   await assert.rejects(debts.list({ extra: true } as never), /unknown field/u);
-  await assert.rejects(debts.list({ selection: "paused" } as never), /selection must be active, closed, or all/u);
+  for (const selection of ["paused", "closed"])
+    await assert.rejects(debts.list({ selection } as never), /selection must be active, settled, or all/u);
   assert.throws(() => Debts.of({ root: debts.root } as never), /Debts.of world/u);
 });
 

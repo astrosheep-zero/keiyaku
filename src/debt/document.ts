@@ -9,6 +9,10 @@ export type DebtPriority = 0 | 1 | 2 | 3;
 // Integer bounds prove the finite priority type without a four-branch wire union.
 export const debtPrioritySchema = z.number().int().min(0).max(3) as z.ZodType<DebtPriority, DebtPriority>;
 export type DebtState = z.infer<typeof debtStateSchema>;
+
+export function debtLifecycle(state: DebtState): "active" | "settled" {
+  return state === "open" ? "active" : "settled";
+}
 export const debtDocumentSchema = z
   .strictObject({
     id: debtIdSchema,

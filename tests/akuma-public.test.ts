@@ -488,7 +488,7 @@ for (const observation of ["status", "wait", "roster"] as const) {
       return await originalTry(paths);
     });
     try {
-      const roster = await Akumas.of(await World.at(root)).list();
+      const roster = await Akumas.of(await World.at(root)).list({ selection: "all" });
       const result =
         observation === "roster"
           ? roster.rows?.find((row) => row.id === value.allocated.id)
@@ -1584,7 +1584,8 @@ test("public Akuma handles separate compact list rows from full status and wait"
   await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
-  const listedRows = (await world.list()).rows;
+  assert.equal((await world.list()).rows, undefined, "asleep instances leave the default active catalogue");
+  const listedRows = (await world.list({ selection: "settled" })).rows;
   assert.ok(listedRows !== undefined);
   const listed = listedRows[0];
   assert.equal(listed?.life, "asleep");
@@ -1690,7 +1691,7 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
     origin: { kind: "fork", parent: direct.id, at: "turn/1" },
   });
 
-  const listed = await world.list({ caller: rootCaller });
+  const listed = await world.list({ caller: rootCaller, selection: "all" });
   const listedRows = listed.rows;
   assert.ok(listedRows !== undefined);
   assert.deepEqual(
@@ -1715,21 +1716,21 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   );
 
   assert.deepEqual(
-    (await world.list({ caller: rootCaller, akumaName: "intern" })).rows?.map((row) => row.id),
+    (await world.list({ caller: rootCaller, akumaName: "intern", selection: "all" })).rows?.map((row) => row.id),
     [greatGrandchild.id, grandchild.id],
     "the closure is complete across archetypes before the name filter",
   );
   assert.deepEqual(
-    (await world.list({ caller: akumaCaller(direct.id) })).rows?.map((row) => row.id),
+    (await world.list({ caller: akumaCaller(direct.id), selection: "all" })).rows?.map((row) => row.id),
     [greatGrandchild.id, grandchild.id],
     "an Akuma caller sees its transitive descendants and not itself",
   );
   assert.deepEqual(
-    (await world.list({ caller: akumaCaller(sibling.id) })).rows?.map((row) => row.id),
+    (await world.list({ caller: akumaCaller(sibling.id), selection: "all" })).rows?.map((row) => row.id),
     [delegation.id],
   );
 
-  const bounded = await world.list({ caller: rootCaller, limit: 2 });
+  const bounded = await world.list({ caller: rootCaller, selection: "all", limit: 2 });
   assert.deepEqual(
     bounded.rows?.map((row) => row.id),
     [delegation.id, greatGrandchild.id],
@@ -1740,7 +1741,7 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   assert.equal(existsSync(cache), true, "the optional lineage cache stays inside this World");
   unlinkSync(cache);
   assert.deepEqual(
-    (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
+    (await world.list({ caller: rootCaller, selection: "all" })).rows?.map((row) => row.id),
     listedRows.map((row) => row.id),
     "an unavailable cache falls back to direct Soul reads",
   );
@@ -1776,13 +1777,13 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
   const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
   await waitForFile(cache);
   assert.deepEqual(
-    (await world.list({ caller })).rows?.map((row) => row.id),
+    (await world.list({ caller, selection: "all" })).rows?.map((row) => row.id),
     [allocated.id],
     "the recorded edge answers the caller-scoped query",
   );
   unlinkSync(cache);
   assert.deepEqual(
-    (await world.list({ caller })).rows?.map((row) => row.id),
+    (await world.list({ caller, selection: "all" })).rows?.map((row) => row.id),
     [allocated.id],
     "the same birth remains discoverable without its cache",
   );
@@ -1833,24 +1834,24 @@ test("a wrong lineage cache edge cannot fabricate members or their ancestor chai
   await recordAkumaLineage(proved, { id: strangerChild.id, caller: akumaCaller(stranger.id) });
   await recordAkumaLineage(proved, { id: unborn.id, caller: rootCaller });
 
-  const listed = await world.list({ caller: rootCaller });
+  const listed = await world.list({ caller: rootCaller, selection: "all" });
   assert.deepEqual(
     listed.rows?.map((row) => row.id),
     [descendant.id, direct.id],
     "only Soul-proven members survive the forged record",
   );
   assert.deepEqual(
-    (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
+    (await world.list({ caller: rootCaller, selection: "all" })).rows?.map((row) => row.id),
     [descendant.id, direct.id],
     "the discarded record is rebuilt from Souls and stays correct",
   );
   assert.deepEqual(
-    (await world.list({ caller: akumaCaller(stranger.id) })).rows?.map((row) => row.id),
+    (await world.list({ caller: akumaCaller(stranger.id), selection: "all" })).rows?.map((row) => row.id),
     [strangerChild.id],
     "the real child remains a child of its real caller",
   );
   assert.deepEqual(
-    (await world.list({ caller: rootCaller, akumaName: "intern" })).rows?.map((row) => row.id),
+    (await world.list({ caller: rootCaller, akumaName: "intern", selection: "all" })).rows?.map((row) => row.id),
     [descendant.id],
   );
 });
@@ -1913,7 +1914,7 @@ test("caller lineage prunes obsolete nonmembers and repairs only missing or inva
   assert.equal(soulReads, 0, "both missing and invalid current edges were repaired, not compatibility-decoded");
   spy.mock.restore();
   assert.deepEqual(
-    (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
+    (await world.list({ caller: rootCaller, selection: "all" })).rows?.map((row) => row.id),
     [sibling.id, direct.id],
     "the vanished identity stays pruned and absent caller attribution stays absent",
   );
@@ -1943,7 +1944,7 @@ test("an unreadable lineage cache recovers after complete Soul evidence, not an 
   const original = heart.prepare("SELECT soul_json FROM soul").get()!.soul_json as string;
   try {
     heart.prepare("UPDATE soul SET soul_json = ?").run("{}");
-    const incomplete = await world.list({ caller });
+    const incomplete = await world.list({ caller, selection: "all" });
     assert.equal(incomplete.rows, undefined);
     assert.equal(incomplete.more, true, "a failed Soul read cannot claim there are no matching members");
     assert.equal(
@@ -1956,7 +1957,7 @@ test("an unreadable lineage cache recovers after complete Soul evidence, not an 
     heart.close();
   }
   assert.deepEqual(
-    (await world.list({ caller })).rows?.map((row) => row.id),
+    (await world.list({ caller, selection: "all" })).rows?.map((row) => row.id),
     [direct.id],
   );
   const prepare = DatabaseSync.prototype.prepare;
@@ -2040,7 +2041,8 @@ test("kill settles a stranded dead Body and later observation presents the kille
   const status = await handle.status();
   assert.equal(status.life, "killed");
   assert.equal("strandedReason" in status, false);
-  const listed = (await world.list()).rows?.find((row) => row.id === allocated.id);
+  assert.equal((await world.list()).rows, undefined, "killed instances are settled");
+  const listed = (await world.list({ selection: "settled" })).rows?.find((row) => row.id === allocated.id);
   assert.equal(listed !== undefined && "life" in listed && listed.life, "killed");
   assert.equal(await handle.kill(noBodyLaunch), "already-killed");
 });

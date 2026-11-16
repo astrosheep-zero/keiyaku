@@ -1,12 +1,12 @@
 import type { BoundedList } from "../bounded-list.js";
 import type { DebtSummary } from "./board.js";
-import type { DebtDocument } from "./document.js";
+import { debtLifecycle, type DebtDocument } from "./document.js";
 import { type DebtId } from "./identity.js";
 import { readRecentDebtDocuments, readDebtDocument, type OpenDebtDocument } from "./store.js";
 import type { WorldRoot } from "../world.js";
 
 function terminal(debt: DebtDocument | undefined): boolean {
-  return debt?.state === "done" || debt?.state === "drop";
+  return debt !== undefined && debtLifecycle(debt.state) === "settled";
 }
 
 export type RecentDebtSummary = Omit<DebtSummary, "disposition"> & Readonly<{ disposition: "ready" | "blocked" }>;

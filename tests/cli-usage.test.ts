@@ -115,7 +115,7 @@ test("Debt listing defaults to active rows and opts into terminal rows", () => {
       return (JSON.parse(result.stdout).rows as readonly { id: string }[]).map((row) => row.id);
     };
     assert.equal(list([]).length, 1);
-    assert.deepEqual(list(["--closed"]), [id]);
+    assert.deepEqual(list(["--settled"]), [id]);
     assert.equal(list(["--all"]).length, 2);
   } finally {
     rmSync(root, { recursive: true, force: true });

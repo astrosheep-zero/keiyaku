@@ -1003,7 +1003,7 @@ test("facade ls reads exactly one selected identity directory", async (t) => {
       kind: "akuma-name-catalogue",
       rows: [{ name: "reviewer", model: "review-model", description: "Complete catalog description." }],
     });
-    const workers = await Akumas.of(await World.at(root)).list({ akumaName: "worker" });
+    const workers = await Akumas.of(await World.at(root)).list({ akumaName: "worker", selection: "all" });
     assert.deepEqual(
       workers.rows?.map((row) => row.id),
       [source.id],
@@ -1039,7 +1039,7 @@ test("Akumas roster returns bounded Heart activity in semantic order", async (t)
     at: "2026-08-11T00:00:03.000Z",
   });
 
-  const page = await Akumas.of(await World.at(root)).list({ akumaName: "worker", limit: 2 });
+  const page = await Akumas.of(await World.at(root)).list({ akumaName: "worker", selection: "all", limit: 2 });
   assert.deepEqual(
     page.rows?.map((row) => row.id),
     [tiedFirst.id, tiedSecond.id],
@@ -1067,7 +1067,7 @@ test("Akumas catalogue preserves readable rows through corrupt Alias authority",
   const source = await answered(root, "worker", "00000003");
   mkdirSync(join(root, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(root, ".keiyaku", "akuma", "alias.json"), "not json\n");
-  const catalogue = await Akumas.of(await World.at(root)).list();
+  const catalogue = await Akumas.of(await World.at(root)).list({ selection: "all" });
   assert.match(catalogue.aliasesError!, /invalid Alias JSON/u);
   assert.deepEqual(catalogue.rows?.map((row) => row.id), [source.id]);
   assert.equal(catalogue.rows?.[0]?.aliases, undefined);

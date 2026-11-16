@@ -1,5 +1,6 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
+import type { LifecycleSelection } from "../bounded-list.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { entryUlidSchema, gateSchema, requirementIdSchema, verdictSchema } from "../protocol/result-leaves.js";
 import type { AttestationData, ContractId } from "../core/facts/types.js";
@@ -119,7 +120,10 @@ export type AmendInput = Readonly<{
   gates?: readonly string[];
 }>;
 export type ArcInput = Readonly<{ markdown: string }>;
-export type ContractListInput = Readonly<{ limit?: number }>;
+export type ContractListInput = Readonly<{
+  selection?: LifecycleSelection;
+  limit?: number;
+}>;
 export type ContractList = ContractCatalogue;
 export type ContractObservationInput = Readonly<{ id: ContractId }>;
 export type ContractResolveInput = Readonly<{ selector?: string; cwd?: string }>;

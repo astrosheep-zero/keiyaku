@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { boundedListLimit } from "../bounded-list.js";
+import { boundedListLimit, type LifecycleSelection } from "../bounded-list.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
 import type { ContractId, ContractState, DeliverData, DocumentKey } from "../core/facts/types.js";
 import { gateReportSchema } from "./result-leaves.js";
@@ -336,11 +336,14 @@ export async function contractCatalogueOperation(
   input: Readonly<{
     scope: RepositoryScope;
     channel: GitDecodeChannel;
+    selection?: LifecycleSelection;
     limit?: number;
   }>,
 ): Promise<ContractCatalogue> {
   const limit = input.limit === undefined ? undefined : boundedListLimit(input.limit);
-  return withGitReadObservation(input.scope, input.channel, (observation) => readContractCatalogue(observation, limit));
+  return withGitReadObservation(input.scope, input.channel, (observation) =>
+    readContractCatalogue(observation, limit, input.selection),
+  );
 }
 
 export async function contractObservationOperation(

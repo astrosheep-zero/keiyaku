@@ -20,6 +20,17 @@ export function boundedListSchema(row: z.ZodType, envelope?: z.ZodRawShape) {
     : z.strictObject(envelope).extend(boundedListBase(row).shape).readonly();
 }
 
+/** Catalogue selection; each product owns the classification of its lifecycle. */
+export const lifecycleSelectionSchema = z.enum(["active", "settled", "all"]);
+export type LifecycleSelection = z.output<typeof lifecycleSelectionSchema>;
+
+export function lifecycleSelection(value: unknown = undefined): LifecycleSelection {
+  if (value === undefined) return "active";
+  const parsed = lifecycleSelectionSchema.safeParse(value);
+  if (!parsed.success) throw new KeiyakuError("invalid-input", "selection must be active, settled, or all");
+  return parsed.data;
+}
+
 export const DEFAULT_BOUNDED_LIST_LIMIT = 50;
 export const MAX_BOUNDED_LIST_LIMIT = 500;
 

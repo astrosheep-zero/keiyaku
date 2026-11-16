@@ -76,23 +76,24 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   });
   const environment = { KEIYAKU_EXTERNAL_CALLER: "test:root" };
   const facet = Keiyaku.at({ cwd: root, environment });
-  const selectedFacet = await facet.ls({ selector: "aku/*", mine: true });
+  const selectedFacet = await facet.ls({ selector: "aku/*", mine: true, selection: "settled" });
   assert.equal(selectedFacet.kind, "akuma-catalogue");
   if (selectedFacet.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
   const { observedAt: _facetTime, ...facetList } = selectedFacet;
-  const { observedAt: _nativeTime, ...nativeList } = await Akumas.of(root).list({ caller: external });
+  const { observedAt: _nativeTime, ...nativeList } = await Akumas.of(root).list({ caller: external, selection: "settled" });
   assert.deepEqual(facetList, nativeList);
   const childEnvironment = { KEIYAKU_ACTOR_ID: direct.id, KEIYAKU_ACTOR_WORLD: root };
-  const selectedChild = await Keiyaku.at({ cwd: root, environment: childEnvironment }).ls({ selector: "aku/*", mine: true });
+  const selectedChild = await Keiyaku.at({ cwd: root, environment: childEnvironment }).ls({ selector: "aku/*", mine: true, selection: "settled" });
   if (selectedChild.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
   const { observedAt: _childTime, ...childList } = selectedChild;
   const { observedAt: _nativeChildTime, ...nativeChildList } = await Akumas.of(root).list({
     caller: { kind: "akuma", world: root, akumaId: direct.id },
+    selection: "settled",
   });
   assert.deepEqual(childList, nativeChildList);
 
-  const shorthand = await cliJson<AkumaList>(["-C", root, "ls", "--mine"], { environment });
-  const globbed = await cliJson<AkumaList>(["-C", root, "ls", "aku/*/*", "--mine"], { environment });
+  const shorthand = await cliJson<AkumaList>(["-C", root, "ls", "--mine", "--settled"], { environment });
+  const globbed = await cliJson<AkumaList>(["-C", root, "ls", "aku/*/*", "--mine", "--settled"], { environment });
   assert.equal(shorthand.exit, 0, shorthand.stderr);
   assert.deepEqual(shorthand.value.rows, globbed.value.rows, "the shorthand and the complete Akuma catalogue agree");
   assert.deepEqual(
@@ -109,7 +110,7 @@ test("ls --mine selects this process caller's World-local descendants", async (t
     false,
   );
 
-  const text = await runCli(["-C", root, "ls", "aku/*/*", "--mine"], { environment });
+  const text = await runCli(["-C", root, "ls", "aku/*/*", "--mine", "--settled"], { environment });
   assert.equal(text.exit, 0, text.stderr);
   const descendantLine = text.stdout.split("\n").find((line) => line.includes(grandchild.id));
   assert.ok(descendantLine, "the descendant remains in the filtered catalogue");
@@ -118,11 +119,11 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   assert.equal(directLine?.includes("· by"), false, "a direct child names no calling Akuma");
   assert.doesNotMatch(text.stdout, /dddd0004/u);
 
-  const childListCli = await cliJson<AkumaList>(["-C", root, "ls", "aku/*/*", "--mine"], {
+  const childListCli = await cliJson<AkumaList>(["-C", root, "ls", "aku/*/*", "--mine", "--settled"], {
     environment: childEnvironment,
   });
   assert.deepEqual((childListCli.value.rows ?? []).map(row => row.id), [grandchild.id]);
-  const childText = await runCli(["-C", root, "ls", "aku/*/*", "--mine"], { environment: childEnvironment });
+  const childText = await runCli(["-C", root, "ls", "aku/*/*", "--mine", "--settled"], { environment: childEnvironment });
   assert.equal(childText.exit, 0, childText.stderr);
   assert.match(childText.stdout, /aku\/intern\/dddd0003/u);
   assert.doesNotMatch(childText.stdout, /· by/u);
@@ -136,7 +137,7 @@ test("ls --mine selects this process caller's World-local descendants", async (t
     await Promise.all([client.connect(a), adapter.server.connect(b)]);
     try {
       await client.listTools();
-      const response = await client.callTool({ name: "ls", arguments: { selector: "aku/*", mine: true } });
+      const response = await client.callTool({ name: "ls", arguments: { selector: "aku/*", mine: true, selection: "settled" } });
       assert.equal(response.isError, false);
       const text = (response.content as { text: string }[])[0]!.text;
       assert.ok(text.includes(grandchild.id));

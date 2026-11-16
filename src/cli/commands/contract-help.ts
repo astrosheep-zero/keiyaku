@@ -246,17 +246,18 @@ export const CONTRACT_COMMAND_SPECS = {
   ls: {
     positional: "optional",
     stdin: "none",
-    flags: { limit: "value", json: "boolean", mine: "boolean", closed: "boolean", all: "boolean" },
+    flags: { limit: "value", json: "boolean", mine: "boolean", settled: "boolean", all: "boolean" },
     usage:
-      'ls debt[/] [--closed | --all] [--limit <count>]\nls kei[/] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--limit <count>]\nls "aku/<name>/*" [--limit <count>]\nls "aku/*" [--limit <count>]\nls "aku/*/*" [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] --mine [--limit <count>]',
+      'ls debt[/] [--settled | --all] [--limit <count>]\nls kei[/] [--settled | --all] [--limit <count>]\nls aku[/] [--limit <count>]\nls aku/<name>[/] [--settled | --all] [--limit <count>]\nls "aku/<name>/*" [--settled | --all] [--limit <count>]\nls "aku/*" [--settled | --all] [--limit <count>]\nls "aku/*/*" [--settled | --all] [--limit <count>]\nls [aku/<name>[/] | "aku/<name>/*" | "aku/*/*"] --mine [--settled | --all] [--limit <count>]',
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
-      "Debt lists open work by default; --closed selects terminal work and --all selects both.",
-      "ls kei lists active Contracts; accepted and abandoned ones leave the list, and their record stays in history and Git.",
+      "Contract, Debt, and Akuma-instance lists select active work by default; --settled selects work at rest and --all selects both.",
+      "Contracts are active while bound; accepted and abandoned Contracts are settled. Open Debts are active; done and dropped Debts are settled.",
+      "Asleep, killed, and stillborn Akumas are settled; running, unborn, stranded, hung, and untidy Akumas remain active.",
       "ls aku/ lists the spawnable Akuma-name catalog; ls aku/<name> lists recent retained Akuma instances under one name.",
       'ls "aku/<name>/*" is the same roster in glob form; ls "aku/*/*" lists recent retained Akuma instances across names.',
       "--mine selects the caller identity of this process and lists that caller's direct and transitive descendants in this World.",
-      "Caller scoping is World-local and refuses for Contract, Debt, or Akuma-name catalogues.",
+      "Caller scoping is World-local, composes with lifecycle selection, and refuses for Contract, Debt, or Akuma-name catalogues. Lifecycle selection also refuses for Akuma-name catalogues.",
       "Descendant rows name their immediate calling Akuma beside the row.",
     ].join("\n"),
   },

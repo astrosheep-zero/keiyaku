@@ -225,6 +225,21 @@ export type LeashProbe = "held" | "free";
 
 export type AkumaLife = "running" | "asleep" | "stranded" | "hung" | "untidy" | "killed";
 
+export function akumaLifecycle(life: AkumaLife | "unborn" | "stillborn"): "active" | "settled" {
+  switch (life) {
+    case "running":
+    case "unborn":
+    case "stranded":
+    case "hung":
+    case "untidy":
+      return "active";
+    case "asleep":
+    case "killed":
+    case "stillborn":
+      return "settled";
+  }
+}
+
 export type HeartSnapshot = Readonly<{
   soul: Soul | null;
   latestBody: BodyFact | null;

@@ -89,7 +89,7 @@ test("chatty status keeps latest intent, observed activity age, current tools an
     const asleep = await api.status({ akuma: id });
     assert.equal(asleep.life, "asleep");
     assert.equal(asleep.lastActivityAt, at, "Turn ending does not advance activity");
-    const listed = (await api.list()).rows?.find(row => row.id === id);
+    const listed = (await api.list({ selection: "settled" })).rows?.find(row => row.id === id);
     assert.equal(listed?.lastActivityAt, asleep.lastActivityAt);
     assert.equal(listed?.lifeAt, settledAt, "Body settlement advances life time independently");
     assert.match(snapshotText(asleep, DEFAULT_CONTEXT), /asleep · last activity \S+ ago/u);

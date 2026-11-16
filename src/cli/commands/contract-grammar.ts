@@ -233,23 +233,21 @@ function parseLs(parts: ContractTokens): VerbRequest<"ls"> {
   const bound = limit === undefined ? {} : { limit };
   const mine = parts.flags.mine === true;
   const all = parts.flags.all === true,
-    closed = parts.flags.closed === true;
-  if (all && closed) refuse("ls", "--all and --closed are mutually exclusive");
-  if (selector === "debt" || selector === "debt/") {
-    if (mine) refuse("ls", "--mine selects Akuma instances only");
-    return {
-      name: "ls",
-      input: { selector, ...bound, ...(all ? { selection: "all" } : closed ? { selection: "closed" } : {}) },
-      output: parts.output,
-    };
-  }
-  if (all || closed) refuse("ls", "--all and --closed select Debts only");
-  if (["kei", "kei/", "aku", "aku/"].includes(selector)) {
+    settled = parts.flags.settled === true;
+  if (all && settled) refuse("ls", "--all and --settled are mutually exclusive");
+  if ((all || settled) && (selector === "aku" || selector === "aku/"))
+    refuse("ls", "--all and --settled select Contract, Debt, or Akuma-instance lifecycles only");
+  if (["debt", "debt/", "kei", "kei/", "aku", "aku/"].includes(selector)) {
     if (mine) refuse("ls", "--mine selects Akuma instances only");
   } else validateInstanceCatalogue(selector);
   return {
     name: "ls",
-    input: { selector, ...bound, ...(mine ? { mine: true } : {}) },
+    input: {
+      selector,
+      ...bound,
+      ...(mine ? { mine: true } : {}),
+      ...(all ? { selection: "all" } : settled ? { selection: "settled" } : {}),
+    },
     output: parts.output,
   };
 }

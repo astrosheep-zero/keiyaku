@@ -296,9 +296,13 @@ function enumerateContractObservations(
   return observations;
 }
 
-export function activeContractJournalPaths(observation: GitReadObservation): readonly string[] {
+export function observedContractJournalPaths(
+  observation: GitReadObservation,
+  journalClass?: ContractJournalClass,
+): readonly string[] {
   return [...observation.snapshot.paths].flatMap(([path, entry]) => {
-    if (CONTRACT_JOURNAL_PATH.exec(path)?.[1] !== "active") return [];
+    const matched = CONTRACT_JOURNAL_PATH.exec(path)?.[1];
+    if (matched === undefined || (journalClass !== undefined && matched !== journalClass)) return [];
     if (entry.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
     return [path];
   });
@@ -318,19 +322,22 @@ async function readJournalBlobs(
   return blobs;
 }
 
-/** Observe active journals without following their prerequisite edges. */
-export async function observeActiveContractJournals(
+/** Observe selected journal classes without following their prerequisite edges. */
+export async function observeContractJournals(
   observation: GitReadObservation,
+  journalClass?: ContractJournalClass,
 ): Promise<ReadonlyMap<ContractId, GitJournalRecord>> {
   const git = observation.snapshot;
-  const journals = activeContractJournalPaths(observation).map((path) => [path, git.paths.get(path)!] as const);
-  return enumerateContractObservations(git, await readJournalBlobs(journals, observation.readBlobs), "active");
+  const journals = observedContractJournalPaths(observation, journalClass).map(
+    (path) => [path, git.paths.get(path)!] as const,
+  );
+  return enumerateContractObservations(git, await readJournalBlobs(journals, observation.readBlobs), journalClass);
 }
 
 export async function observeActiveContractWorld(
   observation: GitReadObservation,
 ): Promise<ActiveContractWorldObservation> {
-  const contracts = await observeActiveContractJournals(observation);
+  const contracts = await observeContractJournals(observation, "active");
   const prerequisites = [...new Set([...contracts.values()].flatMap((record) => record.state?.terms.after ?? []))];
   const dependencyRecords = await observeTargetedContractsAt(observation, prerequisites);
   return {

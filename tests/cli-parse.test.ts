@@ -22,20 +22,22 @@ test("show routes complete Debt addresses to the native Debt operation", () => {
   assert.throws(() => assertExplicitRepoUse(command(["show", "debt/example"]), "/repo"), /no consumer/u);
 });
 
-test("root Debt listings select closed or all only for Debt", () => {
-  assert.deepEqual(command(["ls", "debt/", "--closed"]), {
-    name: "ls",
-    output: "text",
-    input: { selector: "debt/", selection: "closed" },
+test("root listings select active by default, settled or all for lifecycle catalogues", () => {
+  for (const selector of ["debt/", "kei/", "aku/*"]) {
+    assert.deepEqual(command(["ls", selector]), { name: "ls", output: "text", input: { selector } });
+    for (const selection of ["settled", "all"]) {
+      assert.deepEqual(command(["ls", selector, `--${selection}`]), {
+        name: "ls", output: "text", input: { selector, selection },
+      });
+    }
+  }
+  assert.deepEqual(command(["ls", "--mine", "--settled"]), {
+    name: "ls", output: "text", input: { selector: "aku/*", mine: true, selection: "settled" },
   });
-  assert.deepEqual(command(["ls", "debt", "--all"]), {
-    name: "ls",
-    output: "text",
-    input: { selector: "debt", selection: "all" },
-  });
-  assert.throws(() => command(["ls", "debt", "--all", "--closed"]), CliUsageError);
-  assert.throws(() => command(["ls", "kei", "--all"]), CliUsageError);
-  assert.throws(() => command(["ls", "aku", "--closed"]), CliUsageError);
+  assert.throws(() => command(["ls", "debt", "--all", "--settled"]), CliUsageError);
+  assert.throws(() => command(["ls", "aku", "--all"]), CliUsageError);
+  assert.throws(() => command(["ls", "aku/", "--settled"]), CliUsageError);
+  assert.throws(() => command(["ls", "debt", "--closed"]), CliUsageError);
 });
 
 test("nuke admits only a literal WorldRoot confirmation", () => {

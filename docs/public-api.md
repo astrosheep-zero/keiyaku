@@ -126,13 +126,15 @@ not pretend to know the world-wide reverse-dependency view. Text rendering may
 shorten physical Git identities only when unambiguous; product identities remain
 complete.
 
-Contract listing preserves complete live membership when no limit is selected;
-it uses the same concise owner summary as a bounded catalogue. An explicit
-bound reports whether that same observation contains additional rows. Each selected
-catalogue row retains compact actionable physical attention and explicit unknown
-availability from the existing workspace and target observers. A bounded catalogue
-observes physical state only for its selected rows; omission of attention means
-those observations found no issue. Exact addressed observation owns full physical
+Contract listing defaults to active work and may select settled work or both,
+using the lifecycle owner's classification before bounding. It preserves complete
+matching membership when no limit is selected, with one recent-journal order over
+the selected set. An explicit bound reports whether that same observation contains
+additional matching rows. Active rows retain compact actionable physical attention
+and explicit unknown availability from the existing workspace and target observers;
+only selected active rows receive physical observation. Settled rows come from
+existing terminal journals, retain their terminal phase, and carry no workspace
+or target attention. They never observe retired workspaces or physical targets. Exact addressed observation owns full physical
 workspace and per-requirement detail. Contract selector resolution is a read-only, invocation-scoped capability. A
 complete identity is validated without consulting repository authority or proving
 existence; the requested operation owns absence. Short selectors use exact
@@ -155,8 +157,8 @@ authority remains exceptional with its native cause. Resolution neither creates
 a handle nor reserves selection for a later mutation, which retains its own
 admission judgment. The mixed Address facet shares only pure Contract candidate
 matching; its cross-family ambiguity and Alias observation judgment stay its own.
-The listing is the live board: terminal Contracts leave it, and their record
-stays in the journal and Git.
+The default listing remains the live board; explicit settled selection reads
+terminal records without changing the active membership used by selector resolution.
 Listing remains a read-time projection, not a lifecycle judgment.
 
 Explicit verify is a native Contract operation selecting all current

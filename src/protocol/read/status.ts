@@ -4,9 +4,8 @@ import { contractIdSchema, contractJournalPaths, snapshotIdSchema } from "../../
 import { type ContractTargetLag as GitContractTargetLag } from "../../git/workspace.js";
 import { gateSchema, gateStaleReasonSchema } from "../result-leaves.js";
 import {
-  activeContractJournalPaths,
-  observeActiveContractJournals,
-  observeActiveContractWorld,
+  observedContractJournalPaths,
+  observeContractJournals,
   observeContractsForAdmissionInObservationAt,
   deliveryTargetObserver,
   withContractReadObservationAt,
@@ -30,11 +29,15 @@ import {
   type JournalEntry,
   type SnapshotId,
 } from "../../core/facts/types.js";
-import { projectBoundedList } from "../../bounded-list.js";
+import { projectBoundedList, type LifecycleSelection } from "../../bounded-list.js";
 import { observeCurrentPhysicalIssue } from "./observation.js";
 
 const phaseSchema = z.enum(["bound", "claimed", "abandoned"]);
 export type ContractPhase = z.output<typeof phaseSchema>;
+
+export function contractLifecycle(phase: ContractPhase): "active" | "settled" {
+  return phase === "bound" ? "active" : "settled";
+}
 
 const summaryGateSchema = z
   .strictObject({
@@ -216,7 +219,7 @@ export type ContractObservation = z.output<typeof contractObservationSchema>;
 export type ContractMembership = Pick<ContractDetail, "id" | "phase" | "workspace">;
 
 export function readContractCount(observation: GitReadObservation): number {
-  return activeContractJournalPaths(observation).length;
+  return observedContractJournalPaths(observation, "active").length;
 }
 
 /** Selection observes journals and appointments, never physical state or dependencies. */
@@ -226,7 +229,7 @@ export async function readContractMembership(
 ): Promise<readonly ContractMembership[]> {
   const contracts =
     ids === undefined
-      ? await observeActiveContractJournals(observation)
+      ? await observeContractJournals(observation, "active")
       : (await observeContractsForAdmissionInObservationAt(observation, ids)).journals;
   const register = await readPlaceRegister(observation.repository);
   return [...contracts.values()].flatMap(({ state }) => {
@@ -567,29 +570,36 @@ function selectedContractStates(
 }
 
 /**
- * Observe a bounded recent active Contract catalogue, or its complete active set
- * when no bound is selected, from one immutable Git observation.
+ * Observe selected lifecycle classes under one recent-journal order and bound,
+ * from one immutable Git observation. Settled rows never observe physical state.
  */
 export async function readContractCatalogue(
   observation: GitReadObservation,
   limit?: number,
+  selection: LifecycleSelection = "active",
 ): Promise<ContractCatalogue> {
   const observedAt = new Date().toISOString();
-  const observed = await observeActiveContractWorld(observation);
-  const active = selectedContractStates(observed.contracts)
-    .filter(({ state }) => state.terminal === null)
+  const contracts = await observeContractJournals(
+    observation,
+    selection === "all" ? undefined : selection === "active" ? "active" : "terminal",
+  );
+  const matching = selectedContractStates(contracts)
+    .filter(({ state }) => selection === "all" || contractLifecycle(phaseFor(state)) === selection)
     .sort(compareRecentContracts);
-  const selected = limit === undefined ? { rows: active, hasMore: false } : projectBoundedList(active, limit);
-  const register = await readPlaceRegister(observation.repository);
+  const selected = limit === undefined ? { rows: matching, hasMore: false } : projectBoundedList(matching, limit);
+  const register = selected.rows.some(({ state }) => contractLifecycle(phaseFor(state)) === "active")
+    ? await readPlaceRegister(observation.repository)
+    : undefined;
   const observeTarget = deliveryTargetObserver(observation);
   const rows = await Promise.all(
     selected.rows.map(async (selected) => {
       const { state } = selected;
+      if (contractLifecycle(phaseFor(state)) === "settled") return summaryFor(selected);
       const attention = summaryAttention(
         await managedWorkspaceFacts(
           observation.repository,
           state,
-          appointedWorkspace(observation.repository, register, state),
+          appointedWorkspace(observation.repository, register!, state),
           await observeTarget(state),
         ),
       );

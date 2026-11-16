@@ -82,8 +82,9 @@ authority, so a synthetic history would be dishonest.
 
 ## Views
 
-Invocation listing defaults to open work; callers may explicitly select terminal
-work or all work. Lifecycle selection precedes the bound, and rows
+Debt classifies open work as active and done or dropped work as settled: still
+in play versus at rest, without adding another disposition. Listing defaults to
+active work; callers may explicitly select settled work or all work. Lifecycle selection precedes the bound, and rows
 are ordered by priority and then canonical identity. Debt offers native listing
 and graph views without an expression language or caller-selected sorting.
 Catalogues summarize current work rather than repeat
