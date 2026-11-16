@@ -183,8 +183,10 @@ test("native Contract results, verification progress and cancellation pass throu
     await facet.verify(
       { contract: bound.contractId },
       {
-        observe: (event) => {
+        signal: t.signal,
+        observe: async (event) => {
           events.push(event);
+          throw new Error("invocation observer rejection");
         },
       },
     ),
@@ -200,7 +202,9 @@ test("native Contract results, verification progress and cancellation pass throu
   const firstCheck = result.checks[0];
   assert.ok(firstCheck?.kind === "terminal");
   const direct = accepted(await native.verify());
-  const repeated = accepted(await facet.verify({ contract: bound.contractId }));
+  const repeated = accepted(await facet.verify({ contract: bound.contractId }, {
+    observe: () => { throw new Error("invocation observer failure"); },
+  }));
   assert.deepEqual(repeated, direct);
   const controller = new AbortController();
   controller.abort(new Error("caller cancellation"));
