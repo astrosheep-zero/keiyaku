@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { AkumaNotBornError } from "../src/akuma/akuma-errors.js";
 import type { AkumaCaller } from "../src/akuma/caller.js";
 import { killAkumaWithRecovery } from "../src/akuma/akuma-owner.js";
@@ -52,7 +53,7 @@ import {
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId } from "../src/akuma/identity.js";
-import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
+import { akumaLineageCachePath, readAkumaLineage, recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { Settings } from "../src/settings.js";
@@ -1854,7 +1855,7 @@ test("a wrong lineage cache edge cannot fabricate members or their ancestor chai
   );
 });
 
-test("a lineage cache row for a vanished directory never resurrects an identity", async (context) => {
+test("caller lineage prunes obsolete nonmembers and repairs only missing or invalid current edges", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-lineage-stale-");
   const proved = await World.at(root);
   const world = Akumas.of(proved);
@@ -1866,16 +1867,115 @@ test("a lineage cache row for a vanished directory never resurrects an identity"
     createdAt: "2026-08-08T00:00:01.000Z",
     caller: rootCaller,
   });
-  await recordAkumaLineage(proved, { id: "aku/ghost/deadbeef" as never, caller: rootCaller });
+  const sibling = await bornLineageAkuma({
+    root,
+    akumaName: "intern",
+    draw: "ca110017",
+    createdAt: "2026-08-08T00:00:02.000Z",
+    caller: rootCaller,
+  });
+  const unattributed = await bornLineageAkuma({
+    root,
+    akumaName: "worker",
+    draw: "ca110018",
+    createdAt: "2026-08-08T00:00:03.000Z",
+  });
+  const members = [direct, sibling, unattributed];
+  await readAkumaLineage(proved, members);
+  const database = new DatabaseSync(akumaLineageCachePath(proved));
+  try {
+    const obsolete = JSON.stringify({ kind: "akuma", world: proved, akuId: direct.id });
+    database.prepare("INSERT INTO lineage VALUES (?, ?)").run("aku/ghost/deadbeef", obsolete);
+    database.prepare("UPDATE lineage SET caller_json = ? WHERE aku_id = ?").run(obsolete, direct.id);
+    database.prepare("DELETE FROM lineage WHERE aku_id = ?").run(sibling.id);
+  } finally {
+    database.close();
+  }
+  const prepare = DatabaseSync.prototype.prepare;
+  let soulReads = 0;
+  const spy = context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.includes("FROM soul")) soulReads += 1;
+    return prepare.call(this, sql);
+  });
+  const repaired = await readAkumaLineage(proved, members);
+  assert.equal(repaired.skipped, 0);
+  assert.deepEqual(
+    [...repaired.edges],
+    [
+      [unattributed.id, null],
+      [direct.id, rootCaller],
+      [sibling.id, rootCaller],
+    ],
+  );
+  assert.equal(soulReads, 2, "obsolete nonmembers do not force readable peers through Soul fallback");
+  soulReads = 0;
+  assert.deepEqual(await readAkumaLineage(proved, members), repaired);
+  assert.equal(soulReads, 0, "both missing and invalid current edges were repaired, not compatibility-decoded");
+  spy.mock.restore();
   assert.deepEqual(
     (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
-    [direct.id],
+    [sibling.id, direct.id],
+    "the vanished identity stays pruned and absent caller attribution stays absent",
   );
+});
+
+test("an unreadable lineage cache recovers after complete Soul evidence, not an unreadable Soul", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-recovery-");
+  const proved = await World.at(root);
+  const world = Akumas.of(proved);
+  const caller = { kind: "external", integration: "test", id: "recovery" } as const;
+  const direct = await bornLineageAkuma({
+    root,
+    akumaName: "worker",
+    draw: "ca110019",
+    createdAt: "2026-08-08T00:00:01.000Z",
+    caller,
+  });
+  const unattributed = await bornLineageAkuma({
+    root,
+    akumaName: "worker",
+    draw: "ca110020",
+    createdAt: "2026-08-08T00:00:02.000Z",
+  });
+  const cache = akumaLineageCachePath(proved);
+  writeFileSync(cache, "not a SQLite database");
+  const heart = new DatabaseSync(direct.paths.heart);
+  const original = heart.prepare("SELECT soul_json FROM soul").get()!.soul_json as string;
+  try {
+    heart.prepare("UPDATE soul SET soul_json = ?").run("{}");
+    const incomplete = await world.list({ caller });
+    assert.equal(incomplete.rows, undefined);
+    assert.equal(incomplete.more, true, "a failed Soul read cannot claim there are no matching members");
+    assert.equal(
+      readFileSync(cache, "utf8"),
+      "not a SQLite database",
+      "partial evidence cannot rebuild the whole cache",
+    );
+    heart.prepare("UPDATE soul SET soul_json = ?").run(original);
+  } finally {
+    heart.close();
+  }
   assert.deepEqual(
-    (await world.list({ caller: rootCaller })).rows?.map((row) => row.id),
+    (await world.list({ caller })).rows?.map((row) => row.id),
     [direct.id],
-    "the vanished identity stays pruned",
   );
+  const prepare = DatabaseSync.prototype.prepare;
+  let soulReads = 0;
+  const spy = context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
+    if (sql.includes("FROM soul")) soulReads += 1;
+    return prepare.call(this, sql);
+  });
+  const recovered = await readAkumaLineage(proved, [direct, unattributed]);
+  assert.equal(recovered.skipped, 0);
+  assert.deepEqual(
+    [...recovered.edges],
+    [
+      [direct.id, caller],
+      [unattributed.id, null],
+    ],
+  );
+  assert.equal(soulReads, 0, "the next read reuses the repaired cache, including known absent caller attribution");
+  spy.mock.restore();
 });
 
 test("kill returns before its successor recovery settles", async (context) => {

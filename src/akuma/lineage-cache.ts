@@ -13,6 +13,7 @@ import type { WorldRoot } from "../world.js";
  * rebuilt from Hearts, and an unavailable cache falls back to direct Soul reads.
  */
 export type AkumaLineage = ReadonlyMap<AkumaId, AkumaCaller | null>;
+type LineageObservation = Readonly<{ edges: AkumaLineage; skipped: number }>;
 
 export type LineageMember = Readonly<{ id: AkumaId; paths: AkumaPaths }>;
 
@@ -40,12 +41,15 @@ function readCachedEdge(row: unknown): readonly [AkumaId, AkumaCaller | null] {
   return [akumaId, caller];
 }
 
-/** A readable cache, an empty map for a cache that was never written, or null when unusable. */
-async function readLineageCache(path: string): Promise<Map<AkumaId, AkumaCaller | null> | null> {
+/** Decode only current members; obsolete and invalid rows are disposable misses. */
+async function readLineageCache(
+  path: string,
+  known: ReadonlySet<string>,
+): Promise<{ edges: Map<AkumaId, AkumaCaller | null>; stale: string[] } | null> {
   try {
     await lstat(path);
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return new Map();
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { edges: new Map(), stale: [] };
     return null;
   }
   let database: DatabaseSync;
@@ -59,7 +63,22 @@ async function readLineageCache(path: string): Promise<Map<AkumaId, AkumaCaller 
   try {
     database.exec("PRAGMA busy_timeout=0");
     const rows = database.prepare("SELECT aku_id, caller_json FROM lineage").all();
-    return new Map(rows.map(readCachedEdge));
+    const edges = new Map<AkumaId, AkumaCaller | null>();
+    const stale: string[] = [];
+    for (const row of rows) {
+      if (typeof row.aku_id !== "string") continue;
+      if (known.has(row.aku_id)) {
+        try {
+          const [id, caller] = readCachedEdge(row);
+          edges.set(id, caller);
+          continue;
+        } catch {
+          // A malformed current edge is a miss, not a reason to discard peers.
+        }
+      }
+      stale.push(row.aku_id);
+    }
+    return { edges, stale };
   } catch {
     return null;
   } finally {
@@ -70,7 +89,7 @@ async function readLineageCache(path: string): Promise<Map<AkumaId, AkumaCaller 
 async function writeLineageCache(
   path: string,
   fresh: readonly (readonly [AkumaId, AkumaCaller | null])[],
-  stale: readonly AkumaId[],
+  stale: readonly string[],
   replace = false,
 ): Promise<void> {
   try {
@@ -85,8 +104,8 @@ async function writeLineageCache(
       database.exec("BEGIN IMMEDIATE");
       try {
         if (replace) database.exec("DELETE FROM lineage");
-        for (const [akumaId, caller] of fresh) insert.run(akumaId, caller === null ? null : JSON.stringify(caller));
         for (const akumaId of stale) remove.run(akumaId);
+        for (const [akumaId, caller] of fresh) insert.run(akumaId, caller === null ? null : JSON.stringify(caller));
         database.exec("COMMIT");
       } catch (error) {
         database.exec("ROLLBACK");
@@ -100,19 +119,23 @@ async function writeLineageCache(
   }
 }
 
-async function directEdge(member: LineageMember): Promise<readonly [AkumaId, AkumaCaller | null] | null> {
+async function directEdge(member: LineageMember): Promise<readonly [AkumaId, AkumaCaller | null] | null | undefined> {
   try {
     const soul = await readSoul(member.paths);
     return soul === null ? null : [member.id, soul.caller ?? null];
   } catch {
-    // A hard Heart read failure stays an omitted member, never an empty roster claim.
-    return null;
+    // Unreadability is not authoritative absence and cannot justify a rebuild.
+    return undefined;
   }
 }
 
 /** Authoritative lineage read: every known born Soul, with no cache consultation. */
-export async function readDirectAkumaLineage(members: readonly LineageMember[]): Promise<AkumaLineage> {
-  return new Map((await boundedMap(members, directEdge)).filter((edge) => edge !== null));
+export async function readDirectAkumaLineage(members: readonly LineageMember[]): Promise<LineageObservation> {
+  const observed = await boundedMap(members, directEdge);
+  return {
+    edges: new Map(observed.filter((edge) => edge !== null && edge !== undefined)),
+    skipped: observed.filter((edge) => edge === undefined).length,
+  };
 }
 
 /**
@@ -153,17 +176,23 @@ export async function recordAkumaLineage(
  * Rows whose Akuma directory no longer exists never join this view, and fresh
  * edges plus that pruning are written back best-effort.
  */
-export async function readAkumaLineage(world: WorldRoot, members: readonly LineageMember[]): Promise<AkumaLineage> {
+export async function readAkumaLineage(
+  world: WorldRoot,
+  members: readonly LineageMember[],
+): Promise<LineageObservation> {
   const path = akumaLineageCachePath(world);
-  const cached = await readLineageCache(path);
-  if (cached === null) return await readDirectAkumaLineage(members);
-  const known = new Set(members.map((member) => member.id));
-  const stale = [...cached.keys()].filter((id) => !known.has(id));
-  const missing = members.filter((member) => !cached.has(member.id));
-  const fresh = (await boundedMap(missing, directEdge)).filter((edge) => edge !== null);
-  // A vanished directory never contributes an edge even if its prune write fails.
-  for (const id of stale) cached.delete(id);
-  for (const [akumaId, caller] of fresh) cached.set(akumaId, caller);
-  if (fresh.length > 0 || stale.length > 0) await writeLineageCache(path, fresh, stale);
-  return cached;
+  const cached = await readLineageCache(path, new Set(members.map((member) => member.id)));
+  if (cached === null) {
+    const direct = await readDirectAkumaLineage(members);
+    if (direct.skipped === 0) {
+      await invalidateAkumaLineage(world);
+      await rebuildAkumaLineage(world, direct.edges);
+    }
+    return direct;
+  }
+  const missing = members.filter((member) => !cached.edges.has(member.id));
+  const fresh = await readDirectAkumaLineage(missing);
+  for (const [akumaId, caller] of fresh.edges) cached.edges.set(akumaId, caller);
+  if (fresh.edges.size > 0 || cached.stale.length > 0) await writeLineageCache(path, [...fresh.edges], cached.stale);
+  return { edges: cached.edges, skipped: fresh.skipped };
 }

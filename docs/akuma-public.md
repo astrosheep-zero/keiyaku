@@ -254,7 +254,14 @@ presented in the same semantic activity order and bound. Any World-local
 candidate index is verified against born Souls before returning a member and
 falls back to direct Soul evidence on disagreement; unprovable or deleted
 members are omitted honestly without claiming there is nothing more, and unborn
-or stillborn allocations never enter a caller-scoped set.
+or stillborn allocations never enter a caller-scoped set. Disposable index reads
+ignore departed members before interpreting their caller evidence and repair
+missing or invalid current edges from Souls without discarding useful peers.
+An unavailable index is reconstructed best-effort after a complete successful
+direct observation; an unreadable Soul is not absence and cannot justify a
+complete reconstruction. Index persistence failure never changes the native
+answer, and births outside an observed membership set remain discoverable by
+later enumeration.
 
 ## Boundary
 

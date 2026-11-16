@@ -386,20 +386,23 @@ async function readCallerPage(
 ): Promise<CallerPage> {
   const known = await knownAkuma(path);
   const cached = await readAkumaLineage(path, known.rows);
-  const verification: CallerVerification = { world: path, root: caller, lineage: cached, souls: new Map() };
+  const verification: CallerVerification = { world: path, root: caller, lineage: cached.edges, souls: new Map() };
   const attempted = await pageCallerRows(
-    await callerCandidates(known.rows, cached, caller, path, selected),
+    await callerCandidates(known.rows, cached.edges, caller, path, selected),
     limit,
     // A cache-proposed identity without a born Soul cannot justify inclusion.
     async (row) => (row.kind === "born" ? await verifyCallerMember(verification, row.id, row.caller) : "invalid-cache"),
   );
-  if (!attempted.invalid) return attempted;
+  if (!attempted.invalid) return { ...attempted, skipped: attempted.skipped + cached.skipped };
   // One wrong edge makes the whole disposable record untrustworthy.
   await invalidateAkumaLineage(path);
   const direct = await readDirectAkumaLineage(known.rows);
-  const repaired = await pageCallerRows(await callerCandidates(known.rows, direct, caller, path, selected), limit);
-  await rebuildAkumaLineage(path, direct);
-  return repaired;
+  const repaired = await pageCallerRows(
+    await callerCandidates(known.rows, direct.edges, caller, path, selected),
+    limit,
+  );
+  if (direct.skipped === 0) await rebuildAkumaLineage(path, direct.edges);
+  return { ...repaired, skipped: repaired.skipped + direct.skipped };
 }
 
 /** One roster answer: empty rows and known completeness are both omissions. */
