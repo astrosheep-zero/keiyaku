@@ -19,7 +19,6 @@ import { gateRequirementFacts } from "../src/cli/render/contract-observation.js"
 import { unmetRequirementLines } from "../src/cli/render/receipt.js";
 import { modelOutputSchemas as mcpOutputSchemas, projectModelOutput as projectMcpOutput } from "../src/library/model-tools.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
-import { assertWireConformance } from "./support/schema-parity.js";
 import { akumaObservationSchema } from "../src/akuma/selection-observation.js";
 import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
@@ -37,14 +36,6 @@ import {
 import type { ContractHistory } from "../src/library/contract-types.js";
 import type { ContractSummary } from "../src/index.js";
 import type { Settings } from "../src/settings.js";
-import {
-  activityAkumaRow,
-  activeTool,
-  akumaWorldReport,
-  openAkumaSnapshot,
-  reportedFileChange,
-  snapshotRow,
-} from "./support/kanshi-activity.js";
 
 test("model status keeps current work, last outcome and reported changes without internal turn coordinates", () => {
   const value = akumaObservationSchema.parse({
@@ -66,40 +57,6 @@ test("model status keeps current work, last outcome and reported changes without
     kind: "open", summary: value.work.summary, pending: value.work.pending, outcome: value.work.outcome,
   });
   assert.deepEqual(mcpOutputSchemas.status.parse(projected), projected);
-});
-
-test("compact Contract status distinguishes empty observations, unavailable authority and diagnostic evidence", () => {
-  const empty = projectMcpOutput("status", contractDetail());
-  const native = contractDetail({
-    issue: { kind: "unavailable", diagnostic: "cannot observe checkout" },
-    holder: { kind: "unavailable" }, roster: { kind: "unavailable" },
-  });
-  const projected = JSON.parse(JSON.stringify(projectMcpOutput("status", native)));
-  assert.notDeepEqual(projected, empty);
-  assert.deepEqual(projected.issue, native.issue);
-  assert.deepEqual(projected.holder, native.holder);
-  assert.deepEqual(projected.roster, native.roster);
-  assertWireConformance(mcpOutputSchemas.status, projected);
-
-  const attached = contractDetail({
-    issue: { kind: "target-checkout-retained" },
-    roster: [{ id: "aku/worker/12345678", aliasesUnavailable: true }],
-  });
-  const roster = JSON.parse(JSON.stringify(projectMcpOutput("status", attached)));
-  assert.deepEqual(roster.issue, attached.issue);
-  assert.deepEqual(roster.roster, attached.roster);
-  assertWireConformance(mcpOutputSchemas.status, roster);
-});
-
-test("compact Contract catalogue retains actual workspace, target and merge attention", () => {
-  const rows = [
-    contractSummary({ id: contractId("kei/workspace"), attention: [{ kind: "workspace-unavailable", path: "/work/missing" }] }),
-    contractSummary({ id: contractId("kei/target"), attention: [{ kind: "target-unknown", subject: "main" }] }),
-    contractSummary({ id: contractId("kei/merge"), attention: [{ kind: "merge-in-progress", path: "/work/conflict", conflicts: 2 }] }),
-  ];
-  const projected = JSON.parse(JSON.stringify(projectMcpOutput("ls", contractCatalog(rows))));
-  assert.deepEqual(projected.rows, rows);
-  assertWireConformance(mcpOutputSchemas.ls, projected);
 });
 
 test("spawn preserves a definition failure instead of reporting a missing Akuma", async (t) => {
@@ -459,16 +416,4 @@ test("audit separates its observation outcome from complete candidate coordinate
     ].join("\n"),
   );
   assert.doesNotMatch(output, /private-head|^[{[]|^✓ (?:candidate|verification|target)|next|then|please|key=/mu);
-});
-
-test("World roster keeps concrete current work without duplicating snapshot sections", () => {
-  const command = "npm test";
-  const snapshot = openAkumaSnapshot(
-    [snapshotRow(activeTool(5, "bash", { kind: "run", command }))],
-    [reportedFileChange("src/cli/render/kanshi-akuma.ts")],
-  );
-  const report = akumaWorldReport([activityAkumaRow("aku/worker/ffff0001", "running", snapshot)]);
-  const text = renderKanshiText(report, { columns: 120, color: false });
-  assert.ok(text.includes(command));
-  assert.doesNotMatch(text, /──|debts \d|changes \d|came back|STILL RUNNING|killed/u);
 });

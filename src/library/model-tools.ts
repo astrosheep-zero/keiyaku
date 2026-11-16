@@ -13,9 +13,7 @@ import {
   contractSummarySchema,
   contractNormalStatusSchema,
   akumaNameCatalogSchema,
-  akumaNameCatalogRowSchema,
   debtListSchema,
-  debtSummarySchema,
   contractIdSchema,
   akumaIdSchema,
 } from "./keiyaku-verbs.js";
@@ -39,7 +37,6 @@ const akumaStatus = akuma
     work,
   })
   .meta({ id: "AkumaStatus" });
-const contractListRow = contractSummarySchema.meta({ id: "ContractRow" });
 const akumaListRow = akumaCatalogueRowSchema
   .unwrap()
   .extend({ contract: association.exactOptional() })
@@ -63,8 +60,6 @@ const akumaWaitRow = observedAkumaWaitItemSchema
   })
   .meta({ id: "AkumaWaitRow" });
 const unknownWaitRow = z.strictObject({ id: z.union([contractIdSchema, akumaIdSchema]), unknown: z.literal(true) });
-const nameModelRow = akumaNameCatalogRowSchema.meta({ id: "AkumaNameRow" });
-const debtModelRow = debtSummarySchema.meta({ id: "DebtRow" });
 const spawn = verbs.spawn.normal.unwrap();
 const gateProblem = z.strictObject({
   gate: z.string(),
@@ -137,22 +132,13 @@ export const modelOutputSchemas = {
   }),
   status: z.union([contractStatus, akumaStatus]),
   ls: z.union([
-    contractCatalogueSchema
-      .unwrap()
-      .omit({ kind: true, rows: true })
-      .extend({ rows: z.array(contractListRow).exactOptional() }),
+    contractCatalogueSchema.unwrap().omit({ kind: true }),
     akumaCatalogueSchema
       .unwrap()
       .omit({ kind: true, rows: true })
       .extend({ rows: z.array(akumaListRow).exactOptional() }),
-    akumaNameCatalogSchema
-      .unwrap()
-      .omit({ kind: true, rows: true })
-      .extend({ rows: z.array(nameModelRow).exactOptional() }),
-    debtListSchema
-      .unwrap()
-      .omit({ kind: true, rows: true })
-      .extend({ rows: z.array(debtModelRow).exactOptional() }),
+    akumaNameCatalogSchema.unwrap().omit({ kind: true }),
+    debtListSchema.unwrap().omit({ kind: true }),
   ]),
   "debt.add": verbs["debt.add"].normal,
 } as const;

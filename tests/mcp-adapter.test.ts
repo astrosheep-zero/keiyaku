@@ -658,6 +658,7 @@ test("SDK routing preserves optional observation failures and attention in struc
       assert.deepEqual(native.roster, { kind: "unavailable" });
       assert.deepEqual(projected.holder, native.holder);
       assert.deepEqual(projected.roster, native.roster);
+      assert.deepEqual(projected.issue, native.issue);
     } else {
       assert.ok(native.kind === "akuma" && native.contract?.kind === "failed");
     }

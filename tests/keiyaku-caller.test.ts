@@ -4,6 +4,8 @@ import test from "node:test";
 import { Akuma, Keiyaku, KeiyakuUsageError, World } from "../src/index.js";
 import { harnessOwner, requireOwner } from "@astrosheep/square";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
+import { readHeart, readLatestTurnForBody } from "../src/akuma/heart/index.js";
+import { pathsForAkumaId } from "../src/akuma/identity.js";
 import { isolateUserHome } from "./support/user-home.js";
 import {
   cleanupSpawnCapableFixtureForTest,
@@ -94,6 +96,10 @@ test("one host identity serves spawn, whoami, mine and actor-only operations", a
       const child = Akuma.select(world, spawned.akumaId);
       assert.equal((await child.idle({ timeoutMs: 30_000 })).reason, "completed");
       assert.deepEqual((await child.status()).birth.caller, expectedCaller);
+      const paths = pathsForAkumaId(world, child.id);
+      const body = (await readHeart(paths)).latestBody!;
+      assert.equal((await readLatestTurnForBody(paths, body.sequence))?.initiator,
+        facet === explicit ? "pi:current-session" : identity.owner);
       const mine = await facet.ls({ selector: "aku/*", mine: true, selection: "all" });
       assert.equal(mine.kind, "akuma-catalogue");
       if (mine.kind !== "akuma-catalogue") assert.fail("expected Akuma list");

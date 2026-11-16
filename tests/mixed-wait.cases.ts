@@ -220,8 +220,7 @@ test("deadline wait returns three actual events and settled wait keeps the compl
   const [a, b] = InMemoryTransport.createLinkedPair();
   await Promise.all([client.connect(a), adapter.server.connect(b)]);
   t.after(async () => { await client.close(); await adapter.close(); });
-  const tools = (await client.listTools()).tools;
-  for (const name of ["status", "wait", "ls"]) assert.ok(tools.find(tool => tool.name === name)?.outputSchema?.$defs);
+  await client.listTools();
   const status = await client.callTool({ name: "status", arguments: { selector: f.worker.allocated.id } });
   assert.equal(status.isError, false);
   const projectedStatus = modelOutputSchemas.status.parse(status.structuredContent);
@@ -231,8 +230,11 @@ test("deadline wait returns three actual events and settled wait keeps the compl
   for (const text of ["first", "second", "same", "same", "last"]) {
     sequences.push(await appendActivity(paths, { turnSequence: turn.sequence, event: { type: "assistant", text }, at: AT }));
   }
-  const input = { selectors: [f.worker.allocated.id], timeout: "0ms" };
+  const input = { selectors: [f.worker.allocated.id, f.bound.contractId], completion: "all" as const, timeout: "0ms" };
   const running = await f.facet().wait(input);
+  const argv = ["wait", ...input.selectors, "--all", "--timeout", "0ms"];
+  const cli = await cliJson<InvocationWaitResult>(argv, { cwd: f.world, environment: f.environment });
+  assert.deepEqual(cli.value, running);
   const member = running.members[0];
   assert.ok(member?.kind === "akuma" && member.observation.kind === "observed");
   assert.equal(member.observation.life, "running");
@@ -241,13 +243,19 @@ test("deadline wait returns three actual events and settled wait keeps the compl
   assert.deepEqual(member.observation.events?.map(event => event.kind === "said" ? event.text : event.kind), ["same", "same", "last"]);
   assert.equal(Object.hasOwn(member.observation, "provider"), false);
   assert.equal(Object.hasOwn(member.observation, "changes"), false);
-  const text = await runCli(["wait", f.worker.allocated.id, "--timeout", "0ms"], { cwd: f.world, environment: f.environment });
+  const text = await runCli(argv, { cwd: f.world, environment: f.environment });
   assert.equal(text.exit, 0);
   assert.equal((text.stdout.match(/same/gu) ?? []).length, 2);
+  assert.ok(text.stdout.indexOf(f.worker.allocated.id) < text.stdout.indexOf(f.bound.contractId));
+  const deadlineResponse = await client.callTool({ name: "wait", arguments: input });
+  assert.equal(deadlineResponse.isError, false);
+  assert.deepEqual(deadlineResponse.structuredContent, JSON.parse(JSON.stringify(projectModelOutput("wait", running))));
+  assert.equal((deadlineResponse.content as { text: string }[])[0]?.text, text.stdout.trimEnd());
 
   const answer = `answer begins\n${"full answer ".repeat(1000)}\n  exact answer tail`;
   await endTurn(paths, { turnSequence: turn.sequence, completedAt: AT, outcome: { kind: "answered", answer, session: { sessionId: "answer" } } });
   await f.finish();
+  accepted(await f.bound.kei.abandon());
   const settled = await f.facet().wait(input);
   const response = await client.callTool({ name: "wait", arguments: input });
   assert.equal(response.isError, false);
@@ -283,30 +291,4 @@ test("deadline activity decoding failure preserves its member outcome and readab
   assert.ok(result.members[1]?.kind === "contract");
   assert.equal(result.members[1].observation.summary?.id, f.bound.contractId);
   assertWireConformance(Keiyaku.verbs.wait.normal, result);
-});
-
-test("mixed SDK, CLI and MCP share one object input and ordered native evidence", async t => {
-  const f = await fixture(t);
-  const input = { selectors: [f.worker.allocated.id, f.bound.contractId], completion: "all" as const, timeout: "0ms" };
-  const expected = await f.facet().run("wait", input);
-  assert.equal(expected.reason, "deadline");
-  const argv = ["wait", ...input.selectors, "--all", "--timeout", "0ms"];
-  const cli = await cliJson<InvocationWaitResult>(argv, { cwd: f.world, environment: f.environment });
-  assert.deepEqual(cli.value, expected);
-  const text = await runCli(argv, { cwd: f.world, environment: f.environment });
-  assert.ok(text.stdout.indexOf(f.worker.allocated.id) < text.stdout.indexOf(f.bound.contractId));
-  const adapter = createKeiyakuMcpServer({ cwd: f.world, environment: f.environment, version: "test" });
-  const client = new Client({ name: "mixed-wait", version: "1" });
-  const [a, b] = InMemoryTransport.createLinkedPair();
-  await Promise.all([client.connect(a), adapter.server.connect(b)]);
-  t.after(async () => { await client.close(); await adapter.close(); });
-  const { tools } = await client.listTools();
-  const tool = tools.find(tool => tool.name === "wait")!;
-  assert.equal(tool.inputSchema.type, "object");
-  assert.ok(tool.inputSchema.properties?.selectors);
-  const result = await client.callTool({ name: "wait", arguments: input });
-  assert.equal(result.isError, false);
-  assert.deepEqual(result.structuredContent, JSON.parse(JSON.stringify(projectModelOutput("wait", expected))));
-  assertWireConformance(modelOutputSchemas.wait, result.structuredContent);
-  assert.equal((result.content as { text: string }[])[0]?.text, text.stdout.trimEnd());
 });

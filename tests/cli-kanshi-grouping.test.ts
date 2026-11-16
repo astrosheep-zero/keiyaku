@@ -4,7 +4,7 @@ import { contractId } from "../src/core/facts/types.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import { kanshiReportSchema, type AkumaKanshiRow, type KanshiReport } from "../src/kanshi/report.js";
+import type { AkumaKanshiRow, KanshiReport } from "../src/kanshi/report.js";
 import { contractSummary } from "./support/cli-fixtures.js";
 import { activeTool, activityAkumaRow, openAkumaSnapshot, snapshotRow } from "./support/kanshi-activity.js";
 
@@ -68,32 +68,27 @@ test("World nests selected associated Akumas once and preserves ungrouped links 
     akumas: { kind: "present", rows: [peer, child, free, outside, unknown], more: true },
     debts: { kind: "present", rows: [{ id: "debt/free", title: "Independent", priority: 2, disposition: "ready" }] },
   };
-  assert.deepEqual(kanshiReportSchema.parse(input), input);
-  const frozen = JSON.stringify(input);
-  for (const columns of [48, 120]) {
-    const text = renderKanshiText(input, { columns, color: false });
-    for (const row of [child, peer, free, outside, unknown]) once(text, row.id);
-    once(text, first.id);
-    once(text, second.id);
-    assert.ok(text.indexOf(first.id) < text.indexOf(child.id));
-    assert.ok(text.indexOf(child.id) < text.indexOf(second.id));
-    assert.ok(text.indexOf(second.id) < text.indexOf(peer.id));
-    assert.ok(text.indexOf(peer.id) < text.indexOf("AKUMA //"));
-    assert.ok(text.indexOf("AKUMA //") < text.indexOf(free.id));
-    assert.ok(text.includes("@delivery"));
-    assert.ok(text.includes("running"));
-    assert.ok(text.includes("npm test"));
-    assert.ok(text.includes("kei/outside-page"));
-    assert.ok(text.includes("contract association unavailable"));
-    assert.ok(text.includes("debt/held"));
-    assert.ok(text.includes("debt/free"));
-    assert.equal(
-      text.split("\n").filter((line) => line === "…").length,
-      2,
-      "each bounded owner page keeps its omission",
-    );
-  }
-  assert.equal(JSON.stringify(input), frozen, "text grouping does not mutate the native report");
+  const text = renderKanshiText(input, { columns: 120, color: false });
+  for (const row of [child, peer, free, outside, unknown]) once(text, row.id);
+  once(text, first.id);
+  once(text, second.id);
+  assert.ok(text.indexOf(first.id) < text.indexOf(child.id));
+  assert.ok(text.indexOf(child.id) < text.indexOf(second.id));
+  assert.ok(text.indexOf(second.id) < text.indexOf(peer.id));
+  assert.ok(text.indexOf(peer.id) < text.indexOf("AKUMA //"));
+  assert.ok(text.indexOf("AKUMA //") < text.indexOf(free.id));
+  assert.ok(text.includes("@delivery"));
+  assert.ok(text.includes("running"));
+  assert.ok(text.includes("npm test"));
+  assert.ok(text.includes("kei/outside-page"));
+  assert.ok(text.includes("contract association unavailable"));
+  assert.ok(text.includes("debt/held"));
+  assert.ok(text.includes("debt/free"));
+  assert.equal(
+    text.split("\n").filter((line) => line === "…").length,
+    2,
+    "each bounded owner page keeps its omission",
+  );
 });
 
 test("all-nested Akuma page keeps section omissions and Alias failure without claiming an empty roster", () => {

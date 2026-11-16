@@ -14,7 +14,7 @@ import {
   initializeHeart,
 } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { bornBody, bornDirectAkuma, allocatedHeart } from "./support/akuma-fixtures.js";
+import { bornBody, bornDirectAkuma, bornLineageAkuma, allocatedHeart } from "./support/akuma-fixtures.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -114,7 +114,8 @@ test("Kanshi captures immutable coordinates without observation and reads fresh 
   assert.deepEqual(await view.region(), { kind: "present" });
   const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
   const id = present(await bound.kei.state()).id;
-  accepted(await Debts.of(world).add({ title: "Fresh debt" }));
+  const debts = Debts.of(world);
+  const debt = accepted(await debts.add({ title: "Fresh debt" }));
   const board = await view.board();
   if (board.contracts.kind !== "present") assert.fail("captured Repo unavailable");
   if (board.debts.kind !== "present") assert.fail("captured World unavailable");
@@ -124,6 +125,10 @@ test("Kanshi captures immutable coordinates without observation and reads fresh 
   assert.equal((await view.contract(id)).kind, "contract");
   assert.deepEqual(await view.region({}), { kind: "present", declarations: [{ id, patterns: ["src/**"] }] });
   await bound.kei.abandon();
+  accepted(await debts.debt({ id: debt.id }).update({ state: "done" }));
+  const settled = await view.board();
+  assert.deepEqual(settled.contracts, { kind: "present" });
+  assert.deepEqual(settled.debts, { kind: "present" });
   assert.deepEqual((await view.counts()).contracts, { kind: "present", value: 0 });
   assert.deepEqual(await view.region(), { kind: "present" });
   await assert.rejects(
@@ -195,10 +200,13 @@ async function populatedWorld(t: TestContext) {
   return { repository, contract, keiyaku: bound.kei, debtId: added.id, akumaId };
 }
 
-test("World exposes native current work for running peers while catalogues stay thin", async (t) => {
+test("World selects active Akumas before bounding and exposes native work under its Contract", async (t) => {
   const repository = fixtureRepository(t);
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
+  await bornLineageAkuma({ root: world, akumaName: "watcher", draw: "cafe0010", createdAt: "2026-10-31T00:00:00.000Z" });
   const workers: Awaited<ReturnType<typeof bornBody>>[] = [];
   try {
     for (const [suffix, command] of [["cafe0011", "npm test"], ["cafe0012", "square perceive"]] as const) {
@@ -210,9 +218,19 @@ test("World exposes native current work for running peers while catalogues stay 
         event: { type: "tool", phase: "started", id: command, name: "bash", call: { kind: "run", command } },
       });
     }
-    const report = await Kanshi.of({ world, repo: await Repo.at({ path: repository.path }) }).board();
-    assert.equal(report.akumas.kind, "present");
+    const child = workers[0]!.allocated.id;
+    assert.equal((await publishDispatch({ repository: await repositoryAt(world), akumaId: child, contractId: bound.contractId })).kind, "dispatched");
+    const view = Kanshi.of({ world, repo });
+    const limited = await view.board({ akumaLimit: 1 });
+    assert.ok(limited.akumas.kind === "present");
+    assert.deepEqual(limited.akumas.rows?.map(row => row.id), [child]);
+    assert.equal(limited.akumas.more, true);
+    const report = await view.board();
     assert.ok(report.akumas.kind === "present");
+    assert.deepEqual(report.akumas.rows?.map(row => row.id), workers.map(worker => worker.allocated.id));
+    const text = renderKanshiText(report);
+    assert.ok(text.indexOf(bound.contractId) < text.indexOf(child));
+    assert.ok(text.indexOf(child) < text.indexOf("AKUMA //"));
     for (const [index, command] of ["npm test", "square perceive"].entries()) {
       const row: AkumaKanshiRow | undefined = report.akumas.rows?.find(row => row.id === workers[index]!.allocated.id);
       assert.ok(row?.work && row.work.kind !== "unavailable");

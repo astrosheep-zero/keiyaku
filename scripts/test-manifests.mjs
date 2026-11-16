@@ -124,7 +124,6 @@ export const INTEGRATION_TEST_FILES = [
   "tests/git-workspace-capture.test.ts",
   "tests/grok-live-tell.test.ts",
   "tests/invocation-failure-boundary.test.ts",
-  "tests/kanshi-board.test.ts",
   "tests/kanshi-counts.test.ts",
   "tests/kanshi.test.ts",
   "tests/keiyaku-caller.test.ts",
