@@ -228,21 +228,17 @@ Lifecycle observation must not manufacture an unclean end by combining old
 running evidence with a Body's later leash release. A free-seat judgment uses
 fresh Heart evidence protected against succession for that bounded observation;
 it neither mutates lifecycle facts nor retains execution custody afterward.
-This is not a frozen view of subsequent activity or a barrier to future Bodies.
 
-The native roster is an internal bounded recent-activity observation. Reading it,
-status, history, wait, tell, ask, or any other observation
-never retires an entry. Its order is the later of each readable Heart's life and
+The native roster is an internal bounded recent-activity observation. Its order
+is the later of each readable Heart's life and
 activity evidence, with complete identity breaking equal activity and
 untimestamped rows following timestamped rows. A lifecycle-selected roster uses
 the Akuma owner's active or settled classification before bounding, together with
 any caller selection. The observation says whether another readable matching member
 lies beyond its bounded result without claiming a total or a frozen continuation.
-It supplies identity, life evidence, recent activity, and pending-work information
-without loading each history. Alias and current-work enrichment belong to the
-World-bound catalogue composition. Frozen caller attribution remains available to the owner for exact
-caller selection and retention judgments; ordinary roster observation does not
-repeat the birth recipe. Recognized
+It observes native life and activity without loading history. World composition
+owns Alias and current-work enrichment. Ordinary roster observation omits the
+birth recipe. Recognized
 unborn or stillborn allocation state remains visible; a hard direct-read failure
 may omit that roster row without suppressing readable peers and without
 inventing a per-row diagnostic. Status and roster never re-evaluate provider
@@ -269,6 +265,12 @@ direct observation; an unreadable Soul is not absence and cannot justify a
 complete reconstruction. Index persistence failure never changes the native
 answer, and births outside an observed membership set remain discoverable by
 later enumeration.
+
+A caller-selected running count follows the same unbounded tree. Only proven
+Soul ancestry and readable running life increment it. Sleeping or life-unreadable
+ancestors still connect descendants through readable Souls; unreadable Souls
+block only unproven paths. Direct Souls, never an index, prove membership.
+Zero may include skipped entries; failed enumeration is unavailable.
 
 ## Boundary
 

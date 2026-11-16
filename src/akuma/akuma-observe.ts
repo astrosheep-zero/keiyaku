@@ -103,6 +103,11 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
   }
 }
 
+/** Lightweight born-life observation using the same leash refresh as status and wait. */
+export async function readBornLife(paths: AkumaPaths, expected: AkumaId): Promise<AkumaStatus["life"]> {
+  return (await bornObservation(paths, expected, () => readLifeSnapshot(paths))).currentLife;
+}
+
 /** Optional semantic seam; the observer composition owns delivery and deduplication. */
 export type OutcomeObserver = (akumaId: AkumaId, historyIds: readonly string[]) => Promise<void>;
 

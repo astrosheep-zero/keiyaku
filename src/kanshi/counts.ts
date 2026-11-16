@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { countRunningAkuma } from "../akuma/akuma.js";
+import { countCallerRunningAkuma, countRunningAkuma } from "../akuma/akuma.js";
+import { akumaCallerSchema } from "../akuma/caller.js";
+import { KeiyakuError } from "../errors.js";
 import { DebtAuthorityCorruptionError } from "../debt/index.js";
 import { observeDebtBoard } from "../debt/operations.js";
 import { withGitDecodeChannel, withGitTargetedReadObservation } from "../git/read-observation.js";
@@ -10,6 +12,10 @@ import { sectionSchema, type Section } from "./report.js";
 import type { KanshiCoordinates } from "./read.js";
 
 export type KanshiCountsReport = z.output<typeof kanshiCountsReportSchema>;
+
+const countsOptionsSchema = z.strictObject({ akumaCaller: akumaCallerSchema.nullable().exactOptional() }).readonly();
+/** Omit akumaCaller for exact World totals; null marks only that section unavailable. */
+export type KanshiCountsOptions = z.output<typeof countsOptionsSchema>;
 
 export const kanshiCountsReportSchema = z
   .strictObject({
@@ -38,7 +44,14 @@ async function section(read: () => Promise<number>): Promise<Section<number>> {
   }
 }
 
-export async function kanshiCounts(input: KanshiCoordinates): Promise<KanshiCountsReport> {
+export async function kanshiCounts(
+  input: KanshiCoordinates,
+  options: KanshiCountsOptions = {},
+): Promise<KanshiCountsReport> {
+  const parsed = countsOptionsSchema.safeParse(options);
+  if (!parsed.success)
+    throw new KeiyakuError("invalid-input", `Invalid Kanshi counts options: ${parsed.error.message}`);
+  const { akumaCaller } = parsed.data;
   const world = input.world === null ? null : await World.prove(input.world);
   const observedAt = new Date().toISOString();
   const absent = { kind: "absent" } as const;
@@ -64,7 +77,10 @@ export async function kanshiCounts(input: KanshiCoordinates): Promise<KanshiCoun
     }
     if (!established) return [absent, absent];
     return Promise.all([
-      section(() => countRunningAkuma(world)),
+      section(async () => {
+        if (akumaCaller === null) throw new Error("Akuma caller selection unavailable");
+        return akumaCaller === undefined ? countRunningAkuma(world) : countCallerRunningAkuma(world, akumaCaller);
+      }),
       section(
         async () =>
           (await observeDebtBoard(world)).filter((row) => row.disposition === "ready" || row.disposition === "blocked")

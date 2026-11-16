@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { breakBody } from "../src/akuma/heart/index.js";
+import { DatabaseSync } from "node:sqlite";
+import { breakBody, finishBodyIfIdle, readSoul, recordTell } from "../src/akuma/heart/index.js";
+import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { Debts, Kanshi, Keis, KeiyakuError, Repo, World } from "../src/index.js";
-import type { KanshiScopeInput } from "../src/index.js";
+import type { AkumaCaller, KanshiCountsOptions, KanshiScopeInput } from "../src/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
 import { accepted } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
+import { temporaryDirectory } from "./support/process.js";
+import { isolateUserHome } from "./support/user-home.js";
+
+isolateUserHome();
 
 test("exact counts observe complete independent owners and isolate corrupt Hearts", async (context) => {
   const repository = makeGitRepository();
@@ -47,6 +53,9 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   assert.deepEqual([report.akuma, report.contracts, report.debts], [
     { kind: "present", value: 12 }, { kind: "present", value: 12 }, { kind: "present", value: 12 },
   ]);
+  const unavailable = await Kanshi.of({ world, repo }).counts({ akumaCaller: null });
+  assert.equal(unavailable.akuma.kind, "failed");
+  assert.deepEqual([unavailable.contracts, unavailable.debts], [report.contracts, report.debts]);
   writeFileSync(stopped.paths.heart, "corrupt");
   const broken = await Kanshi.of({ world, repo }).counts();
   assert.equal(broken.akuma.kind, "failed");
@@ -82,4 +91,75 @@ test("absence, explicit Repo and crossing validation remain independent", async 
   );
   await assert.rejects(call({ world: `${directory}/.` }));
   assert.equal((await Kanshi.of({ world }).counts()).debts.kind, "absent");
+  const selection = { akumaCaller: { kind: "external", integration: "pi", id: "S" } } as const;
+  assert.equal((await Kanshi.of({ world }).counts(selection)).akuma.kind, "absent");
+  await assert.rejects(Kanshi.of({ world }).counts({ akumaCaller: {} } as KanshiCountsOptions),
+    (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input");
+  await World.at(world);
+  mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "akuma", "run"), "not a directory");
+  const unavailable = await Kanshi.of({ world }).counts(selection);
+  assert.equal(unavailable.akuma.kind, "failed");
+  assert.deepEqual(unavailable.debts, { kind: "present", value: 0 });
+});
+
+test("caller running count preserves readable ancestry without trusting the cache or display bound", async (context) => {
+  const world = await World.at(temporaryDirectory(context, "counts-caller-"));
+  const root: AkumaCaller = { kind: "external", integration: "pi", id: "flagship" };
+  const kanshi = Kanshi.of({ world });
+  const selected = () => kanshi.counts({ akumaCaller: root });
+  assert.deepEqual((await selected()).akuma, { kind: "present", value: 0 });
+  let draw = 0;
+  const born = async (akumaName: string, caller?: AkumaCaller) => {
+    const child = await bornDirectAkuma({
+      root: world,
+      akumaName,
+      draw: (++draw).toString(16).padStart(8, "0"),
+      createdAt: "2026-08-09T00:00:00.000Z",
+      ...(caller === undefined ? {} : { caller }),
+    });
+    context.after(() => child.leash.release());
+    const body = await child.leash.recordBody(child.paths, { leashTakenAt: child.soul.createdAt });
+    return { ...child, body, caller: { kind: "akuma", world, akumaId: child.id } as const };
+  };
+  const ancestor = await born("worker", root);
+  await finishBodyIfIdle(ancestor.paths, { sequence: ancestor.body.sequence, at: ancestor.soul.createdAt });
+  ancestor.leash.release();
+  const branch = await born("child", ancestor.caller);
+  await born("grandchild", branch.caller);
+  for (let i = 0; i < 11; i++) await born("peer", ancestor.caller);
+  const unrelated = await born("outside");
+  await recordTell(unrelated.paths, {
+    kind: "tell",
+    id: "not-a-parent",
+    body: "hello",
+    recordedAt: unrelated.soul.createdAt,
+    initiator: "pi:flagship",
+  });
+  const hung = await born("hung", ancestor.caller);
+  await hung.leash.recordBodyHung(hung.paths, {
+    sequence: hung.body.sequence,
+    diagnostic: "cannot retire",
+    at: hung.soul.createdAt,
+  });
+  await recordAkumaLineage(world, { id: unrelated.id, caller: root });
+  await recordAkumaLineage(world, { id: branch.id });
+  assert.deepEqual((await selected()).akuma, { kind: "present", value: 13 });
+  assert.deepEqual((await kanshi.counts({ akumaCaller: ancestor.caller })).akuma, { kind: "present", value: 13 });
+  // A life failure must not erase the readable Soul edge to its descendants.
+  const database = new DatabaseSync(ancestor.paths.heart);
+  try {
+    database.exec("DROP TABLE bodies");
+  } finally {
+    database.close();
+  }
+  assert.equal((await readSoul(ancestor.paths))?.id, ancestor.id);
+  assert.deepEqual((await selected()).akuma, { kind: "present", value: 13 });
+  assert.equal((await kanshi.counts()).akuma.kind, "failed");
+  writeFileSync(ancestor.paths.heart, "corrupt");
+  unrelated.leash.release();
+  writeFileSync(unrelated.paths.heart, "corrupt");
+  assert.deepEqual((await selected()).akuma, { kind: "present", value: 0 });
+  await born("direct", root);
+  assert.deepEqual((await selected()).akuma, { kind: "present", value: 1 });
 });

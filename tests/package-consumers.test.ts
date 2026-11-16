@@ -168,8 +168,9 @@ void [word, arbitraryGate, kind, category, gates, actions];
         'assert.equal(plugin.manifest.id, "square");',
         'assert.equal(typeof plugin.activate, "function");',
         'const pi = await import("@astrosheep/keiyaku/pi");',
-        'assert.deepEqual(Object.keys(pi), ["registerKeiyakuTools"]);',
+        'assert.deepEqual(Object.keys(pi), ["registerKeiyakuExtension", "registerKeiyakuTools"]);',
         'assert.equal("registerKeiyakuTools" in root, false);',
+        'assert.equal("registerKeiyakuExtension" in root, false);',
         // Dedicated registration does not expose private catalogue, projection or execution.
         "const require = createRequire(import.meta.url);",
         'for (const specifier of ["@astrosheep/keiyaku/debt", "@astrosheep/keiyaku/kanshi", "@astrosheep/keiyaku/akuma", "@astrosheep/keiyaku/akumas"]) {',

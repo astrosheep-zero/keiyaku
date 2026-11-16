@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { harnessOwner } from "@astrosheep/square";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { registerKeiyakuStatus } from "./status.js";
 import { Keiyaku, KeiyakuUsageError } from "../library/keiyaku.js";
 import {
   classifyVerb,
@@ -14,6 +15,23 @@ import { projectFailure } from "../library/outcome.js";
 import { renderVerb } from "../cli/render/verbs.js";
 import { DEFAULT_CLI_COLUMNS } from "../cli/render/terminal.js";
 import { SERVER_DESCRIPTION } from "../mcp/description.js";
+
+function invocationContext(ctx: ExtensionContext) {
+  const environment = Object.freeze({ ...process.env });
+  const home = environment.KEIYAKU_HOME?.trim() || undefined;
+  return {
+    cwd: ctx.cwd,
+    environment,
+    identity: { owner: harnessOwner({ channel: "pi", session: ctx.sessionManager.getSessionId() }) },
+    ...(home === undefined ? {} : { home }),
+  };
+}
+
+/** Register the shipped presentation and native tools without exposing execution internals. */
+export function registerKeiyakuExtension(pi: ExtensionAPI): void {
+  registerKeiyakuTools(pi);
+  registerKeiyakuStatus(pi, invocationContext);
+}
 
 /** Register the native codemode integration; execution remains on the invocation facet. */
 export function registerKeiyakuTools(pi: ExtensionAPI): void {
@@ -32,8 +50,7 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
       async execute(_id, args, signal, _onUpdate, ctx) {
         const { cwd, repo, ...business } = args as Record<string, unknown>;
         const value = business as VerbInput<VerbName>;
-        const environment = { ...process.env };
-        const home = environment.KEIYAKU_HOME?.trim() || undefined;
+        let environment: NodeJS.ProcessEnv = {};
         let completion: VerbCompletion<VerbOutput<VerbName>>;
         try {
           const parsed = modelCoordinates(name).safeParse({
@@ -41,12 +58,12 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
             ...(repo === undefined ? {} : { repo }),
           });
           if (!parsed.success) throw new KeiyakuUsageError(parsed.error.message);
+          const invocation = invocationContext(ctx);
+          environment = invocation.environment;
           const facet = Keiyaku.for({
-            cwd: resolve(ctx.cwd, parsed.data.cwd ?? "."),
-            environment,
-            identity: { owner: harnessOwner({ channel: "pi", session: ctx.sessionManager.getSessionId() }) },
+            ...invocation,
+            cwd: resolve(invocation.cwd, parsed.data.cwd ?? "."),
             ...(!("repo" in parsed.data) || parsed.data.repo === undefined ? {} : { repo: parsed.data.repo }),
-            ...(home === undefined ? {} : { home }),
           });
           completion = {
             kind: "returned",

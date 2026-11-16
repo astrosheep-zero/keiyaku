@@ -1,5 +1,5 @@
 import { contractId, type ContractId } from "../core/facts/types.js";
-import { kanshiCounts, type KanshiCountsReport } from "./counts.js";
+import { kanshiCounts, type KanshiCountsOptions, type KanshiCountsReport } from "./counts.js";
 import {
   captureKanshiScope,
   observeKanshi,
@@ -23,8 +23,8 @@ class KanshiHandle {
     return (await observeKanshi(this.#scope, options)).report;
   }
 
-  counts(): Promise<KanshiCountsReport> {
-    return kanshiCounts(this.#scope);
+  counts(options: KanshiCountsOptions = {}): Promise<KanshiCountsReport> {
+    return kanshiCounts(this.#scope, options);
   }
 
   region(selection: KanshiRegionSelection | Readonly<Record<string, never>> = {}): Promise<RegionRead> {
@@ -43,7 +43,7 @@ export const Kanshi = Object.freeze({
 });
 
 export { kanshiObservationSchema } from "./read.js";
-export type { KanshiCountsReport } from "./counts.js";
+export type { KanshiCountsOptions, KanshiCountsReport } from "./counts.js";
 export { regionReadSchema, kanshiReportSchema, kanshiContractReportSchema, kanshiResultSchema } from "./report.js";
 export type { KanshiBoardOptions, KanshiScopeInput } from "./read.js";
 export type {

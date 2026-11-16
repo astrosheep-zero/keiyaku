@@ -220,6 +220,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "pi/**",
       allow: [
+        any("pi/**"),
+        any("kanshi/index.ts", ["Kanshi"]),
+        any("library/repo.ts", ["Repo", "NoGitWorldError"]),
+        any("world.ts", ["World"]),
+        runtime("library/keiyaku-identity.ts", ["akumaCallerFromEnvironment"]),
         any("library/keiyaku.ts"),
         any("library/keiyaku-verbs.ts"),
         any("library/model-tools.ts"),
@@ -606,7 +611,9 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     {
       source: "kanshi/counts.ts",
       allow: [
+        errorBase,
         any("akuma/akuma.ts"),
+        runtime("akuma/caller.ts", ["akumaCallerSchema"]),
         any("debt/index.ts"),
         any("debt/operations.ts"),
         any("git/read-observation.ts", [...kanshiGitObservation.symbols!, "withGitTargetedReadObservation"]),

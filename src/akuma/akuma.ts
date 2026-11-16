@@ -5,7 +5,7 @@ import { z } from "zod";
 import { projectBoundedList, lifecycleSelection, type LifecycleSelection } from "../bounded-list.js";
 import { akumaLifecycle } from "./heart/facts.js";
 import type { WorldRoot } from "../world.js";
-import { rosterListRow } from "./akuma-observe.js";
+import { readBornLife, rosterListRow } from "./akuma-observe.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import { readSoul } from "./heart/index.js";
 import {
@@ -188,6 +188,25 @@ export async function countRunningAkuma(path: WorldRoot): Promise<number> {
   return observed.rows.filter((row) => row.life === "running").length;
 }
 
+/** Readable running subset of the same frozen caller tree used by listing. */
+export async function countCallerRunningAkuma(path: WorldRoot, caller: AkumaCaller): Promise<number> {
+  const known = await knownAkuma(path);
+  const { edges } = await readDirectAkumaLineage(known.rows);
+  const members = callerClosure(edges, caller, path);
+  const running = await boundedMap(
+    known.rows.filter(({ id }) => members.has(id)),
+    async ({ id, paths }) => {
+      try {
+        return (await readBornLife(paths, id)) === "running" ? 1 : 0;
+      } catch {
+        // Failed life does not erase the already proven Soul edge for descendants.
+        return 0;
+      }
+    },
+  );
+  return running.reduce<number>((count, value) => count + value, 0);
+}
+
 export function rosterInput(
   input: AkumaRosterInput | Readonly<{ akumaName?: string }>,
   allowLimit: boolean,
@@ -223,8 +242,8 @@ function callerClosure(lineage: AkumaLineage, root: AkumaCaller, world: WorldRoo
   const included = new Set<AkumaId>();
   const visited = new Set<string>();
   const queue: AkumaCaller[] = [root];
-  while (queue.length > 0) {
-    const caller = queue.shift()!;
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const caller = queue[cursor]!;
     const key = akumaCallerKey(caller);
     if (visited.has(key)) continue;
     visited.add(key);

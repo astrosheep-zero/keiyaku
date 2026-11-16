@@ -8,7 +8,7 @@ import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-ag
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { Akuma, World } from "../src/index.js";
+import { Akuma, Kanshi, World } from "../src/index.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { SERVER_DESCRIPTION } from "../src/mcp/description.js";
 import { readHeart, readLatestTurnForBody } from "../src/akuma/heart/index.js";
@@ -223,6 +223,9 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     await waitForFixtureFile(join(root, "first.ready"), 30_000);
     const status = await child.status();
     assert.deepEqual(status.birth.caller, { kind: "external", integration: "pi", id: native.manager.getSessionId() });
+    const caller = status.birth.caller;
+    const counts = () => Kanshi.of({ world }).counts({ akumaCaller: caller });
+    assert.deepEqual((await counts()).akuma, { kind: "present", value: 1 });
     const paths = pathsForAkumaId(world, child.id);
     const body = (await readHeart(paths)).latestBody!;
     const pid = Number(readFileSync(join(root, "first.ready"), "utf8"));
@@ -258,6 +261,7 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     writeFileSync(join(root, "first.release"), "release");
     assert.equal((await child.idle({ timeoutMs: 30_000 })).reason, "completed");
     assert.equal((await child.status()).work.kind, "idle");
+    assert.deepEqual((await counts()).akuma, { kind: "present", value: 0 });
     assert.equal(process.env.PI_SESSION_ID, "inherited-parent");
     assert.equal(process.env.CODEX_THREAD_ID, "inherited-other-host");
     operationFailed = false;

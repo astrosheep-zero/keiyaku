@@ -91,6 +91,7 @@ export type {
   KanshiScopeInput,
   KanshiBoardOptions,
   KanshiCountsReport,
+  KanshiCountsOptions,
   AkumaKanshiRow,
   AkumaKanshiWorld,
   ContractEndpointObservation,

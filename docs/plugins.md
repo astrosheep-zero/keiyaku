@@ -20,6 +20,14 @@ attribution. Inherited host identity cannot replace this current session.
 Workers remain detached from the Pi session; cancelling observation or retiring
 the session does not stop admitted work.
 
+Pi tools and footer share host-context capture and identity selection.
+The footer counts readable running descendants in the flagship session's
+birth-caller tree; inside an Akuma it selects that actor's subtree, not separate
+native sessions. Tell recipients never establish ancestry. Caller failure makes
+only the Akuma count unavailable, never World-wide. Contract and Debt counts and
+the World-board overlay retain their scope. Session replacement fences old
+reads; refresh uses one read at a time and coalesces requests.
+
 ## Contract And Selection
 
 Keiyaku owns the closed signal vocabulary and the stable public plugin contract.

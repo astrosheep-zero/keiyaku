@@ -122,6 +122,7 @@ async function writeLineageCache(
 async function directEdge(member: LineageMember): Promise<readonly [AkumaId, AkumaCaller | null] | null | undefined> {
   try {
     const soul = await readSoul(member.paths);
+    if (soul !== null && soul.id !== member.id) throw new Error("Akuma soul does not match its coordinate");
     return soul === null ? null : [member.id, soul.caller ?? null];
   } catch {
     // Unreadability is not authoritative absence and cannot justify a rebuild.

@@ -94,6 +94,18 @@ distinct. Repo
 and World availability are independent, and the aggregate is one read-time
 observation rather than a cross-product transaction.
 
+An explicit caller selection changes only the Akuma count to its owner's
+readable, proven running-descendant subset in this World. It follows existing
+frozen birth caller ancestry, not notification audiences or provider sessions,
+and never uses a bounded catalogue as a total. Unreadable members do not poison
+readable peers; zero means no running member was proven by this observation,
+not that every physical member was readable. Absent World and failed enumeration
+retain their ordinary availability meaning. Invalid selection never becomes an
+unselected World count. Omission keeps the exact World aggregate unchanged;
+Contract and Debt counts are independent of this selection. Explicitly
+unavailable caller selection fails only the Akuma section of the same aggregate
+observation, without reading unselected Akuma totals.
+
 ## Associations and selection
 
 Kanshi may attach already observed DebtHolder and Dispatch facts to their

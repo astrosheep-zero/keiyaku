@@ -38,6 +38,7 @@ export async function bornDirectAkuma(
     draw: string;
     createdAt: string;
     provider?: Soul["provider"];
+    caller?: AkumaCaller;
   }>,
 ) {
   const allocated = await allocatedHeart(input.root, input.akumaName, input.draw);
@@ -48,6 +49,7 @@ export async function bornDirectAkuma(
     options: {},
     cwd: input.root,
     origin: { kind: "direct" },
+    ...(input.caller === undefined ? {} : { caller: input.caller }),
     createdAt: input.createdAt,
   };
   const leash = (await HeldAkumaLeash.try(allocated.paths))!;
