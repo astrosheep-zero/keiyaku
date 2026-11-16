@@ -32,8 +32,8 @@ test("CLI adapts public Contract selector refusals without owning matching", asy
     kind: "refused", refusal: { kind: "unknown-short-selector", selector },
   });
   const facet = Keiyaku.at({ cwd: repo.cwd, environment: {} });
-  await assert.rejects(facet.show({ id: selector }), KeiyakuUsageError);
-  await assert.rejects(facet.show(), KeiyakuUsageError);
+  await assert.rejects(facet.show({ selector }), KeiyakuUsageError);
+  await assert.rejects(facet.show({} as never), KeiyakuUsageError);
 });
 
 test("status parses one complete own-family identity, or defers one name to acquisition", () => {

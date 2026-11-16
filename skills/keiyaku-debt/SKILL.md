@@ -26,7 +26,8 @@ Only `needs` orders work: a `Debt` with unresolved `needs` is `blocked`, and
 becomes `ready` once every prerequisite is `done` or `drop`. Do not add `needs`
 merely because two `Debts` touch the same `Region` or are related.
 
-`show` displays current prerequisites and their availability. Native readiness
+`keiyaku show <debt/...>` requires an explicit selector and displays current
+prerequisites and their availability. Native readiness
 and blocked views interpret unresolved `needs`. Creation starts open; use update
 to set disposition or its current explanation. Every state may be reopened or
 changed to another state. Reopening a prerequisite blocks open dependents again.

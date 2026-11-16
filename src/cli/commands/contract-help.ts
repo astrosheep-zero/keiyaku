@@ -212,11 +212,11 @@ export const CONTRACT_COMMAND_SPECS = {
     positional: "optional",
     stdin: "none",
     flags: { json: "boolean" },
-    usage: "show [<contract>|@name] [--repo <path>]\nshow <debt/...>",
+    usage: "show <contract|@name> [--repo <path>]\nshow <debt/...>",
     purpose: "Read one Contract's guidance or one Debt and its prerequisites.",
     details: [
       "Accepts a complete Contract identity, exact @name short selector, or one complete Debt identity.",
-      "Omitted selection uses the exact managed worktree's installed Contract context.",
+      "An explicit selector is required, including inside a Contract worktree.",
       "Akuma, category, glob, and plural selections are refused before reading.",
       "Debt reads use the invocation World and do not accept --repo.",
       "Text returns Contract guidance directly or renders the Debt owner's detail; --json serializes the same native value.",

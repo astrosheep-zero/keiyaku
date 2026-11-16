@@ -363,7 +363,7 @@ test("guidance preserves exact requested bytes and distinguishes missing authori
   const guidance = await bound.kei.guidance();
   assert.ok(guidance.kind === "present");
   assert.ok(guidance.guidance.includes("## Objective"));
-  assert.deepEqual(await facet.show({ id: bound.contractId }), guidance);
+  assert.deepEqual(await facet.show({ selector: bound.contractId }), guidance);
   assertWireRoundTrip(guidanceSchema, guidance);
 
   const missing = contracts.kei({ id: "kei/missing" as never });
@@ -373,7 +373,7 @@ test("guidance preserves exact requested bytes and distinguishes missing authori
   assert.deepEqual(missingHistory, { kind: "contract-missing", contractId: "kei/missing" });
   assertWireRoundTrip(guidanceSchema, missingGuidance);
   assertWireRoundTrip(contractHistorySchema, missingHistory);
-  assert.equal(classifyVerb("show", {}, { kind: "returned", value: missingGuidance }), "refused");
+  assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "returned", value: missingGuidance }), "refused");
   assert.equal(
     classifyVerb("history", { selector: "kei/missing" }, { kind: "returned", value: missingHistory }),
     "refused",

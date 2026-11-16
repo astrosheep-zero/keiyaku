@@ -235,6 +235,8 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["tell", { akuma: "@worker", prompt: "work", wait: "10m" }],
     ["tell", { akuma: "@worker", prompt: "work", wait: true }],
     ["tell", { akuma: "@worker", prompt: "work", timeoutMs: 0 }],
+    ["show", {}],
+    ["show", { id: "debt/example" }],
     ["show", { ids: ["debt/example"] }],
     ["kill", { akuma: ["@worker"] }],
     ["wait", { selectors: ["kei/example", "aku/worker/12345678"], timeout: "invalid" }],
@@ -342,7 +344,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "timeout", "string"], ["history", "last", "boolean"], ["show", "id", "string"], ["kill", "akuma", "string"]]) {
+  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "timeout", "string"], ["history", "last", "boolean"], ["show", "selector", "string"], ["kill", "akuma", "string"]]) {
     const properties = tools.find((tool) => tool.name === name)!.inputSchema.properties as Record<string, { type?: string }>;
     assert.equal(properties[key!]!.type, type);
   }
@@ -351,7 +353,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(Object.hasOwn(properties, "wait"), false);
   }
   assert.deepEqual(tools.find(tool => tool.name === "wait")!.inputSchema.required, ["selectors"]);
-  assert.ok(!tools.find(tool => tool.name === "show")!.inputSchema.required?.includes("id"));
+  assert.ok(tools.find(tool => tool.name === "show")!.inputSchema.required?.includes("selector"));
   assert.ok(tools.find(tool => tool.name === "kill")!.inputSchema.required?.includes("akuma"));
   for (const name of ["ls", "report", "reconcile"])
     assert.ok(tools.some((tool) => tool.name === name));
@@ -396,7 +398,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   });
   assert.equal(childResult.isError, false);
   const child = accepted(Keiyaku.verbs["debt.add"].output.parse(childResult.structuredContent)).id;
-  const shown = await client.callTool({ name: "show", arguments: { id: child } });
+  const shown = await client.callTool({ name: "show", arguments: { selector: child } });
   assert.equal(shown.isError, false);
   assert.equal(shown.structuredContent, undefined);
   assert.ok(JSON.stringify(shown.content).includes(`needs ${id}`));
@@ -410,7 +412,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   });
   assert.equal(done.isError, false);
   assert.equal(done.structuredContent, undefined);
-  const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { id });
+  const completed = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { selector: id });
   assert.ok(completed.kind === "debt-complete" && completed.items[0]?.kind === "found");
   assert.equal(completed.items[0].state, "done");
   assert.equal(completed.items[0].note, "finished");
@@ -426,7 +428,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   });
   assert.equal(reopened.isError, false);
   assert.equal(reopened.structuredContent, undefined);
-  const reopenedDetail = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { id });
+  const reopenedDetail = await Keiyaku.at({ cwd, environment, home: cwd }).run("show", { selector: id });
   assert.ok(reopenedDetail.kind === "debt-complete" && reopenedDetail.items[0]?.kind === "found");
   assert.equal(reopenedDetail.items[0].state, "open");
   assert.equal(reopenedDetail.items[0].body, undefined);
@@ -684,10 +686,11 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
     assert.equal(response.structuredContent, undefined);
     return (response.content as { type: string; text?: string }[]).filter(item => item.type === "text").map(item => item.text).join("\n");
   };
-  assert.equal(await directText({ id: bound.contractId }), nativeGuidance.guidance);
-  const nativeDebt = await facet.show({ id: parent });
-  const textDebt = await directText({ id: parent });
-  assert.equal(textDebt, renderVerb("show", { id: parent }, { kind: "returned", value: nativeDebt }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
+  assert.equal(await directText({ selector: bound.contractId }), nativeGuidance.guidance);
+  assert.equal(await directText({ selector: `@${bound.contractId.slice("kei/".length)}` }), nativeGuidance.guidance);
+  const nativeDebt = await facet.show({ selector: parent });
+  const textDebt = await directText({ selector: parent });
+  assert.equal(textDebt, renderVerb("show", { selector: parent }, { kind: "returned", value: nativeDebt }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
   const cliDebt = await runCli(["-C", repository.path, "show", parent], { environment });
   assert.equal(cliDebt.exit, 0);
   assert.equal(cliDebt.stdout.trimEnd(), textDebt.trimEnd());
@@ -702,17 +705,16 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
   assert.equal(scriptDebt.items[0]?.needs?.[0]?.id, prerequisite);
   const jsonChild = await runCli(["-C", repository.path, "show", child, "--json"], { environment });
   assert.equal(jsonChild.exit, 0, jsonChild.stderr);
-  assert.deepEqual(JSON.parse(jsonChild.stdout), await facet.show({ id: child }));
-  const textChild = await directText({ id: child });
+  assert.deepEqual(JSON.parse(jsonChild.stdout), await facet.show({ selector: child }));
+  const textChild = await directText({ selector: child });
   assert.ok(textChild.includes(`needs ${parent}`));
-  const missing = await client.callTool({ name: "show", arguments: { id: "debt/missing" } });
+  const missing = await client.callTool({ name: "show", arguments: { selector: "debt/missing" } });
   assert.equal(missing.isError, true);
   assert.equal(missing.structuredContent, undefined);
   assert.match(JSON.stringify(missing.content), /debt missing/u);
-  const contextual = await client.callTool({ name: "show", arguments: { cwd: bound.worktreePath } });
-  assert.equal(contextual.isError, false);
-  assert.equal(contextual.structuredContent, undefined);
-  assert.equal((contextual.content as { text: string }[])[0]?.text, nativeGuidance.guidance);
+  const omitted = await client.callTool({ name: "show", arguments: { cwd: bound.worktreePath } });
+  assert.equal(omitted.isError, true);
+  assert.equal(omitted._meta?.["keiyaku/disposition"], "usage");
 });
 
 test("SDK report records the executing actor and renders its attribution", async (t) => {
@@ -905,7 +907,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
       columns: DEFAULT_CLI_COLUMNS, color: false,
     }),
   }]);
-  const guidance = await client.callTool({ name: "show", arguments: { id: before.id } });
+  const guidance = await client.callTool({ name: "show", arguments: { selector: before.id } });
   const nativeGuidance = await handle.guidance();
   assert.equal(guidance.structuredContent, undefined);
   assert.equal(guidance.isError, false);
@@ -916,12 +918,12 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   assert.equal(boundOverMcp.isError, false);
   const wire = accepted(Keiyaku.verbs.bind.output.parse(boundOverMcp.structuredContent));
   assert.equal(Object.hasOwn(wire, "kei"), false);
-  const mintedInput = { id: wire.contractId };
+  const mintedInput = { selector: wire.contractId };
   const minted = await client.callTool({ name: "show", arguments: mintedInput });
   assert.equal(minted.isError, false);
   const mintedGuidance = await Keiyaku.at({ cwd: repository.path, environment: {} }).run("show", mintedInput);
   assert.ok(mintedGuidance.kind === "present");
-  const missingInput = { id: "kei/missing-mcp-contract" };
+  const missingInput = { selector: "kei/missing-mcp-contract" };
   const absent = await client.callTool({ name: "show", arguments: missingInput });
   assert.equal(absent.structuredContent, undefined);
   assert.equal(absent.isError, true);

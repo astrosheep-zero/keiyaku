@@ -14,7 +14,7 @@ function command(argv: readonly string[]): ParsedCommand {
 
 test("show routes complete Debt addresses to the native Debt operation", () => {
   assert.deepEqual(command(["show", "debt/example"]), {
-    name: "show", input: { id: "debt/example" }, output: "text",
+    name: "show", input: { selector: "debt/example" }, output: "text",
   });
   for (const selectors of [["debt/one", "debt/two"], ["debt/one", "kei/two"], ["@one", "debt/two"]])
     assert.throws(() => command(["show", ...selectors]), /at most one selector/u);
@@ -218,12 +218,12 @@ test("delivery dry-run parses preview options and rejects unused mutation option
 });
 
 test("show parses a standalone Contract guidance read with root coordinates", () => {
-  assert.deepEqual(parseArgv(["show"]), { command: { name: "show", input: {}, output: "text" } });
+  assert.throws(() => parseArgv(["show"]), /show requires one explicit selector/u);
   for (const selector of ["kei/example", "@example"]) {
     assert.deepEqual(parseArgv(["-C", "/invocation", "--repo", "/repository", "show", selector, "--json"]), {
       cwd: "/invocation",
       repo: "/repository",
-      command: { name: "show", input: { id: selector }, output: "json" },
+      command: { name: "show", input: { selector }, output: "json" },
     });
   }
   for (const selector of ["aku", "aku/", "aku/*", "kei", "kei/", "kei/*", "aku/worker/1234abcd", "kei/foo*"]) {
@@ -237,10 +237,10 @@ test("show parses a standalone Contract guidance read with root coordinates", ()
 
 test("show parses one Contract selector and JSON output; status refuses the retired guidance flag", () => {
   assert.deepEqual(parseArgv(["show", "kei/example", "--json"]), {
-    command: { name: "show", input: { id: "kei/example" }, output: "json" },
+    command: { name: "show", input: { selector: "kei/example" }, output: "json" },
   });
   assert.deepEqual(parseArgv(["show", "@example"]), {
-    command: { name: "show", input: { id: "@example" }, output: "text" },
+    command: { name: "show", input: { selector: "@example" }, output: "text" },
   });
   assert.throws(() => parseArgv(["show", "aku/x/*"]), /cannot select an Akuma/u);
   for (const selectors of [[], ["kei/example"], ["@example"], ["kei/one", "kei/two"], ["aku/x/*"]]) {

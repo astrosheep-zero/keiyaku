@@ -768,7 +768,7 @@ test("Debt batch detail retains prerequisite endpoints and readable peers from o
   assert.ok(prerequisiteOwner?.kind === "found");
   assert.deepEqual(prerequisiteOwner.needs, [{ id: removed, state: "missing" }]);
   const facet = Keiyaku.at({ cwd: root, environment: {} });
-  const complete = await facet.show({ id: first });
+  const complete = await facet.show({ selector: first });
   assert.equal(complete.kind, "debt-complete");
   if (complete.kind === "debt-complete") assert.deepEqual(complete.items, [prerequisiteOwner]);
   assert.deepEqual(await debts.read({ ids: [removed] }), { kind: "debt-missing", items: [{ kind: "missing", id: removed }] });

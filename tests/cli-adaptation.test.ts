@@ -24,7 +24,7 @@ import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
 
-test("show reads native bytes once for explicit and contextual Contract selection", async (t) => {
+test("show reads native bytes once for explicit Contract selection and refuses omission", async (t) => {
   const repository = makeGitRepository();
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -56,9 +56,9 @@ test("show reads native bytes once for explicit and contextual Contract selectio
   for (const [cwd, selector] of [
     [repository.path, row.id],
     [repository.path, `@${row.id.slice("kei/".length)}`],
-    [worktreePath, undefined],
+    [worktreePath, row.id],
   ] as const) {
-    const argv = ["-C", cwd, "show", ...(selector === undefined ? [] : [selector])];
+    const argv = ["-C", cwd, "show", selector];
     let before = read.mock.callCount();
     const text = await runCli(argv, { environment: {} });
     assert.equal(text.exit, 0, text.stderr);
@@ -82,10 +82,12 @@ test("show reads native bytes once for explicit and contextual Contract selectio
   }
   const child = join(worktreePath, "nested");
   mkdirSync(child);
-  const nested = await captureOutput(() => main(["-C", child, "show"]));
-  assert.equal(nested.exit, 64);
-  assert.match(nested.stderr, /required outside a managed worktree/u);
-  assert.equal(read.mock.callCount(), before);
+  for (const cwd of [worktreePath, child, join(repository.path, "missing")]) {
+    const omitted = await captureOutput(() => main(["-C", cwd, "show"]));
+    assert.equal(omitted.exit, 64);
+    assert.match(omitted.stderr, /show requires one explicit selector/u);
+    assert.equal(read.mock.callCount(), before);
+  }
   assert.doesNotMatch(status.stdout, /# Guidance read/u);
 });
 
@@ -101,7 +103,7 @@ test("show preserves native absence and selection refusals with command-specific
   assert.deepEqual(json.value, { kind: "missing" });
   assert.equal(read.mock.callCount(), 2);
   for (const [args, reason] of [
-    [[], /required outside a managed worktree/u],
+    [[], /show requires one explicit selector/u],
     [["@missing"], /unknown contract selector/u],
     [["@kei/missing"], /redundant short contract selector/u],
     [["aku/worker/1234abcd"], /cannot select an Akuma/u],

@@ -168,14 +168,13 @@ function parseReview(parts: ContractTokens): CliRequest {
     : { name: "review", input: { ...input, summary }, output: parts.output };
 }
 
-function showSelector(parts: ContractTokens): string | undefined {
+function showSelector(parts: ContractTokens): string {
   if (parts.positionals.length > 1) refuse("show", "show accepts at most one selector");
   const selected = parts.positionals[0];
-  if (selected !== undefined && ["aku/", "kei", "kei/", "kei/*"].includes(selected))
-    refuse("show", "show cannot select a category");
-  if (selected === "aku" || selected?.startsWith("aku/") === true) refuse("show", "show cannot select an Akuma");
-  if (selected !== undefined && !selected.startsWith("@") && /[*?\[\]]/u.test(selected))
-    refuse("show", `unsupported show glob: ${selected}`);
+  if (selected === undefined) refuse("show", "show requires one explicit selector");
+  if (["aku/", "kei", "kei/", "kei/*"].includes(selected)) refuse("show", "show cannot select a category");
+  if (selected === "aku" || selected.startsWith("aku/")) refuse("show", "show cannot select an Akuma");
+  if (!selected.startsWith("@") && /[*?\[\]]/u.test(selected)) refuse("show", `unsupported show glob: ${selected}`);
   return selected;
 }
 
@@ -277,15 +276,15 @@ export function parseContractCommand(parts: ContractTokens): CliRequest {
       return { name: "abandon", input: { ...selected, ...(note === undefined ? {} : { note }) }, output };
     }
     case "show": {
-      const id = showSelector(parts);
-      if (id?.startsWith("debt/") === true) {
+      const selector = showSelector(parts);
+      if (selector.startsWith("debt/")) {
         try {
-          canonicalDebtId(id);
+          canonicalDebtId(selector);
         } catch (error) {
           refuse("show", error instanceof Error ? error.message : String(error));
         }
       }
-      return { name: "show", input: id === undefined ? {} : { id }, output };
+      return { name: "show", input: { selector }, output };
     }
     case "kanshi":
       return { name: "kanshi", input: {}, output };

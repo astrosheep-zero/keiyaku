@@ -401,7 +401,15 @@ const api = Keiyaku.at({ cwd: "/explicit/cwd", environment: {} });
 const run: KeiyakuRunOptions = { signal: AbortSignal.abort() };
 const bind: Promise<BindOutcome> = api.bind({ markdown: "terms" }, run);
 bind.then(answer => { if (answer.kind === "accepted") { const handle: Kei = answer.kei; void handle.id; } });
-api.deliver(); api.verify(); api.abandon(); api.show(); api.reconcile(); api.whoami();
+api.deliver(); api.verify(); api.abandon(); api.show({ selector: "kei/example" }); api.reconcile(); api.whoami();
+// @ts-expect-error show requires explicit business input
+api.show();
+// @ts-expect-error show requires explicit selection
+api.show({});
+// @ts-expect-error generic show also requires explicit selection
+api.run("show", {});
+// @ts-expect-error id is not an invocation show input
+api.show({ id: "kei/example" });
 api.settings(); api.nuke(); api.kanshi(); api.region(); api.debtDoctor();
 api.debtAdd({ title: "caller" }, run);
 api.debtAddDocument({ markdown: "document" }, run);

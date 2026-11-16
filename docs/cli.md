@@ -66,7 +66,7 @@ owner's judgment, and returns the owner result or an edge-level usage refusal.
 | deliver, review, verify, abandon, reconcile | Request lifecycle, evidence production, or repair judgment, or delivery preview; refuse an absent or ambiguous Contract selector. | Return the owning operation result unchanged. |
 | kanshi | Read the selector-free composite World report. | Render independent section availability without changing classification for section failure. |
 | status, ls | Read one addressed Contract or Akuma, or one owner's catalogue; refuse missing or invalid subjects before observation. | Render the owner observation without manufacturing facts. |
-| show | Read one explicitly selected Debt or one explicitly or contextually selected Contract's guidance; refuse plural selection before reading. | Return the selected owner's native value without an envelope. |
+| show | Read one explicitly selected Debt or Contract's guidance; refuse absent or plural selection before reading. | Return the selected owner's native value without an envelope. |
 | region | Read declared Contract file patterns, optionally for selected paths. | Return the owner region observation or an edge refusal. |
 | settings | Read the shared Settings resource for the invocation World. | Return its read-only observation, including scoped failure or absence. |
 | report | Record the invoking Akuma's explicit progress on its current execution; refused when not executing; no recipient selection or inferred caller fallback. | Return native report admission; recorded never claims notification receipt. |
@@ -116,10 +116,10 @@ Its Dispatch association is independent of the contextual Contract. Independent
 facts remain visible when another is absent, invalid, ambiguous, or unavailable;
 the Akuma profile is descriptive, not live execution status.
 
-`show` reads one addressed Debt through its owner or one selected Contract's
-guidance, using the existing exact Contract selection context when selection
-is omitted. Plural selection, Akuma, category, and glob selection refuse before
-reading. The returned text and JSON are the selected owner's own value. Status requires one
+`show` reads one explicitly addressed Debt through its owner or one explicitly
+selected Contract's guidance. Omitted selection refuses before coordinate
+discovery or product reads, even inside a Contract worktree. Plural selection,
+Akuma, category, and glob selection refuse before reading. The returned text and JSON are the selected owner's own value. Status requires one
 complete Contract or Akuma identity without guidance; omitted status is a usage
 refusal. Kanshi alone reads the selector-free World report.
 Plural and category status requests refuse before authority observation. Named

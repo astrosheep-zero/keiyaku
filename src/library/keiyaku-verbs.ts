@@ -317,27 +317,24 @@ export const verbs = Object.freeze({
   },
   show: {
     description:
-      "Read a Contract in full: terms, current chapter, and working instructions. Or read one Debt in full with its prerequisites. Omit id to read the Contract whose worktree you stand in.",
+      "Read a Contract in full: terms, current chapter, and working instructions. Or read one Debt in full with its prerequisites. Requires one explicit selector.",
     input: z
       .strictObject({
-        id: text
-          .superRefine((id, context) => {
+        selector: text
+          .superRefine((selector, context) => {
             if (
-              debtIdSchema.safeParse(id).success ||
-              contractIdSchema.safeParse(id.startsWith("@") ? `kei/${id.slice(1)}` : id).success
+              debtIdSchema.safeParse(selector).success ||
+              contractIdSchema.safeParse(selector.startsWith("@") ? `kei/${selector.slice(1)}` : selector).success
             )
               return;
             context.addIssue({
               code: "custom",
-              message: id.startsWith("@kei/")
-                ? `redundant short contract selector: ${id}`
+              message: selector.startsWith("@kei/")
+                ? `redundant short contract selector: ${selector}`
                 : "show requires one Contract selector or one Debt ID",
             });
           })
-          .exactOptional()
-          .describe(
-            "One kei/... or @name for Contract guidance, or one debt/... ID. Omit for contextual Contract guidance from cwd.",
-          ),
+          .describe("One explicit kei/... or @name for Contract guidance, or one debt/... ID."),
       })
       .readonly(),
     output: z.union([guidanceSchema, debtShowResultSchema, debtAbsentSchema]),

@@ -90,7 +90,7 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   assert.ok(bound.worktreePath);
   commitCandidate(repository, bound.worktreePath);
 
-  const showInput = { id: bound.contractId };
+  const showInput = { selector: bound.contractId };
   const guidance = await facet.run("show", showInput);
   assert.deepEqual(guidance, await bound.kei.guidance());
   assert.ok(guidance.kind === "present" && guidance.guidance.includes("Library verbs"));
@@ -98,8 +98,10 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   assertWireRoundTrip(Keiyaku.verbs.show.output, guidance);
 
   const contextual = Keiyaku.at({ cwd: bound.worktreePath, environment: {}, home });
-  assert.deepEqual(await contextual.show(), guidance);
-  assert.deepEqual(await contextual.run("show", {}), guidance);
+  assert.deepEqual(await contextual.show(showInput), guidance);
+  await assert.rejects(contextual.show({} as never), KeiyakuUsageError);
+  await assert.rejects(contextual.run("show", {} as never), KeiyakuUsageError);
+  await assert.rejects((contextual.show as () => Promise<unknown>)(), KeiyakuUsageError);
 
   const reviewInput = { contract: bound.contractId, verdict: "satisfied" as const, summary: "Reviewed the candidate changes" };
   const reviewed = accepted(await facet.run("review", reviewInput));
@@ -189,8 +191,9 @@ test("wire validation and classification reject malformed calls before observati
   for (const [name, inputs] of [
     ["spawn", [{ akumaName: "worker", prompt: "work", wait: "5m" }]],
     ["tell", [{ akuma: "@worker", prompt: "work", wait: "5m" }]],
-    ["show", [{ ids: ["debt/a"] }, { id: ["debt/a"] },
-      { id: "aku/worker/1234abcd" }, { id: "debt/" }, { id: "@*" }, { id: "@" }]],
+    ["show", [undefined, {}, { id: "kei/example" }, { id: "debt/a", selector: "debt/a" },
+      { ids: ["debt/a"] }, { selector: ["debt/a"] }, { selector: "" }, { selector: " " },
+      { selector: "aku/worker/1234abcd" }, { selector: "debt/" }, { selector: "@*" }, { selector: "@" }]],
     ["kill", [{ akuma: ["aku/worker/1234abcd"] }, { akuma: " " }]],
     ["ls", [{ selector: "kei/", selection: "all" }, { selector: "debt/", mine: true },
       { selector: "aku/", mine: true }, { selector: "aku/*", caller: "aku/intern/00000001" }, { selector: "aku/*", selection: "closed" }]],
@@ -209,8 +212,8 @@ test("wire validation and classification reject malformed calls before observati
   }
   assert.equal(Keiyaku.verbs.history.input.safeParse({ selector: "kei/example", limit: 1 }).success, false);
   assert.equal(Keiyaku.verbs.bind.input.safeParse({ markdown: document(), forkOf: "kei/example" }).success, false);
-  assert.equal(classifyVerb("show", {}, { kind: "returned", value: { kind: "missing" } }), "refused");
-  assert.equal(classifyVerb("show", {}, { kind: "threw", error: new TypeError("unexpected") }), "failed");
+  assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "returned", value: { kind: "missing" } }), "refused");
+  assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "threw", error: new TypeError("unexpected") }), "failed");
 });
 
 test("ls uses one strict object and refuses inapplicable filters before discovery", async (t) => {

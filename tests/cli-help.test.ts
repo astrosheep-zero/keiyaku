@@ -50,7 +50,7 @@ test("command family and leaf help expose executable usage and flags", () => {
   assert.match(verifyHelp, /usage  keiyaku verify/u);
   assert.match(verifyHelp, /--index <n>/u);
   const showHelp = renderContractHelp("show");
-  assert.match(showHelp, /usage  keiyaku show \[<contract>\|@name\]/u);
+  assert.match(showHelp, /usage  keiyaku show <contract\|@name>/u);
   assert.match(showHelp, /--json/u);
   const statusHelp = renderContractHelp("status");
   assert.match(statusHelp, /status <kei\/\.\.\.\|aku\/\.\.\.\|@name>/u);

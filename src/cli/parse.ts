@@ -203,7 +203,7 @@ export function commandRepoPolicy(
     case "region":
       return { use: "required", acceptsExplicit: true };
     case "show": {
-      const debt = command.input.id?.startsWith("debt/") === true;
+      const debt = command.input.selector.startsWith("debt/");
       return { use: debt ? "none" : "required", acceptsExplicit: !debt };
     }
     case "ls":

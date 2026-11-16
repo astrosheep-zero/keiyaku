@@ -27,7 +27,7 @@ import { temporaryDirectory } from "./support/process.js";
 test("Debt facet preserves native lifecycle, flat World listing, and absent World", async (t) => {
   const cwd = temporaryDirectory(t, "debt-facet-");
   const facet = Keiyaku.at({ cwd, environment: { KEIYAKU_ACTOR_ID: "ambient-fixture" } });
-  assert.deepEqual(await facet.show({ id: "debt/missing" }), { kind: "absent" });
+  assert.deepEqual(await facet.show({ selector: "debt/missing" }), { kind: "absent" });
   assert.deepEqual(await facet.ls({ selector: "debt/" }), { kind: "debt-catalogue", absent: true });
   assert.deepEqual(await facet.debtDoctor({}), { kind: "absent" });
   assert.equal((await facet.debtUpdate({ id: "debt/missing", note: "note" })).kind, "refused");
@@ -36,7 +36,7 @@ test("Debt facet preserves native lifecycle, flat World listing, and absent Worl
   const second = accepted(await facet.debtAdd({ title: "Second", needs: [first.id] }));
   const world = await World.at(cwd);
   for (const id of [first.id, second.id])
-    assert.deepEqual(await facet.show({ id }), await Debts.of(world).read({ ids: [id] }));
+    assert.deepEqual(await facet.show({ selector: id }), await Debts.of(world).read({ ids: [id] }));
   assert.equal((await facet.debtUpdate({ id: first.id, state: "done", note: "finished" })).kind, "accepted");
   for (const selection of ["active", "closed", "all"] as const)
     assert.deepEqual(await facet.ls({ selector: "debt/", selection, limit: 1 }), await Debts.of(world).list({ selection, limit: 1 }));
@@ -110,7 +110,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   const { observedAt: _facetObservedAt, ...facetList } = selectedContracts;
   const { observedAt: _nativeObservedAt, ...comparableList } = nativeList;
   assert.deepEqual(facetList, comparableList);
-  assert.deepEqual(await facet.show({ id: contract }), await Keis.of(repoB).kei({ id: contract }).guidance());
+  assert.deepEqual(await facet.show({ selector: contract }), await Keis.of(repoB).kei({ id: contract }).guidance());
   assert.deepEqual(await facet.history({ selector: contract }), await Keis.of(repoB).kei({ id: contract }).history());
 
   const nativeDebts = await Debts.of(worldA).list({ selection: "active" });
@@ -147,7 +147,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
     { kind: "wait", reason: "completed", members: (await Akumas.of(worldA).wait({ akuma: [worker.id], repo: repoB, timeoutMs: 0 })).results.map(observation => ({ kind: "akuma", observation })) },
   );
   const short = `@${contract.slice("kei/".length)}`;
-  assert.deepEqual(await facet.show({ id: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
+  assert.deepEqual(await facet.show({ selector: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
 
   const other = Keiyaku.at({ cwd: second.path, environment: {}, home });
   assert.deepEqual(await other.ls({ selector: "debt/" }), await Debts.of(worldB).list({ selection: "active" }));

@@ -246,7 +246,7 @@ export class Keiyaku {
   abandon(input: VerbInput<"abandon"> = {}, run?: VerbRunFor<"abandon">): Promise<VerbOutput<"abandon">> {
     return this.run("abandon", input, run);
   }
-  show(input: VerbInput<"show"> = {}, run?: VerbRunFor<"show">): Promise<VerbOutput<"show">> {
+  show(input: VerbInput<"show">, run?: VerbRunFor<"show">): Promise<VerbOutput<"show">> {
     return this.run("show", input, run);
   }
   reconcile(input: VerbInput<"reconcile"> = {}, run?: VerbRunFor<"reconcile">): Promise<VerbOutput<"reconcile">> {
@@ -425,9 +425,9 @@ export class Keiyaku {
     return await selected.contract.abandon(input);
   }
 
-  async #show({ id }: VerbInput<"show">) {
-    if (id?.startsWith("debt/") === true) return debt.debtShow(this.#input, id);
-    return await (await this.#selected(id)).contract.guidance();
+  async #show({ selector }: VerbInput<"show">) {
+    if (selector.startsWith("debt/")) return debt.debtShow(this.#input, selector);
+    return await (await this.#selected(selector)).contract.guidance();
   }
 
   async #reconcile(input: VerbInput<"reconcile">) {
