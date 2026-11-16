@@ -26,12 +26,12 @@ import {
 
 declare const repo: Repo;
 declare const id: ContractId;
-declare const markdown: string;
+declare const terms: string;
 
-const input: BindInput = { markdown, after: [id], gates: ["reviewed"] };
-const targetlessInput: BindInput = { markdown, target: null };
+const input: BindInput = { terms, after: [id], gates: ["reviewed"] };
+const targetlessInput: BindInput = { terms, target: null };
 // @ts-expect-error a target is a branch name or an explicit absence, never another value
-const invalidTarget: BindInput = { markdown, target: 7 };
+const invalidTarget: BindInput = { terms, target: 7 };
 const bound: BindOutcome = await Keis.of(repo).bind(input);
 if (bound.kind === "accepted") {
   const handle: Kei = bound.kei;
@@ -113,7 +113,7 @@ const worldReconciled = await Keis.of(repo).reconcile({ retryHooks: true });
 worldReconciled.kind;
 const guidance = await selected.guidance();
 if (guidance.kind === "present") void guidance.guidance;
-const history = await selected.history({ full: true });
+const history = await selected.history({ details: true });
 if (history.kind === "contract")
   history.events.forEach((event) => {
     if (event.kind === "bind" || event.kind === "amend") void [event.document, event.gates, event.after];
@@ -133,7 +133,7 @@ Keis.of(repo).bind({});
 // @ts-expect-error selectors require branded Contract identities
 Keis.of(repo).kei({ id: "kei/unbranded" });
 // @ts-expect-error prerequisite identities cannot be unbranded strings
-Keis.of(repo).bind({ markdown, after: ["kei/unbranded"] });
+Keis.of(repo).bind({ terms, after: ["kei/unbranded"] });
 // @ts-expect-error a Repo cannot act as an alternative construction facade
 repo.bind(input);
 // @ts-expect-error a Delivery review takes an input object

@@ -32,11 +32,11 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   accepted(await debts.debt({ id: done }).update({ state: "done" }));
   accepted(await debts.debt({ id: drop }).update({ state: "drop" }));
   for (let i = 0; i < 12; i++) {
-    accepted(await Keis.of(repo).bind({ target: "main", markdown: contractMarkdown(`Count ${i}`, {
+    accepted(await Keis.of(repo).bind({ target: "main", terms: contractMarkdown(`Count ${i}`, {
       Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
     }), gates: [] }));
   }
-  const terminal = accepted(await Keis.of(repo).bind({ target: "main", markdown: contractMarkdown("Terminal", {
+  const terminal = accepted(await Keis.of(repo).bind({ target: "main", terms: contractMarkdown("Terminal", {
     Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
   }), gates: [] }));
   await terminal.kei.abandon();

@@ -59,7 +59,7 @@ test("CLI list and status families preserve their native owner answers", async (
   const repository = repositoryWithCommit();
   const world = await World.at(repository.path);
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: null, gates: ["reviewed"] }));
   const worker = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a0000004", createdAt: "2026-08-09T00:00:00.000Z" });
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWorker.\n");
@@ -129,9 +129,9 @@ test("named status shares invocation resolution, complete live membership and Al
   const repo = await Repo.at({ path: repository.path });
   const world = await World.at(repository.path);
   const contracts = Keis.of(repo);
-  const oldest = accepted(await contracts.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  const oldest = accepted(await contracts.bind({ terms: document(), target: null, gates: ["reviewed"] }));
   for (let index = 0; index < 10; index += 1)
-    accepted(await contracts.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+    accepted(await contracts.bind({ terms: document(), target: null, gates: ["reviewed"] }));
   const name = `@${oldest.contractId.slice(4)}`;
   const facet = Keiyaku.for({ cwd: world, environment: {} });
   const native = await facet.status({ selector: name });

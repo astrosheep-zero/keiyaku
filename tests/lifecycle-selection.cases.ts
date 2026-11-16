@@ -17,12 +17,12 @@ isolateUserHome();
 test("Contract catalogues select terminal journals under one order without retired-workspace reads", async (t) => {
   const repository = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: repository.path }));
-  const claimed = accepted(await contracts.bind({ markdown: document(), target: null, gates: [] }));
+  const claimed = accepted(await contracts.bind({ terms: document(), target: null, gates: [] }));
   accepted(await claimed.kei.deliver({}));
   assert.equal(present(await claimed.kei.state()).terminal?.kind, "claimed");
-  const abandoned = accepted(await contracts.bind({ markdown: document(), target: null, gates: [] }));
+  const abandoned = accepted(await contracts.bind({ terms: document(), target: null, gates: [] }));
   accepted(await abandoned.kei.abandon({}));
-  const active = accepted(await contracts.bind({ markdown: document(), target: null, gates: [] }));
+  const active = accepted(await contracts.bind({ terms: document(), target: null, gates: [] }));
   assert.deepEqual((await contracts.list()).rows?.map(row => row.id), [active.contractId]);
 
   const trace = join(repository.path, ".git", "catalogue-selection-trace");
@@ -45,7 +45,7 @@ test("Contract catalogues select terminal journals under one order without retir
       assert.deepEqual(bounded.rows, settled.rows?.slice(0, 1));
       assert.equal(bounded.more, true);
       const facet = await Keiyaku.for({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "selection-home-") })
-        .ls({ selector: "kei/", selection: "settled", limit: 1 });
+        .ls({ selector: "kei/", lifecycle: "settled", limit: 1 });
       assert.ok(facet.kind === "contract-catalogue");
       assert.deepEqual(facet.rows, bounded.rows);
       const settledIds = new Set(settled.rows?.map(row => row.id));
@@ -98,7 +98,7 @@ test("Akuma lifecycle selection filters before the bound and intersects caller d
   assert.equal((await world.list({ selection: "all" })).rows?.length, 5);
 
   const facet = Keiyaku.for({ cwd: root, environment: { KEIYAKU_EXTERNAL_CALLER: `${caller.integration}:${caller.id}` } });
-  const selected = await facet.ls({ selector: "aku/*", mine: true, selection: "settled", limit: 1 });
+  const selected = await facet.ls({ selector: "aku/*", mine: true, lifecycle: "settled", limit: 1 });
   assert.ok(selected.kind === "akuma-catalogue");
   assert.deepEqual(selected.rows, settledMine.rows?.slice(0, 1));
   assert.equal(selected.more, true);

@@ -39,7 +39,15 @@ Contradictory caller intent remains usage, distinct from an execution failure.
 
 MCP and Pi publish the facet's operations through one internal model tool
 catalogue, subject to the administration and raw-import exclusion owned by
-[cli.md](cli.md). Structured output is reserved for routing
+[cli.md](cli.md). Model-facing names describe what the caller supplies, with one
+vocabulary for the same intent across verbs. Descriptions explain supplied
+values, observable effects, and returned evidence, never hosting or persistence
+mechanics. Text payloads distinguish complete Contract terms, section edits,
+and chapter narrative rather than imposing a generic name on unrelated intent.
+Observation bounds share duration semantics and never stop the observed work.
+Native Akuma SDK inputs and CLI flag grammar remain independent of this
+model-facing vocabulary.
+Structured output is reserved for routing
 operations: it projects normal owner answers onto compact facts needed to choose
 the next call. Every normal answer of such a tool carries that projection,
 including an answered negative verdict. Native callers and CLI JSON retain the
@@ -166,5 +174,8 @@ and full exact-turn outcomes; optional association already known to the
 observation does not justify new joins. Still-running deadline members retain
 a bounded tail of actual recent events from the same observed frontier, with
 local unavailability rather than loss of the member's outcome. Waiting is not
-a full status read or reported-change observation. History selects one subject. A caller-input error is distinguishable from an owner refusal or
-an unexpected failure, and adds no authority to the facet.
+a full status read or reported-change observation. History selects one subject.
+Akuma history selects either one item, including the latest answer, or a timeline
+page, never both. Contract history alone can include each change's terms.
+A caller-input error is distinguishable from an owner refusal or an unexpected
+failure, and adds no authority to the facet.

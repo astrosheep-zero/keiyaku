@@ -21,7 +21,7 @@ test("public resolution uses explicit Repo context and exact canonical managed-w
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
   const library = Keis.of(repo);
-  const bound = accepted(await library.bind({ markdown, gates: ["reviewed"] }));
+  const bound = accepted(await library.bind({ terms: markdown, gates: ["reviewed"] }));
   const [summary] = (await library.list({  })).rows!;
   assert.ok(summary);
   const observed = await library.observe({ id: summary.id });

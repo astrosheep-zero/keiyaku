@@ -15,7 +15,7 @@ export const amendInputSchema = z.strictObject({
     .string()
     .refine((value) => value.trim() !== "", "target must be nonblank")
     .exactOptional(),
-  markdown: z.string().exactOptional(),
+  edits: z.string().exactOptional(),
   after: z.array(z.string()).readonly().exactOptional(),
   gates: z.array(z.string()).readonly().exactOptional(),
 });
@@ -115,9 +115,9 @@ export function documentDerivation(document: DecodedContractDocument): DocumentD
 }
 
 /** Early CLI acquisition uses the same Library caller boundary, never document-owner capabilities. */
-export function validateContractMarkdown(markdown: string): void {
-  decodeContractDocument(requireMarkdown(markdown), { requireTimeout: true });
+export function validateContractMarkdown(terms: string): void {
+  decodeContractDocument(requireMarkdown(terms, "terms"), { requireTimeout: true });
 }
-export function validateArcMarkdown(markdown: string): void {
-  decodeArcDocument(requireMarkdown(markdown));
+export function validateArcMarkdown(body: string): void {
+  decodeArcDocument(requireMarkdown(body, "body"));
 }

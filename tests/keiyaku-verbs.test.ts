@@ -75,7 +75,7 @@ test("verb runner preserves native bind, show and review results", async (t) => 
   const home = temporaryDirectory(t, "keiyaku-verbs-home-");
   const repository = repositoryWithMain();
   const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home });
-  const bindInput = { markdown: document(), target: null, gates: ["reviewed"] };
+  const bindInput = { terms: document(), target: null, gates: ["reviewed"] };
   assert.equal(Keiyaku.verbs.bind.input.safeParse(bindInput).success, true);
   const bound = accepted(await facet.bind(bindInput));
   assert.equal(classifyVerb("bind", bindInput, { kind: "returned", value: bound }), "accepted");
@@ -136,8 +136,8 @@ test("native ask and wire run return parsed JSON", async (t) => {
     try {
       const facet = Keiyaku.for({ cwd: root, environment: {}, home });
       const result = mode === "native"
-        ? await facet.ask({ akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeoutMs: 30_000 })
-        : await facet.run("ask", { akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeoutMs: 30_000 });
+        ? await facet.ask({ akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeout: "30s" })
+        : await facet.run("ask", { akuma: allocated.id, prompt: "structured", schema: jsonSchema, timeout: "30s" });
       assert.equal(result.kind, "answered");
       if (result.kind !== "answered") throw new Error("expected an answer");
       assert.deepEqual(result.answer, { ok: true });
@@ -195,8 +195,8 @@ test("wire validation and classification reject malformed calls before observati
       { ids: ["debt/a"] }, { selector: ["debt/a"] }, { selector: "" }, { selector: " " },
       { selector: "aku/worker/1234abcd" }, { selector: "debt/" }, { selector: "@*" }, { selector: "@" }]],
     ["kill", [{ akuma: ["aku/worker/1234abcd"] }, { akuma: " " }]],
-    ["ls", [{ selector: "aku/", selection: "all" }, { selector: "debt/", mine: true },
-      { selector: "aku/", mine: true }, { selector: "aku/*", caller: "aku/intern/00000001" }, { selector: "aku/*", selection: "closed" }]],
+    ["ls", [{ selector: "aku/", lifecycle: "all" }, { selector: "debt/", mine: true },
+      { selector: "aku/", mine: true }, { selector: "aku/*", caller: "aku/intern/00000001" }, { selector: "aku/*", lifecycle: "closed" }]],
     ["status", [{}, { id: "kei/a" }, { selector: "kei/a", id: "kei/a" },
       { selector: "debt/a" }, { selector: "aku/*" }, { selector: "kei/" }, { selector: "@" },
       { selector: "@worker*" }, { selector: ["kei/a", "kei/b"] }, { selectors: ["kei/a", "kei/b"] }]],
@@ -207,36 +207,55 @@ test("wire validation and classification reject malformed calls before observati
   assert.equal(Keiyaku.verbs.wait.input.safeParse(mixed).success, true);
   for (const input of [
     { selectors: [] }, { selectors: ["invalid"] },
-    { ...mixed, timeoutMs: 1 }, { ...mixed, timeout: "1.5s" },
+    { ...mixed, timeout: 1 }, { ...mixed, timeout: "1.5s" },
     { ...mixed, timeout: "9007199254740992ms" },
   ]) {
     await assert.rejects(facet.run("wait", input as never), KeiyakuUsageError);
   }
   assert.equal(Keiyaku.verbs.history.input.safeParse({ selector: "kei/example", limit: 1 }).success, false);
-  assert.equal(Keiyaku.verbs.bind.input.safeParse({ markdown: document(), forkOf: "kei/example" }).success, false);
+  assert.equal(Keiyaku.verbs.bind.input.safeParse({ terms: document(), forkOf: "kei/example" }).success, false);
   assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "returned", value: { kind: "missing" } }), "refused");
   assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "threw", error: new TypeError("unexpected") }), "failed");
+});
+
+test("history selects one item or a page and observation deadlines share duration grammar", () => {
+  const history = Keiyaku.verbs.history.input;
+  for (const item of ["last", "turn/1", "report/2", "3"]) {
+    assert.equal(history.safeParse({ selector: "@worker", item }).success, true);
+    assert.equal(history.safeParse({ selector: "@worker", item, limit: 1 }).success, false);
+  }
+  assert.equal(history.safeParse({ selector: "@worker", before: 3, limit: 2 }).success, true);
+  assert.equal(history.safeParse({ selector: "@worker", since: 1, limit: 2 }).success, true);
+  assert.equal(history.safeParse({ selector: "@worker", before: 3, since: 1 }).success, false);
+  assert.equal(history.safeParse({ selector: "kei/example", details: true }).success, true);
+  assert.equal(history.safeParse({ selector: "@worker", details: true }).success, false);
+  for (const timeout of [undefined, "0ms", "30s", "5m", "1.5s"]) {
+    const expected = timeout !== "1.5s";
+    const deadline = timeout === undefined ? {} : { timeout };
+    assert.equal(Keiyaku.verbs.ask.input.safeParse({ akuma: "@worker", prompt: "answer", schema: {}, ...deadline }).success, expected);
+    assert.equal(Keiyaku.verbs.wait.input.safeParse({ selectors: ["@worker"], ...deadline }).success, expected);
+  }
 });
 
 test("ls uses one strict object and refuses inapplicable filters before discovery", async (t) => {
   const input = Keiyaku.verbs.ls.input;
   for (const valid of [
     { selector: "kei/" },
-    { selector: "debt/", selection: "settled", limit: 1 },
-    { selector: "kei/", selection: "all" },
-    { selector: "aku/*", selection: "settled", mine: true },
+    { selector: "debt/", lifecycle: "settled", limit: 1 },
+    { selector: "kei/", lifecycle: "all" },
+    { selector: "aku/*", lifecycle: "settled", mine: true },
     { selector: "aku/" },
     { selector: "aku/*", mine: false },
     { selector: "aku/worker" },
   ])
     assert.equal(input.safeParse(valid).success, true, JSON.stringify(valid));
   for (const invalid of [
-    { selector: "aku/", selection: "all" },
+    { selector: "aku/", lifecycle: "all" },
     { selector: "kei/", mine: false },
     { selector: "debt/", mine: true },
     { selector: "aku/", mine: true },
-    { selector: "aku/*", selection: "closed" },
-    { selector: "debt/", selection: "open" },
+    { selector: "aku/*", lifecycle: "closed" },
+    { selector: "debt/", lifecycle: "open" },
     { selector: "debt/example" },
     { selector: "kei/", limit: 0 },
     { selector: "kei/", extra: true },
@@ -244,7 +263,7 @@ test("ls uses one strict object and refuses inapplicable filters before discover
     assert.equal(input.safeParse(invalid).success, false, JSON.stringify(invalid));
   const facet = Keiyaku.for({ cwd: join(temporaryDirectory(t, "keiyaku-verbs-ls-"), "missing"), environment: {} });
   for (const inapplicable of [
-    { selector: "aku/", selection: "all" },
+    { selector: "aku/", lifecycle: "all" },
     { selector: "kei/", mine: false },
   ] as const)
     await assert.rejects(facet.run("ls", inapplicable), (error: unknown) => {

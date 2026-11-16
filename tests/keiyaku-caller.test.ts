@@ -100,7 +100,7 @@ test("one host identity serves spawn, whoami, mine and actor-only operations", a
       const body = (await readHeart(paths)).latestBody!;
       assert.equal((await readLatestTurnForBody(paths, body.sequence))?.initiator,
         facet === explicit ? "pi:current-session" : identity.owner);
-      const mine = await facet.ls({ selector: "aku/*", mine: true, selection: "all" });
+      const mine = await facet.ls({ selector: "aku/*", mine: true, lifecycle: "all" });
       assert.equal(mine.kind, "akuma-catalogue");
       if (mine.kind !== "akuma-catalogue") assert.fail("expected Akuma list");
       assert.deepEqual(mine.rows?.map((row) => row.id), [spawned.akumaId]);

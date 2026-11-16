@@ -131,7 +131,7 @@ test("Kanshi schemas cover live Contract, Debt, Akuma, Alias, region and absent 
   const bound = await Keis.of(repo).bind({
     target: "main",
     gates: [],
-    markdown: contractMarkdown("Wire contract", {
+    terms: contractMarkdown("Wire contract", {
       Context: "context",
       Objective: "observe",
       Design: "wire",

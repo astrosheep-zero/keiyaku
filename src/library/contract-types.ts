@@ -91,10 +91,10 @@ export const contractHistorySchema = z.union([
 
 export type ContractHistoryEvent = z.output<typeof contractHistoryEventSchema>;
 export type ContractHistory = z.output<typeof contractHistorySchema>;
-export type ContractHistoryInput = Readonly<{ full?: boolean }>;
+export type ContractHistoryInput = Readonly<{ details?: boolean }>;
 
 type MarkdownBindInput = Readonly<{
-  markdown: string;
+  terms: string;
   debt?: DebtId;
   /** A literal target branch; `null` is deliberately targetless; omitted is the Repo worktree's current branch. */
   target?: string | null;
@@ -115,11 +115,11 @@ export type KeisOptions = Readonly<{
 export type AmendInput = Readonly<{
   /** Explicit existing branch or active Contract; omission retains the target. */
   target?: string;
-  markdown?: string;
+  edits?: string;
   after?: readonly ContractId[];
   gates?: readonly string[];
 }>;
-export type ArcInput = Readonly<{ markdown: string }>;
+export type ArcInput = Readonly<{ body: string }>;
 export type ContractListInput = Readonly<{
   selection?: LifecycleSelection;
   limit?: number;

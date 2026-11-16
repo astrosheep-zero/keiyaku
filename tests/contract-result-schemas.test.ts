@@ -32,11 +32,11 @@ import { repositoryAt } from "../src/git/repository.js";
 test("Contract read, wait and terminal mutation wire projections", async () => {
   const repository = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: repository.path }));
-  const bound = accepted(await contracts.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  const bound = accepted(await contracts.bind({ terms: document(), target: null, gates: ["reviewed"] }));
   assertWireRoundTrip(bindOutcomeSchema, bound);
   assertWireRoundTrip(
     bindOutcomeSchema,
-    await contracts.bind({ markdown: document(), after: [contractId("kei/missing")], target: null }),
+    await contracts.bind({ terms: document(), after: [contractId("kei/missing")], target: null }),
   );
   const kei = bound.kei;
   const state = present(await kei.state());
@@ -66,7 +66,7 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
   assert.ok(history.events.some((event) => event.kind === "bind"));
   assert.ok(history.events.some((event) => event.kind === "dispatch"));
   assertWireRoundTrip(contractHistorySchema, history);
-  const fullHistory = await kei.history({ full: true });
+  const fullHistory = await kei.history({ details: true });
   assert.ok(fullHistory.kind === "contract");
   const historicalBind = fullHistory.events.find((event) => event.kind === "bind");
   assert.ok(historicalBind?.kind === "bind");
@@ -86,9 +86,9 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
   assertWireRoundTrip(reconcileResultSchema, await contracts.reconcile({ contract: state.id }));
   assertWireRoundTrip(
     amendOutcomeSchema,
-    await kei.amend({ markdown: "## Replace: Objective\n\nUpdated objective.\n" }),
+    await kei.amend({ edits: "## Replace: Objective\n\nUpdated objective.\n" }),
   );
-  assertWireRoundTrip(arcOutcomeSchema, await kei.arc({ markdown: "# Next\n\nAnother target.\n" }));
+  assertWireRoundTrip(arcOutcomeSchema, await kei.arc({ body: "# Next\n\nAnother target.\n" }));
   const abandoned = await kei.abandon();
   assert.equal(abandoned.kind, "accepted");
   assertWireRoundTrip(abandonOutcomeSchema, abandoned);
@@ -101,15 +101,15 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
   assertWireRoundTrip(abandonOutcomeSchema, abandonedAgain);
   assertWireRoundTrip(
     amendOutcomeSchema,
-    await kei.amend({ markdown: "## Replace: Objective\n\nAnother objective.\n" }),
+    await kei.amend({ edits: "## Replace: Objective\n\nAnother objective.\n" }),
   );
-  assertWireRoundTrip(arcOutcomeSchema, await kei.arc({ markdown: "# Next\n\nAnother target.\n" }));
+  assertWireRoundTrip(arcOutcomeSchema, await kei.arc({ body: "# Next\n\nAnother target.\n" }));
 });
 
 test("delivery, verification, review and preview carry their native wire results and events", async () => {
   const repository = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: repository.path }));
-  const bound = accepted(await contracts.bind({ markdown: document("exit 0"), target: null, gates: ["verified"] }));
+  const bound = accepted(await contracts.bind({ terms: document("exit 0"), target: null, gates: ["verified"] }));
   const kei = bound.kei;
   const state = present(await kei.state());
   const workspace = await appointedWorktreePath(await cachedRepositoryAt(repository.path), state.id);

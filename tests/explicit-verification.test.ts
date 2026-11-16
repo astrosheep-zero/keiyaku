@@ -24,7 +24,7 @@ function declarations(scripts: readonly string[]): string {
 async function fixture(scripts: readonly string[], gates = ["reviewed", "verified"]) {
   const repository = repositoryWithMain();
   const contract = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-    markdown: declarations(scripts), gates, target: "refs/heads/main",
+    terms: declarations(scripts), gates, target: "refs/heads/main",
   })).kei;
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), present(await contract.state()).id);
   commitCandidate(repository, worktree);
@@ -47,7 +47,7 @@ test("explicit checks accumulate on the prospective snapshot and unchanged deliv
   assert.deepEqual(preview.unmetGates?.map(({ state }) => state), ["missing", "missing"]);
   // Both review and the second check are unmet; the first check is not retransmitted.
   assert.equal(preview.unmetGates?.some(({ requirement }) => requirement === first.checks[0]?.requirement), false);
-  accepted(await contract.amend({ markdown: "## Replace: Objective\n\nSame candidate with revised author intent.\n" }));
+  accepted(await contract.amend({ edits: "## Replace: Objective\n\nSame candidate with revised author intent.\n" }));
   const second = accepted(await contract.verify({ index: 2 }));
   assert.equal(second.snapshot, first.snapshot);
   const delivered = accepted(await contract.deliver());
@@ -61,7 +61,7 @@ test("explicit checks accumulate on the prospective snapshot and unchanged deliv
 test("review-only Contracts without declarations refuse verify and retain the delivery lifecycle", async () => {
   const repository = repositoryWithMain();
   const contract = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-    markdown: document(), gates: ["reviewed"], target: "refs/heads/main",
+    terms: document(), gates: ["reviewed"], target: "refs/heads/main",
   })).kei;
   const before = present(await contract.state());
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), before.id);
@@ -303,7 +303,7 @@ test("changed failure testimony admits a new attestation while identical testimo
   const { repository, contract } = await fixture(["true"]);
   const output = join(repository.path, "failure-output");
   writeFileSync(output, "first failure");
-  accepted(await contract.amend({ markdown: `## Replace: Verification\n\n\`\`\`bash timeout=1m\ncat '${output}'; exit 1\n\`\`\`\n` }));
+  accepted(await contract.amend({ edits: `## Replace: Verification\n\n\`\`\`bash timeout=1m\ncat '${output}'; exit 1\n\`\`\`\n` }));
   accepted(await contract.deliver());
   const first = accepted(await contract.verify()).checks[0]!;
   assert.ok(first.kind === "terminal" && first.admission === "admitted");
@@ -332,12 +332,12 @@ test("declaration changes preserve independent requirements while reordering pre
   accepted(await contract.verify());
   const original = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
   assert.equal(original.satisfied, true);
-  accepted(await contract.amend({ markdown:
+  accepted(await contract.amend({ edits:
     "## Replace: Verification\n\n```bash timeout=1m\ntest -f candidate.txt\n```\n\n```bash timeout=1m\ntrue\n```\n" }));
   const reordered = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
   assert.equal(reordered.satisfied, true);
   assert.deepEqual(reordered.requirements.map(({ requirement }) => requirement), original.requirements.map(({ requirement }) => requirement).reverse());
-  accepted(await contract.amend({ markdown:
+  accepted(await contract.amend({ edits:
     "## Replace: Verification\n\n```bash timeout=1m\ntest -f candidate.txt\n```\n\n```bash timeout=1m\necho changed\n```\n" }));
   const changed = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
   assert.deepEqual(changed.requirements.map(({ current }) => current.kind), ["attested", "missing"]);

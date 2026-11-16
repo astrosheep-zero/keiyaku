@@ -34,7 +34,7 @@ test("show reads native bytes once for explicit Contract selection and refuses o
     await library.bind({
       target: "main",
       gates: ["reviewed"],
-      markdown: contractMarkdown("Guidance read", {
+      terms: contractMarkdown("Guidance read", {
         Context: "Native guidance",
         Objective: "Read guidance",
         Design: "One owner",

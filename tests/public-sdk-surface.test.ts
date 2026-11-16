@@ -399,7 +399,7 @@ const host = AkumaHost.inProcess();
 const close: Promise<void> = host.close();
 const api = Keiyaku.for({ cwd: "/explicit/cwd", environment: {} });
 const run: KeiyakuRunOptions = { signal: AbortSignal.abort() };
-const bind: Promise<BindOutcome> = api.bind({ markdown: "terms" }, run);
+const bind: Promise<BindOutcome> = api.bind({ terms: "terms" }, run);
 bind.then(answer => { if (answer.kind === "accepted") { const handle: Kei = answer.kei; void handle.id; } });
 api.deliver(); api.verify(); api.abandon(); api.show({ selector: "kei/example" }); api.reconcile(); api.whoami();
 // @ts-expect-error show requires explicit business input

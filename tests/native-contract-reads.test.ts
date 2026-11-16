@@ -42,15 +42,15 @@ test("default Contract history is semantic; explicit full history retains each h
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: document().replace("Call only the package-root API.", "Historical terms. ".repeat(80)),
+      terms: document().replace("Call only the package-root API.", "Historical terms. ".repeat(80)),
       target: null,
       gates: ["reviewed"],
     }),
   );
   const original = present(await bound.kei.state()).terms.document.bytes;
-  accepted(await bound.kei.amend({ markdown: "## Replace: Objective\n\nThe amended objective.\n" }));
+  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nThe amended objective.\n" }));
   const amended = present(await bound.kei.state()).terms.document.bytes;
-  accepted(await bound.kei.arc({ markdown: "# A historical chapter\n\nExact narrative body.\n" }));
+  accepted(await bound.kei.arc({ body: "# A historical chapter\n\nExact narrative body.\n" }));
 
   const semantic = await bound.kei.history();
   assert.ok(semantic.kind === "contract");
@@ -72,7 +72,7 @@ test("default Contract history is semantic; explicit full history retains each h
     environment: {},
     home: temporaryDirectory(t, "history-full-home-"),
   });
-  const full = await facet.run("history", { selector: bound.contractId, full: true });
+  const full = await facet.run("history", { selector: bound.contractId, details: true });
   assert.ok(full.kind === "contract");
   const boundEvent = full.events.find((event) => event.kind === "bind");
   const amendedEvent = full.events.find((event) => event.kind === "amend");
@@ -111,12 +111,12 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  const bound = accepted(await contracts.bind({ markdown: document(), target: null }));
-  accepted(await bound.kei.amend({ markdown: "## Replace: Objective\n\nRetained amended objective.\n" }));
-  accepted(await bound.kei.arc({ markdown: "# Retained chapter\n\nExact journal narrative.\n" }));
+  const bound = accepted(await contracts.bind({ terms: document(), target: null }));
+  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nRetained amended objective.\n" }));
+  accepted(await bound.kei.arc({ body: "# Retained chapter\n\nExact journal narrative.\n" }));
   const semantic = await bound.kei.history();
   assert.ok(semantic.kind === "contract");
-  const before = await bound.kei.history({ full: true });
+  const before = await bound.kei.history({ details: true });
   assert.ok(before.kind === "contract");
   assert.equal(before.dispatches, undefined);
   const git = await repositoryAt(raw.path);
@@ -128,7 +128,7 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
   ] as const) {
     assert.equal((await publishDispatch({ repository: git, akumaId, contractId: owner })).kind, "dispatched");
   }
-  const healthy = await bound.kei.history({ full: true });
+  const healthy = await bound.kei.history({ details: true });
   assert.ok(healthy.kind === "contract");
   assert.equal(healthy.dispatches, undefined);
   assert.deepEqual(
@@ -151,7 +151,7 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
   );
   const facet = Keiyaku.for({ cwd: raw.path, environment: {}, home: temporaryDirectory(t, "history-corruption-home-") });
   for (const full of [false, true]) {
-    const history = await bound.kei.history({ full });
+    const history = await bound.kei.history({ details: full });
     assert.ok(history.kind === "contract");
     assert.deepEqual(history.events, full ? before.events : semantic.events);
     assert.equal(history.dispatches?.kind, "unavailable");
@@ -159,9 +159,9 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
     assert.ok(history.dispatches?.diagnostic.includes(badPath));
     assertWireRoundTrip(contractHistorySchema, history);
     assertWireRoundTrip(Keiyaku.verbs.history.output, history);
-    assert.deepEqual(await facet.run("history", { selector: bound.contractId, full }), history);
+    assert.deepEqual(await facet.run("history", { selector: bound.contractId, details: full }), history);
     assert.equal(
-      classifyVerb("history", { selector: bound.contractId, full }, { kind: "returned", value: history }),
+      classifyVerb("history", { selector: bound.contractId, details: full }, { kind: "returned", value: history }),
       "accepted",
     );
     const argv = ["-C", raw.path, "history", bound.contractId, ...(full ? ["--full"] : [])];
@@ -181,14 +181,14 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
         }
       }
     }
-    assert.deepEqual(await contracts.kei({ id: contractId("kei/missing") }).history({ full }), {
+    assert.deepEqual(await contracts.kei({ id: contractId("kei/missing") }).history({ details: full }), {
       kind: "contract-missing",
       contractId: "kei/missing",
     });
   }
   await overwriteAuthority(raw.path, new Map([[contractJournalPath(bound.contractId), "not a journal\n"]]));
   for (const full of [false, true]) {
-    await assert.rejects(bound.kei.history({ full }), (error: unknown) => {
+    await assert.rejects(bound.kei.history({ details: full }), (error: unknown) => {
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, "authority-corruption");
       assert.ok(error.cause instanceof AuthorityCorruptionError);
@@ -200,7 +200,7 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
 test("history propagates native cancellation during optional Dispatch enrichment", async (t) => {
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: null }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: null }));
   const git = await repositoryAt(raw.path);
   assert.equal(
     (await publishDispatch({ repository: git, akumaId: parseAkumaId("aku/worker/00000003").id, contractId: bound.contractId })).kind,
@@ -248,11 +248,11 @@ test("history propagates native cancellation during optional Dispatch enrichment
 
 test("history reports internal unavailable Dispatch enrichment when the Dispatch blob read fails", async (t) => {
   const raw = repositoryWithMain();
-  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ markdown: document(), target: null }));
-  accepted(await bound.kei.amend({ markdown: "## Replace: Objective\n\nRetained amended objective.\n" }));
+  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ terms: document(), target: null }));
+  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nRetained amended objective.\n" }));
   const semantic = await bound.kei.history();
   assert.ok(semantic.kind === "contract");
-  const complete = await bound.kei.history({ full: true });
+  const complete = await bound.kei.history({ details: true });
   assert.ok(complete.kind === "contract");
   const akumaId = parseAkumaId("aku/worker/00000004").id;
   const git = await repositoryAt(raw.path);
@@ -260,7 +260,7 @@ test("history reports internal unavailable Dispatch enrichment when the Dispatch
     (await publishDispatch({ repository: git, akumaId, contractId: bound.contractId })).kind,
     "dispatched",
   );
-  const healthy = await bound.kei.history({ full: true });
+  const healthy = await bound.kei.history({ details: true });
   assert.ok(healthy.kind === "contract");
   assert.equal(healthy.dispatches, undefined);
   assert.deepEqual(
@@ -297,7 +297,7 @@ test("history reports internal unavailable Dispatch enrichment when the Dispatch
       const kei = Keis.of(await Repo.at({ path: raw.path, gitPath })).kei({ id: bound.contractId });
       const facet = Keiyaku.for({ cwd: raw.path, environment, home });
       for (const full of [false, true]) {
-        const history = await kei.history({ full });
+        const history = await kei.history({ details: full });
         assert.ok(history.kind === "contract");
         assert.deepEqual(history.events, full ? complete.events : semantic.events);
         assert.equal(history.dispatches?.kind, "unavailable");
@@ -308,10 +308,10 @@ test("history reports internal unavailable Dispatch enrichment when the Dispatch
         assertWireRoundTrip(contractHistorySchema, history);
         assertWireRoundTrip(Keiyaku.verbs.history.output, history);
         assert.equal(
-          classifyVerb("history", { selector: bound.contractId, full }, { kind: "returned", value: history }),
+          classifyVerb("history", { selector: bound.contractId, details: full }, { kind: "returned", value: history }),
           "accepted",
         );
-        assert.deepEqual(await facet.run("history", { selector: bound.contractId, full }), history);
+        assert.deepEqual(await facet.run("history", { selector: bound.contractId, details: full }), history);
         const argv = ["-C", raw.path, "history", bound.contractId, ...(full ? ["--full"] : [])];
         const text = await runCli(argv, { environment });
         assert.equal(text.exit, 0, text.stderr);
@@ -327,7 +327,7 @@ test("history reports internal unavailable Dispatch enrichment when the Dispatch
 
 test("history preserves observation and decode-channel retirement failures", async (t) => {
   const raw = repositoryWithMain();
-  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ markdown: document(), target: null }));
+  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ terms: document(), target: null }));
   const log = join(temporaryDirectory(t, "history-retirement-"), "closed");
   await withGitShim(
     [
@@ -358,7 +358,7 @@ test("history preserves observation and decode-channel retirement failures", asy
 test("guidance preserves exact requested bytes and distinguishes missing authority from a present read", async (t) => {
   const repository = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: repository.path }));
-  const bound = accepted(await contracts.bind({ markdown: document(), target: null }));
+  const bound = accepted(await contracts.bind({ terms: document(), target: null }));
   const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home: temporaryDirectory(t, "guidance-home-") });
   const guidance = await bound.kei.guidance();
   assert.ok(guidance.kind === "present");
@@ -369,7 +369,7 @@ test("guidance preserves exact requested bytes and distinguishes missing authori
   const missing = contracts.kei({ id: "kei/missing" as never });
   const missingGuidance = await missing.guidance();
   assert.deepEqual(missingGuidance, { kind: "missing" });
-  const missingHistory = await missing.history({ full: true });
+  const missingHistory = await missing.history({ details: true });
   assert.deepEqual(missingHistory, { kind: "contract-missing", contractId: "kei/missing" });
   assertWireRoundTrip(guidanceSchema, missingGuidance);
   assertWireRoundTrip(contractHistorySchema, missingHistory);

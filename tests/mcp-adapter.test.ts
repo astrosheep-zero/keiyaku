@@ -65,13 +65,13 @@ async function mcpFixture(t: TestContext, options: Parameters<typeof createKeiya
 
 test("coordinate composition preserves native branches and rejects collisions at construction", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.bind.input);
-  assert.equal(schema.safeParse({ cwd: "/invocation", repo: "/contract", markdown: "terms" }).success, true);
+  assert.equal(schema.safeParse({ cwd: "/invocation", repo: "/contract", terms: "terms" }).success, true);
   assert.equal(schema.safeParse({ repo: "/contract", forkOf: "kei/source" }).success, true);
-  assert.equal(schema.safeParse({ markdown: "terms", forkOf: "kei/source" }).success, false);
-  assert.equal(schema.safeParse({ input: { markdown: "terms" } }).success, false);
+  assert.equal(schema.safeParse({ terms: "terms", forkOf: "kei/source" }).success, false);
+  assert.equal(schema.safeParse({ input: { terms: "terms" } }).success, false);
   assert.equal(schema.safeParse({ forkOf: "kei/source", extra: true }).success, false);
   assert.throws(() => mcpInputSchema(z.union([
-    z.strictObject({ markdown: z.string() }).readonly(),
+    z.strictObject({ terms: z.string() }).readonly(),
     z.strictObject({ repo: z.string() }).readonly(),
   ])), /coordinate collides.*repo/u);
   assert.throws(() => mcpInputSchema(z.strictObject({ cwd: z.string() })), /coordinate collides.*cwd/u);
@@ -81,18 +81,18 @@ test("MCP ls composes one object with the shared applicability checks", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.ls.input);
   for (const valid of [
     { selector: "kei/" },
-    { selector: "debt/", selection: "settled", limit: 1 },
-    { selector: "kei/", selection: "all" },
-    { selector: "aku/*", selection: "settled", mine: true },
+    { selector: "debt/", lifecycle: "settled", limit: 1 },
+    { selector: "kei/", lifecycle: "all" },
+    { selector: "aku/*", lifecycle: "settled", mine: true },
     { selector: "aku/*", mine: false },
   ])
     assert.equal(schema.safeParse(valid).success, true, JSON.stringify(valid));
   for (const invalid of [
-    { selector: "aku/", selection: "all" },
+    { selector: "aku/", lifecycle: "all" },
     { selector: "kei/", mine: false },
     { selector: "debt/", mine: true },
     { selector: "aku/", mine: true },
-    { selector: "aku/*", selection: "closed" },
+    { selector: "aku/*", lifecycle: "closed" },
     { selector: "kei/", extra: true },
   ])
     assert.equal(schema.safeParse(invalid).success, false, JSON.stringify(invalid));
@@ -224,29 +224,29 @@ test("real flat and native calls reject contradictory intent before coordinate I
   const { client } = await mcpFixture(t, { cwd, environment, version: "test" });
   const facet = Keiyaku.for({ cwd, environment, home: cwd });
   const invalid: readonly (readonly [VerbName, Record<string, unknown>])[] = [
-    ["bind", { markdown: "terms", forkOf: "kei/source" }],
-    ["bind", { markdown: "terms", actor: "operator" }],
-    ["amend", { markdown: "## Context\nChanged\n", actor: "operator" }],
-    ["arc", { markdown: "# Chapter", actor: "operator" }],
+    ["bind", { terms: "terms", forkOf: "kei/source" }],
+    ["bind", { terms: "terms", actor: "operator" }],
+    ["amend", { edits: "## Context\nChanged\n", actor: "operator" }],
+    ["arc", { body: "# Chapter", actor: "operator" }],
     ["review", { verdict: "satisfied", summary: "ok", actor: "operator" }],
     ["abandon", { actor: "operator" }],
     ["debt.add", { title: "Unwritten", actor: "operator" }],
     ["ls", { selector: "kei/", mine: true }],
     ["ls", { selector: "kei/", mine: false }],
-    ["ls", { selector: "aku/", selection: "all" }],
+    ["ls", { selector: "aku/", lifecycle: "all" }],
     ["spawn", { akumaName: "worker", writableDirectories: [cwd] }],
     ["spawn", { akumaName: "worker", prompt: "work", wait: "10m" }],
     ["tell", { akuma: "@worker", prompt: "work", wait: "10m" }],
     ["tell", { akuma: "@worker", prompt: "work", wait: true }],
-    ["tell", { akuma: "@worker", prompt: "work", timeoutMs: 0 }],
+    ["tell", { akuma: "@worker", prompt: "work", timeout: "0ms" }],
     ["show", {}],
     ["show", { id: "debt/example" }],
     ["show", { ids: ["debt/example"] }],
     ["kill", { akuma: ["@worker"] }],
     ["wait", { selectors: ["kei/example", "aku/worker/12345678"], timeout: "invalid" }],
-    ["wait", { selectors: ["kei/example"], timeoutMs: 0 }],
-    ["history", { selector: "@worker", id: "turn/1", last: true }],
-    ["history", { selector: "@worker", last: true, limit: 1 }],
+    ["wait", { selectors: ["kei/example"], timeout: 0 }],
+    ["history", { selector: "@worker", item: "turn/1", before: 1 }],
+    ["history", { selector: "@worker", item: "last", limit: 1 }],
     ["history", { selector: "@worker", before: 2, since: 1 }],
     ["debt.update", { id: "debt/example" }],
     ["debt.update", { id: "debt/example", state: "paused" }],
@@ -300,7 +300,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.deepEqual(publishedProperties("debt_update"), [
     "body", "cwd", "id", "needs", "note", "priority", "state", "title",
   ]);
-  assert.deepEqual(publishedProperties("ls"), ["cwd", "limit", "mine", "repo", "selection", "selector"]);
+  assert.deepEqual(publishedProperties("ls"), ["cwd", "lifecycle", "limit", "mine", "repo", "selector"]);
   assert.deepEqual(tools.find((tool) => tool.name === "ls")!.inputSchema.required, ["selector"]);
   assert.deepEqual(publishedProperties("region"), ["contract", "cwd", "paths", "repo"]);
   assert.equal(tools.find((tool) => tool.name === "region")!.inputSchema.required, undefined);
@@ -345,7 +345,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "timeout", "string"], ["history", "last", "boolean"], ["show", "selector", "string"], ["kill", "akuma", "string"]]) {
+  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "timeout", "string"], ["history", "item", "string"], ["show", "selector", "string"], ["kill", "akuma", "string"]]) {
     const properties = tools.find((tool) => tool.name === name)!.inputSchema.properties as Record<string, { type?: string }>;
     assert.equal(properties[key!]!.type, type);
   }
@@ -442,8 +442,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.doesNotMatch(JSON.stringify(explicitRepo.structuredContent), /Foreign repo world/);
   const world = await World.at(first);
   const repo = await Repo.at({ path: otherRepo.path });
-  const prerequisite = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: [] }));
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"], after: [prerequisite.contractId] }));
+  const prerequisite = accepted(await Keis.of(repo).bind({ terms: document(), target: null, gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: null, gates: ["reviewed"], after: [prerequisite.contractId] }));
   // MCP carries the same empty amendment: no field named means no replacement is synthesized.
   const unchanged = await client.callTool({ name: "amend", arguments: {
     repo: otherRepo.path, contract: bound.contractId,
@@ -457,7 +457,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWorker.\n");
   assert.equal((await publishDispatch({ repository: await repositoryAt(otherRepo.path), akumaId: worker.id, contractId: bound.contractId })).kind, "dispatched");
-  const last = await client.callTool({ name: "history", arguments: { cwd: first, selector: worker.id, last: true } });
+  const last = await client.callTool({ name: "history", arguments: { cwd: first, selector: worker.id, item: "last" } });
   assert.equal(last.isError, false, JSON.stringify(last));
   await moveAlias({ world, alias: parseAkumaAlias("@mcp-status"), akumaId: worker.id });
   const statusTool = (await client.listTools()).tools.find(tool => tool.name === "status")!;
@@ -468,7 +468,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.deepEqual(catalogue.rows?.[0]?.contract, { kind: "associated", contractId: bound.contractId });
   for (const [name, input, expected] of [
     ["ls", { selector: "kei/", limit: 1 }, await Keis.of(repo).list({ limit: 1 })],
-    ["ls", { selector: "aku/*", limit: 1, selection: "all" }, catalogue],
+    ["ls", { selector: "aku/*", limit: 1, lifecycle: "all" }, catalogue],
     ["ls", { selector: "aku/" }, await Akumas.akumaNames({ cwd: world, home: cwd })],
 
     ["status", { selector: bound.contractId }, await Kanshi.of({ world, repo }).contract(bound.contractId)],
@@ -541,7 +541,7 @@ test("SDK routing preserves optional observation failures and attention in struc
   const world = await World.at(repository.path);
   const environment = { HOME: repository.path, USERPROFILE: repository.path, KEIYAKU_HOME: repository.path };
   const facet = Keiyaku.for({ cwd: repository.path, environment });
-  const bound = accepted(await facet.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  const bound = accepted(await facet.bind({ terms: document(), target: null, gates: ["reviewed"] }));
   const worker = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a2000031", createdAt: "2026-08-10T00:00:00.000Z" });
   const git = await repositoryAt(repository.path);
   assert.equal((await publishDispatch({ repository: git, akumaId: worker.id, contractId: bound.contractId })).kind, "dispatched");
@@ -578,7 +578,7 @@ test("SDK routing preserves optional observation failures and attention in struc
   const rows = (contracts.structuredContent as { rows: { id: string; attention: unknown }[] }).rows;
   assert.equal(rows[0]?.id, bound.contractId);
   assert.deepEqual(rows[0]?.attention, [{ kind: "workspace-unavailable", path: bound.worktreePath }]);
-  const akumas = await client.callTool({ name: "ls", arguments: { selector: "aku/*", selection: "all" } });
+  const akumas = await client.callTool({ name: "ls", arguments: { selector: "aku/*", lifecycle: "all" } });
   assert.equal(akumas.isError, false);
   assert.equal(Object.hasOwn(akumas.structuredContent!, "aliasesError"), true);
   assert.deepEqual((akumas.structuredContent as { rows: { contract: unknown }[] }).rows[0]!.contract, { kind: "unavailable" });
@@ -600,7 +600,7 @@ test("MCP show is complete text while native and CLI JSON retain owner detail", 
     assert.equal(Object.hasOwn(response.structuredContent!, "kind"), false);
     assert.equal((response.structuredContent as { rows?: unknown }).rows, undefined);
   }
-  const bound = accepted(await facet.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  const bound = accepted(await facet.bind({ terms: document(), target: null, gates: ["reviewed"] }));
   const nativeGuidance = await bound.kei.guidance();
   assert.ok(nativeGuidance.kind === "present");
   const body = [
@@ -680,7 +680,7 @@ test("SDK report records the executing actor and renders its attribution", async
   assert.equal(report.bodySequence, born.body.sequence);
   assert.equal(report.turnSequence, turn.sequence);
   for (const [id, expected] of [[`report/${report.sequence}`, input.text], [String(report.sequence), `report: ${input.text}`]] as const) {
-    const exact = await client.callTool({ name: "history", arguments: { selector: born.allocated.id, id } });
+    const exact = await client.callTool({ name: "history", arguments: { selector: born.allocated.id, item: id } });
     assert.deepEqual(exact.content, [{ type: "text", text: expected }]);
     const cli = await runCli(["-C", root, "history", born.allocated.id, "--id", id], {
       environment: { HOME: root, USERPROFILE: root, KEIYAKU_HOME: root },
@@ -700,7 +700,7 @@ test("SDK deliver selects native preview or placement with one text-only tool", 
   const home = temporaryDirectory(t, "kei-mcp-deliver-home-");
   const repository = repositoryWithMain();
   const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-    markdown: document(), gates: [],
+    terms: document(), gates: [],
   }));
   assert.ok(bound.worktreePath);
   commitCandidate(repository, bound.worktreePath);
@@ -756,9 +756,9 @@ test("SDK amend reports a returned publication retry as retryable", async (t) =>
   const repository = repositoryWithMain();
   const home = temporaryDirectory(t, "kei-mcp-retry-home-");
   const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-    markdown: document(), target: null, gates: [],
+    terms: document(), target: null, gates: [],
   }));
-  const input = { contract: bound.contractId, markdown: document("exit 0") };
+  const input = { contract: bound.contractId, edits: document("exit 0") };
   const environment = { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home };
   await withGitShim(
     [
@@ -796,7 +796,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"] }),
+    await Keis.of(repo).bind({ terms: document(), target: null, gates: ["reviewed"] }),
   );
   const handle = bound.kei;
   const before = present(await handle.state());
@@ -830,7 +830,7 @@ test("cancelled SDK wait retires without changing its Contract", async (t) => {
   assert.equal(guidance.isError, false);
   assert.ok(nativeGuidance.kind === "present");
   assert.equal((guidance.content as { type: string; text: string }[])[0]?.text, nativeGuidance.guidance);
-  const bindInput = { markdown: document(), target: null, gates: ["reviewed"] };
+  const bindInput = { terms: document(), target: null, gates: ["reviewed"] };
   const boundOverMcp = await client.callTool({ name: "bind", arguments: bindInput });
   assert.equal(boundOverMcp.isError, false);
   const wire = accepted(Keiyaku.verbs.bind.output.parse(boundOverMcp.structuredContent));
@@ -881,7 +881,7 @@ test("verification keeps positive and terminal-negative answers distinct from in
     const repository = repositoryWithMain();
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo).bind({
-      markdown: document(scenario === "satisfied" ? "exit 0" : "exit 7"), target: null, gates: scenario === "satisfied" ? ["reviewed", "verified"] : ["reviewed"],
+      terms: document(scenario === "satisfied" ? "exit 0" : "exit 7"), target: null, gates: scenario === "satisfied" ? ["reviewed", "verified"] : ["reviewed"],
     }));
     t.after(async () => {
       await bound.kei.abandon();
@@ -921,7 +921,7 @@ test("MCP waits omit timeout for terminal Contracts and idle Akumas", { timeout:
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   const world = await World.at(repository.path);
   const bound = accepted(await Keis.of(await Repo.at({ path: world })).bind({
-    markdown: document(), target: null, gates: ["reviewed"],
+    terms: document(), target: null, gates: ["reviewed"],
   }));
   accepted(await bound.kei.abandon());
   const worker = await bornLineageAkuma({
@@ -1018,18 +1018,18 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     const schema = { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] };
     const result = await client.callTool({
       name: "ask",
-      arguments: { akuma: allocated.id, prompt: "structured", schema, timeoutMs: 30_000 },
+      arguments: { akuma: allocated.id, prompt: "structured", schema, timeout: "30s" },
     });
     assert.equal(result.isError, false);
     const answer = result.structuredContent as VerbOutput<"ask">;
     assert.equal(answer.kind, "answered");
     assert.ok(answer.kind === "answered" && "answer" in answer);
     assert.deepEqual(answer.answer, { ok: true });
-    assert.equal(result._meta?.["keiyaku/disposition"], classifyVerb("ask", { akuma: allocated.id, prompt: "structured", schema, timeoutMs: 30_000 }, { kind: "returned", value: answer }));
+    assert.equal(result._meta?.["keiyaku/disposition"], classifyVerb("ask", { akuma: allocated.id, prompt: "structured", schema, timeout: "30s" }, { kind: "returned", value: answer }));
     assert.equal((await Akuma.select(world, allocated.id).idle({ timeoutMs: 30_000 })).reason, "completed");
     for (const [prompt, type, expected] of [["scalar", "number", 42], ["null", "null", null]] as const) {
       const response = await client.callTool({ name: "ask", arguments: {
-        akuma: allocated.id, prompt, schema: { type }, timeoutMs: 30_000,
+        akuma: allocated.id, prompt, schema: { type }, timeout: "30s",
       } });
       assert.equal(response.isError, false);
       assert.equal(response._meta?.["keiyaku/disposition"], "accepted");
@@ -1038,7 +1038,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
       await Akuma.select(world, allocated.id).idle({ timeoutMs: 30_000 });
     }
     const invalid = await client.callTool({ name: "ask", arguments: {
-      akuma: allocated.id, prompt: "invalid", schema, timeoutMs: 30_000,
+      akuma: allocated.id, prompt: "invalid", schema, timeout: "30s",
     } });
     assert.equal(invalid.structuredContent, undefined);
     assert.equal(invalid._meta?.["keiyaku/disposition"], "failed");

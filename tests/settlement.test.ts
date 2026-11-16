@@ -97,7 +97,7 @@ test("placement keeps post-bind Debt edits and changes only state to done", asyn
   commitDebts(world);
   const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
-    markdown: document("Edited completion"),
+    terms: document("Edited completion"),
     gates: [],
   }));
   const authority = join(world.path, debtPath(debtId));
@@ -121,7 +121,7 @@ test("reconcile replay of an owed completion is an idempotent no-op the second t
   const debtId = await debt(world.path, "Replay completion", "drop");
   const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
-    markdown: document("Replay completion"),
+    terms: document("Replay completion"),
     gates: [],
   }));
   writeFileSync(`${world.path}/replay.txt`, "replay\n");
@@ -174,7 +174,7 @@ test(
     const debtId = await debt(world.path, "Settlement cleanup", "drop");
     const bound = accepted(await Keis.of(repo).bind({
       debt: debtId,
-      markdown: document("Settlement cleanup"),
+      terms: document("Settlement cleanup"),
       gates: [],
     }));
     writeFileSync(join(world.path, "cleanup.txt"), "cleanup\n");
@@ -230,7 +230,7 @@ test("Settlement exact-read-backs an unknown DebtHolder release after external s
   const debtId = await debt(world.path, "Unknown holder release", "drop");
   const bound = accepted(await Keis.of(repo).bind({
     debt: debtId,
-    markdown: document("Unknown holder release"),
+    terms: document("Unknown holder release"),
     gates: [],
   }));
   writeFileSync(`${world.path}/unknown-holder.txt`, "candidate\n");

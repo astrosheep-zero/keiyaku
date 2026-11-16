@@ -71,7 +71,7 @@ test("explicit verification prepares clean candidate scratch without importing w
       ].join(" && ");
       const bound = accepted(
         await Keis.of(await Repo.at({ path: raw.path })).bind({
-          markdown: document(declaration),
+          terms: document(declaration),
           gates: ["verified", "reviewed"],
         }),
       );
@@ -668,7 +668,7 @@ test("explicit verification retires a partially materialized scratch after post-
         async (gitPath) => {
           const bound = accepted(
             await Keis.of(await Repo.at({ path: raw.path, gitPath })).bind({
-              markdown: document("touch declaration-ran"),
+              terms: document("touch declaration-ran"),
               gates: ["verified", "reviewed"],
             }),
           );

@@ -189,8 +189,8 @@ authority.
 Native Contract abilities keep process custody private while their
 JSON projection retains the single compact owner answer. Guidance reads preserve
 exact requested content and distinguish missing authority. Contract history
-normally returns semantic events without repeating complete terms. Explicit full
-history retains every historical record needed to recover earlier versions;
+normally returns semantic events without repeating complete terms. Explicitly
+requested details retain every historical record needed to recover earlier versions;
 current guidance is not a substitute for that historical evidence. Optional
 Dispatch enrichment follows [Dispatch's isolation law](dispatch.md): its source
 failure remains visible alongside readable journal history, while the addressed

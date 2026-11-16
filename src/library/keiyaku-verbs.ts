@@ -17,7 +17,6 @@ export { akumaNameCatalogSchema, akumaNameCatalogRowSchema } from "../akuma/arch
 export { debtListSchema, debtSummarySchema } from "../debt/index.js";
 export { contractIdSchema } from "../git/identity.js";
 export { akumaIdSchema } from "../akuma/identity.js";
-import { durationSchema } from "../akuma/call-input.js";
 import { parseDuration } from "../duration.js";
 import { addDebtInputSchema, updateDebtInputSchema } from "../debt/input.js";
 import { amendInputSchema } from "./input.js";
@@ -66,7 +65,8 @@ import { guidanceSchema, guidanceNormalSchema } from "./kei.js";
 import { invocationWaitResultSchema, invocationWaitNormalResultSchema } from "./keiyaku-wait.js";
 import { akumaAliasSchema, parseAkumaGlob, parseReadableAkumaAlias } from "../identity/selector.js";
 import { reconcileResultSchema } from "./reconcile.js";
-import { akumaHistoryResultSchema, historySelectionSchemas } from "./selection.js";
+import { akumaHistoryResultSchema } from "./selection.js";
+import { historyInputSchemas } from "../akuma/akuma-owner.js";
 import { whoamiFactsSchema } from "./keiyaku-identity.js";
 import { resetOutcomeSchema } from "./outcome.js";
 import {
@@ -99,9 +99,8 @@ const optText = text.exactOptional();
 const optBool = z.boolean().exactOptional();
 const strings = z.array(text).readonly();
 const positive = z.number().int().positive();
-const timeout = durationSchema.exactOptional();
-const waitDuration = text.refine((value) => parseDuration(value).kind === "parsed", {
-  message: "wait requires an integer duration with unit ms, s, m, or h within the safe millisecond range",
+const duration = text.refine((value) => parseDuration(value).kind === "parsed", {
+  message: "timeout requires an integer duration with unit ms, s, m, or h within the safe millisecond range",
 });
 const contract = {
   contract: optText.describe(
@@ -113,7 +112,7 @@ const commonBind = {
     .nullable()
     .exactOptional()
     .describe(
-      "Integration target: branch name, active kei/... to stack on, or null for a targetless Contract. Omit to target the current branch.",
+      "Where accepted work lands: an existing branch, an active kei/... to stack on, or null for no target. Omit to use the current branch, or copy the source target with forkOf.",
     ),
 };
 const jsonDocument = z.record(z.string(), z.unknown()).readonly();
@@ -132,16 +131,14 @@ const lsInputSchema = z
       .regex(/^(?:kei|debt|aku)\/?$|^aku\/(?:\*(?:\/\*)?|[^/*]+(?:\/\*|\/)?)$/u)
       .describe(catalogueSelector),
     limit: positive.exactOptional().describe("Maximum rows to return (positive integer)."),
-    selection: catalogueSelection,
-    mine: optBool.describe(
-      "When true on an Akuma-instance selector, restrict to direct and transitive descendants of this server environment's caller identity.",
-    ),
+    lifecycle: catalogueSelection,
+    mine: optBool.describe("Only Akumas you started, directly or through your Akumas; valid only for instances."),
   })
-  .superRefine(({ selector, selection, mine }, context) => {
-    if (selection !== undefined && (selector === "aku" || selector === "aku/"))
+  .superRefine(({ selector, lifecycle, mine }, context) => {
+    if (lifecycle !== undefined && (selector === "aku" || selector === "aku/"))
       context.addIssue({
         code: "custom",
-        message: "selection is valid only with a Contract, Debt, or Akuma-instance catalogue",
+        message: "lifecycle is valid only with a Contract, Debt, or Akuma-instance catalogue",
       });
     if (mine !== undefined && (!selector.startsWith("aku/") || selector === "aku/"))
       context.addIssue({ code: "custom", message: "mine is valid only with an Akuma-instance catalogue" });
@@ -152,31 +149,27 @@ const spawnFields = {
     'akumaName to spawn. Use ls {"selector":"aku/"} to list valid names, including when the selected name is not found. Always births a new instance; use tell or ask to continue an existing Akuma.',
   ),
   contract: optText.describe(
-    "Contract ID (kei/...) to record as Dispatch association for status/kanshi; does not set workdir or inject Contract text.",
+    "Contract ID (kei/...) whose work this Akuma does, shown in status and kanshi; does not set workdir or supply its terms.",
   ),
   workdir: optText.describe("Execution directory for the Akuma (relative paths resolve from cwd; defaults to cwd)."),
   alias: optText.describe(
     "World-local alias (with or without leading @) assigned to this Akuma, reassigning any previous holder.",
   ),
-  bare: optBool.describe(
-    "Omit Keiyaku runtime instructions for this Akuma's lifetime (required for generic ACP providers).",
-  ),
+  bare: optBool.describe("Omit Keiyaku-specific instructions for this Akuma's lifetime."),
 };
 const tellFields = {
   akuma: text.describe("Target Akuma selector (aku/<name>/<hex> or @alias)."),
   prompt: nonblank.describe("Nonblank text instruction to admit."),
-  interrupt: optBool.describe(
-    "Request the currently running turn to yield before waking a successor turn for this prompt.",
-  ),
+  interrupt: optBool.describe("Interrupt current work before running this prompt."),
 };
 export const verbs = Object.freeze({
   bind: {
     description:
-      "Bind a Contract: one tracked delivery with fixed terms. Complete Markdown terms in (or forkOf to copy another's); a kei/... id and its own worktree out. target is where the work lands once accepted; gates is what must pass first. Runs no checks.",
+      "Bind a Contract: give exactly one of terms (complete Contract Markdown) or forkOf (copy another Contract). Returns a kei/... id and its own worktree. target is where accepted work lands; gates is what must pass first. Runs no checks.",
     input: z.union([
       z
         .strictObject({
-          markdown: text.describe(
+          terms: text.describe(
             "Complete Contract Markdown document (# Title, ## Context, ## Objective, ## Design, ## Region, ## Criteria, optional ## Verification). Mutually exclusive with forkOf.",
           ),
           debt: debtIdSchema
@@ -196,7 +189,7 @@ export const verbs = Object.freeze({
       z
         .strictObject({
           forkOf: text.describe(
-            "Existing Contract selector (kei/...) whose terms are copied into a new Contract. Mutually exclusive with markdown, debt, after, and gates.",
+            "Existing Contract selector (kei/...) whose terms are copied into a new Contract. Mutually exclusive with terms, debt, after, and gates.",
           ),
           ...commonBind,
         })
@@ -208,11 +201,11 @@ export const verbs = Object.freeze({
   },
   amend: {
     description:
-      "Rewrite an active Contract's terms, target, prerequisites (after), or gates; naming none reports the Contract unchanged and writes nothing. markdown is H2 edits such as ## Replace: Objective, not a new Contract. Returns only what changed.",
+      "Edit an active Contract's terms, target, prerequisites (after), or gates; naming none reports the Contract unchanged. Supply edits as section operations such as ## Replace: Objective, not a replacement Contract. Returns only what changed.",
     input: amendInputSchema
       .extend({
-        markdown: amendInputSchema.shape.markdown.describe(
-          "Replacement Contract Markdown document or section-level amendment.",
+        edits: amendInputSchema.shape.edits.describe(
+          "Section edits to the current terms, using H2 headings such as ## Replace: Objective; not a replacement Contract.",
         ),
         after: amendInputSchema.shape.after.describe(
           "Replacement prerequisite Contract IDs (kei/...); pass [] to clear prerequisites.",
@@ -229,11 +222,11 @@ export const verbs = Object.freeze({
   },
   arc: {
     description:
-      "Open the next chapter of an active Contract: a # Title and optional notes telling its Akumas what is being done now. The terms stay as bound.",
+      "Open the next chapter of an active Contract: give a # Title and optional narrative telling its Akumas what is being done now. Returns the new chapter number; the Contract terms stay unchanged.",
     input: z
       .strictObject({
         ...contract,
-        markdown: text.describe("Arc Markdown body naming and scoping the current chapter."),
+        body: text.describe("Chapter Markdown: a # Title and optional narrative describing the current work."),
       })
       .readonly(),
     output: arcOutcomeSchema,
@@ -249,10 +242,10 @@ export const verbs = Object.freeze({
           dryRun: z
             .literal(true)
             .describe(
-              "When true, read-only preview of candidate integration, standing gate evidence, and target followability without recording delivery or mutating refs.",
+              "Preview the candidate, current gate evidence, and target readiness without submitting delivery.",
             ),
           includeDirty: optBool.describe(
-            "Capture uncommitted worktree and untracked changes via a private index without altering the worktree's real Git index.",
+            "Include uncommitted and untracked worktree changes in the candidate without staging them.",
           ),
           showDiff: optBool.describe(
             "Include the candidate patch diff in dryRun preview output (valid only with dryRun: true).",
@@ -266,13 +259,13 @@ export const verbs = Object.freeze({
             .literal(false)
             .exactOptional()
             .describe(
-              "When true, read-only preview of candidate integration, standing gate evidence, and target followability without recording delivery or mutating refs.",
+              "Preview the candidate, current gate evidence, and target readiness without submitting delivery.",
             ),
           message: optText.describe(
             "Optional commit/integration message for the delivered candidate (submission only).",
           ),
           includeDirty: optBool.describe(
-            "Capture uncommitted worktree and untracked changes via a private index without altering the worktree's real Git index.",
+            "Include uncommitted and untracked worktree changes in the candidate without staging them.",
           ),
           materializeConflict: optBool.describe(
             "When target integration conflicts, materialize conflict markers into the appointed worktree for resolution instead of refusing cleanly (submission only).",
@@ -388,14 +381,12 @@ export const verbs = Object.freeze({
   },
   fork: {
     description:
-      "Birth a copy of an Akuma as it stood at an answered turn (turn/<n> from history), to try another path. The copy wakes idle; give it orders with tell. Needs provider support.",
+      "Birth a copy of an Akuma as it stood at an answered turn (turn/<n> from history), to try another path. The copy wakes idle; give it orders with tell. Available only for Akumas that support forking.",
     input: z
       .strictObject({
         akuma: text.describe("Source Akuma selector (aku/<name>/<hex> or @alias)."),
         at: text.describe("Exact retained answered turn coordinate (turn/<n>) to branch from."),
-        bare: optBool.describe(
-          "Omit Keiyaku runtime instructions on the forked child (a bare parent stays bare regardless).",
-        ),
+        bare: optBool.describe("Omit Keiyaku instructions on the forked child (a bare parent stays bare regardless)."),
       })
       .readonly(),
     output: forkResultSchema,
@@ -415,16 +406,18 @@ export const verbs = Object.freeze({
   },
   ask: {
     description:
-      "Demand a structured answer from an Akuma: a prompt and a JSON Schema in, parsed JSON out. The answer is not checked against the schema; non-JSON is a failure. Not every provider honors schemas.",
+      "Demand a structured answer from an Akuma: a prompt and a JSON Schema in, parsed JSON out. The answer is not checked against the schema; non-JSON is a failure. Some Akumas cannot constrain answers to a schema.",
     input: z
       .strictObject({
         akuma: text.describe("Target Akuma selector (aku/<name>/<hex> or @alias)."),
         prompt: nonblank.describe("Nonblank question or instruction to admit."),
-        timeoutMs: timeout.describe(
-          "Optional observation deadline in integer milliseconds (stops observation on deadline without retracting the prompt or killing the Akuma).",
-        ),
-        schema: jsonDocument.describe("JSON Schema object sent to the provider to constrain the turn's JSON output."),
-        interrupt: optBool.describe("Request the currently running turn to yield before running this Ask."),
+        timeout: duration
+          .exactOptional()
+          .describe(
+            "How long to watch for the answer (e.g. 30s or 5m); omit for no deadline. The deadline only stops watching, never the work.",
+          ),
+        schema: jsonDocument.describe("JSON Schema object describing the JSON answer you want."),
+        interrupt: optBool.describe("Interrupt current work before answering this Ask."),
       })
       .readonly(),
     output: akumaAskResultSchema,
@@ -475,9 +468,11 @@ export const verbs = Object.freeze({
           .enum(["any", "all"])
           .exactOptional()
           .describe('Wake when "any" member satisfies (default), or wait for "all" members.'),
-        timeout: waitDuration
+        timeout: duration
           .exactOptional()
-          .describe("One observation deadline as a duration (e.g. 5m); never cancels work."),
+          .describe(
+            "How long to watch (e.g. 30s or 5m); omit for no deadline. The deadline only stops watching, never the work. 0ms returns the current state at once.",
+          ),
       })
       .readonly(),
     output: invocationWaitResultSchema,
@@ -486,52 +481,43 @@ export const verbs = Object.freeze({
   },
   history: {
     description:
-      "Look back: a Contract's journal, or an Akuma's recent activity. For an Akuma, last returns its latest answer and id opens one item such as turn/<n> or report/<n>.",
+      "Read a Contract's changes, or an Akuma's activity. For an Akuma, item opens one result or activity; omit it to page the timeline.",
     input: z.union([
       z
         .strictObject({
           selector: contractSelector.describe(
             "Single subject: kei/... for Contract history, or aku/<name>/<hex> / @alias for Akuma history.",
           ),
-          full: optBool.describe("Include full event details on Contract history (valid only for kei/... selectors)."),
+          details: optBool.describe("Also show each change's terms; valid only for Contract history."),
         })
         .readonly(),
-      ...historySelectionSchemas.map((branch) =>
-        (
-          branch.extend({
-            last: branch.shape.last.describe(
-              "When true, return only the Akuma's latest retained answer bytes (mutually exclusive with id, before, since, and limit).",
+      ...[
+        z.strictObject({
+          item: text
+            .refine(
+              (value) => value === "last" || historyInputSchemas[0].shape.id.safeParse(value).success,
+              "item must be last, turn/<positive safe integer>, report/<positive safe integer>, or a positive safe decimal sequence",
+            )
+            .describe(
+              'One Akuma item: "last" for the latest answer, turn/<n> for a turn outcome, report/<n> for a progress report, or a positive decimal activity sequence. Cannot be combined with before, since, or limit.',
             ),
-            ...("id" in branch.shape
-              ? {
-                  id: branch.shape.id.describe(
-                    "Exact Akuma item coordinate: turn/<n> (turn outcome), report/<n> (full progress report), or positive decimal activity sequence. Mutually exclusive with before, since, limit, and last.",
-                  ),
-                }
-              : {}),
-            ...("before" in branch.shape
-              ? {
-                  before: branch.shape.before.describe(
-                    "Page older Akuma timeline events strictly before this positive decimal sequence.",
-                  ),
-                }
-              : {}),
-            ...("since" in branch.shape
-              ? {
-                  since: branch.shape.since.describe(
-                    "Page newer Akuma timeline events strictly after this nonnegative decimal sequence (mutually exclusive with before).",
-                  ),
-                }
-              : {}),
-            ...("limit" in branch.shape
-              ? { limit: branch.shape.limit.describe("Maximum Akuma timeline rows to return (1..5000, default 12).") }
-              : {}),
-          }) as typeof branch
-        )
+        }),
+        z.strictObject({
+          before: historyInputSchemas[1].shape.before.describe(
+            "Page events strictly before this positive decimal sequence; cannot be combined with since or item.",
+          ),
+          limit: historyInputSchemas[1].shape.limit.describe("Maximum timeline rows (1..5000, default 12)."),
+        }),
+        z.strictObject({
+          since: historyInputSchemas[2].shape.since.describe(
+            "Page events strictly after this positive decimal sequence; cannot be combined with before or item.",
+          ),
+          limit: historyInputSchemas[2].shape.limit.describe("Maximum timeline rows (1..5000, default 12)."),
+        }),
+      ].map((branch) =>
+        branch
           .extend({
-            selector: akumaSelector.describe(
-              "Single subject: kei/... for Contract history, or aku/<name>/<hex> / @alias for Akuma history.",
-            ),
+            selector: akumaSelector.describe("One Akuma ID (aku/<name>/<hex>) or @alias."),
           })
           .readonly(),
       ),
@@ -541,10 +527,10 @@ export const verbs = Object.freeze({
   },
   report: {
     description:
-      "From inside a running Akuma, leave a progress note for whoever holds it and keep working. Only works when this server runs inside that Akuma.",
+      "From inside a running Akuma only, leave a progress note for whoever holds you and keep working. Returns confirmation that the note was recorded, not that it was received.",
     input: z
       .strictObject({
-        text: nonblank.describe("Nonblank progress report Markdown/text recorded on the current turn timeline."),
+        text: nonblank.describe("Nonblank progress note, in Markdown or plain text, to add to your current turn."),
       })
       .readonly(),
     output: akumaReportResultSchema,
@@ -552,7 +538,7 @@ export const verbs = Object.freeze({
   },
   whoami: {
     description:
-      "Who this server acts as: caller or Akuma identity, its Contract link and turn initiator, and which Contract worktree cwd stands in. Read from the environment; not authentication.",
+      "See who you are acting as and which Contract/worktree you are in, including your Akuma identity and turn initiator when available. This is context, not authentication.",
     input: z.strictObject({}).readonly(),
     output: whoamiFactsSchema,
     effect: "read",
@@ -643,7 +629,7 @@ export const verbs = Object.freeze({
   },
   "debt.update": {
     description:
-      "Replace a Debt's text, priority or prerequisites, or set its disposition to open, done or drop. Any state may be reopened or changed; omitted fields are preserved and empty body, note or needs clears them.",
+      "Change at least one Debt field: text, priority, prerequisites, or disposition (open, done, drop). Any state may be reopened or changed; omitted fields are preserved and empty body, note or needs clears them. Returns the updated Debt or reports no change.",
     input: updateDebtInputSchema
       .safeExtend({ id: debtIdSchema.describe("Target Debt ID (debt/<slug>-<hex>).") })
       .readonly(),

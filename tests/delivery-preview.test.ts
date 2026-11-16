@@ -45,7 +45,7 @@ test("a stale document derivation is refused by the pure decision and restarts t
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: verificationBody(null),
+      terms: verificationBody(null),
     }),
   );
   const state = present(await bound.kei.state());
@@ -56,7 +56,7 @@ test("a stale document derivation is refused by the pure decision and restarts t
     title: decoded.title,
     verification: prepareVerificationDeclaration(verificationDefinition(decoded)),
   };
-  await bound.kei.amend({ markdown: "## Replace: Objective\nA newer document.\n\n" });
+  await bound.kei.amend({ edits: "## Replace: Objective\nA newer document.\n\n" });
   const scope = await scopeOperation({ coordinate: repository.path });
 
   await withGitDecodeChannel(scope, async (channel) => {
@@ -100,7 +100,7 @@ test("preview without Verification still returns an accepted ready candidate", a
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: verificationBody(null),
+      terms: verificationBody(null),
       // This preview fixture observes a deliberately targetless Contract.
       target: null,
     }),
@@ -137,7 +137,7 @@ test("ungated preview reports undeclared without executing declarations or admit
   const marker = `${repository.path}/verification-ran`;
   const contract = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: verificationBody(`touch '${marker}'\nexit 1`),
+      terms: verificationBody(`touch '${marker}'\nexit 1`),
       gates: ["reviewed"],
     }),
   ).kei;
@@ -211,7 +211,7 @@ test("native, invocation and CLI preview preserve authority, refs, real indexes 
   const hookMarker = join(repository.path, "hook-ran");
   const bound = accepted(
     await Keis.of(repo).bind({
-      markdown: verificationBody(`touch '${verificationMarker}'`),
+      terms: verificationBody(`touch '${verificationMarker}'`),
       gates: ["reviewed", "verified"],
     }),
   );
@@ -282,10 +282,10 @@ test("native, invocation and CLI preview preserve authority, refs, real indexes 
 test("preview reports prerequisite and gate judgments without claiming acceptance readiness", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const prerequisite = accepted(await Keis.of(repo).bind({ markdown: verificationBody(null), gates: [] }));
+  const prerequisite = accepted(await Keis.of(repo).bind({ terms: verificationBody(null), gates: [] }));
   const dependent = accepted(
     await Keis.of(repo).bind({
-      markdown: verificationBody(),
+      terms: verificationBody(),
       after: [prerequisite.contractId],
       gates: ["reviewed", "verified"],
     }),
@@ -307,7 +307,7 @@ test("preview reports prerequisite and gate judgments without claiming acceptanc
 test("preview reports integration conflicts without materializing a merge or changing custody", async () => {
   const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: verificationBody(null), gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: verificationBody(null), gates: [] }));
   assert.ok(bound.worktreePath);
   const worktree = bound.worktreePath;
   writeFileSync(join(worktree, "shared.txt"), "candidate\n");
@@ -329,7 +329,7 @@ test("preview reports integration conflicts without materializing a merge or cha
 test("cancelling invocation dry-run preserves native abort and partial preview instead of accepting target.failed", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: verificationBody(null), gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: verificationBody(null), gates: [] }));
   assert.ok(bound.worktreePath);
   const worktree = bound.worktreePath;
   writeFileSync(join(worktree, "candidate.txt"), "candidate\n");
@@ -384,7 +384,7 @@ test("cancelling invocation dry-run preserves native abort and partial preview i
 test("preview names overlapping dirty target checkout while normal delivery still lands and preserves its bytes", async () => {
   const repository = repositoryWithMain({ files: { "delivered.txt": "base\n" } });
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: verificationBody(null), gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: verificationBody(null), gates: [] }));
   assert.ok(bound.worktreePath);
   const worktree = bound.worktreePath;
   writeFileSync(join(worktree, "delivered.txt"), "candidate\n");

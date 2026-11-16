@@ -37,13 +37,13 @@ function bindTargetSelection(target: string | null | undefined): BindTargetSelec
 
 function bindInput(input: BindInput, composition: LocalContractCompositionCapture) {
   const values = validated(() => requireInput(input, "Keis.bind input"));
-  const allowed = values.forkOf === undefined ? ["markdown", "debt", "target", "after", "gates"] : ["forkOf", "target"];
+  const allowed = values.forkOf === undefined ? ["terms", "debt", "target", "after", "gates"] : ["forkOf", "target"];
   requireInput(values, "Keis.bind input", allowed);
   return validated(() => {
     const forkOf = values.forkOf;
     if (values.target !== undefined && values.target !== null && typeof values.target !== "string")
       throw new KeiyakuError("invalid-input", "target must be a string or null");
-    const document = forkOf === undefined ? parseMarkdown(requireMarkdown(values.markdown)) : undefined;
+    const document = forkOf === undefined ? parseMarkdown(requireMarkdown(values.terms, "terms")) : undefined;
     if (forkOf !== undefined && typeof forkOf !== "string")
       throw new KeiyakuError("invalid-input", "forkOf must be a ContractId");
     const derived = forkOf === undefined ? derivedGates(composition, gateNames(values.gates)) : undefined;

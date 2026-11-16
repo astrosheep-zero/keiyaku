@@ -68,7 +68,7 @@ test("frozen KeiyakuError receipts merge into a fresh error retaining the origin
 test("accepted delivery preserves its identities and required retirement failure", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: ["reviewed"], target: "main" }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), gates: ["reviewed"], target: "main" }));
   commitCandidate(repository, bound.worktreePath);
   let first = true;
   const native = createKeiHandle(bound.contractId, {
@@ -99,7 +99,7 @@ test("native delivery propagates lower programming and corruption failures after
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(
       await Keis.of(repo).bind({
-        markdown: (await import("./support/library-verbs.js")).document(),
+        terms: (await import("./support/library-verbs.js")).document(),
         target: "main",
         gates: [],
       }),
@@ -164,7 +164,7 @@ test("native delivery wraps lower-owner failures before publication", async () =
 test("native delivery never treats an aborted signal as proof that an independent programming failure was cancellation", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] })).kei;
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] })).kei;
   commitCandidate(repository);
   const base = scopeForRepo(repo);
   const controller = new AbortController();
@@ -237,7 +237,7 @@ test("decode-channel teardown never replaces the original failure, including a t
 test("native delivery keeps claim and movement when later observation throws, without reading twice", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
   const id = present(await bound.kei.state()).id;
   commitCandidate(repository);
   const original = new TypeError("broken post-placement observation");
@@ -289,7 +289,7 @@ test("native review retains an earlier claimed sibling when a later continuation
   const child = async (title: string) =>
     accepted(
       await Keis.of(repo).bind({
-        markdown: document().replace("# Library verbs", "# " + title),
+        terms: document().replace("# Library verbs", "# " + title),
         gates: [],
         // The continuation fixtures stay targetless, like their prerequisite.
         target: null,
@@ -365,7 +365,7 @@ test("a pre-admission custom caller abort rejects with the exact raw reason with
 test("native cancellation preserves an existing category and any partial observation", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
   const before = present(await bound.kei.state());
   const cause = new TypeError("original caller cause");
   const reason = Object.freeze(new KeiyakuError("authority-corruption", "categorized caller stop", { cause }));
@@ -432,7 +432,7 @@ test("read observation preserves exact exceptional identity and thrown undefined
 test("native bind and delivery JSON retain result data without process custody", async () => {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), gates: [] }));
   const bindJson = JSON.parse(JSON.stringify(bound));
   assert.deepEqual(bindJson, {
     kind: "accepted",
@@ -468,7 +468,7 @@ test("native delivery retains completed Debt settlement before terminal cleanup 
   repository.run(["add", ".keiyaku/debts"]);
   repository.run(["commit", "--quiet", "-m", "Debt authority"]);
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), debt: debt.id, gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), debt: debt.id, gates: [] }));
   const original = new TypeError("terminal cleanup program failure");
   const base = scopeForRepo(repo);
   let armed = false;
@@ -580,7 +580,7 @@ test("native preview preserves partial observation on unexpected target-lag fail
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keis.of(repo).bind({ markdown: document("true"), target: "main", gates: ["reviewed", "verified"] }),
+    await Keis.of(repo).bind({ terms: document("true"), target: "main", gates: ["reviewed", "verified"] }),
   );
   const base = scopeForRepo(repo);
   const original = new TypeError("unexpected native target lag observation failure");
@@ -630,13 +630,13 @@ test("native bind retains its complete accepted value when its owned decode chan
     {},
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      const result = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
+      const result = accepted(await Keis.of(repo).bind({ terms: document(), gates: [] }));
       assert.ok(result.kei instanceof Kei);
       assert.ok(result.worktreePath);
       const healthy = Keis.of(await Repo.at({ path: repository.path })).kei({ id: result.contractId });
       assert.equal(present(await healthy.state()).id, result.contractId);
       assert.ok((result.issues ?? []).some((effect) => effect.kind === "diagnostic" && effect.severity === "optional"));
-      assert.equal(classifyVerb("bind", { markdown: document() }, { kind: "returned", value: result }), "accepted");
+      assert.equal(classifyVerb("bind", { terms: document() }, { kind: "returned", value: result }), "accepted");
       const preview = await result.kei.previewDelivery();
       assert.ok(preview.kind === "ready");
       assert.ok(preview.issues?.some((issue) => issue.kind === "diagnostic" && issue.severity === "optional"));
@@ -649,7 +649,7 @@ test("native bind retains its complete accepted value when its owned decode chan
 test("a no-admission cleanup failure keeps its native cause without claiming delivery", async () => {
   const repository = repositoryWithMain();
   const bound = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({ markdown: document(), gates: ["reviewed"] }),
+    await Keis.of(await Repo.at({ path: repository.path })).bind({ terms: document(), gates: ["reviewed"] }),
   );
   const id = bound.contractId;
   assert.ok(bound.worktreePath);
@@ -697,7 +697,7 @@ test("native delivery retains an earlier completed checkout follow when a later 
   repository.run(["worktree", "add", "--quiet", "--force", sibling, "main"]);
   try {
     const repo = await Repo.at({ path: repository.path });
-    const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
+    const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
     assert.ok(bound.worktreePath);
     commitCandidate(repository, bound.worktreePath);
     const base = scopeForRepo(repo);
@@ -762,7 +762,7 @@ test("native terminal removal survives a subsequent malformed ref read, includin
     { KEIYAKU_REMOVAL_MARKER: marker },
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
-      const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: "main", gates: [] }));
+      const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: "main", gates: [] }));
       assert.ok(bound.worktreePath);
       const path = bound.worktreePath;
       commitCandidate(repository, path);
@@ -796,7 +796,7 @@ test("native delivery independently bounds stalled EOF retirement and proves the
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: document(),
+      terms: document(),
       gates: ["reviewed"],
     }),
   );

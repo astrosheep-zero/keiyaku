@@ -180,16 +180,16 @@ function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, contex
 }
 
 function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history">, context: TextRenderContext): string {
-  const options = query as { full?: boolean; id?: string; last?: boolean };
+  const options = query as { details?: boolean; item?: string };
   if (query.selector.startsWith("kei/")) {
     if (result.kind === "contract-missing") return missing("history", query.selector, context);
     if (result.kind !== "contract") throw new Error("Contract history returned a non-Contract result");
-    return renderContractHistory(result, { full: options.full === true });
+    return renderContractHistory(result, { full: options.details === true });
   }
   if (result.kind === "contract" || result.kind === "contract-missing")
     throw new Error("Akuma history returned a non-Akuma result");
-  const id = options.id;
-  const last = options.last === true;
+  const last = options.item === "last";
+  const id = last ? undefined : options.item;
   const selectedAlias = aliasSelector(query.selector);
   return (
     historyRawAnswer(result, id) ??

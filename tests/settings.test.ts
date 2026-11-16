@@ -50,7 +50,7 @@ function contractGates(context: TestContext) {
   return async (loaded: Settings, names?: readonly string[]) => {
     const result = accepted(
       await Keis.of(await repo, { settings: loaded }).bind({
-        markdown: contractDocument("Settings derivation", "true"),
+        terms: contractDocument("Settings derivation", "true"),
         ...(names === undefined ? {} : { gates: names }),
       }),
     );
@@ -371,7 +371,7 @@ test("Contract audit and delivery consume captured freshness while empty Setting
     const strict = Keis.of(repo, { settings: await projectSettings(repository.path) });
     const bound = accepted(
       await strict.bind({
-        markdown: contractDocument(),
+        terms: contractDocument(),
         target: "main",
         gates: ["reviewed"],
       }),
@@ -904,28 +904,28 @@ test("omitted Settings accepts built-in gates only, empty hooks, and false fresh
     const repo = await Repo.at({ path: repository.path });
     const selected = accepted(
       await Keis.of(repo).bind({
-        markdown: contractDocument(),
+        terms: contractDocument(),
         gates: ["reviewed", "reviewed"],
       }),
     );
     assert.deepEqual(present(await selected.kei.state()).terms.gates, ["reviewed"]);
     await assert.rejects(
-      Keis.of(repo).bind({ markdown: contractDocument(), gates: ["security-audited"] }),
+      Keis.of(repo).bind({ terms: contractDocument(), gates: ["security-audited"] }),
       (error: unknown) =>
         error instanceof KeiyakuError &&
         error.category === "invalid-input" &&
         /Unknown gate 'security-audited'\. Known gate names: reviewed, verified/u.test(error.message),
     );
-    const bare = accepted(await Keis.of(repo).bind({ markdown: contractDocument("Bare core") }));
+    const bare = accepted(await Keis.of(repo).bind({ terms: contractDocument("Bare core") }));
     assert.deepEqual(present(await bare.kei.state()).terms.gates, []);
     const empty = accepted(
       await Keis.of(repo, { settings: await projectSettings(repository.path) }).bind({
-        markdown: contractDocument("Provided empty Settings"),
+        terms: contractDocument("Provided empty Settings"),
       }),
     );
     assert.deepEqual(present(await empty.kei.state()).terms.gates, ["reviewed"]);
     await assert.rejects(
-      Keis.of(repo).bind({ markdown: contractDocument(), gates: ["Security"] }),
+      Keis.of(repo).bind({ terms: contractDocument(), gates: ["Security"] }),
       (error: unknown) =>
         error instanceof KeiyakuError && error.category === "invalid-input" && error.cause instanceof TypeError,
     );
@@ -947,18 +947,18 @@ test("captured Settings selects the configured default while explicit [] skips t
     const captured = await projectSettings(repository.path);
     const repo = await Repo.at({ path: repository.path });
     const omitted = accepted(
-      await Keis.of(repo, { settings: captured }).bind({ markdown: contractDocument("Omitted") }),
+      await Keis.of(repo, { settings: captured }).bind({ terms: contractDocument("Omitted") }),
     );
     assert.deepEqual(present(await omitted.kei.state()).terms.gates, ["reviewed"]);
     const mixed = accepted(
       await Keis.of(repo, { settings: captured }).bind({
-        markdown: contractDocument("Mixed"),
+        terms: contractDocument("Mixed"),
         gates: ["reviewed", "strict", "reviewed"],
       }),
     );
     assert.deepEqual(present(await mixed.kei.state()).terms.gates, ["reviewed", "security-audited"]);
     const explicit = accepted(
-      await Keis.of(repo, { settings: captured }).bind({ markdown: contractDocument("Explicit"), gates: [] }),
+      await Keis.of(repo, { settings: captured }).bind({ terms: contractDocument("Explicit"), gates: [] }),
     );
     assert.deepEqual(present(await explicit.kei.state()).terms.gates, []);
 
@@ -967,7 +967,7 @@ test("captured Settings selects the configured default while explicit [] skips t
       gates: { default: { kind: "bundle", gates: ["security-audited"] } },
     });
     assert.deepEqual(present(await omitted.kei.state()).terms.gates, ["reviewed"]);
-    const again = accepted(await Keis.of(repo, { settings: captured }).bind({ markdown: contractDocument("Again") }));
+    const again = accepted(await Keis.of(repo, { settings: captured }).bind({ terms: contractDocument("Again") }));
     assert.deepEqual(present(await again.kei.state()).terms.gates, ["reviewed"]);
   } finally {
     rmSync(repository.path, { recursive: true, force: true });
@@ -981,7 +981,7 @@ test("a broken gates namespace is scoped to omitted and word-selected bind or am
     const repo = await Repo.at({ path: repository.path });
     writeProjectSettings(repository.path, { gates: { default: { kind: "bundle", gates: ["reviewed"] } } });
     const good = await projectSettings(repository.path);
-    const admitted = accepted(await Keis.of(repo, { settings: good }).bind({ markdown: contractDocument("Admitted") }));
+    const admitted = accepted(await Keis.of(repo, { settings: good }).bind({ terms: contractDocument("Admitted") }));
     const id = present(await admitted.kei.state()).id;
 
     writeProjectSettings(repository.path, { gates: [] });
@@ -991,13 +991,13 @@ test("a broken gates namespace is scoped to omitted and word-selected bind or am
     // Explicit [] never looks up gates, so it still admits without any bundle read.
     const explicit = accepted(
       await Keis.of(repo, { settings: broken }).bind({
-        markdown: contractDocument("Explicit under broken gates"),
+        terms: contractDocument("Explicit under broken gates"),
         gates: [],
       }),
     );
     assert.deepEqual(present(await explicit.kei.state()).terms.gates, []);
     // Omitted amend preserves admitted gates without lookup; fork copies the source gates.
-    accepted(await brokenHandle.amend({ markdown: contractDocument("Admitted v2") }));
+    accepted(await brokenHandle.amend({ edits: contractDocument("Admitted v2") }));
     assert.deepEqual(present(await brokenHandle.state()).terms.gates, ["reviewed"]);
     const forked = accepted(await Keis.of(repo, { settings: broken }).bind({ forkOf: id }));
     assert.deepEqual(present(await forked.kei.state()).terms.gates, ["reviewed"]);
@@ -1007,12 +1007,12 @@ test("a broken gates namespace is scoped to omitted and word-selected bind or am
     const before = await brokenHandle.history();
     const rowsBefore = (await Keis.of(repo, { settings: broken }).list({})).rows!.length;
     await assert.rejects(
-      Keis.of(repo, { settings: broken }).bind({ markdown: contractDocument("Omitted broken") }),
+      Keis.of(repo, { settings: broken }).bind({ terms: contractDocument("Omitted broken") }),
       invalidInputFromSettings,
     );
     await assert.rejects(
       Keis.of(repo, { settings: broken }).bind({
-        markdown: contractDocument("Word-selected broken"),
+        terms: contractDocument("Word-selected broken"),
         gates: ["reviewed"],
       }),
       invalidInputFromSettings,
@@ -1036,7 +1036,7 @@ test("hooks and freshness derive only at the operation that consumes them", asyn
     const brokenHooks = await projectSettings(repository.path);
     assert.equal((await Keis.of(repo, { settings: brokenHooks }).list({})).rows, undefined);
     await assert.rejects(
-      Keis.of(repo, { settings: brokenHooks }).bind({ markdown: contractDocument("Broken hooks") }),
+      Keis.of(repo, { settings: brokenHooks }).bind({ terms: contractDocument("Broken hooks") }),
       invalidInputFromSettings,
     );
 

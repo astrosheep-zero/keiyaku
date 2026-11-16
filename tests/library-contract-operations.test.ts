@@ -40,11 +40,11 @@ test("bind persists the canonical rendering, so amending one section leaves othe
   const repository = repositoryWithMain();
   const repo = await cachedRepoAt(repository.path);
   const raw = document().replace(/\n## Objective/u, "\n\n\n## Objective");
-  const bound = accepted(await Keis.of(repo).bind({ markdown: raw }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: raw }));
   const before = present(await bound.kei.state()).terms.document.bytes;
   assert.equal(before, renderContractBody(decodeContractDocument(document())));
   const amended = accepted(
-    await bound.kei.amend({ markdown: "## Replace: Objective\n\nA sharpened objective.\n" }),
+    await bound.kei.amend({ edits: "## Replace: Objective\n\nA sharpened objective.\n" }),
   );
   assert.deepEqual(amended.changedSections, ["objective"]);
   const after = present(await bound.kei.state()).terms.document.bytes;
@@ -82,7 +82,7 @@ async function buildReviewGatedConflictCandidateTemplate(): Promise<ReviewGatedC
   repository.run(["commit", "--quiet", "-m", "base"]);
   const bound = accepted(
     await Keis.of(await cachedRepoAt(repository.path)).bind({
-      markdown: document(),
+      terms: document(),
       target: "refs/heads/main",
       gates: ["reviewed"],
     }),
@@ -138,7 +138,7 @@ async function conflictBoardFixture(count: number) {
   for (let index = 0; index < count; index += 1) {
     const contract = accepted(
       await Keis.of(repo).bind({
-        markdown: document().replace("# Library verbs", `# Board handoff ${index}`),
+        terms: document().replace("# Library verbs", `# Board handoff ${index}`),
         target: "refs/heads/main",
         gates: ["reviewed"],
       }),
@@ -462,7 +462,7 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
     const repository = repositoryWithMain();
     const bound = accepted(
       await Keis.of(await cachedRepoAt(repository.path)).bind({
-        markdown: document("exit 1"),
+        terms: document("exit 1"),
         gates: [],
       }),
     );

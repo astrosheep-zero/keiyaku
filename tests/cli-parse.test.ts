@@ -27,12 +27,12 @@ test("root listings select active by default, settled or all for lifecycle catal
     assert.deepEqual(command(["ls", selector]), { name: "ls", output: "text", input: { selector } });
     for (const selection of ["settled", "all"]) {
       assert.deepEqual(command(["ls", selector, `--${selection}`]), {
-        name: "ls", output: "text", input: { selector, selection },
+        name: "ls", output: "text", input: { selector, lifecycle: selection },
       });
     }
   }
   assert.deepEqual(command(["ls", "--mine", "--settled"]), {
-    name: "ls", output: "text", input: { selector: "aku/*", mine: true, selection: "settled" },
+    name: "ls", output: "text", input: { selector: "aku/*", mine: true, lifecycle: "settled" },
   });
   assert.throws(() => command(["ls", "debt", "--all", "--settled"]), CliUsageError);
   assert.throws(() => command(["ls", "aku", "--all"]), CliUsageError);
@@ -492,7 +492,7 @@ test("tell admits text without observation and ask requires a schema document", 
   assert.throws(() => command(["tell", "@worker", "--wait", "0ms", "continue"]), /option --wait is not valid for tell/u);
   assert.deepEqual(command(["ask", "aku/worker/1234abcd", "--schema", "answer.json", "--wait", "5m", "continue"]), {
     name: "ask",
-    input: { akuma: "aku/worker/1234abcd", timeoutMs: 300_000 },
+    input: { akuma: "aku/worker/1234abcd", timeout: "5m" },
     acquire: { schema: "answer.json", prompt: { kind: "argument", value: "continue" } },
     output: "text",
   });

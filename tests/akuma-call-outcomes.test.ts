@@ -47,7 +47,7 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   const world = await World.at(repository.path);
   const repo = await Repo.at({ path: world });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: null, gates: [] }));
   const home = temporaryDirectory(t, "call-outcome-home-");
   mkdirSync(join(home, "akumas"));
   writeFileSync(join(home, "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");

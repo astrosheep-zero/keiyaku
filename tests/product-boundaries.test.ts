@@ -24,7 +24,7 @@ test("Contract and Akumas capture only their own composition inputs", async (con
   assert.equal("debts" in contracts, false);
   assert.throws(() => contracts.kei({ repo, id: "kei/example" } as never), invalidInput);
   for (const run of [
-    () => contracts.bind({ repo, markdown: "" } as never),
+    () => contracts.bind({ repo, terms: "" } as never),
     () => contracts.resolve({ repo } as never),
     () => contracts.list({ repo } as never),
     () => contracts.observe({ repo, id: "kei/example" } as never),

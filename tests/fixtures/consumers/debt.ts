@@ -1,7 +1,7 @@
 import { Debts, Keiyaku, World, type DebtDetail, type DebtShowItem, type DebtShowResult, type DebtUpdateResult } from "@astrosheep/keiyaku";
 
 const facet = Keiyaku.for({ cwd: "/tmp", environment: {} });
-const catalogue = facet.ls({ selector: "debt/", selection: "all" });
+const catalogue = facet.ls({ selector: "debt/", lifecycle: "all" });
 const one = facet.show({ selector: "debt/example" });
 const completed: Promise<DebtUpdateResult> = facet.debtUpdate({ id: "debt/example", state: "done" });
 

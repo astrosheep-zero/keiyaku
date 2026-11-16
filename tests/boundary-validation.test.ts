@@ -18,12 +18,12 @@ test("Contract and Debt boundaries reject actor before reading product authority
   const contract = contracts.kei({ id: "kei/missing" as never });
   assert.throws(() => Keis.of(repo, { actor: "operator" } as never), /unknown field: actor/u);
   await assert.rejects(
-    () => withGitShim("exit 99", {}, () => contracts.bind({ markdown: "terms", actor: "operator" } as never)),
+    () => withGitShim("exit 99", {}, () => contracts.bind({ terms: "terms", actor: "operator" } as never)),
     /unknown field: actor/u,
   );
   for (const call of [
-    () => contract.amend({ markdown: "## Context\nChanged\n", actor: "operator" } as never),
-    () => contract.arc({ markdown: "# Chapter", actor: "operator" } as never),
+    () => contract.amend({ edits: "## Context\nChanged\n", actor: "operator" } as never),
+    () => contract.arc({ body: "# Chapter", actor: "operator" } as never),
     () => contract.review({ verdict: "satisfied", summary: "ok", actor: "operator" } as never),
     () => contract.abandon({ actor: "operator" } as never),
   ]) {
@@ -66,7 +66,7 @@ test("package boundary rejects malformed runtime inputs before journal mutation"
   );
   await assert.rejects(
     () =>
-      withGitShim("exit 99", {}, () => Keis.of(repo).bind({ markdown: null } as never)),
+      withGitShim("exit 99", {}, () => Keis.of(repo).bind({ terms: null } as never)),
     invalidInput,
   );
 
@@ -85,7 +85,7 @@ test("amend validates programmer input before observing a missing contract", asy
   await assert.rejects(
     () =>
       withGitShim("exit 99", {}, () =>
-        Reflect.apply(contract.amend, contract, [{ markdown: "## Append: Context\ntext\n", gates: ["Invalid"] }]),
+        Reflect.apply(contract.amend, contract, [{ edits: "## Append: Context\ntext\n", gates: ["Invalid"] }]),
       ),
     (error: unknown) => invalidInput(error, "gates[0] must match ^[a-z][a-z0-9-]{0,63}$"),
   );
@@ -114,7 +114,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const repo = await Repo.at({ path: repository.path });
   const refused = await Keis.of(repo).bind({
-      markdown: [
+      terms: [
         "# T",
         "",
         "## Context",
@@ -142,7 +142,7 @@ test("boundary validation precedes Git and unrepresentable targets stay typed", 
   assert.deepEqual(refused.reason, { kind: "invalid-target" });
 
   const bound = accepted(await Keis.of(repo).bind({
-    markdown: [
+    terms: [
       "# T",
       "",
       "## Context",

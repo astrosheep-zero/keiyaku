@@ -64,9 +64,9 @@ function mutationProgress<K extends "deliver" | "verify" | "review">(controls: E
   return controls.observe === undefined ? undefined : { observe: controls.observe };
 }
 
-function waitTimeout(wait: string): number {
-  const duration = parseDuration(wait);
-  if (duration.kind !== "parsed") throw new KeiyakuUsageError("invalid wait duration");
+function observationTimeout(timeout: string): number {
+  const duration = parseDuration(timeout);
+  if (duration.kind !== "parsed") throw new KeiyakuUsageError("invalid timeout duration");
   return duration.milliseconds;
 }
 
@@ -161,7 +161,7 @@ export class Keiyaku {
     arc: async ({ contract, ...input }) => {
       const selected = await this.#selected(contract);
       try {
-        validateArcMarkdown(input.markdown);
+        validateArcMarkdown(input.body);
       } catch (error) {
         if (errorCategory(error) === "invalid-input") throw new KeiyakuArcDocumentError(selected.id, error as Error);
         throw error;
@@ -274,7 +274,7 @@ export class Keiyaku {
         ...executionSignal(controls),
         ...(at.repo === undefined ? {} : { repo: at.repo }),
         ...(at.world === null ? {} : { world: at.world }),
-        ...(timeout === undefined ? {} : { timeoutMs: waitTimeout(timeout) }),
+        ...(timeout === undefined ? {} : { timeoutMs: observationTimeout(timeout) }),
       });
     },
     history: async ({ selector, ...input }) => {
@@ -284,10 +284,14 @@ export class Keiyaku {
         const library = Keis.of(at.repo);
         return await library
           .kei({ id: this.#fullId(library, selector) })
-          .history("full" in input ? { full: input.full } : undefined);
+          .history("details" in input ? { details: input.details } : undefined);
       }
       const { at, akumas } = await this.#akumas();
-      return await akumas.history({ akuma: selector, ...input, ...(at.repo === undefined ? {} : { repo: at.repo }) });
+      return await akumas.history({
+        akuma: selector,
+        ...("item" in input ? (input.item === "last" ? { last: true } : { id: input.item }) : input),
+        ...(at.repo === undefined ? {} : { repo: at.repo }),
+      });
     },
     report: async (input, controls) => {
       await this.#coordinates("none");
@@ -362,7 +366,7 @@ export class Keiyaku {
     },
     ls: async (input) => {
       const bound = input.limit === undefined ? {} : { limit: input.limit };
-      const lifecycle = input.selection === undefined ? {} : { selection: input.selection };
+      const lifecycle = input.lifecycle === undefined ? {} : { selection: input.lifecycle };
       if (input.selector === "kei" || input.selector === "kei/") {
         const at = await this.#coordinates("required");
         return Keis.of(at.repo!).list({ ...bound, ...lifecycle });
@@ -522,8 +526,12 @@ export class Keiyaku {
       ...(initiator === undefined ? {} : { initiator }),
     };
     if (request.name === "ask") {
-      const { prompt: _prompt, ...input } = request.input;
-      return akumas.ask({ ...input, ...common });
+      const { prompt: _prompt, timeout, ...input } = request.input;
+      return akumas.ask({
+        ...input,
+        ...common,
+        ...(timeout === undefined ? {} : { timeoutMs: observationTimeout(timeout) }),
+      });
     }
     const { prompt: _prompt, ...input } = request.input;
     return akumas.tell({ ...input, ...common });

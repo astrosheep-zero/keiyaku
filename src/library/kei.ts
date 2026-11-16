@@ -165,8 +165,8 @@ export class Kei {
 
   async history(input?: ContractHistoryInput): Promise<ContractHistory> {
     const full = validated(() => {
-      const values = input === undefined ? {} : requireInput(input, "Contract history input", ["full"]);
-      return optionalBoolean(values.full, "full") === true;
+      const values = input === undefined ? {} : requireInput(input, "Contract history input", ["details"]);
+      return optionalBoolean(values.details, "details") === true;
     });
     return await readContractValue(() =>
       withGitDecodeChannel(this.scope, (channel) =>
@@ -247,7 +247,7 @@ export class Kei {
       const values = parsed.data;
       const derived = values.gates === undefined ? undefined : derivedGates(this.composition, gateNames(values.gates));
       return {
-        markdown: values.markdown,
+        edits: values.edits,
         target: values.target,
         gates: derived,
         prerequisites: values.after === undefined ? undefined : normalizedList(values.after, "after", callerContractId),
@@ -255,11 +255,11 @@ export class Kei {
     });
   }
   async amend(input: AmendInput): Promise<AmendOutcome> {
-    const { markdown, target, gates, prerequisites } = this.amendInput(input);
+    const { edits, target, gates, prerequisites } = this.amendInput(input);
     const hooks = derivedHooks(this.composition);
     const requestsChange =
-      markdown !== undefined || target !== undefined || gates !== undefined || prerequisites !== undefined;
-    const amendmentPlan = markdown === undefined ? undefined : validated(() => prepareAmendDocument(markdown));
+      edits !== undefined || target !== undefined || gates !== undefined || prerequisites !== undefined;
+    const amendmentPlan = edits === undefined ? undefined : validated(() => prepareAmendDocument(edits));
     let changedSections: ReadonlySet<string> | undefined;
     const concluded = await this.local<AmendConclusion>("amend", async (accumulator, channel, scope) => {
       const admission = await amendOperation({
@@ -546,8 +546,8 @@ export class Kei {
 
   async arc(input: ArcInput): Promise<ArcOutcome> {
     const chapter = validated(() => {
-      const values = requireInput(input, "arc input", ["markdown"]);
-      return decodeArcDocument(requireMarkdown(values.markdown));
+      const values = requireInput(input, "arc input", ["body"]);
+      return decodeArcDocument(requireMarkdown(values.body, "body"));
     });
     const hooks = derivedHooks(this.composition);
     return await this.local("arc", async (accumulator, channel, scope): Promise<ArcOutcome> => {

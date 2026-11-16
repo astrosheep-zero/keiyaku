@@ -146,7 +146,7 @@ function terms(after: readonly ContractId[]) {
 async function boundObservedContract(repository: TestGitRepository) {
   const bound = accepted(
     await Keis.of(await cachedRepoAt(repository.path)).bind({
-      markdown: contractBody(),
+      terms: contractBody(),
     }),
   );
   const id = present(await bound.kei.state()).id;

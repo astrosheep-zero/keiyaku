@@ -19,15 +19,15 @@ function draftWarning(error: unknown): Readonly<{ warning: string }> {
 
 /** Admit bind Markdown before coordinate resolution and retain a malformed draft. */
 export async function admitBindMarkdown(
-  input: Readonly<{ markdown: string; processCwd?: string; cwd?: string }>,
+  input: Readonly<{ terms: string; processCwd?: string; cwd?: string }>,
 ): Promise<void> {
-  if (isBlankInput(input.markdown)) throw new CliUsageError("bind requires a nonblank stdin document");
+  if (isBlankInput(input.terms)) throw new CliUsageError("bind requires a nonblank stdin document");
   try {
-    validateContractMarkdown(input.markdown);
+    validateContractMarkdown(input.terms);
   } catch (error) {
     if (error instanceof Error && "executionReceipt" in error) throw error;
     if (errorCategory(error) !== "invalid-input") throw error;
-    throw new BindDraftError(error, await bindDraftReceipt(() => resolveInvocationCwd(input), input.markdown));
+    throw new BindDraftError(error, await bindDraftReceipt(() => resolveInvocationCwd(input), input.terms));
   }
 }
 
@@ -52,8 +52,10 @@ export async function acquireContractRequest(
   if (request.name === "amend" && isBlankInput(bytes))
     throw new CliUsageError("amend requires a nonblank stdin document");
   if (request.name === "bind")
-    return { name: request.name, input: { ...request.input, markdown: bytes }, output: request.output };
-  return { name: request.name, input: { ...request.input, markdown: bytes }, output: request.output };
+    return { name: request.name, input: { ...request.input, terms: bytes }, output: request.output };
+  if (request.name === "amend")
+    return { name: request.name, input: { ...request.input, edits: bytes }, output: request.output };
+  return { name: request.name, input: { ...request.input, body: bytes }, output: request.output };
 }
 
 async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime): Promise<CliOutcome> {
@@ -95,7 +97,7 @@ async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime): Promi
 async function runBind(request: VerbRequest<"bind">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
   if ("forkOf" in input) return invokeAndFinish(request, runtime);
-  const markdown = input.markdown;
+  const markdown = input.terms;
   try {
     const answer = await runtime.facet.run("bind", input);
     const completion = { kind: "returned" as const, value: answer };

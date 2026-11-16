@@ -281,7 +281,7 @@ test("duplicate amendments declare invalid input before Git observation", async 
     assert.match(before, /worktree list/u, "repository discovery proves Git observation tracing is active");
     const contract = Keis.of(repo).kei({ id: "kei/missing" as never });
     await assert.rejects(
-      () => contract.amend({ markdown: "## Append: Context\nfirst\n## Append: Context\nsecond\n" }),
+      () => contract.amend({ edits: "## Append: Context\nfirst\n## Append: Context\nsecond\n" }),
       (error: unknown) => {
         assert.ok(error instanceof KeiyakuError);
         assert.equal(error.category, "invalid-input");

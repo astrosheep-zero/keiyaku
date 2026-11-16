@@ -199,7 +199,7 @@ test("both public hosts preserve Contract runtime context and exact native repor
     const repository = repositoryWithMain();
     const world = await nativeWorld(t, repository.path);
     const contract = accepted(await Keis.of(await Repo.at({ path: world })).bind({
-      markdown: document(), target: null, gates: ["reviewed"],
+      terms: document(), target: null, gates: ["reviewed"],
     })).kei;
     const contractId = present(await contract.state()).id;
     const host = { hosting };
@@ -258,7 +258,7 @@ test(
     const world = await nativeWorld(t, repository.path);
     const bound = accepted(
       await Keis.of(await Repo.at({ path: world })).bind({
-        markdown: document(),
+        terms: document(),
         target: null,
         gates: ["reviewed"],
       }),

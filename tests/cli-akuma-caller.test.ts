@@ -76,14 +76,14 @@ test("ls --mine selects this process caller's World-local descendants", async (t
   });
   const environment = { KEIYAKU_EXTERNAL_CALLER: "test:root" };
   const facet = Keiyaku.for({ cwd: root, environment });
-  const selectedFacet = await facet.ls({ selector: "aku/*", mine: true, selection: "settled" });
+  const selectedFacet = await facet.ls({ selector: "aku/*", mine: true, lifecycle: "settled" });
   assert.equal(selectedFacet.kind, "akuma-catalogue");
   if (selectedFacet.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
   const { observedAt: _facetTime, ...facetList } = selectedFacet;
   const { observedAt: _nativeTime, ...nativeList } = await Akumas.of(root).list({ caller: external, selection: "settled" });
   assert.deepEqual(facetList, nativeList);
   const childEnvironment = { KEIYAKU_ACTOR_ID: direct.id, KEIYAKU_ACTOR_WORLD: root };
-  const selectedChild = await Keiyaku.for({ cwd: root, environment: childEnvironment }).ls({ selector: "aku/*", mine: true, selection: "settled" });
+  const selectedChild = await Keiyaku.for({ cwd: root, environment: childEnvironment }).ls({ selector: "aku/*", mine: true, lifecycle: "settled" });
   if (selectedChild.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
   const { observedAt: _childTime, ...childList } = selectedChild;
   const { observedAt: _nativeChildTime, ...nativeChildList } = await Akumas.of(root).list({
@@ -137,7 +137,7 @@ test("ls --mine selects this process caller's World-local descendants", async (t
     await Promise.all([client.connect(a), adapter.server.connect(b)]);
     try {
       await client.listTools();
-      const response = await client.callTool({ name: "ls", arguments: { selector: "aku/*", mine: true, selection: "settled" } });
+      const response = await client.callTool({ name: "ls", arguments: { selector: "aku/*", mine: true, lifecycle: "settled" } });
       assert.equal(response.isError, false);
       const text = (response.content as { text: string }[])[0]!.text;
       assert.ok(text.includes(grandchild.id));

@@ -22,7 +22,7 @@ test("two concurrent private-state binds both publish distinct accepted contract
     Array.from({ length: writers }, () =>
       (async () =>
         Keis.of(await Repo.at({ path: repository.path })).bind({
-          markdown: document(),
+          terms: document(),
           gates: ["reviewed"],
         }))(),
     ),
@@ -43,7 +43,7 @@ test("a preparation spent by a concurrent publication restarts with a fresh atte
     (await observeContractsForAdmissionAt(capability, channel, [id])).decision.get(id)?.head ?? null;
   // The spent artifact is a real private-state witness read before a concurrent publication.
   const spent = await withGitDecodeChannel(capability, headOf);
-  await bound.amend({ markdown: "## Replace: Context\nConcurrent publication of the same contract.\n" });
+  await bound.amend({ edits: "## Replace: Context\nConcurrent publication of the same contract.\n" });
   const moved = await withGitDecodeChannel(capability, headOf);
   assert.notEqual(moved, spent, "the concurrent publication must move the witnessed head");
   const spentAttempt = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA1");
@@ -109,7 +109,7 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
     { KEIYAKU_STALLING: stalling, KEIYAKU_RELEASE: release },
     async (gitPath) =>
       await Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
-        markdown: document(),
+        terms: document(),
         gates: ["reviewed"],
         target: "refs/heads/main",
       }),
@@ -123,7 +123,7 @@ test("a bind stalled in its seat-external preparation does not hold the publicat
   assert.ok(existsSync(stalling), "the bind must stall in its seat-external preparation");
   // Another independent bind must publish while the first still waits outside the seat.
   const concurrent = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-    markdown: document(),
+    terms: document(),
     gates: ["reviewed"],
   }));
   assert.equal(concurrent.kind, "accepted");
@@ -153,7 +153,7 @@ test("an injected Git publication error still returns publication-failed", async
           await Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({
             id: (present(await contract.state())).id,
           })
-        ).amend({ markdown: "## Replace: Context\nNo coordinate moved.\n" }),
+        ).amend({ edits: "## Replace: Context\nNo coordinate moved.\n" }),
     );
   assert.equal(outcome.kind, "retry");
   assert.ok(outcome.kind === "retry" && outcome.reason === "publication-failed");

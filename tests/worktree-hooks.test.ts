@@ -80,7 +80,7 @@ test("concurrent reconcile runs one frozen hook sequence and destroy removes onl
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
     await Keis.of(repo, { settings }).bind({
-      markdown: contractBody("Concurrent hooks"),
+      terms: contractBody("Concurrent hooks"),
     }),
   );
   const id = present(await bound.kei.state()).id;
@@ -140,7 +140,7 @@ test("abandon chains destroy-hook changes after the initial ephemeral recovery",
   const settings = await projectSettings(repository.path);
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path }), { settings }).bind({
-      markdown: contractBody("Recovery around destroy hooks"),
+      terms: contractBody("Recovery around destroy hooks"),
     }),
   );
   const worktree = await appointedWorktreePath(
@@ -193,7 +193,7 @@ test("CLI abandon carries the configured destroy hook to the native operation", 
   settingsHooks(repository.path, { destroy: [markerCommand(marker, "destroy")] });
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: contractBody("CLI abandon hooks"),
+      terms: contractBody("CLI abandon hooks"),
     }),
   );
   const id = present(await bound.kei.state()).id;
@@ -211,7 +211,7 @@ test("CLI arc carries the configured create hook into its reconciliation", async
   settingsHooks(repository.path, { create: [markerCommand(marker, "create")] });
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: contractBody("CLI arc hooks"),
+      terms: contractBody("CLI arc hooks"),
     }),
   );
   const id = present(await bound.kei.state()).id;
@@ -231,7 +231,7 @@ test("a reconcile queued on the effect lock reobserves terminal state before app
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
     await Keis.of(repo).bind({
-      markdown: contractBody("Terminal wins"),
+      terms: contractBody("Terminal wins"),
     }),
   );
   const id = present(await bound.kei.state()).id;
@@ -341,7 +341,7 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
     await Keis.of(repo).bind({
-      markdown: contractBody("Scratch cleanup"),
+      terms: contractBody("Scratch cleanup"),
     }),
   );
   const id = present(await bound.kei.state()).id;

@@ -28,7 +28,7 @@ async function fixture(t: TestContext) {
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
   const environment = { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home };
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: null, gates: ["reviewed"] }));
   const worker = await bornBody(world, "abcd0001", AT);
   t.after(() => worker.holder.release());
   const facet = (gitPath?: string) => Keiyaku.for({ cwd: world, home, environment: {
@@ -38,7 +38,7 @@ async function fixture(t: TestContext) {
     assert.equal((await finishBodyIfIdle(worker.allocated.paths, { sequence: worker.body.sequence, at: AT })).kind, "finished");
     worker.holder.release();
   };
-  const amend = async () => accepted(await bound.kei.amend({ markdown: "## Replace: Objective\n\nWitness this journal change.\n" }));
+  const amend = async () => accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nWitness this journal change.\n" }));
   return { world, repository, environment, bound, worker, facet, finish, amend };
 }
 
@@ -62,7 +62,7 @@ test("mixed any wakes from either native owner; all retains its original Contrac
     barrier.reset();
     const all = facet.run("wait", { selectors, completion: "all", timeout: "1200ms" });
     await barrier.reads();
-    accepted(await f.bound.kei.arc({ markdown: "# Still waiting\n\nThis is a new journal fact.\n" }));
+    accepted(await f.bound.kei.arc({ body: "# Still waiting\n\nThis is a new journal fact.\n" }));
     const deadline = await all;
     assert.equal(deadline.reason, "deadline");
     assert.ok(deadline.members[0]?.kind === "contract");

@@ -240,7 +240,7 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
     }
     if (command.name === "bind" && "acquire" in command) {
       await admitBindMarkdown({
-        markdown: await runtime.readStdin(),
+        terms: await runtime.readStdin(),
         processCwd: input.cwd ?? process.cwd(),
         ...(invocation.cwd === undefined ? {} : { cwd: invocation.cwd }),
       });

@@ -143,11 +143,11 @@ export type CliVerb = Exclude<VerbName, `debt.${string}` | "report" | "whoami">;
 export type VerbRequest<K extends CliVerb = CliVerb> = {
   [P in K]: RequestOutput & Readonly<{ name: P; input: VerbInput<P> }>;
 }[K];
-type DocumentBind = Extract<VerbInput<"bind">, { markdown: string }>;
+type DocumentBind = Extract<VerbInput<"bind">, { terms: string }>;
 type Acquisitions = {
-  bind: { input: Omit<DocumentBind, "markdown">; acquire: { markdown: true } };
-  amend: { input: Omit<VerbInput<"amend">, "markdown">; acquire: { markdown: true } };
-  arc: { input: Omit<VerbInput<"arc">, "markdown">; acquire: { markdown: true } };
+  bind: { input: Omit<DocumentBind, "terms">; acquire: { markdown: true } };
+  amend: { input: Omit<VerbInput<"amend">, "edits">; acquire: { markdown: true } };
+  arc: { input: Omit<VerbInput<"arc">, "body">; acquire: { markdown: true } };
   review: { input: Omit<VerbInput<"review">, "summary">; acquire: { summary: true } };
   spawn: {
     input: Omit<VerbInput<"spawn">, "prompt">;

@@ -1229,7 +1229,7 @@ test("named Address resolution refuses a Contract short-id shared with an Alias"
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const bound = accepted(
     await Keis.of(repo).bind({
-      markdown: [
+      terms: [
         "# Review",
         "",
         "## Context",

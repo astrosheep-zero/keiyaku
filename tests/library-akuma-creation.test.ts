@@ -859,7 +859,7 @@ test("Contract association never selects the Akuma execution workdir", async (t)
   const submittingOwner = harnessOwner({ channel: "pi", session: "isolated-call-submitter" });
   try {
     bound = await Keis.of(repo).bind({
-      markdown: contractMarkdown("Akuma execution placement", {
+      terms: contractMarkdown("Akuma execution placement", {
         Context: "A Contract association and a call execution directory are separate inputs.",
         Objective: "Contract association never selects the Akuma execution workdir.",
         Design: "Keep association in Dispatch and placement in the explicit execution directory.",

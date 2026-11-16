@@ -279,7 +279,7 @@ const coordinates = {
     .regex(/\S/u)
     .exactOptional()
     .describe(
-      "Invocation directory (relative paths resolve from the MCP server startup directory); selects the World.",
+      "Directory to use for this call; relative paths are relative to your current directory. Selects the World.",
     ),
   repo: z
     .string()

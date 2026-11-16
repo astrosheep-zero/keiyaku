@@ -25,7 +25,7 @@ test("all distinguished root SDK errors share the base and declare their owner c
   const id = Akuma.select(world, "aku/worker/11111111").id;
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [], target: null }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), gates: [], target: null }));
   const cause = new TypeError("native cause");
   const options: KeiyakuErrorOptions = {
     cause,
@@ -110,7 +110,7 @@ test("public Keis.bind omitted target names the Repo worktree branch", async () 
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
 
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), gates: [] }));
   const state = present(await bound.kei.state());
   assert.equal(state.coordinates.target, "refs/heads/main");
   const json = JSON.parse(JSON.stringify(bound));
@@ -125,7 +125,7 @@ test("public Keis.bind omitted target names the Repo worktree branch", async () 
   await assert.rejects(
     () =>
       Keis.of(repo).bind({
-        markdown: document(),
+        terms: document(),
         targetSelection: { kind: "current-branch" },
       } as never),
     /Keis.bind input has unknown field: targetSelection/u,
@@ -138,13 +138,13 @@ test("public Keis.bind target:null stays targetless and a string target stays li
   const repo = await Repo.at({ path: raw.path });
 
   const targetless = accepted(
-    await Keis.of(repo).bind({ markdown: document(), target: null, gates: [] }),
+    await Keis.of(repo).bind({ terms: document(), target: null, gates: [] }),
   );
   assert.equal(present(await targetless.kei.state()).coordinates.target, undefined);
 
   const explicit = accepted(
     await Keis.of(repo).bind({
-      markdown: document(),
+      terms: document(),
       target: "release",
       gates: [],
     }),
@@ -152,7 +152,7 @@ test("public Keis.bind target:null stays targetless and a string target stays li
   assert.equal(present(await explicit.kei.state()).coordinates.target, "refs/heads/release");
 
   await assert.rejects(
-    () => Keis.of(repo).bind({ markdown: document(), target: 7 } as never),
+    () => Keis.of(repo).bind({ terms: document(), target: 7 } as never),
     /target must be a string or null/u,
   );
 });

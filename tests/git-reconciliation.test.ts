@@ -31,7 +31,7 @@ let deliveredReviewGatedTargetTemplate: Promise<DeliveredReviewGatedTargetTempla
 async function buildDeliveredReviewGatedTargetTemplate(): Promise<DeliveredReviewGatedTargetTemplate> {
   const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
   const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-    markdown: document(),
+    terms: document(),
     target: "refs/heads/main",
     gates: ["reviewed"],
   }));
@@ -79,7 +79,7 @@ async function restoreOwnedRefs(
 async function projectionFixture() {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document() }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document() }));
   const id = present(await bound.kei.state()).id;
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
   return { repository, repo, id, worktree };
@@ -161,7 +161,7 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     const repository = repositoryWithMain();
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo).bind({
-      markdown: document(),
+      terms: document(),
     }));
     const contract = bound.kei;
     const contractId = (present(await contract.state())).id;

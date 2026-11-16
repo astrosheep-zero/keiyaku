@@ -40,7 +40,7 @@ async function bindAndCommit(options: {
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: document(options.verification),
+      terms: document(options.verification),
       gates: options.gates,
       // These lifecycle fixtures are targetless unless a case names a target.
       target: options.target ?? null,
@@ -77,7 +77,7 @@ test("journal reads ignore unknown envelope and nested keys while append preserv
   const oid = snapshot.paths.get(path)?.oid;
   assert.ok(oid);
   const original = repository.run(["cat-file", "-p", oid]);
-  const history = await keiyaku.history({ full: true });
+  const history = await keiyaku.history({ details: true });
   const extended = `{"additional":{"opaque":true},${original.slice(1)}`
     .replace('"data":{', '"data":{"additional":null,')
     .replace('"document":{', '"document":{"additional":"future",');
@@ -93,7 +93,7 @@ test("journal reads ignore unknown envelope and nested keys while append preserv
     (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
     "published",
   );
-  assert.deepEqual(await keiyaku.history({ full: true }), history);
+  assert.deepEqual(await keiyaku.history({ details: true }), history);
   const reviewed = await cliJson<ReviewOutcome>(
     ["-C", repository.path, "review", state.id, "--satisfied", "--summary", "ordinary review"],
     { environment: { KEIYAKU_ACTOR_ID: "aku/worker/f0d0a002", KEIYAKU_ACTOR_WORLD: repository.path } },
@@ -107,7 +107,7 @@ test("journal reads ignore unknown envelope and nested keys while append preserv
   assert.ok(entry?.kind === "attestation");
   assert.equal(entry.data.summary, "ordinary review");
   assert.equal(encodeEntry(entry), next, "new writes contain only known content");
-  const updatedHistory = await keiyaku.history({ full: true });
+  const updatedHistory = await keiyaku.history({ details: true });
   assert.ok(updatedHistory.kind === "contract");
   assert.match(renderContractHistory(updatedHistory, { full: true }), /ordinary review/u);
 });
@@ -388,7 +388,7 @@ async function targetedCheckoutBinding(files: Readonly<Record<string, string>>, 
   const repository = repositoryWithMain({ files });
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: document(),
+      terms: document(),
       gates: ["reviewed"],
       target: "refs/heads/main",
     }),

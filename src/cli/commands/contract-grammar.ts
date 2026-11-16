@@ -246,7 +246,7 @@ function parseLs(parts: ContractTokens): VerbRequest<"ls"> {
       selector,
       ...bound,
       ...(mine ? { mine: true } : {}),
-      ...(all ? { selection: "all" } : settled ? { selection: "settled" } : {}),
+      ...(all ? { lifecycle: "all" } : settled ? { lifecycle: "settled" } : {}),
     },
     output: parts.output,
   };

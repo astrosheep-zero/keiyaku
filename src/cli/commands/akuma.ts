@@ -101,8 +101,8 @@ export async function runAkumaHistory(request: VerbRequest<"history">, runtime: 
   if (output === "json") writeJson(result);
   else {
     const raw =
-      historyRawAnswer(result, "id" in input ? input.id : undefined) !== undefined ||
-      ("last" in input && input.last === true && result.kind === "akuma-last");
+      historyRawAnswer(result, "item" in input && input.item !== "last" ? input.item : undefined) !== undefined ||
+      ("item" in input && input.item === "last" && result.kind === "akuma-last");
     emitAnswer(renderVerb("history", input, completion, displayContext()), raw);
   }
   return classifyVerb("history", input, completion);

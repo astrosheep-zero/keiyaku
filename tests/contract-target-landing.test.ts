@@ -12,14 +12,14 @@ test("a child lands into the appointed parent without changing parent authority 
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
   const parentBound = accepted(
-    await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }),
+    await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }),
   );
   const parent = parentBound.kei;
   const parentBefore = present(await parent.state());
   const parentPath = parentBound.worktreePath;
   assert.ok(parentPath);
   const mainBefore = raw.run(["rev-parse", "main"]).trim();
-  const bound = accepted(await contracts.bind({ markdown: document(), target: parentBefore.id, gates: [] }));
+  const bound = accepted(await contracts.bind({ terms: document(), target: parentBefore.id, gates: [] }));
   const child = bound.kei;
   const childBefore = present(await child.state());
   assert.equal(typeof childBefore.coordinates.target, "object");
@@ -42,8 +42,8 @@ test("unrelated targetless Contracts do not retain an abandoned unsealed workspa
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  accepted(await contracts.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
-  const second = accepted(await contracts.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
+  accepted(await contracts.bind({ terms: document(), target: null, gates: ["reviewed"] }));
+  const second = accepted(await contracts.bind({ terms: document(), target: null, gates: ["reviewed"] }));
   const path = second.worktreePath!;
   writeFileSync(join(path, "unsealed.txt"), "unsealed\n");
   const abandoned = accepted(await second.kei.abandon());
@@ -60,9 +60,9 @@ test("a parent delivers combined content while the child's exact integration rem
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
   const parentId = present(await parent.kei.state()).id;
-  const child = accepted(await contracts.bind({ markdown: document(), target: parentId, gates: [] }));
+  const child = accepted(await contracts.bind({ terms: document(), target: parentId, gates: [] }));
   const childPath = child.worktreePath!;
   writeFileSync(join(childPath, "child.txt"), "child\n");
   raw.run(["-C", childPath, "add", "child.txt"]);
@@ -88,15 +88,15 @@ test("siblings reintegrate against a moved parent without losing reviewed conten
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
   const parentBind = accepted(
-    await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }),
+    await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }),
   );
   const parent = parentBind.kei;
   const parentId = present(await parent.state()).id;
   const parentPath = parentBind.worktreePath!;
   const firstBind = accepted(
-    await contracts.bind({ markdown: document("true"), target: parentId, gates: ["reviewed", "verified"] }),
+    await contracts.bind({ terms: document("true"), target: parentId, gates: ["reviewed", "verified"] }),
   );
-  const secondBind = accepted(await contracts.bind({ markdown: document(), target: parentId, gates: [] }));
+  const secondBind = accepted(await contracts.bind({ terms: document(), target: parentId, gates: [] }));
   for (const [name, bound] of [
     ["first", firstBind],
     ["second", secondBind],
@@ -134,10 +134,10 @@ test("touching parent edits lag safely and recovery works after parent terminali
   const raw = repositoryWithMain({ files: { "shared.txt": "base\n" } });
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
   const parentId = present(await parent.kei.state()).id;
   const parentPath = parent.worktreePath!;
-  const child = accepted(await contracts.bind({ markdown: document(), target: parentId, gates: [] }));
+  const child = accepted(await contracts.bind({ terms: document(), target: parentId, gates: [] }));
   const childPath = child.worktreePath!;
   writeFileSync(join(childPath, "shared.txt"), "child\n");
   raw.run(["-C", childPath, "add", "shared.txt"]);
@@ -161,10 +161,10 @@ test("recovery refuses to adopt a replacement even when its HEAD matches the acc
   const raw = repositoryWithMain({ files: { "shared.txt": "base\n" } });
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
   const parentId = present(await parent.kei.state()).id;
   const parentPath = parent.worktreePath!;
-  const child = accepted(await contracts.bind({ markdown: document(), target: parentId, gates: [] }));
+  const child = accepted(await contracts.bind({ terms: document(), target: parentId, gates: [] }));
   const childPath = child.worktreePath!;
   writeFileSync(join(childPath, "shared.txt"), "child\n");
   raw.run(["-C", childPath, "add", "shared.txt"]);
@@ -192,10 +192,10 @@ test("ignored parent bytes refuse overwrite before child acceptance", async () =
   const raw = repositoryWithMain({ files: { ".gitignore": "ignored.txt\n" } });
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
   const parentId = present(await parent.kei.state()).id;
   const parentPath = parent.worktreePath!;
-  const child = accepted(await contracts.bind({ markdown: document(), target: parentId, gates: [] }));
+  const child = accepted(await contracts.bind({ terms: document(), target: parentId, gates: [] }));
   const childPath = child.worktreePath!;
   writeFileSync(join(childPath, "ignored.txt"), "candidate\n");
   raw.run(["-C", childPath, "add", "-f", "ignored.txt"]);
@@ -213,9 +213,9 @@ test("fork inherits the exact target incarnation and refuses a replacement", asy
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
   const parentId = present(await parent.kei.state()).id;
-  const child = accepted(await contracts.bind({ markdown: document(), target: parentId, gates: ["reviewed"] }));
+  const child = accepted(await contracts.bind({ terms: document(), target: parentId, gates: ["reviewed"] }));
   const source = present(await child.kei.state());
   const fork = accepted(await contracts.bind({ forkOf: source.id }));
   const inherited = present(await fork.kei.state());
@@ -237,10 +237,10 @@ test("explicit retarget recovers a child of an accepted or abandoned parent with
   for (const disposition of ["accepted", "abandoned"] as const) await t.test(disposition, async () => {
     const raw = repositoryWithMain();
     const contracts = Keis.of(await Repo.at({ path: raw.path }));
-    const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: [] }));
+    const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: [] }));
     const parentId = present(await parent.kei.state()).id;
     const child = accepted(await contracts.bind({
-      markdown: document("test -f child.txt"), target: parentId, gates: ["reviewed", "verified"],
+      terms: document("test -f child.txt"), target: parentId, gates: ["reviewed", "verified"],
     }));
     const path = child.worktreePath!;
     writeFileSync(join(path, "child.txt"), "child\n");
@@ -289,9 +289,9 @@ test("explicit retarget recovers a child of an accepted or abandoned parent with
 test("amend refuses a transitive destination cycle without changing authority", async () => {
   const raw = repositoryWithMain();
   const contracts = Keis.of(await Repo.at({ path: raw.path }));
-  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
   const before = present(await parent.kei.state());
-  const child = accepted(await contracts.bind({ markdown: document(), target: before.id, gates: [] }));
+  const child = accepted(await contracts.bind({ terms: document(), target: before.id, gates: [] }));
   const refused = await parent.kei.amend({ target: present(await child.kei.state()).id });
   assert.equal(refused.kind, "refused", JSON.stringify(refused));
   if (refused.kind === "refused") assert.equal(refused.reason.kind, "cyclic-target");
@@ -302,9 +302,9 @@ test("a parent terminal before placement cannot receive an already delivered chi
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
   const parentId = present(await parent.kei.state()).id;
-  const child = accepted(await contracts.bind({ markdown: document(), target: parentId, gates: ["reviewed"] }));
+  const child = accepted(await contracts.bind({ terms: document(), target: parentId, gates: ["reviewed"] }));
   const path = child.worktreePath!;
   writeFileSync(join(path, "child.txt"), "child\n");
   raw.run(["-C", path, "add", "child.txt"]);
@@ -320,13 +320,13 @@ test("parent terminality during Verification prevents the child's placement", as
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
-  const parent = accepted(await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }));
   const parentId = present(await parent.kei.state()).id;
   const started = join(raw.path, ".git", "verification-started");
   const release = join(raw.path, ".git", "verification-release");
   const script = `touch '${started}'; while [ ! -e '${release}' ]; do sleep 0.05; done`;
   const child = accepted(
-    await contracts.bind({ markdown: document(script), target: parentId, gates: ["verified"] }),
+    await contracts.bind({ terms: document(script), target: parentId, gates: ["verified"] }),
   );
   const childPath = child.worktreePath!;
   writeFileSync(join(childPath, "child.txt"), "child\n");
@@ -357,12 +357,12 @@ test("parent cleanup waits for an already admitted child follow and retains its 
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
   const parentBind = accepted(
-    await contracts.bind({ markdown: document(), target: "main", gates: ["reviewed"] }),
+    await contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }),
   );
   const parent = parentBind.kei;
   const parentState = present(await parent.state());
   const parentPath = parentBind.worktreePath!;
-  const childBind = accepted(await contracts.bind({ markdown: document(), target: parentState.id, gates: [] }));
+  const childBind = accepted(await contracts.bind({ terms: document(), target: parentState.id, gates: [] }));
   const child = childBind.kei;
   const childId = present(await child.state()).id;
   const childPath = childBind.worktreePath!;

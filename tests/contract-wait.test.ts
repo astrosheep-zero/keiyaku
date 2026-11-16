@@ -19,7 +19,7 @@ async function fixture() {
   const repository = repositoryWithMain();
   const repo = await Repo.at({ path: repository.path });
   const make = async (name: string) => {
-    const bound = accepted(await Keis.of(repo).bind({ markdown: document().replace("# Library verbs", `# ${name}`), target: null, gates: ["reviewed"] }));
+    const bound = accepted(await Keis.of(repo).bind({ terms: document().replace("# Library verbs", `# ${name}`), target: null, gates: ["reviewed"] }));
     const handle = bound.kei;
     return { handle, id: present(await handle.state()).id };
   };
@@ -27,7 +27,7 @@ async function fixture() {
 }
 
 async function amend(handle: Kei, objective: string) {
-  accepted(await handle.amend({ markdown: `## Replace: Objective\n\n${objective}\n` }));
+  accepted(await handle.amend({ edits: `## Replace: Objective\n\n${objective}\n` }));
 }
 
 const changed = (result: ContractWaitResult): boolean[] => result.contracts.map((member) => member.changed === true);

@@ -141,7 +141,7 @@ test("Akuma self distinguishes open Turn, birth parent, context and dispatch wit
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
     await Keis.of(repo).bind({
-      markdown: contractMarkdown("Whoami fixture", {
+      terms: contractMarkdown("Whoami fixture", {
         Context: "read-only identity",
         Objective: "show caller",
         Design: "observe facts",

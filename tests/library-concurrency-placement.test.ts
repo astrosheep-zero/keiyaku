@@ -51,7 +51,7 @@ function crossProcessAmend(
     "try {",
     "  if (intent === undefined) {",
     "    const contract = await Keis.of(await Repo.at({ path: process.env.KEIYAKU_REPOSITORY })).kei({ id: contractId });",
-    "    await contract.amend({ markdown: process.env.KEIYAKU_MARKDOWN });",
+    "    await contract.amend({ edits: process.env.KEIYAKU_MARKDOWN });",
     "    process.stdout.write('accepted\\n');",
     "  } else {",
     "    const outcome = await withGitDecodeChannel(capability, (channel) => amendOperation({ scope: capability, channel, contractId, ...intent }));",
@@ -188,7 +188,7 @@ describe("library-concurrency-placement isolated repositories", { concurrency: 4
     const repository = repositoryWithMain();
     repository.run(["branch", "release"]);
     const bound = accepted(await Keis.of(await cachedRepoAt(repository.path)).bind({
-      markdown: document(),
+      terms: document(),
       target: "refs/heads/release",
       gates: ["reviewed"],
     }));

@@ -245,7 +245,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const settings = await projectSettings(repository.path);
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo, { settings }).bind({
-      markdown: contractBody("Release order"),
+      terms: contractBody("Release order"),
     }));
     const git = await repositoryAt(repository.path);
     const appointment = await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id);
@@ -270,7 +270,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
   test("Git removal failure retains custody and a fresh reconcile retries successfully", async () => {
     const repository = repositoryWithCommit();
     const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: contractBody("Retry removal"),
+      terms: contractBody("Retry removal"),
     }));
     const git = await repositoryAt(repository.path);
     const state = present(await bound.kei.state());
@@ -315,7 +315,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const repository = repositoryWithCommit();
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo).bind({
-      markdown: contractBody("Dangling path"),
+      terms: contractBody("Dangling path"),
     }));
     const git = await repositoryAt(repository.path);
     const state = present(await bound.kei.state());
@@ -371,7 +371,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(added.kind, "accepted");
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo).bind({
-      markdown: contractBody("Corrupt register"),
+      terms: contractBody("Corrupt register"),
     }));
     const git = await repositoryAt(repository.path);
     const path = placeRegisterPath(git);
@@ -418,7 +418,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const worktrees = repository.run(["worktree", "list", "--porcelain"]);
     try {
       const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: contractBody("Unrealized"),
+        terms: contractBody("Unrealized"),
         }));
       assert.ok((bound.issues ?? []).some((issue) => issue.kind === "contract-file-failed"));
       assert.equal(existsSync(worktreePath(git, "atlantis")), false);
@@ -435,7 +435,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const repository = repositoryWithCommit();
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(await Keis.of(repo).bind({
-      markdown: contractBody("Release write"),
+      terms: contractBody("Release write"),
     }));
     const git = await repositoryAt(repository.path);
     const appointment = await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id);

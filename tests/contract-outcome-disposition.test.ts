@@ -19,7 +19,7 @@ test("delivery accepts an identical target through native, CLI and MCP outcomes"
   const environment = { HOME: home, USERPROFILE: home, KEIYAKU_HOME: home };
   const facet = Keiyaku.for({ cwd: repository.path, environment, home });
   const bound = accepted(await facet.bind({
-    markdown: document(), target: "refs/heads/main", gates: ["reviewed"],
+    terms: document(), target: "refs/heads/main", gates: ["reviewed"],
   }));
   assert.ok(bound.worktreePath);
   commitCandidate(repository, bound.worktreePath);

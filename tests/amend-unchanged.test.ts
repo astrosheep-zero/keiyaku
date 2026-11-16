@@ -11,7 +11,7 @@ async function bind(
   terms: Readonly<{ gates?: readonly string[]; after?: readonly ContractId[] }> = {},
 ) {
   const repo = await Repo.at({ path: repository.path });
-  return accepted(await Keis.of(repo).bind({ markdown: document(), target: null, ...terms }));
+  return accepted(await Keis.of(repo).bind({ terms: document(), target: null, ...terms }));
 }
 
 async function stateOf(repository: TestGitRepository, id: ContractId) {
@@ -40,7 +40,7 @@ test("omitted amendment fields retain prerequisites and gates, explicit empties 
   const prerequisite = await bind(repository, { gates: [] });
   const bound = await bind(repository, { gates: ["reviewed"], after: [prerequisite.contractId] });
 
-  accepted(await bound.kei.amend({ markdown: "## Replace: Objective\n\nA sharpened objective.\n" }));
+  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nA sharpened objective.\n" }));
   const documented = await stateOf(repository, bound.contractId);
   assert.deepEqual(documented.terms.after, [prerequisite.contractId]);
   assert.deepEqual(documented.terms.gates, ["reviewed"]);

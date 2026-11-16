@@ -553,11 +553,12 @@ test("native, invocation and CLI listings select lifecycle before bounding the W
     const native = await debts.list(input);
     assert.deepEqual(native.rows?.map((row) => row.id) ?? [], ids);
     assert.equal(native.more, undefined);
-    assert.deepEqual(await facet.ls({ selector: "debt/", ...input }), native);
+    const lifecycle = "selection" in input ? { lifecycle: input.selection } : {};
+    assert.deepEqual(await facet.ls({ selector: "debt/", ...lifecycle }), native);
     const bounded = await debts.list({ ...input, limit: 1 });
     assert.deepEqual(bounded.rows?.map((row) => row.id) ?? [], ids.slice(0, 1));
     assert.equal(bounded.more, ids.length > 1 ? true : undefined);
-    assert.deepEqual(await facet.run("ls", { selector: "debt/", ...input, limit: 1 }), bounded);
+    assert.deepEqual(await facet.run("ls", { selector: "debt/", ...lifecycle, limit: 1 }), bounded);
     const flags = "selection" in input ? [input.selection === "settled" ? "--settled" : "--all"] : [];
     for (const selector of ["debt", "debt/"]) {
       const cli = await cliJson(["-C", root, "ls", selector, ...flags, "--limit", "1"], { environment: {} });

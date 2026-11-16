@@ -26,7 +26,7 @@ function document(title: string, region: readonly string[]): string {
 
 async function bind(repository: TestGitRepository, title: string, region: readonly string[]) {
   const result = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-    markdown: document(title, region),
+    terms: document(title, region),
   }));
   return result;
 }
@@ -58,7 +58,7 @@ test("bind and amend expose only live-peer Region witnesses from one document re
   ]);
 
   const amended = await second.kei.amend({
-    markdown: ["## Replace: Region", "~~~", "src/api/internal/**", "~~~", ""].join("\n"),
+    edits: ["## Replace: Region", "~~~", "src/api/internal/**", "~~~", ""].join("\n"),
   });
   assert.deepEqual(accepted(amended).overlaps, [
     {
@@ -102,7 +102,7 @@ test("post-admission observation failure preserves the admitted Contract without
     { KEIYAKU_REGION_MARKER: marker, KEIYAKU_REGION_BATCH_PID: batchPid },
     async (gitPath) =>
       Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
-        markdown: document("Observed failure", ["docs/**"]),
+        terms: document("Observed failure", ["docs/**"]),
       }),
   );
   const receipt = accepted(result);

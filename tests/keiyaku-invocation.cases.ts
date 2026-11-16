@@ -40,7 +40,7 @@ test("Debt facet preserves native lifecycle, flat World listing, and absent Worl
     assert.deepEqual(await facet.show({ selector: id }), await Debts.of(world).read({ ids: [id] }));
   assert.equal((await facet.debtUpdate({ id: first.id, state: "done", note: "finished" })).kind, "accepted");
   for (const selection of ["active", "settled", "all"] as const)
-    assert.deepEqual(await facet.ls({ selector: "debt/", selection, limit: 1 }), await Debts.of(world).list({ selection, limit: 1 }));
+    assert.deepEqual(await facet.ls({ selector: "debt/", lifecycle: selection, limit: 1 }), await Debts.of(world).list({ selection, limit: 1 }));
 });
 
 function withoutObservationTimes(value: unknown): unknown {
@@ -101,7 +101,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
     createdAt: "2026-08-08T00:00:00.000Z",
   });
   const facet = Keiyaku.for({ cwd: first.path, repo: relative(first.path, second.path), environment: {}, home });
-  const bound = accepted(await facet.bind({ markdown, gates: ["reviewed"] }));
+  const bound = accepted(await facet.bind({ terms: markdown, gates: ["reviewed"] }));
   const contract = bound.contractId;
   assert.equal((await Keis.of(repoA).list({})).rows, undefined, "an empty catalogue omits rows");
   const nativeList = await Keis.of(repoB).list({});
@@ -120,7 +120,7 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   assert.equal(nativeDebts.rows![0]?.id, debtA);
   const nativeWorkers = await Akumas.of(worldA).list({ akumaName: "worker", repo: repoB, selection: "all" });
   assert.equal(nativeWorkers.rows![0]?.id, worker.id);
-  const selectedWorkers = await facet.ls({ selector: "aku/worker", selection: "all" });
+  const selectedWorkers = await facet.ls({ selector: "aku/worker", lifecycle: "all" });
   if (selectedWorkers.kind !== "akuma-catalogue") assert.fail("wrong catalogue");
   const { observedAt: _facetWorkersAt, ...facetWorkers } = selectedWorkers;
   const { observedAt: _nativeWorkersAt, ...comparableWorkers } = nativeWorkers;
@@ -170,7 +170,7 @@ test("native Contract results, verification progress and cancellation pass throu
   const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home });
   const bound = accepted(
     await Keis.of(repo).bind({
-      markdown: document("printf invocation-progress"),
+      terms: document("printf invocation-progress"),
       target: null,
       gates: ["verified"],
     }),
@@ -264,7 +264,7 @@ test("typed and generic waits omit timeout for terminal Contracts and idle Akuma
   const repository = repositoryWithCommit();
   const world = await World.at(repository.path);
   const facet = Keiyaku.for({ cwd: world, environment: {}, home });
-  const bound = accepted(await facet.bind({ markdown, target: null, gates: ["reviewed"] }));
+  const bound = accepted(await facet.bind({ terms: markdown, target: null, gates: ["reviewed"] }));
   accepted(await bound.kei.abandon());
   const worker = await bornLineageAkuma({
     root: world, akumaName: "worker", draw: "feed0025", createdAt: "2026-10-30T00:00:00.000Z",

@@ -36,7 +36,7 @@ async function verificationCandidate() {
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown:
+      terms:
         document() +
         "\n## Verification\n\n~~~bash timeout=1m\nprintf first\n~~~\n\n~~~bash timeout=1m\nprintf second\n~~~\n",
       target: null,

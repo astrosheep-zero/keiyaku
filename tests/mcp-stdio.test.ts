@@ -79,7 +79,7 @@ test("SIGTERM retires a pending stdio wait without changing its Contract", async
   t.after(() => rmSync(repository.path, { recursive: true, force: true }));
   const repo = await Repo.at({ path: repository.path });
   const bound = accepted(
-    await Keis.of(repo).bind({ markdown: document(), target: null, gates: ["reviewed"] }),
+    await Keis.of(repo).bind({ terms: document(), target: null, gates: ["reviewed"] }),
   );
   const before = present(await bound.kei.state());
   const transport = new StdioClientTransport({

@@ -74,7 +74,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const repository = repositoryWithMain();
     const primary = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: document(),
+        terms: document(),
         target: "refs/heads/main",
         gates: ["reviewed"],
       }),
@@ -110,7 +110,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const { repository, contract: primary, state: prerequisite } = await fixture();
     const bound = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: document("exit 1"),
+        terms: document("exit 1"),
         gates: [],
         // Continuation fixtures stay targetless like their prerequisite.
         target: null,
@@ -137,7 +137,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const marker = join(repository.path, ".git", "verification-ran");
     const contract = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: document(`touch '${marker}'`),
+        terms: document(`touch '${marker}'`),
         target: "refs/heads/main",
         gates: ["reviewed", "verified"],
       }),
@@ -174,7 +174,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const marker = join(repository.path, ".git", "dependent-verification-ran");
     const dependent = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: document(`touch '${marker}'`),
+        terms: document(`touch '${marker}'`),
         gates: ["verified"],
         target: null,
         after: [prerequisite.id],
@@ -197,7 +197,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const repository = repositoryWithMain();
     const contract = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: document("exit 0"),
+        terms: document("exit 0"),
         gates: ["verified"],
       }),
     ).kei;
@@ -220,7 +220,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const markdown = document("exit 1") + "\n~~~bash timeout=5m\nexit 0\n~~~\n";
     const contract = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown,
+        terms: markdown,
         gates: ["verified"],
       }),
     ).kei;
@@ -250,7 +250,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const repository = repositoryWithMain();
     const contract = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: document("exit 0"),
+        terms: document("exit 0"),
         gates: ["reviewed", "verified"],
       }),
     ).kei;
@@ -280,7 +280,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const repository = repositoryWithMain();
     const contract = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: document("exit 0"),
+        terms: document("exit 0"),
         gates: ["verified"],
         target: null,
       }),
@@ -318,7 +318,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     assert.ok(receipt?.kind === "contract");
     assert.equal(receipt.contractId, state.id);
     assert.deepEqual(receipt.admitted?.map(({ kind }) => kind), ["attestation"]);
-    const history = await contract.history({ full: true });
+    const history = await contract.history({ details: true });
     assert.ok(history.kind === "contract");
     const attestations = history.events.filter((event) => event.kind === "attestation");
     assert.equal(attestations.length, 1);
@@ -333,7 +333,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const child = async (title: string, after: readonly ContractId[]) =>
       accepted(
         await Keis.of(repo).bind({
-          markdown: document().replace("# Library verbs", `# ${title}`),
+          terms: document().replace("# Library verbs", `# ${title}`),
           gates: [],
           // Continuation fixtures stay targetless like their prerequisite.
           target: null,

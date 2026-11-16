@@ -95,7 +95,7 @@ async function buildPostBindTemplate(
   }
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: contractBody(),
+      terms: contractBody(),
       ...(target === "targeted"
         ? { target: "refs/heads/main", ...(gates.length === 0 ? {} : { gates }) }
         : // The targetless fixture stays deliberately targetless now that omission names the branch.
@@ -172,7 +172,7 @@ async function directoryReplacementContract(ignore = "artifact/*.tmp\n") {
   });
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: contractBody(),
+      terms: contractBody(),
       target: "refs/heads/main",
     }),
   );
@@ -590,7 +590,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
     const bound = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
-        markdown: contractBody(),
+        terms: contractBody(),
       }),
     );
     const state = present(await bound.kei.state());
@@ -636,7 +636,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(
       await Keis.of(repo).bind({
-        markdown: contractBody(),
+        terms: contractBody(),
       }),
     );
     const contractId = present(await bound.kei.state()).id;
@@ -726,7 +726,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
       {},
       async (gitPath) =>
         Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
-          markdown: contractBody(),
+          terms: contractBody(),
         }),
     );
     const receipt = accepted(result);
@@ -855,7 +855,7 @@ describe("git-delivery isolated repositories", { concurrency: 4 }, () => {
     const repo = await Repo.at({ path: repository.path });
     const bound = accepted(
       await Keis.of(repo).bind({
-        markdown: contractBody(),
+        terms: contractBody(),
       }),
     );
     const contractId = present(await bound.kei.state()).id;

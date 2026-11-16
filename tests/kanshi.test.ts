@@ -112,7 +112,7 @@ test("Kanshi captures immutable coordinates without observation and reads fresh 
   scope.repo = null;
   assert.deepEqual((await view.counts()).contracts, { kind: "present", value: 0 });
   assert.deepEqual(await view.region(), { kind: "present" });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), gates: [] }));
   const id = present(await bound.kei.state()).id;
   const debts = Debts.of(world);
   const debt = accepted(await debts.add({ title: "Fresh debt" }));
@@ -178,7 +178,7 @@ async function populatedWorld(t: TestContext) {
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
       debt: added.id,
-      markdown: document(),
+      terms: document(),
       target: "main",
     }),
   );
@@ -205,7 +205,7 @@ test("World selects active Akumas before bounding and exposes native work under 
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
   const world = await World.at(repository.path);
   const repo = await Repo.at({ path: repository.path });
-  const bound = accepted(await Keis.of(repo).bind({ markdown: document(), gates: [] }));
+  const bound = accepted(await Keis.of(repo).bind({ terms: document(), gates: [] }));
   await bornLineageAkuma({ root: world, akumaName: "watcher", draw: "cafe0010", createdAt: "2026-10-31T00:00:00.000Z" });
   const workers: Awaited<ReturnType<typeof bornBody>>[] = [];
   try {
@@ -328,7 +328,7 @@ test("exact target movement names only the owner-witnessed predecessor", async (
   const world = await World.at(repository.path);
   const bound = accepted(
     await Keis.of(repo).bind({
-      markdown: document("Target movement"),
+      terms: document("Target movement"),
       target: "main",
       gates: ["reviewed"],
     }),
@@ -589,7 +589,7 @@ test("World status bounds worktree detail before observation and shares repeated
   const rows: { id: ContractId; path: string }[] = [];
   for (let index = 0; index < 20; index += 1) {
     const bound = accepted(await contracts.bind({
-      markdown: document(`Status ${index}`),
+      terms: document(`Status ${index}`),
       target: index < 16 ? "main" : rows[0]!.id,
       gates: ["reviewed"],
     }));

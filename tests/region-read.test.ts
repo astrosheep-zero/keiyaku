@@ -34,7 +34,7 @@ function document(title: string, patterns: readonly string[]): string {
 async function bind(repository: ReturnType<typeof repositoryWithMain>, title: string, patterns: readonly string[]) {
   const result = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      markdown: document(title, patterns),
+      terms: document(title, patterns),
       gates: [],
     }),
   );

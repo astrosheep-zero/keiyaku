@@ -232,7 +232,7 @@ function parseHistory(
     if ([flags.id, flags.before, flags.since, flags.limit, flags.last].some((value) => value !== undefined)) {
       fail("history kei/... does not accept --id, --before, --since, --limit, or --last");
     }
-    return { name: "history", input: { selector, full: flags.full === true }, output };
+    return { name: "history", input: { selector, details: flags.full === true }, output };
   }
   return parseAkumaHistory(selector, flags, output, fail);
 }
@@ -270,8 +270,7 @@ function parseAkumaHistory(
     name: "history",
     input: {
       selector,
-      ...(id === undefined ? {} : { id }),
-      last: flags.last === true,
+      ...(id === undefined ? (flags.last === true ? { item: "last" } : {}) : { item: id }),
       ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
       ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
       ...(limit === undefined ? {} : { limit }),
@@ -336,10 +335,10 @@ function parseTell(
   };
   if (action === "tell") return { name: action, input, acquire: { prompt }, output };
   const wait = flags.wait === undefined ? undefined : stringFlag(flags.wait, "--wait requires a duration", fail);
-  const timeoutMs = wait === undefined ? undefined : parseDuration(wait, "--wait", fail);
+  if (wait !== undefined) parseDuration(wait, "--wait", fail);
   return {
     name: action,
-    input: { ...input, ...(timeoutMs === undefined ? {} : { timeoutMs }) },
+    input: { ...input, ...(wait === undefined ? {} : { timeout: wait }) },
     acquire: { prompt, schema: stringFlag(flags.schema, "ask requires --schema <file>", fail) },
     output,
   };

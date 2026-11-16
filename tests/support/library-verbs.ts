@@ -100,7 +100,7 @@ export function document(verification?: string): string {
 export async function bind(repository: TestGitRepository, verification?: string) {
   // These lifecycle fixtures exercise targetless Contracts on an attached HEAD.
   const result = await Keis.of(await Repo.at({ path: repository.path })).bind({
-    markdown: document(verification),
+    terms: document(verification),
     target: null,
     gates: verification === undefined ? ["reviewed"] : ["verified"],
   });
@@ -135,7 +135,7 @@ export function targetPlacementDocument(title = "Target checkout placement"): st
 
 export async function managedCandidate(repository: TestGitRepository, gates: readonly string[] = []) {
   const bound = await Keis.of(await cachedRepoAt(repository.path)).bind({
-    markdown: targetPlacementDocument(),
+    terms: targetPlacementDocument(),
     target: "refs/heads/main",
     gates,
   });
