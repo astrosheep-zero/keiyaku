@@ -331,8 +331,9 @@ export function renderVerb<K extends VerbName>(
       return renderKanshiText(value as VerbOutput<"kanshi">, context);
     case "status": {
       const result = value as VerbOutput<"status">;
+      const alias = aliasSelector((input as VerbInput<"status">).selector);
       return result.kind === "akuma"
-        ? snapshotText(result, context, context)
+        ? snapshotText(result, context, alias === undefined ? {} : { alias })
         : result.kind === "contract-missing"
           ? missing("status", result.id, context)
           : renderKanshiText(result, context);

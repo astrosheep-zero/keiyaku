@@ -110,8 +110,13 @@ availability in complete detail; listing defaults to open work.
 
 Each list and addressed status operation selects one producing owner before
 observation. The independent selector-free Kanshi read owns the World report;
-status requires one complete Contract or Akuma identity and never falls back to
-World observation. A missing Contract is refused; a failed exact Contract read
+status requires one complete Contract or Akuma identity or one named selector
+and never falls back to World observation. Named status selection reuses the
+Address authority and its cross-family collision judgment, freezing the resolved
+identity once before exact observation. Later alias movement cannot retarget that
+read. Exact selection consults no named authority; native exact-owner operations
+remain exact. Selection establishes no World and returns the owner's canonical
+identity. A missing Contract is refused; a failed exact Contract read
 is an operational failure. Catalogues identify their Contract, Akuma-instance, akumaName, or Debt family even
 when empty or unavailable. Contract, Debt, and Akuma-instance catalogues share
 active, settled, or complete selection, defaulting to active: still in play versus
@@ -131,9 +136,9 @@ a Contract worktree; invocation guidance never infers contextual selection.
 Invalid or plural selection likewise refuses before product reads; native Debt
 batch reads remain independently owned by Debt.
 Kill accepts one selector that may expand to a frozen set of Akumas, preserving
-each member's native stop evidence. A named CLI
-address is acquired at the asynchronous process edge, then dispatched as the
-resolved family's ordinary exact operation. Invocation waiting composes Contract
+each member's native stop evidence. Named status acquisition belongs to this
+shared invocation boundary rather than an adapter-specific route; adapters
+supply the selector without resolving it. Invocation waiting composes Contract
 journal observation and Akuma work-completion observation without making either
 product depend on the other. Each Contract keeps its entry baseline throughout;
 a witnessed journal change or terminal observation satisfies that member, while

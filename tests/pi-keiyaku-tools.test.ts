@@ -203,6 +203,17 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     assert.equal(spawned.isError, false, text(spawned));
     const id = (spawned.structuredContent as { akumaId: string }).akumaId;
     const child = Akuma.select(world, id);
+    await native.run(`text(await tools.keiyaku_status({selector: "@native-child"}));`);
+    const namedStatus = resultFor(native.results, "keiyaku_status");
+    assert.equal(namedStatus.isError, false, text(namedStatus));
+    assert.equal((namedStatus.structuredContent as { id: string }).id, id);
+    const mcpStatus = await client.callTool({ name: "status", arguments: { selector: "@native-child" } });
+    assert.equal(mcpStatus.isError, false, JSON.stringify(mcpStatus));
+    assert.equal((mcpStatus.structuredContent as { id: string }).id, id);
+    await native.run(`await tools.keiyaku_status({selector: "@unknown-status"});`, true);
+    const unknownStatus = resultFor(native.results, "keiyaku_status");
+    assert.equal(unknownStatus.isError, true);
+    assert.match(text(unknownStatus), /Akuma alias not found/u);
     await waitForFixtureFile(join(root, "first.ready"), 30_000);
     const status = await child.status();
     assert.deepEqual(status.birth.caller, { kind: "external", integration: "pi", id: native.manager.getSessionId() });

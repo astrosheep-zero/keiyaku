@@ -153,7 +153,6 @@ type Acquisitions = {
     input: Omit<VerbInput<"spawn">, "prompt">;
     acquire: { prompt?: AkumaPromptSource };
   };
-  status: { input: Record<string, never>; acquire: { selector: string } };
   tell: { input: Omit<VerbInput<"tell">, "prompt">; acquire: { prompt: AkumaPromptSource } };
   ask: { input: Omit<VerbInput<"ask">, "prompt" | "schema">; acquire: { prompt: AkumaPromptSource; schema: string } };
 };

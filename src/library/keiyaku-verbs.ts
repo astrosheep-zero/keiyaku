@@ -49,7 +49,7 @@ import {
 import { contractHistorySchema } from "./contract-types.js";
 import { guidanceSchema, guidanceNormalSchema } from "./kei.js";
 import { invocationWaitResultSchema, invocationWaitNormalResultSchema } from "./keiyaku-wait.js";
-import { parseAkumaGlob, parseReadableAkumaAlias } from "../identity/selector.js";
+import { akumaAliasSchema, parseAkumaGlob, parseReadableAkumaAlias } from "../identity/selector.js";
 import { reconcileResultSchema } from "./reconcile.js";
 import { akumaHistoryResultSchema, historySelectionSchemas } from "./selection.js";
 import { whoamiFactsSchema } from "./keiyaku-identity.js";
@@ -563,13 +563,14 @@ export const verbs = Object.freeze({
   },
   status: {
     description:
-      "Where one Contract stands (stage, gates, prerequisites, worktree) or what one Akuma is doing (state, current work, changed files). Exact kei/... or aku/<name>/<id> only; no aliases.",
+      "Where one Contract stands (stage, gates, prerequisites, worktree) or what one Akuma is doing (state, current work, changed files). Select one complete identity or @name; returns its canonical id.",
     input: z
       .strictObject({
-        id: z
-          .union([contractIdSchema, akumaIdSchema])
+        selector: z
+          .union([contractIdSchema, akumaIdSchema, akumaAliasSchema])
+          .refine((value) => !/[*?\[\]]/u.test(value), "status does not accept globs")
           .describe(
-            "Exact Contract ID (kei/...) or Akuma ID (aku/<name>/<hex>); @aliases and category paths are refused.",
+            "One complete Contract ID (kei/...), Akuma ID (aku/<name>/<hex>), or @name (Contract shorthand or World-local Akuma alias). Ambiguous names, globs and categories are refused.",
           ),
       })
       .readonly(),

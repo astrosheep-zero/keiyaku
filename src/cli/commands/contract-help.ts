@@ -238,7 +238,8 @@ export const CONTRACT_COMMAND_SPECS = {
     purpose: "Show one Contract or Akuma status.",
     details: [
       "Use kanshi for the selector-free World board.",
-      "Addressed status accepts one complete identity or resolves one @name.",
+      "The selector accepts one complete identity or @name (Contract shorthand or World-local Akuma alias).",
+      "Names use the shared invocation resolver; a Contract/Akuma collision is refused. Results keep the full canonical id.",
       "Plural selectors, categories, globs and --limit are refused before reading.",
       "Akuma entries show the directory each Akuma was started in.",
     ].join("\n"),

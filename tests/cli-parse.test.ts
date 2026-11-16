@@ -87,7 +87,7 @@ test("global coordinates are independent of command position", () => {
   assert.deepEqual(parseArgv(["--repo", "../delivery", "status", "kei/example", "-C", "/repo/caller"]), {
     cwd: "/repo/caller",
     repo: "../delivery",
-    command: { name: "status", input: { id: "kei/example" }, output: "text" },
+    command: { name: "status", input: { selector: "kei/example" }, output: "text" },
   });
   assert.deepEqual(parseArgv(["spawn", "worker", "--workdir", "work", "body"]), {
     workdir: "work",

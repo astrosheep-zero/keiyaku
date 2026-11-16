@@ -126,13 +126,13 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   const { observedAt: _nativeWorkersAt, ...comparableWorkers } = nativeWorkers;
   assert.deepEqual(facetWorkers, comparableWorkers);
   const workerStatus = await Akumas.of(worldA).status({ akuma: worker.id, repo: repoB });
-  assert.deepEqual(await facet.status({ id: worker.id }), workerStatus);
+  assert.deepEqual(await facet.status({ selector: worker.id }), workerStatus);
   assert.deepEqual(
     await facet.history({ selector: worker.id }),
     await Akumas.of(worldA).history({ akuma: worker.id, repo: repoB }),
   );
   const contractStatus = await Kanshi.of({ world: worldA, repo: repoB }).contract(contract);
-  assert.deepEqual(withoutObservationTimes(await facet.status({ id: contract })), withoutObservationTimes(contractStatus));
+  assert.deepEqual(withoutObservationTimes(await facet.status({ selector: contract })), withoutObservationTimes(contractStatus));
   assert.deepEqual(withoutObservationTimes(await facet.kanshi({})), withoutObservationTimes(await Kanshi.of({ world: worldA, repo: repoB }).board()));
   const nativeRegion = (selection = {}) => Kanshi.of({ world: worldA, repo: repoB }).region(selection);
   assert.deepEqual(await facet.region({}), await nativeRegion());

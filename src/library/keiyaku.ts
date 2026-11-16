@@ -16,6 +16,7 @@ import { World, WorldError } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
 import { Kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
 import { Akumas } from "./akumas.js";
+import { observeNamedAddress, resolveNamedAddress } from "./address.js";
 import { waitInvocation } from "./keiyaku-wait.js";
 import type { AskObserver } from "../akuma/akuma-selection-execution.js";
 import { deliveryOwner } from "./keiyaku-attribution.js";
@@ -164,15 +165,22 @@ export class Keiyaku {
       }
       case "status": {
         const at = await this.#coordinates("optional");
-        if (request.input.id.startsWith("aku/")) {
+        const selector = request.input.selector;
+        const id = selector.startsWith("@")
+          ? resolveNamedAddress({
+              selector,
+              ...(await observeNamedAddress({ world: at.world, repo: at.repo ?? null, selectors: [selector] })),
+            }).id
+          : selector;
+        if (id.startsWith("aku/")) {
           if (at.world === null) throw new KeiyakuUsageError("no Keiyaku world contains the invocation cwd");
           return Akumas.of(at.world).status({
-            akuma: request.input.id,
+            akuma: id,
             ...(at.repo === undefined ? {} : { repo: at.repo }),
           });
         }
         if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
-        const report = await Kanshi.of({ world: at.world, repo: at.repo }).contract(contractId(request.input.id));
+        const report = await Kanshi.of({ world: at.world, repo: at.repo }).contract(contractId(id));
         if (report.kind === "contract-absent") throw new Error("Contract observation with a Repo cannot be absent");
         return report;
       }

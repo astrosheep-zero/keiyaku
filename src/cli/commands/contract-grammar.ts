@@ -1,7 +1,8 @@
 import { validateAkumaName } from "../../identity/normalize.js";
 import { parseAkumaId } from "../../akuma/identity.js";
-import { canonicalDebtId } from "../../debt/identity.js";
 import { contractId } from "../../core/facts/types.js";
+import { parseReadableAkumaAlias } from "../../identity/selector.js";
+import { canonicalDebtId } from "../../debt/identity.js";
 import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
 import { CliUsageError, commandGuide } from "../usage.js";
 import { CONTRACT_COMMAND_SPECS, type ContractCommand } from "./contract-help.js";
@@ -178,21 +179,20 @@ function showSelector(parts: ContractTokens): string {
   return selected;
 }
 
-function parseStatus(parts: ContractTokens): CliRequest {
+function parseStatus(parts: ContractTokens): VerbRequest<"status"> {
   if (parts.positionals.length > 1) refuse("status", "status accepts at most one complete identity or @name");
   const selector = parts.positionals[0];
   if (selector === undefined) refuse("status", "status requires one subject; use kanshi for the World board");
   if (/[*?\[\]]/u.test(selector)) refuse("status", `unsupported status glob: ${selector}`);
-  if (selector.startsWith("@")) return { name: "status", input: {}, acquire: { selector }, output: parts.output };
   try {
-    if (selector.startsWith("kei/"))
-      return { name: "status", input: { id: contractId(selector) }, output: parts.output };
-    if (selector.startsWith("aku/"))
-      return { name: "status", input: { id: parseAkumaId(selector).id }, output: parts.output };
+    if (selector.startsWith("@")) parseReadableAkumaAlias(selector);
+    else if (selector.startsWith("kei/")) contractId(selector);
+    else if (selector.startsWith("aku/")) parseAkumaId(selector);
+    else refuse("status", "status requires one complete Contract or Akuma identity or @name");
   } catch (error) {
     refuse("status", error instanceof Error ? error.message : String(error));
   }
-  refuse("status", "status requires one complete Contract or Akuma identity or @name");
+  return { name: "status", input: { selector }, output: parts.output };
 }
 
 function parseRegion(parts: ContractTokens): VerbRequest<"region"> {

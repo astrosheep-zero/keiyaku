@@ -26,6 +26,8 @@ import { renderVerb } from "../src/cli/render/verbs.js";
 import { DEFAULT_CLI_COLUMNS } from "../src/cli/render/terminal.js";
 import { Akuma, Akumas, Keis, Repo, World, Kanshi } from "../src/index.js";
 import { publishDispatch } from "../src/dispatch/index.js";
+import { moveAlias } from "../src/alias/index.js";
+import { parseAkumaAlias } from "../src/identity/selector.js";
 import {
   repositoryAt,
   updateGitTree,
@@ -531,6 +533,11 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(history.isError, false, JSON.stringify(history));
   const last = await client.callTool({ name: "history", arguments: { cwd: first, selector: worker.id, last: true } });
   assert.equal(last.isError, false, JSON.stringify(last));
+  await moveAlias({ world, alias: parseAkumaAlias("@mcp-status"), akumaId: worker.id });
+  const statusTool = (await client.listTools()).tools.find(tool => tool.name === "status")!;
+  const validateStatus = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(statusTool.inputSchema)));
+  assert.equal(validateStatus({ selector: "@mcp-status" }).valid, true);
+  assert.equal(validateStatus({ id: worker.id }).valid, false);
   const catalogue = await Akumas.of(world).list({ repo, limit: 1, selection: "all" });
   assert.deepEqual(catalogue.rows?.[0]?.contract, { kind: "associated", contractId: bound.contractId });
   for (const [name, input, expected] of [
@@ -538,8 +545,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     ["ls", { selector: "aku/*", limit: 1, selection: "all" }, catalogue],
     ["ls", { selector: "aku/" }, await Akumas.akumaNames({ cwd: world, home: cwd })],
 
-    ["status", { id: bound.contractId }, await Kanshi.of({ world, repo }).contract(bound.contractId)],
-    ["status", { id: worker.id }, await Akumas.of(world).status({ akuma: worker.id, repo })],
+    ["status", { selector: bound.contractId }, await Kanshi.of({ world, repo }).contract(bound.contractId)],
+    ["status", { selector: worker.id }, await Akumas.of(world).status({ akuma: worker.id, repo })],
+    ["status", { selector: "@mcp-status" }, await Akumas.of(world).status({ akuma: worker.id, repo })],
+    ["status", { selector: `@${bound.contractId.slice(4)}` }, await Kanshi.of({ world, repo }).contract(bound.contractId)],
     ["kanshi", {}, await Kanshi.of({ world, repo }).board()],
   ] as const) {
     const response = await client.callTool({ name, arguments: { cwd: first, repo: otherRepo.path, ...input } });
@@ -553,6 +562,16 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
       );
     } else assert.equal(response.structuredContent, undefined);
   }
+  const unknownStatus = await client.callTool({ name: "status", arguments: { cwd: first, selector: "@unknown-status" } });
+  assert.equal(unknownStatus.isError, true);
+  assert.match(JSON.stringify(unknownStatus.content), /unknown Akuma alias/u);
+  await moveAlias({ world, alias: parseAkumaAlias(`@${bound.contractId.slice(4)}`), akumaId: worker.id });
+  const ambiguousStatus = await client.callTool({ name: "status", arguments: {
+    cwd: first, repo: otherRepo.path, selector: `@${bound.contractId.slice(4)}`,
+  } });
+  assert.equal(ambiguousStatus.isError, true);
+  assert.equal(ambiguousStatus._meta?.["keiyaku/disposition"], "usage");
+  assert.match(JSON.stringify(ambiguousStatus.content), /ambiguous selector/u);
   const killingFacet = Keiyaku.for({ cwd: first, repo: otherRepo.path, environment, home: cwd });
   const killInput = { akuma: worker.id };
   const nativeKill = await killingFacet.kill(killInput);
@@ -573,17 +592,17 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.equal(contractKill.isError, false);
   assert.equal((contractKill.content as { text: string }[])[0]?.text,
     renderVerb("kill", contractKillInput, { kind: "returned", value: expandedKill }, { columns: DEFAULT_CLI_COLUMNS, color: false }));
-  const missing = await client.callTool({ name: "status", arguments: { repo: otherRepo.path, id: "kei/missing-mcp-status" } });
+  const missing = await client.callTool({ name: "status", arguments: { repo: otherRepo.path, selector: "kei/missing-mcp-status" } });
   assert.equal(missing.structuredContent, undefined);
   assert.equal(missing.isError, true);
   assert.equal((missing.content as { text: string }[])[0]?.text.split("\n")[0], "refused");
-  assert.deepEqual(await Keiyaku.for({ cwd, repo: otherRepo.path, environment, home: cwd }).run("status", { id: "kei/missing-mcp-status" }),
+  assert.deepEqual(await Keiyaku.for({ cwd, repo: otherRepo.path, environment, home: cwd }).run("status", { selector: "kei/missing-mcp-status" }),
     { kind: "contract-missing", id: "kei/missing-mcp-status" });
   assert.equal(missing._meta?.["keiyaku/disposition"], "refused");
   assert.equal(process.cwd(), processCwd);
   assert.deepEqual({ ...process.env }, processEnv);
   otherRepo.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
-  const failedStatus = await client.callTool({ name: "status", arguments: { repo: otherRepo.path, id: bound.contractId } });
+  const failedStatus = await client.callTool({ name: "status", arguments: { repo: otherRepo.path, selector: bound.contractId } });
   assert.equal(failedStatus.isError, true);
   assert.equal(failedStatus._meta?.["keiyaku/disposition"], "failed");
   assert.equal(failedStatus.structuredContent, undefined);
@@ -621,14 +640,14 @@ test("SDK routing keeps optional panel failures in text without publishing unava
   t.after(async () => { await client.close(); await adapter.close(); });
   await client.listTools();
   for (const id of [bound.contractId, worker.id]) {
-    const response = await client.callTool({ name: "status", arguments: { id } });
+    const response = await client.callTool({ name: "status", arguments: { selector: id } });
     assert.equal(response.isError, false, JSON.stringify(response));
     const projected = response.structuredContent!;
     assert.equal(Object.hasOwn(projected, "holder"), false);
     assert.equal(Object.hasOwn(projected, "roster"), false);
     assert.equal(Object.hasOwn(projected, "contract"), false);
     assert.match(JSON.stringify(response.content), /association unavailable/u);
-    const native = await facet.status({ id });
+    const native = await facet.status({ selector: id });
     if (native.kind === "contract") {
       assert.deepEqual(native.holder, { kind: "unavailable" });
       assert.deepEqual(native.roster, { kind: "unavailable" });

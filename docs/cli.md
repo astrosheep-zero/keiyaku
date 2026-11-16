@@ -119,13 +119,15 @@ the Akuma profile is descriptive, not live execution status.
 `show` reads one explicitly addressed Debt through its owner or one explicitly
 selected Contract's guidance. Omitted selection refuses before coordinate
 discovery or product reads, even inside a Contract worktree. Plural selection,
-Akuma, category, and glob selection refuse before reading. The returned text and JSON are the selected owner's own value. Status requires one
-complete Contract or Akuma identity without guidance; omitted status is a usage
-refusal. Kanshi alone reads the selector-free World report.
-Plural and category status requests refuse before authority observation. Named
-addresses are resolved once during asynchronous input acquisition through the
-existing address authority, then invoke the resolved family's exact operation;
-parsing remains synchronous and free of authority reads. Kill accepts one selector
+Akuma, category, and glob selection refuse before reading. The returned text and
+JSON are the selected owner's own value. Status requires one complete Contract
+or Akuma identity or one named selector without guidance; omitted status is a
+usage refusal. Kanshi alone reads the selector-free World report. Plural and
+category status requests refuse before authority observation. The edge forwards
+status selection to the shared invocation owner, which resolves named addresses
+once through the existing Address authority before exact observation. Text may
+retain the supplied alias beside the canonical result identity without another
+lookup. Parsing remains synchronous and free of authority reads. Kill accepts one selector
 whose Contract or glob expansion may select several Akumas, retaining each member's
 native stop evidence. Wait retains caller-selected batching.
 

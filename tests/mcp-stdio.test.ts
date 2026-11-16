@@ -43,7 +43,11 @@ test("packaged stdio server launches from its documented standalone configuratio
   t.after(async () => {
     await client.close();
   });
-  assert.ok((await client.listTools()).tools.some((tool) => tool.name === "report"));
+  const { tools } = await client.listTools();
+  assert.ok(tools.some((tool) => tool.name === "report"));
+  const status = tools.find((tool) => tool.name === "status")!;
+  for (const field of status.inputSchema.required ?? [])
+    assert.ok(help.includes(`status requires ${field}`), `help must name the required status field ${field}`);
   const result = await client.callTool({ name: "whoami", arguments: {} });
   assert.equal(result.isError, false);
   const created = await client.callTool({ name: "debt_add", arguments: { cwd: root, title: "Stdio flat business input" } });

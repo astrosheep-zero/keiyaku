@@ -36,16 +36,16 @@ test("CLI adapts public Contract selector refusals without owning matching", asy
   await assert.rejects(facet.show({} as never), KeiyakuUsageError);
 });
 
-test("status parses one complete own-family identity, or defers one name to acquisition", () => {
+test("status parses one complete identity or name without authority acquisition", () => {
   assert.throws(() => parseArgv(["status"]), CliUsageError);
   assert.deepEqual(parseArgv(["status", "kei/example"]), {
-    command: { name: "status", input: { id: "kei/example" }, output: "text" },
+    command: { name: "status", input: { selector: "kei/example" }, output: "text" },
   });
   assert.deepEqual(parseArgv(["status", "aku/worker/1234abcd", "--json"]), {
-    command: { name: "status", input: { id: "aku/worker/1234abcd" }, output: "json" },
+    command: { name: "status", input: { selector: "aku/worker/1234abcd" }, output: "json" },
   });
   assert.deepEqual(parseArgv(["status", "@example"]), {
-    command: { name: "status", input: {}, acquire: { selector: "@example" }, output: "text" },
+    command: { name: "status", input: { selector: "@example" }, output: "text" },
   });
   for (const selectors of [
     ["kei/one", "kei/two"], ["aku/worker/1234abcd", "aku/worker/1234abce"],
@@ -86,7 +86,7 @@ test("CLI list and status families preserve their native owner answers", async (
 test("exact Contract status without a Repo keeps the usage boundary", async (t) => {
   const cwd = temporaryDirectory(t, "cli-status-no-repo-");
   const facet = Keiyaku.for({ cwd, environment: {} });
-  await assert.rejects(facet.status({ id: "kei/example" }), KeiyakuUsageError);
+  await assert.rejects(facet.status({ selector: "kei/example" }), KeiyakuUsageError);
   const result = await captureOutput(() => main(["-C", cwd, "status", "kei/example", "--json"]));
   assert.equal(result.exit, 64);
   assert.equal(result.stderr, "");
@@ -124,7 +124,7 @@ test("instance listing preserves bounded native rows and reads no Debt authority
   assert.ok(text.stdout.includes(`${owner.rows![0]!.id} (@recent)`));
 });
 
-test("named status uses complete live membership and preserves Alias collisions", async () => {
+test("named status shares invocation resolution, complete live membership and Alias collisions", async () => {
   const repository = repositoryWithCommit();
   const repo = await Repo.at({ path: repository.path });
   const world = await World.at(repository.path);
@@ -133,12 +133,17 @@ test("named status uses complete live membership and preserves Alias collisions"
   for (let index = 0; index < 10; index += 1)
     accepted(await contracts.bind({ markdown: document(), target: null, gates: ["reviewed"] }));
   const name = `@${oldest.contractId.slice(4)}`;
+  const facet = Keiyaku.for({ cwd: world, environment: {} });
+  const native = await facet.status({ selector: name });
+  assert.equal(native.id, oldest.contractId);
+  assert.equal(native.kind, "contract");
   const selected = await cliJson<KanshiContractReport>(["-C", world, "status", name], { environment: {} });
   assert.equal(selected.exit, 0, selected.stderr);
   assert.equal(selected.value.id, oldest.contractId);
   assert.equal(selected.value.kind, "contract");
   const born = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a0000001", createdAt: "2026-08-09T00:00:00.000Z" });
   await moveAlias({ world, alias: parseAkumaAlias(name), akumaId: born.id });
+  await assert.rejects(facet.status({ selector: name }), /ambiguous selector matches Contract and Akuma/u);
   const collision = await cliJson<{ kind: string; category: string; diagnostic: string }>(["-C", world, "status", name], { environment: {} });
   assert.equal(collision.exit, 64, collision.stderr);
   assert.equal(collision.value.kind, "failed");
@@ -149,6 +154,8 @@ test("named status uses complete live membership and preserves Alias collisions"
   const readableAlias = await cliJson<{ id: string }>(["-C", world, "status", name], { environment: {} });
   assert.equal(readableAlias.exit, 0, readableAlias.stderr);
   assert.equal(readableAlias.value.id, born.id);
+  assert.equal((await facet.run("status", { selector: name })).id, born.id);
+  await assert.rejects(facet.status({ selector: "@unknown" }), /Contract world is failed/u);
   const unresolved = await cliJson<{ diagnostic: string }>(["-C", world, "status", "@unknown"], { environment: {} });
   assert.equal(unresolved.exit, 3, unresolved.stderr);
   assert.match(unresolved.value.diagnostic, /Contract world is failed/u);
