@@ -24,7 +24,6 @@ const identityNames = [
   "PASEO_AGENT_ID",
   "KEIYAKU_INITIATOR",
   "SQUARE_DELIVERY",
-  "SQUARE_NOTIFY_DELIVERY_WAIT_MS",
 ] as const;
 
 async function fixture(t: TestContext, artifact = true) {
@@ -362,6 +361,43 @@ test("unobserved timeout release and TTL expiry make retained outcomes eligible"
   await other.close();
   assert.equal((await f.cards()).length, 2);
 });
+
+for (const route of ["notice", "wait deferral", "exact observation"] as const) {
+  test(`${route} passes cancellation through ledger opening before acquiring custody`, async (t) => {
+    const f = await fixture(t);
+    const controller = new AbortController();
+    const entered = deferred<void>();
+    const resume = deferred<void>();
+    const open = DeliveryLedger.open;
+    t.mock.method(DeliveryLedger, "open", async (options: Parameters<typeof open>[0]) => {
+      entered.resolve();
+      await resume.promise;
+      assert.equal(options?.signal, controller.signal);
+      return await open.call(DeliveryLedger, options);
+    });
+    const id = "aku/open/1234abcd";
+    const operation = route === "wait deferral"
+      ? f.plugin.waitDeferral!({ akumaIds: [id] }, controller.signal)
+      : route === "exact observation"
+        ? f.plugin.signals!["akuma.outcome-observed"]!({
+            kind: "akuma.outcome-observed", akumaId: id, historyId: "turn/1", observer: f.alice,
+          }, controller.signal)
+        : f.plugin.signals!["akuma.turn-outcome"]!({
+            kind: "akuma.turn-outcome", akumaId: id, bodySequence: 1, turnSequence: 1,
+            participants: [f.alice], outcome: { kind: "answered", text: "done" },
+          }, controller.signal);
+    const reason = new Error("ledger open canceled");
+    const pending = assert.rejects(Promise.resolve(operation), (error) => error === reason);
+    await entered.promise;
+    controller.abort(reason);
+    resume.resolve();
+    await pending;
+    t.mock.restoreAll();
+    assert.deepEqual(await f.cards(), []);
+    await f.turn(id, 1);
+    assert.deepEqual((await f.cards()).map((card) => card.key), [key(id, "turn/1")]);
+  });
+}
 
 test("partial acquisition cleans late allocated suppression when its peer fails", async (t) => {
   const f = await fixture(t);
@@ -724,7 +760,6 @@ test("a native receiver claims full text and receipts prevent idempotent replay"
 
 test("unknown handoff retains producer connection until late accepted settlement without recall", async (t) => {
   const f = await fixture(t);
-  process.env.SQUARE_NOTIFY_DELIVERY_WAIT_MS = "10";
   const plugin = await f.activate();
   const session = await f.ledger.session(f.alice);
   assert.ok(session);
@@ -759,7 +794,7 @@ test("unknown handoff retains producer connection until late accepted settlement
             return "accepted";
           },
         },
-        args[3],
+        { ...args[3], timeoutMs: 10 },
       );
       lateSettlement = result;
       return await result;

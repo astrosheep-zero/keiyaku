@@ -81,7 +81,7 @@ test("whoami never reads an existing Square seat or publishes an index", async (
   const square = await Square.build({
     path,
     markdown: "",
-    env: { SQUARE_INDEX: join(root, "setup-index"), SQUARE_DELIVERY: join(root, "delivery.sqlite") },
+    ledgerLocation: join(root, "delivery.sqlite"),
   });
   try {
     await square.join("Existing", { owner: harnessOwner({ channel: "pi", session: "existing" }) });

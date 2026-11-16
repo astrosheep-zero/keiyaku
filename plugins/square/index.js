@@ -136,7 +136,7 @@ const plugin = {
             }
             cancellation?.throwIfAborted();
             const { text, ...presentation } = renderNotice(label);
-            const ledger = await DeliveryLedger.open({ location });
+            const ledger = await DeliveryLedger.open({ location, ...(cancellation === undefined ? {} : { signal: cancellation }) });
             const lifetime = ledgerLifetime(ledger);
             try {
                 const details = {
@@ -150,7 +150,6 @@ const plugin = {
                         text,
                         details,
                     }, {
-                        env: environment,
                         ...(cancellation === undefined ? {} : { signal: cancellation }),
                         track: lifetime.track,
                     });
@@ -173,7 +172,7 @@ const plugin = {
             const owner = localOwner(environment);
             if (owner === undefined || input.akumaIds.length === 0)
                 return undefined;
-            const ledger = await DeliveryLedger.open({ location });
+            const ledger = await DeliveryLedger.open({ location, ...(cancellation === undefined ? {} : { signal: cancellation }) });
             const lifetime = ledgerLifetime(ledger);
             const acquired = [];
             const expired = new Set();
@@ -207,7 +206,6 @@ const plugin = {
                         }
                         if (!signal.aborted) {
                             await bounded(lifetime.own(dispatchEligibleCards(ledger, owner, {
-                                env: environment,
                                 signal,
                                 track: lifetime.track,
                             })), signal);
@@ -288,7 +286,7 @@ const plugin = {
                     const owner = signal.observer === undefined ? localOwner(environment) : requireOwner(signal.observer);
                     if (owner === undefined)
                         return;
-                    const ledger = await DeliveryLedger.open({ location });
+                    const ledger = await DeliveryLedger.open({ location, ...(cancellation === undefined ? {} : { signal: cancellation }) });
                     try {
                         cancellation?.throwIfAborted();
                         await ledger.suppress({ owner, key: `keiyaku/${signal.akumaId}/${signal.historyId}`, scope: "exact" });
