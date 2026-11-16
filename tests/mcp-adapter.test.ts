@@ -238,8 +238,8 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["tell", { akuma: "@worker", prompt: "work", timeoutMs: 0 }],
     ["show", { ids: ["debt/example"] }],
     ["kill", { akuma: ["@worker"] }],
+    ["wait", { selectors: ["kei/example", "aku/worker/12345678"], timeout: "invalid" }],
     ["wait", { selectors: ["kei/example"], timeoutMs: 0 }],
-    ["wait", { selectors: ["kei/example", "aku/worker/12345678"] }],
     ["history", { selector: "@worker", id: "turn/1", last: true }],
     ["history", { selector: "@worker", last: true, limit: 1 }],
     ["history", { selector: "@worker", before: 2, since: 1 }],
@@ -1026,11 +1026,11 @@ test("MCP waits omit timeout for terminal Contracts and idle Akumas", { timeout:
   await Promise.all([client.connect(a), adapter.server.connect(b)]);
   t.after(async () => { await client.close(); await adapter.close(); });
   await client.listTools();
-  for (const [selector, expected] of [[bound.contractId, "terminal"], [worker.id, "completed"]] as const) {
+  for (const selector of [bound.contractId, worker.id]) {
     const response = await client.callTool({ name: "wait", arguments: { selectors: [selector] } }, undefined, { signal: t.signal });
     assert.equal(response.isError, false, JSON.stringify(response));
     const result = Keiyaku.verbs.wait.normal.parse(response.structuredContent);
-    assert.equal(result.reason, expected);
+    assert.equal(result.reason, "completed");
   }
 });
 
@@ -1053,8 +1053,8 @@ test("SDK waits distinguish observed failed/canceled work from an unreadable pee
     const response = await client.callTool({ name: "wait", arguments: { selectors: [born.allocated.id], timeout: "0ms" } });
     assert.equal(response.isError, false);
     const value = Keiyaku.verbs.wait.normal.parse(response.structuredContent);
-    assert.ok(value.kind === "akuma" && value.results[0]?.kind === "observed");
-    assert.equal(value.results[0].outcome?.kind, outcome.kind);
+    assert.ok(value.members[0]?.kind === "akuma" && value.members[0].observation.kind === "observed");
+    assert.equal(value.members[0].observation.outcome?.kind, outcome.kind);
   }
   const peer = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "feed0024", createdAt: "2026-10-30T00:00:00.000Z" });
   writeFileSync(peer.paths.heart, "not a Heart database\n");
@@ -1066,8 +1066,9 @@ test("SDK waits distinguish observed failed/canceled work from an unreadable pee
   const { reason, results } = await executeWaitAkuma({ path: world, ids: [born.allocated.id, peer.id], completion: "all", timeoutMs: 150 });
   const native = { kind: "akuma" as const, reason, results };
   assert.ok(native.results.some(item => item.kind === "unobserved"));
-  assertWireConformance(Keiyaku.verbs.wait.normal, native, false);
-  assert.deepEqual(Keiyaku.verbs.wait.output.parse(native), native);
+  const composed = { kind: "wait", reason, members: results.map(observation => ({ kind: "akuma", observation })) };
+  assertWireConformance(Keiyaku.verbs.wait.normal, composed, false);
+  assert.deepEqual(Keiyaku.verbs.wait.output.parse(composed), composed);
 });
 
 test("SDK fork consumes the answered Turn coordinate through a real provider process", async (t) => {
@@ -1179,7 +1180,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     const waited = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
     assert.equal(waited.isError, false);
     const completion = Keiyaku.verbs.wait.normal.parse(waited.structuredContent);
-    assert.ok(completion.kind === "akuma" && completion.results[0]?.kind === "observed");
+    assert.ok(completion.members[0]?.kind === "akuma" && completion.members[0].observation.kind === "observed");
     const told = await client.callTool({
       name: "tell", arguments: { akuma: child.akumaId, prompt: "structured", wait: "30s" },
     });

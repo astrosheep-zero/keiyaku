@@ -197,20 +197,14 @@ test("wire validation and classification reject malformed calls before observati
     await assert.rejects(facet.run(name, input as never), KeiyakuUsageError);
   }
   const mixed = { selectors: ["kei/example", "aku/example/12345678"] };
-  assert.equal(Keiyaku.verbs.wait.input.safeParse(mixed).success, false);
+  assert.equal(Keiyaku.verbs.wait.input.safeParse(mixed).success, true);
   for (const input of [
-    { selectors: ["kei/example"], timeoutMs: 0 },
-    { selectors: ["aku/example/12345678"], timeout: "0.5s" },
-    { selectors: ["aku/example/12345678"], timeout: "9007199254740992ms" },
+    { selectors: [] }, { selectors: ["invalid"] },
+    { ...mixed, timeoutMs: 1 }, { ...mixed, timeout: "1.5s" },
+    { ...mixed, timeout: "9007199254740992ms" },
   ]) {
-    assert.equal(Keiyaku.verbs.wait.input.safeParse(input).success, false);
     await assert.rejects(facet.run("wait", input as never), KeiyakuUsageError);
   }
-  await assert.rejects(facet.run("wait", mixed), (error: unknown) => {
-    assert.ok(error instanceof KeiyakuUsageError);
-    assert.equal(classifyVerb("wait", mixed, { kind: "threw", error }), "usage");
-    return true;
-  });
   assert.equal(Keiyaku.verbs.history.input.safeParse({ selector: "kei/example", limit: 1 }).success, false);
   assert.equal(Keiyaku.verbs.bind.input.safeParse({ markdown: document(), forkOf: "kei/example" }).success, false);
   assert.equal(classifyVerb("show", {}, { kind: "returned", value: { kind: "missing" } }), "refused");

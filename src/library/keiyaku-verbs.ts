@@ -17,8 +17,6 @@ import {
   akumaAskNormalResultSchema,
   akumaKillResultSchema,
   akumaTellResultSchema,
-  akumaWaitResultSchema,
-  akumaWaitNormalResultSchema,
 } from "../akuma/selection-observation.js";
 import {
   regionResultSchema,
@@ -50,7 +48,8 @@ import {
 } from "./contract-outcomes.js";
 import { contractHistorySchema } from "./contract-types.js";
 import { guidanceSchema, guidanceNormalSchema } from "./kei.js";
-import { contractWaitResultSchema, contractWaitNormalResultSchema } from "./contract-wait.js";
+import { invocationWaitResultSchema, invocationWaitNormalResultSchema } from "./keiyaku-wait.js";
+import { parseAkumaGlob, parseReadableAkumaAlias } from "../identity/selector.js";
 import { reconcileResultSchema } from "./reconcile.js";
 import { akumaHistoryResultSchema, historySelectionSchemas } from "./selection.js";
 import { whoamiFactsSchema } from "./keiyaku-identity.js";
@@ -447,51 +446,41 @@ export const verbs = Object.freeze({
   },
   wait: {
     description:
-      "Wait until selected Contracts change or close, or selected Akumas finish their current work. Contracts or Akumas, never both in one call. Already closed or finished returns at once. A timeout ends the waiting, not the work.",
-    input: z.union([
-      z
-        .strictObject({
-          selectors: z
-            .array(contractSelector)
-            .min(1)
-            .readonly()
-            .describe(
-              'Nonempty homogeneous selector list: either all Contract IDs (kei/...) or all Akuma selectors (aku/<name>/<hex>, @alias, or "aku/<name-pattern>/<hex-pattern>").',
-            ),
-          completion: z
-            .enum(["any", "all"])
-            .exactOptional()
-            .describe('Wake when "any" selected target settles/changes (default) or wait for "all".'),
-          timeout: waitDuration
-            .exactOptional()
-            .describe(
-              'Observation deadline as an integer duration with unit ms, s, m, or h; returns reason "deadline" without canceling work.',
-            ),
-        })
-        .readonly(),
-      z
-        .strictObject({
-          selectors: z
-            .array(akumaSelector)
-            .min(1)
-            .readonly()
-            .describe(
-              'Nonempty homogeneous selector list: either all Contract IDs (kei/...) or all Akuma selectors (aku/<name>/<hex>, @alias, or "aku/<name-pattern>/<hex-pattern>").',
-            ),
-          completion: z
-            .enum(["any", "all"])
-            .exactOptional()
-            .describe('Wake when "any" selected target settles/changes (default) or wait for "all".'),
-          timeout: waitDuration
-            .exactOptional()
-            .describe(
-              'Observation deadline as an integer duration with unit ms, s, m, or h; returns reason "deadline" without canceling work.',
-            ),
-        })
-        .readonly(),
-    ]),
-    output: z.union([contractWaitResultSchema, akumaWaitResultSchema]),
-    normal: z.union([contractWaitNormalResultSchema, akumaWaitNormalResultSchema]),
+      "Wait for Contracts to change or close and Akumas to finish their current work, together or separately. Any/all applies to the whole selection. Already satisfied members count immediately. A timeout ends observation, never the work.",
+    input: z
+      .strictObject({
+        selectors: z
+          .array(
+            z.union([
+              contractIdSchema,
+              text.refine((value) => {
+                try {
+                  if (value.startsWith("@")) parseReadableAkumaAlias(value);
+                  else if (value.includes("*")) parseAkumaGlob(value);
+                  else return akumaIdSchema.safeParse(value).success;
+                  return true;
+                } catch {
+                  return false;
+                }
+              }, "Expected an Akuma ID, alias or glob"),
+            ]),
+          )
+          .min(1)
+          .readonly()
+          .describe(
+            'Contract IDs (kei/...) and Akuma selectors (aku/<name>/<hex>, @alias, or "aku/<name-pattern>/<hex-pattern>"), in caller order. A Contract selects its journal, not dispatched Akumas.',
+          ),
+        completion: z
+          .enum(["any", "all"])
+          .exactOptional()
+          .describe('Wake when "any" member satisfies (default), or wait for "all" members.'),
+        timeout: waitDuration
+          .exactOptional()
+          .describe("One observation deadline as a duration (e.g. 5m); never cancels work."),
+      })
+      .readonly(),
+    output: invocationWaitResultSchema,
+    normal: invocationWaitNormalResultSchema,
     effect: "read",
   },
   history: {

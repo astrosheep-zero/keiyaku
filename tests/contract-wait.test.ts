@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { Akumas, Kei, Keis, Keiyaku, Repo, World, type ContractWaitResult } from "../src/index.js";
+import { Akumas, Kei, Keis, Repo, World, type ContractWaitResult, type InvocationWaitResult } from "../src/index.js";
+import { contractWaitNormalResultSchema } from "../src/library/contract-wait.js";
 import { assertWireConformance } from "./support/schema-parity.js";
 import { contractJournalPaths } from "../src/git/identity.js";
 import { readGitPaths, repositoryAt, updateGitTree, writeCommit } from "../src/git/repository.js";
@@ -29,7 +30,6 @@ async function amend(handle: Kei, objective: string) {
   accepted(await handle.amend({ markdown: `## Replace: Objective\n\n${objective}\n` }));
 }
 
-const contractWaitNormalResultSchema = Keiyaku.verbs.wait.normal;
 const changed = (result: ContractWaitResult): boolean[] => result.contracts.map((member) => member.changed === true);
 
 test("Contract waits witness their own journal changes and preserve plural progress", async () => {
@@ -120,13 +120,13 @@ test("terminal baselines satisfy any and all without inventing changes", async (
   for (const [id, label] of [[claimed.id, "accepted"], [second.id, "abandoned"]] as const) {
     const text = await runCli(["--repo", repository.path, "wait", id, "--timeout", "0ms"], { cwd: repository.path });
     assert.equal(text.exit, 0);
-    assert.match(text.stdout, new RegExp(`terminal: .*\\(${label}\\)`, "u"));
+    assert.match(text.stdout, new RegExp(`completed\\n.*\\(${label}\\)`, "u"));
     assert.doesNotMatch(text.stdout, /changed/u);
-    const json = await cliJson<ContractWaitResult>(["--repo", repository.path, "wait", id, "--timeout", "0ms"], { cwd: repository.path });
+    const json = await cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", id, "--timeout", "0ms"], { cwd: repository.path });
     assert.equal(json.exit, 0);
-    assert.equal(json.value.kind, "contract");
-    assert.equal(json.value.reason, "terminal");
-    assert.deepEqual(json.value.contracts, [{ id, terminal: label === "accepted" ? "claimed" : label }]);
+    assert.equal(json.value.kind, "wait");
+    assert.equal(json.value.reason, "completed");
+    assert.deepEqual(json.value.members, [{ kind: "contract", observation: { id, terminal: label === "accepted" ? "claimed" : label } }]);
   }
 });
 
@@ -210,31 +210,28 @@ test("initial reads honor deadlines and cancellation; inputs and Akuma selectors
   await assert.rejects(Akumas.of(world).wait({ akuma: [first.id], repo, timeoutMs: 0 }), /does not accept Contract/u);
 });
 
-test("CLI Contract waits need no Akuma World and mixed families refuse", async (context) => {
+test("CLI Contract waits need no Akuma World", async (context) => {
   const { repository, first } = await fixture();
   const cwd = mkdtempSync(join(tmpdir(), "contract-wait-no-world-"));
   context.after(() => rmSync(cwd, { recursive: true, force: true }));
   writeFileSync(join(cwd, ".keiyaku"), "not a World directory");
   await withContractWaitBarrier(repository.path, async (barrier) => {
     const environment = { KEIYAKU_GIT_PATH: barrier.gitPath };
-    const json = await cliJson<ContractWaitResult>(["--repo", repository.path, "wait", first.id, "--timeout", "0ms"], { environment, cwd });
+    const json = await cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", first.id, "--timeout", "0ms"], { environment, cwd });
     assert.equal(json.exit, 0);
     assert.equal(json.value.reason, "deadline");
-    assert.deepEqual(json.value.contracts, [{ id: first.id }]);
+    assert.deepEqual(json.value.members, [{ kind: "contract", observation: { id: first.id } }]);
     barrier.reset();
-    const observing = cliJson<ContractWaitResult>(["--repo", repository.path, "wait", first.id, "--timeout", "10s"], { environment, cwd });
+    const observing = cliJson<InvocationWaitResult>(["--repo", repository.path, "wait", first.id, "--timeout", "10s"], { environment, cwd });
     await barrier.reads();
     await amend(first.handle, "CLI witnessed journal admission.");
     const result = await observing;
     assert.equal(result.exit, 0);
-    assert.equal(result.value.reason, "changed");
-    assert.equal(result.value.contracts[0]?.changed, true);
+    assert.equal(result.value.reason, "completed");
+    assert.deepEqual(result.value.members, [{ kind: "contract", observation: { id: first.id, changed: true } }]);
     const missing = await runCli(["--repo", repository.path, "wait", "kei/not-present", "--timeout", "0ms"], { environment, cwd });
     assert.notEqual(missing.exit, 0);
     assert.match(missing.stdout + missing.stderr, /kei\/not-present/u);
-    await assert.rejects(
-      runCli(["--repo", repository.path, "wait", first.id, "@worker"], { environment, cwd }),
-      /cannot mix Contract and Akuma/u,
-    );
+
   });
 });

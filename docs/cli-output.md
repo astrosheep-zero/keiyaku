@@ -279,17 +279,13 @@ and serialized JSON for ask, once; the verb determines that projection. Deadline
 cause without fabricating an answer. Bounded omissions remain visible, settled
 rows never replay, and failures are never hidden by compaction.
 
-A wait is not a stream. It observes each selected Akuma to its completion
-judgment or the caller deadline and then prints one compact result line per
-member in result order on stdout: an observed life mark, complete identity with
-any single-target alias as a parenthetical, and the final public snapshot's
-summary folded and bounded to the terminal without truncating identity. The
-summary names a stopped life even when an older answer exists, keeps pending
-input and a resume-unsupported strand visible, and otherwise reads the current
-answered preview, failure diagnostic, or completion; a running member stays
-running. Members the wait could not read follow as one failure line each with
-complete identity and diagnostic. A wait opens no live frame and redraws no
-progress.
+A wait is not a stream and opens no live frame. Its compact projection preserves
+the invocation's global conclusion, frozen member order and complete identities,
+without recomputing satisfaction. Contract change, terminal, missing and unknown
+remain distinct. Akuma summaries retain native life, pending input, unsupported
+resume and unreadable diagnostics; stopped life takes precedence over an older
+answer. Unobserved peers remain unknown, and running peers remain running.
+Single-target aliases supplement identity. Summary text is bounded, never identity.
 
 Region overlap in bind and amend receipts remains supporting evidence, not a
 warning or a separate report; it groups by related Contract and renders

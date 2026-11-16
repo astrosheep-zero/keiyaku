@@ -4,8 +4,8 @@
 invocation directory and environment rather than resolved product coordinates.
 It captures those explicit inputs without observing the filesystem or reading
 ambient process state. Each operation resolves its invocation scope anew; the
-facet keeps no persistent authority, observation cache, or separate result model.
-Its operations return native owner values and preserve owner refusal, retry,
+facet keeps no persistent authority or observation cache. Its operations return
+native owner values, except for its cross-product wait composition, and preserve owner refusal, retry,
 cancellation, and observation semantics. A single described verb surface offers
 both typed methods and generic execution over the same caller boundary. The
 facet also owns the shared interpretation of returned and thrown outcomes for
@@ -97,7 +97,26 @@ product reads; native Debt batch reads remain independently owned by Debt.
 Kill accepts one selector that may expand to a frozen set of Akumas, preserving
 each member's native stop evidence. A named CLI
 address is acquired at the asynchronous process edge, then dispatched as the
-resolved family's ordinary exact operation. A Contract wait and an Akuma wait
-remain separate and a mixed wait is refused before observation. History selects
-one subject. A caller-input error is distinguishable from an owner refusal or
+resolved family's ordinary exact operation. Invocation waiting composes Contract
+journal observation and Akuma work-completion observation without making either
+product depend on the other. Each Contract keeps its entry baseline throughout;
+a witnessed journal change or terminal observation satisfies that member, while
+Akuma satisfaction remains its native completion judgment. Unknown, missing, and
+failed observation never establish satisfaction. Native refusal and failure
+retain their meaning in the composed answer.
+
+Selection freezes resolved identities once in first-seen caller order, including
+native Akuma selector expansion and deduplication. A Contract identity selects
+its journal, never its Dispatch roster. One invocation-wide any/all judgment and
+one monotonic deadline cover the whole set, including observation reads; already
+satisfied members count immediately. A zero deadline still requests an initial
+snapshot. Completion takes precedence when witnessed at the deadline edge.
+The answer retains ordered, identified native member evidence, including peers
+not yet observed when another member satisfies the wait. Neither deadline nor
+cancellation stops work; all owned read custody and timers retire before return
+or exceptional propagation. Contract-only observation requires no Akuma World.
+Native single-family SDK waits remain independent operations with their own
+interfaces. Composition retains the Akuma owner's lightweight completion
+observation discipline: waiting on unfinished work does not repeatedly load its
+full monitoring detail. History selects one subject. A caller-input error is distinguishable from an owner refusal or
 an unexpected failure, and adds no authority to the facet.

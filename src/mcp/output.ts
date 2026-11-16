@@ -85,21 +85,7 @@ export const mcpOutputSchemas = {
     verbs.ask.normal.options[1].unwrap().omit({ interrupt: true, wake: true }),
     verbs.ask.normal.options[2].unwrap().omit({ interrupt: true, wake: true }),
   ]),
-  wait: z.union([
-    z.strictObject({
-      kind: z.literal("contract"),
-      reason: z.enum(["changed", "terminal", "deadline"]),
-      contracts: z.array(
-        z.strictObject({
-          id: z.string(),
-          changed: z.literal(true).exactOptional(),
-          terminal: z.enum(["claimed", "abandoned"]).exactOptional(),
-          presence: z.literal("unknown").exactOptional(),
-        }),
-      ),
-    }),
-    verbs.wait.normal.options[1],
-  ]),
+  wait: verbs.wait.normal,
   status: z.union([
     contract.omit({ targetObservation: true, issue: true, holder: true, roster: true }).extend({
       holder: contract.shape.holder.unwrap().options[0].exactOptional(),

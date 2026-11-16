@@ -16,7 +16,11 @@ or a runtime parse of trusted results. Observation declarations preserve the
 reason-specific evidence and consistent availability of their members without
 proving completion over a selected set; that judgment remains with the native
 producer. Native callers and CLI JSON retain the complete answer,
-including refusal, retry, and stops after confirmed effects. A standalone
+including refusal, retry, and stops after confirmed effects. Invocation wait owns
+only the cross-product group conclusion and ordered member composition; its
+member observations reuse native evidence and never replace either product's
+completion judgment. Unobserved peers remain explicit even when the group
+completes. A standalone
 transport may project normal routing answers onto compact decision facts with
 its own structural declaration. This pure projection consumes the existing owner
 judgment, never reparses trusted answers or narrows the native schema.

@@ -1,11 +1,6 @@
 import { AkumaNotBornError } from "../akuma/akuma-errors.js";
 import { AkumaNameError } from "../akuma/archetype.js";
-import type {
-  AkumaAskResult,
-  AkumaKillResult,
-  AkumaTellResult,
-  AkumaWaitResult,
-} from "../akuma/selection-observation.js";
+import type { AkumaAskResult, AkumaKillResult, AkumaTellResult } from "../akuma/selection-observation.js";
 import type { RegionRead } from "../kanshi/report.js";
 import type {
   DebtAbsent,
@@ -16,7 +11,7 @@ import type {
 } from "../debt/index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "./address.js";
 import type { ForkResult, SpawnResult } from "./akuma-creation.js";
-import type { ContractWaitResult } from "./contract-wait.js";
+import type { InvocationWaitResult } from "./keiyaku-wait.js";
 import { KeiyakuArcDocumentError } from "./keiyaku-coordinates.js";
 import { errorCategory } from "../errors.js";
 import type { VerbInput, VerbName, VerbOutput } from "./keiyaku-verbs.js";
@@ -81,9 +76,15 @@ function classifyReconcile(result: VerbOutput<"reconcile">): VerbDisposition {
   }
 }
 
-function classifyWait(result: ContractWaitResult | AkumaWaitResult): VerbDisposition {
-  if (result.kind === "contract") return result.reason === "missing" ? "refused" : "accepted";
-  return result.results.some((item) => item.kind !== "observed") ? "failed" : "accepted";
+function classifyWait(result: InvocationWaitResult): VerbDisposition {
+  if (
+    result.members.some(
+      (member) =>
+        member.kind === "akuma" && (member.observation.kind === "unobserved" || member.observation.kind === "missing"),
+    )
+  )
+    return "failed";
+  return result.reason === "missing" ? "refused" : "accepted";
 }
 
 function classifyHistory(value: VerbOutput<"history">): VerbDisposition {
@@ -133,7 +134,7 @@ export function classifyVerb<K extends VerbName>(
         ? "failed"
         : "accepted";
     case "wait":
-      return classifyWait(value as ContractWaitResult | AkumaWaitResult);
+      return classifyWait(value as InvocationWaitResult);
     case "history":
       return classifyHistory(value as VerbOutput<"history">);
     case "show": {

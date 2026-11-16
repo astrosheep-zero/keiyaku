@@ -380,7 +380,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/contract-outcomes.ts"),
         any("library/contract-types.ts"),
         any("library/kei.ts", ["Guidance", "guidanceSchema", "guidanceNormalSchema"]),
-        any("library/contract-wait.ts"),
+        any("library/keiyaku-wait.ts", ["invocationWaitResultSchema", "invocationWaitNormalResultSchema"]),
         any("library/reconcile.ts"),
         any("library/selection.ts"),
         any("library/keiyaku-identity.ts"),
@@ -400,6 +400,14 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       deny: libraryOwner.deny.filter(
         (rule) => !invocationFacet.includes(rule) && rule.target !== "library/akuma-creation.ts",
       ),
+    },
+    {
+      source: "library/keiyaku-wait.ts",
+      allow: [
+        ...libraryOwner.allow,
+        any("plugin/akuma-signals.ts", ["outcomePluginObserver", "stderrPluginDiagnostic", "withAkumaWaitDeferrals"]),
+      ],
+      deny: libraryOwner.deny.filter((rule) => !invocationFacet.includes(rule)),
     },
     ...["library/keiyaku.ts", "library/keiyaku-*.ts"].map((source) => ({
       source,
@@ -842,6 +850,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("library/address.ts", ["AkumaAddressRefusal", "AkumaSetAddressInput"]),
         types("library/akuma-creation.ts", ["SpawnProgress", "SpawnWaitObserver"]),
         types("library/keiyaku-identity.ts", ["WhoamiFacts"]),
+        types("library/keiyaku-wait.ts", ["InvocationWaitMember", "InvocationWaitResult"]),
         any("kanshi/index.ts"),
         any("library/akumas.ts"),
         any("core/facts/errors.ts", ["AuthorityCorruptionError"]),

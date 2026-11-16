@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { contractId, entryUlid, gate, requirementId, snapshotId } from "../src/core/facts/types.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
-import { contractWaitText } from "../src/cli/render/contract-wait.js";
+import { contractWaitMemberText } from "../src/cli/render/contract-wait.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 
 const id = contractId("kei/compact-cli");
@@ -26,17 +26,13 @@ test("show renders the native guidance object and keeps missing distinct", () =>
 
 test("Contract wait renders changed, present, unknown and missing without conflating them", () => {
   assert.equal(
-    contractWaitText({
-      kind: "contract",
-      reason: "deadline",
-      contracts: [
-        { id, changed: true, terminal: "claimed" },
-        { id: contractId("kei/present") },
-        { id: contractId("kei/unknown"), presence: "unknown" },
-        { id: contractId("kei/missing"), presence: "missing" },
-      ],
-    }),
-    "deadline: kei/compact-cli (changed, accepted), kei/present, kei/unknown (unobserved), kei/missing (missing)",
+    [
+      { id, changed: true as const, terminal: "claimed" as const },
+      { id: contractId("kei/present") },
+      { id: contractId("kei/unknown"), presence: "unknown" as const },
+      { id: contractId("kei/missing"), presence: "missing" as const },
+    ].map(contractWaitMemberText).join(", "),
+    "kei/compact-cli (changed, accepted), kei/present, kei/unknown (unobserved), kei/missing (missing)",
   );
 });
 

@@ -39,11 +39,13 @@ type WaitRound = Readonly<{
 }>;
 
 const SHARED_ORDINARY_BUDGET = 30;
+export const AKUMA_WAIT_POLL_MS = 250;
 
 async function observeWaitRound(
   ids: readonly AkumaStatus["id"][],
   readerFor: (id: AkumaStatus["id"]) => ReturnType<typeof createLiveStatusReader>,
   signal?: AbortSignal,
+  witnessed?: (item: AkumaWaitItem, observation?: LiveStatusObservation) => void,
 ): Promise<WaitRound> {
   const read = (id: AkumaStatus["id"], ordinaryBudget?: number) =>
     readerFor(id).read({ aperture: "monitoring", ...(ordinaryBudget === undefined ? {} : { ordinaryBudget }) }, signal);
@@ -57,11 +59,18 @@ async function observeWaitRound(
     try {
       const observed = await read(id, remaining);
       observations.push(observed);
+      witnessed?.(completionItem(observed), observed);
       remaining -= observed.ordinarySelected;
     } catch (error) {
       signal?.throwIfAborted();
-      if (error instanceof AkumaNotBornError) missing.push(id);
-      else unobserved.push({ id, diagnostic: diagnostic(error) });
+      if (error instanceof AkumaNotBornError) {
+        missing.push(id);
+        witnessed?.({ kind: "missing", id });
+      } else {
+        const item = { id, diagnostic: diagnostic(error) };
+        unobserved.push(item);
+        witnessed?.({ kind: "unobserved", ...item });
+      }
     }
   }
   return { observations, unobserved, missing };
@@ -108,54 +117,76 @@ function completionItem({ status, rows }: LiveStatusObservation): AkumaWaitItem 
   };
 }
 
-/** Compact final native evidence, retaining full statuses privately for owner composition. */
-export async function executeWaitAkuma(input: WaitExecutionInput): Promise<NativeWaitResult> {
+/** Private observation custody shared by native and invocation set waits. */
+export function createAkumaWaitObserver(path: WorldRoot, ids: readonly AkumaStatus["id"][]) {
   const readers = new Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>();
+  const items = new Map<AkumaStatus["id"], AkumaWaitItem>();
+  const observations = new Map<AkumaStatus["id"], LiveStatusObservation>();
   const readerFor = (id: AkumaStatus["id"]) => {
     let reader = readers.get(id);
     if (reader === undefined) {
-      reader = createLiveStatusReader(pathsForAkumaId(input.path, id), id);
+      reader = createLiveStatusReader(pathsForAkumaId(path, id), id);
       readers.set(id, reader);
     }
     return reader;
   };
+  return {
+    items,
+    satisfied: (id: AkumaStatus["id"]) => {
+      const observation = observations.get(id);
+      return items.get(id)?.kind === "observed" && observation !== undefined && defaultWaitComplete(observation.status);
+    },
+    observe: (signal?: AbortSignal) =>
+      observeWaitRound(ids, readerFor, signal, (item, observation) => {
+        items.set(item.id, item);
+        if (observation === undefined) observations.delete(item.id);
+        else observations.set(item.id, observation);
+      }),
+    probe: (completion: "any" | "all", signal?: AbortSignal) =>
+      readWaitComplete(path, ids, completion, signal, (id) =>
+        readerFor(id)
+          .complete(signal)
+          .catch((error: unknown) => {
+            if (error instanceof AkumaNotBornError) return true;
+            throw error;
+          }),
+      ),
+    async notify(observer?: OutcomeObserver): Promise<void> {
+      for (const { status, rows } of observations.values()) {
+        const outcome = rows.findLast((row): row is OutcomeRow => row.kind === "outcome");
+        if (outcome !== undefined) await observer?.(status.id, [`turn/${outcome.turnSequence}`]);
+      }
+    },
+    clear: () => {
+      for (const reader of readers.values()) reader.clear();
+    },
+  };
+}
+
+/** Compact final native evidence, retaining full statuses privately for owner composition. */
+export async function executeWaitAkuma(input: WaitExecutionInput): Promise<NativeWaitResult> {
+  const observer = createAkumaWaitObserver(input.path, input.ids);
   try {
     const waited = await waitForObservation({
-      pollMs: 250,
+      pollMs: AKUMA_WAIT_POLL_MS,
       ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       ...(input.signal === undefined ? {} : { signal: input.signal }),
       ...(input.predicate === undefined
         ? {
-            probe: async () =>
-              await readWaitComplete(input.path, input.ids, input.completion, input.signal, (id) =>
-                readerFor(id)
-                  .complete(input.signal)
-                  .catch((error: unknown) => {
-                    if (error instanceof AkumaNotBornError) return true;
-                    throw error;
-                  }),
-              ),
+            probe: () => observer.probe(input.completion, input.signal),
           }
         : {}),
-      observe: async () => await observeWaitRound(input.ids, readerFor, input.signal),
+      observe: () => observer.observe(input.signal),
       complete: (round) => roundComplete(round, input.completion, input.predicate),
     });
-    for (const { status, rows } of waited.value.observations) {
-      const outcome = rows.findLast((row): row is OutcomeRow => row.kind === "outcome");
-      if (outcome !== undefined) await input.outcomeObserved?.(status.id, [`turn/${outcome.turnSequence}`]);
-    }
-    const items = new Map<AkumaStatus["id"], AkumaWaitItem>(
-      waited.value.observations.map((observation) => [observation.status.id, completionItem(observation)]),
-    );
-    for (const item of waited.value.unobserved) items.set(item.id, { kind: "unobserved", ...item });
-    for (const id of waited.value.missing) items.set(id, { kind: "missing", id });
+    await observer.notify(input.outcomeObserved);
     return {
       reason: waited.reason,
       observations: waited.value.observations.map((observation) => observation.status),
-      results: input.ids.map((id) => items.get(id)!),
+      results: input.ids.map((id) => observer.items.get(id)!),
     };
   } finally {
-    for (const reader of readers.values()) reader.clear();
+    observer.clear();
   }
 }
 

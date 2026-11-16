@@ -1,4 +1,5 @@
 import "./keiyaku-invocation.cases.js";
+import "./mixed-wait.cases.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {

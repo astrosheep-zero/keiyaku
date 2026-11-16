@@ -255,6 +255,8 @@ type ResolvedAkumaSet = Readonly<{
   path: WorldRoot;
   /** The same set in the caller's selector order, for surfaces that name the selection as chosen. */
   orderedIds: readonly AkumaId[];
+  /** Frozen expansion per selector, before cross-selector deduplication. */
+  selections: readonly (readonly AkumaId[])[];
   /** The canonical order of the selected set. */
   ids: readonly AkumaId[];
   contractMembers: ReadonlySet<AkumaId>;
@@ -293,16 +295,21 @@ async function readAkumaSet(input: UncheckedAkumaAddressInput, options: AkumaSet
   const contractMembers = new Set<AkumaId>();
   const explicit = new Set<AkumaId>();
   const sources = { rosterIds, aliases, dispatches };
-  for (const selector of selectors) addSelectorIds(selector, sources, selected, contractMembers, explicit);
-  return { path, orderedIds: [...selected], ids: canonicalAkumaOrder(selected), contractMembers, explicit };
+  const selections = selectors.map((selector) => {
+    const members = new Set<AkumaId>();
+    addSelectorIds(selector, sources, members, contractMembers, explicit);
+    for (const id of members) selected.add(id);
+    return [...members];
+  });
+  return { path, orderedIds: [...selected], selections, ids: canonicalAkumaOrder(selected), contractMembers, explicit };
 }
 
 export async function addressAkumaSet(
   input: UncheckedAkumaAddressInput,
   options: AkumaSetOptions = {},
-): Promise<Readonly<{ path: WorldRoot; ids: readonly AkumaId[]; orderedIds: readonly AkumaId[] }>> {
+): Promise<Pick<ResolvedAkumaSet, "path" | "ids" | "orderedIds" | "selections">> {
   const resolved = await readAkumaSet(input, options);
   for (const id of resolved.explicit) await requireBornAkuma(resolved.path, id);
   await refuseForeignContractMembers(resolved.path, resolved.ids, resolved.contractMembers);
-  return { path: resolved.path, ids: resolved.ids, orderedIds: resolved.orderedIds };
+  return { path: resolved.path, ids: resolved.ids, orderedIds: resolved.orderedIds, selections: resolved.selections };
 }

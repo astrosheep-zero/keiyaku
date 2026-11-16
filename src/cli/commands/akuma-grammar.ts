@@ -70,7 +70,7 @@ const AKUMA_COMMAND_SPECS = {
     usage: `wait ${SET_SELECTORS} [--any | --all] [--timeout <duration>] [--repo <path>]`,
     purpose: "Wait for Contract changes or terminal state, or Akumas to finish work.",
     details: [
-      "Select Contracts or Akumas, never both in one wait. Contract IDs wait for their next journal change or terminal state, not associated Akumas.",
+      "Select Contracts and Akumas together or separately. Contract IDs wait for their next journal change or terminal state, not associated Akumas. One deadline and any/all mode cover the whole selection.",
       "The default mode is any; --all waits for every selected member. Each Contract starts from its current journal head; already accepted or abandoned Contracts complete immediately.",
       SET_DETAILS,
       "An already completed Akuma counts immediately; a deadline only bounds observation.",
@@ -213,8 +213,6 @@ function parseWait(
   if (flags.any === true && flags.all === true) fail("wait --any and --all are mutually exclusive");
   const completion = flags.any === true ? ("any" as const) : flags.all === true ? ("all" as const) : undefined;
   const selectors = rawSelectors.map((value) => validateSet(value, fail));
-  if (selectors.some((value) => value.startsWith("kei/")) && selectors.some((value) => !value.startsWith("kei/")))
-    fail("wait cannot mix Contract and Akuma selectors");
   const timeout =
     flags.timeout === undefined ? undefined : stringFlag(flags.timeout, "--timeout requires a duration", fail);
   if (timeout !== undefined) parseDuration(timeout, "--timeout", fail);

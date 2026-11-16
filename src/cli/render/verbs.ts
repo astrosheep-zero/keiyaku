@@ -27,7 +27,7 @@ import {
   type ContractMutationName,
 } from "./contract.js";
 import { renderDeliveryPreview } from "./delivery-preview.js";
-import { contractWaitText } from "./contract-wait.js";
+import { contractWaitMemberText } from "./contract-wait.js";
 import { renderDebtList, renderDebtMutation, renderDebtShow, renderDebtUpdate, renderDoctor } from "./debt.js";
 import { renderKanshiText } from "./kanshi.js";
 import { renderNukeText } from "./nuke.js";
@@ -167,10 +167,17 @@ function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">, 
 }
 
 function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, context: TextRenderContext): string {
-  if ("contracts" in result) return contractWaitText(result);
-  const selectors = input.selectors;
-  const selectedAlias = selectors.length === 1 ? aliasSelector(selectors[0]) : undefined;
-  return waitText(result, selectedAlias === undefined ? {} : { alias: selectedAlias }, context);
+  const selectedAlias = input.selectors.length === 1 ? aliasSelector(input.selectors[0]) : undefined;
+  const rows = result.members.map((member) => {
+    if (member.kind === "contract") return contractWaitMemberText(member.observation);
+    if (member.observation.kind === "unknown") return `? ${member.observation.id} (unobserved)`;
+    return waitText(
+      { kind: "akuma", reason: result.reason === "deadline" ? "deadline" : "completed", results: [member.observation] },
+      selectedAlias === undefined ? {} : { alias: selectedAlias },
+      context,
+    );
+  });
+  return [result.reason, ...rows].join("\n");
 }
 
 function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history">, context: TextRenderContext): string {

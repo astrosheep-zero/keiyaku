@@ -140,11 +140,11 @@ test("facet delegates reads and mutations using selected Repo but invocation Wor
   await assert.rejects(facet.region({ contract, paths: ["src/**"] }), KeiyakuUsageError);
   assert.deepEqual(
     await facet.wait({ selectors: [contract], timeout: "0ms" }),
-    await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 }),
+    { kind: "wait", reason: "deadline", members: (await Keis.of(repoB).wait({ contracts: [contract], timeoutMs: 0 })).contracts.map(observation => ({ kind: "contract", observation })) },
   );
   assert.deepEqual(
     await facet.wait({ selectors: [worker.id], timeout: "0ms" }),
-    await Akumas.of(worldA).wait({ akuma: [worker.id], repo: repoB, timeoutMs: 0 }),
+    { kind: "wait", reason: "completed", members: (await Akumas.of(worldA).wait({ akuma: [worker.id], repo: repoB, timeoutMs: 0 })).results.map(observation => ({ kind: "akuma", observation })) },
   );
   const short = `@${contract.slice("kei/".length)}`;
   assert.deepEqual(await facet.show({ id: short }), await Keis.of(repoB).kei({ id: contract }).guidance());
@@ -256,20 +256,20 @@ test("typed and generic waits omit timeout for terminal Contracts and idle Akuma
   const worker = await bornLineageAkuma({
     root: world, akumaName: "worker", draw: "feed0025", createdAt: "2026-10-30T00:00:00.000Z",
   });
-  for (const [selector, expected] of [[bound.contractId, "terminal"], [worker.id, "completed"]] as const) {
+  for (const selector of [bound.contractId, worker.id]) {
     const input = { selectors: [selector] };
     assert.equal(Keiyaku.verbs.wait.input.safeParse(input).success, true);
     const typed = await facet.wait(input, { signal: t.signal });
-    assert.equal(typed.reason, expected);
+    assert.equal(typed.reason, "completed");
     assert.deepEqual(await facet.run("wait", input, { signal: t.signal }), typed);
   }
 });
 
-test("mixed wait refuses before observing even a nonexistent invocation cwd", async (t) => {
+test("valid mixed wait reaches coordinate discovery rather than a family-shape refusal", async (t) => {
   const home = temporaryDirectory(t, "keiyaku-invocation-wait-");
   const facet = Keiyaku.at({ cwd: join(home, "missing"), environment: {}, home });
   await assert.rejects(
     facet.wait({ selectors: ["kei/example", "aku/worker/1234abcd"] }),
-    KeiyakuUsageError,
+    /invocation cwd is not an existing directory/u,
   );
 });

@@ -15,6 +15,7 @@ import { World, WorldError } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
 import { Kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
 import { Akumas } from "./akumas.js";
+import { waitInvocation } from "./keiyaku-wait.js";
 import type { AskObserver } from "../akuma/akuma-selection-execution.js";
 import type { SpawnWaitObserver } from "./akuma-creation.js";
 import { deliveryOwner } from "./keiyaku-attribution.js";
@@ -548,19 +549,17 @@ export class Keiyaku {
   }
 
   async #wait({ selectors, timeout, ...input }: ExecutionInput<"wait">) {
-    const timeoutMs = timeout === undefined ? {} : { timeoutMs: waitTimeout(timeout) };
-    const contracts = selectors.filter((selector) => selector.startsWith("kei/"));
-    if (contracts.length > 0) {
-      const at = await this.#coordinates("required", true);
-      if (at.repo === undefined) throw new KeiyakuUsageError("Contract wait requires a repository");
-      return await Keis.of(at.repo).wait({ contracts, ...input, ...timeoutMs });
-    }
-    const { at, akumas } = await this.#akumas();
-    return await akumas.wait({
-      akuma: selectors,
+    const hasContracts = selectors.some((selector) => selector.startsWith("kei/"));
+    const contractOnly = selectors.every((selector) => selector.startsWith("kei/"));
+    const at = await this.#coordinates(hasContracts ? "required" : "optional", contractOnly);
+    if (hasContracts && at.repo === undefined) throw new KeiyakuUsageError("Contract wait requires a repository");
+    if (!contractOnly && at.world === null) throw new KeiyakuUsageError("Akuma wait requires a World");
+    return await waitInvocation({
+      selectors,
       ...input,
-      ...timeoutMs,
       ...(at.repo === undefined ? {} : { repo: at.repo }),
+      ...(at.world === null ? {} : { world: at.world }),
+      ...(timeout === undefined ? {} : { timeoutMs: waitTimeout(timeout) }),
     });
   }
 
