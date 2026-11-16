@@ -209,6 +209,41 @@ test("wire validation and classification reject malformed calls before observati
   assert.equal(classifyVerb("show", {}, { kind: "threw", error: new TypeError("unexpected") }), "failed");
 });
 
+test("ls uses one strict object and refuses inapplicable filters before discovery", async (t) => {
+  const input = Keiyaku.verbs.ls.input;
+  for (const valid of [
+    { selector: "kei/" },
+    { selector: "debt/", selection: "closed", limit: 1 },
+    { selector: "aku/" },
+    { selector: "aku/*", mine: false },
+    { selector: "aku/worker" },
+  ])
+    assert.equal(input.safeParse(valid).success, true, JSON.stringify(valid));
+  for (const invalid of [
+    { selector: "kei/", selection: "all" },
+    { selector: "kei/", mine: false },
+    { selector: "debt/", mine: true },
+    { selector: "aku/", mine: true },
+    { selector: "aku/*", selection: "closed" },
+    { selector: "debt/", selection: "open" },
+    { selector: "debt/example" },
+    { selector: "kei/", limit: 0 },
+    { selector: "kei/", extra: true },
+  ])
+    assert.equal(input.safeParse(invalid).success, false, JSON.stringify(invalid));
+  const facet = Keiyaku.at({ cwd: join(temporaryDirectory(t, "keiyaku-verbs-ls-"), "missing"), environment: {} });
+  for (const inapplicable of [
+    { selector: "kei/", selection: "all" },
+    { selector: "kei/", mine: false },
+  ] as const)
+    await assert.rejects(facet.run("ls", inapplicable), (error: unknown) => {
+      assert.ok(error instanceof KeiyakuUsageError);
+      assert.match(error.message, /valid only with/u);
+      assert.equal(classifyVerb("ls", inapplicable, { kind: "threw", error }), "usage");
+      return true;
+    });
+});
+
 test("region uses one strict object and refuses contract with paths before discovery", async () => {
   const input = Keiyaku.verbs.region.input;
   for (const valid of [{}, { contract: "kei/example" }, { paths: ["src/**"] }])

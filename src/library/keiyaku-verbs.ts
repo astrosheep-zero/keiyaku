@@ -115,28 +115,26 @@ const debtSelection = z
   .describe(
     'Debt lifecycle filter (valid only with "debt"/"debt/"): "active" (open, default), "closed" (done or drop), or "all".',
   );
-const listBound = { limit: positive.exactOptional().describe("Maximum rows to return (positive integer).") };
 const catalogueSelector =
   'Catalogue path selector: "kei"/"kei/", "debt"/"debt/", "aku"/"aku/" (akumaName values), or "aku/*" / "aku/*/*" / "aku/<name>" / "aku/<name>/*" (instances).';
-const lsInputSchema = z.union([
-  z.strictObject({ selector: text.regex(/^(?:kei|aku)\/?$/u).describe(catalogueSelector), ...listBound }).readonly(),
-  z
-    .strictObject({
-      selector: text.regex(/^debt\/?$/u).describe(catalogueSelector),
-      selection: debtSelection,
-      ...listBound,
-    })
-    .readonly(),
-  z
-    .strictObject({
-      selector: text.regex(/^aku\/(?:\*(?:\/\*)?|[^/*]+(?:\/\*|\/)?)$/u).describe(catalogueSelector),
-      mine: optBool.describe(
-        "When true on an Akuma-instance selector, restrict to direct and transitive descendants of this server environment's caller identity.",
-      ),
-      ...listBound,
-    })
-    .readonly(),
-]);
+const lsInputSchema = z
+  .strictObject({
+    selector: text
+      .regex(/^(?:kei|debt|aku)\/?$|^aku\/(?:\*(?:\/\*)?|[^/*]+(?:\/\*|\/)?)$/u)
+      .describe(catalogueSelector),
+    limit: positive.exactOptional().describe("Maximum rows to return (positive integer)."),
+    selection: debtSelection,
+    mine: optBool.describe(
+      "When true on an Akuma-instance selector, restrict to direct and transitive descendants of this server environment's caller identity.",
+    ),
+  })
+  .superRefine(({ selector, selection, mine }, context) => {
+    if (selection !== undefined && selector !== "debt" && selector !== "debt/")
+      context.addIssue({ code: "custom", message: "selection is valid only with a Debt catalogue" });
+    if (mine !== undefined && (!selector.startsWith("aku/") || selector === "aku/"))
+      context.addIssue({ code: "custom", message: "mine is valid only with an Akuma-instance catalogue" });
+  })
+  .readonly();
 const spawnFields = {
   akumaName: nonblank.describe(
     'akumaName to spawn. Use ls {"selector":"aku/"} to list valid names, including when the selected name is not found. Always births a new instance; use tell or ask to continue an existing Akuma.',

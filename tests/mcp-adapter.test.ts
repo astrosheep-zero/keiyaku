@@ -64,6 +64,25 @@ test("coordinate composition preserves native branches and rejects collisions at
   assert.throws(() => mcpInputSchema(z.strictObject({ cwd: z.string() })), /coordinate collides.*cwd/u);
 });
 
+test("MCP ls composes one object with the shared applicability checks", () => {
+  const schema = mcpInputSchema(Keiyaku.verbs.ls.input);
+  for (const valid of [
+    { selector: "kei/" },
+    { selector: "debt/", selection: "closed", limit: 1 },
+    { selector: "aku/*", mine: false },
+  ])
+    assert.equal(schema.safeParse(valid).success, true, JSON.stringify(valid));
+  for (const invalid of [
+    { selector: "kei/", selection: "all" },
+    { selector: "kei/", mine: false },
+    { selector: "debt/", mine: true },
+    { selector: "aku/", mine: true },
+    { selector: "aku/*", selection: "closed" },
+    { selector: "kei/", extra: true },
+  ])
+    assert.equal(schema.safeParse(invalid).success, false, JSON.stringify(invalid));
+});
+
 test("MCP region composes one optional object with the shared contradiction check", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.region.input);
   for (const valid of [{}, { contract: "kei/example" }, { paths: ["src/**"] }])
@@ -208,6 +227,8 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["abandon", { actor: "operator" }],
     ["debt.add", { title: "Unwritten", actor: "operator" }],
     ["ls", { selector: "kei/", mine: true }],
+    ["ls", { selector: "kei/", mine: false }],
+    ["ls", { selector: "kei/", selection: "all" }],
     ["spawn", { akumaName: "worker", writableDirectories: [cwd] }],
     ["spawn", { akumaName: "worker", wait: "10m" }],
     ["spawn", { akumaName: "worker", prompt: "work", wait: "0.5s" }],
@@ -282,6 +303,8 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   assert.deepEqual(publishedProperties("debt_update"), [
     "body", "cwd", "id", "needs", "note", "priority", "state", "title",
   ]);
+  assert.deepEqual(publishedProperties("ls"), ["cwd", "limit", "mine", "repo", "selection", "selector"]);
+  assert.deepEqual(tools.find((tool) => tool.name === "ls")!.inputSchema.required, ["selector"]);
   assert.deepEqual(publishedProperties("region"), ["contract", "cwd", "paths", "repo"]);
   assert.equal(tools.find((tool) => tool.name === "region")!.inputSchema.required, undefined);
   let unknown: McpError | undefined;

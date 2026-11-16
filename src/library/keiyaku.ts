@@ -615,7 +615,7 @@ export class Keiyaku {
     if (input.selector === "debt" || input.selector === "debt/")
       return debt.debtLs(this.#input, {
         ...bound,
-        ...("selection" in input && input.selection !== undefined ? { selection: input.selection } : {}),
+        ...(input.selection === undefined ? {} : { selection: input.selection }),
       });
     if (input.selector === "aku" || input.selector === "aku/") {
       const at = await this.#coordinates("none");
@@ -628,7 +628,7 @@ export class Keiyaku {
     const name = input.selector.split("/")[1]!;
     const akumaName = name === "*" ? undefined : validateAkumaName(name);
     const { at, akumas } = await this.#akumas();
-    const caller = await this.#resolveLsCaller("mine" in input ? input.mine : undefined);
+    const caller = await this.#resolveLsCaller(input.mine);
     return akumas.list({
       ...bound,
       ...(akumaName === undefined ? {} : { akumaName }),
