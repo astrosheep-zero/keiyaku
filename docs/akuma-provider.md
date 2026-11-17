@@ -167,6 +167,21 @@ history only: deleting retained activity never changes recovery, resume, fork,
 outcome, failure, or life. Complete answers and native fork coordinates remain
 Turn authority; sessions remain resume authority.
 
+Slow consumers receive bounded disposable narration in arrival order. Saturation
+drops the oldest ordinary narration, including notes, unknown kinds and failed
+tool observations, without inferring priority from their wording. A separate
+bounded loss observation counts dropped narration until consumed; it retains its
+first loss position and precedes the narration that caused that loss. It never
+claims a terminal outcome was lost. Provider completion and physical closure
+remain independent authoritative evidence.
+
+The latest unconsumed session, runtime-model and pending-approval observations
+are independently reserved from narration capacity. A newer observation replaces
+only its own earlier state, including an unnamed model or cleared approvals,
+and is ordered at its replacement's arrival. Superseded intermediate state is
+coalesced rather than counted as lost narration. These ephemeral buffers create
+no durable facts: Body still admits consumed evidence through Heart.
+
 Native permission requests and their replies produce one provider-neutral
 observation of the attempt's currently pending approvals. It preserves native
 request identity and the action, resources, and tool actually observed; a reply
@@ -190,11 +205,9 @@ precise limitation rather than a guess. Adapters only produce that observation:
 Body admits it through Heart, where only the exact latest running Body may move
 the Soul's one current model that every later Turn, resume, and fork reads. The
 observation is never retained as activity and never becomes a second model
-record. Bounded narration retention never displaces it: one reserved model slot
-in that same bounded retention holds the latest unconsumed observation and
-supersedes an obsolete one instead of retaining both, so neither narration
-overflow nor a full protected backlog leaves the Soul on a model the attempt is
-no longer running. An unnamed observation clears the confirmation it replaces.
+record. Bounded narration retention never displaces it, and a newer unconsumed
+observation supersedes the obsolete one. An unnamed observation clears the
+confirmation it replaces.
 
 The optional Paseo mirror has no shared model catalog or inferred default. A
 new or recreated mirror persists the exact model observed at creation time for

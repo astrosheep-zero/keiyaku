@@ -605,114 +605,154 @@ test("a correlated start's admitted preview survives empty and conflicting compl
   );
 });
 
-test("AgentEventChannel bounds reconstructible activity while retaining session and error events", async () => {
+test("AgentEventChannel retains the newest ordinary FIFO without narration priority", async () => {
   const channel = new AgentEventChannel();
-  const session: AgentEvent = { type: "session", coordinate: { sessionId: "session-1" } };
-  channel.emit(session);
-  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 8; index += 1)
-    channel.emit({ type: "assistant", text: `update-${index}` });
-  const error = {
-    type: "tool",
-    phase: "completed",
-    id: "tool-1",
-    name: "shell",
-    call: { kind: "run", command: "false" },
-    result: { status: "error", message: "failed" },
-  } satisfies AgentEvent;
-  channel.emit(error);
-  channel.end();
-
-  const events: AgentEvent[] = [];
-  for await (const event of channel) events.push(event);
-  assert.equal(events.length, AGENT_EVENT_QUEUE_LIMIT);
-  assert.deepEqual(events[0], session);
-  assert.deepEqual(events.at(-1), error);
-  assert.equal(
-    events.some((event) => event.type === "assistant" && event.text === "update-0"),
-    false,
-  );
-  assert.equal(
-    events.some((event) => event.type === "assistant" && event.text === "update-7"),
-    false,
-  );
-  assert.equal(
-    events.some((event) => event.type === "assistant" && event.text === `update-${AGENT_EVENT_QUEUE_LIMIT + 7}`),
-    true,
-  );
+  const narration: AgentEvent[] = [
+    noteEvent("native extension failed"),
+    { type: "unknown", kind: "terminal_error" },
+    {
+      type: "tool",
+      phase: "completed",
+      id: "tool-1",
+      name: "shell",
+      call: { kind: "run", command: "false" },
+      result: { status: "error", message: "failed" },
+    },
+    ...Array.from({ length: AGENT_EVENT_QUEUE_LIMIT + 8 }, (_, index): AgentEvent => ({
+      type: "assistant",
+      text: `update-${index}`,
+    })),
+  ];
+  for (const event of narration) channel.emit(event);
+  assert.deepEqual(await drainChannel(channel), [
+    ...narration.slice(11, AGENT_EVENT_QUEUE_LIMIT),
+    noteEvent("Agent event queue overflow: 11 ordinary narration events dropped"),
+    ...narration.slice(AGENT_EVENT_QUEUE_LIMIT),
+  ]);
 });
 
-test("AgentEventChannel ignores post-end events before queue mutation", async () => {
+test("AgentEventChannel reserves the latest session, unknown model and cleared approvals", async () => {
   const channel = new AgentEventChannel();
-  channel.end();
-  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 1; index += 1)
-    assert.doesNotThrow(() => channel.emit(noteEvent(`late-${index}`)));
+  channel.emit({ type: "session", coordinate: { sessionId: "old-session" } });
+  channel.emit({ type: "model", model: "old-model" });
+  channel.emit({ type: "permission", requests: [{ id: "ask", action: "write", resources: ["file"] }] });
+  const session: AgentEvent = { type: "session", coordinate: { sessionId: "latest-session" } };
+  channel.emit(session);
+  channel.emit({ type: "model" });
+  channel.emit({ type: "permission", requests: [] });
+  const narration = Array.from({ length: AGENT_EVENT_QUEUE_LIMIT * 3 }, (_, index) => noteEvent(`note-${index}`));
+  for (const event of narration) channel.emit(event);
+  assert.deepEqual(await drainChannel(channel), [
+    session,
+    { type: "model" },
+    { type: "permission", requests: [] },
+    noteEvent(`Agent event queue overflow: ${AGENT_EVENT_QUEUE_LIMIT * 2} ordinary narration events dropped`),
+    ...narration.slice(-AGENT_EVENT_QUEUE_LIMIT),
+  ]);
+});
+
+test("AgentEventChannel orders each replaced state at its actual arrival", async () => {
+  const channel = new AgentEventChannel();
+  channel.emit({ type: "session", coordinate: { sessionId: "old-session" } });
+  channel.emit({ type: "model", model: "old-model" });
+  channel.emit({ type: "permission", requests: [] });
+  const before = noteEvent("before replacement");
+  const between = noteEvent("between replacements");
+  const after = noteEvent("after replacement");
+  const session: AgentEvent = { type: "session", coordinate: { sessionId: "new-session" } };
+  const model: AgentEvent = { type: "model", model: "new-model" };
+  const permission: AgentEvent = { type: "permission", requests: [{ id: "new", action: "read", resources: [] }] };
+  channel.emit(before);
+  channel.emit(session);
+  channel.emit(between);
+  channel.emit(model);
+  channel.emit(permission);
+  channel.emit(after);
+  assert.deepEqual(await drainChannel(channel), [before, session, between, model, permission, after]);
+});
+
+test("AgentEventChannel keeps a loss marker through overflow and resets it when consumed", async () => {
+  const channel = new AgentEventChannel();
+  const narration = Array.from({ length: AGENT_EVENT_QUEUE_LIMIT * 2 + 2 }, (_, index) => noteEvent(`note-${index}`));
+  for (const event of narration) channel.emit(event);
   const iterator = channel[Symbol.asyncIterator]();
+  assert.deepEqual(await iterator.next(), {
+    done: false,
+    value: noteEvent(`Agent event queue overflow: ${AGENT_EVENT_QUEUE_LIMIT + 2} ordinary narration events dropped`),
+  });
+  const incoming = noteEvent("next loss");
+  channel.emit(incoming);
+  assert.deepEqual(await drainChannel(channel), [
+    ...narration.slice(-AGENT_EVENT_QUEUE_LIMIT + 1),
+    noteEvent("Agent event queue overflow: 1 ordinary narration events dropped"),
+    incoming,
+  ]);
+});
+
+test("AgentEventChannel delivers FIFO waiters and ends every remaining next", async () => {
+  const channel = new AgentEventChannel();
+  const iterator = channel[Symbol.asyncIterator]();
+  const pending = [iterator.next(), iterator.next(), iterator.next(), iterator.next()];
+  const first = noteEvent("first");
+  const second: AgentEvent = { type: "model" };
+  channel.emit(first);
+  channel.emit(second);
+  channel.end();
+  channel.end();
+  channel.emit(noteEvent("too late"));
+  assert.deepEqual(await Promise.all(pending), [
+    { done: false, value: first },
+    { done: false, value: second },
+    { done: true, value: undefined },
+    { done: true, value: undefined },
+  ]);
   assert.deepEqual(await iterator.next(), { done: true, value: undefined });
 });
 
-test("AgentEventChannel coalesces protected overflow without throwing", async () => {
+test("AgentEventChannel drains retained values after end and ignores every later emission", async () => {
   const channel = new AgentEventChannel();
-  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 1; index += 1)
-    assert.doesNotThrow(() => channel.emit(noteEvent(`error-${index}`)));
+  const first = noteEvent("retained");
+  const session: AgentEvent = { type: "session", coordinate: { sessionId: "retained-session" } };
+  channel.emit(first);
+  channel.emit(session);
   channel.end();
-
-  const events: AgentEvent[] = [];
-  for await (const event of channel) events.push(event);
-  const markers = events.filter(
-    (event): event is Extract<AgentEvent, { type: "note" }> =>
-      event.type === "note" && event.text.startsWith("Agent event queue overflow"),
-  );
-  assert.equal(events.length, AGENT_EVENT_QUEUE_LIMIT);
-  assert.equal(markers.length, 1);
-  assert.equal(markers[0]?.text, "Agent event queue overflow: 2 terminal/error events coalesced");
+  channel.end();
+  for (let index = 0; index <= AGENT_EVENT_QUEUE_LIMIT; index += 1) channel.emit(noteEvent(`late-${index}`));
+  channel.emit({ type: "session", coordinate: { sessionId: "late-session" } });
+  channel.emit({ type: "model", model: "late-model" });
+  channel.emit({ type: "permission", requests: [] });
+  assert.deepEqual(await drainChannel(channel), [first, session]);
 });
 
-test("AgentEventChannel keeps the runtime model observation narration overflow would drop", async () => {
+test("ProviderAttempt preserves failed completion and physical closure after diagnostic narration is dropped", async () => {
+  const retired = promiseBarrier<void>();
   const channel = new AgentEventChannel();
-  channel.emit({ type: "session", coordinate: { sessionId: "session-1" } });
-  channel.emit({ type: "model", model: "claude-native" });
-  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT + 8; index += 1)
-    channel.emit({ type: "assistant", text: `update-${index}` });
-  channel.end();
-
-  const events: AgentEvent[] = [];
-  for await (const event of channel) events.push(event);
-  assert.deepEqual(
-    events.filter((event) => event.type === "model"),
-    [{ type: "model", model: "claude-native" }],
-    "the model the adapter proved it ran is not narration to discard",
-  );
-  assert.equal(events.length, AGENT_EVENT_QUEUE_LIMIT + 1);
-  assert.equal(events.some((event) => event.type === "assistant" && event.text === "update-0"), false);
-  assert.equal(
-    events.some((event) => event.type === "assistant" && event.text === `update-${AGENT_EVENT_QUEUE_LIMIT + 7}`),
-    true,
-  );
-});
-
-test("AgentEventChannel keeps the latest model observation above a saturated protected queue", async () => {
-  const channel = new AgentEventChannel();
-  for (let index = 0; index < AGENT_EVENT_QUEUE_LIMIT; index += 1) channel.emit(noteEvent(`error-${index}`));
-  channel.emit({ type: "model", model: "claude-native" });
-  channel.emit({ type: "model" });
-  channel.emit(noteEvent("error-late-1"));
-  channel.emit(noteEvent("error-late-2"));
-  channel.end();
-
-  const events: AgentEvent[] = [];
-  for await (const event of channel) events.push(event);
-  assert.deepEqual(
-    events.filter((event) => event.type === "model"),
-    [{ type: "model" }],
-    "one coalesced observation holds the newest fact, an unnamed one clearing the named one",
-  );
-  assert.equal(events.length, AGENT_EVENT_QUEUE_LIMIT + 1);
-  const markers = events.filter(
-    (event): event is Extract<AgentEvent, { type: "note" }> =>
-      event.type === "note" && event.text.startsWith("Agent event queue overflow"),
-  );
-  assert.equal(markers.length, 1);
-  assert.equal(markers[0]?.text, "Agent event queue overflow: 3 terminal/error events coalesced");
+  const attempt = createProviderAttempt(undefined, async (custody) => {
+    custody.own({ closed: retired.promise, forceDispose: async () => retired.resolve() });
+    channel.emit(noteEvent("native failure diagnostic"));
+    for (let index = 0; index <= AGENT_EVENT_QUEUE_LIMIT; index += 1) {
+      channel.emit({ type: "assistant", text: `update-${index}` });
+    }
+    channel.end();
+    return {
+      admission: { fence: "native-turn" },
+      events: channel,
+      completion: Promise.resolve<TurnResult>({ kind: "failed", diagnostic: "native failure" }),
+    };
+  });
+  const session = await attempt.result;
+  assert.deepEqual(await session.completion, { kind: "failed", diagnostic: "native failure" });
+  const events = await collectEvents(session.events);
+  assert.equal(events.some((event) => event.type === "note" && event.text === "native failure diagnostic"), false);
+  let closed = false;
+  void attempt.closed.then(() => {
+    closed = true;
+  });
+  await Promise.resolve();
+  assert.equal(closed, false, "a failed completion does not prove physical retirement");
+  retired.resolve();
+  await attempt.closed;
+  assert.equal(closed, true);
 });
 
 test("ProviderAttempt applies only the current retirement mode to late ownership", async () => {

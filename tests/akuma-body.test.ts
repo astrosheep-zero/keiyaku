@@ -2525,13 +2525,19 @@ test("the model a Turn proved it ran survives narration overflow into Soul and t
     const retained = (await activitySlice(allocated.paths)).rows.flatMap((fact) =>
       fact.kind === "activity" ? [fact.event] : [],
     );
-    assert.equal(retained.length, AGENT_EVENT_QUEUE_LIMIT, "the flood saturated the bound without growing it");
-    assert.equal(retained.some((event) => event.type === "assistant" && event.text === "narration-0"), false);
-    assert.equal(
-      retained.some(
-        (event) => event.type === "assistant" && event.text === `narration-${AGENT_EVENT_QUEUE_LIMIT + 7}`,
-      ),
-      true,
+    const narration = Array.from({ length: AGENT_EVENT_QUEUE_LIMIT }, (_, index) => ({
+      type: "assistant",
+      text: `narration-${index + 8}`,
+    }));
+    assert.deepEqual(
+      retained,
+      [
+        { type: "session", coordinate: { sessionId: "overflow-session" } },
+        ...narration.slice(0, -8),
+        { type: "note", text: "Agent event queue overflow: 8 ordinary narration events dropped" },
+        ...narration.slice(-8),
+      ],
+      "session and loss evidence do not spend the bounded ordinary narration capacity",
     );
 
     await recordTell(allocated.paths, { id: "overflow-tell", body: "again", recordedAt: "2026-08-08T00:00:11.000Z" });

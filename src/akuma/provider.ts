@@ -272,86 +272,39 @@ export function unknownEvent(kind: string): Extract<AgentEvent, { type: "unknown
 
 type EventWaiter = Readonly<{ resolve(value: IteratorResult<AgentEvent>): void }>;
 
-// Slow consumers may lose reconstructible narration, but the latest model and
-// permission state each have a reserved slot. Superseding an obsolete state
-// (including an empty permission set) cannot compete with narration or overflow.
-// A full protected narration queue coalesces errors; `end` ignores later emission.
-function isErrorEvent(event: AgentEvent): boolean {
-  if (event.type === "note") return true;
-  if (event.type === "tool" && event.phase === "completed") return event.result.status === "error";
-  return event.type === "unknown" && /(?:error|fail|abort|cancel|stop|terminal)/iu.test(event.kind);
-}
+type StampedEvent = Readonly<{ ordinal: number; event: AgentEvent }>;
 
-function isStateEvent(event: AgentEvent): boolean {
-  return event.type === "model" || event.type === "permission";
-}
-
-function isReconstructibleEvent(event: AgentEvent): boolean {
-  return event.type !== "session" && !isStateEvent(event) && !isErrorEvent(event);
-}
-
-const AGENT_EVENT_OVERFLOW_PREFIX = "Agent event queue overflow";
-
-function overflowEvent(count: number): Extract<AgentEvent, { type: "note" }> {
-  return { type: "note", text: `${AGENT_EVENT_OVERFLOW_PREFIX}: ${count} terminal/error events coalesced` };
-}
-
+// Narration is disposable; state and the loss marker each reserve one slot.
+// Only the loss marker uses the reserved note key; emitted notes stay in FIFO.
 export class AgentEventChannel implements AsyncIterable<AgentEvent> {
-  private readonly queued: AgentEvent[] = [];
+  private readonly queued: StampedEvent[] = [];
+  private readonly reserved = new Map<AgentEvent["type"], StampedEvent>();
   private readonly waiters: EventWaiter[] = [];
-  private overflowMarker: Extract<AgentEvent, { type: "note" }> | undefined;
+  private ordinal = 0;
   private overflowCount = 0;
   private ended = false;
 
   emit(event: AgentEvent): void {
     if (this.ended) return;
+    const entry = { ordinal: ++this.ordinal, event };
     const waiter = this.waiters.shift();
     if (waiter !== undefined) {
       waiter.resolve({ done: false, value: event });
-      return;
-    }
-    if (isStateEvent(event)) {
-      const obsolete = this.queued.findIndex((queued) => queued.type === event.type);
-      if (obsolete === -1) this.queued.push(event);
-      else this.queued[obsolete] = event;
-      return;
-    }
-    if (this.narrationCount() >= AGENT_EVENT_QUEUE_LIMIT) {
-      const reconstructible = this.queued.findIndex(isReconstructibleEvent);
-      if (reconstructible === -1) {
-        if (isReconstructibleEvent(event)) return;
-        this.overflowCount += 1;
-        if (this.overflowMarker !== undefined) {
-          const marker = overflowEvent(this.overflowCount);
-          const markerIndex = this.queued.indexOf(this.overflowMarker);
-          if (markerIndex !== -1) {
-            this.queued[markerIndex] = marker;
-            this.overflowMarker = marker;
-            return;
-          }
-          this.overflowMarker = undefined;
-        }
-        const protectedItem = this.queued.findIndex((queued) => queued.type !== "session" && !isStateEvent(queued));
-        const replacement =
-          protectedItem === -1 ? this.queued.findIndex((queued) => !isStateEvent(queued)) : protectedItem;
-        this.overflowCount += 1;
-        const marker = overflowEvent(this.overflowCount);
-        this.queued[replacement] = marker;
-        this.overflowMarker = marker;
-        return;
+    } else if (event.type === "session" || event.type === "model" || event.type === "permission") {
+      this.reserved.set(event.type, entry);
+    } else {
+      if (this.queued.length === AGENT_EVENT_QUEUE_LIMIT) {
+        this.queued.shift();
+        this.reserved.set("note", {
+          ordinal: this.reserved.get("note")?.ordinal ?? entry.ordinal,
+          event: noteEvent(`Agent event queue overflow: ${++this.overflowCount} ordinary narration events dropped`),
+        });
       }
-      this.queued.splice(reconstructible, 1);
+      this.queued.push(entry);
     }
-    this.queued.push(event);
-  }
-
-  /** State snapshots do not spend ordinary narration slots. */
-  private narrationCount(): number {
-    return this.queued.reduce((count, event) => count + Number(!isStateEvent(event)), 0);
   }
 
   end(): void {
-    if (this.ended) return;
     this.ended = true;
     for (const waiter of this.waiters.splice(0)) waiter.resolve({ done: true, value: undefined });
   }
@@ -359,12 +312,19 @@ export class AgentEventChannel implements AsyncIterable<AgentEvent> {
   [Symbol.asyncIterator](): AsyncIterator<AgentEvent> {
     return {
       next: () => {
-        const event = this.queued.shift();
-        if (event === this.overflowMarker) {
-          this.overflowMarker = undefined;
-          this.overflowCount = 0;
+        let entry = this.queued[0];
+        for (const reserved of this.reserved.values()) {
+          if (entry === undefined || reserved.ordinal <= entry.ordinal) entry = reserved;
         }
-        if (event !== undefined) return Promise.resolve({ done: false, value: event });
+        if (entry !== undefined) {
+          if (entry === this.queued[0]) {
+            this.queued.shift();
+          } else {
+            this.reserved.delete(entry.event.type);
+            if (entry.event.type === "note") this.overflowCount = 0;
+          }
+          return Promise.resolve({ done: false, value: entry.event });
+        }
         if (this.ended) return Promise.resolve({ done: true, value: undefined });
         return new Promise((resolve) => this.waiters.push({ resolve }));
       },
