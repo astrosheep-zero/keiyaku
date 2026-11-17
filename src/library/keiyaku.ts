@@ -282,14 +282,12 @@ export class Keiyaku {
         const at = await this.#coordinates("required");
         if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
         const library = Keis.of(at.repo);
-        return await library
-          .kei({ id: this.#fullId(library, selector) })
-          .history("details" in input ? { details: input.details } : undefined);
+        return await library.kei({ id: this.#fullId(library, selector) }).history(input);
       }
       const { at, akumas } = await this.#akumas();
       return await akumas.history({
         akuma: selector,
-        ...("item" in input ? (input.item === "last" ? { last: true } : { id: input.item }) : input),
+        ...("item" in input ? (input.item === "answer" ? { last: true } : { id: input.item }) : input),
         ...(at.repo === undefined ? {} : { repo: at.repo }),
       });
     },

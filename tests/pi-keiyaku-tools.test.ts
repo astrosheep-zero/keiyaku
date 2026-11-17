@@ -11,8 +11,9 @@ import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv
 import { Akuma, World } from "../src/index.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { SERVER_DESCRIPTION } from "../src/mcp/description.js";
-import { readHeart, readLatestTurnForBody } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn, readHeart, readLatestTurnForBody } from "../src/akuma/heart/index.js";
 import { pathsForAkumaId } from "../src/akuma/identity.js";
+import { bornBody } from "./support/akuma-fixtures.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import { isolateUserHome } from "./support/user-home.js";
 import {
@@ -225,6 +226,20 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
       const validation = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(schema)))(result.structuredContent);
       assert.equal(validation.valid, true, validation.errorMessage);
     }
+
+    const retained = await bornBody(world, "feed0030", "2026-11-17T00:00:00.000Z");
+    try {
+      const turn = await beginTurn(retained.allocated.paths, { bodySequence: retained.body.sequence, startedAt: "2026-11-17T00:00:00.000Z" });
+      await endTurn(retained.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-11-17T00:00:01.000Z", outcome: { kind: "answered", answer: "exact Pi answer\n", session: { sessionId: "retained-pi" } } });
+      for (const selection of [{ limit: 1 }, { item: `turn/${turn.sequence}` }, { item: "answer" }]) {
+        const input = { selector: retained.allocated.id, ...selection };
+        await native.run(`text(await tools.keiyaku_history(${JSON.stringify(input)}));`);
+        const observed = resultFor(native.results, "keiyaku_history");
+        const expected = await client.callTool({ name: "history", arguments: input });
+        assert.equal(observed.isError, false, text(observed));
+        assert.deepEqual(observed.content, expected.content);
+      }
+    } finally { retained.holder.release(); }
 
     const observing = deferred<void>();
     native.session.subscribe((event) => {

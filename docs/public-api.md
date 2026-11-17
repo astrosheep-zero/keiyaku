@@ -188,13 +188,20 @@ authority.
 
 Native Contract abilities keep process custody private while their
 JSON projection retains the single compact owner answer. Guidance reads preserve
-exact requested content and distinguish missing authority. Contract history
-normally returns semantic events without repeating complete terms. Explicitly
-requested details retain every historical record needed to recover earlier versions;
-current guidance is not a substitute for that historical evidence. Optional
-Dispatch enrichment follows [Dispatch's isolation law](dispatch.md): its source
-failure remains visible alongside readable journal history, while the addressed
-Contract's own corrupt authority remains exceptional.
+exact requested content and distinguish missing authority. Contract historical
+reading has one caller model: a bounded page of semantic journal records, or one
+exact record opened by a copyable address from that page. A page reports the
+journal's retained range and the records it omits, and never infers current
+lifecycle from its own slice; its addresses are stable append positions that
+later facts and optional associations cannot renumber or reorder. An exact read
+recovers that record's complete retained content, including the historical terms
+that made it meaningful, and never substitutes current guidance or invents a
+snapshot the journal never kept. An unknown address is a normal unknown-history
+answer naming the addressed Contract, distinct from absent authority; corruption
+and required observation failures remain exceptional. Optional Dispatch
+enrichment follows [Dispatch's isolation law](dispatch.md): it never supplies a
+journal address, its source failure remains visible alongside readable journal
+history, while the addressed Contract's own corrupt authority remains exceptional.
 
 A caller submitting review testimony supplies a nonblank summary; historical
 testimony remains readable whether or not it included one.

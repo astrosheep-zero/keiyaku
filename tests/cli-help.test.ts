@@ -87,7 +87,7 @@ test("leaf help and usage refusals share accepted invocation options", () => {
     );
   }
   assert.match(renderContractHelp("show"), /\[--repo <path>\]/u);
-  assert.match(renderAkumaHelp("history"), /history <kei\/\.\.\.> \[--full\] \[--repo <path>\]/u);
+  assert.match(renderAkumaHelp("history"), /--id <historyId>/u);
 });
 
 test("help is stdout zero and does not enter an absent world", async () => {

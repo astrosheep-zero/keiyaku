@@ -2,7 +2,8 @@
 import { z } from "zod";
 import type { LifecycleSelection } from "../bounded-list.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
-import { entryUlidSchema, gateSchema, requirementIdSchema, verdictSchema } from "../protocol/result-leaves.js";
+import { gateSchema, requirementIdSchema, verdictSchema } from "../protocol/result-leaves.js";
+import { canonicalDecimalSchema, historyPageSchemas } from "../history.js";
 import type { AttestationData, ContractId } from "../core/facts/types.js";
 import type { ContractCatalogue } from "../protocol/read/status.js";
 import type { Settings } from "../settings.js";
@@ -13,31 +14,34 @@ import { akumaIdSchema } from "../akuma/identity.js";
 /** Public gate words remain ordinary strings; private policy interprets them. */
 export type { Gate } from "../core/facts/types.js";
 
+/** A journal row's public address is its one-based append position, never its private entry identity. */
 const historyCommon = {
-  id: entryUlidSchema,
+  id: canonicalDecimalSchema,
   at: z.string(),
 };
 const historyTarget = z.union([
   z.string(),
   z.strictObject({ kind: z.literal("contract"), contractId: contractIdSchema }).readonly(),
 ]);
+const historyIncarnation = z.strictObject({ id: z.string(), identity: z.string() }).readonly();
 const historyGates = z.array(gateSchema).readonly().exactOptional();
 const historyAfter = z.array(contractIdSchema).readonly().exactOptional();
 function historyEvent<Kind extends string, Fields extends z.ZodRawShape>(kind: Kind, fields: Fields) {
   return z.strictObject({ ...historyCommon, kind: z.literal(kind), ...fields }).readonly();
 }
-export const contractHistoryEventSchema = z.union([
+/** A page row keeps the semantic fact; an exact read adds that record's complete retained terms. */
+export const contractJournalRowSchema = z.union([
   historyEvent("bind", {
     start: snapshotIdSchema,
     target: historyTarget.exactOptional(),
     gates: historyGates,
     after: historyAfter,
     document: z.string().exactOptional(),
-    targetIncarnation: z.strictObject({ id: z.string(), identity: z.string() }).readonly().exactOptional(),
+    targetIncarnation: historyIncarnation.exactOptional(),
   }),
   historyEvent("amend", {
     target: historyTarget.exactOptional(),
-    targetIncarnation: z.strictObject({ id: z.string(), identity: z.string() }).readonly().exactOptional(),
+    targetIncarnation: historyIncarnation.exactOptional(),
     changedSections: z.array(z.string()).readonly().exactOptional(),
     gates: historyGates,
     after: historyAfter,
@@ -59,23 +63,24 @@ export const contractHistoryEventSchema = z.union([
     subject: z.string(),
     summary: z.string().exactOptional(),
   }),
-  historyEvent("claimed", { deliveryId: entryUlidSchema }),
+  historyEvent("claimed", { deliveryId: canonicalDecimalSchema }),
   historyEvent("arc", { chapter: z.number().int().positive(), title: z.string(), body: z.string().exactOptional() }),
   historyEvent("abandoned", { note: z.string().exactOptional() }),
-  z
-    .strictObject({
-      kind: z.literal("dispatch"),
-      at: z.string(),
-      akumaId: akumaIdSchema,
-    })
-    .readonly(),
 ]);
+/** One available Dispatch association, presented after the journal row it enriches. */
+export const contractDispatchRowSchema = z
+  .strictObject({ kind: z.literal("dispatch"), at: z.string(), akumaId: akumaIdSchema })
+  .readonly();
+export const contractHistoryEventSchema = z.union([contractJournalRowSchema, contractDispatchRowSchema]);
 export const contractHistorySchema = z.union([
   z
     .strictObject({
       kind: z.literal("contract"),
       contractId: contractIdSchema,
       events: z.array(contractHistoryEventSchema).readonly(),
+      omitted: z.number().int().positive().exactOptional(),
+      lowestRetainedSequence: z.number().int().positive().exactOptional(),
+      highestSequence: z.number().int().positive().exactOptional(),
       dispatches: z
         .strictObject({
           kind: z.literal("unavailable"),
@@ -86,12 +91,28 @@ export const contractHistorySchema = z.union([
         .exactOptional(),
     })
     .readonly(),
+  z
+    .strictObject({
+      kind: z.literal("contract-exact"),
+      contractId: contractIdSchema,
+      event: contractJournalRowSchema,
+    })
+    .readonly(),
+  z.strictObject({ kind: z.literal("contract-unknown-history"), contractId: contractIdSchema }).readonly(),
   z.strictObject({ kind: z.literal("contract-missing"), contractId: contractIdSchema }).readonly(),
 ]);
 
+/** A page, one exact journal record, an unknown address, or absent Contract authority. */
 export type ContractHistoryEvent = z.output<typeof contractHistoryEventSchema>;
+export type ContractDispatchRow = z.output<typeof contractDispatchRowSchema>;
+export type ContractJournalRow = z.output<typeof contractJournalRowSchema>;
 export type ContractHistory = z.output<typeof contractHistorySchema>;
-export type ContractHistoryInput = Readonly<{ details?: boolean }>;
+/** One exact address or one page window; the family's schema rejects contradictory intent. */
+export const contractHistoryInputSchema = z.union([
+  z.strictObject({ item: canonicalDecimalSchema }),
+  ...historyPageSchemas,
+]);
+export type ContractHistoryInput = Readonly<{ item?: string; before?: number; since?: number; limit?: number }>;
 
 type MarkdownBindInput = Readonly<{
   terms: string;

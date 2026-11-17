@@ -95,14 +95,19 @@ export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): 
 export async function runAkumaHistory(request: VerbRequest<"history">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
   const result = await runtime.facet.run("history", input, { signal: runtime.signal });
-  if (result.kind === "contract" || result.kind === "contract-missing")
+  if (
+    result.kind === "contract" ||
+    result.kind === "contract-exact" ||
+    result.kind === "contract-unknown-history" ||
+    result.kind === "contract-missing"
+  )
     throw new Error("Akuma history returned a non-Akuma result");
   const completion = { kind: "returned" as const, value: result };
   if (output === "json") writeJson(result);
   else {
     const raw =
-      historyRawAnswer(result, "item" in input && input.item !== "last" ? input.item : undefined) !== undefined ||
-      ("item" in input && input.item === "last" && result.kind === "akuma-last");
+      historyRawAnswer(result, "item" in input && input.item !== "answer" ? input.item : undefined) !== undefined ||
+      ("item" in input && input.item === "answer" && result.kind === "akuma-answer");
     emitAnswer(renderVerb("history", input, completion, displayContext()), raw);
   }
   return classifyVerb("history", input, completion);

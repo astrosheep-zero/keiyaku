@@ -126,10 +126,19 @@ Inspect durable facts and their requirement scope separately from live execution
 
 ```bash
 keiyaku history <contract>
-keiyaku history <contract> --json
+keiyaku history <contract> --before 13 --limit 4
+keiyaku history <contract> --id 2 --json
+keiyaku history <akuma> --answer
 keiyaku status <contract>
 keiyaku deliver <contract> --dry-run --json
 ```
+
+History defaults to the latest 12 entries for either family. Use `--before` for
+older entries or `--since` for the earliest newer entries, then copy a visible
+address to `--id` for the complete retained item. Contract decimal addresses stay
+stable as facts append; exact records retain their own historical terms. Akuma
+`--answer` returns the latest retained answered Turn, even after later failed work;
+JSON includes its exact `turn/N` coordinate.
 
 Each terminal check records testimony for its gate, stable requirement, and exact
 captured snapshot; there is no aggregate Verification attestation. A later

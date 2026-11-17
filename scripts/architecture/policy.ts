@@ -17,9 +17,11 @@ const protocolOperations = [
 const invocationFacet = [any("library/keiyaku.ts"), any("library/keiyaku-*.ts")] as const;
 
 const errorBase = any("errors.ts");
+const history = any("history.ts");
 const contractOwner = {
   allow: [
     errorBase,
+    history,
     runtime("akuma/identity.ts", ["akumaIdSchema"]),
     types("bounded-list.ts", ["LifecycleSelection"]),
     any("body/**"),
@@ -80,6 +82,7 @@ const targetPlacementRuntime = runtime("git/target-placement.ts");
 const libraryOwner = {
   allow: [
     errorBase,
+    history,
     types("bounded-list.ts", ["LifecycleSelection"]),
     any("akuma/**"),
     any("alias/**"),
@@ -775,7 +778,15 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       // The one lower native Akuma owner reads no optional Alias, Dispatch,
       // Debt or Contract authority; World composition attaches those above it.
       source: "akuma/akuma-owner.ts",
-      allow: [errorBase, any("akuma/**"), boundedList, any("identity/**"), any("settings.ts"), any("world.ts")],
+      allow: [
+        errorBase,
+        runtime("history.ts", ["historyPageSchemas"]),
+        any("akuma/**"),
+        boundedList,
+        any("identity/**"),
+        any("settings.ts"),
+        any("world.ts"),
+      ],
       deny: [any("akuma/detached-body.ts"), any("akuma/akuma-instance.ts")],
     },
     {
@@ -817,6 +828,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     { source: "akuma/read-pool.ts", allow: [] },
     {
+      source: "akuma/projection-read.ts",
+      allow: [types("akuma/projection.ts"), runtime("history.ts", ["selectHistoryPage"])],
+    },
+    {
       source: "akuma/**",
       allow: [
         errorBase,
@@ -833,6 +848,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       ],
       deny: [any("library/**"), any("akuma/detached-body.ts")],
     },
+    { source: "history.ts", allow: [] },
     { source: "runtime/proc/**", allow: [any("runtime/proc/**")] },
     {
       source: "verification/**",
@@ -957,6 +973,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "cli/**",
       allow: [
         errorBase,
+        runtime("history.ts", ["canonicalDecimalSchema"]),
         runtime("core/facts/types.ts", ["targetName", "contractId"]),
         any("akuma/**"),
         any("cli/**"),

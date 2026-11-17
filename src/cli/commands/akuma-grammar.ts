@@ -2,6 +2,7 @@ import { CliUsageError, commandGuide, usageLine, type CliUsageGuide } from "../u
 import { scanArgs, type ScanFlagKind, type ScanSpec } from "../scan.js";
 import { parseDuration as decodeDuration } from "../../duration.js";
 import { parseAkumaAlias, parseAkumaGlob, type AkumaAlias } from "../../identity/selector.js";
+import { canonicalDecimalSchema } from "../../history.js";
 import { parseExactHistorySelector } from "../../akuma/identity.js";
 
 import type { CliRequest, PendingRequest, VerbRequest } from "../parse.js";
@@ -102,20 +103,19 @@ const AKUMA_COMMAND_SPECS = {
       before: "value",
       since: "value",
       limit: "value",
-      last: "boolean",
-      full: "boolean",
+      answer: "boolean",
       json: "boolean",
     },
     usage:
-      "history <aku/...|@name> [--before <index> | --since <index>] [--limit <count>]\nhistory <aku/...|@name> --id <historyId>\nhistory <aku/...|@name> --last\nhistory <kei/...> [--full] [--repo <path>]",
+      "history <kei/...|aku/...|@name> [--before <index> | --since <index>] [--limit <count>]\nhistory <kei/...|aku/...|@name> --id <historyId>\nhistory <aku/...|@name> --answer",
     purpose: "Read an Akuma's answers and activity, or a Contract's history of changes and assigned work.",
     details: [
-      "--id reads exact retained activity by its positive decimal id, a terminal turn (turn/<number>), or a report (report/<number>).",
-      "--before <index> pages older rows before that sequence; --since <index> pages newer rows after it.",
-      "--limit bounds page size (default 12); without --since, the latest rows are shown.",
-      "With --since, paging starts at the earliest newer rows.",
-      "--last returns only the most recent answer, if one exists; it is not a history page.",
-      "Contract history defaults to a causal skeleton; --full prints every event with complete fields.",
+      "--id opens one complete Contract record by its decimal address, or retained Akuma activity by a decimal address, turn/<number>, or report/<number>.",
+      "--before <index> pages older entries before that sequence; --since <index> pages newer entries after it.",
+      "--limit bounds page size (1..5000, default 12); without --since, the latest entries are shown.",
+      "With --since, paging starts at the earliest newer entries.",
+      "--answer returns the latest retained answered Turn, even after later failed or cancelled work; it is not a history page.",
+      "Exact reads cannot be combined with paging. --repo selects the repository for Contract history.",
     ].join("\n"),
   },
   fork: {
@@ -228,52 +228,35 @@ function parseHistory(
   output: "text" | "json",
   fail: (message: string) => never,
 ): VerbRequest<"history"> {
-  if (selector.startsWith("kei/")) {
-    if ([flags.id, flags.before, flags.since, flags.limit, flags.last].some((value) => value !== undefined)) {
-      fail("history kei/... does not accept --id, --before, --since, --limit, or --last");
-    }
-    return { name: "history", input: { selector, details: flags.full === true }, output };
-  }
-  return parseAkumaHistory(selector, flags, output, fail);
-}
-
-function refuseHistoryIdConflict(
-  flags: Readonly<Record<string, FlagValue>>,
-  bounded: boolean,
-  fail: (message: string) => never,
-): void {
-  if (flags.id !== undefined && (flags.last === true || bounded))
-    fail("history --id cannot be combined with --last, --before, --since, or --limit");
-}
-
-function parseAkumaHistory(
-  selector: string,
-  flags: Readonly<Record<string, FlagValue>>,
-  output: "text" | "json",
-  fail: (message: string) => never,
-): VerbRequest<"history"> {
-  if (flags.full === true) fail("history --full is only valid for kei/...");
-  const bounded = flags.before !== undefined || flags.since !== undefined || flags.limit !== undefined;
+  const bounded = ["before", "since", "limit"].some((key) => flags[key] !== undefined);
   if (flags.before !== undefined && flags.since !== undefined)
     fail("history --before and --since are mutually exclusive");
-  refuseHistoryIdConflict(flags, bounded, fail);
-  if (flags.last === true && bounded) fail("history --last cannot be combined with --before, --since, or --limit");
-  const limit = flags.limit === undefined ? undefined : positiveIndex(flags.limit, "--limit", fail);
-  if (limit !== undefined && limit > 5_000) fail("--limit must be no greater than 5000");
+  if (flags.id !== undefined && (flags.answer === true || bounded))
+    fail("history --id cannot be combined with --answer, --before, --since, or --limit");
+  if (flags.answer === true && bounded) fail("history --answer cannot be combined with --before, --since, or --limit");
+  if (selector.startsWith("kei/") && flags.answer === true) fail("history --answer requires an Akuma");
+  const page: { before?: number; since?: number; limit?: number } = {};
+  for (const key of ["before", "since", "limit"] as const) {
+    if (flags[key] !== undefined) page[key] = positiveIndex(flags[key], `--${key}`, fail);
+  }
+  if (page.limit !== undefined && page.limit > 5_000) fail("--limit must be no greater than 5000");
   const id =
     flags.id === undefined ? undefined : stringFlag(flags.id, "history --id requires a nonblank historyId", fail);
-  if (id !== undefined && parseExactHistorySelector(id) === null)
+  if (
+    id !== undefined &&
+    (selector.startsWith("kei/")
+      ? !canonicalDecimalSchema.safeParse(id).success
+      : parseExactHistorySelector(id) === null)
+  )
     fail(
-      "history --id requires a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
+      "history --id requires a positive safe decimal integer for a Contract; Akumas also accept turn/<positive safe integer> or report/<positive safe integer>",
     );
   return {
     name: "history",
     input: {
       selector,
-      ...(id === undefined ? (flags.last === true ? { item: "last" } : {}) : { item: id }),
-      ...(flags.before === undefined ? {} : { before: positiveIndex(flags.before, "--before", fail) }),
-      ...(flags.since === undefined ? {} : { since: positiveIndex(flags.since, "--since", fail) }),
-      ...(limit === undefined ? {} : { limit }),
+      ...(id === undefined ? (flags.answer === true ? { item: "answer" } : {}) : { item: id }),
+      ...page,
     },
     output,
   };

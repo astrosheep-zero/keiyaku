@@ -211,16 +211,9 @@ function debtDetail(overrides: Partial<DebtDetail> = {}): DebtDetail {
   };
 }
 
-test("receipt and history rendering keeps journal ids and zero counts out of text", () => {
+test("empty history carries its subject without inferring a lifecycle", () => {
   assert.equal(
     renderContractHistory({ kind: "contract", contractId: contractId("kei/empty-history"), events: [] }),
-    "history  kei/empty-history · bound\n",
-  );
-  assert.equal(
-    renderContractHistory(
-      { kind: "contract", contractId: contractId("kei/empty-history"), events: [] },
-      { full: true },
-    ),
     "history  kei/empty-history\n",
   );
 });
@@ -261,7 +254,7 @@ test("the progress strip renders the road to claim from current-candidate chips"
   );
 });
 
-test("skeleton history keeps individual requirements while full history retains exact subjects", () => {
+test("history pages keep individual requirements and exact records retain subjects", () => {
   const watch = contractId("kei/history-test");
   const start = snapshotId("a".repeat(40));
   const candidateA = snapshotId("b".repeat(40));
@@ -272,7 +265,7 @@ test("skeleton history keeps individual requirements while full history retains 
   let suffix = 0;
   const nextEntry = () => {
     suffix += 1;
-    return entryUlid(`01ARZ3NDEKTSV4RRFFQ69G5F${String(suffix).padStart(2, "0")}`);
+    return String(suffix);
   };
   const delivery = (candidate: SnapshotId, predecessor: SnapshotId, integration: SnapshotId) => ({
     candidate,
@@ -350,7 +343,7 @@ test("skeleton history keeps individual requirements while full history retains 
       kind: "claimed",
       id: nextEntry(),
       at: "2026-09-29T09:30:00.000Z",
-      deliveryId: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5F99"),
+      deliveryId: "5",
     },
   ];
   const journals = events.filter((event) => event.kind !== "dispatch").length;
@@ -358,24 +351,25 @@ test("skeleton history keeps individual requirements while full history retains 
 
   assert.equal(
     text.split("\n")[0],
-    `history  kei/history-test · accepted · ${journals} entries · 1 dispatch`,
-    "the header carries state, plural counts, and no journal word",
+    `history  kei/history-test · ${journals} entries · 1 dispatch`,
+    "the header reports returned rows without asserting current lifecycle",
   );
   assert.doesNotMatch(text, /journal/u);
   assert.equal((text.match(/^\d{4}-\d{2}-\d{2}$/gmu) ?? []).length, 2, "one bare day divider per day");
-  assert.match(text, /^15:18 bound to main @ aaaaaaa · gates review · verification · aku\/intern\/33dd4670$/mu);
-  assert.match(text, /^16:00 delivered bbbbbbb$/mu);
-  assert.match(text, /^16:01 × verification verification:sha256:original-check · subject snapshot ccccccc · \d+ lines$/mu);
-  assert.match(text, /^16:11 amended · gates$/mu, "amend names its facets");
-  assert.match(text, /^16:18 delivered ddddddd$/mu);
+  assert.match(text, /^15:18 1 bound to main @ aaaaaaa · gates review · verification$/mu);
+  assert.match(text, /^15:20 dispatch · aku\/intern\/33dd4670$/mu);
+  assert.match(text, /^16:00 2 delivered bbbbbbb$/mu);
+  assert.match(text, /^16:01 3 × verification verification:sha256:original-check · subject snapshot ccccccc · \d+ lines$/mu);
+  assert.match(text, /^16:11 4 amended · gates$/mu, "amend names its facets");
+  assert.match(text, /^16:18 5 delivered ddddddd$/mu);
   assert.match(
     text,
-    /^16:19 ✓ verification verification:sha256:original-check · subject snapshot eeeeeee · target revision 01ARZ3NDEKTSV4RRFFQ69G5FA0 · \d+ lines$/mu,
+    /^16:19 6 ✓ verification verification:sha256:original-check · subject snapshot eeeeeee · target revision 01ARZ3NDEKTSV4RRFFQ69G5FA0 · \d+ lines$/mu,
   );
   assert.match(
     text,
     new RegExp(
-      `^16:38 ✓ review · subject change ${reviewChange} · document ${reviewDocument} · 1 line$`,
+      `^16:38 7 ✓ review · subject change ${reviewChange} · document ${reviewDocument} · 1 line$`,
       "mu",
     ),
     "a mark-first review beat labels every recorded subject part in canonical order",
@@ -383,19 +377,18 @@ test("skeleton history keeps individual requirements while full history retains 
   assert.doesNotMatch(text, /\[\["/u, "subject text never leaks its stored tuple array");
   assert.match(
     text,
-    /^16:38 integrated eeeeeee\.\.fffffff$/mu,
+    /^16:38 8 integrated eeeeeee\.\.fffffff$/mu,
     "reintegration stays separate from each check's evidence",
   );
-  assert.match(text, /^09:00 arc Chapter One · 2 lines$/mu, "the chapter title is visible with its body folded");
-  assert.match(text, /^09:30 accepted$/mu);
+  assert.match(text, /^09:00 10 arc Chapter One · 2 lines$/mu, "the chapter title is visible with its body folded");
+  assert.match(text, /^09:30 11 accepted$/mu);
   assert.doesNotMatch(text, /freeform body|verification satisfied|verification unsatisfied/u, "evidence stays folded");
   assert.doesNotMatch(text, /\[[ ✓×]\]/u, "history rows never carry state checkboxes");
   assert.doesNotMatch(text, /T\d{2}:\d{2}:\d{2}|Z /u, "skeleton rows carry HH:MM only");
   assert.doesNotMatch(text, /satisfied|unsatisfied/u, "the mark carries the verdict");
 
-  const full = renderContractHistory({ kind: "contract", contractId: watch, events }, { full: true });
-  assert.match(full, /^history  kei\/history-test · \d+ journal entries · 1 dispatch$/mu);
-  assert.match(full, /2026-09-28T15:18:31\.946Z bind · 01ARZ3NDEKTSV4RRFFQ69G5F01/u, "full keeps ISO stamps");
+  const full = events.flatMap((event) => event.kind === "dispatch" ? [] : [renderContractHistory({ kind: "contract-exact", contractId: watch, event })]).join("\n");
+  assert.match(full, /2026-09-28T15:18:31\.946Z bind · 1/u, "exact keeps ISO stamps");
   assert.match(full, /candidate  bbbbbbb/u, "full keeps complete fields");
   assert.match(full, /subject  snapshot ccccccc/u, "full history lays out the recorded subject parts");
   assert.match(full, /subject  snapshot eeeeeee · target revision 01ARZ3NDEKTSV4RRFFQ69G5FA0/u);
@@ -407,14 +400,14 @@ test("skeleton history keeps individual requirements while full history retains 
   assert.doesNotMatch(full, /\[\["/u, "full history never leaks the stored tuple array");
 
   const help = renderAkumaHelp("history");
-  assert.match(help, /\[--full\]/u, "help advertises the full mode");
+  assert.match(help, /--answer/u);
 });
 
-test("full Contract history renders supplied historical terms rather than a current read", () => {
+test("exact Contract history renders complete historical terms", () => {
   const id = contractId("kei/historical-terms");
-  const entry = entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV");
+  const entry = "1";
   const start = snapshotId("a".repeat(40));
-  const bytes = "# Historical terms\n\n## Context\nOriginal scope.\n";
+  const bytes = "# Historical terms\n\n## Context\nOriginal scope.\n" + Array.from({length: 150}, (_, index) => `historical line ${index}\n`).join("");
   const event: Extract<ContractHistoryEvent, { kind: "bind" }> = {
     kind: "bind",
     id: entry,
@@ -425,7 +418,7 @@ test("full Contract history renders supplied historical terms rather than a curr
     after: [],
   };
   const history = { kind: "contract" as const, contractId: id, events: [event] };
-  const full = renderContractHistory(history, { full: true });
+  const full = renderContractHistory({ kind: "contract-exact", contractId: id, event });
   assert.ok(
     full.includes(
       bytes
@@ -445,15 +438,9 @@ test("full Contract history renders supplied historical terms rather than a curr
       diagnostic: "Dispatch has invalid fields: dispatch/broken.json",
     },
   };
-  for (const full of [false, true]) {
-    const rendered = renderContractHistory(unavailable, { full });
-    assert.ok(rendered.includes(full ? "Original scope." : "bound to targetless"));
-    assert.ok(
-      rendered.includes(
-        "! Dispatch history unavailable · authority-corruption · Dispatch has invalid fields: dispatch/broken.json",
-      ),
-    );
-  }
+  const rendered = renderContractHistory(unavailable);
+  assert.ok(rendered.includes("bound to targetless"));
+  assert.ok(rendered.includes("! Dispatch history unavailable · authority-corruption · Dispatch has invalid fields: dispatch/broken.json"));
 });
 
 test("a debt title wraps its em-dash and title as one unit", () => {

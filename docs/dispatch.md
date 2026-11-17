@@ -25,9 +25,12 @@ observation, cancellation, and resource-retirement failures retain their own
 exceptional meaning. Complete Contract-to-Akuma selection depends on Dispatch
 as subject-set authority and remains strict when that authority is unavailable.
 
-Read-time composition retains available Dispatch associations on Contract rows.
-Unavailable association authority leaves readable Contract rows present with
-explicit unavailable evidence.
+Read-time composition retains available Dispatch associations on Contract
+journal rows. Association is read-time only: a Dispatch enriches the journal
+record it follows in the same frozen chronological observation, and Dispatch
+never supplies, renumbers, or consumes a journal address or page bound. An
+unavailable association source leaves readable Contract rows present with
+explicit unavailable evidence, never partial membership.
 
 Membership is exact Contract identity. This projection creates no Contract
 back-pointer, Akuma-history expansion, second timestamp, or reverse index.

@@ -694,25 +694,31 @@ test("stdin marker is position independent for Contract commands and global coor
   assert.throws(() => parseArgv(["bind", "-", "--repo"]), /--repo requires a path/u);
 });
 
-test("history accepts separate paged, exact, last, and Contract forms", () => {
+test("history accepts shared pages, exact records and Akuma answers", () => {
   for (const args of [
     ["history", "@worker", "--since", "2", "--limit", "4"],
     ["history", "@worker", "--id", "turn/3"],
     ["history", "@worker", "--id", "3"],
-    ["history", "@worker", "--last"],
-    ["history", "kei/example", "--full", "--json"],
+    ["history", "@worker", "--answer"],
+    ["history", "kei/example", "--id", "2", "--json"],
+    ["history", "kei/example", "--before", "4", "--limit", "2"],
+    ["history", "kei/example", "--since", "1"],
   ])
     assert.doesNotThrow(() => parseArgv(args));
-  for (const id of ["0", "-1", "01", "+1", "1.5", "1e2", "9007199254740992", "act/3"]) {
-    assert.throws(() => parseArgv(["history", "@worker", "--id", id]));
+  for (const selector of ["@worker", "kei/example"]) {
+    for (const id of ["0", "-1", "01", "+1", "1.5", "1e2", "9007199254740992", "act/3"]) {
+      assert.throws(() => parseArgv(["history", selector, "--id", id]));
+    }
+    assert.throws(() => parseArgv(["history", selector, "--id", "3", "--answer"]), /cannot be combined/u);
+    assert.throws(() => parseArgv(["history", selector, "--answer", "--limit", "4"]), /cannot be combined/u);
   }
-  assert.throws(() => parseArgv(["history", "@worker", "--id", "3", "--last"]), /cannot be combined/u);
-  assert.throws(() => parseArgv(["history", "@worker", "--last", "--limit", "4"]), /cannot be combined/u);
+  assert.throws(() => parseArgv(["history", "kei/example", "--answer"]), /requires an Akuma/u);
+  assert.throws(() => parseArgv(["history", "kei/example", "--id", "turn/1"]), /decimal integer/u);
 });
 
 test("history keeps the id conflict ahead of an invalid limit and id", () => {
   assert.throws(
     () => parseArgv(["history", "aku/worker/1234abcd", "--id", "not-a-turn", "--limit", "0"]),
-    /history --id cannot be combined with --last, --before, --since, or --limit/u,
+    /history --id cannot be combined with --answer, --before, --since, or --limit/u,
   );
 });

@@ -77,7 +77,7 @@ test("journal reads ignore unknown envelope and nested keys while append preserv
   const oid = snapshot.paths.get(path)?.oid;
   assert.ok(oid);
   const original = repository.run(["cat-file", "-p", oid]);
-  const history = await keiyaku.history({ details: true });
+  const history = await keiyaku.history({ item: "1" });
   const extended = `{"additional":{"opaque":true},${original.slice(1)}`
     .replace('"data":{', '"data":{"additional":null,')
     .replace('"document":{', '"document":{"additional":"future",');
@@ -93,7 +93,7 @@ test("journal reads ignore unknown envelope and nested keys while append preserv
     (await updateRefsAtomically(git, [{ ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit }])).kind,
     "published",
   );
-  assert.deepEqual(await keiyaku.history({ details: true }), history);
+  assert.deepEqual(await keiyaku.history({ item: "1" }), history);
   const reviewed = await cliJson<ReviewOutcome>(
     ["-C", repository.path, "review", state.id, "--satisfied", "--summary", "ordinary review"],
     { environment: { KEIYAKU_ACTOR_ID: "aku/worker/f0d0a002", KEIYAKU_ACTOR_WORLD: repository.path } },
@@ -107,9 +107,9 @@ test("journal reads ignore unknown envelope and nested keys while append preserv
   assert.ok(entry?.kind === "attestation");
   assert.equal(entry.data.summary, "ordinary review");
   assert.equal(encodeEntry(entry), next, "new writes contain only known content");
-  const updatedHistory = await keiyaku.history({ details: true });
-  assert.ok(updatedHistory.kind === "contract");
-  assert.match(renderContractHistory(updatedHistory, { full: true }), /ordinary review/u);
+  const updatedHistory = await keiyaku.history({ item: "2" });
+  assert.ok(updatedHistory.kind === "contract-exact");
+  assert.match(renderContractHistory(updatedHistory), /ordinary review/u);
 });
 
 describe("contract-lifecycle verification blocking", { concurrency: 3 }, () => {

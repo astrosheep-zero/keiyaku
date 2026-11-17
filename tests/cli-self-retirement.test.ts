@@ -107,7 +107,7 @@ test("an ordinary non-retiring operation keeps its receipt, exit, and worktree",
   assert.equal((delivered.stdout.match(/^✓ delivered /gmu) ?? []).length, 1, "one final receipt");
   assert.equal(existsSync(fixture.worktree), true);
 
-  const history = await runFixtureCli(fixture.cli, fixture.worktree, ["history", fixture.contract, "--full"]);
+  const history = await runFixtureCli(fixture.cli, fixture.worktree, ["history", fixture.contract, "--id", "2"]);
   assert.equal(history.exit, 0, history.stderr);
   assert.match(history.stdout, /deliver/u);
   assert.doesNotMatch(history.stdout, /claimed/u, "a delivery is not a terminal claim");
@@ -132,11 +132,14 @@ test("a worktree-local compiled CLI reports its accepted self-retirement in text
   assert.match(reviewed.stdout, /^✓ accepted$/mu);
   assert.equal(existsSync(fixture.worktree), false, "terminal cleanup retired the executing worktree");
 
-  const history = await runFixtureCli(repositoryCli, fixture.world, ["history", fixture.contract, "--full"]);
+  const history = await runFixtureCli(repositoryCli, fixture.world, ["history", fixture.contract, "--id", "3"]);
   assert.equal(history.exit, 0, history.stderr);
   assert.match(history.stdout, /gate  reviewed/u);
   assert.match(history.stdout, /verdict  satisfied/u);
-  assert.match(history.stdout, /claimed/u);
+  const terminal = await runFixtureCli(repositoryCli, fixture.world, ["history", fixture.contract, "--id", "4"]);
+  assert.equal(terminal.exit, 0, terminal.stderr);
+  assert.match(terminal.stdout, /claimed · 4/u);
+  assert.match(terminal.stdout, /delivery  2/u);
 });
 
 test("a worktree-local compiled CLI reports its accepted self-retirement in JSON", async (context) => {

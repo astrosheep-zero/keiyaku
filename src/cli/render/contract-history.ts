@@ -1,10 +1,13 @@
 import type { ContractHistory, ContractHistoryEvent } from "../../index.js";
 import { gateDisplayName, lifecycleWord, shortGitId } from "./contract-observation.js";
-import { receiptPayload } from "./receipt.js";
 import { DEFAULT_CLI_COLUMNS, renderOpaqueBlock, safeText } from "./terminal.js";
 
 function listFact(label: string, values: readonly string[] | undefined): readonly string[] {
-  return values === undefined || values.length === 0 ? [] : [`  ${label}  ${values.map(safeText).join(" · ")}`];
+  return values === undefined ? [] : [`  ${label}  ${values.length === 0 ? "none" : values.map(safeText).join(" · ")}`];
+}
+
+function historicalPayload(label: string, payload: string): readonly string[] {
+  return [`  ${label}`, ...payload.split("\n").map((line) => (line.length === 0 ? "" : `  ${safeText(line)}`))];
 }
 
 /** Lay out a recorded dependency-key set as its labeled facts; unknown representations stay literal. */
@@ -57,15 +60,14 @@ function payloadSuffix(payload: string | undefined): string {
   return ` · ${count} line${count === 1 ? "" : "s"}`;
 }
 
-function eventLine(event: ContractHistoryEvent, dispatches: readonly ContractHistoryEvent[] = []): string {
+function eventLine(event: ContractHistoryEvent): string {
   switch (event.kind) {
     case "dispatch":
       return `dispatch · ${event.akumaId}`;
     case "bind": {
       const gates = event.gates?.map(gateDisplayName) ?? [];
       const gateFact = gates.length === 0 ? "" : ` · ${gates.length === 1 ? "gate" : "gates"} ${gates.join(" · ")}`;
-      const callers = dispatches.flatMap((item) => (item.kind === "dispatch" ? [` · ${item.akumaId}`] : [])).join("");
-      return `bound to ${targetName(event.target)} @ ${shortGitId(event.start)}${gateFact}${callers}`;
+      return `bound to ${targetName(event.target)} @ ${shortGitId(event.start)}${gateFact}`;
     }
     case "amend": {
       const changed = [
@@ -119,7 +121,7 @@ function semanticBody(event: ContractHistoryEvent): readonly string[] {
         `  integration result  ${shortGitId(event.integration)}`,
         `  content identity  ${event.contentId}`,
       ];
-      if (event.note !== undefined) receiptPayload(lines, "note", event.note);
+      if (event.note !== undefined) lines.push(...historicalPayload("note", event.note));
       return lines;
     }
     case "reintegrated":
@@ -134,7 +136,7 @@ function semanticBody(event: ContractHistoryEvent): readonly string[] {
         `  verdict  ${event.verdict}`,
         `  subject  ${subjectFact(event.subject)}`,
       ];
-      if (event.summary !== undefined) receiptPayload(lines, "summary", event.summary);
+      if (event.summary !== undefined) lines.push(...historicalPayload("summary", event.summary));
       return lines;
     }
     case "claimed":
@@ -143,28 +145,25 @@ function semanticBody(event: ContractHistoryEvent): readonly string[] {
       return [
         `  sequence  ${event.chapter}`,
         `  title  ${safeText(event.title)}`,
-        ...(event.body === undefined ? [] : ["  body", ...renderOpaqueBlock(event.body, "  ", DEFAULT_CLI_COLUMNS)]),
+        ...(event.body === undefined ? [] : historicalPayload("body", event.body)),
       ];
     case "abandoned": {
       const lines: string[] = [];
-      if (event.note !== undefined) receiptPayload(lines, "note", event.note);
+      if (event.note !== undefined) lines.push(...historicalPayload("note", event.note));
       return lines;
     }
   }
 }
 
-/** Full mode exposes supplied historical facts, never a current-state reread. */
-function fullEventLines(event: ContractHistoryEvent): readonly string[] {
-  const identity = event.kind === "dispatch" ? event.akumaId : event.id;
-  const header = `${event.at} ${event.kind} · ${identity}`;
-  const detail = [
+/** One complete retained record, without substituting a current-state read. */
+function exactEventLines(event: Exclude<ContractHistoryEvent, { kind: "dispatch" }>): readonly string[] {
+  return [
+    `${event.at} ${event.kind} · ${event.id}`,
     ...semanticBody(event),
     ...(event.kind === "bind" || event.kind === "amend"
       ? [
-          ...(event.document === undefined
-            ? []
-            : ["  document", ...renderOpaqueBlock(event.document, "  ", DEFAULT_CLI_COLUMNS)]),
-          ...(event.kind !== "bind" || event.targetIncarnation === undefined
+          ...(event.document === undefined ? [] : historicalPayload("document", event.document)),
+          ...(event.targetIncarnation === undefined
             ? []
             : [
                 `  target incarnation  ${safeText(event.targetIncarnation.id)} · ${safeText(event.targetIncarnation.identity)}`,
@@ -175,50 +174,35 @@ function fullEventLines(event: ContractHistoryEvent): readonly string[] {
       ? []
       : [`  require branches up to date  ${event.requireBranchesToBeUpToDate}`]),
   ];
-  return [header, ...detail];
 }
 
 export function renderContractHistory(
-  history: Extract<ContractHistory, { kind: "contract" }>,
-  options: Readonly<{ full?: boolean }> = {},
+  history: Extract<ContractHistory, { kind: "contract" | "contract-exact" }>,
 ): string {
+  const header = `history  ${history.contractId}`;
+  if (history.kind === "contract-exact") return [header, "", ...exactEventLines(history.event)].join("\n");
   const journals = history.events.filter((event) => event.kind !== "dispatch").length;
   const dispatches = history.events.length - journals;
   const counts = [
-    ...(journals === 0
-      ? []
-      : [`${journals} ${options.full === true ? "journal " : ""}${journals === 1 ? "entry" : "entries"}`]),
+    ...(journals === 0 ? [] : [`${journals} ${journals === 1 ? "entry" : "entries"}`]),
     ...(dispatches === 0 ? [] : [`${dispatches} ${dispatches === 1 ? "dispatch" : "dispatches"}`]),
   ];
-  const state = history.events.some((event) => event.kind === "claimed")
-    ? lifecycleWord("claimed")
-    : history.events.some((event) => event.kind === "abandoned")
-      ? "abandoned"
-      : "bound";
-  const header = `history  ${history.contractId}${options.full === true ? "" : ` · ${state}`}${counts.length === 0 ? "" : ` · ${counts.join(" · ")}`}`;
-  const failure =
-    history.dispatches === undefined
-      ? []
-      : [
-          "",
-          `! Dispatch history unavailable · ${history.dispatches.category} · ${safeText(history.dispatches.diagnostic)}`,
-        ];
-  if (options.full === true) return [header, "", ...history.events.flatMap(fullEventLines), ...failure].join("\n");
-  const lines = [header, ""];
+  const lines = [header + (counts.length === 0 ? "" : ` · ${counts.join(" · ")}`), ""];
+  if (history.omitted !== undefined) lines.push(`… ${history.omitted} journal entries omitted`, "");
   let day: string | undefined;
-  for (let index = 0; index < history.events.length; index += 1) {
-    const event = history.events[index]!;
+  for (const event of history.events) {
     const nextDay = event.at.slice(0, 10);
     if (nextDay !== day) {
       if (day !== undefined) lines.push("");
       lines.push(nextDay, "");
       day = nextDay;
     }
-    const adjacent: ContractHistoryEvent[] = [];
-    if (event.kind === "bind") {
-      while (history.events[index + 1]?.kind === "dispatch") adjacent.push(history.events[++index]!);
-    }
-    lines.push(`${clock(event)} ${eventLine(event, adjacent)}`);
+    lines.push(`${clock(event)} ${event.kind === "dispatch" ? "" : `${event.id} `}${eventLine(event)}`);
   }
-  return [...lines, ...failure].join("\n");
+  if (history.dispatches !== undefined)
+    lines.push(
+      "",
+      `! Dispatch history unavailable · ${history.dispatches.category} · ${safeText(history.dispatches.diagnostic)}`,
+    );
+  return lines.join("\n");
 }

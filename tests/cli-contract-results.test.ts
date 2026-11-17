@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { contractId, entryUlid, gate, requirementId, snapshotId } from "../src/core/facts/types.js";
+import { contractId, gate, requirementId, snapshotId } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { contractWaitMemberText } from "../src/cli/render/contract-wait.js";
@@ -44,14 +44,14 @@ test("semantic Contract history renders native identities without raw journal ca
     events: [
       {
         kind: "bind",
-        id: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+        id: "1",
         at: "2026-11-09T13:00:00Z",
         start: snapshotId("a".repeat(40)),
         gates: [gate("reviewed")],
       },
       {
         kind: "attestation",
-        id: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
+        id: "2",
         at: "2026-11-09T13:01:00Z",
         gate: gate("verified"),
         requirement: requirementId("check-build"),
@@ -61,7 +61,7 @@ test("semantic Contract history renders native identities without raw journal ca
       },
       {
         kind: "arc",
-        id: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX"),
+        id: "3",
         at: "2026-11-09T13:02:00Z",
         chapter: 2,
         title: "Recovery",
@@ -69,7 +69,7 @@ test("semantic Contract history renders native identities without raw journal ca
       },
     ],
   });
-  assert.match(text, /history  kei\/compact-cli · bound · 3 entries/u);
+  assert.match(text, /history  kei\/compact-cli · 3 entries/u);
   assert.match(text, /bound to targetless/u);
   assert.match(text, /× verification check-build · subject snapshot bbbbbbb/u);
   assert.match(text, /arc Recovery · 2 lines/u);
@@ -83,7 +83,7 @@ test("subject display keeps terminal-safe parts and literal unknown representati
     events: [
       {
         kind: "attestation",
-        id: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+        id: "1",
         at: "2026-11-09T13:03:00Z",
         gate: gate("verified"),
         requirement: requirementId("check-build"),
@@ -92,7 +92,7 @@ test("subject display keeps terminal-safe parts and literal unknown representati
       },
       {
         kind: "attestation",
-        id: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
+        id: "2",
         at: "2026-11-09T13:04:00Z",
         gate: gate("verified"),
         requirement: requirementId("check-build"),

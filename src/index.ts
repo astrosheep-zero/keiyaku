@@ -160,6 +160,8 @@ export type {
   ContractHistory,
   ContractHistoryInput,
   ContractHistoryEvent,
+  ContractJournalRow,
+  ContractDispatchRow,
   ContractList,
   ContractListInput,
   ContractObservationInput,

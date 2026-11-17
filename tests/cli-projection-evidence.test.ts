@@ -28,7 +28,6 @@ import { entityLines, plumbFacts } from "../src/cli/render/terminal.js";
 import {
   changeId,
   contractId,
-  entryUlid,
   gate,
   requirementId,
   snapshotId,
@@ -236,7 +235,7 @@ test("bind draft facts preserve optional evidence without a separate text dialec
 test("Contract history renders semantic evidence and explicitly requested historical terms", () => {
   const contract = contractId("kei/history");
   const at = "2026-08-12T00:00:00.000Z";
-  const id = entryUlid("0".repeat(26));
+  const id = "1";
   const history: Extract<ContractHistory, { kind: "contract" }> = {
     kind: "contract",
     contractId: contract,
@@ -251,7 +250,7 @@ test("Contract history renders semantic evidence and explicitly requested histor
       },
       {
         kind: "attestation",
-        id: entryUlid("0".repeat(25) + "1"),
+        id: "2",
         at,
         gate: gate("verified"),
         requirement: requirementId("verification:sha256:original-check"),
@@ -264,7 +263,11 @@ test("Contract history renders semantic evidence and explicitly requested histor
   assert.match(ordinary, /bound to main @ start/u);
   assert.match(ordinary, /verification verification:sha256:original-check · subject snapshot 4444444/u);
   assert.doesNotMatch(ordinary, /exact historical terms/u);
-  const full = renderContractHistory(history, { full: true });
+  const full = history.events.map(event => {
+    assert.notEqual(event.kind, "dispatch");
+    if (event.kind === "dispatch") throw new Error("expected journal record");
+    return renderContractHistory({ kind: "contract-exact", contractId: contract, event });
+  }).join("\n");
   assert.match(full, /exact historical terms/u);
   assert.match(full, /subject  snapshot 4444444/u);
   assert.equal(JSON.parse(JSON.stringify(history)).events[0].document, "exact historical terms");

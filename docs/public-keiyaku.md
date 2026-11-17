@@ -174,8 +174,13 @@ and full exact-turn outcomes; optional association already known to the
 observation does not justify new joins. Still-running deadline members retain
 a bounded tail of actual recent events from the same observed frontier, with
 local unavailability rather than loss of the member's outcome. Waiting is not
-a full status read or reported-change observation. History selects one subject.
-Akuma history selects either one item, including the latest answer, or a timeline
-page, never both. Contract history alone can include each change's terms.
+a full status read or reported-change observation. History selects one subject and either a bounded timeline page or one exact item.
+Both families share cursor direction and bounds while keeping native sequence,
+absence, retention, and failure meanings. Copyable page addresses open complete
+retained records; contradictory selection and family-inapplicable addresses are
+caller intent errors before coordinate discovery. Latest-answer selection belongs
+only to Akuma and returns the selected answered Turn's coordinate and exact bytes
+from the same retained observation, even after later failed or cancelled work or
+reports. Standalone Akuma inputs retain their native vocabulary.
 A caller-input error is distinguishable from an owner refusal or an unexpected
 failure, and adds no authority to the facet.

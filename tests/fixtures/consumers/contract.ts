@@ -113,11 +113,11 @@ const worldReconciled = await Keis.of(repo).reconcile({ retryHooks: true });
 worldReconciled.kind;
 const guidance = await selected.guidance();
 if (guidance.kind === "present") void guidance.guidance;
-const history = await selected.history({ details: true });
-if (history.kind === "contract")
-  history.events.forEach((event) => {
-    if (event.kind === "bind" || event.kind === "amend") void [event.document, event.gates, event.after];
-  });
+const history = await selected.history({ item: "1" });
+if (history.kind === "contract-exact") {
+  const event = history.event;
+  if (event.kind === "bind" || event.kind === "amend") void [event.document, event.gates, event.after];
+}
 
 // Handles cannot be independently constructed outside their repository authority.
 // @ts-expect-error constructor is private

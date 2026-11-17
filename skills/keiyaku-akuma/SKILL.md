@@ -51,8 +51,11 @@ research.
 - **`kanshi`, `status`, and `history`:** `kanshi` shows the `World` board;
   `status <aku/...|kei/...|@name>` observes one identity, with current work and
   file-change summary for an Akuma. Plural and category status are refused.
-  `history` reads recent timeline events, the latest answer, or one exact
-  `turn/N` or `report/N` item.
+  `history` reads bounded timeline entries; `--before`, `--since`, and `--limit`
+  page either Contract or Akuma history. Copy a decimal row address to `--id` for
+  a complete Contract record or Akuma activity, or an Akuma `turn/N` or `report/N`
+  address for that retained item. `--answer` returns the latest retained answered
+  Turn as raw bytes; JSON also carries its exact Turn coordinate.
 - **`ls`, `fork`, and `kill`:** `ls` lists akumaNames (`aku/`), recent
   instances with life and associations (`"aku/*/*"`), or your own call tree;
   `fork` branches a new `Akuma`

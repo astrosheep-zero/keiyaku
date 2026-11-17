@@ -42,7 +42,7 @@ enumeration stay out of ordinary text. Historical attestation subject text
 presents the recorded subject as its labeled semantic facts, not its stored
 encoding; an unrecognized representation stays literal terminal-safe evidence
 rather than gaining an invented reading. Ordinary JSON receipts likewise omit
-raw journal records and internal custody; explicitly requested full history
+raw journal records and internal custody; explicitly requested exact history
 retains historical content without duplicating storage envelopes. Verification
 receipts name the captured snapshot once and each check's verdict or stop,
 declaration position, and recording conclusion compactly. Full identities remain
@@ -199,51 +199,43 @@ coordinates. Presentation may wrap or densify evidence but cannot truncate a
 copyable identity, replace a public discriminant with decoration, or remove
 evidence merely to hide internal terminology.
 
-One Akuma observation discipline keeps complete identity and known static
-context ahead of current work or chronological activity, followed by the native
-life judgment, reported changes, and diagnostics. Status renders semantic work;
-history and live observation retain their chronological interpretation.
-Known coordinates appear once; unknown coordinates stay absent. Selected Akuma
-status foregrounds the age of its latest retained activity, when any, without
-inferring activity from a Turn opening or claiming continuous liveness. The
-projection owner supplies semantic current-work facts and one concrete bounded
-current-action summary, with exact retained detail coordinates. Status and World
-render that answer without expanding a chat timeline. Thin catalogue rows share
-one projection with World observation; World current work is a separate bounded
-native observation. History and live observation retain their chronological
-activity, omissions and complete native interpretation. Changes within the execution
-directory have priority over outside changes, which are summarized separately;
-an unavailable directory preserves the
-unpartitioned summary. Identity, conclusion, reported changes, and actionable
-failure or pending evidence remain visible. A diagnostic keeps its subject,
-unavailable state, cause, and recovery coordinates together, never as an
-unlabeled static property. Activity retains the owner's event order, selection,
-omissions, payloads, and attribution. A conclusion already supplied by the
-timeline is not repeated.
+Akuma panels place complete identity and known context before native work or
+chronological activity, life, changes, and diagnostics. Coordinates appear once;
+unknown facts stay absent. Status foregrounds retained activity age, never Turn
+opening or inferred liveness, and renders the owner's bounded current-action
+summary with exact detail coordinates. Status and World do not expand a chat
+timeline. Thin catalogue and World rows share the native projection; World current
+work is separately bounded. History and live observation preserve owner order,
+selection, omissions, payloads, and attribution. Changes in the execution directory
+take priority over separately summarized outside changes; unknown directory keeps
+the unpartitioned summary. Identity, conclusion, changes, and actionable pending
+or failure evidence stay visible. Diagnostics keep subject, availability, cause,
+and recovery together. A timeline conclusion is not repeated.
 
 History is immutable: it neither fabricates current state nor reads extra state
-to fill its panel. Status consumes the same completion judgment as wait,
+to fill its panel. Contract pages expose copyable journal addresses in append
+order; optional Dispatch follows its owning record with its recorded time and
+Akuma detail address. A bounded page names its omissions and never implies
+current lifecycle from the slice. An exact Contract read presents the complete
+retained historical record, including authored payloads, without terminal clipping
+or substitution by current guidance. Unavailable Dispatch enrichment stays beside
+readable page rows.
+Status consumes the same completion judgment as wait,
 including outstanding input on a sleeping Akuma. Only an observed input wait
 justifies elapsed-duration text; unknown change size never implies additions or
 removals. Activity omits wall-clock timestamps while retaining witnessed tool
 and wait durations.
 
-Free text shares one bounded payload discipline across Contract testimony and
-Akuma observations. Multiline payloads preserve paragraphs and indentation;
-single-line previews fold whitespace. Speech, input, thought, and action remain
-distinct without invented quotation marks, and wrapping never changes event
-selection or meaning. Whole-grapheme terminal width governs wrapping and visible
-truncation, preferring word boundaries. History previews retain the beginning
-and name their omission; status and World carry outcome coordinates and verdicts
-rather than answer previews. An exact
-activity text read returns the full retained authored content or neutral tool
-summary without terminal framing or payload clipping; exact typed output keeps
-the complete retained native row. Paged Akuma history exposes each retained
-report and Turn outcome's exact address directly, keeping those coordinates
-copyable even in a narrow terminal. Outcome payloads follow their address and
-preserve multiline relative indentation. Live observation keeps its existing
-presentation; exact item and latest-answer reads remain raw retained bytes.
-Capture and retention limits remain honest.
+Bounded free-text previews preserve multiline paragraphs and indentation, fold
+single-line whitespace, and keep speech, input, thought, and action distinct without
+invented quotation marks. Whole-grapheme wrapping prefers word boundaries, preserves
+selection and meaning, and names truncation. History previews keep the beginning;
+status and World show outcome coordinates and verdicts rather than answer previews.
+Akuma history exposes copyable report and Turn addresses even in narrow terminals,
+with outcome payloads below preserving relative indentation. Exact activity text
+returns full retained authored content or neutral tool summary without framing or
+clipping; typed detail keeps the native row. Exact Akuma item and latest-answer
+text remains raw retained bytes. Capture and retention limits remain honest.
 
 Selected Contract status foregrounds current work or the terminal outcome,
 without repeating settled mechanics. A delivered integration observed before

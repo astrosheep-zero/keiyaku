@@ -14,6 +14,7 @@ export const capabilityPolicy = {
       module: "zod",
       owners: [
         { source: "bounded-list.ts", symbols: ["z"] },
+        { source: "history.ts", symbols: ["z"] },
         { source: "region.ts", symbols: ["z"] },
         { source: "settings.ts", symbols: ["z"] },
         { source: "kanshi/report.ts", symbols: ["z"] },

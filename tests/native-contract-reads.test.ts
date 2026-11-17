@@ -1,9 +1,9 @@
-import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
+import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
@@ -14,6 +14,7 @@ import { captureLocalContractComposition } from "../src/library/contract-setting
 import { scopeForRepo } from "../src/library/repo.js";
 import { withScopeAbortSignal } from "../src/protocol/operations.js";
 import { contractJournalPath } from "../src/git/identity.js";
+import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import {
   GIT_REF,
@@ -24,25 +25,39 @@ import {
   writeBlob,
   writeStateCommit,
 } from "../src/git/repository.js";
+import { Keis, Keiyaku, KeiyakuError, Repo } from "../src/index.js";
 import {
-  Keis,
-  Keiyaku,
-  KeiyakuError,
-  Repo,
-} from "../src/index.js";
-import { contractHistorySchema } from "../src/library/contract-types.js";
+  contractHistorySchema,
+  type ContractHistory,
+  type ContractHistoryInput,
+} from "../src/library/contract-types.js";
 import { guidanceSchema } from "../src/library/kei.js";
-import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { waitForFile, withGitShim } from "./support/git.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { temporaryDirectory } from "./support/process.js";
 
-test("default Contract history is semantic; explicit full history retains each historical version", async (t) => {
+/** Address-bearing row labels: enough to prove order, stable addresses and enrichment placement. */
+function rowLabels(history: ContractHistory): readonly string[] {
+  assert.ok(history.kind === "contract");
+  return history.events.map((event) =>
+    event.kind === "dispatch" ? `dispatch ${event.akumaId}` : `${event.kind} ${event.id}`,
+  );
+}
+
+function dispatchBytes(akumaId: string, contract: string, dispatchedAt: string): string {
+  return `${JSON.stringify({ akumaId, contractId: contract, dispatchedAt })}\n`;
+}
+
+function dispatchPath(akumaId: string): string {
+  return `dispatch/${createHash("sha256").update(akumaId).digest("hex")}.json`;
+}
+
+test("Contract history pages journal addresses, and an exact address recovers its own record", async () => {
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({
-      terms: document().replace("Call only the package-root API.", "Historical terms. ".repeat(80)),
+      terms: document().replace("Call only the package-root API.", "Historical terms. ".repeat(8)),
       target: null,
       gates: ["reviewed"],
     }),
@@ -52,45 +67,124 @@ test("default Contract history is semantic; explicit full history retains each h
   const amended = present(await bound.kei.state()).terms.document.bytes;
   accepted(await bound.kei.arc({ body: "# A historical chapter\n\nExact narrative body.\n" }));
 
-  const semantic = await bound.kei.history();
-  assert.ok(semantic.kind === "contract");
-  assert.equal(semantic.contractId, bound.contractId);
-  assert.deepEqual(
-    semantic.events.map((event) => event.kind),
-    ["bind", "amend", "arc"],
-  );
-  const amendment = semantic.events.find((event) => event.kind === "amend");
-  assert.deepEqual(amendment?.changedSections, ["Objective"]);
+  const page = await bound.kei.history();
+  assert.deepEqual(rowLabels(page), ["bind 1", "amend 2", "arc 3"]);
+  assert.ok(page.kind === "contract");
+  assert.equal(page.lowestRetainedSequence, 1);
+  assert.equal(page.highestSequence, 3);
+  assert.equal(page.omitted, undefined);
+  assert.equal(page.dispatches, undefined);
   assert.equal(
-    semantic.events.every((event) => !("document" in event)),
+    page.events.every((event) => !("document" in event) || event.document === undefined),
     true,
   );
-  assertWireRoundTrip(contractHistorySchema, semantic);
+  const pageAmendment = page.events[1];
+  assert.ok(pageAmendment?.kind === "amend");
+  assert.deepEqual(pageAmendment.changedSections, ["Objective"]);
+  assertWireRoundTrip(contractHistorySchema, page);
 
-  const facet = Keiyaku.for({
-    cwd: repository.path,
-    environment: {},
-    home: temporaryDirectory(t, "history-full-home-"),
+  const state = present(await bound.kei.state());
+  const binding = await bound.kei.history({ item: "1" });
+  assert.ok(binding.kind === "contract-exact");
+  assert.ok(binding.event.kind === "bind");
+  assert.equal(binding.event.id, "1");
+  assert.equal(binding.event.start, state.coordinates.start);
+  assert.equal(binding.event.document, original);
+  assert.deepEqual(binding.event.gates, ["reviewed"]);
+  assert.deepEqual(binding.event.after, []);
+  assert.equal(binding.event.target, undefined);
+  assertWireRoundTrip(contractHistorySchema, binding);
+
+  const amendment = await bound.kei.history({ item: "2" });
+  assert.ok(amendment.kind === "contract-exact");
+  assert.ok(amendment.event.kind === "amend");
+  assert.equal(amendment.event.document, amended);
+  assert.deepEqual(amendment.event.changedSections, ["Objective"]);
+  assert.deepEqual(amendment.event.gates, ["reviewed"]);
+  assert.deepEqual(amendment.event.after, []);
+  assertWireRoundTrip(contractHistorySchema, amendment);
+
+  const chapter = await bound.kei.history({ item: "3" });
+  assert.ok(chapter.kind === "contract-exact");
+  assert.ok(chapter.event.kind === "arc");
+  assert.equal(chapter.event.chapter, 1);
+  assert.equal(chapter.event.title, "A historical chapter");
+  assert.equal(chapter.event.body, "\nExact narrative body.\n");
+  assertWireRoundTrip(contractHistorySchema, chapter);
+
+  assert.deepEqual(await bound.kei.history({ item: "4" }), {
+    kind: "contract-unknown-history",
+    contractId: bound.contractId,
   });
-  const full = await facet.run("history", { selector: bound.contractId, details: true });
-  assert.ok(full.kind === "contract");
-  const boundEvent = full.events.find((event) => event.kind === "bind");
-  const amendedEvent = full.events.find((event) => event.kind === "amend");
-  assert.ok(boundEvent?.kind === "bind");
-  assert.ok(amendedEvent?.kind === "amend");
-  assert.equal(boundEvent.document, original);
-  assert.equal(amendedEvent.document, amended);
-  assert.deepEqual(boundEvent.gates, ["reviewed"]);
-  assert.deepEqual(amendedEvent.gates, ["reviewed"]);
-  assert.deepEqual(amendedEvent.after, []);
-  assert.notEqual(original, amended);
-  assert.ok(
-    full.events.every((event) =>
-      event.kind === "bind" || event.kind === "amend" ? event.document !== undefined : true,
-    ),
+
+  const recent = await bound.kei.history({ before: 3, limit: 2 });
+  assert.deepEqual(rowLabels(recent), ["bind 1", "amend 2"]);
+  assert.ok(recent.kind === "contract");
+  assert.equal(recent.omitted, undefined);
+  const boundedAmendment = await bound.kei.history({ since: 1, limit: 1 });
+  assert.deepEqual(rowLabels(boundedAmendment), ["amend 2"]);
+  assert.ok(boundedAmendment.kind === "contract");
+  assert.equal(boundedAmendment.omitted, 1);
+  const boundedRecord = boundedAmendment.events[0];
+  assert.ok(boundedRecord?.kind === "amend");
+  assert.deepEqual(boundedRecord.changedSections, ["Objective"]);
+  const latest = await bound.kei.history({ limit: 1 });
+  assert.deepEqual(rowLabels(latest), ["arc 3"]);
+  assert.ok(latest.kind === "contract");
+  assert.equal(latest.omitted, 2);
+
+  for (const invalid of [
+    { item: "1", limit: 1 },
+    { item: "1", before: 2 },
+    { before: 2, since: 1 },
+    { item: "turn/1" },
+    { item: "report/1" },
+    { item: "answer" },
+    { item: "last" },
+    { item: "0" },
+    { item: "01" },
+    { before: 0 },
+    { limit: 5_001 },
+  ] as readonly ContractHistoryInput[]) {
+    await assert.rejects(bound.kei.history(invalid), (error: unknown) => {
+      assert.ok(error instanceof KeiyakuError);
+      assert.equal(error.category, "invalid-input");
+      return true;
+    });
+  }
+  await withGitShim(
+    'if [ "$1 $2" = "cat-file --batch" ]; then exit 73; fi\nexec "$KEIYAKU_REAL_GIT" "$@"',
+    {},
+    async (gitPath) => {
+      const kei = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({ id: bound.contractId });
+      // Invalid caller intent is refused before any product observation could fail.
+      await assert.rejects(kei.history({ item: "answer" }), (error: unknown) => {
+        assert.ok(error instanceof KeiyakuError);
+        assert.equal(error.category, "invalid-input");
+        return true;
+      });
+    },
   );
-  assertWireRoundTrip(contractHistorySchema, full);
-  assert.deepEqual(await facet.run("history", { selector: bound.contractId }), semantic);
+  for (let chapter = 2; chapter <= 12; chapter += 1) accepted(await bound.kei.arc({ body: `# Chapter ${chapter}\n\nRetained chapter ${chapter}.\n` }));
+  const tail = await bound.kei.history();
+  assert.ok(tail.kind === "contract");
+  assert.equal(tail.highestSequence, 14);
+  assert.equal(tail.omitted, 2);
+  assert.deepEqual(tail.events.map(event => event.kind === "dispatch" ? undefined : event.id), Array.from({ length: 12 }, (_, index) => String(index + 3)));
+  const traversed: string[] = [];
+  let since = 1;
+  for (;;) {
+    const page = await bound.kei.history({ since, limit: 4 });
+    assert.ok(page.kind === "contract");
+    const rows = page.events.filter(event => event.kind !== "dispatch");
+    traversed.push(...rows.map(row => row.id));
+    if (page.omitted === undefined) break;
+    since = Number(rows.at(-1)!.id);
+  }
+  assert.deepEqual(traversed, Array.from({ length: 13 }, (_, index) => String(index + 2)));
+  const old = await bound.kei.history({ before: 3, limit: 1 });
+  assert.ok(old.kind === "contract" && old.events[0]?.kind === "amend");
+  assert.deepEqual(old.events[0].changedSections, ["Objective"]);
 });
 
 async function overwriteAuthority(path: string, changes: ReadonlyMap<string, string>): Promise<void> {
@@ -107,18 +201,87 @@ async function overwriteAuthority(path: string, changes: ReadonlyMap<string, str
   );
 }
 
-test("Contract history retains its journal and CLI content when unrelated Dispatch authority is malformed", async (t) => {
+test("Dispatch enrichment anchors to the preceding journal row without touching journal addresses", async () => {
   const raw = repositoryWithMain();
-  const repo = await Repo.at({ path: raw.path });
-  const contracts = Keis.of(repo);
+  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ terms: document(), target: null }));
+  // Distinct admission clocks keep the anchoring cases unambiguous.
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nThe amended objective.\n" }));
+  const pages = await bound.kei.history();
+  assert.ok(pages.kind === "contract");
+  const bindingAt = pages.events[0]!.at;
+  const amendmentAt = pages.events[1]!.at;
+  assert.ok(bindingAt < amendmentAt);
+  const journalPath = contractJournalPath(bound.contractId);
+  const journal = decodeJournal(raw.run(["show", `${GIT_REF}:${journalPath}`]));
+  // Nonmonotonic clocks: the first appended row now carries the later timestamp.
+  const swapped = journal.map((entry, index) => ({ ...entry, at: journal[journal.length - 1 - index]!.at }));
+  await overwriteAuthority(raw.path, new Map([[journalPath, swapped.map(encodeEntry).join("")]]));
+  const git = await repositoryAt(raw.path);
+  const fallback = parseAkumaId("aku/worker/00000001").id;
+  const firstTie = parseAkumaId("aku/worker/00000002").id;
+  const secondTie = parseAkumaId("aku/worker/00000009").id;
+  const earlier = parseAkumaId("aku/worker/00000003").id;
+  for (const akumaId of [secondTie, fallback, earlier, firstTie]) {
+    assert.equal(
+      (await publishDispatch({ repository: git, akumaId, contractId: bound.contractId })).kind,
+      "dispatched",
+    );
+  }
+  await overwriteAuthority(
+    raw.path,
+    new Map([
+      // Earlier than every journal timestamp still belongs to the first appended row.
+      [dispatchPath(fallback), dispatchBytes(fallback, bound.contractId, "2000-01-01T00:00:00.000Z")],
+      [dispatchPath(firstTie), dispatchBytes(firstTie, bound.contractId, amendmentAt)],
+      [dispatchPath(secondTie), dispatchBytes(secondTie, bound.contractId, amendmentAt)],
+      [dispatchPath(earlier), dispatchBytes(earlier, bound.contractId, bindingAt)],
+    ]),
+  );
+
+  const page = await bound.kei.history();
+  assert.ok(page.kind === "contract");
+  const journalRows = page.events.filter((event) => event.kind !== "dispatch");
+  // Append order stays authoritative even though the first row now carries the later clock.
+  assert.deepEqual(
+    journalRows.map((row) => [row.id, row.at]),
+    [
+      ["1", amendmentAt],
+      ["2", bindingAt],
+    ],
+  );
+  assert.deepEqual(rowLabels(page), [
+    "bind 1",
+    `dispatch ${fallback}`,
+    `dispatch ${firstTie}`,
+    `dispatch ${secondTie}`,
+    "amend 2",
+    `dispatch ${earlier}`,
+  ]);
+  assert.deepEqual(rowLabels(await bound.kei.history({ before: 2 })), [
+    "bind 1",
+    `dispatch ${fallback}`,
+    `dispatch ${firstTie}`,
+    `dispatch ${secondTie}`,
+  ]);
+  const latestPage = await bound.kei.history({ limit: 1 });
+  assert.deepEqual(rowLabels(latestPage), ["amend 2", `dispatch ${earlier}`]);
+  assert.ok(latestPage.kind === "contract");
+  assert.equal(latestPage.omitted, 1);
+  const binding = await bound.kei.history({ item: "1" });
+  assert.ok(binding.kind === "contract-exact");
+  assert.equal(binding.event.kind, "bind");
+  assertWireRoundTrip(contractHistorySchema, binding);
+});
+
+test("Contract history retains its journal when unrelated Dispatch authority is malformed", async () => {
+  const raw = repositoryWithMain();
+  const contracts = Keis.of(await Repo.at({ path: raw.path }));
   const bound = accepted(await contracts.bind({ terms: document(), target: null }));
   accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nRetained amended objective.\n" }));
   accepted(await bound.kei.arc({ body: "# Retained chapter\n\nExact journal narrative.\n" }));
-  const semantic = await bound.kei.history();
-  assert.ok(semantic.kind === "contract");
-  const before = await bound.kei.history({ details: true });
-  assert.ok(before.kind === "contract");
-  assert.equal(before.dispatches, undefined);
+  const healthy = await bound.kei.history();
+  assert.deepEqual(rowLabels(healthy), ["bind 1", "amend 2", "arc 3"]);
   const git = await repositoryAt(raw.path);
   const member = parseAkumaId("aku/worker/00000001").id;
   const unrelated = parseAkumaId("aku/worker/00000002").id;
@@ -128,18 +291,17 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
   ] as const) {
     assert.equal((await publishDispatch({ repository: git, akumaId, contractId: owner })).kind, "dispatched");
   }
-  const healthy = await bound.kei.history({ details: true });
-  assert.ok(healthy.kind === "contract");
-  assert.equal(healthy.dispatches, undefined);
-  assert.deepEqual(
-    healthy.events.filter((event) => event.kind === "dispatch").map((event) => event.akumaId),
-    [member],
+  const enriched = await bound.kei.history();
+  assert.deepEqual(rowLabels(enriched), ["bind 1", "amend 2", "arc 3", `dispatch ${member}`]);
+  assert.ok(enriched.kind === "contract");
+  assert.equal(enriched.dispatches, undefined);
+  assertWireRoundTrip(Keiyaku.verbs.history.output, enriched);
+  assert.equal(
+    classifyVerb("history", { selector: bound.contractId }, { kind: "returned", value: enriched }),
+    "accepted",
   );
-  assert.deepEqual(
-    healthy.events.map((event) => event.at),
-    healthy.events.map((event) => event.at).sort(),
-  );
-  const badPath = `dispatch/${createHash("sha256").update(unrelated).digest("hex")}.json`;
+
+  const badPath = dispatchPath(unrelated);
   await overwriteAuthority(
     raw.path,
     new Map([
@@ -149,46 +311,31 @@ test("Contract history retains its journal and CLI content when unrelated Dispat
       ],
     ]),
   );
-  const facet = Keiyaku.for({ cwd: raw.path, environment: {}, home: temporaryDirectory(t, "history-corruption-home-") });
-  for (const full of [false, true]) {
-    const history = await bound.kei.history({ details: full });
-    assert.ok(history.kind === "contract");
-    assert.deepEqual(history.events, full ? before.events : semantic.events);
-    assert.equal(history.dispatches?.kind, "unavailable");
-    assert.equal(history.dispatches?.category, "authority-corruption");
-    assert.ok(history.dispatches?.diagnostic.includes(badPath));
-    assertWireRoundTrip(contractHistorySchema, history);
-    assertWireRoundTrip(Keiyaku.verbs.history.output, history);
-    assert.deepEqual(await facet.run("history", { selector: bound.contractId, details: full }), history);
-    assert.equal(
-      classifyVerb("history", { selector: bound.contractId, details: full }, { kind: "returned", value: history }),
-      "accepted",
-    );
-    const argv = ["-C", raw.path, "history", bound.contractId, ...(full ? ["--full"] : [])];
-    const json = await cliJson(argv, { environment: {} });
-    assert.equal(json.exit, 0, json.stderr);
-    assert.deepEqual(json.value, history);
-    const text = await runCli(argv, { environment: {} });
-    assert.equal(text.exit, 0, text.stderr);
-    assert.match(text.stdout, /Retained chapter/u);
-    assert.match(text.stdout, /Dispatch history unavailable/u);
-    assert.ok(text.stdout.includes(badPath));
-    if (full) {
-      for (const event of before.events) {
-        if (event.kind === "bind" || event.kind === "amend") {
-          assert.ok(event.document);
-          for (const line of event.document.trim().split("\n")) assert.ok(text.stdout.includes(line));
-        }
-      }
-    }
-    assert.deepEqual(await contracts.kei({ id: contractId("kei/missing") }).history({ details: full }), {
-      kind: "contract-missing",
-      contractId: "kei/missing",
-    });
-  }
+  const history = await bound.kei.history();
+  // Unavailable association authority supplies no partial membership at all.
+  assert.deepEqual(rowLabels(history), ["bind 1", "amend 2", "arc 3"]);
+  assert.ok(history.kind === "contract");
+  assert.equal(history.dispatches?.kind, "unavailable");
+  assert.equal(history.dispatches?.category, "authority-corruption");
+  assert.ok(history.dispatches?.diagnostic.includes(badPath));
+  assertWireRoundTrip(contractHistorySchema, history);
+  assertWireRoundTrip(Keiyaku.verbs.history.output, history);
+  const bounded = await bound.kei.history({ before: 3, limit: 1 });
+  assert.deepEqual(rowLabels(bounded), ["amend 2"]);
+  assert.ok(bounded.kind === "contract");
+  assert.equal(bounded.dispatches?.category, "authority-corruption");
+  const binding = await bound.kei.history({ item: "1" });
+  assert.ok(binding.kind === "contract-exact");
+  assert.equal(binding.event.kind, "bind");
+  assert.equal("dispatches" in binding, false);
+  assert.deepEqual(await contracts.kei({ id: contractId("kei/missing") }).history(), {
+    kind: "contract-missing",
+    contractId: "kei/missing",
+  });
+
   await overwriteAuthority(raw.path, new Map([[contractJournalPath(bound.contractId), "not a journal\n"]]));
-  for (const full of [false, true]) {
-    await assert.rejects(bound.kei.history({ details: full }), (error: unknown) => {
+  for (const request of [undefined, { item: "1" }] as const) {
+    await assert.rejects(bound.kei.history(request), (error: unknown) => {
       assert.ok(error instanceof KeiyakuError);
       assert.equal(error.category, "authority-corruption");
       assert.ok(error.cause instanceof AuthorityCorruptionError);
@@ -203,7 +350,13 @@ test("history propagates native cancellation during optional Dispatch enrichment
   const bound = accepted(await Keis.of(repo).bind({ terms: document(), target: null }));
   const git = await repositoryAt(raw.path);
   assert.equal(
-    (await publishDispatch({ repository: git, akumaId: parseAkumaId("aku/worker/00000003").id, contractId: bound.contractId })).kind,
+    (
+      await publishDispatch({
+        repository: git,
+        akumaId: parseAkumaId("aku/worker/00000003").id,
+        contractId: bound.contractId,
+      })
+    ).kind,
     "dispatched",
   );
   const snapshot = await withGitDecodeChannel(git, (channel) =>
@@ -246,32 +399,19 @@ test("history propagates native cancellation during optional Dispatch enrichment
   );
 });
 
-test("history reports internal unavailable Dispatch enrichment when the Dispatch blob read fails", async (t) => {
+test("history reports internal unavailable Dispatch enrichment when the Dispatch blob read fails", async () => {
   const raw = repositoryWithMain();
   const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ terms: document(), target: null }));
   accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nRetained amended objective.\n" }));
-  const semantic = await bound.kei.history();
-  assert.ok(semantic.kind === "contract");
-  const complete = await bound.kei.history({ details: true });
-  assert.ok(complete.kind === "contract");
+  const healthy = await bound.kei.history();
+  assert.deepEqual(rowLabels(healthy), ["bind 1", "amend 2"]);
   const akumaId = parseAkumaId("aku/worker/00000004").id;
   const git = await repositoryAt(raw.path);
-  assert.equal(
-    (await publishDispatch({ repository: git, akumaId, contractId: bound.contractId })).kind,
-    "dispatched",
-  );
-  const healthy = await bound.kei.history({ details: true });
-  assert.ok(healthy.kind === "contract");
-  assert.equal(healthy.dispatches, undefined);
-  assert.deepEqual(
-    healthy.events.filter((event) => event.kind === "dispatch").map((event) => event.akumaId),
-    [akumaId],
-  );
+  assert.equal((await publishDispatch({ repository: git, akumaId, contractId: bound.contractId })).kind, "dispatched");
   const snapshot = await withGitDecodeChannel(git, (channel) =>
     withGitReadObservation(git, channel, (observation) => observation.snapshot),
   );
   const dispatch = [...snapshot.paths].find(([path]) => path.startsWith("dispatch/"))![1];
-  const home = temporaryDirectory(t, "history-internal-home-");
   await withGitShim(
     [
       'if [ "$1 $2" = "cat-file --batch" ]; then',
@@ -288,39 +428,19 @@ test("history reports internal unavailable Dispatch enrichment when the Dispatch
     ].join("\n"),
     { KEIYAKU_BROKEN_OID: dispatch.oid },
     async (gitPath) => {
-      const environment = {
-        HOME: home,
-        USERPROFILE: home,
-        KEIYAKU_HOME: home,
-        KEIYAKU_GIT_PATH: gitPath,
-      };
       const kei = Keis.of(await Repo.at({ path: raw.path, gitPath })).kei({ id: bound.contractId });
-      const facet = Keiyaku.for({ cwd: raw.path, environment, home });
-      for (const full of [false, true]) {
-        const history = await kei.history({ details: full });
-        assert.ok(history.kind === "contract");
-        assert.deepEqual(history.events, full ? complete.events : semantic.events);
-        assert.equal(history.dispatches?.kind, "unavailable");
-        assert.equal(history.dispatches?.category, "internal");
-        const diagnostic = history.dispatches?.diagnostic ?? "";
-        assert.match(diagnostic, /unexpected header/u);
-        assert.ok(diagnostic.includes(dispatch.oid));
-        assertWireRoundTrip(contractHistorySchema, history);
-        assertWireRoundTrip(Keiyaku.verbs.history.output, history);
-        assert.equal(
-          classifyVerb("history", { selector: bound.contractId, details: full }, { kind: "returned", value: history }),
-          "accepted",
-        );
-        assert.deepEqual(await facet.run("history", { selector: bound.contractId, details: full }), history);
-        const argv = ["-C", raw.path, "history", bound.contractId, ...(full ? ["--full"] : [])];
-        const text = await runCli(argv, { environment });
-        assert.equal(text.exit, 0, text.stderr);
-        assert.equal(text.stderr, "");
-        assert.ok(text.stdout.includes(`history  ${bound.contractId}`));
-        assert.match(text.stdout, full ? /changed sections  Objective/u : /bound to targetless/u);
-        assert.ok(text.stdout.includes("! Dispatch history unavailable · internal · "));
-        assert.doesNotMatch(text.stdout, /authority-corruption/u);
-      }
+      const history = await kei.history();
+      assert.deepEqual(rowLabels(history), ["bind 1", "amend 2"]);
+      assert.ok(history.kind === "contract");
+      assert.equal(history.dispatches?.kind, "unavailable");
+      assert.equal(history.dispatches?.category, "internal");
+      const diagnostic = history.dispatches?.diagnostic ?? "";
+      assert.match(diagnostic, /unexpected header/u);
+      assert.ok(diagnostic.includes(dispatch.oid));
+      assertWireRoundTrip(contractHistorySchema, history);
+      const binding = await kei.history({ item: "1" });
+      assert.ok(binding.kind === "contract-exact");
+      assert.equal(binding.event.kind, "bind");
     },
   );
 });
@@ -369,11 +489,14 @@ test("guidance preserves exact requested bytes and distinguishes missing authori
   const missing = contracts.kei({ id: "kei/missing" as never });
   const missingGuidance = await missing.guidance();
   assert.deepEqual(missingGuidance, { kind: "missing" });
-  const missingHistory = await missing.history({ details: true });
+  const missingHistory = await missing.history();
   assert.deepEqual(missingHistory, { kind: "contract-missing", contractId: "kei/missing" });
   assertWireRoundTrip(guidanceSchema, missingGuidance);
   assertWireRoundTrip(contractHistorySchema, missingHistory);
-  assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "returned", value: missingGuidance }), "refused");
+  assert.equal(
+    classifyVerb("show", { selector: "kei/missing" }, { kind: "returned", value: missingGuidance }),
+    "refused",
+  );
   assert.equal(
     classifyVerb("history", { selector: "kei/missing" }, { kind: "returned", value: missingHistory }),
     "refused",

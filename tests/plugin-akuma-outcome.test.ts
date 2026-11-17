@@ -288,8 +288,8 @@ test("host callback throws and async rejections cannot alter observation results
     },
   });
   const result = await plural.history({ akuma: value.allocated.id, last: true });
-  assert.equal(result.kind, "akuma-last");
-  assert.ok(result.kind === "akuma-last");
+  assert.equal(result.kind, "akuma-answer");
+  assert.ok(result.kind === "akuma-answer");
   assert.equal(result.answer, "unchanged answer");
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(thrown, 1);
@@ -422,7 +422,9 @@ test("history page, exact and last use the identity of the actual retained resul
   const failed = await outcome(value);
   const api = Akumas.of(world);
   const last = await api.history({ akuma: value.allocated.id, last: true });
-  assert.equal(last.kind, "akuma-last");
+  assert.equal(last.kind, "akuma-answer");
+  assert.ok(last.kind === "akuma-answer");
+  assert.equal(last.historyId, `turn/${answered.sequence}`);
   assert.deepEqual(
     recorded.signals(),
     [signal(value.allocated.id, answered.sequence)],

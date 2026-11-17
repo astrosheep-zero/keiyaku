@@ -212,7 +212,7 @@ test("wire validation and classification reject malformed calls before observati
   ]) {
     await assert.rejects(facet.run("wait", input as never), KeiyakuUsageError);
   }
-  assert.equal(Keiyaku.verbs.history.input.safeParse({ selector: "kei/example", limit: 1 }).success, false);
+  assert.equal(Keiyaku.verbs.history.input.safeParse({ selector: "kei/example", limit: 1 }).success, true);
   assert.equal(Keiyaku.verbs.bind.input.safeParse({ terms: document(), forkOf: "kei/example" }).success, false);
   assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "returned", value: { kind: "missing" } }), "refused");
   assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "threw", error: new TypeError("unexpected") }), "failed");
@@ -220,15 +220,16 @@ test("wire validation and classification reject malformed calls before observati
 
 test("history selects one item or a page and observation deadlines share duration grammar", () => {
   const history = Keiyaku.verbs.history.input;
-  for (const item of ["last", "turn/1", "report/2", "3"]) {
+  for (const item of ["answer", "turn/1", "report/2", "3"]) {
     assert.equal(history.safeParse({ selector: "@worker", item }).success, true);
     assert.equal(history.safeParse({ selector: "@worker", item, limit: 1 }).success, false);
   }
   assert.equal(history.safeParse({ selector: "@worker", before: 3, limit: 2 }).success, true);
   assert.equal(history.safeParse({ selector: "@worker", since: 1, limit: 2 }).success, true);
   assert.equal(history.safeParse({ selector: "@worker", before: 3, since: 1 }).success, false);
-  assert.equal(history.safeParse({ selector: "kei/example", details: true }).success, true);
-  assert.equal(history.safeParse({ selector: "@worker", details: true }).success, false);
+  assert.equal(history.safeParse({ selector: "kei/example", item: "2" }).success, true);
+  for (const item of ["answer", "turn/1", "report/2"]) assert.equal(history.safeParse({ selector: "kei/example", item }).success, false);
+  assert.equal(history.safeParse({ selector: "kei/example", before: 3, since: 1 }).success, false);
   for (const timeout of [undefined, "0ms", "30s", "5m", "1.5s"]) {
     const expected = timeout !== "1.5s";
     const deadline = timeout === undefined ? {} : { timeout };

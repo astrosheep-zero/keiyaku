@@ -53,8 +53,8 @@ import { publishAkuma } from "./publication.js";
 import { z } from "zod";
 import { publicSessionCoordinate, publicSessionCoordinateSchema, type PublicSessionCoordinate } from "./coordinate.js";
 
-const historySequence = z.number().int().positive();
-const historyLimit = historySequence.max(5_000).exactOptional();
+import { historyPageSchemas } from "../history.js";
+
 export const historyInputSchemas = [
   z.strictObject({
     id: z
@@ -65,8 +65,7 @@ export const historyInputSchemas = [
           "id must be a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
       }),
   }),
-  z.strictObject({ before: historySequence.exactOptional(), limit: historyLimit }),
-  z.strictObject({ since: historySequence, limit: historyLimit }),
+  ...historyPageSchemas,
 ] as const;
 const historyInputSchema = z.union(historyInputSchemas);
 
@@ -92,7 +91,9 @@ export type ForkReceipt =
   | Readonly<{ kind: "fork-failed"; diagnostic: string }>
   | Readonly<{ kind: "provider-forked-local-birth-failed"; session: PublicSessionCoordinate; diagnostic: string }>;
 
-export type LastAnswer = Readonly<{ kind: "answer"; answer: string }> | Readonly<{ kind: "no-answer" }>;
+export type LastAnswer =
+  | Readonly<{ kind: "answer"; answer: string; historyId: `turn/${number}` }>
+  | Readonly<{ kind: "no-answer" }>;
 
 type TellAdmission =
   | Readonly<{ kind: "not-born" }>
@@ -583,7 +584,7 @@ export class AkumaOwner {
     const turn = await readLastAnsweredTurn(this.paths);
     if (turn?.end?.outcome.kind !== "answered") return { kind: "no-answer" };
     await this.outcomeObserved?.(this.id, [`turn/${turn.sequence}`]);
-    return { kind: "answer", answer: turn.end.outcome.answer };
+    return { kind: "answer", answer: turn.end.outcome.answer, historyId: `turn/${turn.sequence}` };
   }
 }
 

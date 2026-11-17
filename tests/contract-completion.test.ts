@@ -318,7 +318,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     assert.ok(receipt?.kind === "contract");
     assert.equal(receipt.contractId, state.id);
     assert.deepEqual(receipt.admitted?.map(({ kind }) => kind), ["attestation"]);
-    const history = await contract.history({ details: true });
+    const history = await contract.history();
     assert.ok(history.kind === "contract");
     const attestations = history.events.filter((event) => event.kind === "attestation");
     assert.equal(attestations.length, 1);

@@ -45,7 +45,7 @@ import {
 } from "./support/process.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
-import { runCli } from "./support/cli-fixtures.js";
+import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
@@ -62,6 +62,34 @@ async function mcpFixture(t: TestContext, options: Parameters<typeof createKeiya
   const { tools } = await client.listTools();
   return { client, tools };
 }
+
+test("Contract page addresses open exact historical records through invocation, CLI and MCP", async (t) => {
+  const repository = repositoryWithMain();
+  const home = temporaryDirectory(t, "history-adapters-home-");
+  const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home });
+  const bound = accepted(await facet.bind({ terms: document(), target: null }));
+  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nHistorical amendment.\n" }));
+  accepted(await bound.kei.arc({ body: "# Later chapter\n\nA later fact.\n" }));
+  const { client } = await mcpFixture(t, { cwd: repository.path, environment: {}, version: "test" });
+  for (const [selection, args] of [
+    [{ before: 3, limit: 1 }, ["--before", "3", "--limit", "1"]],
+    [{ item: "2" }, ["--id", "2"]],
+    [{ item: "99" }, ["--id", "99"]],
+  ] as const) {
+    const input = { selector: bound.contractId, ...selection };
+    const native = await bound.kei.history(selection);
+    assert.deepEqual(await facet.history(input), native);
+    const json = await cliJson(["-C", repository.path, "history", bound.contractId, ...args], { environment: {} });
+    assert.deepEqual(json.value, native);
+    const response = await client.callTool({ name: "history", arguments: input });
+    const disposition = classifyVerb("history", input, { kind: "returned", value: native });
+    assert.equal(response._meta?.["keiyaku/disposition"], disposition);
+    assert.equal(response.isError === true, disposition === "refused");
+    const rendered = renderVerb("history", input, { kind: "returned", value: native }, { columns: DEFAULT_CLI_COLUMNS, color: false });
+    assert.ok((response.content as { text: string }[])[0]?.text.includes(rendered));
+    if (native.kind === "contract-exact") assert.match(rendered, /Historical amendment\./u);
+  }
+});
 
 test("coordinate composition preserves native branches and rejects collisions at construction", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.bind.input);
@@ -246,7 +274,7 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["wait", { selectors: ["kei/example", "aku/worker/12345678"], timeout: "invalid" }],
     ["wait", { selectors: ["kei/example"], timeout: 0 }],
     ["history", { selector: "@worker", item: "turn/1", before: 1 }],
-    ["history", { selector: "@worker", item: "last", limit: 1 }],
+    ["history", { selector: "@worker", item: "answer", limit: 1 }],
     ["history", { selector: "@worker", before: 2, since: 1 }],
     ["debt.update", { id: "debt/example" }],
     ["debt.update", { id: "debt/example", state: "paused" }],
@@ -457,7 +485,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWorker.\n");
   assert.equal((await publishDispatch({ repository: await repositoryAt(otherRepo.path), akumaId: worker.id, contractId: bound.contractId })).kind, "dispatched");
-  const last = await client.callTool({ name: "history", arguments: { cwd: first, selector: worker.id, item: "last" } });
+  const last = await client.callTool({ name: "history", arguments: { cwd: first, selector: worker.id, item: "answer" } });
   assert.equal(last.isError, false, JSON.stringify(last));
   await moveAlias({ world, alias: parseAkumaAlias("@mcp-status"), akumaId: worker.id });
   const statusTool = (await client.listTools()).tools.find(tool => tool.name === "status")!;

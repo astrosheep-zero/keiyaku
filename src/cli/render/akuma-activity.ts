@@ -936,13 +936,13 @@ export function waitText(result: AkumaWaitResult, presentation: AkumaPresentatio
 
 export function historyText(
   result: AkumaHistoryResult,
-  presentation: AkumaPresentation & Readonly<{ id?: string; last?: boolean; since?: number }>,
+  presentation: AkumaPresentation & Readonly<{ id?: string; answer?: boolean; since?: number }>,
   context: TextRenderContext,
 ): string {
   if (presentation.id !== undefined) {
     return historyRawAnswer(result, presentation.id) ?? `${presentation.id} has no matching retained history`;
   }
-  if (presentation.last === true) return result.kind === "akuma-last" ? result.answer : "no answer retained";
+  if (presentation.answer === true) return result.kind === "akuma-answer" ? result.answer : "no answer retained";
   if (result.kind !== "akuma") throw new Error("history result lacks page");
   const rows = groupedRows(result.events, context, { history: true });
   const paging =

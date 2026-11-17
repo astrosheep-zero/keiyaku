@@ -88,7 +88,11 @@ function classifyWait(result: InvocationWaitResult): VerbDisposition {
 }
 
 function classifyHistory(value: VerbOutput<"history">): VerbDisposition {
-  return value.kind === "contract-missing" || value.kind === "akuma-unknown-history" ? "refused" : "accepted";
+  return value.kind === "contract-missing" ||
+    value.kind === "contract-unknown-history" ||
+    value.kind === "akuma-unknown-history"
+    ? "refused"
+    : "accepted";
 }
 
 function classifyNuke(result: VerbOutput<"nuke">): VerbDisposition {

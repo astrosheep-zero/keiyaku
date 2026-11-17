@@ -180,31 +180,36 @@ function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, contex
 }
 
 function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history">, context: TextRenderContext): string {
-  const options = query as { details?: boolean; item?: string };
   if (query.selector.startsWith("kei/")) {
-    if (result.kind === "contract-missing") return missing("history", query.selector, context);
-    if (result.kind !== "contract") throw new Error("Contract history returned a non-Contract result");
-    return renderContractHistory(result, { full: options.details === true });
+    if (result.kind === "contract-missing") return missing("history", result.contractId, context);
+    if (result.kind === "contract-unknown-history")
+      return `${result.contractId} has no matching history at ${"item" in query ? query.item : ""}`;
+    if (result.kind !== "contract" && result.kind !== "contract-exact")
+      throw new Error("Contract history returned a non-Contract result");
+    return renderContractHistory(result);
   }
-  if (result.kind === "contract" || result.kind === "contract-missing")
+  if (
+    result.kind === "contract" ||
+    result.kind === "contract-exact" ||
+    result.kind === "contract-unknown-history" ||
+    result.kind === "contract-missing"
+  )
     throw new Error("Akuma history returned a non-Akuma result");
-  const last = options.item === "last";
-  const id = last ? undefined : options.item;
+  const answer = "item" in query && query.item === "answer";
+  const id = "item" in query && !answer ? query.item : undefined;
   const selectedAlias = aliasSelector(query.selector);
   return (
     historyRawAnswer(result, id) ??
-    (last && result.kind === "akuma-last"
-      ? result.answer
-      : historyText(
-          result,
-          {
-            ...(selectedAlias === undefined ? {} : { alias: selectedAlias }),
-            ...(id === undefined ? {} : { id }),
-            ...("since" in query && query.since !== undefined ? { since: query.since } : {}),
-            last,
-          },
-          context,
-        ))
+    historyText(
+      result,
+      {
+        ...(selectedAlias === undefined ? {} : { alias: selectedAlias }),
+        ...(id === undefined ? {} : { id }),
+        ...("since" in query && query.since !== undefined ? { since: query.since } : {}),
+        answer,
+      },
+      context,
+    )
   );
 }
 

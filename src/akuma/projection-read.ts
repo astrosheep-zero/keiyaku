@@ -1,3 +1,4 @@
+import { selectHistoryPage } from "../history.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type {
   ActivityRow,
@@ -247,15 +248,7 @@ export function selectSnapshot(
 }
 
 export function selectHistory(ledger: TurnLedger, cursor: HistoryCursor): HistoryPage {
-  const eligible = ledger.rows.filter((row) =>
-    cursor.before !== undefined
-      ? row.sequence < cursor.before
-      : cursor.since !== undefined
-        ? row.sequence > cursor.since
-        : true,
-  );
-  const rows = cursor.since !== undefined ? eligible.slice(0, cursor.limit) : eligible.slice(-cursor.limit);
-  const omitted = Math.max(0, eligible.length - rows.length);
+  const { rows, omitted } = selectHistoryPage(ledger.rows, (row) => row.sequence, cursor);
   const historyLost =
     cursor.since !== undefined
       ? ledger.rows[0] !== undefined && ledger.rows[0].sequence > cursor.since + 1
@@ -263,8 +256,8 @@ export function selectHistory(ledger: TurnLedger, cursor: HistoryCursor): Histor
   return {
     rows,
     omitted,
-    hasEarlier: cursor.since === undefined && eligible.length > rows.length,
-    hasLater: cursor.since !== undefined && eligible.length > rows.length,
+    hasEarlier: cursor.since === undefined && omitted > 0,
+    hasLater: cursor.since !== undefined && omitted > 0,
     historyLost,
     lowestRetained: ledger.retained.lowestRetained,
     highest: ledger.retained.highest,

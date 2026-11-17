@@ -61,6 +61,7 @@ import {
   abandonOutcomeSchema,
 } from "./contract-outcomes.js";
 import { contractHistorySchema } from "./contract-types.js";
+import { canonicalDecimalSchema, historyPageSchemas } from "../history.js";
 import { guidanceSchema, guidanceNormalSchema } from "./kei.js";
 import { invocationWaitResultSchema, invocationWaitNormalResultSchema } from "./keiyaku-wait.js";
 import { akumaAliasSchema, parseAkumaGlob, parseReadableAkumaAlias } from "../identity/selector.js";
@@ -118,6 +119,9 @@ const commonBind = {
 const jsonDocument = z.record(z.string(), z.unknown()).readonly();
 const contractSelector = text.startsWith("kei/");
 const akumaSelector = text.regex(/^(?!kei\/)/u);
+const historySelectorDescription = "Single subject: kei/... for a Contract, or aku/<name>/<hex> / @alias for an Akuma.";
+const historyItemDescription =
+  'Open one complete retained item: a canonical positive safe decimal address for a Contract record or Akuma activity; Akumas also accept turn/<n> for an outcome, report/<n> for a report, or "answer" for the latest answered Turn and its exact coordinate. Cannot be combined with before, since, or limit.';
 const catalogueSelection = lifecycleSelectionSchema
   .exactOptional()
   .describe(
@@ -480,44 +484,29 @@ export const verbs = Object.freeze({
     effect: "read",
   },
   history: {
-    description:
-      "Read a Contract's changes, or an Akuma's activity. For an Akuma, item opens one result or activity; omit it to page the timeline.",
+    description: "Read a bounded Contract or Akuma timeline, or open one complete item by its visible address.",
     input: z.union([
       z
         .strictObject({
-          selector: contractSelector.describe(
-            "Single subject: kei/... for Contract history, or aku/<name>/<hex> / @alias for Akuma history.",
-          ),
-          details: optBool.describe("Also show each change's terms; valid only for Contract history."),
+          selector: contractSelector.describe(historySelectorDescription),
+          item: canonicalDecimalSchema.describe(historyItemDescription),
         })
         .readonly(),
-      ...[
-        z.strictObject({
+      z
+        .strictObject({
+          selector: akumaSelector.describe(historySelectorDescription),
           item: text
             .refine(
-              (value) => value === "last" || historyInputSchemas[0].shape.id.safeParse(value).success,
-              "item must be last, turn/<positive safe integer>, report/<positive safe integer>, or a positive safe decimal sequence",
+              (value) => value === "answer" || historyInputSchemas[0].shape.id.safeParse(value).success,
+              "item must be answer, turn/<positive safe integer>, report/<positive safe integer>, or a canonical positive safe decimal sequence",
             )
-            .describe(
-              'One Akuma item: "last" for the latest answer, turn/<n> for a turn outcome, report/<n> for a progress report, or a positive decimal activity sequence. Cannot be combined with before, since, or limit.',
-            ),
-        }),
-        z.strictObject({
-          before: historyInputSchemas[1].shape.before.describe(
-            "Page events strictly before this positive decimal sequence; cannot be combined with since or item.",
-          ),
-          limit: historyInputSchemas[1].shape.limit.describe("Maximum timeline rows (1..5000, default 12)."),
-        }),
-        z.strictObject({
-          since: historyInputSchemas[2].shape.since.describe(
-            "Page events strictly after this positive decimal sequence; cannot be combined with before or item.",
-          ),
-          limit: historyInputSchemas[2].shape.limit.describe("Maximum timeline rows (1..5000, default 12)."),
-        }),
-      ].map((branch) =>
+            .describe(historyItemDescription),
+        })
+        .readonly(),
+      ...historyPageSchemas.map((branch) =>
         branch
           .extend({
-            selector: akumaSelector.describe("One Akuma ID (aku/<name>/<hex>) or @alias."),
+            selector: text.describe(historySelectorDescription),
           })
           .readonly(),
       ),

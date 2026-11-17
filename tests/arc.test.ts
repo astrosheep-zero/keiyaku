@@ -259,8 +259,7 @@ test("stored old-shape arc bytes normalize at decode and render as one chapter b
   const guidance = renderContractGuidance(current);
   const rendered = renderContractBody(body, current.currentArc?.data);
   const history = renderContractHistory(
-    { kind: "contract", contractId: id, events: [{ kind: "arc", id: legacy.entry, at: legacy.at, chapter: legacy.data.seq, title: legacy.data.title, body: legacy.data.body }] },
-    { full: true },
+    { kind: "contract-exact", contractId: id, event: { kind: "arc", id: "2", at: legacy.at, chapter: legacy.data.seq, title: legacy.data.title, body: legacy.data.body } },
   );
   for (const text of [
     guidance.slice(guidance.indexOf("## Arc")),
@@ -281,16 +280,10 @@ test("freeform and empty chapters render as one bounded history payload", () => 
     "AB",
   );
   const empty = entry("arc", { seq: 2, title: "Empty", body: "" }, "AC");
-  const history = renderContractHistory(
-    {
-      kind: "contract", contractId: id,
-      events: [
-        { kind: "arc", id: freeform.entry, at: freeform.at, chapter: freeform.data.seq, title: freeform.data.title, body: freeform.data.body },
-        { kind: "arc", id: empty.entry, at: empty.at, chapter: empty.data.seq, title: empty.data.title, body: empty.data.body },
-      ],
-    },
-    { full: true },
-  );
+  const history = [freeform, empty].map((chapter, index) => renderContractHistory({
+    kind: "contract-exact", contractId: id,
+    event: { kind: "arc", id: String(index + 2), at: chapter.at, chapter: chapter.data.seq, title: chapter.data.title, body: chapter.data.body },
+  })).join("\n");
   assert.match(history, /title  Freeform/u);
   assert.match(history, /title  Empty/u);
   assert.match(history, /body\n\n  ## Delivery\n\n  First line\.\n  Second line\./u);
@@ -300,19 +293,18 @@ test("freeform and empty chapters render as one bounded history payload", () => 
   const causal = renderContractHistory({
     kind: "contract", contractId: id,
     events: [
-      { kind: "arc", id: freeform.entry, at: freeform.at, chapter: freeform.data.seq, title: freeform.data.title, body: freeform.data.body },
-      { kind: "arc", id: empty.entry, at: empty.at, chapter: empty.data.seq, title: empty.data.title, body: empty.data.body },
+      { kind: "arc", id: "2", at: freeform.at, chapter: freeform.data.seq, title: freeform.data.title, body: freeform.data.body },
+      { kind: "arc", id: "3", at: empty.at, chapter: empty.data.seq, title: empty.data.title, body: empty.data.body },
     ],
   });
-  assert.match(causal, /^00:00 arc Freeform · 6 lines$/mu);
-  assert.match(causal, /^00:00 arc Empty$/mu);
+  assert.match(causal, /^00:00 2 arc Freeform · 6 lines$/mu);
+  assert.match(causal, /^00:00 3 arc Empty$/mu);
 });
 
 test("full arc history renders historical body lines without turning them into sections", () => {
   const chapter = entry("arc", { seq: 1, title: "Blank runs", body: "line one\n\n\nline two\n\n\n\nline three" }, "AD");
   const history = renderContractHistory(
-    { kind: "contract", contractId: id, events: [{ kind: "arc", id: chapter.entry, at: chapter.at, chapter: chapter.data.seq, title: chapter.data.title, body: chapter.data.body }] },
-    { full: true },
+    { kind: "contract-exact", contractId: id, event: { kind: "arc", id: "2", at: chapter.at, chapter: chapter.data.seq, title: chapter.data.title, body: chapter.data.body } },
   );
   assert.equal(chapter.data.body, "line one\n\n\nline two\n\n\n\nline three");
   for (const line of ["line one", "line two", "line three"])

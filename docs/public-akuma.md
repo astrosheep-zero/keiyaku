@@ -156,7 +156,11 @@ projects the native life and current actionable work, adding separate read-only
 Dispatch associations where available; it never intersects them into
 Akuma state or re-evaluates lifecycle. Debt creation establishes no Akuma
 association. Execution history preserves requested
-historical content and correlation independently of current associations. Selection uses one verb per meaning on both faces: `tell` admits a Tell and may observe its text answer; `ask` requires a JSON Schema document and observes the parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide work. Ask alone distinguishes invalid output; text observation reports it as failure with the same diagnostic. Bounds are optional and limit observation only, never admission. Schema belongs only to ask. Interrupt is a flag on tell or ask: it durably admits the Tell with a request for the current Body to yield, then observes completion before waking a successor; if completion is not proven, the Tell remains admitted and recoverable. Cancellation after admission stops observation, not admission. Kill is the pure stop. Tell and ask address one Akuma directly. Wait accepts a
+historical content and correlation independently of current associations.
+Latest-answer selection keeps the actual answered Turn coordinate beside its full
+answer from the same retained observation; a later report, failed or cancelled
+Turn cannot replace it. Composition never searches again to infer that coordinate.
+Selection uses one verb per meaning on both faces: `tell` admits a Tell and may observe its text answer; `ask` requires a JSON Schema document and observes the parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide work. Ask alone distinguishes invalid output; text observation reports it as failure with the same diagnostic. Bounds are optional and limit observation only, never admission. Schema belongs only to ask. Interrupt is a flag on tell or ask: it durably admits the Tell with a request for the current Body to yield, then observes completion before waking a successor; if completion is not proven, the Tell remains admitted and recoverable. Cancellation after admission stops observation, not admission. Kill is the pure stop. Tell and ask address one Akuma directly. Wait accepts a
 caller-selected batch; kill accepts exactly one selector, which may expand through
 a glob or Contract membership to several Akumas.
 Cancellation before admission preserves the native reason unchanged. After

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Akuma, Akumas, KeiyakuError, type AkumaReportResult } from "../src/index.js";
+import { Akuma, Akumas, Keiyaku, KeiyakuError, type AkumaReportResult } from "../src/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { activitySlice, beginTurn, breakBody, endTurn, readHeart, recordReport } from "../src/akuma/heart/index.js";
 import { insertActivityFact } from "../src/akuma/heart/rows.js";
@@ -164,8 +164,8 @@ test("exact report history selects retained identity without observing outcomes"
         (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input",
       );
     }
-    for (const flag of ["--last", "--before", "--since", "--limit"]) {
-      assert.throws(() => parseArgv(["history", value.allocated.id, "--id", id, flag, ...(flag === "--last" ? [] : ["1"])]));
+    for (const flag of ["--answer", "--before", "--since", "--limit"]) {
+      assert.throws(() => parseArgv(["history", value.allocated.id, "--id", id, flag, ...(flag === "--answer" ? [] : ["1"])]));
     }
     await endTurn(value.allocated.paths, { turnSequence: value.turn.sequence, completedAt: AT,
       outcome: { kind: "answered", answer: "final", session: { sessionId: "native" } } });
@@ -175,8 +175,49 @@ test("exact report history selects retained identity without observing outcomes"
     assert.ok("kind" in exact && exact.kind === "exact");
     assert.deepEqual(observed, [`turn/${value.turn.sequence}`]);
     const last = await Akumas.of(value.world).history({ akuma: value.allocated.id, last: true });
-    assert.equal(last.kind, "akuma-last");
-    if (last.kind === "akuma-last") assert.equal(last.answer, "final");
+    assert.equal(last.kind, "akuma-answer");
+    if (last.kind === "akuma-answer") assert.equal(last.answer, "final");
+  } finally { value.holder.release(); }
+});
+
+test("answer keeps its exact Turn through later failure, cancellation and reports, including empty bytes", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-history-answer-");
+  const value = await reportFixture(root, "feed0020");
+  const facet = Keiyaku.for({ cwd: root, environment: {}, home: join(root, "empty-home") });
+  const selector = value.allocated.id;
+  try {
+    assert.deepEqual(await facet.history({ selector, item: "answer" }), { kind: "akuma-no-answer", akumaId: selector });
+    await endTurn(value.allocated.paths, { turnSequence: value.turn.sequence, completedAt: AT,
+      outcome: { kind: "answered", answer: "old\n  exact answer\n", session: { sessionId: "native" } } });
+    const failed = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
+    await endTurn(value.allocated.paths, { turnSequence: failed.sequence, completedAt: AT,
+      outcome: { kind: "failed", diagnostic: "later failure" } });
+    const canceled = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
+    await endTurn(value.allocated.paths, { turnSequence: canceled.sequence, completedAt: AT, outcome: { kind: "canceled" } });
+    const next = await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
+    const report = await recordReport(value.allocated.paths, { text: "later report", at: AT });
+    assert.equal(report.kind, "recorded");
+    const answer = await facet.history({ selector, item: "answer" });
+    assert.deepEqual(answer, { kind: "akuma-answer", akumaId: selector,
+      historyId: `turn/${value.turn.sequence}`, answer: "old\n  exact answer\n" });
+    assert.ok(answer.kind === "akuma-answer");
+    const exact = await facet.history({ selector, item: answer.historyId });
+    assert.ok(exact.kind === "akuma-exact" && exact.outcome.kind === "answered");
+    assert.equal(exact.outcome.answer, answer.answer);
+    const latest = await facet.history({ selector, limit: 1 });
+    assert.ok(latest.kind === "akuma");
+    assert.equal(latest.events[0]?.kind, "report");
+    const raw = await runCli(["history", selector, "--answer"], { cwd: root });
+    assert.equal(raw.exit, 0, raw.stderr);
+    assert.equal(raw.stdout, answer.answer);
+    await endTurn(value.allocated.paths, { turnSequence: next.sequence, completedAt: AT,
+      outcome: { kind: "answered", answer: "", session: { sessionId: "native" } } });
+    assert.deepEqual(await facet.history({ selector, item: "answer" }), {
+      kind: "akuma-answer", akumaId: selector, historyId: `turn/${next.sequence}`, answer: "",
+    });
+    const empty = await runCli(["history", selector, "--answer"], { cwd: root });
+    assert.equal(empty.exit, 0, empty.stderr);
+    assert.equal(empty.stdout, "");
   } finally { value.holder.release(); }
 });
 

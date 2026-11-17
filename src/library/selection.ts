@@ -1,6 +1,6 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
-import { akumaIdSchema } from "../akuma/identity.js";
+import { akumaIdSchema, turnHistoryIdSchema } from "../akuma/identity.js";
 import { activityRowSchema, outcomeRowSchema, reportRowSchema } from "../akuma/projection.js";
 import { projectCurrentWork } from "../akuma/status-projection.js";
 import { withoutReportedChanges } from "../akuma/projection.js";
@@ -99,7 +99,14 @@ export const akumaHistoryResultSchema = z.union([
     .extend({ kind: z.literal("akuma-report"), ...historyCommon })
     .readonly(),
   z.strictObject({ kind: z.literal("akuma-unknown-history"), ...historyCommon }).readonly(),
-  z.strictObject({ kind: z.literal("akuma-last"), ...historyCommon, answer: z.string() }).readonly(),
+  z
+    .strictObject({
+      kind: z.literal("akuma-answer"),
+      ...historyCommon,
+      historyId: turnHistoryIdSchema,
+      answer: z.string(),
+    })
+    .readonly(),
   z.strictObject({ kind: z.literal("akuma-no-answer"), ...historyCommon }).readonly(),
 ]);
 
@@ -434,7 +441,7 @@ export async function historyAkuma(
     if (last === true) {
       const answer = await handle.lastAnswer();
       return answer.kind === "answer"
-        ? { kind: "akuma-last", ...subject, answer: answer.answer }
+        ? { kind: "akuma-answer", ...subject, answer: answer.answer, historyId: answer.historyId }
         : { kind: "akuma-no-answer", ...subject };
     }
     const history = await handle.history(options);

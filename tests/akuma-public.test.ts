@@ -256,7 +256,7 @@ test("compact activity ids recover retained input, displaced tools and folded na
     assert.equal(historyPage(await owner.history()).rows.some(row => row.sequence === said), false);
     const rawSaid = await runCli(["history", born.allocated.id, "--id", String(said)], { cwd: root });
     assert.equal(rawSaid.stdout, `said: ${answer}`);
-    assert.equal((await runCli(["history", born.allocated.id, "--last"], { cwd: root })).stdout, answer);
+    assert.equal((await runCli(["history", born.allocated.id, "--answer"], { cwd: root })).stdout, answer);
     assert.equal((await runCli(["history", born.allocated.id, "--id", `turn/${turn.sequence}`], { cwd: root })).stdout, answer);
     assert.deepEqual(await owner.fork({ at: String(said) }, noBodyLaunch), { kind: "unknown-history" });
     assert.equal((await api.history({ akuma: born.allocated.id, id: String(turn.sequence) })).kind, "akuma-unknown-history");
@@ -1365,7 +1365,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
   );
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
-  assert.deepEqual(await handle.lastAnswer(), { kind: "answer", answer: "complete without fork" });
+  assert.deepEqual(await handle.lastAnswer(), { kind: "answer", answer: "complete without fork", historyId: "turn/1" });
   assert.deepEqual(historyPage(await handle.history()).rows.find((row) => row.kind === "outcome")?.outcome, {
     kind: "answered",
     answer: "complete without fork",

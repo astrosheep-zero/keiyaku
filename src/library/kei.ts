@@ -4,9 +4,14 @@ import { renderContractGuidance } from "../contract-guidance.js";
 import { type ContractId, type ContractState, type ContractTerms, type JournalEntry } from "../core/facts/types.js";
 import { parseToAST } from "../markdown/parse.js";
 import { indexDocument, indexedHeadings, sectionContent, normalizeTitle } from "../markdown/query.js";
-import { readDispatchesAt } from "../dispatch/index.js";
+import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
-import { withGitDecodeChannel, withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
+import {
+  withGitDecodeChannel,
+  withGitReadObservation,
+  type GitDecodeChannel,
+  type GitReadObservation,
+} from "../git/read-observation.js";
 import {
   contractObservationOperation,
   deliveryOperation,
@@ -63,13 +68,17 @@ import {
   type AbandonInput,
   type AmendInput,
   type ArcInput,
+  contractHistoryInputSchema,
+  type ContractDispatchRow,
   type ContractHistory,
-  type ContractHistoryInput,
   type ContractHistoryEvent,
+  type ContractHistoryInput,
+  type ContractJournalRow,
   type DeliverInput,
   type ReviewInput,
   type VerifyInput,
 } from "./contract-types.js";
+import { selectHistoryPage, type HistoryCursor } from "../history.js";
 import { compactDelivery, admitDeliveryOperation, type DeliverLeading } from "../protocol/deliver.js";
 import { type Delivery } from "./delivery.js";
 import {
@@ -164,10 +173,7 @@ export class Kei {
   }
 
   async history(input?: ContractHistoryInput): Promise<ContractHistory> {
-    const full = validated(() => {
-      const values = input === undefined ? {} : requireInput(input, "Contract history input", ["details"]);
-      return optionalBoolean(values.details, "details") === true;
-    });
+    const request = historyRequest(input);
     return await readContractValue(() =>
       withGitDecodeChannel(this.scope, (channel) =>
         withGitReadObservation(this.scope, channel, async (observation) => {
@@ -175,46 +181,17 @@ export class Kei {
           const record = journals.journals.get(this.id);
           if (record === undefined) throw new Error(`missing requested contract observation: ${this.id}`);
           if (record.state === null) return { kind: "contract-missing", contractId: this.id };
-          let terms: ContractTerms | undefined;
-          const events: ContractHistoryEvent[] = record.entries.map((entry) => {
-            const event = historyEvent(entry, terms, full);
-            if (entry.kind === "bind") terms = entry.data.terms;
-            else if (entry.kind === "amend") terms = entry.data;
-            return event;
-          });
-          let unavailable: Extract<ContractHistory, { kind: "contract" }>["dispatches"];
-          let dispatches;
-          try {
-            dispatches = await readDispatchesAt(observation);
-          } catch (error) {
-            const category = errorCategory(error);
-            if (category === "aborted" || this.scope.signal?.aborted === true) throw error;
-            unavailable = {
-              kind: "unavailable",
-              category: category === "authority-corruption" ? category : "internal",
-              diagnostic: error instanceof Error ? error.message : String(error),
-            };
-          }
-          events.push(
-            ...(dispatches ?? [])
-              .filter((dispatch) => dispatch.contractId === this.id)
-              .map((dispatch) => ({
-                kind: "dispatch" as const,
-                at: dispatch.dispatchedAt,
-                akumaId: dispatch.akumaId,
-              })),
-          );
-          events.sort((left, right) => {
-            if (left.at !== right.at) return left.at < right.at ? -1 : 1;
-            if ((left.kind === "dispatch") !== (right.kind === "dispatch")) return left.kind === "dispatch" ? 1 : -1;
-            return 0;
-          });
-          return {
-            kind: "contract",
-            contractId: this.id,
-            events,
-            ...(unavailable === undefined ? {} : { dispatches: unavailable }),
+          const journal: ObservedJournal = {
+            entries: record.entries,
+            addresses: new Map(record.entries.map((entry, index) => [entry.entry, String(index + 1)])),
           };
+          if ("item" in request) {
+            const [event] = projectJournal(journal, new Set([Number(request.item)]), true);
+            return event === undefined
+              ? { kind: "contract-unknown-history", contractId: this.id }
+              : { kind: "contract-exact", contractId: this.id, event };
+          }
+          return await journalPage(observation, this.scope, this.id, journal, request);
         }),
       ),
     );
@@ -666,7 +643,7 @@ export class Kei {
   }
 }
 
-function changedHistoryTerms(before: ContractTerms | undefined, after: ContractTerms) {
+function changedHistoryTerms(before: ContractTerms | undefined, after: ContractTerms, complete: boolean) {
   const sections = (terms: ContractTerms): ReadonlyMap<string, string> => {
     const document = parseToAST(terms.document.bytes);
     return new Map(
@@ -684,8 +661,12 @@ function changedHistoryTerms(before: ContractTerms | undefined, after: ContractT
     left !== undefined && left.length === right.length && left.every((value, index) => value === right[index]);
   return {
     ...(changedSections.length === 0 ? {} : { changedSections }),
-    ...(equal(before?.gates, after.gates) ? {} : { gates: after.gates }),
-    ...(equal(before?.after, after.after) ? {} : { after: after.after }),
+    ...(complete
+      ? { gates: after.gates, after: after.after }
+      : {
+          ...(equal(before?.gates, after.gates) ? {} : { gates: after.gates }),
+          ...(equal(before?.after, after.after) ? {} : { after: after.after }),
+        }),
   };
 }
 
@@ -701,32 +682,68 @@ function attestationHistory(entry: Extract<JournalEntry, { kind: "attestation" }
   };
 }
 
-function historyTarget(target: ContractState["coordinates"]["target"], full: boolean) {
+function historyTarget(target: ContractState["coordinates"]["target"], complete: boolean) {
   return target === undefined
     ? {}
     : {
         target: typeof target === "string" ? target : { kind: "contract" as const, contractId: target.contractId },
-        ...(full && typeof target === "object" ? { targetIncarnation: target.worktree } : {}),
+        ...(complete && typeof target === "object" ? { targetIncarnation: target.worktree } : {}),
       };
 }
 
-function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, full: boolean): ContractHistoryEvent {
-  const common = { id: entry.entry, at: entry.at };
+type ObservedJournal = Readonly<{
+  entries: readonly JournalEntry[];
+  addresses: ReadonlyMap<string, string>;
+}>;
+
+/** One exact address or one page window; the family's schema rejects contradictory intent. */
+function historyRequest(input: ContractHistoryInput | undefined) {
+  const parsed = contractHistoryInputSchema.safeParse(
+    input === undefined ? {} : requireInput(input, "Contract history input"),
+  );
+  if (!parsed.success) throw new KeiyakuError("invalid-input", parsed.error.message, { cause: parsed.error });
+  return parsed.data;
+}
+
+/**
+ * Project selected one-based append positions from one complete observed journal,
+ * computing each amendment's summary against its real preceding terms. Sequence
+ * stays authoritative: rows keep append order even under equal or nonmonotonic clocks.
+ */
+function projectJournal(
+  journal: ObservedJournal,
+  selected: ReadonlySet<number>,
+  complete: boolean,
+): readonly ContractJournalRow[] {
+  const rows: ContractJournalRow[] = [];
+  let terms: ContractTerms | undefined;
+  journal.entries.forEach((entry, index) => {
+    const position = index + 1;
+    if (selected.has(position)) rows.push(journalRecord(journal, entry, position, terms, complete));
+    if (entry.kind === "bind") terms = entry.data.terms;
+    else if (entry.kind === "amend") terms = entry.data;
+  });
+  return rows;
+}
+
+function journalRecord(
+  journal: ObservedJournal,
+  entry: JournalEntry,
+  position: number,
+  terms: ContractTerms | undefined,
+  complete: boolean,
+): ContractJournalRow {
+  const common = { id: String(position), at: entry.at };
   switch (entry.kind) {
     case "bind": {
       const { coordinates, terms: bound } = entry.data;
-      const target = coordinates.target;
       return {
         ...common,
         kind: "bind",
         start: coordinates.start,
-        ...historyTarget(target, full),
-        ...(full
-          ? {
-              document: bound.document.bytes,
-              gates: bound.gates,
-              after: bound.after,
-            }
+        ...historyTarget(coordinates.target, complete),
+        ...(complete
+          ? { document: bound.document.bytes, gates: bound.gates, after: bound.after }
           : {
               ...(bound.gates.length === 0 ? {} : { gates: bound.gates }),
               ...(bound.after.length === 0 ? {} : { after: bound.after }),
@@ -737,9 +754,9 @@ function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, ful
       return {
         ...common,
         kind: "amend",
-        ...historyTarget(entry.data.target, full),
-        ...changedHistoryTerms(terms, entry.data),
-        ...(full ? { document: entry.data.document.bytes, gates: entry.data.gates, after: entry.data.after } : {}),
+        ...historyTarget(entry.data.target, complete),
+        ...changedHistoryTerms(terms, entry.data, complete),
+        ...(complete ? { document: entry.data.document.bytes } : {}),
       };
     case "deliver": {
       const { tenderSnapshot, integration, note } = entry.data;
@@ -751,7 +768,7 @@ function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, ful
         contentId: integration.changeId,
         predecessor: integration.predecessor,
         ...(note === undefined ? {} : { note }),
-        ...(full ? { requireBranchesToBeUpToDate: entry.data.policy.requireBranchesToBeUpToDate } : {}),
+        ...(complete ? { requireBranchesToBeUpToDate: entry.data.policy.requireBranchesToBeUpToDate } : {}),
       };
     }
     case "reintegrated":
@@ -763,15 +780,22 @@ function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, ful
       };
     case "attestation":
       return { ...common, ...attestationHistory(entry) };
-    case "claimed":
-      return { ...common, kind: "claimed", deliveryId: entry.data.delivery };
+    case "claimed": {
+      const delivery = journal.addresses.get(entry.data.delivery);
+      if (delivery === undefined)
+        throw new KeiyakuError(
+          "authority-corruption",
+          `claimed delivery is not a journal entry: ${entry.data.delivery}`,
+        );
+      return { ...common, kind: "claimed", deliveryId: delivery };
+    }
     case "arc":
       return {
         ...common,
         kind: "arc",
         chapter: entry.data.seq,
         title: entry.data.title,
-        ...(entry.data.body.length === 0 && !full ? {} : { body: entry.data.body }),
+        ...(entry.data.body.length === 0 && !complete ? {} : { body: entry.data.body }),
       };
     case "abandoned":
       return {
@@ -780,6 +804,86 @@ function historyEvent(entry: JournalEntry, terms: ContractTerms | undefined, ful
         ...(entry.data.note === undefined ? {} : { note: entry.data.note }),
       };
   }
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/**
+ * Anchor each available Dispatch to the journal row it follows in the existing
+ * chronological merge. Journal wins equal-time ties and sequence breaks its own;
+ * a Dispatch earlier than the first journal row belongs to that first row.
+ */
+function associateDispatches(
+  entries: readonly JournalEntry[],
+  dispatches: readonly Dispatch[],
+  contractId: ContractId,
+): ReadonlyMap<number, readonly ContractDispatchRow[]> {
+  const chronological = entries
+    .map((entry, index) => ({ position: index + 1, at: entry.at }))
+    .sort((left, right) => (left.at === right.at ? left.position - right.position : compareText(left.at, right.at)));
+  const own = dispatches
+    .filter((dispatch) => dispatch.contractId === contractId)
+    .sort((left, right) =>
+      left.dispatchedAt === right.dispatchedAt
+        ? compareText(left.akumaId, right.akumaId)
+        : compareText(left.dispatchedAt, right.dispatchedAt),
+    );
+  const grouped = new Map<number, ContractDispatchRow[]>();
+  let nextJournal = 0;
+  // Earlier than every journal timestamp belongs to the first appended row.
+  let position = 1;
+  for (const dispatch of own) {
+    while (chronological[nextJournal] !== undefined && chronological[nextJournal]!.at <= dispatch.dispatchedAt) {
+      position = chronological[nextJournal++]!.position;
+    }
+    const rows = grouped.get(position) ?? [];
+    rows.push({ kind: "dispatch", at: dispatch.dispatchedAt, akumaId: dispatch.akumaId });
+    grouped.set(position, rows);
+  }
+  return grouped;
+}
+
+/** One bounded journal page over the complete observation, with available enrichment. */
+async function journalPage(
+  observation: GitReadObservation,
+  scope: RepositoryScope,
+  contractId: ContractId,
+  journal: ObservedJournal,
+  request: HistoryCursor,
+): Promise<ContractHistory> {
+  const page = selectHistoryPage(
+    journal.entries.map((_entry, index) => index + 1),
+    (position) => position,
+    request,
+  );
+  let associations: ReadonlyMap<number, readonly ContractDispatchRow[]> = new Map();
+  let unavailable: Extract<ContractHistory, { kind: "contract" }>["dispatches"];
+  try {
+    associations = associateDispatches(journal.entries, await readDispatchesAt(observation), contractId);
+  } catch (error) {
+    const category = errorCategory(error);
+    if (category === "aborted" || scope.signal?.aborted === true) throw error;
+    unavailable = {
+      kind: "unavailable",
+      category: category === "authority-corruption" ? category : "internal",
+      diagnostic: error instanceof Error ? error.message : String(error),
+    };
+  }
+  const events: ContractHistoryEvent[] = [];
+  for (const row of projectJournal(journal, new Set(page.rows), false)) {
+    events.push(row, ...(associations.get(Number(row.id)) ?? []));
+  }
+  return {
+    kind: "contract",
+    contractId,
+    events,
+    ...(page.omitted === 0 ? {} : { omitted: page.omitted }),
+    lowestRetainedSequence: 1,
+    highestSequence: journal.entries.length,
+    ...(unavailable === undefined ? {} : { dispatches: unavailable }),
+  };
 }
 
 /** Internal constructor capability; callers select a Contract through Keis.of. */

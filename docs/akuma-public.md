@@ -112,13 +112,13 @@ creates no outcome, fork point, or durable fact, and never substitutes a nearby
 row or another result. Provider capture and retention still bound recovery;
 unretained and non-activity coordinates remain unknown.
 It retains exact answered outcome bytes, including an empty answer, and
-the public history identity for a retained answered Turn. When that projection
-omits a final narration as its answered outcome's duplicate, the outcome also
-carries the omitted narration's durable identity, so a consumer correlates the
-two items without comparing their text; narration that is truncated or differs
-from the answer is never named as an omitted duplicate. A fork accepts only
-that exact answered point. Pruned history remains honestly unavailable; public
-snapshots do not fabricate a cursor, result, or loss marker.
+the public history identity for a retained answered Turn. Latest-answer selection
+returns both from one retained observation; later non-answer facts do not replace it.
+When final narration duplicates an answered outcome, the outcome names that
+narration's durable identity for correlation without text comparison. Truncated
+or differing narration is never named as a duplicate. Fork accepts only an exact
+answered point. Pruned history remains unavailable; snapshots fabricate neither
+cursor nor result nor loss marker.
 
 A stream observes that same retained timeline continuously: the caller pulls
 complete bounded timeline windows, one at a time, instead of asking for a page.
