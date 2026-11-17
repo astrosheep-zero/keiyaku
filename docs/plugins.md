@@ -126,11 +126,20 @@ one ensure-and-refresh operation. Birth and public reads do not attach mirrors.
 Attachment follows only the exact Akuma's immutable birth caller, never the
 current environment, Turn initiator, alias, execution directory, or fork lineage.
 Missing Akuma parent mirrors may first be repaired from their own retained callers.
-One bounded attachment attempt shares a complete public directory observation
-across the subject and its caller ancestry; it never reuses that observation
-across attempts. Recovered parents carry public creation evidence into the same
-attempt and remain subject to fresh identity validation before child creation.
-Incomplete, unreadable, ambiguous, cyclic, or
+One activation owns an ephemeral directory index shared by attachment and
+read-only recovery. Its complete current-connection observation includes inactive,
+archived and background candidates; discovery order never narrows identity or
+ambiguity. A bounded subscription snapshot alone proves no absence or uniqueness.
+Connection replacement, incomplete discovery or conflicting evidence invalidates
+that observation, and only ordinary demand may rebuild it. Concurrent callers
+share discovery without sharing caller cancellation. Activation retirement releases
+its observation and fences late discovery and identity reads. No persistent index
+or background repair is introduced.
+Each attempt freezes candidate evidence across the subject and its caller ancestry
+and freshly validates selected exact identities before effects. Membership changes
+invalidate that evidence. Recovered parents carry public creation evidence into
+the shared index and remain subject to fresh identity validation before child
+creation. Incomplete, unreadable, ambiguous, cyclic, or
 excessively deep ancestry proves no attachment. Recovery creates no external
 parent and recognizes only supported native host identities. Generic external
 attribution remains valid even when the mirror does not support that integration.

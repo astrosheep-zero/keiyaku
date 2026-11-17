@@ -5,7 +5,9 @@ import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { createPaseoApi, type PaseoAgent } from "@getpaseo/client";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
-import { refreshOrReopen } from "../plugins/paseo/plugin/server/reopen.js";
+import { createReopener } from "../plugins/paseo/plugin/server/reopen.js";
+import { createDirectoryIndex } from "../plugins/paseo/plugin/server/directory.js";
+import { directorySubscriptions } from "./support/paseo-directory.js";
 
 const snapshot = (id: string, world: string, akuId: string, archivedAt: string | null = null): PaseoAgent => ({
   id, provider: "keiyaku", cwd: world, model: null, createdAt: "2026-10-01T00:00:00.000Z",
@@ -32,10 +34,18 @@ async function harness(t: TestContext, options: {
   const defaultAgent = snapshot("mirror", world, "aku/test/1");
   const pages = options.pages ?? [[defaultAgent]];
   const optionsForTest = options;
+  const directory = createDirectoryIndex();
+  const refreshOrReopen = createReopener(directory);
+  const stream = directorySubscriptions(async () => ({ requestId: "sub", entries: [],
+    pageInfo: { hasMore: true, nextCursor: "partial", prevCursor: null } }));
+  t.after(() => directory.close());
   const client = {
+    observeAgents: stream.observeAgents,
     getLastServerInfoMessage() { return { serverId: "test-server" }; },
-    async fetchAgents(input: { filter?: unknown; page?: { cursor?: string; limit?: number } }) {
+    async fetchAgents(input: { filter?: { statuses?: string[] }; page?: { cursor?: string; limit?: number } }) {
       listed.push(input);
+      if (input.filter?.statuses?.includes("running")) return { requestId: "list", entries: [],
+        pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } };
       const index = input.page?.cursor ? Number(input.page.cursor) : 0;
       return { requestId: "list", entries: (pages[index] ?? []).map(agent => ({ agent, project: null })),
         pageInfo: { hasMore: index + 1 < pages.length, nextCursor: index + 1 < pages.length ? String(index + 1) : null, prevCursor: null } };
@@ -57,13 +67,16 @@ async function harness(t: TestContext, options: {
   const paseo = createPaseoApi(client);
   t.after(() => paseo.dispose());
   const refreshLocal = async () => ({ woken: 0 });
-  return { world, paseo, listed, refreshed, refetched, refreshLocal, refetchStarted };
+  return { world, paseo, client, listed, refreshed, refetched, refreshLocal, refetchStarted, refreshOrReopen };
 }
 
 test("refresh reopens only the canonical persisted mirror through a zero-item read-only timeline fetch", async t => {
   const h = await harness(t);
-  assert.deepEqual(await refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 1 });
-  assert.deepEqual(h.listed.map(value => (value as { filter: unknown }).filter), [{ includeArchived: true, includeBackground: true }]);
+  assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 1 });
+  assert.deepEqual(h.listed.map(value => (value as { filter: unknown }).filter), [
+    { includeArchived: true, includeBackground: true, statuses: ["running", "initializing"] },
+    { includeArchived: true, includeBackground: true, statuses: ["idle", "error", "closed"] },
+  ]);
   assert.deepEqual(h.refreshed, ["mirror"]);
   assert.deepEqual(h.refetched, [["mirror", 0]]);
 });
@@ -73,10 +86,10 @@ test("a persisted mirror from another real World is not reopened", async t => {
   t.after(() => rm(otherWorld, { recursive: true, force: true }));
   const h = await harness(t);
   const matching = snapshot("mirror", h.world, "aku/test/1");
-  t.mock.method(h.paseo.agents, "list", async () => ({ requestId: "list",
+  t.mock.method(h.client, "fetchAgents", async () => ({ requestId: "list",
     entries: [snapshot("foreign-world", otherWorld, "aku/test/1"), matching].map(agent => ({ agent, project: null })),
     pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }));
-  assert.deepEqual(await refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 1 });
+  assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 1 });
   assert.deepEqual(h.refreshed, ["mirror"]);
   assert.deepEqual(h.refetched, [["mirror", 0]]);
 });
@@ -85,10 +98,10 @@ test("directory pagination must complete before any candidate can be reopened", 
   const h = await harness(t);
   const warning = t.mock.method(console, "warn", () => {});
   // Make the directory claim another page without providing a usable cursor.
-  t.mock.method(h.paseo.agents, "list", async () => ({ requestId: "list",
+  t.mock.method(h.client, "fetchAgents", async () => ({ requestId: "list",
     entries: [{ agent: snapshot("mirror", h.world, "aku/test/1"), project: null }],
     pageInfo: { hasMore: true, nextCursor: null, prevCursor: null } }));
-  assert.deepEqual(await refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 0 });
+  assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 0 });
   assert.equal(h.refreshed.length, 0);
   assert.equal(h.refetched.length, 0);
   assert.match(String(warning.mock.calls[0]?.arguments[0]), /incomplete Paseo agent directory pagination/u);
@@ -107,7 +120,7 @@ test("archived, disappeared, changed and concurrently archived mappings are refu
   for (const scenario of scenarios) await t.test(scenario.label, async t => {
     const world = await mkdtemp(join(tmpdir(), "paseo-reopen-case-"));
     const h = await harness(t, scenario.setup(world), world);
-    assert.deepEqual(await refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 0 });
+    assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 0 });
     assert.equal(h.refetched.length, scenario.refetches);
   });
 });
@@ -119,10 +132,10 @@ test("unversioned and incorrectly shaped provider metadata is never treated as m
   const wrongVersion = { ...good, id: "v2", persistence: { ...good.persistence!, metadata: {
     pluginProviderPersistence: { version: 2, data: { world: h.world, akuId: "aku/test/1" } },
   } } };
-  t.mock.method(h.paseo.agents, "list", async () => ({ requestId: "list",
+  t.mock.method(h.client, "fetchAgents", async () => ({ requestId: "list",
     entries: [wrongShape, wrongVersion].map(agent => ({ agent, project: null })),
     pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } }));
-  assert.deepEqual(await refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 0 });
+  assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal), { woken: 0 });
   assert.deepEqual(h.refreshed, []);
   assert.deepEqual(h.refetched, []);
 });
@@ -131,8 +144,8 @@ test("concurrent refreshes coalesce reopening the same exact agent", { timeout: 
   let release!: () => void;
   const blocked = new Promise<void>(resolve => { release = resolve; });
   const h = await harness(t, { blockRefetch: blocked });
-  const first = refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal);
-  const second = refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal);
+  const first = h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal);
+  const second = h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, h.refreshLocal);
   t.after(release);
   let deadline: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -151,6 +164,6 @@ test("concurrent refreshes coalesce reopening the same exact agent", { timeout: 
 
 test("an already open local mirror wakes without enumerating persisted agents", async t => {
   const h = await harness(t);
-  assert.deepEqual(await refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, async () => ({ woken: 1 })), { woken: 1 });
+  assert.deepEqual(await h.refreshOrReopen(h.paseo, { world: h.world, akuId: "aku/test/1" }, async () => ({ woken: 1 })), { woken: 1 });
   assert.deepEqual(h.listed, []);
 });

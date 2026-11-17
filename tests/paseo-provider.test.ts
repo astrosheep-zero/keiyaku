@@ -9,7 +9,8 @@ import { appendActivity, beginTurn, endTurn, HeldAkumaLeash } from "../src/akuma
 import test, { type TestContext } from "node:test";
 import { ProviderEventSchema, type ProviderEvent, type ProviderInput, type ProviderSessionConfig } from "@getpaseo/plugin/server/provider";
 import type { PluginServerContext } from "@getpaseo/plugin/server";
-import { createPaseoApi } from "@getpaseo/client";
+import { createPaseoApi, type PaseoAgent } from "@getpaseo/client";
+import { directorySubscriptions } from "./support/paseo-directory.js";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PluginContext } from "../src/plugin/public.js";
 import { akumaCallerFromEnvironment } from "../src/library/keiyaku-identity.js";
@@ -571,23 +572,31 @@ test("native execution attach, SDK creation and identity retries share the regis
   const child = await bornLineageAkuma({ root, akumaName: "test", draw: "1234abcd", createdAt: at, caller });
   const world = await realpath(root), akuId = child.id;
   const wire: Parameters<DaemonClient["createAgent"]>[0][] = [];
-  const created = new Map<string, { id: string; cwd: string }>();
+  const created = new Map<string, PaseoAgent>();
   const parent = { id: "parent", cwd: root, archivedAt: null,
     persistence: { provider: "codex", sessionId: "native-codex", nativeHandle: "native-codex" } };
+  const stream = directorySubscriptions(async () => ({ requestId: "subscription", entries: [],
+    pageInfo: { hasMore: true, nextCursor: "partial", prevCursor: null } }));
   const paseo = createPaseoApi({
-    async fetchAgents(options: { filter: unknown }) {
-      assert.deepEqual(options.filter, { includeArchived: true, includeBackground: true });
+    observeAgents: stream.observeAgents,
+    async fetchAgents(options: { filter: { statuses: string[] } }) {
+      assert.deepEqual(options.filter, { includeArchived: true, includeBackground: true, statuses: options.filter.statuses });
       return { requestId: "list", entries: [{ agent: parent, project: null }],
         pageInfo: { hasMore: false, nextCursor: null, prevCursor: null } };
     },
     async fetchAgent({ agentId }: { agentId: string }) {
-      return agentId === "parent" ? { agent: parent, project: null } : null;
+      const agent = agentId === "parent" ? parent : [...created.values()].find(value => value.id === agentId);
+      return agent ? { agent, project: null } : null;
     },
     getLastServerInfoMessage() { return { serverId: "test-server" }; },
     async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
       wire.push(options);
       assert.ok(options.idempotencyKey);
-      if (!created.has(options.idempotencyKey)) created.set(options.idempotencyKey, { id: "child", cwd: root });
+      if (!created.has(options.idempotencyKey)) created.set(options.idempotencyKey, {
+        id: "child", cwd: root, provider: "keiyaku", archivedAt: null, updatedAt: at,
+        persistence: { provider: "keiyaku", sessionId: "opaque-child",
+          metadata: { pluginProviderPersistence: { version: 1, data: { world, akuId } } } },
+      } as unknown as PaseoAgent);
       return created.get(options.idempotencyKey)!;
     },
   } as unknown as DaemonClient);
@@ -623,17 +632,17 @@ test("native execution attach, SDK creation and identity retries share the regis
       providerOptions: { world, akuId } },
     callerAgentId: "parent", idempotencyKey: `keiyaku:${world}:${akuId}`, labels: {} });
   assert.deepEqual(await handlers.get("attach")!({ world: alias, akuId, caller }), { attached: true });
-  assert.equal(created.size, 1, "canonical identity reuses daemon idempotency, not a bridge registry");
-  assert.equal(wire[1]?.idempotencyKey, wire[0]?.idempotencyKey);
+  assert.equal(created.size, 1, "canonical identity reuses the indexed public creation snapshot");
+  assert.equal(wire.length, 1, "the warm repeat does not resubmit create");
   const diagnostics = t.mock.method(console, "warn", () => {});
-  for (const other of [{ kind: "unknown" }, { kind: "akuma", world, akuId },
+  for (const other of [{ kind: "unknown" }, { kind: "akuma", world, akuId: "aku/missing/8765abcd" },
     { kind: "external", integration: "paseo", id: "parent" },
     { ...caller, integration: "other" }, { ...caller, id: "gone" }]) {
     const before = diagnostics.mock.callCount();
-    assert.deepEqual(await handlers.get("attach")!({ world, akuId, caller: other }), { attached: false });
+    assert.deepEqual(await handlers.get("attach")!({ world, akuId: "aku/test/missing", caller: other }), { attached: false });
     assert.equal(diagnostics.mock.callCount(), before + 1);
   }
-  assert.equal(create.mock.callCount(), 2, "only the initial native attach and its idempotent retry reach create");
+  assert.equal(create.mock.callCount(), 1, "only the initial native attachment reaches create");
 });
 
 const promptInput = (id = "client-1", text = "change direction"): Extract<ProviderInput, { type: "session.prompt" }> => ({

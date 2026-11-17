@@ -9,6 +9,8 @@ import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
 import "./support/local-public-package.js";
 const { backfillMirrorTitles, createForwarder, syncMirrorTitles } = await import("../plugins/paseo/forwarder/index.js");
 import { attach } from "../plugins/paseo/plugin/server/attach.js";
+import { createDirectoryIndex } from "../plugins/paseo/plugin/server/directory.js";
+import { directorySubscriptions } from "./support/paseo-directory.js";
 import { World } from "../src/world.js";
 import { moveAlias } from "../src/alias/index.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
@@ -40,14 +42,23 @@ test("execution refreshes converge alias titles without changing the creation fi
     const wire: Parameters<DaemonClient["createAgent"]>[0][] = [];
     const parent = { id: "parent", cwd: h.world, archivedAt: null, provider: "pi",
       persistence: { provider: "pi", sessionId: "native-parent" } };
+    const directory = createDirectoryIndex();
+    t.after(() => directory.close());
+    const stream = directorySubscriptions(async () => ({ requestId: "sub", entries: [], pageInfo }));
     const client = {
+      observeAgents: stream.observeAgents,
       getLastServerInfoMessage() { return { serverId: "test-server" }; },
-      async fetchAgent() { return { agent: parent, project: null }; },
+      async fetchAgent({ agentId }: { agentId: string }) {
+        return { agent: agentId === child?.id ? child : agentId === nextTarget.id ? nextTarget : parent, project: null };
+      },
       async fetchAgents() { return { entries: [parent, ...(child ? [child, nextTarget] : [])].map(agent => ({ agent, project: null })), pageInfo }; },
       async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
         const request = JSON.stringify(options);
         if (fingerprint !== undefined) assert.equal(request, fingerprint, "changed idempotent payload would conflict");
-        else { fingerprint = request; creates++; child = snapshot("mirror", h.world, akuId, options.config?.title ?? null); }
+        else {
+          fingerprint = request; creates++; child = snapshot("mirror", h.world, akuId, options.config?.title ?? null);
+          stream.update({ kind: "upsert", agent: nextTarget });
+        }
         wire.push(options);
         return child!;
       },
@@ -56,7 +67,7 @@ test("execution refreshes converge alias titles without changing the creation fi
         target.title = update.name!; renames.push(update.name!);
       },
       async invokePluginRpc(_plugin: string, method: string, input: unknown) {
-        return method === "attach" ? await attach(input as Parameters<typeof attach>[0], { paseo }, async () => ({
+        return method === "attach" ? await attach(input as Parameters<typeof attach>[0], { paseo }, directory, async () => ({
           caller: { kind: "external", integration: "pi", id: "native-parent" },
         })) : { woken: 0 };
       },

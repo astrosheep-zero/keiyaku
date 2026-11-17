@@ -1,9 +1,7 @@
 import { realpath } from "node:fs/promises";
-import type { PaseoAgent, PaseoApi } from "@getpaseo/client";
+import type { PaseoAgent } from "@getpaseo/client";
 import { z } from "zod";
-import { raceAbort } from "./transport.js";
 
-const PAGE_SIZE = 200;
 const mirrorPersistence = z.object({ version: z.literal(1),
   data: z.object({ world: z.string(), akuId: z.string() }) });
 
@@ -14,8 +12,8 @@ export function persistedMirrorIdentity(agent: PaseoAgent): { world: string; aku
     ? parsed.data.data : undefined;
 }
 
-export async function matchesCanonicalMirror(agent: PaseoAgent, world: string, akuId: string): Promise<boolean> {
-  if (agent.archivedAt) return false;
+export async function matchesCanonicalMirror(agent: PaseoAgent, world: string, akuId: string, includeArchived = false): Promise<boolean> {
+  if (agent.archivedAt && !includeArchived) return false;
   const identity = persistedMirrorIdentity(agent);
   if (!identity || identity.akuId !== akuId) return false;
   try {
@@ -23,37 +21,4 @@ export async function matchesCanonicalMirror(agent: PaseoAgent, world: string, a
   } catch {
     return false;
   }
-}
-
-export async function listAgentDirectory(paseo: PaseoApi, signal?: AbortSignal): Promise<PaseoAgent[]> {
-  const agents: PaseoAgent[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
-  for (;;) {
-    const list = () => paseo.agents.list({ filter: { includeArchived: true, includeBackground: true },
-      ...(signal ? { signal } : {}), page: { limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) } });
-    const page = await (signal ? raceAbort(signal, list) : list());
-    for (const { agent } of page.entries) agents.push(agent);
-    if (!page.pageInfo.hasMore) return agents;
-    const next = page.pageInfo.nextCursor;
-    if (!next || next === cursor || seenCursors.has(next)) throw new Error("incomplete Paseo agent directory pagination");
-    seenCursors.add(next);
-    cursor = next;
-  }
-}
-
-export async function findMirrorCandidates(agents: readonly PaseoAgent[], world: string, akuId: string,
-  includeArchived = false): Promise<PaseoAgent[]> {
-  const candidates: PaseoAgent[] = [];
-  for (const agent of agents) {
-    if (agent.archivedAt && !includeArchived) continue;
-    const identity = persistedMirrorIdentity(agent);
-    if (!identity || identity.akuId !== akuId) continue;
-    try {
-      if (await realpath(identity.world) === world) candidates.push(agent);
-    } catch {
-      throw new Error(`unreadable mirror World for ${akuId}`);
-    }
-  }
-  return candidates;
 }

@@ -31,18 +31,23 @@ is installed. A complete Akuma parent declaration wins. Multiple nonempty native
 host IDs refuse as ambiguous instead of guessing. With no native ID, the existing
 `KEIYAKU_EXTERNAL_CALLER` fallback remains supported.
 
-Attachment traverses Paseo's complete public directory, including archived and
-background entries. Akuma parents match persisted Keiyaku provider identity and
-canonical World/AkuId. The sole candidate is refreshed and must remain unchanged
-and unarchived. Missing, ambiguous, changed, or unreadable evidence diagnoses
-non-attachment without affecting birth. Path aliases match; titles, cwd, aliases,
-and fork ancestry do not identify parents. A missing parent mirror is first
-repaired from that parent's own frozen caller through the public SDK. Each attempt
-shares one complete directory across child, native parent, and recursive ancestor
-matching. A repaired parent comes from create's returned public handle snapshot
-and is freshly validated before creating its child; no directory is cached across
-attempts.
-Cyclic or overly deep chains refuse without inventing an external parent.
+Attachment and read-only recovery share one activation-owned memory index. Cold
+demand subscribes to all archived/background entries, then completes every page of
+`running`/`initializing` and `idle`/`error`/`closed` before judging identity.
+Concurrent callers share discovery; warm lookups use indexed candidates and fresh
+exact-ID reads without listing again.
+
+The initial page is partial; its stream covers the filter. Bootstrap buffers updates
+and refuses timestamp conflicts. Errors, overflow and connection changes retire
+evidence; ordinary demand rebuilds it. Waiters cancel independently. Teardown
+awaits bootstrap and releases subscriptions and listeners, including late ones.
+
+Akuma parents match persisted Keiyaku identity and canonical World/AkuId, never
+title, cwd, aliases or fork ancestry. Fresh unique parents must remain unchanged
+and unarchived. Missing parents are repaired recursively from their frozen callers.
+Creation snapshots enter the index and receive fresh validation before child
+creation. Membership changes invalidate attempt evidence. Unreadable, ambiguous,
+cyclic or deep ancestry refuses without blocking independent runtime refresh.
 
 External parents match `persistence.metadata.provider` (or `persistence.provider`
 when absent) plus `persistence.sessionId`, never Pi's file-path handle. This
@@ -92,8 +97,8 @@ attachment, ordinary refresh, or explicit backfill. Provider timeline refresh
 alone does not rename. There is no alias watcher or background retry.
 
 Completed creation replay does not reattach a detached child or revive an
-archived child. Every attachment attempt first completes a public directory
-traversal including archived and background mirrors: an existing exact mapping
+archived child. Every attachment attempt requires a complete current-connection
+index including archived and background mirrors: an existing exact mapping
 prevents creation, reparenting, or unarchiving. Unknown and unsupported callers
 create no automatic mirror.
 
@@ -125,10 +130,11 @@ The provider advertises `session.can_stop_runtime` and answers false for every
 open mirror, including idle sessions; an absent local provider session may answer
 true. Host close and archive release observation only and never kill the Akuma.
 
-When a refresh signal has no matching local session, the plugin completes a
-public directory traversal including archived and background agents, then
-matches only the versioned provider persistence data's canonical World and
-AkuId. It does not infer identity from title or opaque session ID. Each candidate
+When a refresh signal has no matching local session, the plugin uses the same
+complete directory index, matching only the versioned
+provider persistence data's canonical World and AkuId. An archived duplicate still
+makes the mapping ambiguous. It does not infer identity from title or opaque
+session ID. The unique candidate
 is refreshed and rechecked for the same provider identity and non-archived state
 before `timeline.refetch({ limit: 0 })` asks Paseo to load the existing agent for
 read-only history. The response's error and fresh agent identity are checked as
@@ -140,7 +146,8 @@ archive can race between the final pre-read check and the host read. Paseo's
 history load preserves archive state and performs no execution, but the bridge
 cannot promise that the host will not briefly load an archived record in that
 race. Incomplete pagination or a missing, archived, or changed mapping is not
-reopened.
+reopened. Changed exact-ID evidence permits one rediscovery within the deadline;
+retired generations cannot authorize late effects.
 
 Create a Paseo agent with `config.provider: "keiyaku/mirror"`, a working directory,
 and `config.options` (translated by the client to opaque `providerOptions`, not
@@ -158,7 +165,8 @@ model settings):
 
 The Paseo plugin requires host version `>=0.14.0`, which supplies provider
 runtime-safety negotiation and the owned public directory subscription used for
-registration handoff and background mirror discovery. The provider observes
+registration handoff and background mirror discovery through the host's bundled
+public client API. The provider observes
 through the public SDK's one pull-backed stream directly in the plugin process:
 every frame is a complete latest bounded
 window carrying the producer's own coverage metadata, and the next frame is

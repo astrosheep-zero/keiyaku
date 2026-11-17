@@ -11,6 +11,8 @@ import { temporaryDirectory } from "./support/process.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
 import { attach } from "../plugins/paseo/plugin/server/attach.js";
+import { createDirectoryIndex } from "../plugins/paseo/plugin/server/directory.js";
+import { directorySubscriptions } from "./support/paseo-directory.js";
 const { createForwarder } = await import("../plugins/paseo/forwarder/index.js");
 
 const at = "2026-11-11T00:00:00.000Z";
@@ -39,13 +41,17 @@ test("execution refresh repairs missing mirrors and parents using retained calle
   const rpc: string[] = [];
   let directoryPages = 0, traversals = 0;
   const fetched: string[] = [];
+  const directory = createDirectoryIndex();
+  t.after(() => directory.close());
+  const stream = directorySubscriptions(async () => ({ requestId: "sub", entries: [], pageInfo }));
   const client = {
+    observeAgents: stream.observeAgents,
     getLastServerInfoMessage() { return { serverId: "isolated-test" }; },
-    async fetchAgents(options: { filter?: { includeBackground?: boolean }; page?: { cursor?: string; limit?: number } }) {
+    async fetchAgents(options: { filter?: { includeBackground?: boolean; statuses?: string[] }; page?: { cursor?: string; limit?: number } }) {
       const offset = Number(options.page?.cursor ?? 0);
       const limit = options.page?.limit ?? 200;
       if (options.filter?.includeBackground) { directoryPages++; if (!offset) traversals++; }
-      const all = [...agents.values()];
+      const all = options.filter?.statuses?.includes("running") ? [] : [...agents.values()];
       const hasMore = offset + limit < all.length;
       return { requestId: "list", entries: all.slice(offset, offset + limit).map(agent => ({ agent, project: null })),
         pageInfo: { hasMore, nextCursor: hasMore ? String(offset + limit) : null, prevCursor: null } };
@@ -77,7 +83,7 @@ test("execution refresh repairs missing mirrors and parents using retained calle
     async invokePluginRpc(_plugin: string, method: string, input: unknown) {
       rpc.push(method);
       const target = input as Parameters<typeof attach>[0];
-      if (method === "attach") return attach(target, { paseo }, transport.status);
+      if (method === "attach") return attach(target, { paseo }, directory, transport.status);
       await transport.status(target.world, target.akuId, t.signal);
       return { woken: 1 };
     },
@@ -99,8 +105,8 @@ test("execution refresh repairs missing mirrors and parents using retained calle
     assert.deepEqual(handle.current()?.persistence?.metadata?.pluginProviderPersistence,
       { version: 1, data: call.arguments[0].config.options }, "creation evidence immediately carries exact persisted identity");
   }
-  assert.equal(traversals, 2, "concurrent attempts each own one complete directory");
-  assert.equal(directoryPages, 36, "each 3499-entry attempt reads exactly 18 pages, including recursive repairs");
+  assert.equal(traversals, 2, "concurrent attempts share one hot and remaining bootstrap");
+  assert.equal(directoryPages, 19, "one hot page and 18 pages for the 3499 idle entries, including recursive repairs");
   assert.equal(fetched.filter(id => id === "mirror-0").length, 2, "recovered public handles receive fresh parent validation");
   assert.equal(fetched.filter(id => id === "mirror-1").length, 2);
   assert.equal(rpc.filter(method => method === "attach").length, 2);
@@ -109,7 +115,7 @@ test("execution refresh repairs missing mirrors and parents using retained calle
     outcome: { kind: "answered", text: "done" } });
   await signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: child.id, bodySequence: 1, end: "exited" });
   assert.equal(creations.size, 3, "repeated execution refreshes reuse the same ancestor, parent and child mirrors");
-  assert.equal(traversals, 4, "later signals obtain fresh directories rather than reusing prior observations");
+  assert.equal(traversals, 2, "later signals reuse the subscription-maintained complete index");
 });
 
 test("retained caller cycles terminate without pending-ensure deadlock or invented parents", { timeout: 5000 }, async t => {
@@ -124,7 +130,11 @@ test("retained caller cycles terminate without pending-ensure deadlock or invent
   const transport = createSdkTransport({ entry: resolve("build/src/index.js") });
   t.after(() => transport.close());
   let creates = 0;
+  const directory = createDirectoryIndex();
+  t.after(() => directory.close());
+  const stream = directorySubscriptions(async () => ({ requestId: "sub", entries: [], pageInfo }));
   const paseo = createPaseoApi({
+    observeAgents: stream.observeAgents,
     async fetchAgents(options: { signal?: AbortSignal }) {
       assert.ok(options.signal instanceof AbortSignal);
       return { requestId: "list", entries: [], pageInfo };
@@ -134,7 +144,7 @@ test("retained caller cycles terminate without pending-ensure deadlock or invent
   t.after(() => paseo.dispose());
   const warning = t.mock.method(console, "warn", () => {});
   let reads = 0;
-  assert.deepEqual(await attach({ world, akuId: firstId }, { paseo }, async (...args) => {
+  assert.deepEqual(await attach({ world, akuId: firstId }, { paseo }, directory, async (...args) => {
     reads++;
     return transport.status(...args);
   }), { attached: false });
