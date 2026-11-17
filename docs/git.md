@@ -26,6 +26,16 @@ requested authority, while only a deliberate world read enumerates the whole
 world. Observations and object reuse end with the call: there is no cross-call
 cache, second index, or independently updated current-state snapshot.
 
+Private-state publication deliberately spends work proportional to the whole
+private tree, using the exact immutable base captured by its decision observation.
+It preserves every unaddressed leaf and its mode, including unknown authority,
+symlinks, and gitlinks. Native serialization may prune empty tree-only directories;
+these directories carry no authority. Addressed leaf writes cannot replace an
+existing directory or descend through an existing non-tree ancestor, even when
+another change deletes that ancestor. Publication never uses or mutates a caller's
+index, branch, or worktree, and retires its temporary custody after owned commands
+terminate. Independent operation and cleanup failures both remain observable.
+
 Cooperating private-state writers share one repository-local publication seat.
 It coordinates writers but does not decide acceptance: atomic compare-and-swap
 and exact durable read-back remain the only currentness and unknown-outcome

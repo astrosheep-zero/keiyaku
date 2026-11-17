@@ -1,5 +1,27 @@
 import { consumeProcessStdout, spawnCancellableProcess } from "../runtime/proc/run.js";
 import { pipeline } from "node:stream/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+export async function withPrivateGitIndex<Value>(
+  action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>,
+): Promise<Value> {
+  const directory = await mkdtemp(join(tmpdir(), "keiyaku-v4-index-"));
+  let value: Value;
+  try {
+    value = await action({ GIT_INDEX_FILE: join(directory, "index") });
+  } catch (error) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+    } catch (cleanup) {
+      throw new AggregateError([error, cleanup], "Private Git index operation and cleanup failed");
+    }
+    throw error;
+  }
+  await rm(directory, { recursive: true, force: true });
+  return value;
+}
 
 export type GitRepository = Readonly<{
   /** The executable selected when this repository capability is created. */

@@ -16,7 +16,6 @@ export type GitReadObservation = Readonly<{
   readonly [gitReadObservationBrand]: true;
   repository: GitRepository;
   snapshot: GitSnapshot;
-  treeDirectories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
   readBlobs(oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitBlobResult>>;
   resolveRef(ref: string): Promise<GitOid | null>;
 }>;
@@ -267,12 +266,10 @@ function commitTree(result: GitObjectResult, commit: GitOid): GitOid {
 
 type TreeObservation = Readonly<{
   paths: ReadonlyMap<string, TreeEntry>;
-  directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>;
 }>;
 
 async function completeTree(channel: GitDecodeChannel, root: GitOid): Promise<TreeObservation> {
   const paths = new Map<string, TreeEntry>();
-  const directories = new Map<string, ReadonlyMap<string, TreeEntry>>();
   let level = [{ path: "", oid: root }];
   while (level.length > 0) {
     const objects = await channel.readObjects(level.map(({ oid }) => oid));
@@ -282,7 +279,6 @@ async function completeTree(channel: GitDecodeChannel, root: GitOid): Promise<Tr
       if (object?.kind !== "present") throw new AuthorityCorruptionError(`Git tree is missing: ${tree.oid}`);
       if (object.type !== "tree") throw new AuthorityCorruptionError(`Git object is not a tree: ${tree.oid}`);
       const entries = parseTreeObject(object.bytes, tree.oid.length / 2);
-      directories.set(tree.path, entries);
       for (const [name, entry] of entries) {
         const path = tree.path.length === 0 ? name : `${tree.path}/${name}`;
         if (entry.type === "tree") next.push({ path, oid: entry.oid });
@@ -291,7 +287,7 @@ async function completeTree(channel: GitDecodeChannel, root: GitOid): Promise<Tr
     }
     level = next;
   }
-  return { paths, directories };
+  return { paths };
 }
 
 type TreeSelectionNode = {
@@ -332,17 +328,14 @@ export async function readGitTreeSelection(
   selection: GitTreeSelection,
 ): Promise<TreeObservation> {
   const paths = new Map<string, TreeEntry>();
-  const directories = new Map<string, ReadonlyMap<string, TreeEntry>>();
-  const readDirectory = async (path: string, oid: GitOid): Promise<ReadonlyMap<string, TreeEntry>> => {
+  const readDirectory = async (oid: GitOid): Promise<ReadonlyMap<string, TreeEntry>> => {
     const object = (await channel.readObjects([oid])).get(oid);
     if (object?.kind !== "present") throw new AuthorityCorruptionError(`Git tree is missing: ${oid}`);
     if (object.type !== "tree") throw new AuthorityCorruptionError(`Git object is not a tree: ${oid}`);
-    const entries = parseTreeObject(object.bytes, oid.length / 2);
-    directories.set(path, entries);
-    return entries;
+    return parseTreeObject(object.bytes, oid.length / 2);
   };
   const enumerate = async (path: string, oid: GitOid): Promise<void> => {
-    const entries = await readDirectory(path, oid);
+    const entries = await readDirectory(oid);
     await Promise.all(
       [...entries].map(async ([name, entry]) => {
         const childPath = path.length === 0 ? name : `${path}/${name}`;
@@ -352,7 +345,7 @@ export async function readGitTreeSelection(
     );
   };
   const visit = async (path: string, oid: GitOid, node: TreeSelectionNode): Promise<void> => {
-    const entries = await readDirectory(path, oid);
+    const entries = await readDirectory(oid);
     await Promise.all(
       [...node.children].map(async ([name, child]) => {
         const entry = entries.get(name);
@@ -373,7 +366,7 @@ export async function readGitTreeSelection(
     );
   };
   await visit("", root, selectionTree(selection));
-  return { paths, directories };
+  return { paths };
 }
 
 async function readFormat(observation: GitReadObservation): Promise<void> {
@@ -467,10 +460,8 @@ async function observeEpoch<Value>(
   let failure: { error: unknown } | undefined;
   try {
     let snapshot: GitSnapshot;
-    let treeDirectories: TreeObservation["directories"];
     if (commit === null) {
       snapshot = { commit: null, tree: null, paths: new Map() };
-      treeDirectories = new Map();
     } else {
       const commitObject = (await channel.readObjects([commit])).get(commit);
       if (commitObject === undefined) throw new Error(`missing state commit result: ${commit}`);
@@ -478,13 +469,11 @@ async function observeEpoch<Value>(
       const observed =
         selection === null ? await completeTree(channel, tree) : await readGitTreeSelection(channel, tree, selection);
       snapshot = { commit, tree, paths: observed.paths };
-      treeDirectories = observed.directories;
     }
     const observation = {
       [gitReadObservationBrand]: true,
       repository,
       snapshot,
-      treeDirectories,
       readBlobs: async (oids) => {
         assertActive();
         return await readBlobResults(channel, oids);

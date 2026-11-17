@@ -5,8 +5,10 @@ import { syncBuiltinESMExports } from "node:module";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { GitPlumbingError } from "../src/git/process.js";
-import { captureWorkspaceTree, observeWorkspace, withPrivateGitIndex } from "../src/git/workspace.js";
+import { captureWorkspaceTree, observeWorkspace } from "../src/git/workspace.js";
+import { withPrivateGitIndex } from "../src/git/process.js";
 import { cachedRepositoryAt, withGitShim, type TestGitRepository } from "./support/git.js";
+import { updateGitTree, writeBlob } from "../src/git/repository.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 
 function custody(repository: TestGitRepository, workspace = repository.path) {
@@ -168,6 +170,51 @@ test("capture creates no shared-index output when split index is enabled", async
     sharedBefore.map((name) => readFileSync(join(gitDirectory, name))),
     sharedBytes,
   );
+});
+
+test("private-state publication preserves ambient, split and unmerged indices and both linked-worktree heads", async () => {
+  const repository = repositoryWithMain({ files: { "conflict.txt": "base\n" } });
+  repository.run(["checkout", "--quiet", "-b", "other"]);
+  writeFileSync(join(repository.path, "conflict.txt"), "other\n");
+  repository.run(["commit", "--quiet", "-am", "other"]);
+  repository.run(["checkout", "--quiet", "main"]);
+  writeFileSync(join(repository.path, "conflict.txt"), "main\n");
+  repository.run(["commit", "--quiet", "-am", "main"]);
+  assert.throws(() => repository.run(["merge", "--no-edit", "other"]));
+  const unmerged = repository.run(["ls-files", "--unmerged"]);
+  assert.notEqual(unmerged, "");
+  const workspace = join(repository.path, "linked");
+  repository.run(["worktree", "add", "--quiet", "--detach", workspace]);
+  repository.run(["config", "core.splitIndex", "true"]);
+  repository.run(["-C", workspace, "update-index", "--split-index"]);
+  const linkedDirectory = repository.run(["-C", workspace, "rev-parse", "--absolute-git-dir"]).trim();
+  const shared = () => readdirSync(linkedDirectory).filter((name) => name.startsWith("sharedindex."))
+    .map((name) => [name, readFileSync(join(linkedDirectory, name))]);
+  const sharedBefore = shared();
+  assert.ok(sharedBefore.length > 0);
+  const primaryBefore = custody(repository);
+  const linkedBefore = custody(repository, workspace);
+  const git = await cachedRepositoryAt(workspace);
+  const blob = await writeBlob(git, "private authority\n");
+  const base = await updateGitTree(git, null, new Map([["authority", { oid: blob }]]));
+  repository.run(["config", "core.sparseCheckout", "true"]);
+  repository.run(["config", "index.sparse", "true"]);
+  const previous = process.env.GIT_INDEX_FILE;
+  let tree;
+  try {
+    process.env.GIT_INDEX_FILE = join(repository.path, ".git", "index");
+    tree = await updateGitTree(git, base, new Map([["nested/authority", { oid: blob }]]));
+  } finally {
+    if (previous === undefined) delete process.env.GIT_INDEX_FILE;
+    else process.env.GIT_INDEX_FILE = previous;
+  }
+  assert.equal(repository.run(["ls-tree", "-r", "--name-only", tree]), "authority\nnested/authority\n");
+  assert.deepEqual(custody(repository), primaryBefore);
+  assert.deepEqual(custody(repository, workspace), linkedBefore);
+  assert.deepEqual(shared(), sharedBefore);
+  assert.equal(repository.run(["ls-files", "--unmerged"]), unmerged);
+  assert.equal(readFileSync(join(repository.path, "conflict.txt"), "utf8"),
+    "<<<<<<< HEAD\nmain\n=======\nother\n>>>>>>> other\n");
 });
 
 test("status observation and clean capture do not refresh caller index bytes", async () => {

@@ -3,16 +3,8 @@ import { isAbsolute, resolve } from "node:path";
 import { lstat, realpath } from "node:fs/promises";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
-import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
-import {
-  parseTreeObject,
-  prepareTreeUpdate,
-  treeUpdate,
-  validPath,
-  type PreparedTree,
-  type TreeChange,
-  type TreeEntry,
-} from "./tree.js";
+import { executeGit, GitPlumbingError, withPrivateGitIndex, type GitRepository } from "./process.js";
+import { validPath, type TreeChange, type TreeEntry } from "./tree.js";
 export type { TreeChange } from "./tree.js";
 export const GIT_REF = "refs/heads/keiyaku-state";
 export const DELIVERY_REF_NAMESPACE = "refs/keiyaku/delivery";
@@ -282,57 +274,6 @@ export async function readBlob(repository: GitRepository, oid: GitOid): Promise<
   return await executeGit(repository, ["cat-file", "blob", oid]);
 }
 
-function malformedBatchOutput(detail: string): never {
-  throw new GitPlumbingError({
-    stderr: Buffer.alloc(0),
-    status: null,
-    message: `malformed cat-file --batch output: ${detail}`,
-  });
-}
-
-type GitObject = Readonly<{ type: string; bytes: Buffer }>;
-
-async function readObjects(
-  repository: GitRepository,
-  oids: readonly GitOid[],
-): Promise<ReadonlyMap<GitOid, GitObject>> {
-  const unique = [...new Set(oids)];
-  for (const oid of unique) gitObjectId(oid, "Git object");
-  if (unique.length === 0) return new Map();
-
-  const output = await executeGit(repository, ["cat-file", "--batch"], `${unique.join("\n")}\n`);
-  const objects = new Map<GitOid, GitObject>();
-  let offset = 0;
-  for (const oid of unique) {
-    const headerEnd = output.indexOf(0x0a, offset);
-    if (headerEnd < 0) malformedBatchOutput(`missing header for ${oid}`);
-    const fields = output.subarray(offset, headerEnd).toString("ascii").split(" ");
-    offset = headerEnd + 1;
-    if (fields.length === 2 && fields[0] === oid && fields[1] === "missing") {
-      throw new GitPlumbingError({
-        stderr: `missing Git object: ${oid}`,
-        status: 1,
-        message: `cat-file --batch: missing Git object ${oid}`,
-      });
-    }
-    if (fields.length !== 3 || fields[0] !== oid || fields[1] === undefined || fields[2] === undefined) {
-      malformedBatchOutput(`unexpected header for ${oid}`);
-    }
-    if (!/^(0|[1-9][0-9]*)$/.test(fields[2])) malformedBatchOutput(`invalid size for ${oid}`);
-    const size = Number(fields[2]);
-    if (!Number.isSafeInteger(size) || size < 0 || size > output.length - offset) {
-      malformedBatchOutput(`invalid content length for ${oid}`);
-    }
-    const bytes = output.subarray(offset, offset + size);
-    offset += size;
-    if (output[offset] !== 0x0a) malformedBatchOutput(`missing content delimiter for ${oid}`);
-    offset += 1;
-    objects.set(oid, { type: fields[1], bytes });
-  }
-  if (offset !== output.length) malformedBatchOutput("trailing bytes");
-  return objects;
-}
-
 async function validateGitFormat(repository: GitRepository, paths: ReadonlyMap<string, TreeEntry>): Promise<void> {
   const format = paths.get(GIT_FORMAT_PATH);
   if (format === undefined) throw new AuthorityCorruptionError(`Git is missing ${GIT_FORMAT_PATH}`);
@@ -343,102 +284,86 @@ async function validateGitFormat(repository: GitRepository, paths: ReadonlyMap<s
   }
 }
 
-async function baseTreeEntries(
-  repository: GitRepository,
-  baseTree: GitOid | null,
-  changedPaths: readonly string[],
-  nodePaths: readonly string[],
-): Promise<ReadonlyMap<string, Map<string, TreeEntry>>> {
-  const byPath = new Map<string, Map<string, TreeEntry>>();
-  if (baseTree === null) return byPath;
-
-  const ancestry = parseTreeEntries(
-    await executeGit(repository, [
-      "ls-tree",
-      "-z",
-      "-t",
-      "-r",
-      "--full-tree",
-      baseTree,
-      "--",
-      ...changedPaths.map((path) => `:(literal)${path}`),
-    ]),
-  );
-  const treeByPath = new Map<string, GitOid>([["", baseTree]]);
-  for (const path of nodePaths) {
-    if (path.length === 0) continue;
-    const entry = ancestry.get(path);
-    if (entry === undefined) continue;
-    if (entry.type !== "tree") throw new Error(`Git path is both file and directory: ${path}`);
-    treeByPath.set(path, entry.oid);
-  }
-
-  const objects = await readObjects(repository, [...treeByPath.values()]);
-  const oidBytes = baseTree.length / 2;
-  for (const [path, oid] of treeByPath) {
-    const object = objects.get(oid);
-    if (object === undefined || object.type !== "tree") {
-      throw new GitPlumbingError({ stderr: oid, status: null, message: `Git tree is not a tree: ${path || "/"}` });
+function validateTreeChanges(changes: ReadonlyMap<string, TreeChange>): ReadonlySet<string> {
+  const addressed = new Set<string>();
+  for (const [path, change] of changes) {
+    validPath(path);
+    const parts = path.split("/");
+    for (let length = 1; length <= parts.length; length += 1) {
+      addressed.add(parts.slice(0, length).join("/"));
     }
-    byPath.set(path, parseTreeObject(object.bytes, oidBytes));
-  }
-  return byPath;
-}
-
-async function writePreparedTrees(repository: GitRepository, prepared: readonly PreparedTree[]): Promise<void> {
-  const output = await executeGit(
-    repository,
-    ["mktree", "--batch"],
-    prepared.map(({ records }) => `${records}\n`).join(""),
-  );
-  const written = output.toString("ascii").trimEnd().split("\n");
-  if (written.length !== prepared.length) {
-    throw new GitPlumbingError({ stderr: output, status: null, message: "malformed mktree --batch output" });
-  }
-  for (let index = 0; index < prepared.length; index += 1) {
-    const expected = prepared[index]!.oid;
-    const actual = written[index]!;
-    gitObjectId(actual, "written tree");
-    if (actual !== expected) {
-      throw new GitPlumbingError({ stderr: output, status: null, message: `mktree wrote unexpected tree: ${actual}` });
+    if (change === null) continue;
+    gitObjectId(change.oid, `tree entry ${path}`);
+    const mode = change.mode ?? "100644";
+    if (!["100644", "100755", "120000", "160000"].includes(mode)) {
+      throw new Error(`invalid Git leaf mode: ${mode}`);
+    }
+    if (change.type !== undefined && change.type !== (mode === "160000" ? "commit" : "blob")) {
+      throw new Error(`invalid Git leaf type: ${path}`);
     }
   }
+  return addressed;
 }
 
-async function writeTreeUpdate(
-  repository: GitRepository,
-  baseTree: GitOid | null,
-  changes: ReadonlyMap<string, TreeChange>,
-  update: ReturnType<typeof treeUpdate>,
-  bases: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>,
-): Promise<GitOid> {
-  const representativeOid = baseTree ?? [...changes.values()].find((change) => change !== null)?.oid;
-  if (representativeOid === undefined) throw new Error("cannot write an empty Git tree without an object format");
-  const prepared = prepareTreeUpdate({ update, bases, oidBytes: representativeOid.length / 2 });
-  await writePreparedTrees(repository, prepared.trees);
-  return prepared.root;
-}
-
-/** Copy only the changed paths' tree ancestors, preserving untouched subtrees by object ID. */
+/** Serialize a complete private tree through an isolated native Git index. */
 export async function updateGitTree(
   repository: GitRepository,
   baseTree: GitOid | null,
   changes: ReadonlyMap<string, TreeChange>,
 ): Promise<GitOid> {
-  const update = treeUpdate(changes);
-  const bases = await baseTreeEntries(repository, baseTree, [...changes.keys()], update.nodePaths);
-  return writeTreeUpdate(repository, baseTree, changes, update, bases);
-}
-
-/** Write a tree update from directory entries frozen with the admitted base tree. */
-export async function updateGitTreeFromFrozenDirectories(
-  repository: GitRepository,
-  baseTree: GitOid | null,
-  directories: ReadonlyMap<string, ReadonlyMap<string, TreeEntry>>,
-  changes: ReadonlyMap<string, TreeChange>,
-): Promise<GitOid> {
-  const update = treeUpdate(changes);
-  return writeTreeUpdate(repository, baseTree, changes, update, directories);
+  if (baseTree !== null) gitObjectId(baseTree, "base tree");
+  const addressed = validateTreeChanges(changes);
+  const existing =
+    baseTree === null || addressed.size === 0
+      ? new Map<string, TreeEntry>()
+      : parseTreeEntries(
+          await executeGit(repository, [
+            "ls-tree",
+            "-z",
+            "-t",
+            "-r",
+            "--full-tree",
+            baseTree,
+            "--",
+            ...[...addressed].map((path) => `:(literal)${path}`),
+          ]),
+        );
+  for (const [path, change] of changes) {
+    if (change !== null && existing.get(path)?.type === "tree") {
+      throw new Error(`Git path is both file and directory: ${path}`);
+    }
+    const parts = path.split("/");
+    for (let length = 1; length < parts.length; length += 1) {
+      const ancestor = parts.slice(0, length).join("/");
+      const entry = existing.get(ancestor);
+      if ((entry !== undefined && entry.type !== "tree") || changes.has(ancestor)) {
+        throw new Error(`Git path is both file and directory: ${path}`);
+      }
+    }
+  }
+  const format = (await executeGit(repository, ["rev-parse", "--show-object-format"])).toString("ascii").trim();
+  const width = format === "sha1" ? 40 : format === "sha256" ? 64 : 0;
+  if (width === 0) throw new Error(`unsupported Git object format: ${format}`);
+  const records: string[] = [];
+  for (const [path, change] of changes) {
+    if (change !== null && change.oid.length !== width) {
+      throw new Error(`invalid Git object ID width: ${path}`);
+    }
+    records.push(
+      change === null ? `0 ${"0".repeat(width)}\t${path}\0` : `${change.mode ?? "100644"} ${change.oid}\t${path}\0`,
+    );
+  }
+  return await withPrivateGitIndex(async (environment) => {
+    const config = ["-c", "core.splitIndex=false", "-c", "core.sparseCheckout=false", "-c", "index.sparse=false"];
+    await executeGit(repository, [...config, "read-tree", baseTree ?? "--empty"], undefined, environment);
+    await executeGit(repository, [...config, "update-index", "-z", "--index-info"], records.join(""), environment);
+    const tree = (await executeGit(repository, [...config, "write-tree"], undefined, environment))
+      .toString("ascii")
+      .trim();
+    gitObjectId(tree, "written tree");
+    if (tree.length !== width) throw new Error("written tree has an invalid Git object ID width");
+    return tree;
+  });
 }
 
 async function writeCommitObject(

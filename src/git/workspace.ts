@@ -1,11 +1,10 @@
 import { z } from "zod";
-import { access, mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractPhysicalName, gitObjectId, mintSnapshotId, snapshotIdSchema, type GitObjectId } from "./identity.js";
-import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
+import { executeGit, GitPlumbingError, withPrivateGitIndex, type GitRepository } from "./process.js";
 import {
   HANDOFF_RECEIPT_REF_NAMESPACE,
   readBlob,
@@ -136,25 +135,6 @@ export async function followDependentManagedWorktree(
   if (!ancestor) return { kind: "retained", head, reason: "head-moved", paths };
   await executeGit(repository, ["-C", workspace, "checkout", "--quiet", "--detach", gitObjectId(target)]);
   return { kind: "followed", before: head, after: target };
-}
-
-export async function withPrivateGitIndex<Value>(
-  action: (environment: Readonly<{ GIT_INDEX_FILE: string }>) => Value | PromiseLike<Value>,
-): Promise<Value> {
-  const directory = await mkdtemp(join(tmpdir(), "keiyaku-v4-index-"));
-  let value: Value;
-  try {
-    value = await action({ GIT_INDEX_FILE: join(directory, "index") });
-  } catch (error) {
-    try {
-      await rm(directory, { recursive: true, force: true });
-    } catch (cleanup) {
-      throw new AggregateError([error, cleanup], "Private Git index capture and cleanup failed");
-    }
-    throw error;
-  }
-  await rm(directory, { recursive: true, force: true });
-  return value;
 }
 
 function fields(record: string, count: number): readonly string[] {

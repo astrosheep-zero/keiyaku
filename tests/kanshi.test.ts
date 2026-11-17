@@ -24,12 +24,12 @@ import { contractId, type ContractId } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import {
   GIT_FORMAT_PATH,
-  updateGitTree,
   updateRefsAtomically,
   writeBlob,
   writeStateCommit,
   repositoryAt,
 } from "../src/git/repository.js";
+import { executeGit, withPrivateGitIndex } from "../src/git/process.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import type { AkumaAlias } from "../src/identity/selector.js";
 import { KeiyakuError } from "../src/errors.js";
@@ -151,12 +151,19 @@ async function replacePrivateState(
   const snapshot = await withGitDecodeChannel(git, (channel) =>
     withGitReadObservation(git, channel, (observation) => observation.snapshot),
   );
-  const changes = new Map(
-    await Promise.all(
-      [...replacements].map(async ([path, bytes]) => [path, { oid: await writeBlob(git, bytes) }] as const),
-    ),
-  );
-  const tree = await updateGitTree(git, snapshot.tree, changes);
+  // Corruption fixtures deliberately replace whole authority subtrees. Native Git
+  // constructs those invalid trees without weakening production leaf-write guards.
+  const tree = await withPrivateGitIndex(async (environment) => {
+    const config = ["-c", "core.splitIndex=false", "-c", "core.sparseCheckout=false", "-c", "index.sparse=false"];
+    await executeGit(git, [...config, "read-tree", snapshot.tree ?? "--empty"], undefined, environment);
+    for (const [path, bytes] of replacements) {
+      const descendants = await executeGit(git, [...config, "ls-files", "-z", "--", `:(literal)${path}`], undefined, environment);
+      await executeGit(git, [...config, "update-index", "--force-remove", "-z", "--stdin"], descendants, environment);
+      const oid = await writeBlob(git, bytes);
+      await executeGit(git, [...config, "update-index", "-z", "--index-info"], `100644 ${oid}\t${path}\0`, environment);
+    }
+    return (await executeGit(git, [...config, "write-tree"], undefined, environment)).toString("ascii").trim();
+  });
   const commit = await writeStateCommit({ repository: git, tree, parent: snapshot.commit });
   assert.equal(
     (

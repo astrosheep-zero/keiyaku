@@ -13,7 +13,7 @@ import {
   type RefPublication,
   type TreeChange,
   readRef,
-  updateGitTreeFromFrozenDirectories,
+  updateGitTree,
   updateRefsAtomically,
   writeBlob,
   writeStateCommit,
@@ -161,12 +161,7 @@ async function publishOffer(
   owner: ContractId,
 ): Promise<RefPublication> {
   const { snapshot } = admission;
-  const gitTree = await updateGitTreeFromFrozenDirectories(
-    repository,
-    snapshot.tree,
-    admission.treeDirectories,
-    changes,
-  );
+  const gitTree = await updateGitTree(repository, snapshot.tree, changes);
   const gitCommit = mintSnapshotId(
     await writeStateCommit({
       repository,

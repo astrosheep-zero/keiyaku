@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { publicationFailedSchema } from "../git/admission.js";
 import type { ProtocolProgress } from "./progress.js";
-import { extendAdmissionPathsAt, observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
 import {
   appendPrivateStateSeatClose,
   isPrivateStateSeatContention,
@@ -284,17 +284,9 @@ async function decideDecoratedProtocolOffer<Input extends Readonly<{ contractId:
     companions.length === 0
       ? decision.offer
       : { ...decision.offer, companions: [...(decision.offer.companions ?? []), ...companions] };
-  const admissionObservation =
-    companions.length === 0
-      ? decisionObservation
-      : await extendAdmissionPathsAt(
-          admission.channel,
-          decisionObservation,
-          companions.map(({ path }) => path),
-        );
   return {
     kind: "offered",
-    observation: admissionObservation,
+    observation: decisionObservation,
     attempt,
     offer,
     assertions: prepared.assertions,

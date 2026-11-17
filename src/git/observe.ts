@@ -85,7 +85,6 @@ type FrozenGitObservation = Readonly<{
 export type GitAdmissionSnapshot = Readonly<{
   snapshot: GitSnapshot;
   frozenJournalBytes: ReadonlyMap<GitOid, Buffer>;
-  treeDirectories: ReadonlyMap<string, ReadonlyMap<string, import("./tree.js").TreeEntry>>;
 }>;
 
 export type GitDecisionObservation = Readonly<{
@@ -452,7 +451,6 @@ export async function observeContractsForAdmissionInObservationAt(
     admission: {
       snapshot: observation.snapshot,
       frozenJournalBytes: contracts.frozenJournalBytes,
-      treeDirectories: observation.treeDirectories,
     },
     decision: decisionProjection(contracts),
     journals: contracts.contracts,
@@ -492,30 +490,9 @@ export async function extendContractsForAdmissionAt(
     admission: {
       snapshot: extendedSnapshot,
       frozenJournalBytes: new Map([...observation.admission.frozenJournalBytes, ...added.frozenJournalBytes]),
-      treeDirectories: new Map([...observation.admission.treeDirectories, ...selected.directories]),
     },
     decision: new Map([...observation.decision, ...decisionProjection(added)]),
     journals: new Map([...observation.journals, ...added.contracts]),
-  };
-}
-
-export async function extendAdmissionPathsAt(
-  channel: GitDecodeChannel,
-  observation: GitDecisionObservation,
-  paths: readonly string[],
-): Promise<GitDecisionObservation> {
-  if (paths.length === 0 || observation.admission.snapshot.tree === null) return observation;
-  const selected = await readGitTreeSelection(channel, observation.admission.snapshot.tree, { paths });
-  return {
-    ...observation,
-    admission: {
-      ...observation.admission,
-      snapshot: {
-        ...observation.admission.snapshot,
-        paths: new Map([...observation.admission.snapshot.paths, ...selected.paths]),
-      },
-      treeDirectories: new Map([...observation.admission.treeDirectories, ...selected.directories]),
-    },
   };
 }
 
