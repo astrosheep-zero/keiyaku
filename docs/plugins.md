@@ -125,8 +125,12 @@ Paseo attachment is attempted at Turn start, Turn outcome, and Body end through
 one ensure-and-refresh operation. Birth and public reads do not attach mirrors.
 Attachment follows only the exact Akuma's immutable birth caller, never the
 current environment, Turn initiator, alias, execution directory, or fork lineage.
-Missing Akuma parent mirrors may first be repaired from their own retained callers;
-incomplete, unreadable, ambiguous, cyclic, or
+Missing Akuma parent mirrors may first be repaired from their own retained callers.
+One bounded attachment attempt shares a complete public directory observation
+across the subject and its caller ancestry; it never reuses that observation
+across attempts. Recovered parents carry public creation evidence into the same
+attempt and remain subject to fresh identity validation before child creation.
+Incomplete, unreadable, ambiguous, cyclic, or
 excessively deep ancestry proves no attachment. Recovery creates no external
 parent and recognizes only supported native host identities. Generic external
 attribution remains valid even when the mirror does not support that integration.

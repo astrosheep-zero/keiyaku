@@ -19,8 +19,10 @@ const pageInfo = { hasMore: false, nextCursor: null, prevCursor: null };
 test("execution refresh repairs missing mirrors and parents using retained callers through the public SDK", { timeout: 10_000 }, async t => {
   const world = await World.at(temporaryDirectory(t, "paseo-repair-"));
   await writeFile(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
-  const parent = await bornLineageAkuma({ root: world, akumaName: "parent", draw: "1234abcd", createdAt: at,
+  const ancestor = await bornLineageAkuma({ root: world, akumaName: "ancestor", draw: "1111abcd", createdAt: at,
     caller: { kind: "external", integration: "claude", id: "native-parent" } });
+  const parent = await bornLineageAkuma({ root: world, akumaName: "parent", draw: "1234abcd", createdAt: at,
+    caller: { kind: "akuma", world, akumaId: ancestor.id } });
   const child = await bornLineageAkuma({ root: world, akumaName: "child", draw: "5678abcd", createdAt: at,
     caller: { kind: "akuma", world, akumaId: parent.id },
     origin: { kind: "fork", parent: "aku/unrelated/11111111" as typeof parent.id, at: "turn/1" } });
@@ -29,13 +31,30 @@ test("execution refresh repairs missing mirrors and parents using retained calle
   const agents = new Map<string, PaseoAgent>();
   agents.set("host", { id: "host", provider: "wwz", cwd: world, archivedAt: null,
     persistence: { provider: "wwz", sessionId: "native-parent", metadata: { provider: "claude" } } } as unknown as PaseoAgent);
+  for (let index = 0; index < 3498; index++) agents.set(`unrelated-${index}`, {
+    id: `unrelated-${index}`, provider: "pi", cwd: world, archivedAt: null,
+  } as unknown as PaseoAgent);
   const creations = new Map<string, string>();
   const parents: Array<[string, string | undefined]> = [];
   const rpc: string[] = [];
+  let directoryPages = 0, traversals = 0;
+  const fetched: string[] = [];
   const client = {
     getLastServerInfoMessage() { return { serverId: "isolated-test" }; },
-    async fetchAgents() { return { requestId: "list", entries: [...agents.values()].map(agent => ({ agent, project: null })), pageInfo }; },
-    async fetchAgent({ agentId }: { agentId: string }) { const agent = agents.get(agentId); return agent ? { agent, project: null } : null; },
+    async fetchAgents(options: { filter?: { includeBackground?: boolean }; page?: { cursor?: string; limit?: number } }) {
+      const offset = Number(options.page?.cursor ?? 0);
+      const limit = options.page?.limit ?? 200;
+      if (options.filter?.includeBackground) { directoryPages++; if (!offset) traversals++; }
+      const all = [...agents.values()];
+      const hasMore = offset + limit < all.length;
+      return { requestId: "list", entries: all.slice(offset, offset + limit).map(agent => ({ agent, project: null })),
+        pageInfo: { hasMore, nextCursor: hasMore ? String(offset + limit) : null, prevCursor: null } };
+    },
+    async fetchAgent({ agentId }: { agentId: string }) {
+      fetched.push(agentId);
+      const agent = agents.get(agentId);
+      return agent ? { agent, project: null } : null;
+    },
     async createAgent(options: Parameters<DaemonClient["createAgent"]>[0]) {
       const target = options.config!.providerOptions as { world: string; akuId: string };
       const status = await transport.status(target.world, target.akuId, t.signal);
@@ -65,19 +84,32 @@ test("execution refresh repairs missing mirrors and parents using retained calle
     async close() {},
   };
   const paseo = createPaseoApi(client as unknown as DaemonClient);
+  const create = t.mock.method(paseo.agents, "create");
   t.after(() => paseo.dispose());
   const { signals } = await createForwarder(async () => client as unknown as DaemonClient).activate({
     world, config: undefined, writablePath() { throw new Error("no observer store"); },
   });
   const started = { kind: "akuma.turn-started" as const, akumaId: child.id, turnSequence: 1 };
   await Promise.all([signals?.["akuma.turn-started"]?.(started), signals?.["akuma.turn-started"]?.(started)]);
-  assert.deepEqual(parents, [[parent.id, "host"], [child.id, "mirror-0"]]);
+  assert.deepEqual(parents, [[ancestor.id, "host"], [parent.id, "mirror-0"], [child.id, "mirror-1"]]);
+  for (const call of create.mock.calls) {
+    const handle = await call.result;
+    assert.ok(handle);
+    assert.equal(handle.current(), agents.get(handle.id), "real createPaseoApi seeds current() directly from the daemon response");
+    assert.deepEqual(handle.current()?.persistence?.metadata?.pluginProviderPersistence,
+      { version: 1, data: call.arguments[0].config.options }, "creation evidence immediately carries exact persisted identity");
+  }
+  assert.equal(traversals, 2, "concurrent attempts each own one complete directory");
+  assert.equal(directoryPages, 36, "each 3499-entry attempt reads exactly 18 pages, including recursive repairs");
+  assert.equal(fetched.filter(id => id === "mirror-0").length, 2, "recovered public handles receive fresh parent validation");
+  assert.equal(fetched.filter(id => id === "mirror-1").length, 2);
   assert.equal(rpc.filter(method => method === "attach").length, 2);
   assert.equal(rpc.filter(method => method === "refresh").length, 2);
   await signals?.["akuma.turn-outcome"]?.({ ...started, kind: "akuma.turn-outcome", bodySequence: 1,
     outcome: { kind: "answered", text: "done" } });
   await signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: child.id, bodySequence: 1, end: "exited" });
-  assert.equal(creations.size, 2, "repeated execution refreshes reuse the same parent and child mirrors");
+  assert.equal(creations.size, 3, "repeated execution refreshes reuse the same ancestor, parent and child mirrors");
+  assert.equal(traversals, 4, "later signals obtain fresh directories rather than reusing prior observations");
 });
 
 test("retained caller cycles terminate without pending-ensure deadlock or invented parents", { timeout: 5000 }, async t => {

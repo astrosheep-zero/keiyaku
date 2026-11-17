@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import type { PaseoAgent, PaseoAgentHandle, PaseoApi } from "@getpaseo/client";
-import { listMirrorCandidates, matchesCanonicalMirror } from "./mirror-identity.js";
+import { findMirrorCandidates, listAgentDirectory, matchesCanonicalMirror } from "./mirror-identity.js";
 
 const reopenInFlight = new Map<string, Promise<boolean>>();
 
@@ -21,7 +21,7 @@ export async function refreshOrReopen(paseo: PaseoApi, input: { world: string; a
 
   let candidates: PaseoAgent[];
   try {
-    candidates = await listMirrorCandidates(paseo, world, input.akuId);
+    candidates = await findMirrorCandidates(await listAgentDirectory(paseo), world, input.akuId);
   } catch (error) {
     console.warn(`Keiyaku mirror refresh skipped: ${error instanceof Error ? error.message : String(error)}`);
     return { woken: 0 };

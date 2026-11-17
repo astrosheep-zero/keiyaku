@@ -49,7 +49,7 @@ test("native parents match exact persistence provider/sessionId across every dir
     handleOnly.persistence.nativeHandle = "native-session";
     const h = await harness(t, [[wrongProvider, handleOnly], [selected], []], selected);
     assert.deepEqual(await h.run(provider), { attached: true });
-    assert.equal(h.listed.length, 6, "finish child and native-parent directory traversals");
+    assert.equal(h.listed.length, 3, "share one complete directory for child and native parent");
     assert.deepEqual(h.fetched, ["parent"]);
     const world = await realpath(h.world);
     assert.deepEqual(h.created, [{
@@ -134,11 +134,13 @@ test("nested Akuma attaches beneath the unique persisted parent across canonical
   t.after(() => rm(alias, { force: true }));
   const parentId = "aku/parent/1234abcd", childId = "aku/child/5678abcd";
   const matching = mirrorParent("parent-mirror", parentWorld, parentId);
-  const h = await nestedHarness(t, childWorld,
-    [[mirrorParent("wrong-world", childWorld, parentId)], [matching]], id => id === matching.id ? matching : null);
+  const directory = [mirrorParent("wrong-world", childWorld, parentId), ...Array.from({ length: 3497 }, (_, index) =>
+    parent(`unrelated-${index}`, "pi", `unrelated-${index}`) as unknown as PaseoAgent), matching];
+  const pages = Array.from({ length: Math.ceil(directory.length / 200) }, (_, index) => directory.slice(index * 200, (index + 1) * 200));
+  const h = await nestedHarness(t, childWorld, pages, id => id === matching.id ? matching : null);
   assert.deepEqual(await attach({ world: childWorld, akuId: childId,
     caller: { kind: "akuma", world: alias, akuId: parentId } }, { paseo: h.paseo }), { attached: true });
-  assert.equal(h.listed.length, 4, "finish child and parent directory traversals");
+  assert.equal(h.listed.length, 18, "share one complete 3499-entry directory for child and Akuma parent");
   assert.deepEqual(h.fetched, ["parent-mirror"]);
   const canonicalChild = await realpath(childWorld);
   assert.deepEqual(h.create.mock.calls[0]?.arguments[0], {
@@ -197,6 +199,19 @@ test("missing, duplicate (including archived), archived and stale parent mapping
     assert.equal(warning.mock.callCount(), 1);
     assert.match(String(warning.mock.calls[0]?.arguments[0]), scenario.reason);
   });
+});
+
+test("incomplete attachment directory cannot authorize creation even with a matching native parent", async t => {
+  const selected = parent("parent", "pi", "native-session");
+  const h = await harness(t, [[selected]], selected);
+  t.mock.method(h.paseo.agents, "list", async () => ({ requestId: "list",
+    entries: [{ agent: selected as unknown as PaseoAgent, project: null }],
+    pageInfo: { hasMore: true, nextCursor: null, prevCursor: null } }));
+  const warning = t.mock.method(console, "warn", () => {});
+  assert.deepEqual(await h.run("pi"), { attached: false });
+  assert.equal(h.created.length, 0);
+  assert.deepEqual(h.fetched, []);
+  assert.match(String(warning.mock.calls[0]?.arguments[0]), /incomplete Paseo agent directory pagination/u);
 });
 
 test("existing detached and archived child mappings suppress creation and parent lookup", async t => {

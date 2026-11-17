@@ -62,6 +62,23 @@ test("a hung attachment is bounded and independent refresh reconnects", async t 
   assert.equal(closes, connects);
 });
 
+test("caller cancellation bounds attach and releases the runtime client", async t => {
+  const ctx = await context(t);
+  const cancellation = new AbortController();
+  let closes = 0;
+  const { signals } = await createForwarder(async signal => {
+    signal.throwIfAborted();
+    return {
+      async invokePluginRpc() { cancellation.abort(new Error("caller left")); return await new Promise(() => {}); },
+      fetchAgents: emptyDirectory, async updateAgent() {}, async close() { closes++; },
+    };
+  }).activate(ctx);
+  t.mock.method(console, "warn", () => {});
+  await assert.rejects(async () => signals?.["akuma.body-ended"]?.({ kind: "akuma.body-ended", akumaId: started.akumaId,
+    bodySequence: 1, end: "exited" }, cancellation.signal), /caller left/u);
+  assert.equal(closes, 1);
+});
+
 test("attachment errors still allow independent runtime refresh and title cleanup", async t => {
   const ctx = await context(t);
   const calls: string[] = [];

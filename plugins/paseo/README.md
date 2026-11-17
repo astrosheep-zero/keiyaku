@@ -37,7 +37,11 @@ canonical World/AkuId. The sole candidate is refreshed and must remain unchanged
 and unarchived. Missing, ambiguous, changed, or unreadable evidence diagnoses
 non-attachment without affecting birth. Path aliases match; titles, cwd, aliases,
 and fork ancestry do not identify parents. A missing parent mirror is first
-repaired from that parent's own frozen caller through the public SDK.
+repaired from that parent's own frozen caller through the public SDK. Each attempt
+shares one complete directory across child, native parent, and recursive ancestor
+matching. A repaired parent comes from create's returned public handle snapshot
+and is freshly validated before creating its child; no directory is cached across
+attempts.
 Cyclic or overly deep chains refuse without inventing an external parent.
 
 External parents match `persistence.metadata.provider` (or `persistence.provider`

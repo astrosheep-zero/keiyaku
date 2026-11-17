@@ -25,29 +25,35 @@ export async function matchesCanonicalMirror(agent: PaseoAgent, world: string, a
   }
 }
 
-export async function listMirrorCandidates(paseo: PaseoApi, world: string, akuId: string,
-  includeArchived = false, signal?: AbortSignal): Promise<PaseoAgent[]> {
-  const candidates: PaseoAgent[] = [];
+export async function listAgentDirectory(paseo: PaseoApi, signal?: AbortSignal): Promise<PaseoAgent[]> {
+  const agents: PaseoAgent[] = [];
   const seenCursors = new Set<string>();
   let cursor: string | undefined;
   for (;;) {
     const list = () => paseo.agents.list({ filter: { includeArchived: true, includeBackground: true },
       ...(signal ? { signal } : {}), page: { limit: PAGE_SIZE, ...(cursor ? { cursor } : {}) } });
     const page = await (signal ? raceAbort(signal, list) : list());
-    for (const { agent } of page.entries) {
-      if (agent.archivedAt && !includeArchived) continue;
-      const identity = persistedMirrorIdentity(agent);
-      if (!identity || identity.akuId !== akuId) continue;
-      try {
-        if (await realpath(identity.world) === world) candidates.push(agent);
-      } catch {
-        throw new Error(`unreadable mirror World for ${akuId}`);
-      }
-    }
-    if (!page.pageInfo.hasMore) return candidates;
+    for (const { agent } of page.entries) agents.push(agent);
+    if (!page.pageInfo.hasMore) return agents;
     const next = page.pageInfo.nextCursor;
     if (!next || next === cursor || seenCursors.has(next)) throw new Error("incomplete Paseo agent directory pagination");
     seenCursors.add(next);
     cursor = next;
   }
+}
+
+export async function findMirrorCandidates(agents: readonly PaseoAgent[], world: string, akuId: string,
+  includeArchived = false): Promise<PaseoAgent[]> {
+  const candidates: PaseoAgent[] = [];
+  for (const agent of agents) {
+    if (agent.archivedAt && !includeArchived) continue;
+    const identity = persistedMirrorIdentity(agent);
+    if (!identity || identity.akuId !== akuId) continue;
+    try {
+      if (await realpath(identity.world) === world) candidates.push(agent);
+    } catch {
+      throw new Error(`unreadable mirror World for ${akuId}`);
+    }
+  }
+  return candidates;
 }
