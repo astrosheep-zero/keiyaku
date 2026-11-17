@@ -418,6 +418,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         any("library/selection.ts"),
         any("library/keiyaku-identity.ts"),
         any("library/outcome.ts"),
+        runtime("library/nuke.ts", ["nukeResultSchema"]),
         any("library/akuma-creation.ts", [
           "spawnProgressSchema",
           "spawnResultSchema",
@@ -472,7 +473,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       allow: [...libraryOwner.allow, any("protocol/progress.ts")],
       deny: libraryOwner.deny,
     },
-    { source: "library/outcome.ts", ...outcomeOwner },
+    {
+      source: "library/outcome.ts",
+      allow: [...outcomeOwner.allow, types("library/nuke.ts", ["ResetCounts", "ResetIssue"])],
+    },
     {
       source: "library/invocation.ts",
       allow: [
@@ -928,7 +932,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         types("library/delivery.ts", ["Delivery"]),
         types("library/outcome.ts"),
         any("library/repo.ts", ["Repo", "NoGitWorldError", "RepoAtInput"]),
-        any("library/nuke.ts", ["nukeKeiyaku", "NukeInput", "NukeResult"]),
+        runtime("library/nuke.ts", ["nukeKeiyaku"]),
+        types("library/nuke.ts", ["NukeInput", "NukeResult", "ResetCounts", "ResetIssue"]),
         types("library/contract-composition.ts"),
         types("library/contract-outcomes.ts"),
         types("library/contract-types.ts"),

@@ -175,11 +175,9 @@ export type {
   Gate,
 } from "./library/contract-types.js";
 export { nukeKeiyaku as nuke } from "./library/nuke.js";
-export type { NukeInput, NukeResult } from "./library/nuke.js";
+export type { NukeInput, NukeResult, ResetCounts, ResetIssue } from "./library/nuke.js";
 export type {
   InvocationIssue,
-  ResetCounts,
-  ResetIssue,
   PartialOutcomeEnvelope,
   HandoffOutcome,
   ReconciliationLag,

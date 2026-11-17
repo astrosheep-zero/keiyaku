@@ -69,7 +69,7 @@ import { reconcileResultSchema } from "./reconcile.js";
 import { akumaHistoryResultSchema } from "./selection.js";
 import { historyInputSchemas } from "../akuma/akuma-owner.js";
 import { whoamiFactsSchema } from "./keiyaku-identity.js";
-import { resetOutcomeSchema } from "./outcome.js";
+import { nukeResultSchema } from "./nuke.js";
 import {
   debtAbsentSchema,
   debtShowResultSchema,
@@ -541,7 +541,7 @@ export const verbs = Object.freeze({
   nuke: {
     description: "Reset the selected World with explicit confirmation.",
     input: z.strictObject({ confirm: optText }).readonly(),
-    output: resetOutcomeSchema,
+    output: nukeResultSchema,
     effect: "destroy",
   },
   kanshi: {

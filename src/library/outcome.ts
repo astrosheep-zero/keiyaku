@@ -8,7 +8,8 @@ import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 import { placementOutcome, placementSchema, placedSchema } from "../protocol/completion.js";
 import { verificationAdmissionOutcome } from "../protocol/verify.js";
 
-import { worldRootSchema, type WorldRoot } from "../world.js";
+import type { WorldRoot } from "../world.js";
+import type { ResetCounts, ResetIssue } from "./nuke.js";
 import type { ContinuationReport } from "./continuation.js";
 import type { ReviewOutcome, VerifyOutcome } from "./contract-outcomes.js";
 import type { SpawnResult } from "./akuma-creation.js";
@@ -21,7 +22,6 @@ import { retrySchema, executionIssueSchema } from "../protocol/result-reasons.js
 export { executionIssueSchema } from "../protocol/result-reasons.js";
 
 export type ContractVerb = "bind" | "amend" | "deliver" | "verify" | "review" | "deliver-preview" | "arc" | "abandon";
-type OutcomeOperation = ContractVerb | "nuke";
 
 // Raw physical reports stay in the invocation's private custody. Only actionable leaves cross
 // the result boundary; the same owner classification is used by reconcile and mutation results.
@@ -169,32 +169,9 @@ export function contractOutcomeDisposition(
   return retry ? "retryable" : unsatisfied ? "unsatisfied" : "accepted";
 }
 
-const resetOwnerSchema = z.enum(["akuma", "git", "debt", "world"]);
-export type ResetOwner = z.output<typeof resetOwnerSchema>;
-export const resetIssueSchema = z.union([
-  z
-    .strictObject({ kind: z.literal("reset-owner-stopped"), owner: resetOwnerSchema, diagnostic: z.string().min(1) })
-    .readonly(),
-  z.strictObject({ kind: z.literal("reset-residue"), diagnostic: z.string().min(1) }).readonly(),
-]);
-export type ResetIssue = z.output<typeof resetIssueSchema>;
-export function resetIssueIsRequired(issue: ResetIssue): boolean {
-  switch (issue.kind) {
-    case "reset-owner-stopped":
-      return true;
-    case "reset-residue":
-      return false;
-    default: {
-      return issue;
-    }
-  }
-}
-type ResetEffect = (Readonly<{ kind: "reset-owner-stopped" }> | Readonly<{ kind: "reset-residue" }>) &
-  Readonly<{ owner: ResetOwner; diagnostic: string; world: string }>;
 /** Internal accumulator carrier, not a published operation answer. */
 export type InvocationEffect =
   | Readonly<{ kind: "issue"; contract: ContractId; issue: InvocationIssue }>
-  | ResetEffect
   | Readonly<{ kind: "movement"; contract: ContractId; effect: MovementEffect }>;
 
 const admittedFields = scoped;
@@ -319,30 +296,6 @@ export const handoffOutcomeSchema = z
   .readonly();
 export type HandoffOutcome = z.output<typeof handoffOutcomeSchema>;
 
-export type ResetCounts = Readonly<{ refs: number; worktrees: number; debts: number }>;
-export type ResetRefusal =
-  | import("./refusal.js").NukeConfirmationRefusal
-  | import("./refusal.js").NukeConfirmationRequiredRefusal;
-export const resetOutcomeSchema = z.union([
-  z
-    .strictObject({
-      kind: z.literal("accepted"),
-      refsRemoved: z.number().int().nonnegative().exactOptional(),
-      worktreesRemoved: z.number().int().nonnegative().exactOptional(),
-      debtsRemoved: z.number().int().nonnegative().exactOptional(),
-      issues: z.array(resetIssueSchema).min(1).readonly().exactOptional(),
-    })
-    .readonly(),
-  z.strictObject({ kind: z.literal("refused"), world: worldRootSchema }).readonly(),
-]);
-export type ResetOutcome = z.output<typeof resetOutcomeSchema>;
-type ResetProjection = Readonly<{ world: WorldRoot }> &
-  (
-    | Readonly<{ kind: "accepted" }>
-    | Readonly<{ kind: "refused"; refusal: ResetRefusal }>
-    | Readonly<{ kind: "failed"; error: unknown }>
-  );
-
 export type Verify = Omit<
   Extract<VerifyOutcome, { kind: "accepted" }>,
   "kind" | "contractId" | "issues" | "recoverySnapshots"
@@ -452,7 +405,7 @@ function partialEvidence(snapshot: InvocationSnapshot, primary: ContractId | und
   };
 }
 
-function acceptedRecoveries(operation: OutcomeOperation, snapshot: InvocationSnapshot, contract: ContractId) {
+function acceptedRecoveries(operation: ContractVerb, snapshot: InvocationSnapshot, contract: ContractId) {
   const recoveries = snapshot.effects.flatMap((record) =>
     record.kind === "movement" && record.effect.kind === "recovery-snapshot"
       ? [{ snapshot: record.effect.snapshot, ...(record.contract === contract ? {} : { contractId: record.contract }) }]
@@ -464,66 +417,12 @@ function acceptedRecoveries(operation: OutcomeOperation, snapshot: InvocationSna
   return { recoverySnapshots: local ? unique.map((recovery) => recovery.snapshot) : unique };
 }
 
-function projectReset(
-  snapshot: InvocationSnapshot,
-  projection: ResetProjection,
-): Readonly<{ kind: "returned"; outcome: ResetOutcome }> | Readonly<{ kind: "failed"; error: KeiyakuError }> {
-  const issues = snapshot.effects
-    .filter((effect): effect is ResetEffect => effect.kind === "reset-owner-stopped" || effect.kind === "reset-residue")
-    .map(
-      ({ world: _world, owner, ...issue }): ResetIssue =>
-        issue.kind === "reset-residue" ? issue : { ...issue, owner },
-    );
-  const partial = projection.kind === "failed" || issues.some(resetIssueIsRequired);
-  const removed: { refs?: number; worktrees?: number; debts?: number } = {};
-  const counts = snapshot.reset?.removed;
-  if (counts !== undefined)
-    for (const key of ["refs", "worktrees", "debts"] as const) {
-      const owner = key === "debts" ? "debt" : "git";
-      if (counts[key] > 0 || (partial && snapshot.reset?.attempted.includes(owner))) removed[key] = counts[key];
-    }
-  const evidence = {
-    ...(Object.keys(removed).length === 0 ? {} : { removed }),
-    ...(issues.length === 0 ? {} : { issues }),
-  };
-  if (projection.kind === "failed")
-    return {
-      kind: "failed",
-      error: withOutcomeReceipt(projection.error, { kind: "world", world: projection.world, ...evidence }),
-    };
-  return {
-    kind: "returned",
-    outcome:
-      projection.kind === "refused"
-        ? { kind: "refused", world: projection.world }
-        : {
-            kind: "accepted",
-            ...(removed.refs === undefined ? {} : { refsRemoved: removed.refs }),
-            ...(removed.worktrees === undefined ? {} : { worktreesRemoved: removed.worktrees }),
-            ...(removed.debts === undefined ? {} : { debtsRemoved: removed.debts }),
-            ...(issues.length === 0 ? {} : { issues }),
-          },
-  };
-}
-
-export function project(
-  operation: "nuke",
-  snapshot: InvocationSnapshot,
-  conclusion: ResetProjection,
-): Readonly<{ kind: "returned"; outcome: ResetOutcome }> | Readonly<{ kind: "failed"; error: KeiyakuError }>;
 export function project<Answer extends Readonly<{ kind: string; contractId?: ContractId }>>(
   operation: ContractVerb,
   snapshot: InvocationSnapshot,
   conclusion: Answer | InvocationFailure,
   signal?: AbortSignal,
-): Readonly<{ kind: "returned"; outcome: Answer }> | InvocationFailure;
-export function project<Answer extends Readonly<{ kind: string; contractId?: ContractId }>>(
-  operation: OutcomeOperation,
-  snapshot: InvocationSnapshot,
-  conclusion: Answer | InvocationFailure | ResetProjection,
-  signal?: AbortSignal,
-): Readonly<{ kind: "returned"; outcome: Answer | ResetOutcome }> | InvocationFailure {
-  if ("world" in conclusion) return projectReset(snapshot, conclusion);
+): Readonly<{ kind: "returned"; outcome: Answer }> | InvocationFailure {
   const contract = "error" in conclusion ? conclusion.contract : conclusion.contractId;
   const current = contract === undefined ? undefined : snapshot.conclusions.get(contract);
   const issues = invocationIssues(snapshot.effects, contract, current?.snapshot);

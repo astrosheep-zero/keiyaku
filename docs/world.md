@@ -72,9 +72,10 @@ residue-specific knowledge. Git alone applies its state-first local reset rule;
 that rule does not create a World-wide lock or transaction.
 
 A confirmed reset reports owner-confirmed removals and trailing owner stops in
-one accepted World answer. It does not invent Contract identity, head, journal
-facts, or another reset authority. Owner completion and retirement are
-independently awaited even when another owner fails; each confirmed removal
+one accepted World answer. World reset owns that answer independently of
+Contract admission and evidence custody. It does not invent Contract identity,
+head, journal facts, or another reset authority. Owner completion and retirement
+are independently awaited even when another owner fails; each confirmed removal
 remains visible before later cleanup or coordination fails. A stopped or partial
 answer distinguishes an owner attempted with no removals from one whose deletion
 was never attempted or whose effects are unknown. Required deletion stops and

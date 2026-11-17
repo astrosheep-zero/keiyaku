@@ -409,7 +409,7 @@ function compactReconcile(
   records: readonly InvocationEffect[],
   completed = false,
 ): RepoContractReconcileReport {
-  const own = records.filter((record) => "contract" in record && record.contract === contractId);
+  const own = records.filter((record) => record.contract === contractId);
   const issues = invocationIssues(own, contractId).map((issue) => {
     switch (issue.kind) {
       case "worktree-follow-retained":
@@ -438,7 +438,7 @@ function compactReconcile(
 
 export function observedReconcileContracts(accumulator: InvocationAccumulator): readonly RepoContractReconcileReport[] {
   const snapshot = accumulator.snapshot();
-  const ids = new Set(snapshot.effects.flatMap((effect) => ("contract" in effect ? [effect.contract] : [])));
+  const ids = new Set(snapshot.effects.map((effect) => effect.contract));
   return [...ids]
     .map((id) => compactReconcile(id, snapshot.effects))
     .filter((row) => row.effects !== undefined || row.issues !== undefined);

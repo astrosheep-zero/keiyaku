@@ -15,7 +15,8 @@ import type { InvocationWaitResult } from "./keiyaku-wait.js";
 import { KeiyakuArcDocumentError } from "./keiyaku-coordinates.js";
 import { errorCategory } from "../errors.js";
 import type { VerbInput, VerbName, VerbOutput } from "./keiyaku-verbs.js";
-import { contractOutcomeDisposition, invocationIssueIsFailure, resetIssueIsRequired } from "./outcome.js";
+import { contractOutcomeDisposition, invocationIssueIsFailure } from "./outcome.js";
+import { resetIssueIsRequired } from "./nuke.js";
 
 export type VerbDisposition = "accepted" | "unsatisfied" | "refused" | "retryable" | "failed" | "usage";
 

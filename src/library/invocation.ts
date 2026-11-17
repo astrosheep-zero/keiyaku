@@ -22,7 +22,6 @@ import type {
   VerificationResidue,
 } from "../protocol/progress.js";
 import type { SettlementReport } from "../settlement/settle.js";
-import type { WorldRoot } from "../world.js";
 import type { ContinuationReport } from "./continuation.js";
 import type {
   ContractConclusion,
@@ -30,7 +29,6 @@ import type {
   InvocationEffect,
   InvocationIssue,
   ReconciliationLag,
-  ResetCounts,
   admittedEvidenceSchema,
 } from "./outcome.js";
 import type { z } from "zod";
@@ -46,7 +44,6 @@ export type InvocationSnapshot = Readonly<{
   affected: readonly ContractId[];
   effects: readonly InvocationEffect[];
   conclusions: ReadonlyMap<ContractId, ContractConclusion>;
-  reset?: Readonly<{ world: WorldRoot; removed: ResetCounts; attempted: readonly ("git" | "debt")[] }>;
 }>;
 
 type ReconciliationRecord = Readonly<{
@@ -101,30 +98,10 @@ export class InvocationAccumulator implements ProtocolProgress {
   private readonly candidateConclusions = new Map<ContractId, ContractConclusion>();
   private readonly reportedResidue = new WeakSet<object>();
 
-  private resetState?: {
-    world: WorldRoot;
-    removed: { refs: number; worktrees: number; debts: number };
-    attempted: ("git" | "debt")[];
-  };
-
   constructor(
     private readonly observer?: ExecutionObserver,
     private readonly operation?: ContractVerb,
   ) {}
-
-  beginReset(world: WorldRoot): void {
-    this.resetState = { world, removed: { refs: 0, worktrees: 0, debts: 0 }, attempted: [] };
-  }
-
-  recordResetAttempt(owner: "git" | "debt"): void {
-    if (this.resetState === undefined) throw new Error("reset progress requires its World");
-    if (!this.resetState.attempted.includes(owner)) this.resetState.attempted.push(owner);
-  }
-
-  recordResetRemoved(counts: Partial<ResetCounts>): void {
-    if (this.resetState === undefined) throw new Error("reset progress requires its World");
-    for (const key of ["refs", "worktrees", "debts"] as const) this.resetState.removed[key] += counts[key] ?? 0;
-  }
 
   observe(event: ExecutionObservation): void {
     observeExecution(this.observer, event);
@@ -297,11 +274,6 @@ export class InvocationAccumulator implements ProtocolProgress {
     });
   }
 
-  /** World reset observations share the carrier without pretending a Contract admission happened. */
-  recordReset(effect: Extract<InvocationEffect, { kind: "reset-owner-stopped" | "reset-residue" }>): void {
-    this.records.push(effect);
-  }
-
   recordDelivery(contract: ContractId, value: DeliveryIdentity): void {
     this.extendConclusions(contract, value);
   }
@@ -323,15 +295,6 @@ export class InvocationAccumulator implements ProtocolProgress {
       affected: Object.freeze([...this.affectedContracts]),
       effects: Object.freeze([...this.records]),
       conclusions: new Map(this.candidateConclusions),
-      ...(this.resetState === undefined
-        ? {}
-        : {
-            reset: Object.freeze({
-              world: this.resetState.world,
-              removed: Object.freeze({ ...this.resetState.removed }),
-              attempted: Object.freeze([...this.resetState.attempted]),
-            }),
-          }),
     };
   }
 
