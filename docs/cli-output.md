@@ -38,7 +38,10 @@ and operational failure. Text labels name a candidate and its integration result
 and a content identity is distinguished from a commit by its kind name alone —
 the teaching that a content identity is never Git-addressable lives in leaf
 help, not on receipt rows. Journal blobs, entry ids, and record-field
-enumeration stay out of ordinary text. Ordinary JSON receipts likewise omit
+enumeration stay out of ordinary text. Historical attestation subject text
+presents the recorded subject as its labeled semantic facts, not its stored
+encoding; an unrecognized representation stays literal terminal-safe evidence
+rather than gaining an invented reading. Ordinary JSON receipts likewise omit
 raw journal records and internal custody; explicitly requested full history
 retains historical content without duplicating storage envelopes. Verification
 receipts name the captured snapshot once and each check's verdict or stop,

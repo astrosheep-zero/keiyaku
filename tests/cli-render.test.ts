@@ -14,12 +14,15 @@ import {
   changeId,
   contractId,
   type SnapshotId,
+  documentKey,
   entryUlid,
+  type EntryUlid,
   gate,
   requirementId,
   snapshotId,
   type ContractId,
 } from "../src/core/facts/types.js";
+import { dependencyKeySet } from "../src/core/subject.js";
 import type { ReconcileCompletion } from "../src/library/reconcile.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
 import {
@@ -277,13 +280,18 @@ test("skeleton history keeps individual requirements while full history retains 
     integration,
     contentId: changeId(integration),
   });
-  const verification = (snapshot: SnapshotId, verdict: "satisfied" | "unsatisfied") => ({
+  const verification = (snapshot: SnapshotId, verdict: "satisfied" | "unsatisfied", target?: EntryUlid) => ({
     gate: gate("verified"),
     requirement: requirementId("verification:sha256:original-check"),
-    subject: snapshot,
+    subject: dependencyKeySet([
+      { kind: "snapshot", value: snapshot },
+      ...(target === undefined ? [] : [{ kind: "target" as const, value: target }]),
+    ]),
     verdict,
     summary: `verification ${verdict}\nsecond line`,
   });
+  const reviewChange = changeId("9".repeat(40));
+  const reviewDocument = documentKey(`document:sha256:${"ab".repeat(32)}`);
   const events: ContractHistoryEvent[] = [
     {
       kind: "bind",
@@ -307,7 +315,7 @@ test("skeleton history keeps individual requirements while full history retains 
       kind: "attestation",
       id: nextEntry(),
       at: "2026-09-28T16:19:00.000Z",
-      ...verification(integrationB, "satisfied"),
+      ...verification(integrationB, "satisfied", entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA0")),
     },
     {
       kind: "attestation",
@@ -315,7 +323,10 @@ test("skeleton history keeps individual requirements while full history retains 
       at: "2026-09-28T16:38:00.000Z",
       gate: gate("reviewed"),
       requirement: requirementId("gate:reviewed"),
-      subject: integrationB,
+      subject: dependencyKeySet([
+        { kind: "document", value: reviewDocument },
+        { kind: "change", value: reviewChange },
+      ]),
       verdict: "satisfied",
       summary: "review summary",
     },
@@ -354,11 +365,22 @@ test("skeleton history keeps individual requirements while full history retains 
   assert.equal((text.match(/^\d{4}-\d{2}-\d{2}$/gmu) ?? []).length, 2, "one bare day divider per day");
   assert.match(text, /^15:18 bound to main @ aaaaaaa · gates review · verification · aku\/intern\/33dd4670$/mu);
   assert.match(text, /^16:00 delivered bbbbbbb$/mu);
-  assert.match(text, /^16:01 × verification verification:sha256:original-check · subject c{40} · \d+ lines$/mu);
+  assert.match(text, /^16:01 × verification verification:sha256:original-check · subject snapshot ccccccc · \d+ lines$/mu);
   assert.match(text, /^16:11 amended · gates$/mu, "amend names its facets");
   assert.match(text, /^16:18 delivered ddddddd$/mu);
-  assert.match(text, /^16:19 ✓ verification verification:sha256:original-check · subject e{40} · \d+ lines$/mu);
-  assert.match(text, /^16:38 ✓ review · subject e{40} · 1 line$/mu, "a mark-first review beat");
+  assert.match(
+    text,
+    /^16:19 ✓ verification verification:sha256:original-check · subject snapshot eeeeeee · target revision 01ARZ3NDEKTSV4RRFFQ69G5FA0 · \d+ lines$/mu,
+  );
+  assert.match(
+    text,
+    new RegExp(
+      `^16:38 ✓ review · subject change ${reviewChange} · document ${reviewDocument} · 1 line$`,
+      "mu",
+    ),
+    "a mark-first review beat labels every recorded subject part in canonical order",
+  );
+  assert.doesNotMatch(text, /\[\["/u, "subject text never leaks its stored tuple array");
   assert.match(
     text,
     /^16:38 integrated eeeeeee\.\.fffffff$/mu,
@@ -375,8 +397,14 @@ test("skeleton history keeps individual requirements while full history retains 
   assert.match(full, /^history  kei\/history-test · \d+ journal entries · 1 dispatch$/mu);
   assert.match(full, /2026-09-28T15:18:31\.946Z bind · 01ARZ3NDEKTSV4RRFFQ69G5F01/u, "full keeps ISO stamps");
   assert.match(full, /candidate  bbbbbbb/u, "full keeps complete fields");
-  assert.match(full, /subject  c{40}/u, "full history preserves the exact opaque subject");
-  assert.match(full, /subject  e{40}/u);
+  assert.match(full, /subject  snapshot ccccccc/u, "full history lays out the recorded subject parts");
+  assert.match(full, /subject  snapshot eeeeeee · target revision 01ARZ3NDEKTSV4RRFFQ69G5FA0/u);
+  assert.match(
+    full,
+    new RegExp(`subject  change ${reviewChange} · document ${reviewDocument}`, "u"),
+    "full history labels every recorded subject part too",
+  );
+  assert.doesNotMatch(full, /\[\["/u, "full history never leaks the stored tuple array");
 
   const help = renderAkumaHelp("history");
   assert.match(help, /\[--full\]/u, "help advertises the full mode");

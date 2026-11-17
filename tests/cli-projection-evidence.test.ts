@@ -33,6 +33,7 @@ import {
   requirementId,
   snapshotId,
 } from "../src/core/facts/types.js";
+import { dependencyKeySet } from "../src/core/subject.js";
 import type { ContractHistory } from "../src/library/contract-types.js";
 import type { ContractSummary } from "../src/index.js";
 import type { Settings } from "../src/settings.js";
@@ -255,17 +256,17 @@ test("Contract history renders semantic evidence and explicitly requested histor
         gate: gate("verified"),
         requirement: requirementId("verification:sha256:original-check"),
         verdict: "satisfied",
-        subject: "4".repeat(40),
+        subject: dependencyKeySet([{ kind: "snapshot", value: snapshotId("4".repeat(40)) }]),
       },
     ],
   };
   const ordinary = renderContractHistory(history);
   assert.match(ordinary, /bound to main @ start/u);
-  assert.match(ordinary, /verification verification:sha256:original-check · subject 4{40}/u);
+  assert.match(ordinary, /verification verification:sha256:original-check · subject snapshot 4444444/u);
   assert.doesNotMatch(ordinary, /exact historical terms/u);
   const full = renderContractHistory(history, { full: true });
   assert.match(full, /exact historical terms/u);
-  assert.match(full, /subject  4{40}/u);
+  assert.match(full, /subject  snapshot 4444444/u);
   assert.equal(JSON.parse(JSON.stringify(history)).events[0].document, "exact historical terms");
 });
 

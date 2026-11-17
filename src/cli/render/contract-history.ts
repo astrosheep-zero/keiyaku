@@ -7,6 +7,40 @@ function listFact(label: string, values: readonly string[] | undefined): readonl
   return values === undefined || values.length === 0 ? [] : [`  ${label}  ${values.map(safeText).join(" · ")}`];
 }
 
+/** Lay out a recorded dependency-key set as its labeled facts; unknown representations stay literal. */
+function subjectFact(subject: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(subject) as unknown;
+  } catch {
+    return safeText(subject);
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return safeText(subject);
+  const parts: string[] = [];
+  for (const key of parsed) {
+    if (!Array.isArray(key) || key.length !== 2) return safeText(subject);
+    const [kind, identity] = key;
+    if (typeof kind !== "string" || typeof identity !== "string") return safeText(subject);
+    const value = safeText(identity);
+    switch (kind) {
+      case "change":
+      case "document":
+      case "segment":
+        parts.push(`${kind} ${value}`);
+        break;
+      case "snapshot":
+        parts.push(`snapshot ${shortGitId(value)}`);
+        break;
+      case "target":
+        parts.push(`target revision ${value}`);
+        break;
+      default:
+        return safeText(subject);
+    }
+  }
+  return parts.join(" · ");
+}
+
 function targetName(target: Extract<ContractHistoryEvent, { kind: "bind" }>["target"]): string {
   if (target === undefined) return "targetless";
   return typeof target === "string" ? target.replace(/^refs\/heads\//u, "") : target.contractId;
@@ -49,7 +83,7 @@ function eventLine(event: ContractHistoryEvent, dispatches: readonly ContractHis
     case "attestation": {
       const requirement =
         event.gate === "verified" || event.requirement !== `gate:${event.gate}` ? ` ${event.requirement}` : "";
-      return `${event.verdict === "satisfied" ? "✓" : "×"} ${gateDisplayName(event.gate)}${requirement} · subject ${safeText(event.subject)}${payloadSuffix(event.summary)}`;
+      return `${event.verdict === "satisfied" ? "✓" : "×"} ${gateDisplayName(event.gate)}${requirement} · subject ${subjectFact(event.subject)}${payloadSuffix(event.summary)}`;
     }
     case "claimed":
       return lifecycleWord("claimed");
@@ -98,7 +132,7 @@ function semanticBody(event: ContractHistoryEvent): readonly string[] {
         `  gate  ${event.gate}`,
         `  requirement  ${event.requirement}`,
         `  verdict  ${event.verdict}`,
-        `  subject  ${safeText(event.subject)}`,
+        `  subject  ${subjectFact(event.subject)}`,
       ];
       if (event.summary !== undefined) receiptPayload(lines, "summary", event.summary);
       return lines;

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { contractId, entryUlid, gate, requirementId, snapshotId } from "../src/core/facts/types.js";
+import { dependencyKeySet } from "../src/core/subject.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { contractWaitMemberText } from "../src/cli/render/contract-wait.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
@@ -55,7 +56,7 @@ test("semantic Contract history renders native identities without raw journal ca
         gate: gate("verified"),
         requirement: requirementId("check-build"),
         verdict: "unsatisfied",
-        subject: snapshotId("b".repeat(40)),
+        subject: dependencyKeySet([{ kind: "snapshot", value: snapshotId("b".repeat(40)) }]),
         summary: "actual failure",
       },
       {
@@ -70,6 +71,43 @@ test("semantic Contract history renders native identities without raw journal ca
   });
   assert.match(text, /history  kei\/compact-cli · bound · 3 entries/u);
   assert.match(text, /bound to targetless/u);
-  assert.match(text, /× verification check-build · subject bbbbbbb/u);
+  assert.match(text, /× verification check-build · subject snapshot bbbbbbb/u);
   assert.match(text, /arc Recovery · 2 lines/u);
+});
+
+test("subject display keeps terminal-safe parts and literal unknown representations", () => {
+  const unknown = '[["future-kind","opaque identity"]]';
+  const text = renderContractHistory({
+    kind: "contract",
+    contractId: id,
+    events: [
+      {
+        kind: "attestation",
+        id: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAY"),
+        at: "2026-11-09T13:03:00Z",
+        gate: gate("verified"),
+        requirement: requirementId("check-build"),
+        verdict: "satisfied",
+        subject: '[["document","opaque\\u0001identity"]]',
+      },
+      {
+        kind: "attestation",
+        id: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAZ"),
+        at: "2026-11-09T13:04:00Z",
+        gate: gate("verified"),
+        requirement: requirementId("check-build"),
+        verdict: "satisfied",
+        subject: unknown,
+      },
+    ],
+  });
+  assert.match(
+    text,
+    /subject document opaque�identity/u,
+    "a recorded identity is laid out as a terminal-safe labeled fact",
+  );
+  assert.ok(
+    text.includes(`subject ${unknown}`),
+    "an unknown subject kind stays literal evidence instead of gaining a guessed reading",
+  );
 });
