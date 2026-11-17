@@ -50,30 +50,12 @@ type SelectedPlugin = Readonly<{
 }>;
 
 type Attempt<T> =
-  | Readonly<{ kind: "settled"; value: T }>
+  | Readonly<{ kind: "completed"; value: T }>
   | Readonly<{ kind: "failed"; error: unknown }>
-  | Readonly<{ kind: "timed-out" }>;
-
-type Activation = Readonly<{
-  pluginId: string;
-  instance: z.infer<typeof instanceSchema> | undefined;
-  timedOut: boolean;
-}>;
-
-type ActivationInput = Readonly<{
-  selected: SelectedPlugin;
-  world: WorldRoot;
-  cancellation: AbortSignal;
-}>;
-
-const ABORTED = Symbol("plugin attempt aborted");
+  | Readonly<{ kind: "expired" | "canceled" }>;
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function message(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).slice(0, DIAGNOSTIC_LIMIT);
 }
 
 export function reportPluginDiagnostic(
@@ -84,9 +66,8 @@ export function reportPluginDiagnostic(
 ): void {
   if (report === undefined) return;
   try {
-    void Promise.resolve(report(`plugin ${subject} ${stage}: ${message(error)}`.slice(0, DIAGNOSTIC_LIMIT))).catch(
-      () => {},
-    );
+    const detail = error instanceof Error ? error.message : String(error);
+    void Promise.resolve(report(`plugin ${subject} ${stage}: ${detail}`.slice(0, DIAGNOSTIC_LIMIT))).catch(() => {});
   } catch {
     // Diagnostics are optional side effects too.
   }
@@ -96,42 +77,59 @@ function timeoutError(): Error {
   return new Error(`timed out after ${PLUGIN_ATTEMPT_TIMEOUT_MS}ms`);
 }
 
-async function boundedAttempt<T>(
-  attempt: (cancellation: AbortSignal) => Promise<T> | T,
-  timeoutMs = PLUGIN_ATTEMPT_TIMEOUT_MS,
+function runBounded<T>(
+  operation: (signal: AbortSignal) => Promise<T> | T,
+  deadline: number,
+  caller?: AbortSignal,
+  onLateValue?: (value: T) => Promise<void>,
 ): Promise<Attempt<T>> {
-  if (timeoutMs <= 0) return { kind: "timed-out" };
+  if (caller?.aborted) return Promise.resolve({ kind: "canceled" });
+  if (deadline <= performance.now()) return Promise.resolve({ kind: "expired" });
   const controller = new AbortController();
-  let timeout: NodeJS.Timeout | undefined;
-  const completed = Promise.resolve()
-    .then(() => attempt(controller.signal))
-    .then(
-      (value): Attempt<T> => ({ kind: "settled", value }),
-      (error: unknown): Attempt<T> => ({ kind: "failed", error }),
-    );
-  const expired = new Promise<Attempt<T>>((resolve) => {
-    timeout = setTimeout(() => {
-      controller.abort(timeoutError());
-      resolve({ kind: "timed-out" });
-    }, timeoutMs);
+  return new Promise((resolve) => {
+    let settled = false;
+    const settle = (result: Attempt<T>): boolean => {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      caller?.removeEventListener("abort", cancel);
+      resolve(result);
+      return true;
+    };
+    const cancel = () => {
+      if (settle({ kind: "canceled" })) controller.abort(caller?.reason);
+    };
+    const timer = setTimeout(() => {
+      if (settle({ kind: "expired" })) controller.abort(timeoutError());
+    }, deadline - performance.now());
+    caller?.addEventListener("abort", cancel, { once: true });
+    void Promise.resolve()
+      .then(() => {
+        controller.signal.throwIfAborted();
+        return operation(controller.signal);
+      })
+      .then(
+        (value) => {
+          if (!settle({ kind: "completed", value })) return onLateValue?.(value);
+          return undefined;
+        },
+        (error: unknown) => settle({ kind: "failed", error }),
+      )
+      .catch(() => {});
   });
-  const result = await Promise.race([completed, expired]);
-  if (timeout !== undefined) clearTimeout(timeout);
-  return result;
 }
 
-async function settleBefore<T>(promise: Promise<T>, cancellation: AbortSignal): Promise<T | typeof ABORTED> {
-  if (cancellation.aborted) return ABORTED;
-  let releaseAbort!: () => void;
-  const aborted = new Promise<typeof ABORTED>((resolve) => {
-    releaseAbort = () => resolve(ABORTED);
-    cancellation.addEventListener("abort", releaseAbort, { once: true });
-  });
-  try {
-    return await Promise.race([promise, aborted]);
-  } finally {
-    cancellation.removeEventListener("abort", releaseAbort);
+function attemptValue<T>(
+  result: Attempt<T>,
+  report: PluginDiagnostic | undefined,
+  pluginId: string,
+  stage: string,
+): T | undefined {
+  if (result.kind === "completed") return result.value;
+  if (result.kind !== "canceled") {
+    reportPluginDiagnostic(report, pluginId, stage, result.kind === "failed" ? result.error : timeoutError());
   }
+  return undefined;
 }
 
 function selectedEntry(
@@ -202,9 +200,7 @@ function selectedPlugins(input: Settings, report: PluginDiagnostic | undefined):
   const selected = [
     ...BUILTIN_PLUGINS.filter((entry) => !configured.has(entry.id) && !disabled.has(entry.id)),
     ...configured.values(),
-  ]
-    .filter((entry): entry is SelectedPlugin => entry !== null)
-    .sort((left, right) => left.id.localeCompare(right.id));
+  ].sort((left, right) => left.id.localeCompare(right.id));
   return Object.freeze(selected);
 }
 
@@ -332,8 +328,13 @@ async function importFromWorld(world: WorldRoot, packageName: string): Promise<R
   }
 }
 
-async function activate({ selected, world, cancellation }: ActivationInput): Promise<Activation["instance"]> {
+async function activate(
+  selected: SelectedPlugin,
+  world: WorldRoot,
+  cancellation: AbortSignal,
+): Promise<z.infer<typeof instanceSchema>> {
   const module = await importFromWorld(world, selected.package);
+  cancellation.throwIfAborted();
   pluginSchema.parse(module.default);
   const candidate = module.default as z.infer<typeof pluginSchema>;
   if (candidate.manifest.id !== selected.id) {
@@ -349,90 +350,25 @@ async function activate({ selected, world, cancellation }: ActivationInput): Pro
       return path;
     },
   });
-  if (cancellation.aborted) return undefined;
+  cancellation.throwIfAborted();
   const instance = await candidate.activate(context, cancellation);
-  if (cancellation.aborted) return undefined;
+  cancellation.throwIfAborted();
   instanceSchema.parse(instance);
   return instance;
 }
 
-async function deliver(
-  { pluginId, instance }: Activation,
-  signal: PluginSignal,
-  reportDiagnostic: PluginDiagnostic | undefined,
-  timeoutMs: number,
-): Promise<void> {
-  const signals = instance?.signals;
-  const handler = signals?.[signal.kind];
-  if (handler === undefined) return;
-  const result = await boundedAttempt(
-    (cancellation) => handler.call(signals, signal as never, cancellation),
-    timeoutMs,
-  );
-  if (result.kind === "timed-out") reportPluginDiagnostic(reportDiagnostic, pluginId, "signal", timeoutError());
-  if (result.kind === "failed") reportPluginDiagnostic(reportDiagnostic, pluginId, "signal", result.error);
-}
-
 async function closeWaitDeferral(
   pluginId: string,
-  scope: PluginWaitDeferral,
+  scope: PluginWaitDeferral | undefined,
   reportDiagnostic: PluginDiagnostic | undefined,
 ): Promise<void> {
-  const result = await boundedAttempt((cancellation) => scope.close(cancellation));
-  if (result.kind === "timed-out")
-    reportPluginDiagnostic(reportDiagnostic, pluginId, "wait deferral cleanup", timeoutError());
-  if (result.kind === "failed")
-    reportPluginDiagnostic(reportDiagnostic, pluginId, "wait deferral cleanup", result.error);
-}
-
-async function acquireWaitDeferral(
-  { pluginId, activation }: Readonly<{ pluginId: string; activation: Promise<Activation> }>,
-  input: PluginWaitDeferralInput,
-  signal: AbortSignal | undefined,
-  deadline: number,
-  reportDiagnostic: PluginDiagnostic | undefined,
-): Promise<PluginWaitDeferral | undefined> {
-  const controller = new AbortController();
-  const abort = () => controller.abort(signal?.reason);
-  if (signal?.aborted) abort();
-  else signal?.addEventListener("abort", abort, { once: true });
-  const cancellation = controller.signal;
-  const timer = setTimeout(() => controller.abort(timeoutError()), Math.max(0, deadline - performance.now()));
-  const completed = activation
-    .then(async (activated) => {
-      if (cancellation.aborted) return undefined;
-      const value = await activated.instance?.waitDeferral?.(input, cancellation);
-      return value === undefined ? undefined : waitDeferralResource(value, pluginId, reportDiagnostic);
-    })
-    .catch((error: unknown) => {
-      if (!cancellation.aborted) reportPluginDiagnostic(reportDiagnostic, pluginId, "wait deferral", error);
-      return undefined;
-    });
-  const result = await settleBefore(completed, cancellation);
-  clearTimeout(timer);
-  signal?.removeEventListener("abort", abort);
-  if (result !== ABORTED) return result;
-  if (signal?.aborted !== true) reportPluginDiagnostic(reportDiagnostic, pluginId, "wait deferral", timeoutError());
-  void completed.then(async (scope) => {
-    if (scope !== undefined) await closeWaitDeferral(pluginId, scope, reportDiagnostic);
-  });
-  return undefined;
-}
-
-function waitDeferralResource(
-  value: unknown,
-  pluginId: string,
-  reportDiagnostic: PluginDiagnostic | undefined,
-): PluginWaitDeferral | undefined {
-  try {
-    const close = object(value) ? value.close : undefined;
-    if (typeof close !== "function") throw new TypeError("resource close must be a function");
-    // Normal and late acquisition have disjoint cleanup paths; the plugin owns its close lifetime.
-    return value as PluginWaitDeferral;
-  } catch (error) {
-    reportPluginDiagnostic(reportDiagnostic, pluginId, "wait deferral validation", error);
-    return undefined;
-  }
+  if (scope === undefined) return;
+  attemptValue(
+    await runBounded((cancellation) => scope.close(cancellation), performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS),
+    reportDiagnostic,
+    pluginId,
+    "wait deferral cleanup",
+  );
 }
 
 export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
@@ -448,14 +384,12 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   const report = input.reportDiagnostic;
   const selected = selectedPlugins(input.settings ?? (await Settings.load({ cwd: input.world })), report);
   const activations = selected.map((entry) => {
-    const activation = boundedAttempt((cancellation) =>
-      activate({ selected: entry, world: input.world, cancellation }),
-    ).then((result): Activation => {
-      if (result.kind === "settled") {
-        return { pluginId: entry.id, instance: result.value, timedOut: false };
-      }
-      reportPluginDiagnostic(report, entry.id, "activation", result.kind === "failed" ? result.error : timeoutError());
-      return { pluginId: entry.id, instance: undefined, timedOut: result.kind === "timed-out" };
+    const activation = runBounded(
+      (cancellation) => activate(entry, input.world, cancellation),
+      performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS,
+    ).then((result) => {
+      attemptValue(result, report, entry.id, "activation");
+      return result;
     });
     return { pluginId: entry.id, activation };
   });
@@ -463,22 +397,23 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
   return Object.freeze({
     async emit(signal: PluginSignal, reportDiagnostic: PluginDiagnostic | undefined = report): Promise<void> {
       const deadline = performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS;
-      const expiry = new AbortController();
-      const timer = setTimeout(() => expiry.abort(), PLUGIN_ATTEMPT_TIMEOUT_MS);
-      try {
-        await Promise.all(
-          activations.map(async ({ pluginId, activation }) => {
-            const activated = await settleBefore(activation, expiry.signal);
-            if (activated === ABORTED || activated.timedOut) {
-              reportPluginDiagnostic(reportDiagnostic, pluginId, "signal", timeoutError());
-              if (activated === ABORTED) return;
-            }
-            await deliver(activated, signal, reportDiagnostic, Math.max(0, deadline - performance.now()));
-          }),
-        );
-      } finally {
-        clearTimeout(timer);
-      }
+      await Promise.all(
+        activations.map(async ({ pluginId, activation }) => {
+          attemptValue(
+            await runBounded(async (cancellation) => {
+              const activated = await activation;
+              cancellation.throwIfAborted();
+              if (activated.kind === "expired") throw timeoutError();
+              if (activated.kind === "completed") {
+                await activated.value.signals?.[signal.kind]?.(signal as never, cancellation);
+              }
+            }, deadline),
+            reportDiagnostic,
+            pluginId,
+            "signal",
+          );
+        }),
+      );
     },
     async withWaitDeferrals<T>(
       selected: PluginWaitDeferralInput,
@@ -492,16 +427,35 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
       });
       const deadline = performance.now() + PLUGIN_ATTEMPT_TIMEOUT_MS;
       const scopes = await Promise.all(
-        activations.map((plugin) => acquireWaitDeferral(plugin, input, signal, deadline, reportDiagnostic)),
+        activations.map(async ({ pluginId, activation }) => {
+          return attemptValue(
+            await runBounded(
+              async (cancellation) => {
+                const activated = await activation;
+                cancellation.throwIfAborted();
+                if (activated.kind !== "completed") return undefined;
+                const scope = await activated.value.waitDeferral?.(input, cancellation);
+                if (scope !== undefined && (!object(scope) || typeof scope.close !== "function")) {
+                  throw new TypeError("resource close must be a function");
+                }
+                return scope;
+              },
+              deadline,
+              signal,
+              (scope) => closeWaitDeferral(pluginId, scope, reportDiagnostic),
+            ),
+            reportDiagnostic,
+            pluginId,
+            "wait deferral",
+          );
+        }),
       );
       try {
         signal?.throwIfAborted();
         return await action();
       } finally {
         await Promise.all(
-          scopes.map((scope, index) =>
-            scope === undefined ? undefined : closeWaitDeferral(activations[index]!.pluginId, scope, reportDiagnostic),
-          ),
+          scopes.map((scope, index) => closeWaitDeferral(activations[index]!.pluginId, scope, reportDiagnostic)),
         );
       }
     },

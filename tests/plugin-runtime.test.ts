@@ -12,7 +12,7 @@ import { Settings } from "../src/settings.js";
 import { World } from "../src/world.js";
 import { restoreEnvironmentValues } from "./support/process.js";
 
-test("frozen child identities and independent resources surround observation", async () => {
+test("frozen child identities and independent native resources surround nested and overlapping observation", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -22,11 +22,15 @@ test("frozen child identities and independent resources surround observation", a
       [
         'import { appendFileSync } from "node:fs";',
         'export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {',
-        '  let next = 0; return { waitDeferral(input) {',
+        '  let next = 0; const instance = { waitDeferral(input) {',
+        '    if (this !== instance) throw new Error("lost instance receiver");',
         '    const id = ++next;',
         '    appendFileSync(context.config.trace, `acquire:${id}:${input.akumaIds.join(",")}:${Object.isFrozen(input)}:${Object.isFrozen(input.akumaIds)}\\n`);',
-        '    return { close(cleanup) { appendFileSync(context.config.trace, `close:${id}:${cleanup.aborted}\\n`); } };',
-        "  } };",
+        '    const resource = { close(cleanup) {',
+        '      if (this !== resource) throw new Error("lost resource receiver");',
+        '      appendFileSync(context.config.trace, `close:${id}:${cleanup.aborted}\\n`);',
+        '    } }; return resource;',
+        "  } }; return instance;",
         "} };",
       ].join("\n"),
     );
@@ -45,9 +49,21 @@ test("frozen child identities and independent resources surround observation", a
     });
     selected.akumaIds.push("aku/changed");
     await pending;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const overlapping = runtime.withWaitDeferrals({ akumaIds: ["aku/shared"] }, undefined, () => gate);
+    await eventually(() => trace(output).some(line => line.startsWith("acquire:3:")));
+    await runtime.withWaitDeferrals({ akumaIds: ["aku/shared"] }, undefined, async () => {
+      appendFileSync(output, "overlapping-observation\n");
+    });
+    assert.equal(trace(output).includes("close:3:false"), false);
+    release();
+    await overlapping;
     assert.deepEqual(trace(output), [
       "acquire:1:aku/allocated:true:true", "acquire:2:aku/one,aku/two:true:true",
       "route-and-final-observation", "close:2:false", "outer-still-active", "close:1:false",
+      "acquire:3:aku/shared:true:true", "acquire:4:aku/shared:true:true",
+      "overlapping-observation", "close:4:false", "close:3:false",
     ]);
   } finally {
     value.close();
@@ -63,7 +79,7 @@ test("timed-out acquisition closes a scope that arrives later", async (context) 
       'export default { manifest: { id: "alpha", apiVersion: 1 }, activate(context) {',
       '  return { waitDeferral() {',
       '    appendFileSync(context.config.trace, "started\\n");',
-      '    return new Promise(resolve => setTimeout(() => resolve({ close() { appendFileSync(context.config.trace, "late-close\\n"); } }), 6000));',
+      '    return new Promise(resolve => setTimeout(() => resolve({ close(cleanup) { appendFileSync(context.config.trace, "late-close:" + cleanup.aborted + "\\n"); } }), 6000));',
       '  } };',
       '} };',
     ].join("\n"));
@@ -72,18 +88,22 @@ test("timed-out acquisition closes a scope that arrives later", async (context) 
       alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
     });
     const world = await World.at(value.root);
-    const runtime = await pluginRuntime({ world, settings: await Settings.load({ cwd: value.root, home: value.home }) });
+    const diagnostics: string[] = [];
+    const runtime = await pluginRuntime({ world, settings: await Settings.load({ cwd: value.root, home: value.home }),
+      reportDiagnostic: message => diagnostics.push(message) });
     const advance = deadlineClock(context);
     const pending = runtime.withWaitDeferrals({ akumaIds: ["aku/allocated"] }, undefined, async () => {
       appendFileSync(output, "route\n");
+      return "original result";
     });
     await eventually(() => trace(output).includes("started"));
     advance(5000);
-    await pending;
+    assert.equal(await pending, "original result");
     assert.ok(trace(output).includes("route"));
     advance(1000);
-    await eventually(() => trace(output).includes("late-close"));
-    assert.equal(trace(output).filter(line => line === "late-close").length, 1);
+    await eventually(() => trace(output).includes("late-close:false"));
+    assert.deepEqual(diagnostics, ["plugin alpha wait deferral: timed out after 5000ms"]);
+    assert.equal(trace(output).filter(line => line === "late-close:false").length, 1);
   } finally {
     value.close();
   }
@@ -113,10 +133,13 @@ test("pre-aborted wait acquires nothing; rejected cleanup preserves both result 
     const world = await World.at(value.root);
     const runtime = await pluginRuntime({ world, settings: await Settings.load({ cwd: value.root, home: value.home }) });
     const aborted = new AbortController();
-    aborted.abort();
+    const reason = new Error("pre-aborted caller");
+    aborted.abort(reason);
     await assert.rejects(
       runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, aborted.signal, async () => assert.fail("route must not run")),
+      error => error === reason,
     );
+    assert.equal(trace(output).length, 0);
     const result = {};
     assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => result), result);
     await assert.rejects(
@@ -166,7 +189,7 @@ test("cancellation cleans immediate and late scopes without diagnosing cooperati
     const reason = new Error("caller cancelled");
     const pending = runtime.withWaitDeferrals({ akumaIds: ["aku/allocated"] }, caller.signal, async () => assert.fail("must not start"));
     const rejected = assert.rejects(pending, error => error === reason);
-    await eventually(() => trace(output).includes("gamma:started"));
+    await eventually(() => ["alpha", "beta", "gamma"].every(name => trace(output).includes(`${name}:started`)));
     caller.abort(reason);
     await rejected;
     await eventually(() => diagnostics.length === 2);
@@ -267,7 +290,7 @@ test("malformed wait resources diagnose without changing the route result", asyn
       settings: await Settings.load({ cwd: value.root, home: value.home }), reportDiagnostic: message => diagnostics.push(message) });
     assert.equal(await runtime.withWaitDeferrals({ akumaIds: ["aku/one"] }, undefined, async () => "result"), "result");
     assert.equal(diagnostics.length, 1);
-    assert.match(diagnostics[0]!, /wait deferral validation: resource close must be a function/u);
+    assert.match(diagnostics[0]!, /wait deferral: resource close must be a function/u);
   } finally { value.close(); }
 });
 
@@ -819,6 +842,7 @@ test("plugin writable paths reject traversal, management custody, duplicate name
     await pluginRuntime({ world, reportDiagnostic: (value) => diagnostics.push(value) });
 
     await eventually(() => trace(output).includes("undeclared"));
+    await eventually(() => diagnostics.length === 5);
     assert.deepEqual(trace(output), [join(world, ".square"), "undeclared"]);
     assert.equal(existsSync(join(outside, "escape")), false);
     for (const id of ["case", "duplicate", "reserved", "symlink", "traversal"]) {
@@ -843,7 +867,7 @@ test("a healthy plugin is emitted to while another activation hangs", { timeout:
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "hanging", apiVersion: 1 },',
-        '  activate(context, cancellation) { appendFileSync(context.config.trace, "activation-started\\n"); return new Promise((resolve) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "activation-aborted\\n"); resolve({ signals: { "akuma.born": () => appendFileSync(context.config.trace, "late-called\\n") } }); }, { once: true })); },',
+        '  activate(context, cancellation) { appendFileSync(context.config.trace, "activation-started\\n"); return new Promise((_resolve, reject) => cancellation.addEventListener("abort", () => { appendFileSync(context.config.trace, "activation-aborted\\n"); reject(cancellation.reason); }, { once: true })); },',
         "};",
       ].join("\n"),
     );
@@ -878,10 +902,11 @@ test("a healthy plugin is emitted to while another activation hangs", { timeout:
     assert.deepEqual([...trace(output)].sort(), ["activated", "activation-started", "called"]);
     advance(5_000);
     await emission;
-    // The hung activation is bounded and diagnosed, and its late handler set
-    // never replays the emission it missed.
+    // Cooperative rejection after expiry is observed without a second diagnostic.
     assert.deepEqual([...trace(output)].sort(), ["activated", "activation-aborted", "activation-started", "called"]);
-    assert.equal(diagnostics.includes("plugin hanging activation: timed out after 5000ms"), true, diagnostics.join("; "));
+    assert.deepEqual(diagnostics.filter(value => value.startsWith("plugin hanging activation:")), [
+      "plugin hanging activation: timed out after 5000ms",
+    ]);
     assert.equal(diagnostics.includes("plugin hanging signal: timed out after 5000ms"), true, diagnostics.join("; "));
   } finally {
     value.close();
@@ -953,6 +978,52 @@ test("a stalled import leaves healthy delivery independent and cannot activate a
   }
 });
 
+test("eligibility and handler delivery spend one shared emission lifetime", async (context) => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(value.root, "alpha", `
+      import { appendFileSync } from "node:fs";
+      export default { manifest: { id: "alpha", apiVersion: 1 }, async activate(context, activation) {
+        const record = text => appendFileSync(context.config.trace, text + "\\n");
+        record("activating");
+        await new Promise(resolve => setTimeout(resolve, 4000));
+        const hooks = { "akuma.born"(_event, cancellation) {
+          if (this !== hooks) throw new Error("lost handler receiver");
+          if (cancellation === activation) throw new Error("shared activation cancellation");
+          record("handler-started");
+          return new Promise((_resolve, reject) => cancellation.addEventListener("abort", () => {
+            record("handler-aborted:" + activation.aborted);
+            reject(cancellation.reason);
+          }, { once: true }));
+        } };
+        return { signals: hooks };
+      } };
+    `);
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+    });
+    const advance = deadlineClock(context);
+    const diagnostics: string[] = [];
+    const runtime = await pluginRuntime({ world: await World.at(value.root),
+      reportDiagnostic: message => diagnostics.push(message) });
+    const emission = runtime.emit({ kind: "akuma.born", akumaId: "aku/example", bodySequence: 1,
+      origin: { kind: "direct" }, caller: { kind: "unknown" } });
+    await eventually(() => trace(output).includes("activating"));
+    advance(4000);
+    await eventually(() => trace(output).includes("handler-started"));
+    advance(999);
+    assert.deepEqual(trace(output), ["activating", "handler-started"]);
+    advance(1);
+    await emission;
+    assert.deepEqual(trace(output), ["activating", "handler-started", "handler-aborted:false"]);
+    assert.deepEqual(diagnostics, ["plugin alpha signal: timed out after 5000ms"]);
+  } finally {
+    value.close();
+  }
+});
+
 test("hanging handler is cancelled at the delivery bound without blocking another handler", { timeout: 5_000 }, async (context) => {
   const value = fixture();
   try {
@@ -1006,6 +1077,7 @@ test("hanging handler is cancelled at the delivery bound without blocking anothe
         diagnostics.some((value) => value.startsWith("plugin hanging signal: timed out after 5000ms")),
         true,
       );
+      assert.deepEqual(diagnostics, ["plugin hanging signal: timed out after 5000ms"]);
       assert.deepEqual(unhandled, []);
     } finally {
       process.off("unhandledRejection", observeUnhandled);

@@ -178,15 +178,15 @@ original instance for direct hook invocation with its original receiver. Import,
 package, capability, and activation failures produce one activation diagnostic
 attributed to that plugin, preserving the underlying cause. Activation and
 handler attempts are bounded by the five-second attempt limit; their failures
-are diagnostic-only and do not prevent other selected plugins from proceeding. The
-host supplies each activation and handler attempt its own cancellation signal; a
-non-cooperative attempt that outlives its limit loses authority to participate in
-the operation; an invocation resource returned late receives only bounded cleanup.
-A signal that arrives while a selected plugin is still
-activating remains eligible only when that activation settles successfully
-within the signal producer's own bounded delivery; a pending activation holds
-back only that plugin's handlers, and an emission it misses is dropped with a
-diagnostic and is never replayed.
+are diagnostic-only and do not prevent other selected plugins from proceeding.
+Each activation and each invocation attempt has one bounded participation
+lifetime and its own cancellation signal. A signal shares one five-second
+lifetime across eligibility and delivery for all selected plugins, which proceed
+independently. Waiting for eligibility never cancels or restarts the process-local
+activation. A non-cooperative attempt that outlives its limit loses authority to
+participate; this is not a promise to physically retire arbitrary same-process
+code. A signal whose activation misses that lifetime is diagnosed and dropped,
+never replayed.
 
 ## Host Diagnostics
 
@@ -231,9 +231,16 @@ ending remains independent. Observation never waits for producer notification.
 Accepted external custody cannot be recalled. Permanent retention and custody
 judgment belong to the ledger, not Keiyaku.
 
-Acquisition and cleanup remain bounded and diagnostic-only, preserving native
-results and admission. Scope release may best-effort dispatch newly eligible
-cards; expiry needs the next ordinary receiver or dispatch opportunity and adds
+Acquisition shares one five-second lifetime across selected plugins. Caller
+cancellation ends participation without diagnosing a plugin failure and preserves
+the caller's native cancellation reason; pre-canceled work acquires nothing and
+never starts the action. Each valid resource belongs either to the invocation's
+final release or to late release after its acquisition lost authority, never
+both. Every release has a fresh independent five-second lifetime, even after
+acquisition expiry or action cancellation. Acquisition and cleanup failures are
+diagnostic-only; cleanup cannot replace the action's result or original error.
+Scope release may best-effort dispatch newly eligible cards; expiry needs the
+next ordinary receiver or dispatch opportunity and adds
 no recovery guarantee. Serving Bodies choose no requester resource or recipient
 from ambient parent identity. Core adds no registry or watcher.
 
