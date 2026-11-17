@@ -160,7 +160,7 @@ export function createProvider(transport: AkumaTransport, handoff?: Registration
                     // started real work even when its receipt still says pending.
                     await session.observe();
                     mirror.admit(admitted.row, prompt.clientMessageId);
-                    const observed = mirror.refreshedTurnId();
+                    const observed = mirror.refreshedTurnId(admitted.row.tellId);
                     respond(admitted.result.type === "completed" && observed !== undefined
                       ? { type: "turn", turnId: observed } : admitted.result);
                   } catch (error) {

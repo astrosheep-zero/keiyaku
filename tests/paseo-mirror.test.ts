@@ -50,6 +50,24 @@ test("an admitted Tell keeps its unknown sequence until the producer witnesses t
   assert.equal(items(events).filter((item) => item.type === "user_message").length, 1);
 });
 
+test("Tell correlation requires its own delivery and an open start in the held fresh window", () => {
+  const { mirror } = collect();
+  const delivered: Extract<Row, { kind: "tell" }> = { kind: "tell", sequence: 2, at, tellId: "exact",
+    text: "work", state: "told", deliveries: [{ route: "launch", turnSequence: 3, deliveredAt: at }] };
+  mirror.seed(window([turn(1), delivered, turn(3)]));
+  assert.equal(mirror.refreshedTurnId("exact"), undefined, "cached history cannot substitute for a fresh read");
+  const release = mirror.hold();
+  mirror.publish(window([turn(1), { ...delivered, tellId: "other" }, turn(3)]));
+  assert.equal(mirror.refreshedTurnId("exact"), undefined, "another Tell's delivery proves nothing");
+  mirror.publish(window([turn(1), delivered, turn(3), turn(4)]));
+  assert.equal(mirror.refreshedTurnId("exact"), "turn/3", "exact delivery wins over the latest open Turn");
+  mirror.publish(window([delivered]));
+  assert.equal(mirror.refreshedTurnId("exact"), undefined, "delivery without an observed start cannot claim execution");
+  mirror.publish(window([turn(1), delivered, turn(3), failed(4, 3), turn(5)]));
+  assert.equal(mirror.refreshedTurnId("exact"), undefined, "ended delivery never falls back to another open Turn");
+  release();
+});
+
 test("actual producer ids keep identical overlapping tool calls distinct across completion order and Turn scope", () => {
   const { events, mirror } = collect();
   mirror.publish(window([turn(1), tool(2, "started", "a"), tool(3, "started", "b")]));

@@ -711,14 +711,59 @@ test("pending admission and failed wake acknowledge success without inventing Ak
   assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "completed" });
   assert.deepEqual(notices(h.events), []);
   assert.equal(turns(h.events).length, 0);
-  receipt = tellReceipt({ kind: "pending" }, "launch-tell");
-  rows = [turn(1)];
-  const third = request(); third.prompt.clientMessageId = "client-3";
-  await h.connection.send(third);
-  assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "turn", turnId: "turn/1" },
-    "only an authoritative Turn observed after admission can turn the send into Turn correlation");
-  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [["turn/1", "started"]],
-    "the observed Turn comes from the producer's own history, never from a removed delivery row");
+});
+
+test("an auto prompt never adopts an older open Turn while its Tell waits for wake", async (t) => {
+  const receipt = tellReceipt({ kind: "pending" }, "recovery-tell");
+  const pending: Extract<Row, { kind: "tell" }> = { kind: "tell", sequence: 438, tellId: receipt.tellId,
+    text: "Resume working.", state: "pending", at, deliveries: [] };
+  let rows: Row[] = [turn(303)];
+  const h = await harness(t, { window: async () => rows, tell: async () => {
+    rows = [...rows, pending];
+    return receipt;
+  } });
+  await h.open();
+  const request = promptInput("recovery", pending.text);
+  request.prompt.delivery = "auto";
+  await h.connection.send(request);
+  assert.deepEqual(promptResults(h.events).map((event) => event.result), [{ type: "completed" }]);
+  rows = [turn(303), { ...pending, state: "told", deliveries: [{ route: "launch", turnSequence: 439, deliveredAt: at }] }, turn(439)];
+  h.push(rows); await tick();
+  rows = [...rows, answer(446, 439)];
+  h.push(rows); await tick();
+  assert.deepEqual(turns(h.events).map((event) => [event.turnId, event.state]), [
+    ["turn/303", "started"], ["turn/439", "started"], ["turn/439", "completed"],
+  ], "the later real Turn completes without fabricating an outcome for the lost execution");
+  assert.ok(items(h.events).some((event) => event.item.type === "assistant_message" && event.item.text === "hello"));
+  assert.deepEqual(h.calls.map((call) => call.op), ["tell"], "one submission, no Stop or retry");
+  const messages = items(h.events).filter((event) => event.item.type === "user_message");
+  assert.equal(messages.length, 1, "the observed Tell replaces the optimistic message without duplication");
+  const message = messages[0]?.item;
+  assert.ok(message?.type === "user_message");
+  assert.equal(message.clientMessageId, "recovery");
+});
+
+test("auto prompts correlate only their exact delivery and acknowledge already-completed work", async (t) => {
+  let receipt = tellReceipt({ kind: "pending" }, "launch-tell");
+  const delivered = (sequence: number, tellId: string, turnSequence: number): Row => ({ kind: "tell", sequence,
+    at, tellId, text: "work", state: "told", deliveries: [{ route: "launch", turnSequence, deliveredAt: at }] });
+  let rows: Row[] = [];
+  const h = await harness(t, { window: async () => rows, tell: async () => receipt });
+  await h.open();
+  rows = [turn(303), delivered(438, receipt.tellId, 439), turn(439), delivered(440, "other-tell", 441), turn(441)];
+  const request = promptInput("launch", "work"); request.prompt.delivery = "auto";
+  await h.connection.send(request);
+  assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "turn", turnId: "turn/439" },
+    "another Tell's newer Turn is not this submission's execution");
+  receipt = tellReceipt({ kind: "pending" }, "fast-tell");
+  rows = [...rows, delivered(442, receipt.tellId, 443), turn(443), answer(446, 443)];
+  const fast = promptInput("fast", "work"); fast.prompt.delivery = "auto";
+  await h.connection.send(fast);
+  assert.deepEqual(promptResults(h.events).at(-1)?.result, { type: "completed" },
+    "a terminal delivery cannot leave the host waiting for another completion");
+  assert.deepEqual(turns(h.events).slice(-2).map((event) => [event.turnId, event.state]), [
+    ["turn/443", "started"], ["turn/443", "completed"],
+  ]);
 });
 
 test("unsupported input refuses before Tell admission and ambiguous failure never retries", async (t) => {

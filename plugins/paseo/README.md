@@ -238,14 +238,19 @@ uses the observed Paseo Turn captured before submission as presentation
 correlation, not a new Keiyaku delivery or Turn-binding fact. Publication of racing
 history waits until admission is correlated to the optimistic message.
 
-For an idle send, the provider reopens its observation once while publication is
-held. A receipt or freshly observed window that names a real running Turn can
-associate the host request with that Turn. Otherwise Paseo may start and complete its own
-`command-<clientMessageId>` send-command lifecycle. This only completes the send
-command: it does not mean the Akuma answered, completed, or stopped. Later Akuma
-starts and outcomes still come from observed Keiyaku windows. A wake failure retains its
-diagnostic without turning the recorded message into failure or adding a pending
-message UI. Initial retention notices are unchanged.
+For an ordinary auto prompt, the provider reopens its observation once while
+publication is held and uses the freshly observed Tell row matching its admitted
+`tellId` to correlate execution. Only that Tell's latest delivery can identify an
+observed still-open Turn; neither an unrelated delivery nor the latest open Turn
+is a fallback. If the Tell remains pending, its delivery or Turn start is outside
+the read, or its delivered Turn has already ended, the send receives admission
+acknowledgement without claiming a running Turn. Paseo may then start and complete
+its own `command-<clientMessageId>` send-command lifecycle. This only completes
+the send command: it does not mean the Akuma answered, completed, or stopped.
+Later real Turn starts and outcomes still publish normally. An older Turn left
+open by unproven execution loss is not canceled or adopted by the new prompt.
+A wake failure retains its diagnostic without turning the recorded message into
+failure or adding a pending message UI. Initial retention notices are unchanged.
 
 Only nonblank plain text is supported. Commands, attachments and output schemas
 are refused before submission. A host-requested clear of stale permission

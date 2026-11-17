@@ -71,12 +71,14 @@ export function createMirror(sessionId: string, emit: Emit) {
       };
     },
     currentTurnId: () => turn && !turn.closed ? `turn/${turn.sequence}` : undefined,
-    refreshedTurnId() {
-      const latest = deferred?.rows.filter((row) => row.kind === "turn").at(-1);
-      if (latest?.kind !== "turn") return mirror.currentTurnId();
-      if (deferred?.rows.some((row) => row.kind === "outcome" && row.turnSequence === latest.sequence)) return undefined;
-      if (turn?.sequence === latest.sequence && turn.closed) return undefined;
-      return `turn/${latest.sequence}`;
+    refreshedTurnId(tellId: string) {
+      const rows = deferred?.rows;
+      const tell = rows?.find((row) => row.kind === "tell" && row.tellId === tellId);
+      const delivered = tell?.kind === "tell" ? tell.deliveries.at(-1)?.turnSequence : undefined;
+      if (delivered === undefined || !rows?.some((row) => row.kind === "turn" && row.sequence === delivered)) return undefined;
+      if (rows.some((row) => row.kind === "outcome" && row.turnSequence === delivered)) return undefined;
+      if (turn?.sequence === delivered && turn.closed) return undefined;
+      return `turn/${delivered}`;
     },
     admit(row: AdmittedMessage, clientMessageId: string) {
       userMessage(row, clientMessageId);

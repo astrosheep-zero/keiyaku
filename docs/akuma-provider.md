@@ -94,6 +94,15 @@ cannot establish or change execution state, and its payload is not retained in
 the diagnostic. A broken observation boundary remains a read failure; neither
 case authorizes inferred completion or automatic recovery.
 
+The mirror acknowledges input admission separately from execution. Correlating a
+new execution request requires a fresh observation proving delivery of that exact
+input to an open Turn. Missing delivery evidence or an already-ended Turn leaves
+admission acknowledged without choosing another execution. Older unclosed Turns
+and unrelated input supply no substitute correlation. Steering an existing
+execution retains its captured host Turn acknowledgement as presentation, not
+proof of native delivery. Independently observed starts and outcomes remain
+authoritative without invented settlement.
+
 ## Headless Permission Baseline
 
 An opencode-sdk spawn is headless: no channel can answer a native permission

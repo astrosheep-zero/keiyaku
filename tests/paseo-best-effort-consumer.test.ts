@@ -41,10 +41,12 @@ const AKUMA_ID = akumaId({ akumaName: "test", suffix: "be57eff0" });
 const turn = (n: number): Row => ({ kind: "turn", sequence: n, bodySequence: n, at });
 const answer = (n: number, sequence: number, text = "done"): Row => ({ kind: "outcome", sequence, turnSequence: n, at, outcome: { kind: "answered", answer: text } });
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
-function receipt(_text: string, id: string, launch?: number, failed = false): TellAdmission {
+const deliveredTell = (sequence: number, turnSequence: number, tellId: string, text: string): Row => ({ kind: "tell",
+  sequence, at, tellId, text, state: "told", deliveries: [{ route: "launch", turnSequence, deliveredAt: at }] });
+function receipt(id: string, wake = false, failed = false): TellAdmission {
   const subject = { akumaId: AKUMA_ID, tellId: id };
   return failed ? { kind: "failed", ...subject, failures: [{ stage: "wake", diagnostic: "test wake failed" }] }
-    : { kind: "admitted", ...subject, ...(launch === undefined ? {} : { wake: { kind: "pending" as const } }) };
+    : { kind: "admitted", ...subject, ...(wake ? { wake: { kind: "pending" as const } } : {}) };
 }
 
 /** One bridge mutation as the typed transport sees it; there is no command line left to record. */
@@ -293,8 +295,8 @@ for (const failed of [false, true]) test(`recorded steer succeeds with ${failed 
   let n = 0;
   const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
     n++;
-    if (n === 1) h.setRows([turn(2)]);
-    return receipt(text, `id-${n}`, n === 1 ? 2 : undefined, n > 1 && failed);
+    if (n === 1) h.setRows([deliveredTell(1, 2, `id-${n}`, text), turn(2)]);
+    return receipt(`id-${n}`, n === 1, n > 1 && failed);
   } });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
   assert.deepEqual(await h.send("steering", "steering"), { disposition: "steered" });
@@ -470,8 +472,8 @@ test("a Turn transition during Tell keeps its captured acknowledgement and does 
   let n = 0;
   const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
     n++;
-    if (n === 1) { h.setRows([turn(2)]); return receipt(text, "initial", 2); }
-    began(); await blocked; return receipt(text, "steering");
+    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial", true); }
+    began(); await blocked; return receipt("steering");
   } });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
   const sending = h.send("steering", "steering"); await started;
@@ -488,8 +490,8 @@ test("a transition before plugin receipt can still make the host reject the ackn
   let n = 0;
   const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
     n++;
-    if (n === 1) { h.setRows([turn(2)]); return receipt(text, "initial", 2); }
-    return receipt(text, "accepted-on-transition");
+    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial", true); }
+    return receipt("accepted-on-transition");
   } });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
   h.setBeforePrompt(async () => {
@@ -502,23 +504,32 @@ test("a transition before plugin receipt can still make the host reject the ackn
   h.setRows([turn(2), answer(2, 3), turn(4), answer(4, 5)]); await h.refresh();
 });
 
-test("idle admission completes a host send command, then later real Akuma execution is still tracked", async (t) => {
-  const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => receipt(text, "idle") });
-  await h.send("idle input", "idle"); await h.drain();
+test("pending recovery Tell completes only its host command before a later real Turn", async (t) => {
+  const pending: Extract<Row, { kind: "tell" }> = { kind: "tell", sequence: 438, at, tellId: "recovery",
+    text: "Resume working.", state: "pending", deliveries: [] };
+  const h = await harness(t, { tell: async () => { h.setRows([turn(303), pending]); return receipt(pending.tellId, true); } }, [turn(303)]);
+  await h.send(pending.text, "recovery"); await h.drain();
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
   assert.deepEqual(h.events.filter((event) => event.type === "turn_started" || event.type === "turn_completed").map((event) => [event.type, event.turnId]), [
-    ["turn_started", "command-idle"], ["turn_completed", "command-idle"],
+    ["turn_started", "command-recovery"], ["turn_completed", "command-recovery"],
   ]);
-  h.setRows([turn(2)]); await h.refresh();
+  const running = [turn(303), deliveredTell(438, 439, pending.tellId, pending.text), turn(439)];
+  h.push(running); await h.drain();
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running");
-  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
-  h.setRows([turn(2), answer(2, 3)]); await h.refresh();
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/439");
+  h.push([...running, answer(439, 446)]); await h.drain();
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
-  assert.equal(h.events.filter((event) => event.type === "turn_completed" && event.turnId === "turn/2").length, 1);
+  assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, null);
+  assert.ok(h.events.some((event) => event.type === "timeline" && event.item.type === "assistant_message" && event.item.text === "done"));
+  assert.equal(h.events.filter((event) => event.type === "turn_completed" && event.turnId === "turn/439").length, 1);
+  assert.equal(h.events.some((event) => (event.type === "turn_completed" || event.type === "turn_canceled") && event.turnId === "turn/303"), false);
+  assert.deepEqual(h.calls.map((call) => call.op), ["tell"], "no retry or Stop to repair presentation");
 });
 
 test("idle admission with an already observed native start must not let command completion hide running work", async (t) => {
-  const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => { h.setRows([turn(2)]); return receipt(text, "idle"); } });
+  const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
+    h.setRows([deliveredTell(1, 2, "idle", text), turn(2)]); return receipt("idle");
+  } });
   await h.send("idle input", "idle"); await h.drain();
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "running");
   assert.equal(h.manager.getAgent(h.agent.id)!.activeTurnId, "turn/2");
@@ -531,9 +542,9 @@ test("combined best-effort Steer, explicit Stop, and later Tell preserve the sam
     stop: async () => stopAttempt("killed", AKUMA_ID),
     tell: async (_world, _akuId, _signal, text) => {
       n++;
-      if (n === 1) { h.setRows([turn(2)]); return receipt(text, "initial", 2); }
-      if (n === 2) return receipt(text, "accepted");
-      h.setRows([turn(2), turn(4)]); return receipt(text, "after-stop", 4);
+      if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial", true); }
+      if (n === 2) return receipt("accepted");
+      h.setRows([turn(2), deliveredTell(3, 4, "after-stop", text), turn(4)]); return receipt("after-stop", true);
     },
   });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
@@ -598,7 +609,7 @@ test("uncertain steer fails honestly without host replacement, retry, or touchin
   let n = 0;
   const h = await harness(t, { tell: async (_world, _akuId, _signal, text) => {
     n++;
-    if (n === 1) { h.setRows([turn(2)]); return receipt(text, "initial", 2); }
+    if (n === 1) { h.setRows([deliveredTell(1, 2, "initial", text), turn(2)]); return receipt("initial", true); }
     throw new Error("lost receipt after possible admission");
   } });
   await h.send("initial", "initial"); await h.manager.waitForAgentRunStart(h.agent.id);
