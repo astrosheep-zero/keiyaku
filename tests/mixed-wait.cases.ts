@@ -177,7 +177,7 @@ test("unsettled Akumas use cheap paced probes between initial and deadline snaps
     try {
       const result = await f.facet().wait({ selectors, completion: "all", timeout: "1200ms" });
       assert.equal(result.reason, "deadline");
-      assert.equal(snapshots, 2, "only initial and final full monitoring snapshots, not one per poll");
+      assert.equal(snapshots, 1, "only deadline detail decodes the retained frontier; initial and paced reads use life evidence");
       assert.ok(lifeReads > snapshots + 2, "intervening rounds still probe native completion");
       assert.ok(lifeReads <= 8, "cheap probes retain native pacing instead of running every Contract poll");
       const worker = result.members.find(member => member.kind === "akuma");

@@ -10,7 +10,7 @@ import test, { type TestContext } from "node:test";
 import { Akuma, Akumas, KeiyakuError, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { readAkumaTimeline } from "../src/akuma/akuma.js";
+import { readAkumaWork } from "../src/akuma/akuma.js";
 import { beginTurn, endTurn, finishBodyIfIdle, readTell, recordTell } from "../src/akuma/heart/index.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
@@ -384,7 +384,7 @@ test("public status observes committed identity, not idle or incidental internal
   const answered = await outcome(value, "");
   const api = Akumas.of(world);
   await api.list();
-  await readAkumaTimeline(world, value.allocated.id);
+  await readAkumaWork(world, value.allocated.id);
   await new AkumaOwner(value.allocated.id, world).history();
   await new AkumaOwner(value.allocated.id, world).lastAnswer();
   assert.deepEqual(recorded.signals(), [], "lifecycle production, roster and internal reads are not observers");
@@ -410,7 +410,9 @@ test("public status observes committed identity, not idle or incidental internal
   await beginTurn(value.allocated.paths, { bodySequence: value.body.sequence, startedAt: AT });
   const open = await api.status({ akuma: value.allocated.id });
   assert.equal(open.work.kind, "open");
-  assert.deepEqual(recorded.signals(), [], "a past outcome read to build an open view is not caller observation");
+  assert.equal(open.work.outcome?.historyId, `turn/${failed.sequence}`);
+  assert.deepEqual(recorded.signals(), [signal(value.allocated.id, failed.sequence)],
+    "status exposes its latest retained outcome even while a newer Turn is open");
 });
 
 test("history page, exact and last use the identity of the actual retained result", async (t) => {

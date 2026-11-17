@@ -625,11 +625,11 @@ export function latestTurnFactForBody(database: DatabaseSync, bodySequence: numb
   return row === undefined ? null : decodeTurnRow(row);
 }
 
-export function latestTurnFact(database: DatabaseSync): TurnFact | null {
-  const latest = database.prepare("SELECT sequence FROM turns ORDER BY sequence DESC LIMIT 1").get() as
-    | { sequence: number }
-    | undefined;
-  return latest === undefined ? null : turnFact(database, latest.sequence);
+export function latestTurnEndFact(database: DatabaseSync): TurnEndFact | undefined {
+  const latest = database
+    .prepare("SELECT sequence FROM turns WHERE end_sequence IS NOT NULL ORDER BY end_sequence DESC LIMIT 1")
+    .get() as { sequence: number } | undefined;
+  return latest === undefined ? undefined : turnFact(database, latest.sequence)?.end;
 }
 
 export function turnFact(database: DatabaseSync, turnSequence: number): TurnFact | null {

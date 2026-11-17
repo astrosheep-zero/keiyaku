@@ -78,16 +78,13 @@ retired members or capture later Tells. A protected backlog is not itself a new
 reason to compact: maintenance is amortized over new history and runs when
 protected work is released. Maintenance progress can only
 avoid repeated work; it cannot decide a fact's liveness or replace the retained
-history window. The public
-timeline projector is pure and derives snapshots, gaps, history loss, activity
-selection, and reported changes from this one sequence. These projections never
-become facts or cursors of a second store.
-When a complete Turn's exact final non-truncated narration equals its answered
-outcome, that projector omits only that projected duplicate. Heart retains both
-source facts; renderers never decide this fold. The outcome it produces names
-the omitted narration's durable identity, so the correlation is projected
-evidence rather than a consumer's re-comparison of text, and truncated or
-differing narration is never named as that duplicate.
+history window. The public timeline derives one semantic row from each retained
+fact in durable sequence order. Tool starts and completions remain independent
+observations correlated by their native invocation identity within a Turn;
+narration and an equal final answer remain independent observations too. No
+projection moves, merges, or hides those retained identities. Current work and
+reported changes derive directly from the latest retained frontier, without a
+second timeline or store.
 
 The latest retained activity time is the time of the last retained input,
 provider narration, or explicit progress report in durable timeline order.

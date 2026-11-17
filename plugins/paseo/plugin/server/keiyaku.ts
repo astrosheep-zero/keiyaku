@@ -25,7 +25,7 @@ const call = z.discriminatedUnion("kind", [
 const result = z.strictObject({ status: z.enum(["ok", "error"]), message: text.exactOptional(),
   output: text.exactOptional(), exitCode: z.number().int().safe().exactOptional() });
 const outcome = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("answered"), answer: text, foldedSaidSequence: count.exactOptional() }),
+  z.strictObject({ kind: z.literal("answered"), answer: text }),
   z.strictObject({ kind: z.literal("failed"), diagnostic: text }),
   z.strictObject({ kind: z.literal("canceled") }),
 ]);
@@ -41,8 +41,7 @@ const supportedRow = z.discriminatedUnion("kind", [
       deliveredAt: timestamp, route: z.enum(["launch", "live"]), turnSequence: count,
     })) }),
   z.strictObject({ kind: z.literal("tool"), ...turn, name: nonblank, toolId: text, call,
-    state: z.union([z.enum(["active", "unsettled"]), result]),
-    durationMs: z.number().finite().nonnegative().exactOptional(), truncated }),
+    phase: z.enum(["started", "completed"]), result: result.exactOptional(), truncated }),
   z.strictObject({ kind: z.literal("outcome"), ...turn, outcome }),
 ]);
 

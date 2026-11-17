@@ -6,7 +6,7 @@ import { parseAkumaAlias } from "../src/identity/selector.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import type { AkumaKanshiRow, KanshiReport } from "../src/kanshi/report.js";
 import { contractSummary } from "./support/cli-fixtures.js";
-import { activeTool, activityAkumaRow, openAkumaSnapshot, snapshotRow } from "./support/kanshi-activity.js";
+import { startedTool, turnStarted, activityAkumaRow } from "./support/kanshi-activity.js";
 
 const at = "2026-01-01T10:00:05.000Z";
 const first = contractSummary({ id: contractId("kei/first"), title: "First", phaseAt: at });
@@ -39,7 +39,7 @@ test("World nests selected associated Akumas once and preserves ungrouped links 
     ...activityAkumaRow(
       "aku/worker/00000001",
       "running",
-      openAkumaSnapshot([snapshotRow(activeTool(5, "bash", { kind: "run", command: "npm test" }))]),
+      [turnStarted(), startedTool(5, "bash", { kind: "run", command: "npm test" })],
     ),
     aliases: [parseAkumaAlias("@delivery")],
     contract: associated(first.id),

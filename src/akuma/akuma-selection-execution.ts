@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { akumaStatusSchema } from "./akuma.js";
-import { activityRowSchema, activitySnapshotSchema } from "./projection.js";
+import { activityRowSchema } from "./projection.js";
 import { tellResultSchema, pendingTellReceipt } from "./call-initial-tell.js";
 import { akumaIdSchema } from "./identity.js";
 import type { WorldRoot } from "../world.js";
@@ -21,8 +21,7 @@ import {
 
 export const liveStatusObservationSchema = z
   .strictObject({
-    status: akumaStatusSchema.unwrap().omit({ work: true }).extend({ timeline: activitySnapshotSchema }).readonly(),
-    ordinarySelected: z.number(),
+    status: akumaStatusSchema,
     rows: z.array(activityRowSchema).readonly(),
   })
   .readonly();

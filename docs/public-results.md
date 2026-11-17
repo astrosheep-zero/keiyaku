@@ -19,9 +19,11 @@ producer. Native callers and CLI JSON retain the complete answer,
 including refusal, retry, and stops after confirmed effects. Invocation wait owns
 only the cross-product group conclusion and ordered member composition; its
 member observations reuse native evidence and never replace either product's
-completion judgment. Thin member facts remain distinct from full addressed
-status. Exact settled answers retain their outcome identity and complete text;
-recent activity is bounded native evidence, not a synthesized work summary.
+completion judgment. One native observer supplies standalone, plural, and
+invocation Akuma waiting with compact final evidence, without a parallel full
+status retained for later compaction. Exact settled answers retain their outcome
+identity and complete text. Recent activity consists of bounded retained
+semantic rows; tool starts and completions remain independent observations.
 An unavailable activity observation never reverses the wait's conclusion or
 hides independently observed outcomes. Unobserved peers remain explicit even
 when the group completes. A standalone

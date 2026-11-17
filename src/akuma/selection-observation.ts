@@ -43,6 +43,7 @@ export const akumaObservationSchema = z
     provider: z.string(),
     model: z.string().exactOptional(),
     work: currentWorkSchema,
+    recent: z.array(activityRowSchema).max(3).readonly().exactOptional(),
     lastActivityAt: z.string().exactOptional(),
     strandedReason: z.literal("resume-unsupported").exactOptional(),
     contract: z.union([dispatchAssociationSchema.options[1], dispatchAssociationSchema.options[2]]).exactOptional(),

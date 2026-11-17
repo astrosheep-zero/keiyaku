@@ -115,11 +115,10 @@ function contractFacts(contract: DisplayAssociation, columns: number): readonly 
   return contract.kind === "failed" ? diagnosticLines("contract association", contract.diagnostic, columns) : [];
 }
 
-/** Frozen rows distinguish unsettled work from a witnessed result. */
+/** Frozen history never asserts continuing tool liveness. */
 function toolMargin(row: Extract<RenderRow, { kind: "tool" }>): string {
-  if (row.state === "active") return "?  ";
-  if (row.state === "unsettled") return "?  ";
-  return row.state.status === "ok" ? ACTION_MARGIN : "!  ";
+  if (row.phase === "started") return "?  ";
+  return row.result?.status === "ok" ? ACTION_MARGIN : "!  ";
 }
 
 function rowText(row: Exclude<RenderRow, { kind: "tool" }>): Readonly<{
@@ -365,14 +364,7 @@ export function historyRawAnswer(result: AkumaHistoryResult, historyId: string |
     if (row.sequence !== selector.sequence || row.kind === "turn" || row.kind === "outcome") return undefined;
     if (row.kind === "tool") {
       const tool = toolRepr(row);
-      const prefix =
-        row.state === "unsettled"
-          ? "unknown: "
-          : row.state === "active"
-            ? "active: "
-            : row.state.status === "error"
-              ? "error: "
-              : "";
+      const prefix = row.phase === "completed" && row.result?.status === "error" ? "error: " : "";
       return `${prefix}${tool.label} ${tool.text}${tool.suffix}${tool.diagnostic === "" ? "" : ` · ${tool.diagnostic}`}`;
     }
     const kind = row.kind === "tell" && row.state === "pending" ? "pending-tell" : row.kind;

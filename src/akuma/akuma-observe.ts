@@ -1,9 +1,5 @@
-import { realpath } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
-import { promisify } from "node:util";
 import { projectAkumaBirth } from "./caller.js";
 import {
-  readStatusFacts,
   createStatusFactReader,
   readLifeSnapshot,
   HeldAkumaLeash,
@@ -18,25 +14,13 @@ import {
   type WaitFacts,
 } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
-import {
-  DEFAULT_TAIL,
-  projectTurns,
-  reportedChangePaths,
-  selectHistory,
-  selectSnapshot,
-  type ActivityHistory,
-  type ActivityRow,
-  type ActivitySnapshot,
-  type TurnLedger,
-} from "./projection.js";
+import { projectFact, type ActivityRow } from "./projection.js";
+import { summarizeFrontier } from "./projection-read.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { abortableDelay } from "./abort.js";
 import type { WorldRoot } from "../world.js";
 import type { AkumaRosterRow, AkumaStatus } from "./akuma.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
-
-/** Native resolution answers on-disk case as well as symlinks; the portable form keeps the caller's spelling. */
-const realpathNative = promisify(realpath.native);
 
 export async function rosterListRow(paths: AkumaPaths, expected: AkumaId): Promise<AkumaRosterRow> {
   const snapshot = await readHeart(paths);
@@ -82,13 +66,19 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
   read: () => Promise<T>,
   snapshot?: T,
 ) {
-  snapshot ??= await read();
+  const fresh = async () => {
+    try {
+      return await read();
+    } catch (error) {
+      if (isHeartAbsent(error)) throw new AkumaNotBornError(expected);
+      throw error;
+    }
+  };
+  snapshot ??= await fresh();
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const claim = await HeldAkumaLeash.try(paths);
   try {
-    // A Body may finish after the first read. Refresh under the free seat so
-    // neither its release nor a successor can manufacture an untidy observation.
-    if (claim !== null) snapshot = await read();
+    if (claim !== null) snapshot = await fresh();
     const soul = snapshot.soul;
     if (soul === null) throw new AkumaNotBornError(expected);
     if (soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
@@ -103,245 +93,97 @@ async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBod
   }
 }
 
-/** Lightweight born-life observation using the same leash refresh as status and wait. */
 export async function readBornLife(paths: AkumaPaths, expected: AkumaId): Promise<AkumaStatus["life"]> {
   return (await bornObservation(paths, expected, () => readLifeSnapshot(paths))).currentLife;
 }
 
-/** Optional semantic seam; the observer composition owns delivery and deduplication. */
 export type OutcomeObserver = (akumaId: AkumaId, historyIds: readonly string[]) => Promise<void>;
-
 export async function observeOutcomeRows(
   id: AkumaId,
   rows: readonly ActivityRow[],
   observer?: OutcomeObserver,
 ): Promise<void> {
-  if (observer === undefined) return;
-  const historyIds = rows.flatMap((row) => (row.kind === "outcome" ? [`turn/${row.turnSequence}`] : []));
-  if (historyIds.length > 0) await observer(id, historyIds);
+  const ids = rows.flatMap((row) => (row.kind === "outcome" ? [`turn/${row.turnSequence}`] : []));
+  if (ids.length > 0) await observer?.(id, ids);
+}
+export async function observeStatusOutcome(status: AkumaStatus, observer?: OutcomeObserver): Promise<void> {
+  if (status.work.outcome !== undefined) await observer?.(status.id, [status.work.outcome.historyId]);
 }
 
-export async function observeStatusOutcome(
-  status: LiveStatusObservation["status"],
-  observer?: OutcomeObserver,
-): Promise<void> {
-  const snapshot = status.timeline;
-  if (snapshot.kind === "idle" && snapshot.outcome !== undefined)
-    await observer?.(status.id, [`turn/${snapshot.outcome.turnSequence}`]);
-}
-
-type BudgetedStatusObservation = Readonly<{
-  status: Omit<AkumaStatus, "work"> & Readonly<{ timeline: ActivitySnapshot }>;
-  ordinarySelected: number;
-}>;
-
-/**
- * The internal live-observation companion for one status frontier.  It is not
- * part of status or any returned facade result: viewers receive it only while
- * an observation loop is still streaming.
- */
-export type LiveStatusObservation = BudgetedStatusObservation & Readonly<{ rows: readonly ActivityRow[] }>;
+export type LiveStatusObservation = Readonly<{ status: AkumaStatus; rows: readonly ActivityRow[] }>;
 export type WaitStatusObservation = WaitFacts & Readonly<{ id: AkumaId; life: AkumaStatus["life"] }>;
 
-type StatusObservationInput = Readonly<{
-  aperture: "monitoring" | "receipt";
-  ordinaryBudget?: number;
-  admittedTellId?: string;
-}>;
-
-function snapshotSelection(
-  input: StatusObservationInput,
-  executionDir?: string,
-  canonicalize?: (absolutePath: string) => string,
-) {
-  if (input.ordinaryBudget !== undefined && (!Number.isSafeInteger(input.ordinaryBudget) || input.ordinaryBudget < 0))
-    throw new TypeError("ordinary budget must be a nonnegative safe integer");
-  return {
-    aperture: input.aperture,
-    budget: { tail: Math.min(DEFAULT_TAIL, input.ordinaryBudget ?? DEFAULT_TAIL) },
-    ...(executionDir === undefined ? {} : { executionDir }),
-    ...(canonicalize === undefined ? {} : { canonicalize }),
-    ...(input.admittedTellId === undefined ? {} : { admittedTellId: input.admittedTellId }),
-  };
-}
-
-type LiveSelectionMemo = Readonly<{
-  facts: Awaited<ReturnType<typeof readStatusFacts>>;
-  ledger: TurnLedger;
-  options: ReturnType<typeof snapshotSelection>;
-  selected: ReturnType<typeof selectSnapshot>;
-  anchorsChanged: number;
-}>;
-
-/** Canonical resolutions of reported-change anchors, so projection itself stays synchronous. */
-function createCanonicalAnchors() {
-  const resolved = new Map<string, string>();
-  let changed = 0;
-  return {
-    changed: () => changed,
-    clear: (): void => {
-      resolved.clear();
-      changed = 0;
-    },
-    /** Answer from what is already resolved; an unresolved directory stays lexical. */
-    canonicalize(absolutePath: string): string {
-      const hit = resolved.get(absolutePath);
-      if (hit !== undefined) return hit;
-      const dir = resolved.get(dirname(absolutePath));
-      return dir === undefined ? absolutePath : join(dir, basename(absolutePath));
-    },
-    async resolve(absolutePaths: readonly string[]): Promise<void> {
-      for (const absolutePath of new Set(absolutePaths)) {
-        if (resolved.has(absolutePath)) continue;
-        try {
-          resolved.set(absolutePath, await realpathNative(absolutePath));
-          changed += 1;
-          continue;
-        } catch {
-          // A deleted or not-yet-existing leaf still belongs to its canonical directory.
-        }
-        const dir = dirname(absolutePath);
-        if (resolved.has(dir)) continue;
-        try {
-          resolved.set(dir, await realpathNative(dir));
-          changed += 1;
-        } catch {
-          // An unresolvable directory stays lexical without caching the transient error.
-        }
-      }
-    },
-  };
-}
-
-function reusableSelection(
-  memo: LiveSelectionMemo | undefined,
-  ledger: TurnLedger,
-  options: ReturnType<typeof snapshotSelection>,
-  anchorsChanged: number,
-): ReturnType<typeof selectSnapshot> | undefined {
-  if (memo === undefined || memo.ledger !== ledger || memo.anchorsChanged !== anchorsChanged) return undefined;
-  if (
-    memo.options.aperture !== options.aperture ||
-    memo.options.admittedTellId !== options.admittedTellId ||
-    memo.options.budget.tail !== options.budget.tail ||
-    memo.options.executionDir !== options.executionDir
-  )
-    return undefined;
-  return memo.selected;
-}
-
-/** Private to a live wait: retain only this member's current frontier and last selection. */
+/** Operation-scoped read custody, with no cached fact or presentation fallback. */
 export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
   const reader = createStatusFactReader(paths);
-  const anchors = createCanonicalAnchors();
-  let memo: LiveSelectionMemo | undefined;
-  const clear = (): void => {
-    reader.clear();
-    anchors.clear();
-    memo = undefined;
-  };
   return {
-    clear,
-    async execution(signal?: AbortSignal) {
-      return (await bornObservation(paths, expected, () => reader.life(signal))).currentLife;
+    clear: reader.clear,
+    async tellOutcome(id: string, signal?: AbortSignal) {
+      const observed = await bornObservation(paths, expected, () => reader.tellOutcome(id, signal));
+      return { ...observed.snapshot, life: observed.currentLife };
     },
-    tellOutcome: reader.tellOutcome,
     async wait(recent: boolean, signal?: AbortSignal): Promise<WaitStatusObservation> {
       const observed = await bornObservation(paths, expected, () => reader.wait(recent, signal));
       return { ...observed.snapshot, id: expected, life: observed.currentLife };
     },
     async complete(signal?: AbortSignal): Promise<boolean> {
-      try {
-        const observed = await bornObservation(paths, expected, () => reader.life(signal));
-        return complete(observed.currentLife, observed.snapshot.hasPendingTell);
-      } catch (error) {
-        clear();
-        throw error;
-      }
+      const observed = await bornObservation(paths, expected, () => reader.life(signal));
+      return executionProgress(observed.currentLife, observed.snapshot.hasPendingTell) !== "advancing";
     },
-    async read(input: StatusObservationInput, signal?: AbortSignal): Promise<LiveStatusObservation> {
+    async read(signal?: AbortSignal): Promise<LiveStatusObservation> {
       try {
-        const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => reader.life(signal));
+        const { snapshot, soul, currentLife } = await bornObservation(paths, expected, () => reader.read(signal));
         const resumeUnsupported =
           currentLife === "stranded" &&
           snapshot.latestSession?.provider === soul.provider.name &&
           (await resolveProviderExecution(soul.provider)).adapter.resume === undefined;
-        const facts = await reader.read(input, signal);
-        const ledger = memo?.facts === facts ? memo.ledger : projectTurns(facts);
-        const executionDir = await realpathNative(soul.cwd).catch(() => undefined);
-        if (executionDir !== undefined)
-          await anchors.resolve(reportedChangePaths(ledger).map((reported) => resolve(executionDir, reported)));
-        const options = snapshotSelection(
-          input,
-          executionDir,
-          executionDir === undefined ? undefined : anchors.canonicalize,
-        );
-        const anchorsChanged = anchors.changed();
-        const selected = reusableSelection(memo, ledger, options, anchorsChanged) ?? selectSnapshot(ledger, options);
-        memo = { facts, ledger, options, selected, anchorsChanged };
-        const lastActivityAt = snapshot.lastActivityAt;
+        const rows = snapshot.timeline.map(projectFact);
         return {
           status: {
             id: soul.id,
             birth: projectAkumaBirth(soul),
             life: currentLife,
             cwd: soul.cwd,
-            // The execution adapter and its one current model are what this Akuma
-            // actually runs; a birth request the Soul still only seeded is not a
-            // claim that a native runtime ever used it.
             provider: soul.provider.name,
             ...(soul.options.model === undefined ? {} : { model: soul.options.model }),
             ...(resumeUnsupported ? { strandedReason: "resume-unsupported" as const } : {}),
-            timeline: selected.snapshot,
-            ...(lastActivityAt === null ? {} : { lastActivityAt }),
+            ...summarizeFrontier(rows, soul.cwd),
+            ...(snapshot.lastActivityAt === null ? {} : { lastActivityAt: snapshot.lastActivityAt }),
           },
-          ordinarySelected: selected.ordinaryCount,
-          rows: ledger.rows,
+          rows,
         };
       } catch (error) {
-        clear();
+        reader.clear();
         throw error;
       }
     },
   };
 }
 
-/** One-shot observations use the same reader and always release it. */
 export async function bornLiveStatus(
   paths: AkumaPaths,
   expected: AkumaId,
-  input: StatusObservationInput,
   signal?: AbortSignal,
 ): Promise<LiveStatusObservation> {
   const reader = createLiveStatusReader(paths, expected);
   try {
-    return await reader.read(input, signal);
+    return await reader.read(signal);
   } finally {
     reader.clear();
   }
 }
-
-export async function bornStatus(
-  paths: AkumaPaths,
-  expected: AkumaId,
-  input: StatusObservationInput,
-): Promise<BudgetedStatusObservation> {
-  const { rows: _rows, ...status } = await bornLiveStatus(paths, expected, input);
-  return status;
+export async function bornStatus(paths: AkumaPaths, expected: AkumaId): Promise<AkumaStatus> {
+  return (await bornLiveStatus(paths, expected)).status;
 }
-
 export async function readLiveStatus(
   worldPath: WorldRoot,
   id: AkumaId,
-  input: StatusObservationInput,
   signal?: AbortSignal,
 ): Promise<LiveStatusObservation> {
-  return await bornLiveStatus(pathsForAkumaId(worldPath, id), id, input, signal);
+  return await bornLiveStatus(pathsForAkumaId(worldPath, id), id, signal);
 }
 
 export type ExecutionProgress = "settled" | "advancing" | "stopped";
-
-/** Pending input is not execution. An owned launch can bridge the admission gap. */
 export function executionProgress(
   life: AkumaStatus["life"],
   pending: boolean,
@@ -352,59 +194,14 @@ export function executionProgress(
   if (life === "asleep") return pending ? "advancing" : "settled";
   return "stopped";
 }
-
-function complete(life: AkumaStatus["life"], pending: boolean): boolean {
-  return executionProgress(life, pending) !== "advancing";
-}
-
-export function defaultWaitComplete(status: LiveStatusObservation["status"]): boolean {
-  return complete(
-    status.life,
-    status.timeline.entries.some(
-      (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
-    ),
-  );
-}
-
-/** Probe completion only; returned statuses still come from a full observation. */
-export async function readWaitComplete(
-  worldPath: WorldRoot,
-  ids: readonly AkumaId[],
-  completion: "any" | "all",
-  signal?: AbortSignal,
-  probe?: (id: AkumaId) => Promise<boolean>,
-): Promise<boolean> {
-  let completed = 0;
-  for (const id of ids) {
-    signal?.throwIfAborted();
-    try {
-      const paths = pathsForAkumaId(worldPath, id);
-      const ready =
-        probe === undefined
-          ? await bornObservation(paths, id, () => readLifeSnapshot(paths, signal)).then((observed) =>
-              complete(observed.currentLife, observed.snapshot.hasPendingTell),
-            )
-          : await probe(id);
-      if (ready) {
-        if (completion === "any") return true;
-        completed += 1;
-      }
-    } catch (error) {
-      if (ids.length === 1 || error instanceof AkumaNotBornError) throw error;
-    }
-  }
-  return ids.length > 0 && completed === ids.length;
+export function defaultWaitComplete(status: AkumaStatus): boolean {
+  return executionProgress(status.life, status.work.pending !== undefined) !== "advancing";
 }
 
 export type WaitReason = "completed" | "deadline";
-/** The one observation cadence public waiting and timeline streaming share. */
 export const OBSERVATION_POLL_MS = 100;
 
-/**
- * The one deadline-aware observation loop for public Akuma waiting.  It always
- * reads once before judging a passed deadline, so a zero-duration wait remains
- * an honest final snapshot and completion wins at the deadline edge.
- */
+/** A final deadline-edge observation always precedes the completion judgment. */
 export async function waitForObservation<T>(
   input: Readonly<{
     timeoutMs?: number;
@@ -436,5 +233,3 @@ export async function waitForObservation<T>(
     );
   }
 }
-
-export { selectHistory, type ActivityHistory, type ActivitySnapshot };

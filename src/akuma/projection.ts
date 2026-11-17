@@ -1,20 +1,18 @@
+import { z } from "zod";
 import {
   toolCallSchema,
   toolResultSchema,
   fileChangeSchema,
   diffstatSchema,
   permissionRequestSchema,
-  type AgentEvent,
   type ToolCall,
   type ToolResult,
 } from "./heart/activity-schema.js";
 import type { TimelineFact, TurnEndFact } from "./heart/index.js";
 import { projectTell, reportFactSchema, reportFactWireSchema, type TellDelivery, type TellRow } from "./heart/facts.js";
-import { z } from "zod";
 
 const nonblankTextSchema = z.string().refine((value) => value.trim() !== "");
 const countSchema = z.number().int().nonnegative();
-const sequenceSchema = z.number().int().positive();
 const timestampSchema = z.string().refine((value) => Number.isFinite(Date.parse(value)), "expected timestamp");
 const strictDiffstatSchema = diffstatSchema.strict().readonly();
 const [runCall, readCall, searchCall, changeCall, otherCall] = toolCallSchema.options;
@@ -25,8 +23,8 @@ export const publicFileChangeSchema = fileChangeSchema
   })
   .strict()
   .readonly();
-// Public observation historically admits zero-based read positions, unlike native narration.
 export const publicRunCallSchema = runCall.strict().readonly();
+// Historical public observations admit zero-based read positions.
 export const publicReadCallSchema = readCall
   .extend({ offset: countSchema.exactOptional(), limit: countSchema.exactOptional() })
   .strict()
@@ -47,10 +45,7 @@ const publicOtherCallSchema = otherCall
   .omit({ display: true })
   .extend({
     input: z
-      .strictObject({
-        json: z.string(),
-        truncated: z.literal(true).exactOptional(),
-      })
+      .strictObject({ json: z.string(), truncated: z.literal(true).exactOptional() })
       .readonly()
       .exactOptional(),
   })
@@ -71,10 +66,26 @@ export const publicToolResultSchema = toolResultSchema
   })
   .strict()
   .readonly();
-
 export const publicPermissionRequestSchema = permissionRequestSchema
   .extend({ tool: permissionRequestSchema.shape.tool.unwrap().exactOptional() })
   .strict()
+  .readonly();
+const turnRowSchema = z
+  .strictObject({
+    kind: z.literal("turn"),
+    sequence: countSchema,
+    bodySequence: countSchema,
+    at: timestampSchema,
+  })
+  .readonly();
+const callRowSchema = z
+  .strictObject({
+    kind: z.literal("call"),
+    sequence: countSchema,
+    turnSequence: countSchema,
+    at: timestampSchema,
+    text: z.string(),
+  })
   .readonly();
 const permissionRowSchema = z
   .strictObject({
@@ -86,38 +97,10 @@ const permissionRowSchema = z
     truncated: z.literal(true).exactOptional(),
   })
   .readonly();
-
-const tellDeliverySchema = z
-  .object({
-    deliveredAt: timestampSchema,
-    route: z.enum(["launch", "live"]),
-    turnSequence: countSchema,
-  })
-  .strict()
-  .readonly() satisfies z.ZodType<TellDelivery>;
-const turnRowSchema = z
-  .object({
-    kind: z.literal("turn"),
-    sequence: countSchema,
-    bodySequence: countSchema,
-    at: timestampSchema,
-  })
-  .strict()
-  .readonly();
-const callRowSchema = z
-  .object({
-    kind: z.literal("call"),
-    sequence: countSchema,
-    turnSequence: countSchema,
-    at: timestampSchema,
-    text: z.string(),
-  })
-  .strict()
-  .readonly();
 export const reportRowSchema = reportFactWireSchema;
 export const textRowSchema = (kind: "said" | "thought" | "note") =>
   z
-    .object({
+    .strictObject({
       kind: z.literal(kind),
       sequence: countSchema,
       turnSequence: countSchema,
@@ -125,10 +108,16 @@ export const textRowSchema = (kind: "said" | "thought" | "note") =>
       text: z.string(),
       truncated: z.literal(true).exactOptional(),
     })
-    .strict()
     .readonly();
+const tellDeliverySchema = z
+  .strictObject({
+    deliveredAt: timestampSchema,
+    route: z.enum(["launch", "live"]),
+    turnSequence: countSchema,
+  })
+  .readonly() satisfies z.ZodType<TellDelivery>;
 export const tellRowSchema = z
-  .object({
+  .strictObject({
     kind: z.literal("tell"),
     sequence: countSchema,
     at: timestampSchema,
@@ -137,191 +126,42 @@ export const tellRowSchema = z
     state: z.enum(["pending", "told"]),
     deliveries: z.array(tellDeliverySchema).readonly(),
   })
-  .strict()
   .readonly() satisfies z.ZodType<TellRow>;
 export const outcomeSchema = z.union([
-  z
-    .object({
-      kind: z.literal("answered"),
-      answer: z.string(),
-      foldedSaidSequence: countSchema.exactOptional(),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({ kind: z.literal("failed"), diagnostic: z.string() })
-    .strict()
-    .readonly(),
-  z
-    .object({ kind: z.literal("canceled") })
-    .strict()
-    .readonly(),
+  z.strictObject({ kind: z.literal("answered"), answer: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("failed"), diagnostic: z.string() }).readonly(),
+  z.strictObject({ kind: z.literal("canceled") }).readonly(),
 ]);
 export const outcomeRowSchema = z
-  .object({
+  .strictObject({
     kind: z.literal("outcome"),
     sequence: countSchema,
     turnSequence: countSchema,
     at: timestampSchema,
     outcome: outcomeSchema,
   })
-  .strict()
   .readonly();
-const completedToolRowSchema = z
-  .object({
+export const toolRowSchema = z
+  .strictObject({
     kind: z.literal("tool"),
     sequence: countSchema,
     turnSequence: countSchema,
     at: timestampSchema,
-    durationMs: z.number().finite().nonnegative().exactOptional(),
     name: nonblankTextSchema,
     call: publicToolCallSchema,
-    state: publicToolResultSchema,
+    phase: z.enum(["started", "completed"]),
+    result: publicToolResultSchema.exactOptional(),
     toolId: z.string(),
     truncated: z.literal(true).exactOptional(),
   })
-  .strict()
+  .refine((row) => (row.phase === "completed") === (row.result !== undefined), "only completed tools have results")
   .readonly();
-/** Tool state varies inside one kind-tagged row, not competing tool alternatives. */
-export const toolRowSchema = completedToolRowSchema
-  .unwrap()
-  .extend({ state: z.union([z.enum(["active", "unsettled"]), publicToolResultSchema]) })
-  .readonly();
-const openToolRowSchema = toolRowSchema
-  .unwrap()
-  .extend({ state: z.union([z.literal("active"), publicToolResultSchema]) })
-  .refine((row) => row.state !== "active" || row.durationMs === undefined, "active tool has no duration")
-  .readonly();
-const snapshotFactRowSchema = z.union([
-  permissionRowSchema,
-  reportRowSchema,
-  callRowSchema,
-  textRowSchema("said"),
-  textRowSchema("thought"),
-  textRowSchema("note"),
-  tellRowSchema,
-]);
-const openSnapshotRowSchema = z.union([snapshotFactRowSchema, openToolRowSchema]);
-const idleSnapshotRowSchema = z.union([snapshotFactRowSchema, completedToolRowSchema]);
-const snapshotEntrySchema = <Row extends z.ZodType>(row: Row) =>
-  z.union([
-    z
-      .object({ kind: z.literal("gap"), count: countSchema })
-      .strict()
-      .readonly(),
-    z
-      .object({ kind: z.literal("row"), row })
-      .strict()
-      .readonly(),
-  ]);
-const reportedFileChangeSchema = z
-  .object({
+export const reportedFileChangeSchema = z
+  .strictObject({
     path: z.string(),
     diffstat: strictDiffstatSchema.exactOptional(),
   })
-  .strict()
   .readonly();
-const reportedChangeFields = {
-  reportedChanges: z.array(reportedFileChangeSchema).readonly(),
-  reportedChangesOmitted: countSchema,
-  reportedChangesOutside: countSchema.exactOptional(),
-};
-const openActivitySnapshotSchema = z
-  .object({
-    kind: z.literal("open"),
-    turn: turnRowSchema,
-    entries: z.array(snapshotEntrySchema(openSnapshotRowSchema)).readonly(),
-    openingSequence: sequenceSchema.exactOptional(),
-    ...reportedChangeFields,
-  })
-  .strict()
-  .superRefine((snapshot, context) => {
-    if (snapshot.openingSequence === undefined) return;
-    const matches = snapshot.entries.filter(
-      (entry) => entry.kind === "row" && entry.row.sequence === snapshot.openingSequence,
-    );
-    if (matches.length !== 1) {
-      context.addIssue({
-        code: "custom",
-        path: ["openingSequence"],
-        message: "openingSequence must name exactly one snapshot entry",
-      });
-    }
-  })
-  .readonly();
-
-export const activitySnapshotSchema = z.union([
-  z
-    .object({
-      kind: z.literal("unborn"),
-      entries: z.tuple([]).readonly(),
-      ...reportedChangeFields,
-    })
-    .strict()
-    .readonly(),
-  openActivitySnapshotSchema,
-  z
-    .object({
-      kind: z.literal("idle"),
-      outcome: outcomeRowSchema.exactOptional(),
-      entries: z.array(snapshotEntrySchema(idleSnapshotRowSchema)).readonly(),
-      ...reportedChangeFields,
-    })
-    .strict()
-    .readonly(),
-]);
-
-type TurnOutcome = z.output<typeof outcomeSchema>;
-export type TurnStartRow = z.output<typeof turnRowSchema>;
-type CallRow = z.output<typeof callRowSchema>;
-type SaidRow = z.output<ReturnType<typeof textRowSchema>>;
-type ThoughtRow = z.output<ReturnType<typeof textRowSchema>>;
-type NoteRow = z.output<ReturnType<typeof textRowSchema>>;
-export type ReportRow = z.output<typeof reportFactSchema>;
-export type PermissionRow = z.output<typeof permissionRowSchema>;
-type TurnNarrationRow = CallRow | SaidRow | ThoughtRow | NoteRow | ReportRow | PermissionRow;
-export type { TellRow } from "./heart/facts.js";
-export type OutcomeRow = z.output<typeof outcomeRowSchema>;
-
-function publicOutcome(outcome: TurnEndFact["outcome"]): TurnOutcome {
-  if (outcome.kind === "answered") return { kind: "answered", answer: outcome.answer };
-  if (outcome.kind === "canceled") return { kind: "canceled" };
-  return { kind: "failed", diagnostic: outcome.diagnostic };
-}
-
-export type ToolRow = z.output<typeof toolRowSchema>;
-type ToolRowFields = Omit<ToolRow, "state">;
-export type ActiveToolRow = ToolRowFields & Readonly<{ state: "active" }>;
-export type CompletedToolRow = z.output<typeof completedToolRowSchema>;
-export type UnsettledToolRow = ToolRowFields & Readonly<{ state: "unsettled" }>;
-
-export type OpenTurnRow = TurnNarrationRow | ActiveToolRow | CompletedToolRow;
-export type ClosedTurnRow = TurnNarrationRow | UnsettledToolRow | CompletedToolRow;
-
-export type OpenTurn = Readonly<{
-  kind: "open";
-  turn: TurnStartRow;
-  rows: readonly OpenTurnRow[];
-}>;
-
-export type ClosedTurn = Readonly<{
-  kind: "closed";
-  turn: TurnStartRow;
-  rows: readonly ClosedTurnRow[];
-  outcome: OutcomeRow;
-}>;
-
-export type ProjectedTurn = OpenTurn | ClosedTurn;
-export type ActivityRow = z.output<typeof activityRowSchema>;
-export type OpenSnapshotRow = z.output<typeof openSnapshotRowSchema>;
-export type IdleSnapshotRow = z.output<typeof idleSnapshotRowSchema>;
-export type SnapshotRow = OpenSnapshotRow | IdleSnapshotRow;
-export type ActivitySnapshotEntry<Row extends SnapshotRow = SnapshotRow> = z.output<
-  ReturnType<typeof snapshotEntrySchema<z.ZodType<Row>>>
->;
-export type ReportedFileChange = z.output<typeof reportedFileChangeSchema>;
-export type ActivitySnapshot = z.output<typeof activitySnapshotSchema>;
-
 export const activityRowSchema = z.union([
   permissionRowSchema,
   turnRowSchema,
@@ -345,16 +185,145 @@ export const activityHistorySchema = z
     highest: z.number().nullable(),
   })
   .readonly();
-
+export type TurnStartRow = z.output<typeof turnRowSchema>;
+export type ReportRow = z.output<typeof reportFactSchema>;
+export type PermissionRow = z.output<typeof permissionRowSchema>;
+export type OutcomeRow = z.output<typeof outcomeRowSchema>;
+export type ToolRow = z.output<typeof toolRowSchema>;
+export type ActivityRow = z.output<typeof activityRowSchema>;
+export type ReportedFileChange = z.output<typeof reportedFileChangeSchema>;
 export type ActivityHistory = z.output<typeof activityHistorySchema>;
-
+export type HistoryPage = ActivityHistory;
+export type { TellRow } from "./heart/facts.js";
 export type ExactHistory =
   | Readonly<{ kind: "exact"; outcome: OutcomeRow }>
   | Readonly<{ kind: "exact-report"; report: ReportRow }>
   | Readonly<{ kind: "exact-activity"; row: ActivityRow }>
   | Readonly<{ kind: "unknown-history"; id: string }>;
+export type HistoryCursor = Readonly<{ before?: number; since?: number; limit: number }>;
 
-export type HistoryPage = ActivityHistory;
+function publicOutcome(outcome: TurnEndFact["outcome"]): OutcomeRow["outcome"] {
+  if (outcome.kind === "answered") return { kind: "answered", answer: outcome.answer };
+  if (outcome.kind === "canceled") return { kind: "canceled" };
+  return { kind: "failed", diagnostic: outcome.diagnostic };
+}
+
+/** Omit absent wire members while constructing trusted neutral values. */
+function publicCall(call: ToolCall): ToolRow["call"] {
+  switch (call.kind) {
+    case "read":
+      return {
+        kind: "read",
+        path: call.path,
+        ...(call.offset === undefined ? {} : { offset: call.offset }),
+        ...(call.limit === undefined ? {} : { limit: call.limit }),
+      };
+    case "search":
+      return {
+        kind: "search",
+        query: call.query,
+        ...(call.scope === undefined ? {} : { scope: call.scope }),
+        ...(call.path === undefined ? {} : { path: call.path }),
+        ...(call.glob === undefined ? {} : { glob: call.glob }),
+      };
+    case "fileChange":
+      return {
+        kind: "fileChange",
+        changes: call.changes.map((change) => ({
+          op: change.op,
+          path: change.path,
+          ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
+          ...(change.patch === undefined ? {} : { patch: change.patch }),
+        })),
+      };
+    case "other":
+      return {
+        kind: "other",
+        ...(call.input === undefined
+          ? {}
+          : {
+              input: { json: call.input.json, ...(call.input.truncated ? { truncated: true } : {}) },
+            }),
+      };
+    case "run":
+      return { kind: "run", command: call.command };
+  }
+}
+
+function publicResult(result: ToolResult): NonNullable<ToolRow["result"]> {
+  return {
+    status: result.status,
+    ...(result.message === undefined ? {} : { message: result.message }),
+    ...(result.output === undefined ? {} : { output: result.output }),
+    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
+  };
+}
+
+/** Each retained fact has exactly one row, with its durable identity unchanged. */
+export function projectFact(fact: TimelineFact): ActivityRow {
+  switch (fact.kind) {
+    case "turn-start":
+      return { kind: "turn", sequence: fact.sequence, bodySequence: fact.bodySequence, at: fact.startedAt };
+    case "turn-end":
+      return {
+        kind: "outcome",
+        sequence: fact.sequence,
+        turnSequence: fact.turnSequence,
+        at: fact.completedAt,
+        outcome: publicOutcome(fact.outcome),
+      };
+    case "call":
+      return { kind: "call", sequence: fact.sequence, turnSequence: fact.turnSequence, at: fact.at, text: fact.body };
+    case "report":
+      return fact;
+    case "tell": {
+      const tell = projectTell(fact);
+      return { ...tell, deliveries: tell.deliveries.map(({ receipt: _receipt, ...delivery }) => delivery) };
+    }
+    case "activity": {
+      const event = fact.event;
+      const coordinate = { sequence: fact.sequence, turnSequence: fact.turnSequence, at: fact.at };
+      const truncated = "truncated" in event && event.truncated === true ? { truncated: true as const } : {};
+      if (event.type === "tool") {
+        return {
+          kind: "tool",
+          ...coordinate,
+          name: event.name,
+          toolId: event.id,
+          call: publicCall(event.call),
+          phase: event.phase,
+          ...(event.phase === "completed" ? { result: publicResult(event.result) } : {}),
+          ...truncated,
+        };
+      }
+      if (event.type === "permission") {
+        return {
+          kind: "permission",
+          ...coordinate,
+          requests: event.requests.map(({ tool, ...request }) => ({
+            ...request,
+            ...(tool === undefined ? {} : { tool }),
+          })),
+          ...truncated,
+        };
+      }
+      if (event.type === "assistant" || event.type === "thought" || event.type === "note") {
+        return {
+          kind: event.type === "assistant" ? "said" : event.type,
+          ...coordinate,
+          text: event.text,
+          ...truncated,
+        };
+      }
+      return {
+        kind: "note",
+        ...coordinate,
+        text: event.type === "unknown" ? event.kind : JSON.stringify(event),
+        ...truncated,
+      };
+    }
+  }
+}
 
 export function selectExactHistory(
   rows: readonly ActivityRow[],
@@ -370,305 +339,3 @@ export function selectExactHistory(
   );
   return outcome === undefined ? { kind: "unknown-history", id } : { kind: "exact", outcome };
 }
-
-export type HistoryCursor = Readonly<{ before?: number; since?: number; limit: number }>;
-
-export type RetainedWindow = Readonly<{
-  lowestRetained: number | null;
-  highest: number | null;
-}>;
-
-export type TurnLedger = Readonly<{
-  rows: readonly ActivityRow[];
-  turns: readonly ProjectedTurn[];
-  retained: RetainedWindow;
-  openTurn?: OpenTurn;
-  latestOutcome?: OutcomeRow;
-}>;
-
-type MutableTurn = {
-  phase: "open" | "closed";
-  turn: TurnStartRow;
-  rows: (OpenTurnRow | UnsettledToolRow)[];
-  running: Map<string, number>;
-  outcome?: OutcomeRow;
-};
-
-type ProjectionState = {
-  turns: MutableTurn[];
-  turnsBySequence: Map<number, MutableTurn>;
-  tells: TellRow[];
-  orphanRows: ClosedTurnRow[];
-  orphanOutcomes: OutcomeRow[];
-  orphanRunning: Map<string, number>;
-};
-
-function duration(startedAt: string, completedAt: string): number | undefined {
-  const start = Date.parse(startedAt);
-  const end = Date.parse(completedAt);
-  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return undefined;
-  return end - start;
-}
-
-function toolKey(turnSequence: number, id: string): string {
-  return `${turnSequence}:${id}`;
-}
-
-/** Private neutral tool values carry optional undefined; the published row omits absent members. */
-function publicCall(call: ToolCall): ToolRow["call"] {
-  if (call.kind === "read")
-    return {
-      kind: "read",
-      path: call.path,
-      ...(call.offset === undefined ? {} : { offset: call.offset }),
-      ...(call.limit === undefined ? {} : { limit: call.limit }),
-    };
-  if (call.kind === "search")
-    return {
-      kind: "search",
-      query: call.query,
-      ...(call.scope === undefined ? {} : { scope: call.scope }),
-      ...(call.path === undefined ? {} : { path: call.path }),
-      ...(call.glob === undefined ? {} : { glob: call.glob }),
-    };
-  if (call.kind === "fileChange")
-    return {
-      kind: "fileChange",
-      changes: call.changes.map((change) => ({
-        op: change.op,
-        path: change.path,
-        ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
-        ...(change.patch === undefined ? {} : { patch: change.patch }),
-      })),
-    };
-  if (call.kind === "other")
-    return {
-      kind: "other",
-      ...(call.input === undefined
-        ? {}
-        : {
-            input: {
-              json: call.input.json,
-              ...(call.input.truncated ? { truncated: true } : {}),
-            },
-          }),
-    };
-  return { kind: "run", command: call.command };
-}
-
-function publicResult(result: ToolResult): CompletedToolRow["state"] {
-  return {
-    status: result.status,
-    ...(result.message === undefined ? {} : { message: result.message }),
-    ...(result.output === undefined ? {} : { output: result.output }),
-    ...(result.exitCode === undefined ? {} : { exitCode: result.exitCode }),
-  };
-}
-
-function narrationRow(fact: Extract<TimelineFact, { event: unknown }>, event: AgentEvent): TurnNarrationRow | null {
-  if (event.type === "permission")
-    return {
-      kind: "permission",
-      sequence: fact.sequence,
-      turnSequence: fact.turnSequence,
-      at: fact.at,
-      requests: event.requests.map(({ tool, ...request }) => ({ ...request, ...(tool === undefined ? {} : { tool }) })),
-      ...(event.truncated === true ? { truncated: true } : {}),
-    };
-  if (event.type !== "assistant" && event.type !== "thought" && event.type !== "note") return null;
-  return {
-    kind: event.type === "assistant" ? "said" : event.type,
-    sequence: fact.sequence,
-    turnSequence: fact.turnSequence,
-    at: fact.at,
-    text: event.text,
-    ...(event.truncated === true ? { truncated: true } : {}),
-  };
-}
-
-/** The one tool-row body every phase shares; each phase adds its own state. */
-function toolRow(
-  fact: Extract<TimelineFact, { kind: "activity" }>,
-  event: Extract<AgentEvent, { type: "tool" }>,
-  truncated: boolean,
-): ToolRowFields {
-  return {
-    kind: "tool",
-    sequence: fact.sequence,
-    turnSequence: fact.turnSequence,
-    at: fact.at,
-    name: event.name,
-    toolId: event.id,
-    call: publicCall(event.call),
-    ...(truncated ? { truncated: true } : {}),
-  };
-}
-
-function projectToolEvent(
-  rows: (OpenTurnRow | UnsettledToolRow)[],
-  running: Map<string, number>,
-  fact: Extract<TimelineFact, { kind: "activity" }>,
-  event: Extract<AgentEvent, { type: "tool" }>,
-  phase: "open" | "closed",
-): void {
-  const key = toolKey(fact.turnSequence, event.id);
-  if (event.phase === "started") {
-    running.set(key, rows.length);
-    rows.push({ ...toolRow(fact, event, event.truncated === true), state: phase === "open" ? "active" : "unsettled" });
-    return;
-  }
-  const index = running.get(key);
-  const started = index === undefined ? undefined : rows[index];
-  if (started?.kind !== "tool") {
-    rows.push({ ...toolRow(fact, event, event.truncated === true), state: publicResult(event.result) });
-    return;
-  }
-  const durationMs = duration(started.at, fact.at);
-  rows[index!] = {
-    ...toolRow(fact, event, started.truncated === true || event.truncated === true),
-    ...(durationMs === undefined ? {} : { durationMs }),
-    state: publicResult(event.result),
-  };
-  running.delete(key);
-}
-
-function projectActivityEvent(state: ProjectionState, fact: Extract<TimelineFact, { kind: "activity" }>): void {
-  const event: AgentEvent = fact.event;
-  const narration = narrationRow(fact, event);
-  if (narration !== null) {
-    const turn = state.turnsBySequence.get(fact.turnSequence);
-    if (turn === undefined) state.orphanRows.push(narration);
-    else turn.rows.push(narration);
-    return;
-  }
-  if (event.type !== "tool") return;
-  const turn = state.turnsBySequence.get(fact.turnSequence);
-  if (turn === undefined) projectToolEvent(state.orphanRows, state.orphanRunning, fact, event, "closed");
-  else projectToolEvent(turn.rows, turn.running, fact, event, turn.phase);
-}
-
-function demoteActive(row: OpenTurnRow | UnsettledToolRow): ClosedTurnRow {
-  if (row.kind !== "tool" || row.state !== "active") return row;
-  return { ...row, state: "unsettled" };
-}
-
-function foldOutcomeVoice(
-  rows: readonly (OpenTurnRow | UnsettledToolRow)[],
-  outcome: OutcomeRow | undefined,
-): Readonly<{ rows: readonly (OpenTurnRow | UnsettledToolRow)[]; outcome: OutcomeRow | undefined }> {
-  if (outcome?.outcome.kind !== "answered") return { rows, outcome };
-  const finalVoice = rows.findLast((row): row is SaidRow => row.kind === "said");
-  return finalVoice?.text === outcome.outcome.answer && finalVoice.truncated !== true
-    ? {
-        rows: rows.filter((row) => row !== finalVoice),
-        outcome: { ...outcome, outcome: { ...outcome.outcome, foldedSaidSequence: finalVoice.sequence } },
-      }
-    : { rows, outcome };
-}
-
-function finishTurn(turn: MutableTurn): ProjectedTurn {
-  const folded = foldOutcomeVoice(turn.rows, turn.outcome);
-  const rows = [...folded.rows].sort((left, right) => left.sequence - right.sequence);
-  if (turn.phase === "closed" && folded.outcome !== undefined) {
-    return { kind: "closed", turn: turn.turn, rows: rows.map(demoteActive), outcome: folded.outcome };
-  }
-  if (rows.some((row) => row.kind === "tool" && row.state === "unsettled")) {
-    throw new Error(`open Turn ${turn.turn.sequence} contains an unsettled tool`);
-  }
-  return { kind: "open", turn: turn.turn, rows: rows as readonly OpenTurnRow[] };
-}
-
-function finishLedger(state: ProjectionState, retained: RetainedWindow): TurnLedger {
-  const turns = state.turns.map(finishTurn);
-  const rows: readonly ActivityRow[] = [
-    ...turns.flatMap((turn) => [turn.turn, ...turn.rows, ...(turn.kind === "closed" ? [turn.outcome] : [])]),
-    ...state.tells,
-    ...state.orphanRows,
-    ...state.orphanOutcomes,
-  ].sort((left, right) => left.sequence - right.sequence);
-  const frontier = turns.at(-1);
-  const openTurn = frontier?.kind === "open" ? frontier : undefined;
-  const latestOutcome = rows.findLast((row): row is OutcomeRow => row.kind === "outcome");
-  return {
-    rows,
-    turns,
-    retained,
-    ...(openTurn === undefined ? {} : { openTurn }),
-    ...(latestOutcome === undefined ? {} : { latestOutcome }),
-  };
-}
-
-/** Fold the retained fact timeline into Turn-owned rows without inventing provider facts. */
-export function projectTurns(
-  facts: readonly TimelineFact[],
-  retained: RetainedWindow = {
-    lowestRetained: facts[0]?.sequence ?? null,
-    highest: facts.at(-1)?.sequence ?? null,
-  },
-): TurnLedger {
-  const state: ProjectionState = {
-    turns: [],
-    turnsBySequence: new Map(),
-    tells: [],
-    orphanRows: [],
-    orphanOutcomes: [],
-    orphanRunning: new Map(),
-  };
-  for (const fact of facts) {
-    if (fact.kind === "turn-start") {
-      const turn = {
-        kind: "turn" as const,
-        sequence: fact.sequence,
-        bodySequence: fact.bodySequence,
-        at: fact.startedAt,
-      };
-      const projected: MutableTurn = { phase: "open", turn, rows: [], running: new Map() };
-      state.turns.push(projected);
-      state.turnsBySequence.set(turn.sequence, projected);
-    } else if (fact.kind === "turn-end") {
-      const outcome = {
-        kind: "outcome" as const,
-        sequence: fact.sequence,
-        turnSequence: fact.turnSequence,
-        at: fact.completedAt,
-        outcome: publicOutcome(fact.outcome),
-      };
-      const turn = state.turnsBySequence.get(fact.turnSequence);
-      if (turn === undefined) state.orphanOutcomes.push(outcome);
-      else {
-        turn.phase = "closed";
-        turn.rows = turn.rows.map(demoteActive);
-        turn.outcome = outcome;
-      }
-    } else if (fact.kind === "call") {
-      const row = {
-        kind: "call" as const,
-        sequence: fact.sequence,
-        turnSequence: fact.turnSequence,
-        at: fact.at,
-        text: fact.body,
-      };
-      const turn = state.turnsBySequence.get(fact.turnSequence);
-      if (turn === undefined) state.orphanRows.push(row);
-      else turn.rows.push(row);
-    } else if (fact.kind === "report") {
-      const turn = state.turnsBySequence.get(fact.turnSequence);
-      if (turn === undefined) state.orphanRows.push(fact);
-      else turn.rows.push(fact);
-    } else if (fact.kind === "tell") {
-      const tell = projectTell(fact);
-      state.tells.push({ ...tell, deliveries: tell.deliveries.map(({ receipt: _receipt, ...delivery }) => delivery) });
-    } else {
-      projectActivityEvent(state, fact);
-    }
-  }
-  return finishLedger(state, retained);
-}
-
-export {
-  DEFAULT_TAIL,
-  reportedChangePaths,
-  selectHistory,
-  selectSnapshot,
-  withoutReportedChanges,
-} from "./projection-read.js";

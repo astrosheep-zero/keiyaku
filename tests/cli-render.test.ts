@@ -1,5 +1,4 @@
 import { projectCurrentWork } from "../src/akuma/status-projection.js";
-import type { ActivitySnapshot } from "../src/akuma/projection.js";
 import {
   acceptedReceipt,
   contractCatalog,
@@ -35,7 +34,7 @@ import {
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
-import { type ActivityRow, type CompletedToolRow, type OutcomeRow } from "../src/akuma/projection.js";
+import { type ActivityRow, type OutcomeRow, type ToolRow } from "../src/akuma/projection.js";
 import type { AkumaObservation, DeliverOutcome, Placement, Placed, RequirementProblem } from "../src/index.js";
 import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
@@ -53,21 +52,19 @@ import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
 import { renderConflictMaterialized, renderRefusal } from "../src/cli/render/refusal.js";
 import { renderReconcile } from "../src/cli/render/reconcile.js";
 import {
-  activeTool,
   activityAkumaRow,
   akumaWorldReport,
   answeredOutcome,
   completedTool,
-  idleAkumaSnapshot,
-  openAkumaSnapshot,
-  snapshotRow,
+  startedTool,
+  turnStarted,
   AKUMA_ACTIVITY_AT,
   type ActivityToolCall,
 } from "./support/kanshi-activity.js";
 import { parseArgv } from "../src/cli/parse.js";
 import { askCurrentWorkLine } from "../src/cli/render/akuma.js";
-import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { activityFact } from "./support/akuma-fixtures.js";
+import { projectFact } from "../src/akuma/projection.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
@@ -120,7 +117,8 @@ function observation(status: LiveStatusObservation["status"]): AkumaObservation 
     life: status.life,
     cwd: status.cwd ?? "/work/repo",
     provider: status.provider ?? "fixture",
-    work: projectCurrentWork(status.timeline),
+    work: status.work,
+    ...(status.recent === undefined ? {} : { recent: status.recent }),
     ...(status.model === undefined ? {} : { model: status.model }),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
   };
@@ -148,9 +146,34 @@ function placedDelivery(
   return { integration, placement: { kind: "placed" as const, predecessor, target: "refs/heads/main" } };
 }
 
-/** Rows carried by a live observation; focused renderer fixtures need no second projection. */
-function activityRows(timeline: ActivitySnapshot): readonly ActivityRow[] {
-  return timeline.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+function statusFields(rows: readonly ActivityRow[]) {
+  return {
+    work: projectCurrentWork(rows),
+    ...(rows.length === 0 ? {} : { recent: rows.slice(-3) }),
+  };
+}
+
+function statusOf(
+  id: string,
+  life: LiveStatusObservation["status"]["life"],
+  rows: readonly ActivityRow[],
+  extra: Readonly<Record<string, unknown>> = {},
+): LiveStatusObservation["status"] {
+  return liveStatusObservationSchema.unwrap().shape.status.parse({
+    birth: DIRECT_BIRTH,
+    id,
+    life,
+    ...statusFields(rows),
+    ...extra,
+  });
+}
+
+function openRows(rows: readonly ActivityRow[]): readonly ActivityRow[] {
+  return [turnStarted(1), ...rows];
+}
+
+function idleRows(rows: readonly ActivityRow[], outcome?: OutcomeRow): readonly ActivityRow[] {
+  return [...rows, ...(outcome === undefined ? [] : [outcome])];
 }
 
 /** One generic tool row carrying the admitted bounded argument preview an adapter retains. */
@@ -158,7 +181,7 @@ function genericTool(
   sequence: number,
   name: string,
   input?: Readonly<{ json: string; truncated?: true }>,
-): CompletedToolRow {
+): ToolRow {
   return completedTool(sequence, name, {
     kind: "other",
     ...(input === undefined ? {} : { input }),
@@ -606,7 +629,7 @@ test("empty catalogues share a surface-named none state", () => {
   assert.equal(renderVerb("ls", { selector: "aku/*" }, { kind: "returned", value: { kind: "akuma-catalogue", observedAt: "2026-08-12T00:00:00.000Z" } }, { columns: 120, color: false }), "akuma  none");
 });
 test("World roster names a bound Contract once without a bare unavailable parenthetical", () => {
-  const snapshot = idleAkumaSnapshot([]);
+  const snapshot = idleRows([]);
   const bound = {
     ...activityAkumaRow("aku/worker/11110001", "asleep", snapshot),
     contract: { kind: "associated" as const, contractId: contractId("kei/bound-contract") },
@@ -666,7 +689,7 @@ test("World status debt rows state a Contract association only when one exists",
 });
 
 test("World roster states the activity age only when it differs from the state age", () => {
-  const snapshot = idleAkumaSnapshot([]);
+  const snapshot = idleRows([]);
   const equal = activityAkumaRow("aku/worker/33330003", "asleep", snapshot);
   const equalText = renderAkuma(akumaWorldReport([equal]), { columns: 120, color: false }).join("\n");
   assert.match(equalText, /asleep · 5s/u);
@@ -1907,8 +1930,8 @@ test("World roster keeps the latest concrete tool work", () => {
       call: { kind: "run", command: "bash -lc 'npm test -- tests/cli-render.test.ts'" },
     },
   ];
-  const snapshot = openAkumaSnapshot(
-    calls.map((member, index) => snapshotRow(activeTool(index + 1, member.name, member.call))),
+  const snapshot = openRows(
+    calls.map((member, index) => (startedTool(index + 1, member.name, member.call))),
   );
   const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running", snapshot)]), {
     columns: 120,
@@ -1919,14 +1942,14 @@ test("World roster keeps the latest concrete tool work", () => {
 });
 
 test("World and addressed status retain the outcome's exact history coordinate and verdict", () => {
-  const snapshot = idleAkumaSnapshot([], answeredOutcome(1, "complete retained answer"));
+  const snapshot = idleRows([], answeredOutcome(1, "complete retained answer"));
   const context = { columns: 70, color: false };
   const board = renderAkuma(
     akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]),
     context,
   ).join("\n");
   const status = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "asleep", timeline: snapshot,
+    birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "asleep", ...statusFields(snapshot),
   });
   for (const text of [board, snapshotText(observation(status), context)])
     assert.match(text, /answered turn\/1 · activity 1/u);
@@ -1937,8 +1960,7 @@ test("native history retains diagnostics beneath a bounded command row", () => {
   const row = completedTool(1, "bash", { kind: "run", command: `bash -lc 'npm test ${"long-file ".repeat(30)}'` },
     { status: "error", exitCode: 7, message: diagnostic });
   const context = { columns: 48, color: false };
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "running",
-    timeline: openAkumaSnapshot([snapshotRow(row)]) });
+  const status = statusOf("aku/worker/aaaa0001", "running", openRows([row]));
   const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {}, context);
   const lines = text.split("\n");
   const continuation = lines.slice(lines.findIndex((line) => line.includes("run")) + 1).join(" ").replace(/\s+/gu, " ");
@@ -1956,8 +1978,7 @@ test("native history bounds long diagnostics with a visible omission", () => {
     const context = { columns, color: false };
     for (const failed of [false, true]) {
       const row = completedTool(1, "bash", { kind: "run", command: "npm test" }, { status: failed ? "error" : "ok", message });
-      const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id: "aku/worker/aaaa0001", life: "running",
-        timeline: openAkumaSnapshot([snapshotRow(row)]) });
+      const status = statusOf("aku/worker/aaaa0001", "running", openRows([row]));
       const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: [row] }, {}, context);
       assert.match(text, /diagnostic/u);
       assert.match(text.trimEnd(), /…$/u, "the bounded diagnostic visibly omits its remainder");
@@ -1966,9 +1987,9 @@ test("native history bounds long diagnostics with a visible omission", () => {
 });
 
 test("World roster keeps the honest fallback for unknown tool calls", () => {
-  const snapshot = openAkumaSnapshot([
-    snapshotRow(activeTool(1, "mystery", { kind: "other" })),
-    snapshotRow(activeTool(2, "custom-tool", { kind: "other" })),
+  const snapshot = openRows([
+    (startedTool(1, "mystery", { kind: "other" })),
+    (startedTool(2, "custom-tool", { kind: "other" })),
   ]);
   const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/cccc0003", "running", snapshot)]), {
     columns: 120,
@@ -1979,31 +2000,13 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
 
 test("a settled successful tool spends no mark while voice and input rows keep their own leads", () => {
   const id = "aku/worker/abcd0040";
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id,
-    life: "running",
-    timeline: openAkumaSnapshot([
-      { kind: "row", row: completedTool(1, "read", { kind: "read", path: "src/a.ts", offset: 0, limit: 1 }) },
-      {
-        kind: "row",
-        row: { kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "spoken" },
-      },
-      {
-        kind: "row",
-        row: {
-          kind: "tell",
-          sequence: 3,
-          at: AKUMA_ACTIVITY_AT,
-          tellId: "tell/mark-law",
-          text: "told direction",
-          state: "told",
-          deliveries: [{ route: "launch", turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
-        },
-      },
-    ]),
-  });
-  const text = nativeHistoryText({ kind: "akuma", akumaId: status.id, events: activityRows(status.timeline) }, {}, { columns: 100, color: false });
+  const rows: ActivityRow[] = [
+    completedTool(1, "read", { kind: "read", path: "src/a.ts", offset: 0, limit: 1 }),
+    { kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "spoken" },
+    { kind: "tell", sequence: 3, at: AKUMA_ACTIVITY_AT, tellId: "tell/mark-law", text: "told direction", state: "told",
+      deliveries: [{ route: "launch", turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }] },
+  ];
+  const text = nativeHistoryText({ kind: "akuma", akumaId: parseAkumaId(id).id, events: rows }, {}, { columns: 100, color: false });
   assert.match(text, /^ {3}read +src\/a\.ts · L0-0$/mu, "a settled tool affirms success by spending no mark");
   assert.match(text, /^▎ spoken$/mu, "speech sits on its own rail without a label or quotes");
   assert.match(text, /^▸ told direction$/mu, "a told input keeps its input lead");
@@ -2105,8 +2108,8 @@ test("activity rows share one six-cell default action column", () => {
 });
 
 test("World current work keeps concrete active work and visible clipping", () => {
-  const active = openAkumaSnapshot([
-    snapshotRow(activeTool(1, "bash", { kind: "run", command: "keiyaku wait --all" })),
+  const active = openRows([
+    (startedTool(1, "bash", { kind: "run", command: "keiyaku wait --all" })),
   ]);
   const activeRoster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aabb0006", "running", active)]), {
     columns: 120,
@@ -2115,8 +2118,8 @@ test("World current work keeps concrete active work and visible clipping", () =>
   assert.match(activeRoster, /1 run \$ keiyaku wait --all/u);
   assert.doesNotMatch(activeRoster, /— ok/u);
 
-  const truncated = openAkumaSnapshot([
-    snapshotRow({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
+  const truncated = openRows([
+    ({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
   ]);
   const truncatedRoster = renderAkuma(
     akumaWorldReport([activityAkumaRow("aku/worker/eeff0008", "running", truncated)]),
@@ -2131,7 +2134,7 @@ test("a sleeping worker retains its outcome coordinate and completion judgment",
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0001",
     life: "asleep",
-    timeline: idleAkumaSnapshot([], answeredOutcome(1, "the answer")),
+    ...statusFields(idleRows([], answeredOutcome(1, "the answer"))),
   });
   const snapshot = snapshotText(observation(sleeping), { columns: 80, color: false });
   assert.match(snapshot, /answered turn\/1 · activity 1/u);
@@ -2141,7 +2144,7 @@ test("a sleeping worker retains its outcome coordinate and completion judgment",
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0002",
     life: "asleep",
-    timeline: idleAkumaSnapshot([]),
+    ...statusFields(idleRows([])),
   });
   const answerlessText = snapshotText(observation(answerless), { columns: 80, color: false });
   assert.match(answerlessText, /✓ completed$/mu, "an answer-less sleeper keeps its closer");
@@ -2173,7 +2176,7 @@ test("status text and JSON report the Akuma execution workdir", () => {
     id,
     life: "running",
     cwd: "/work/tree",
-    timeline: openAkumaSnapshot([]),
+    ...statusFields(openRows([])),
   });
   const invocation = parseArgv(["status", id]);
   assert.ok("command" in invocation);
@@ -2199,43 +2202,43 @@ test("status keeps current evidence while history retains thought narration", ()
     text: "internal thought",
   };
   const completed = (sequence: number, command: string) => completedTool(sequence, "bash", { kind: "run", command });
-  const active = (sequence: number, command: string) => activeTool(sequence, "bash", { kind: "run", command });
+  const active = (sequence: number, command: string) => startedTool(sequence, "bash", { kind: "run", command });
 
   const focusedEntries = [
-    snapshotRow(thought),
-    snapshotRow(completed(2, "c1")),
-    snapshotRow(completed(3, "c2")),
-    snapshotRow(completed(4, "c3")),
-    snapshotRow(completed(5, "c4")),
-    snapshotRow({ kind: "note" as const, sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
-    snapshotRow(completed(7, "c5")),
-    snapshotRow(completed(8, "c6")),
-    snapshotRow(completed(9, "c7")),
-    snapshotRow({ kind: "said" as const, sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
-    snapshotRow(completed(11, "c8")),
-    snapshotRow(active(12, "c9")),
+    (thought),
+    (completed(2, "c1")),
+    (completed(3, "c2")),
+    (completed(4, "c3")),
+    (completed(5, "c4")),
+    ({ kind: "note" as const, sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
+    (completed(7, "c5")),
+    (completed(8, "c6")),
+    (completed(9, "c7")),
+    ({ kind: "said" as const, sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
+    (completed(11, "c8")),
+    (active(12, "c9")),
   ];
-  const snapshot = openAkumaSnapshot(focusedEntries);
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: snapshot });
+  const snapshot = openRows(focusedEntries);
+  const status = statusOf(id, "running", snapshot);
   const statusInvocation = parseArgv(["status", id]);
   assert.ok("command" in statusInvocation);
   const statusText = snapshotText(observation(status), DEFAULT_CONTEXT);
   assert.match(statusText, /12 run \$ c9/u, "the owner-selected current work remains visible");
   assert.deepEqual(observation(status).work.activeTools, [{ id: 12, turnSequence: 1, toolId: "tool-12" }]);
 
-  const outcomeSnapshot = idleAkumaSnapshot(
+  const outcomeSnapshot = idleRows(
     [
-      snapshotRow(completed(2, "c1")),
-      snapshotRow(completed(3, "c2")),
-      snapshotRow(completed(4, "c3")),
-      snapshotRow(completed(5, "c4")),
-      snapshotRow({ kind: "note" as const, sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
-      snapshotRow(completed(7, "c5")),
-      snapshotRow(completed(8, "c6")),
-      snapshotRow(completed(9, "c7")),
-      snapshotRow({ kind: "said" as const, sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
-      snapshotRow(completed(11, "c8")),
-      snapshotRow(completed(12, "c9")),
+      (completed(2, "c1")),
+      (completed(3, "c2")),
+      (completed(4, "c3")),
+      (completed(5, "c4")),
+      ({ kind: "note" as const, sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
+      (completed(7, "c5")),
+      (completed(8, "c6")),
+      (completed(9, "c7")),
+      ({ kind: "said" as const, sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
+      (completed(11, "c8")),
+      (completed(12, "c9")),
     ],
     answeredOutcome(13, "final outcome"),
   );
@@ -2243,7 +2246,7 @@ test("status keeps current evidence while history retains thought narration", ()
     birth: DIRECT_BIRTH,
     id,
     life: "asleep",
-    timeline: outcomeSnapshot,
+    ...statusFields(outcomeSnapshot),
   });
   const outcomeText = snapshotText(observation(answeredStatus), DEFAULT_CONTEXT);
   assert.match(outcomeText, /answered turn\/1 · activity 13/u);
@@ -2261,7 +2264,7 @@ test("status keeps current evidence while history retains thought narration", ()
         birth: DIRECT_BIRTH,
         id,
         life: "asleep",
-        timeline: idleAkumaSnapshot(outcomeSnapshot.entries, failedOutcome),
+        ...statusFields(idleRows(outcomeSnapshot.filter(row => row.kind !== "outcome"), failedOutcome)),
       }),
     ),
     DEFAULT_CONTEXT,
@@ -2270,7 +2273,7 @@ test("status keeps current evidence while history retains thought narration", ()
 
   const historyInvocation = parseArgv(["history", id]);
   assert.ok("command" in historyInvocation);
-  const events = status.timeline.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
+  const events = snapshot;
   const historyText = nativeHistoryText(
     {
       kind: "akuma",
@@ -2284,7 +2287,7 @@ test("status keeps current evidence while history retains thought narration", ()
     DEFAULT_CONTEXT,
   );
   assert.match(historyText, /internal thought/u, "history keeps retained thought narration");
-  assert.match(historyText, /^ {3}··· +55 earlier events · showing last 12/mu);
+  assert.match(historyText, /^ {3}··· +55 earlier events · showing last 13/mu);
   assert.doesNotMatch(historyText, /earlier turns/u);
   assert.doesNotMatch(historyText, /●/u, "history never asserts live activity");
   for (const command of ["c4", "c5", "c6", "c7"])
@@ -2333,23 +2336,14 @@ test("Ask current work follows the native overlapping-tool frontier", () => {
   ];
   const third = [...second, tool(8, "completed", "A")];
   const projection = (facts: readonly TimelineFact[]) => {
-    const ledger = projectTurns(facts);
-    return {
-      status: liveStatusObservationSchema.unwrap().shape.status.parse({
-        birth: DIRECT_BIRTH,
-        id,
-        life: "running",
-        timeline: selectSnapshot(ledger, { aperture: "monitoring" }).snapshot,
-      }),
-      ordinarySelected: 0,
-      rows: ledger.rows,
-    };
+    const rows = facts.map(projectFact);
+    return { status: statusOf(id, "running", rows), rows };
   };
   const context = { columns: 120, color: false };
   const line = (facts: readonly TimelineFact[]) => {
     const observed = projection(facts);
     return askCurrentWorkLine(
-      { id, life: observed.status.life, summary: projectCurrentWork(observed.status.timeline).summary },
+      { id, life: observed.status.life, summary: observed.status.work.summary },
       2_000,
       context,
     );
@@ -2358,9 +2352,9 @@ test("Ask current work follows the native overlapping-tool frontier", () => {
   assert.match(line(second), /run \$ A/u);
   assert.match(line(third), /last observed running/u);
   assert.doesNotMatch(line(third), /\$ [AB]/u, "settled tools are no longer current work");
-  const ledger = projectTurns(third);
-  const history = nativeHistoryText({ kind: "akuma", akumaId: id, events: ledger.rows }, {}, context);
-  assert.ok(history.indexOf("$ B") < history.indexOf("$ A"), "native history retains completion order");
+  const completions = third.map(projectFact).filter(row => row.kind === "tool" && row.phase === "completed");
+  const history = nativeHistoryText({ kind: "akuma", akumaId: id, events: completions }, {}, context);
+  assert.ok(history.indexOf("$ B") < history.indexOf("$ A"), "native history retains both completion identities in durable order");
 });
 
 test("a plural wait text renders compact facts, exact-turn outcomes and unreadable peers", () => {
@@ -2400,23 +2394,18 @@ test("an any-mode completion keeps an incomplete peer's own state honest", () =>
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0047",
     life: "asleep",
-    timeline: idleAkumaSnapshot([]),
+    ...statusFields(idleRows([])),
   });
   const pending = liveStatusObservationSchema.unwrap().shape.status.parse({
     birth: DIRECT_BIRTH,
     id: "aku/worker/abcd0048",
     life: "asleep",
-    timeline: openAkumaSnapshot([
-      snapshotRow({
-        kind: "tell",
-        sequence: 1,
-        at: AKUMA_ACTIVITY_AT,
-        tellId: "tell/pending-any",
-        text: "still waiting",
-        state: "pending",
-        deliveries: [],
-      }),
-    ]),
+    ...statusFields(openRows([
+      {
+        kind: "tell", sequence: 1, at: AKUMA_ACTIVITY_AT,
+        tellId: "tell/pending-any", text: "still waiting", state: "pending", deliveries: [],
+      },
+    ])),
   });
   const results = [
     { kind: "observed" as const, id: complete.id, life: complete.life },

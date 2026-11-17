@@ -157,10 +157,8 @@ export function decodeTimelineBatch(batch: TimelineBatch): readonly TimelineFact
   });
 }
 
-export type StatusFactInput = Readonly<{ aperture: "monitoring" | "receipt"; admittedTellId?: string }>;
-
-/** Select the frontier and its delivered Tells, plus aperture-required Tell pins. */
-export function readStatusBatch(database: DatabaseSync, input: StatusFactInput) {
+/** Select the latest Turn, its delivered input, pending input and latest retained outcome. */
+export function statusFacts(database: DatabaseSync): readonly TimelineFact[] {
   const frontier = database.prepare("SELECT sequence FROM turns ORDER BY sequence DESC LIMIT 1").get() as
     | { sequence: number }
     | undefined;
@@ -168,15 +166,14 @@ export function readStatusBatch(database: DatabaseSync, input: StatusFactInput) 
     .prepare(
       `WITH selected(sequence) AS (
       SELECT sequence FROM turns WHERE sequence = ?
-      UNION SELECT end_sequence FROM turns WHERE sequence = ? AND end_sequence IS NOT NULL
+      UNION SELECT MAX(end_sequence) FROM turns WHERE end_sequence IS NOT NULL
       UNION SELECT sequence FROM calls WHERE turn_sequence = ?
       UNION SELECT sequence FROM reports WHERE turn_sequence = ?
       UNION SELECT sequence FROM activity WHERE turn_sequence = ?
       UNION SELECT tells.sequence FROM tells
       JOIN tell_deliveries ON tell_deliveries.tell_id = tells.id
       WHERE tell_deliveries.turn_sequence = ?
-      UNION SELECT sequence FROM tells WHERE id = ?
-      UNION SELECT sequence FROM tells WHERE ? AND ${tellStateSql} = 'pending'
+      UNION SELECT sequence FROM tells WHERE ${tellStateSql} = 'pending'
     ) SELECT timeline.sequence, timeline.kind FROM timeline JOIN selected USING(sequence) ORDER BY sequence`,
     )
     .all(
@@ -185,15 +182,8 @@ export function readStatusBatch(database: DatabaseSync, input: StatusFactInput) 
       frontier?.sequence ?? null,
       frontier?.sequence ?? null,
       frontier?.sequence ?? null,
-      frontier?.sequence ?? null,
-      input.admittedTellId ?? null,
-      input.aperture === "monitoring" || input.admittedTellId === undefined ? 1 : 0,
     ) as unknown as readonly TimelineRow[];
-  return { frontier: frontier?.sequence ?? null, ...readTimelineBatch(database, rows) };
-}
-
-export function statusFacts(database: DatabaseSync, input: StatusFactInput): readonly TimelineFact[] {
-  return decodeTimelineBatch(readStatusBatch(database, input));
+  return decodeTimelineBatch(readTimelineBatch(database, rows));
 }
 
 export function activityFactSlice(database: DatabaseSync): ActivityFactSlice {

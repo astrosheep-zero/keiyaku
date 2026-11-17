@@ -195,8 +195,7 @@ async function observeSubjects(
   const contracts = subjects.flatMap((subject) => (subject.kind === "contract" ? [subject.id] : []));
   const journals =
     contracts.length === 0 ? undefined : createContractWaitObserver(scopeForRepo(input.repo!), contracts);
-  const akumas =
-    addressed === undefined ? undefined : createAkumaWaitObserver(addressed.path, addressed.orderedIds, true);
+  const akumas = addressed === undefined ? undefined : createAkumaWaitObserver(addressed.path, addressed.orderedIds);
   const deadline = input.timeoutMs === undefined ? Infinity : performance.now() + input.timeoutMs;
   const stop = new AbortController();
   const signal = input.signal === undefined ? stop.signal : AbortSignal.any([input.signal, stop.signal]);

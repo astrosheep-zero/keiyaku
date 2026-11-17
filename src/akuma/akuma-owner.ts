@@ -7,7 +7,6 @@ import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import {
   createLiveStatusReader,
   bornStatus,
-  defaultWaitComplete,
   executionProgress,
   observeOutcomeRows,
   observeStatusOutcome,
@@ -47,7 +46,9 @@ import {
 import { parseExactHistorySelector, pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
 import type { ReportAdmission } from "./heart/facts.js";
 import type { ActivityHistory, ExactHistory } from "./projection.js";
-import { projectTurns, selectExactHistory, selectHistory } from "./projection.js";
+import { projectFact, selectExactHistory } from "./projection.js";
+import { selectHistory } from "./projection-read.js";
+import type { AkumaWaitItem } from "./selection-observation.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import { publishAkuma } from "./publication.js";
 import { z } from "zod";
@@ -223,9 +224,9 @@ export class AkumaOwner {
     return pathsForAkumaId(this.worldPath, this.id);
   }
 
-  private async projectHistoryTurns() {
+  private async historyTimeline() {
     const slice = await activitySlice(this.paths);
-    return projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest });
+    return { ...slice, rows: slice.rows.map(projectFact) };
   }
 
   private async exactHistory(id: string): Promise<ExactHistory> {
@@ -235,14 +236,10 @@ export class AkumaOwner {
         "invalid-input",
         "Akuma history id must be a positive safe decimal integer, turn/<positive safe integer> or report/<positive safe integer>",
       );
-    const slice = await activitySlice(this.paths);
-    const ledger = projectTurns(slice.rows, { lowestRetained: slice.lowestRetained, highest: slice.highest });
+    const timeline = await this.historyTimeline();
     if (selector.kind !== "activity")
-      return selectExactHistory(ledger.rows, { kind: selector.kind, sequence: selector.sequence });
-    const fact = slice.rows.find((row) => row.sequence === selector.sequence);
-    const row =
-      ledger.rows.find((row) => row.sequence === selector.sequence) ??
-      (fact === undefined ? undefined : projectTurns([fact]).rows.find((row) => row.sequence === selector.sequence));
+      return selectExactHistory(timeline.rows, { kind: selector.kind, sequence: selector.sequence });
+    const row = timeline.rows.find((row) => row.sequence === selector.sequence);
     return row === undefined || row.kind === "turn" || row.kind === "outcome"
       ? { kind: "unknown-history", id }
       : { kind: "exact-activity", row };
@@ -253,7 +250,7 @@ export class AkumaOwner {
   }
 
   async status(): Promise<LiveStatusObservation["status"]> {
-    const { status } = await bornStatus(this.paths, this.id, { aperture: "monitoring" });
+    const status = await bornStatus(this.paths, this.id);
     await observeStatusOutcome(status, this.outcomeObserved);
     return status;
   }
@@ -268,7 +265,7 @@ export class AkumaOwner {
       return exact;
     }
     const limit = input.limit ?? 12;
-    const history = selectHistory(await this.projectHistoryTurns(), {
+    const history = selectHistory(await this.historyTimeline(), {
       ...(input.before === undefined ? {} : { before: input.before }),
       ...(input.since === undefined ? {} : { since: input.since }),
       limit,
@@ -287,35 +284,28 @@ export class AkumaOwner {
   }
 
   async waitReceipt(
-    predicate: (status: LiveStatusObservation["status"]) => boolean = defaultWaitComplete,
     options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
-  ): Promise<Readonly<{ reason: WaitReason; status: LiveStatusObservation["status"] }>> {
+  ): Promise<Readonly<{ reason: WaitReason; status: Extract<AkumaWaitItem, { kind: "observed" }> }>> {
     validateAkumaInput(durationSchema.optional(), options.timeoutMs);
     const waited = await executeWaitAkuma({
       path: this.worldPath,
       ids: [this.id],
       completion: "all",
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      ...(predicate === defaultWaitComplete ? {} : { predicate }),
+      ...options,
       ...(this.outcomeObserved === undefined ? {} : { outcomeObserved: this.outcomeObserved }),
     });
-    const status = waited.observations[0];
-    if (status === undefined) {
-      const item = waited.results[0];
-      if (item?.kind === "missing") throw new AkumaNotBornError(this.id);
+    const status = waited.results[0];
+    if (status?.kind === "missing") throw new AkumaNotBornError(this.id);
+    if (status?.kind !== "observed") {
       throw new AkumaProviderError(
-        item?.kind === "unobserved" ? item.diagnostic : "Akuma wait returned no observation",
+        status?.kind === "unobserved" ? status.diagnostic : "Akuma wait returned no observation",
       );
     }
     return { reason: waited.reason, status };
   }
 
-  async wait(
-    predicate: (status: LiveStatusObservation["status"]) => boolean = defaultWaitComplete,
-    options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {},
-  ): Promise<LiveStatusObservation["status"]> {
-    return (await this.waitReceipt(predicate, options)).status;
+  async wait(options: Readonly<{ timeoutMs?: number; signal?: AbortSignal }> = {}) {
+    return (await this.waitReceipt(options)).status;
   }
 
   async admitInitialTell(
@@ -409,15 +399,12 @@ export class AkumaOwner {
         ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
         ...(options.signal === undefined ? {} : { signal: options.signal }),
         observe: async () => {
-          const currentLife = await reader.execution(options.signal);
-          const progress = executionProgress(currentLife, true, options.wake?.());
-          const { tell, end } = await reader.tellOutcome(tellId, options.signal);
+          const { tell, end, life } = await reader.tellOutcome(tellId, options.signal);
+          const progress = executionProgress(life, true, options.wake?.());
           if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
           if (end !== undefined) await this.outcomeObserved?.(this.id, [`turn/${end.turnSequence}`]);
           if (options.observe !== undefined) {
-            await options.observe(
-              await reader.read({ aperture: "monitoring", admittedTellId: tellId }, options.signal),
-            );
+            await options.observe(await reader.read(options.signal));
           }
           return {
             outcome: end?.outcome ?? null,

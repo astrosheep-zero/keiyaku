@@ -148,12 +148,12 @@ test("the in-process transport serves the real public package's own stream, stat
   mirror.publish(frame.value);
   assert.equal(events.filter((event) => event.type === "timeline.item" && event.item.type === "notification" &&
     event.item.id === `keiyaku:report/${report.sequence}` && event.item.message === "Progress report: working").length, 1);
-  const tool = rows.find((row) => row.kind === "tool" && row.name === "bash");
+  const tool = rows.find((row) => row.kind === "tool" && row.name === "bash" && row.phase === "completed");
   assert.ok(tool?.kind === "tool");
   assert.deepEqual(tool, await producerRow(root, value.allocated.id, tool.sequence),
     "the transport boundary is transparent to the producer's own record, identity included");
   assert.deepEqual(tool.call, { kind: "run", command: "printf hello" });
-  assert.deepEqual(tool.state, { status: "ok", message: "hello", exitCode: 0, output: "hello" },
+  assert.deepEqual(tool.result, { status: "ok", message: "hello", exitCode: 0, output: "hello" },
     "the transport boundary keeps the observed result text");
   const carried = rows.flatMap((row) => row.kind === "tool" && row.name === "edit" ? [row] : []);
   assert.equal(carried.length, 1, "the bounded window carries the observed edit record");
@@ -224,10 +224,10 @@ test("a native Pi completion reaches a Paseo edit detail through the public proj
   mirror.publish(history);
   const calls = events.flatMap((event) => event.type === "timeline.item" && event.item.type === "tool_call"
     ? [event.item] : []);
-  assert.deepEqual(calls.map((call) => call.name), ["edit", "bash"]);
-  assert.deepEqual(calls[0]?.detail, { type: "edit", filePath: "src/a.ts", unifiedDiff: patch },
+  assert.deepEqual(calls.map((call) => call.name), ["edit", "edit", "bash", "bash"]);
+  assert.deepEqual(calls[1]?.detail, { type: "edit", filePath: "src/a.ts", unifiedDiff: patch },
     "the native completion's own patch is the edit detail");
-  assert.deepEqual(calls[1]?.detail, { type: "shell", command: "npm test", output: "3 passing\n" },
+  assert.deepEqual(calls[3]?.detail, { type: "shell", command: "npm test", output: "3 passing\n" },
     "the native completion's own output is the shell output, not its diagnostic");
 });
 
@@ -392,9 +392,9 @@ test("SDK isolates bad records within trusted windows and continues to a real ou
 test("local wire admission isolates nested tool payloads while preserving healthy siblings", () => {
   const tool = { kind: "tool", sequence: 1, turnSequence: 1, at, name: "edit", toolId: "tool",
     call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch: "@@\n-old\n+new\n" }] },
-    state: { status: "ok", output: "observed output" } };
+    phase: "completed", result: { status: "ok", output: "observed output" } };
   const raw = { ...frame(1), omitted: -0.5, lowestRetained: 0, highest: 4.5, rows: [
-    { ...tool, state: { ...tool.state, secret: { nested: "never expose" } } },
+    { ...tool, result: { ...tool.result, secret: { nested: "never expose" } } },
     { ...tool, sequence: 2, call: { ...tool.call, changes: [
       { ...tool.call.changes[0], secret: { nested: "never expose" } },
     ] } },
@@ -769,9 +769,7 @@ test("the evaluated bundle mirrors a real Akuma through the public streaming sur
   assert.deepEqual(tools(), [[callId, "running"], [callId, "completed"]],
     "the completion updates that one item rather than pairing by names, arguments or timestamps");
 
-  // The producer's own fold identity, asserted live: the answered outcome reuses
-  // the live narration's identity, so the identical final upsert stays the
-  // host's to suppress instead of appearing as a second message.
+  // Narration and final answer retain independent durable identities.
   await appendActivity(consumer.paths, { turnSequence, at, event: { type: "assistant", text: "the final line" } });
   const spoken = () => items().filter((item) => item.type === "assistant_message" && item.text === "the final line");
   await until(() => spoken().length > 0);
@@ -780,8 +778,8 @@ test("the evaluated bundle mirrors a real Akuma through the public streaming sur
   await endTurn(consumer.paths, { turnSequence, completedAt: at,
     outcome: { kind: "answered", answer: "the final line", session: { sessionId: "paseo-sdk-evaluated" } } });
   await until(() => spoken().length > 1);
-  assert.deepEqual(spoken().map((item) => item.id), [live?.id, live?.id],
-    "the outcome reuses the live narration's own identity, not a new message that repeats the same text");
+  assert.deepEqual(spoken().map((item) => item.id), [live.id, `keiyaku:turn/${turnSequence}`],
+    "the final answer keeps its Turn identity beside the independent narration");
 
   // One observation for the session's whole life, idle included: sealing this
   // Turn and starting a later one must arrive through that same subscription,

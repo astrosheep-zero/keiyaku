@@ -8,7 +8,7 @@ import {
   activitySlice, appendActivity, beginTurn, bindTellsToTurn, cancelBodyTurns, endTurn, HeldAkumaLeash,
   readHeart, readTurn, recordTell, recordTellDeliveries,
 } from "../src/akuma/heart/index.js";
-import { projectTurns } from "../src/akuma/projection.js";
+import { projectFact } from "../src/akuma/projection.js";
 import type { AgentEvent } from "../src/akuma/provider.js";
 
 async function fixture() {
@@ -174,13 +174,16 @@ test("Heart retains observed tool output and per-change patches beside rows writ
       [observed, legacy],
       "both rows survive the durable write and read unchanged",
     );
-    const ledger = projectTurns(slice.rows, {
-      lowestRetained: slice.lowestRetained,
-      highest: slice.highest,
-    });
-    const toolRows = ledger.rows.filter((row) => row.kind === "tool");
+    const rows = slice.rows.map(projectFact);
+    assert.deepEqual(
+      rows.map((row) => row.sequence),
+      slice.rows.map((row) => row.sequence),
+      "each retained fact keeps exactly one row in durable order",
+    );
+    const toolRows = rows.filter((row) => row.kind === "tool");
+    assert.deepEqual(toolRows.map((row) => row.phase), ["completed", "completed"]);
     assert.deepEqual(toolRows.map((row) => row.call), [observed.call, legacy.call]);
-    assert.deepEqual(toolRows.map((row) => (row.state === "active" || row.state === "unsettled" ? null : row.state)), [
+    assert.deepEqual(toolRows.map((row) => row.result), [
       { status: "ok", output: "edited src/edited.ts" },
       { status: "ok" },
     ]);

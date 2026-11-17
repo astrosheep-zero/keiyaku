@@ -798,7 +798,7 @@ test("the real public stream carries a long open Turn into the mirror without in
   latest = await openWindow();
   const running = latest.rows.find((row) => row.kind === "tool");
   assert.ok(running?.kind === "tool");
-  assert.equal(running.state, "active", "the opened window reports the call while its Turn is still open");
+  assert.equal(running.phase, "started", "the opened window retains the call's start");
   await h.open();
   for (let index = 0; index < 245; index++) await appendActivity(value.allocated.paths, {
     turnSequence: started.sequence, at,
@@ -812,11 +812,12 @@ test("the real public stream carries a long open Turn into the mirror without in
   assert.equal(latest.historyLost, false, "projection holes and pagination are not guessed retention loss");
   assert.equal(latest.hasEarlier, false);
   assert.ok(latest.rows.some((row) => row.kind === "turn" && row.sequence === started.sequence));
-  const tool = latest.rows.find((row) => row.kind === "tool");
+  const tool = latest.rows.find((row) => row.kind === "tool" && row.phase === "completed");
   assert.ok(tool?.kind === "tool");
   assert.deepEqual(tool.call, { kind: "run", command: "printf hello" });
-  assert.deepEqual(tool.state, { status: "ok", message: "hello", exitCode: 0 },
-    "a later frame reports the settled state of the call the opened window saw running");
+  assert.deepEqual(tool.result, { status: "ok", message: "hello", exitCode: 0 },
+    "a later frame retains the completion independently of the start");
+  assert.ok(latest.rows.some((row) => row.kind === "tool" && row.phase === "started" && row.sequence === running.sequence));
   assert.equal(tool.toolId, running.toolId, "the settled call keeps the identity the opened window reported");
   await h.refresh(); await tick();
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started"], "long ongoing work stays running");
@@ -839,11 +840,8 @@ test("the real public stream carries a long open Turn into the mirror without in
   latest = await openWindow();
   const outcome = latest.rows.find((row) => row.kind === "outcome");
   assert.ok(outcome?.kind === "outcome" && outcome.outcome.kind === "answered");
-  // The mirror reuses the producer's own narration identity and never invents
-  // one; folding the exact final narration needs the identity the producer
-  // itself reports.
-  if (outcome.outcome.foldedSaidSequence !== undefined)
-    assert.equal(outcome.outcome.foldedSaidSequence, said.sequence, "the real public SDK carries the producer's fold identity");
+  assert.ok(latest.rows.some((row) => row.kind === "said" && row.sequence === said.sequence),
+    "an equal final answer never hides retained narration");
   await h.refresh(); await tick();
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started", "completed"]);
   const narrated = new Set(items(h.events).flatMap((event) => event.item.type === "assistant_message" ? [event.item.id] : []));
@@ -879,7 +877,7 @@ test("the live observation publishes intermediate activity, keeps its display th
   t.mock.timers.tick(60_000); await tick();
   assert.equal(reads, 1, "an idle session never reads on a timer");
   rows = [...rows,
-    { kind: "tool", sequence: 3, turnSequence: 2, toolId: "running", at, name: "bash", call: { kind: "run", command: "work" }, state: "active" },
+    { kind: "tool", sequence: 3, turnSequence: 2, toolId: "running", at, name: "bash", call: { kind: "run", command: "work" }, phase: "started" },
     { kind: "said", sequence: 4, turnSequence: 2, at, text: "still working" }];
   h.push(rows); await tick();
   assert.deepEqual(items(h.events).map((event) => event.item.type), ["tool_call", "assistant_message"],
@@ -893,8 +891,8 @@ test("the live observation publishes intermediate activity, keeps its display th
   t.mock.timers.tick(31 * 60_000); await tick();
   assert.equal(reads, before, "a failed observation is never retried on a timer");
   // Only an explicit refresh opens a fresh observation, and it observes now.
-  rows = [...rows.filter((row) => row.kind !== "said"),
-    { ...answer(5, 2), outcome: { kind: "answered", answer: "still working", foldedSaidSequence: 4 } }];
+  rows = [...rows,
+    { ...answer(5, 2), outcome: { kind: "answered", answer: "still working" } }];
   await h.refresh(); await tick();
   assert.equal(reads, before + 1, "an explicit refresh opens exactly one observation");
   assert.deepEqual(turns(h.events).map((event) => event.state), ["started", "completed"]);

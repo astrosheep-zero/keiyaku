@@ -85,9 +85,10 @@ creates an additional public result arm; [plugins.md](plugins.md) owns their
 process-local lifetime and diagnostics. Public selection observations explicitly
 participate in identified-outcome observation, while association reads and
 roster expansion do not. Wait and ask deliver identified outcome observation
-in the observing process from the concrete result they return. Wait uses its privately retained final native status evidence before returning
-compact completion observations; ask uses private live observation evidence that
-never changes the public result. Bounded spawn
+in the observing process from the concrete result they return. Wait uses its
+compact final native evidence; ask carries exact input-bound evidence alongside
+its private live observation. Neither retains an alternate full-status answer
+merely to discard it later. Bounded spawn
 answer observation stays with the submitting observer. Composition never
 rereads later state to infer the identity of an earlier observed answer. Ordinary
 creation answers omit routine stage inventories and repeated input, while a later
@@ -154,7 +155,9 @@ selection resolves and freezes identities once, then fans out the same lower
 owner operations or one shared set-observation algorithm. Addressed status
 projects the native life and current actionable work, adding separate read-only
 Dispatch associations where available; it never intersects them into
-Akuma state or re-evaluates lifecycle. Debt creation establishes no Akuma
+Akuma state or re-evaluates lifecycle. Native current work, bounded recent
+detail, and advisory lexical reported changes remain independent of association
+enrichment. Debt creation establishes no Akuma
 association. Execution history preserves requested
 historical content and correlation independently of current associations.
 Latest-answer selection keeps the actual answered Turn coordinate beside its full

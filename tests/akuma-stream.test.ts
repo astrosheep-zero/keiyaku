@@ -505,7 +505,7 @@ test("an unborn identity fails with the existing unborn error", async (context) 
   );
 });
 
-test("stream follows one mutable tool row from its start to its witnessed completion", async (context) => {
+test("stream keeps a tool's start and completion as independent retained rows", async (context) => {
   const root = temporaryDirectory(context, "keiyaku-akuma-stream-tool-");
   const fixture = await bornStreamFixture(root, "c0000021");
   const owner = new AkumaOwner(fixture.allocated.id, fixture.world);
@@ -522,7 +522,8 @@ test("stream follows one mutable tool row from its start to its witnessed comple
     const active = await pull(iterator, "the started tool");
     const activeRow = active.rows.find((row) => row.kind === "tool");
     assert.ok(activeRow?.kind === "tool");
-    assert.equal(activeRow.state, "active");
+    assert.equal(activeRow.phase, "started");
+    assert.equal(activeRow.result, undefined, "a start carries no result");
     assert.equal(activeRow.sequence, started);
 
     await appendActivity(fixture.allocated.paths, {
@@ -531,15 +532,14 @@ test("stream follows one mutable tool row from its start to its witnessed comple
       at: AT,
     });
     const completed = await pull(iterator, "the completed tool");
-    const completedRow = completed.rows.find((row) => row.kind === "tool");
-    assert.ok(completedRow?.kind === "tool");
-    assert.deepEqual(completedRow.state, { status: "ok" });
-    assert.notEqual(completedRow.sequence, activeRow.sequence);
-    assert.equal(
-      completed.rows.some((row) => row.kind === "tool" && row.sequence === started),
-      false,
-      "the retained window holds the completion rather than its earlier start",
-    );
+    const rows = completed.rows.filter((row) => row.kind === "tool");
+    assert.equal(rows.length, 2, "the completion neither relocates nor replaces the start");
+    const [startRow, completedRow] = rows;
+    assert.ok(startRow?.kind === "tool" && completedRow?.kind === "tool");
+    assert.deepEqual([startRow.sequence, completedRow.sequence], [started, completedRow.sequence]);
+    assert.deepEqual([startRow.phase, completedRow.phase], ["started", "completed"]);
+    assert.equal(startRow.toolId, completedRow.toolId, "both rows name the same native invocation");
+    assert.deepEqual(completedRow.result, { status: "ok" });
   } finally {
     controller.abort(new Error("test finished"));
     fixture.holder.release();

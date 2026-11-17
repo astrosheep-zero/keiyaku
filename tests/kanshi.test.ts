@@ -54,13 +54,9 @@ import type { WorldRoot } from "../src/world.js";
 import { World } from "../src/world.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 import { contractMarkdown } from "./support/markdown.js";
-import {
-  activityAkumaRow,
-  akumaWorldReport,
-  openAkumaSnapshot,
-  snapshotRow,
-  AKUMA_ACTIVITY_AT,
-} from "./support/kanshi-activity.js";
+import { akumaWorldReport, AKUMA_ACTIVITY_AT } from "./support/kanshi-activity.js";
+import { parseAkumaId } from "../src/akuma/identity.js";
+import { projectCurrentWork } from "../src/akuma/status-projection.js";
 
 function document(title = "Kanshi contract"): string {
   return contractMarkdown(title, {
@@ -682,9 +678,16 @@ test("World status bounds worktree detail before observation and shares repeated
 });
 
 test("World running rows keep only one bounded latest activity line through the shared renderer", () => {
-  const row = activityAkumaRow("aku/worker/1234abcd", "running", openAkumaSnapshot([
-    snapshotRow({ kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "first paragraph\nsecond paragraph".repeat(30) }),
-  ]));
+  const row: AkumaKanshiRow = {
+    id: parseAkumaId("aku/worker/1234abcd").id,
+    life: "running",
+    lifeAt: AKUMA_ACTIVITY_AT,
+    lastActivityAt: AKUMA_ACTIVITY_AT,
+    work: projectCurrentWork([
+      { kind: "turn", sequence: 1, bodySequence: 1, at: AKUMA_ACTIVITY_AT },
+      { kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "first paragraph\nsecond paragraph".repeat(30) },
+    ]),
+  };
   for (const columns of [48, 100]) {
     const board = renderAkuma(akumaWorldReport([row]), { columns, color: false });
     assert.ok(board.some((line) => line.includes(row.id)), "the board keeps the complete identity");

@@ -143,8 +143,10 @@ names the actual tool observed with a bounded argument preview, and a partial
 capture truncates visibly. Rendering does not interpret foreign command or
 parameter dialects: retained commands and paths use the shared bounded
 payload discipline. Native tool rows keep their observed work preview together
-with the semantic trailer of read ranges, diffstats, durations, and exit/error
-status within the terminal width. A row whose provider supplied no preview
+with the semantic trailer of read ranges, diffstats, and observed exit/error
+status within the terminal width. Tool starts and completions remain separate
+retained observations; rendering derives no duration from their timestamps. A
+row whose provider supplied no preview
 carries the tool identity alone; the truncation mark means a partial capture,
 never a missing one, and an explicitly empty argument object stays visibly
 empty. Status and World render the native owner's concrete current-action

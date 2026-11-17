@@ -44,7 +44,7 @@ import {
   latestKillFact,
   latestSessionFact,
   latestTurnFactForBody,
-  latestTurnFact,
+  latestTurnEndFact,
   lastAnsweredTurnFact,
   pauseFact,
   sessionFactForCoordinate,
@@ -76,10 +76,7 @@ import {
 import {
   activityFactSlice,
   statusFacts,
-  readStatusBatch,
-  decodeTimelineBatch,
   timelineDataVersion,
-  type StatusFactInput,
   lastActivityAt as readLastActivityAt,
   pruneActivityFacts,
   type ActivityFactSlice,
@@ -177,6 +174,7 @@ export async function appendActivity(
 
 type ActivitySlice = ActivityFactSlice;
 export type { TimelineFact } from "./timeline.js";
+import type { TimelineFact } from "./timeline.js";
 
 export type CurrentModelUpdate = "recorded" | "unchanged" | "not-current-body";
 
@@ -204,12 +202,8 @@ export async function activitySlice(paths: AkumaPaths): Promise<ActivitySlice> {
   return await withReadOnlyHeart(paths, (heart) => activityFactSlice(heart));
 }
 
-export async function readStatusFacts(
-  paths: AkumaPaths,
-  input: StatusFactInput,
-  signal?: AbortSignal,
-): Promise<ActivitySlice["rows"]> {
-  return await withReadOnlyHeart(paths, (heart) => statusFacts(heart, input), signal);
+export async function readStatusFacts(paths: AkumaPaths, signal?: AbortSignal): Promise<ActivitySlice["rows"]> {
+  return await withReadOnlyHeart(paths, statusFacts, signal);
 }
 
 /** One live observation's current retained timeline, or a no-change witness. */
@@ -249,77 +243,36 @@ export function createTimelineReader(paths: AkumaPaths): Readonly<{
   };
 }
 
-// Each query returns a fixed set of scalar columns; compare JSON columns as text.
-function sameRawRows<Row extends object>(left: readonly Row[], right: readonly Row[]): boolean {
-  if (left.length !== right.length) return false;
-  if (left.length === 0) return true;
-  const columns = Object.keys(left[0]!) as (keyof Row)[];
-  return left.every((row, index) => columns.every((column) => row[column] === right[index]![column]));
-}
-
-function sameStatusBatch(left: ReturnType<typeof readStatusBatch>, right: ReturnType<typeof readStatusBatch>): boolean {
-  return (
-    left.frontier === right.frontier &&
-    sameRawRows(left.rows, right.rows) &&
-    sameRawRows(left.turns, right.turns) &&
-    sameRawRows(left.calls, right.calls) &&
-    sameRawRows(left.reports, right.reports) &&
-    sameRawRows(left.activity, right.activity) &&
-    sameRawRows(left.tells.rows, right.tells.rows) &&
-    sameRawRows(left.tells.deliveries, right.tells.deliveries) &&
-    sameRawRows(left.tells.bindings, right.tells.bindings)
-  );
-}
-
-/** One observer owns its connection and successful decoded frontier. */
+/** One observation owns read custody; every read decodes its current transaction. */
 export function createStatusFactReader(paths: AkumaPaths) {
   const reader = createHeartReader(paths);
-  let memo: Readonly<{ batch: ReturnType<typeof readStatusBatch>; facts: ActivitySlice["rows"] }> | undefined;
   return {
     life: (signal?: AbortSignal) => readLifeSnapshot(paths, signal, reader.read),
     wait: (recent: boolean, signal?: AbortSignal): Promise<WaitFacts> =>
       reader.read((heart) => {
         const snapshot = lifeSnapshot(heart);
-        const turn = latestTurnFact(heart);
-        let activity: ActivityFactSlice | undefined;
+        const outcome = latestTurnEndFact(heart);
+        let activity: readonly TimelineFact[] | undefined;
         let activityDiagnostic: string | undefined;
         if (recent) {
           try {
-            activity = activityFactSlice(heart);
+            activity = statusFacts(heart);
           } catch (error) {
             activityDiagnostic = error instanceof Error ? error.message : String(error);
           }
         }
-        return { ...snapshot, turn, activity, activityDiagnostic };
+        return { ...snapshot, outcome, activity, activityDiagnostic };
       }, signal),
     tellOutcome: (id: string, signal?: AbortSignal) =>
       reader.read((heart) => {
         const tell = tellFact(heart, id);
-        // A pending Tell may be retried by a successor after cancellation. Its
-        // first retained terminal still belongs to this exact admission.
+        // A retry cannot replace this exact admission's first retained terminal.
         const end = terminalTurnForTell(heart, id)?.end;
-        return { tell, end };
+        return { ...lifeSnapshot(heart), tell, end };
       }, signal),
-    clear(): void {
-      reader.clear();
-      memo = undefined;
-    },
-    async read(input: StatusFactInput, signal?: AbortSignal): Promise<ActivitySlice["rows"]> {
-      try {
-        const next = await reader.read((heart) => {
-          const batch = readStatusBatch(heart, input);
-          if (memo !== undefined && sameStatusBatch(batch, memo.batch)) return memo;
-          return { batch, facts: decodeTimelineBatch(batch) };
-        }, signal);
-        // Publication follows COMMIT, so failed reads can never supply a fallback.
-        memo = next;
-        return next.facts;
-      } catch (error) {
-        reader.clear();
-        memo = undefined;
-        throw error;
-      }
-    },
+    clear: reader.clear,
+    read: (signal?: AbortSignal) =>
+      reader.read((heart) => ({ ...lifeSnapshot(heart), timeline: statusFacts(heart) }), signal),
   };
 }
 
@@ -328,8 +281,8 @@ type LifeSnapshot = Pick<HeartSnapshot, "soul" | "latestBody" | "latestSession" 
 
 export type WaitFacts = LifeSnapshot &
   Readonly<{
-    turn: TurnFact | null;
-    activity: ActivityFactSlice | undefined;
+    outcome: TurnEndFact | undefined;
+    activity: readonly TimelineFact[] | undefined;
     activityDiagnostic: string | undefined;
   }>;
 

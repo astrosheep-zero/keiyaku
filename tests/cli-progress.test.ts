@@ -9,13 +9,8 @@ import { captureOutput } from "./support/cli-fixtures.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import type { TellResult } from "../src/akuma/body.js";
-import {
-  activeTool,
-  idleAkumaSnapshot,
-  openAkumaSnapshot,
-  snapshotRow,
-  AKUMA_ACTIVITY_AT,
-} from "./support/kanshi-activity.js";
+import { startedTool, turnStarted, AKUMA_ACTIVITY_AT } from "./support/kanshi-activity.js";
+import { projectCurrentWork } from "../src/akuma/status-projection.js";
 import { withTellFailureReceipt } from "../src/akuma/akuma-errors.js";
 import type { VerbInput, VerbName, VerbRunFor } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
@@ -404,15 +399,14 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
           birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } },
           id,
           life: "running",
-          timeline: openAkumaSnapshot([snapshotRow(activeTool(3, "bash", { kind: "run", command: "first work" }))]),
+          work: projectCurrentWork([turnStarted(), startedTool(3, "bash", { kind: "run", command: "first work" })]),
         });
-        observe?.({ kind: "live", observation: { status, rows: [], ordinarySelected: 0 } });
+        observe?.({ kind: "live", observation: { status, rows: [] } });
         observe?.({
           kind: "live",
           observation: {
-            status: { ...status, life: "asleep", timeline: idleAkumaSnapshot([]) },
+            status: { ...status, life: "asleep", work: projectCurrentWork([]) },
             rows: [],
-            ordinarySelected: 0,
           },
         });
         now = 42_000;

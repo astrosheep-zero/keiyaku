@@ -2,8 +2,6 @@
 import { z } from "zod";
 import { akumaIdSchema, turnHistoryIdSchema } from "../akuma/identity.js";
 import { activityRowSchema, outcomeRowSchema, reportRowSchema } from "../akuma/projection.js";
-import { projectCurrentWork } from "../akuma/status-projection.js";
-import { withoutReportedChanges } from "../akuma/projection.js";
 import { AkumaNotBornError, AkumaObservationError } from "../akuma/akuma-errors.js";
 import { AkumaOwner, historyInputSchemas } from "../akuma/akuma-owner.js";
 import { durationSchema, validateTellObservation, validateAkumaInput } from "../akuma/call-input.js";
@@ -160,10 +158,8 @@ async function observeAkuma(status: LiveStatusObservation["status"], repo?: Repo
   const contract = (await dispatchAssociations(repo, [status.id])).get(status.id)!;
   if (status.cwd === undefined || status.provider === undefined)
     throw new Error(`Born Akuma ${status.id} lacks its frozen execution context`);
-  const composed = (await placementDischarged(repo)(contract))
-    ? { ...status, timeline: withoutReportedChanges(status.timeline) }
-    : status;
-  const changes = composed.timeline.reportedChanges;
+  const discharged = await placementDischarged(repo)(contract);
+  const changes = discharged ? [] : (status.changes ?? []);
   return {
     kind: "akuma",
     id: status.id,
@@ -171,15 +167,14 @@ async function observeAkuma(status: LiveStatusObservation["status"], repo?: Repo
     cwd: status.cwd,
     provider: status.provider,
     ...(status.model === undefined ? {} : { model: status.model }),
-    work: projectCurrentWork(composed.timeline),
+    work: status.work,
+    ...(status.recent === undefined ? {} : { recent: status.recent }),
     ...(status.lastActivityAt === undefined ? {} : { lastActivityAt: status.lastActivityAt }),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
     ...(contract.kind === "none" ? {} : { contract }),
     ...(changes.length === 0 ? {} : { changes }),
-    ...(composed.timeline.reportedChangesOmitted === 0 ? {} : { moreChanges: true }),
-    ...(composed.timeline.reportedChangesOutside === undefined
-      ? {}
-      : { outsideChanges: composed.timeline.reportedChangesOutside }),
+    ...(discharged || status.moreChanges !== true ? {} : { moreChanges: true }),
+    ...(discharged || status.outsideChanges === undefined ? {} : { outsideChanges: status.outsideChanges }),
   };
 }
 

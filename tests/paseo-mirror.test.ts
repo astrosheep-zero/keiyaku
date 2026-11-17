@@ -18,8 +18,10 @@ const turn = (sequence: number): Row => ({ kind: "turn", sequence, bodySequence:
 const failed = (sequence: number, turnSequence: number): Row => ({ kind: "outcome", sequence, turnSequence, at,
   outcome: { kind: "failed", diagnostic: "turn failed" } });
 const read = { kind: "read", path: "same.ts", offset: 2, limit: 4 } as const;
-const tool = (sequence: number, state: Extract<Row, { kind: "tool" }>["state"], toolId: string, turnSequence = 1): Row =>
-  ({ kind: "tool", sequence, turnSequence, at, name: "read", call: read, state, toolId });
+const tool = (sequence: number, phase: "started" | "completed", toolId: string, turnSequence = 1,
+  result?: Extract<Row, { kind: "tool" }>["result"]): Row =>
+  ({ kind: "tool", sequence, turnSequence, at, name: "read", call: read, phase, toolId,
+    ...(result === undefined ? {} : { result }) });
 
 function collect(): Readonly<{ events: ProviderEvent[]; mirror: ReturnType<typeof createMirror> }> {
   const events: ProviderEvent[] = [];
@@ -50,16 +52,14 @@ test("an admitted Tell keeps its unknown sequence until the producer witnesses t
 
 test("actual producer ids keep identical overlapping tool calls distinct across completion order and Turn scope", () => {
   const { events, mirror } = collect();
-  mirror.publish(window([turn(1), tool(2, "active", "a"), tool(3, "active", "b")]));
-  mirror.publish(window([turn(1), tool(2, "active", "a"), tool(4, { status: "error", message: "permission denied" }, "b")]));
-  mirror.publish(window([turn(1), tool(2, { status: "ok", message: "same content" }, "a"),
-    tool(4, { status: "error", message: "permission denied" }, "b")]));
-  // An identical window republishes nothing, however often it is observed.
-  mirror.publish(window([turn(1), tool(2, { status: "ok", message: "same content" }, "a"),
-    tool(4, { status: "error", message: "permission denied" }, "b")]));
-  mirror.publish(window([turn(1), tool(2, { status: "ok", message: "same content" }, "a"),
-    tool(4, { status: "error", message: "permission denied" }, "b"), failed(6, 1), turn(7),
-    tool(8, "active", "a", 7)]));
+  mirror.publish(window([turn(1), tool(2, "started", "a"), tool(3, "started", "b")]));
+  const completed = [turn(1), tool(2, "started", "a"), tool(3, "started", "b"),
+    tool(4, "completed", "b", 1, { status: "error", message: "permission denied" })];
+  mirror.publish(window(completed));
+  const final = [...completed, tool(5, "completed", "a", 1, { status: "ok", message: "same content" })];
+  mirror.publish(window(final));
+  mirror.publish(window(final));
+  mirror.publish(window([...final, failed(6, 1), turn(7), tool(8, "started", "a", 7)]));
   const calls = items(events).flatMap((item) => item.type === "tool_call" ? [item] : []);
   assert.deepEqual(calls.map((item) => [item.callId, item.status]), [
     ["tool/1/a", "running"], ["tool/1/b", "running"], ["tool/1/b", "failed"],
@@ -75,7 +75,7 @@ test("generic invocation previews, truncation, exact results and thought output 
   mirror.publish(window([turn(1),
     { kind: "thought", sequence: 2, turnSequence: 1, at, text: "checking source", truncated: true },
     { kind: "tool", sequence: 3, turnSequence: 1, at, name: "fetch", toolId: "fetch", call: invocation,
-      state: { status: "ok", message: "bounded response" }, truncated: true },
+      phase: "completed", result: { status: "ok", message: "bounded response" }, truncated: true },
     { kind: "note", sequence: 4, turnSequence: 1, at, text: "compacted context" },
   ]));
   const observed = items(events);
@@ -97,15 +97,15 @@ test("a result's own output is displayed and an honestly empty one is never repl
   const { events, mirror } = collect();
   mirror.publish(window([turn(1),
     { kind: "tool", sequence: 2, turnSequence: 1, at, name: "bash", toolId: "a", call: run,
-      state: { status: "ok", message: "legacy diagnostic", output: "3 passing\n", exitCode: 0 } },
+      phase: "completed", result: { status: "ok", message: "legacy diagnostic", output: "3 passing\n", exitCode: 0 } },
     { kind: "tool", sequence: 3, turnSequence: 1, at, name: "bash", toolId: "b", call: run,
-      state: { status: "ok", message: "legacy diagnostic", exitCode: 0 } },
+      phase: "completed", result: { status: "ok", message: "legacy diagnostic", exitCode: 0 } },
     { kind: "tool", sequence: 4, turnSequence: 1, at, name: "read", toolId: "c",
-      call: { kind: "read", path: "src/a.ts" }, state: { status: "ok", message: "stale diagnostic", output: "" } },
+      call: { kind: "read", path: "src/a.ts" }, phase: "completed", result: { status: "ok", message: "stale diagnostic", output: "" } },
     { kind: "tool", sequence: 5, turnSequence: 1, at, name: "grep", toolId: "d",
-      call: { kind: "search", query: "needle" }, state: { status: "ok", output: "src/a.ts:1:needle" } },
+      call: { kind: "search", query: "needle" }, phase: "completed", result: { status: "ok", output: "src/a.ts:1:needle" } },
     { kind: "tool", sequence: 6, turnSequence: 1, at, name: "bash", toolId: "e", call: run,
-      state: { status: "ok" } },
+      phase: "completed", result: { status: "ok" } },
   ]));
   assert.deepEqual(callsOf(events).map((call) => call.detail), [
     { type: "shell", command: "npm test", output: "3 passing\n", exitCode: 0 },
@@ -121,12 +121,12 @@ test("one observed file patch is a native edit detail", () => {
   mirror.publish(window([turn(1),
     { kind: "tool", sequence: 2, turnSequence: 1, at, name: "edit", toolId: "a",
       call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", diffstat: { added: 1, removed: 1 }, patch }] },
-      state: { status: "ok", output: "edited src/a.ts" } },
+      phase: "completed", result: { status: "ok", output: "edited src/a.ts" } },
     // An empty patch is present, not absent, so it stays a diff rather than
     // collapsing into the diagnostic fallback the producer never wrote.
     { kind: "tool", sequence: 3, turnSequence: 1, at, name: "edit", toolId: "b",
       call: { kind: "fileChange", changes: [{ op: "update", path: "src/b.ts", patch: "" }] },
-      state: { status: "ok", output: "edited src/b.ts" } },
+      phase: "completed", result: { status: "ok", output: "edited src/b.ts" } },
   ]));
   assert.deepEqual(callsOf(events).map((call) => call.detail), [
     { type: "edit", filePath: "src/a.ts", unifiedDiff: patch },
@@ -143,10 +143,10 @@ test("multi-file changes and a missing patch keep every file in the fallback det
   ];
   mirror.publish(window([turn(1),
     { kind: "tool", sequence: 2, turnSequence: 1, at, name: "apply_patch", toolId: "a",
-      call: { kind: "fileChange", changes }, state: { status: "ok", output: "applied 2 files" } },
+      call: { kind: "fileChange", changes }, phase: "completed", result: { status: "ok", output: "applied 2 files" } },
     { kind: "tool", sequence: 3, turnSequence: 1, at, name: "edit", toolId: "b",
       call: { kind: "fileChange", changes: [{ op: "update", path: "src/c.ts" }] },
-      state: { status: "error", message: "no patch reported", output: "partial" } },
+      phase: "completed", result: { status: "error", message: "no patch reported", output: "partial" } },
   ]));
   assert.deepEqual(callsOf(events).map((call) => call.detail), [
     { type: "unknown", input: { kind: "fileChange", changes }, output: { status: "ok", output: "applied 2 files" } },
@@ -161,10 +161,10 @@ test("a producer's own truncation marker stays in the displayed text, not only i
   const marked = "line\n…[truncated]";
   mirror.publish(window([turn(1),
     { kind: "tool", sequence: 2, turnSequence: 1, at, name: "bash", toolId: "a", call: run,
-      state: { status: "ok", output: marked }, truncated: true },
+      phase: "completed", result: { status: "ok", output: marked }, truncated: true },
     { kind: "tool", sequence: 3, turnSequence: 1, at, name: "edit", toolId: "b",
       call: { kind: "fileChange", changes: [{ op: "update", path: "src/a.ts", patch: `${patch}…[truncated]` }] },
-      state: { status: "ok", output: marked }, truncated: true },
+      phase: "completed", result: { status: "ok", output: marked }, truncated: true },
   ]));
   assert.deepEqual(callsOf(events).map((call) => call.detail), [
     { type: "shell", command: "npm test", output: marked },

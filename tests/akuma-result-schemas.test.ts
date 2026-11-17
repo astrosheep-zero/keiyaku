@@ -8,7 +8,7 @@ import type { BodyLauncher } from "../src/akuma/body-launch.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createProviderAttempt, type ProviderAdapter } from "../src/akuma/provider.js";
 import * as root from "../src/index.js";
-import { activityHistorySchema, activitySnapshotSchema } from "../src/akuma/projection.js";
+import { activityHistorySchema } from "../src/akuma/projection.js";
 import { akumaStatusSchema } from "../src/akuma/akuma.js";
 import {
   akumaAskResultSchema, akumaCatalogueSchema, akumaKillResultSchema, akumaObservationSchema,
@@ -24,7 +24,6 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { appendActivity, beginTurn, endTurn } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { projectCurrentWork } from "../src/akuma/status-projection.js";
-import { activeTool, answeredOutcome, openAkumaSnapshot, idleAkumaSnapshot } from "./support/kanshi-activity.js";
 import { tellResultSchema } from "../src/akuma/call-initial-tell.js";
 import { bornBody } from "./support/akuma-fixtures.js";
 import { bornWorld, fixtureAdapter, fixtureLauncher, answering, settleFixtureBodies } from "./support/akuma-tell.js";
@@ -113,7 +112,7 @@ test("Akuma result wire schemas preserve real observations and mutations", async
   await stream.return?.();
 });
 
-test("standalone public status shares compact active and idle observations while native detail stays retained", async (context) => {
+test("standalone public status shares one direct current-work observation and keeps only the latest three rows", async (context) => {
   const directory = temporaryDirectory(context, "akuma-standalone-compact-");
   const world = await root.World.at(directory);
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
@@ -129,14 +128,16 @@ test("standalone public status shares compact active and idle observations while
     for (let index = 0; index < 12; index += 1)
       await appendActivity(born.allocated.paths, { turnSequence: turn.sequence, at: "2026-10-30T00:00:03.000Z", event: { type: "note", text: `detail ${index} ${"🙂".repeat(400)}` } });
     const native = await owner.status();
-    assert.ok(native.timeline.entries.some(entry => entry.kind === "gap"));
     const active = await aku.status();
+    assert.deepEqual(active, native, "the standalone face serves the owner's one native observation");
     assertWireRoundTrip(akumaStatusSchema, active);
-    assert.deepEqual(active.work, projectCurrentWork(native.timeline));
+    assert.equal("timeline" in active, false, "status carries no second timeline carrier");
+    assert.equal(active.recent?.length, 3, "optional recent detail is the latest three flat frontier rows");
+    assert.ok(active.recent?.every(row => row.kind === "note"));
+    assert.equal(active.recent?.at(-1)?.sequence, active.work.latestActivity);
     assert.ok(active.work.summary?.id === activeId && active.work.summary.clipped);
     assert.match(active.work.summary.text, /^run \$ npm test/u);
     assert.deepEqual(active.work.activeTools, [{ id: activeId, turnSequence: turn.sequence, toolId: "native-long-tool" }]);
-    assert.equal(akumaStatusSchema.safeParse(native).success, false);
     const answer = `answer ${"🙂".repeat(600)}`;
     await endTurn(born.allocated.paths, { turnSequence: turn.sequence, completedAt: "2026-10-30T00:00:04.000Z", outcome: { kind: "answered", answer, session: { sessionId: "compact-status" } } });
     const idle = await aku.status();
@@ -147,7 +148,11 @@ test("standalone public status shares compact active and idle observations while
     assert.equal(idle.work.latestActivity, idle.work.outcome?.activityId);
     const waited = await aku.idle({ timeoutMs: 0 });
     assertWireRoundTrip(akumaIdleResultSchema, waited);
-    assert.deepEqual(waited.status.work, idle.work);
+    assert.equal(waited.status.kind, "observed");
+    assert.equal(waited.status.id, born.allocated.id);
+    assert.equal(waited.status.life, idle.life);
+    assert.equal(waited.status.outcome?.historyId, `turn/${turn.sequence}`);
+    assert.equal(waited.status.events, undefined, "a native wait does not decode narration it will not use");
     const history = await aku.history();
     assert.ok(history.rows.some(row => row.kind === "outcome" && row.outcome.kind === "answered" && row.outcome.answer === answer));
     const stream = aku.stream()[Symbol.asyncIterator]();
@@ -159,66 +164,74 @@ test("standalone public status shares compact active and idle observations while
 });
 
 test("current work selects active commands before narration and preserves pending/outcome coordinates", () => {
+  const at = "2026-10-30T00:00:00.000Z";
   for (const command of ["npm test", "square perceive"]) {
-    const work = projectCurrentWork(openAkumaSnapshot([
-      { kind: "row", row: activeTool(2, "bash", { kind: "run", command }) },
-      { kind: "row", row: { kind: "said", sequence: 3, turnSequence: 1, at: "2026-10-30T00:00:00.000Z", text: "waiting" } },
-    ]));
+    const work = projectCurrentWork([
+      { kind: "turn", sequence: 1, bodySequence: 1, at },
+      { kind: "tool", sequence: 2, turnSequence: 1, at, name: "bash", toolId: "tool-2", call: { kind: "run", command }, phase: "started" },
+      { kind: "said", sequence: 3, turnSequence: 1, at, text: "waiting" },
+    ]);
     assert.equal(work.summary?.text, `run $ ${command}`);
     assert.equal(work.summary?.id, 2);
   }
-  const captured = projectCurrentWork(openAkumaSnapshot([
-    { kind: "row", row: activeTool(4, "custom", { kind: "other", input: { json: '{"path":"cut', truncated: true } }) },
-  ]));
+  const captured = projectCurrentWork([
+    { kind: "turn", sequence: 1, bodySequence: 1, at },
+    { kind: "tool", sequence: 4, turnSequence: 1, at, name: "custom", toolId: "tool-4", call: { kind: "other", input: { json: '{"path":"cut', truncated: true } }, phase: "started" },
+  ]);
   assert.deepEqual(captured.summary, { id: 4, text: 'custom {"path":"cut…', clipped: true });
-  const pending = { kind: "tell", sequence: 11, at: "2026-10-30T00:00:00.000Z", tellId: "pending", text: "next step", state: "pending", deliveries: [] } as const;
-  const work = projectCurrentWork(idleAkumaSnapshot([{ kind: "row", row: pending }], answeredOutcome(9, "exact answer")));
+  const pending = { kind: "tell", sequence: 11, at, tellId: "pending", text: "next step", state: "pending", deliveries: [] } as const;
+  const work = projectCurrentWork([pending, { kind: "outcome", sequence: 9, turnSequence: 1, at, outcome: { kind: "answered", answer: "exact answer" } }]);
   assert.deepEqual(work.pending, [{ id: 11, tellId: "pending" }]);
   assert.deepEqual(work.outcome, { historyId: "turn/1", activityId: 9, verdict: "answered" });
 });
 
-test("public timeline wire is strict, deeply readonly, and exact-optional", () => {
-  const tool = {
-    kind: "tool",
-    sequence: 2,
-    turnSequence: 1,
-    at: "2026-10-30T00:00:00.000Z",
-    name: "read",
-    toolId: "native-read",
-    call: { kind: "read", path: "file" },
-    state: "active",
+test("public history wire is strict, deeply readonly, exact-optional, and phases results", () => {
+  const at = "2026-10-30T00:00:00.000Z";
+  const started = {
+    kind: "tool", sequence: 2, turnSequence: 1, at, name: "read", toolId: "native-read",
+    call: { kind: "read", path: "file" }, phase: "started",
   };
-  const snapshot = {
-    kind: "open",
-    turn: { kind: "turn", sequence: 1, bodySequence: 1, at: "2026-10-30T00:00:00.000Z" },
-    entries: [{ kind: "row", row: tool }],
-    reportedChanges: [],
-    reportedChangesOmitted: 0,
+  const completed = {
+    ...started, sequence: 3, phase: "completed", result: { status: "ok", output: "bytes" },
   };
-  const parsed = activitySnapshotSchema.parse(snapshot);
-  assert.equal(parsed.kind, "open");
-  if (parsed.kind !== "open") throw new Error("expected open snapshot");
+  const history = {
+    rows: [
+      { kind: "turn", sequence: 1, bodySequence: 1, at },
+      started,
+      completed,
+    ],
+    omitted: 0,
+    hasEarlier: false,
+    hasLater: false,
+    historyLost: false,
+    lowestRetained: 1,
+    highest: 3,
+  };
+  const parsed = activityHistorySchema.parse(history);
   assert.ok(Object.isFrozen(parsed));
-  assert.ok(Object.isFrozen(parsed.turn));
-  assert.ok(Object.isFrozen(parsed.entries));
-  const entry = parsed.entries[0]!;
-  assert.ok(Object.isFrozen(entry));
-  if (entry.kind !== "row" || entry.row.kind !== "tool") throw new Error("expected tool row");
-  assert.ok(Object.isFrozen(entry.row));
-  assert.ok(Object.isFrozen(entry.row.call));
-  assert.equal(activitySnapshotSchema.safeParse({ ...snapshot, openingSequence: undefined }).success, false);
+  assert.ok(Object.isFrozen(parsed.rows));
+  const row = parsed.rows[1]!;
+  assert.ok(Object.isFrozen(row));
+  if (row.kind !== "tool") throw new Error("expected tool row");
+  assert.ok(Object.isFrozen(row.call));
+  assert.equal(activityHistorySchema.safeParse({ ...history, extra: true }).success, false);
   assert.equal(
-    activitySnapshotSchema.safeParse({
-      ...snapshot,
-      entries: [{ kind: "row", row: { ...tool, call: { ...tool.call, offset: undefined } } }],
-    }).success,
+    activityHistorySchema.safeParse({ ...history, rows: [...history.rows, { ...started, sequence: 4, result: { status: "ok" } }] }).success,
     false,
+    "a started tool never carries a result",
   );
   assert.equal(
-    activitySnapshotSchema.safeParse({
-      ...snapshot,
-      entries: [{ kind: "row", row: { ...tool, call: { ...tool.call, extra: true } } }],
-    }).success,
+    activityHistorySchema.safeParse({ ...history, rows: [...history.rows, { ...completed, sequence: 4, result: undefined }] }).success,
+    false,
+    "a completed tool always carries its result",
+  );
+  assert.equal(
+    activityHistorySchema.safeParse({ ...history, rows: [{ ...started, call: { ...started.call, offset: undefined } }] }).success,
+    false,
+    "absent members stay absent rather than explicit undefined",
+  );
+  assert.equal(
+    activityHistorySchema.safeParse({ ...history, rows: [{ ...started, call: { ...started.call, extra: true } }] }).success,
     false,
   );
 });

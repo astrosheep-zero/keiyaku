@@ -1,7 +1,6 @@
 import { KeiyakuError } from "../errors.js";
 import { z } from "zod";
 import { durationSchema, validateAkumaInput, validateTellObservation } from "./call-input.js";
-import { akumaStatusSchema } from "./akuma.js";
 import type { AkumaCaller } from "./caller.js";
 import type { Settings } from "../settings.js";
 import type { WorldRoot } from "../world.js";
@@ -13,7 +12,6 @@ import {
 } from "../plugin/akuma-signals.js";
 import { abortable } from "./abort.js";
 import { admitAkumaCall } from "./akuma-call.js";
-import { defaultWaitComplete } from "./akuma-observe.js";
 import type { AkumaStreamSnapshot } from "./akuma-stream.js";
 import { AkumaOwner } from "./akuma-owner.js";
 import { executeAskAkuma, executeTellAkuma } from "./akuma-selection-execution.js";
@@ -23,13 +21,14 @@ import { captureAkumaHost, type AkumaHostOptions } from "../body-host.js";
 export type { AkumaHostOptions } from "../body-host.js";
 import type { BodyLauncher } from "./body-launch.js";
 import { parseAkumaId, type AkumaId } from "./identity.js";
-import { projectCurrentWork } from "./status-projection.js";
 import type { ActivityHistory } from "./projection.js";
 import { canonicalDocument, type JsonSchemaDocument } from "./schema.js";
 import { type AkumaAskResult, type AkumaTellResult } from "./selection-observation.js";
 
+import { observedAkumaWaitItemSchema, type AkumaWaitItem } from "./selection-observation.js";
+
 export const akumaIdleResultSchema = z
-  .strictObject({ reason: z.enum(["completed", "deadline"]), status: akumaStatusSchema })
+  .strictObject({ reason: z.enum(["completed", "deadline"]), status: observedAkumaWaitItemSchema })
   .readonly();
 export const akumaReportResultSchema = z.union([
   z.strictObject({ kind: z.literal("recorded"), reportId: z.string().regex(/^report\/[1-9][0-9]*$/u) }).readonly(),
@@ -37,7 +36,10 @@ export const akumaReportResultSchema = z.union([
 ]);
 
 export type AkumaIdleOptions = Readonly<{ timeoutMs?: number; signal?: AbortSignal }>;
-export type AkumaIdleResult = Readonly<{ reason: "completed" | "deadline"; status: AkumaStatus }>;
+export type AkumaIdleResult = Readonly<{
+  reason: "completed" | "deadline";
+  status: Extract<AkumaWaitItem, { kind: "observed" }>;
+}>;
 export type AkumaHistoryOptions = Readonly<{ before?: number; since?: number; limit?: number }>;
 export type AkumaSignalOptions = Readonly<{ signal?: AbortSignal }>;
 
@@ -186,8 +188,7 @@ class AkumaHandle {
   }
 
   async status(): Promise<AkumaStatus> {
-    const { timeline, ...status } = await this.owner(true).status();
-    return { ...status, work: projectCurrentWork(timeline) };
+    return await this.owner(true).status();
   }
 
   async idle(options: AkumaIdleOptions = {}): Promise<AkumaIdleResult> {
@@ -204,12 +205,10 @@ class AkumaHandle {
       { akumaIds: [this.id] },
       signal,
       async () => {
-        const waited = await this.owner(true).waitReceipt(defaultWaitComplete, {
+        return await this.owner(true).waitReceipt({
           ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
           ...(signal === undefined ? {} : { signal }),
         });
-        const { timeline, ...status } = waited.status;
-        return { reason: waited.reason, status: { ...status, work: projectCurrentWork(timeline) } };
       },
     );
   }

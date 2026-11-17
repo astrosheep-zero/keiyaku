@@ -78,7 +78,10 @@ Contract catalogue rows retain physical attention and availability rather than
 expanded addressed detail. Akuma catalogue rows
 retain life and associations; a bounded separate current-work observation adds
 the native semantic frontier and concrete current-action summary from the same
-read. No terminal-chat timeline or answer preview belongs in the World report.
+read. Current work derives directly from the latest retained frontier rather
+than a selected timeline window; optional recent detail never controls its
+approval or pending-input evidence. No terminal-chat timeline or answer preview
+belongs in the World report.
 Unborn allocations have no frontier, and failed frontier observation remains
 explicit without changing roster membership. Native history and live observation
 keep exact retained detail. The bounded report retains owner order and whether
@@ -115,7 +118,8 @@ from names or directories, or uses an attachment as permission to change any
 product.
 
 Reported changes belong to the addressed Akuma observation, not to every
-catalogue row. Placement discharge of pending work uses the Contract owner's
+catalogue row. Its containment is lexical and advisory, granting no filesystem
+authority. Placement discharge of pending work uses the Contract owner's
 observed phase without changing Heart evidence. Missing, failed, or unproven
 Contract authority cannot establish that work was placed.
 

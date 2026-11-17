@@ -3,10 +3,9 @@ import { captureAkumaHostDiagnostic, type AkumaHostOptions } from "../akuma/akum
 import { listAkumaNameDefinitions, type AkumaNameCatalog, type AkumaNameCatalogInput } from "../akuma/archetype.js";
 import type { AkumaCaller } from "../akuma/caller.js";
 import type { AkumaRosterInput } from "../akuma/akuma.js";
-import { observeAkumaRoster, readAkumaTimeline, rosterInput } from "../akuma/akuma.js";
+import { observeAkumaRoster, readAkumaWork, rosterInput } from "../akuma/akuma.js";
 import { boundedListLimit, type LifecycleSelection } from "../bounded-list.js";
 import { boundedMap } from "../akuma/read-pool.js";
-import { projectCurrentWork } from "../akuma/status-projection.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { KeiyakuError } from "../errors.js";
 import { withGitDecodeChannel, withGitReadObservation, type GitReadObservation } from "../git/read-observation.js";
@@ -238,7 +237,7 @@ export async function akumaRowsAt(
     const summary = { ...facts, ...(caller?.kind === "akuma" ? { parentAkumaId: caller.akumaId } : {}) };
     if (index >= (options.snapshotRows ?? 0)) return summary;
     try {
-      return { ...summary, work: projectCurrentWork(await readAkumaTimeline(world, row.id)) };
+      return { ...summary, work: await readAkumaWork(world, row.id) };
     } catch (error) {
       return { ...summary, work: { kind: "unavailable", diagnostic: diagnostic(error) } };
     }

@@ -14,7 +14,7 @@ import type { ProviderEvent, ProviderRegistration } from "@getpaseo/plugin/serve
 import type { SessionOutboundMessage } from "@getpaseo/protocol/messages";
 import { createProvider } from "../plugins/paseo/plugin/server/provider.js";
 import { createRegistrationHandoff, registerRegistrationHooks } from "../plugins/paseo/plugin/server/handoff.js";
-import { projectTurns } from "../src/akuma/projection.js";
+import { projectFact } from "../src/akuma/projection.js";
 import { akumaId } from "../src/akuma/identity.js";
 import { activityFact, turnEndFact } from "./support/akuma-fixtures.js";
 import { expectBodySettles } from "./support/process.js";
@@ -547,7 +547,7 @@ test("combined best-effort Steer, explicit Stop, and later Tell preserve the sam
   h.setRows([turn(2), turn(4), answer(4, 5)]); await h.refresh();
 });
 
-test("installed consumer keeps live said and producer-linked final answer as one native message", async (t) => {
+test("installed consumer preserves live speech and an equal final answer as separate messages", async (t) => {
   const h = await harness(t);
   const facts: TimelineFact[] = [
     { kind: "turn-start", sequence: 2, bodySequence: 1, startedAt: at },
@@ -555,7 +555,7 @@ test("installed consumer keeps live said and producer-linked final answer as one
     activityFact(4, 2, at, { type: "tool", phase: "started", id: "work", name: "bash", call: { kind: "run", command: "work" } }),
     activityFact(5, 2, at, { type: "assistant", text: "final answer" }),
   ];
-  h.setRows(historySchema.shape.rows.parse(projectTurns(facts).rows)); await h.refresh();
+  h.setRows(historySchema.shape.rows.parse(facts.map(projectFact))); await h.refresh();
   const saidItems = () => h.events.flatMap((event) =>
     event.type === "timeline" && event.item.type === "assistant_message" ? [{ event, item: event.item }] : []);
   const before = saidItems();
@@ -564,17 +564,11 @@ test("installed consumer keeps live said and producer-linked final answer as one
     { type: "assistant_message", text: "final answer", messageId: "keiyaku:said/5" },
   ], "intermediate speech is visible before outcome");
   facts.push(turnEndFact(6, 2, at, { kind: "answered", answer: "final answer", session: { sessionId: "native" } }));
-  const settled = historySchema.shape.rows.parse(projectTurns(facts).rows);
-  const outcome = settled.find((row) => row.kind === "outcome");
+  const settled = historySchema.shape.rows.parse(facts.map(projectFact));
   h.setRows(settled); await h.refresh();
   const after = saidItems();
-  if (outcome?.kind === "outcome" && outcome.outcome.kind === "answered" && outcome.outcome.foldedSaidSequence !== undefined)
-    assert.deepEqual(after, before, "the installed provider drops the identical final upsert by native message identity");
-  else
-    // Without the producer's own fold identity the mirror can only report the
-    // outcome as its own message; it never guesses which speech it replaces.
-    assert.deepEqual(after.map(({ item }) => item.messageId), ["keiyaku:said/3", "keiyaku:said/5", "keiyaku:turn/2"],
-      "an outcome without a fold identity is published as the outcome's own message");
+  assert.deepEqual(after.map(({ item }) => item.messageId), ["keiyaku:said/3", "keiyaku:said/5", "keiyaku:turn/2"],
+    "narration and outcome keep their distinct durable identities");
   assert.equal(h.manager.getAgent(h.agent.id)!.lifecycle, "idle");
   assert.equal(h.events.filter((event) => event.type === "turn_completed").length, 1);
 });
@@ -582,10 +576,10 @@ test("installed consumer keeps live said and producer-linked final answer as one
 test("installed native consumer folds tool start and result by producer identity, not invocation text", async (t) => {
   const h = await harness(t);
   const tools: Row[] = ["a", "b"].map((toolId, index) => ({ kind: "tool", sequence: 3 + index, at,
-    turnSequence: 2, toolId, name: "bash", call: { kind: "run", command: "same command" }, state: "active" }));
+    turnSequence: 2, toolId, name: "bash", call: { kind: "run", command: "same command" }, phase: "started" }));
   h.setRows([turn(2), ...tools]); await h.refresh();
-  h.setRows([turn(2), { ...tools[0]!, sequence: 6, state: { status: "ok", message: "A" } } as Row,
-    { ...tools[1]!, sequence: 5, state: { status: "error", message: "B" } } as Row]);
+  h.setRows([turn(2), ...tools, { ...tools[0]!, sequence: 6, phase: "completed", result: { status: "ok", message: "A" } } as Row,
+    { ...tools[1]!, sequence: 5, phase: "completed", result: { status: "error", message: "B" } } as Row]);
   await h.refresh();
   const rows = h.events.flatMap((event, index) => event.type === "timeline"
     ? [{ item: event.item, seq: index + 1, timestamp: event.timestamp ?? at,

@@ -43,7 +43,6 @@ export type {
   AkumaOrigin,
   ActivityHistory,
   ActivityRow,
-  ActivitySnapshot,
   AkumaId,
   AkumaAskObservation,
   AkumaAskOptions,

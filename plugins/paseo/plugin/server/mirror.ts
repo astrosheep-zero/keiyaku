@@ -131,9 +131,8 @@ export function createMirror(sessionId: string, emit: Emit) {
             emit({ type: "session.turn", sessionId, turnId: `turn/${turn.sequence}`, state: "started" });
           }
         } else if (row.kind === "tool") {
-          const state = row.state;
           const toolIdentity = `${row.turnSequence}/${row.toolId}`;
-          const result = typeof state === "object" ? state : undefined;
+          const result = row.result;
           // The result's own output is the observed text; its diagnostic message is
           // only the stand-in an older producer wrote instead, so an honestly empty
           // output is never replaced by its diagnostic.
@@ -151,7 +150,6 @@ export function createMirror(sessionId: string, emit: Emit) {
               : row.call.kind === "search"
                 ? { type: "search", query: row.call.query,
                   ...(output === undefined ? {} : { content: output }),
-                  ...(row.durationMs === undefined ? {} : { durationMs: row.durationMs }),
                   ...(row.truncated === undefined ? {} : { truncated: row.truncated }) }
                 // One observed file patch is the whole operation; anything else keeps
                 // the complete change list so no single file stands in for the rest.
@@ -160,12 +158,12 @@ export function createMirror(sessionId: string, emit: Emit) {
                   : { type: "unknown", input: z.json().parse(row.call), output: result === undefined ? null : z.json().parse(result) };
           item({ type: "tool_call", id: `keiyaku:tool/${toolIdentity}`, callId: `tool/${toolIdentity}`, name: row.name,
             detail, metadata: { turnSequence: row.turnSequence, sequence: row.sequence,
-              ...(row.durationMs === undefined ? {} : { durationMs: row.durationMs }),
               ...(row.truncated === undefined ? {} : { truncated: row.truncated }),
-              call: z.json().parse(row.call), state: z.json().parse(state) },
-            ...(typeof state === "object" && state.status === "error"
-              ? { status: "failed", error: z.json().parse(state) }
-              : { status: state === "active" ? "running" : state === "unsettled" ? "canceled" : "completed", error: null }) }, row.at);
+              call: z.json().parse(row.call), phase: row.phase,
+              ...(result === undefined ? {} : { result: z.json().parse(result) }) },
+            ...(result?.status === "error"
+              ? { status: "failed", error: z.json().parse(result) }
+              : { status: row.phase === "started" ? "running" : "completed", error: null }) }, row.at);
         } else if (row.kind === "said") {
           item({ type: "assistant_message", id: `keiyaku:said/${row.sequence}`, text: row.text }, row.at);
         } else if (row.kind === "thought") {
@@ -179,8 +177,7 @@ export function createMirror(sessionId: string, emit: Emit) {
           item({ type: "notification", id: `keiyaku:note/${row.sequence}`, level: "info", message: row.text }, row.at);
         } else if (row.kind === "outcome") {
           if (row.outcome.kind !== "canceled") item(row.outcome.kind === "answered"
-            ? { type: "assistant_message", id: row.outcome.foldedSaidSequence === undefined
-              ? `keiyaku:turn/${row.turnSequence}` : `keiyaku:said/${row.outcome.foldedSaidSequence}`, text: row.outcome.answer }
+            ? { type: "assistant_message", id: `keiyaku:turn/${row.turnSequence}`, text: row.outcome.answer }
             : { type: "error", id: `keiyaku:turn/${row.turnSequence}`, message: row.outcome.diagnostic }, row.at);
           finish(openTurns.get(row.turnSequence), row.outcome.kind === "answered" ? "completed" : row.outcome.kind,
             row.outcome.kind === "failed" ? row.outcome.diagnostic : undefined);

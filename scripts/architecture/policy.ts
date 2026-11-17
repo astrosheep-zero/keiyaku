@@ -825,7 +825,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     { source: "akuma/read-pool.ts", allow: [] },
     {
       source: "akuma/projection-read.ts",
-      allow: [types("akuma/projection.ts"), runtime("history.ts", ["selectHistoryPage"])],
+      allow: [
+        types("akuma/projection.ts"),
+        runtime("akuma/status-projection.ts", ["projectCurrentWork"]),
+        runtime("history.ts", ["selectHistoryPage"]),
+      ],
     },
     {
       source: "akuma/**",

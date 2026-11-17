@@ -2,11 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
-import {
-  type ActivityHistory,
-  type ActivityRow,
-  type OutcomeRow,
-} from "../src/akuma/projection.js";
+import { type ActivityHistory, type ActivityRow, type OutcomeRow } from "../src/akuma/projection.js";
 import {
   DEFAULT_CONTEXT,
   frameRule,
@@ -37,14 +33,28 @@ import { renderVerb } from "../src/cli/render/verbs.js";
 import {
   answeredOutcome,
   completedTool,
-  idleAkumaSnapshot,
-  openAkumaSnapshot,
-  snapshotRow,
+  turnStarted,
   AKUMA_ACTIVITY_AT,
   reportedFileChange,
 } from "./support/kanshi-activity.js";
 
 const DIRECT_BIRTH = { origin: { kind: "direct" }, caller: { kind: "unknown" } } as const;
+
+function statusOf(
+  id: string,
+  life: LiveStatusObservation["status"]["life"],
+  rows: readonly ActivityRow[],
+  extra: Readonly<Record<string, unknown>> = {},
+): LiveStatusObservation["status"] {
+  return liveStatusObservationSchema.unwrap().shape.status.parse({
+    birth: DIRECT_BIRTH,
+    id,
+    life,
+    work: projectCurrentWork(rows),
+    ...(rows.length === 0 ? {} : { recent: rows.slice(-3) }),
+    ...extra,
+  });
+}
 
 /** One native selected observation over a status row; absence stays absent. */
 function observation(
@@ -57,25 +67,24 @@ function observation(
     life: status.life,
     cwd: status.cwd ?? "/work/repo",
     provider: status.provider ?? "fixture",
-    work: projectCurrentWork(status.timeline),
+    work: status.work,
+    ...(status.recent === undefined ? {} : { recent: status.recent }),
+    ...(status.model === undefined ? {} : { model: status.model }),
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
     ...(association.kind === "none" ? {} : { contract: association }),
-    ...(status.timeline.reportedChanges.length === 0 ? {} : {
-      changes: status.timeline.reportedChanges.map(({ path, diffstat }) => ({ path, ...(diffstat === undefined ? {} : { diffstat }) })),
-    }),
-    ...(status.timeline.reportedChangesOmitted === 0 ? {} : { moreChanges: true }),
+    ...(status.changes === undefined ? {} : { changes: status.changes }),
+    ...(status.moreChanges === undefined ? {} : { moreChanges: status.moreChanges }),
+    ...(status.outsideChanges === undefined ? {} : { outsideChanges: status.outsideChanges }),
   };
 }
 
 test("status retains execution context, current work, changes, and unavailable associations", () => {
   const id = "aku/worker/abcd1234";
-  const note: ActivityRow = { kind: "said", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "editing the projection" };
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id,
-    life: "running",
+  const note: ActivityRow = { kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "editing the projection" };
+  const rows = [turnStarted(1), note];
+  const status = statusOf(id, "running", rows, {
     cwd: "/work/appointed",
-    timeline: openAkumaSnapshot([{ kind: "row", row: note }], [reportedFileChange("/work/file")]),
+    changes: [reportedFileChange("/work/file")],
   });
   const lines = snapshotText(
     observation(status, { kind: "failed", diagnostic: "lookup refused" }),
@@ -103,50 +112,29 @@ test("status retains execution context, current work, changes, and unavailable a
 });
 
 test("history retains input, speech, actions, outcomes, and omission evidence", () => {
-  const entries = [
-    snapshotRow({
-      kind: "call" as const,
-      sequence: 1,
-      turnSequence: 1,
-      at: AKUMA_ACTIVITY_AT,
-      text: "first input",
-    }),
-    snapshotRow({
-      kind: "said" as const,
-      sequence: 2,
-      turnSequence: 1,
-      at: AKUMA_ACTIVITY_AT,
-      text: "spoken line\n  indented line",
-    }),
-    snapshotRow({
-      kind: "thought" as const,
-      sequence: 3,
-      turnSequence: 1,
-      at: AKUMA_ACTIVITY_AT,
-      text: "hidden reasoning",
-    }),
-    snapshotRow({ kind: "note" as const, sequence: 4, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "a note" }),
-    snapshotRow(completedTool(5, "bash", { kind: "run", command: "echo ok" })),
-    snapshotRow(completedTool(6, "bash", { kind: "run", command: "false" }, { status: "error", exitCode: 1 })),
-    snapshotRow({
-      kind: "tell" as const,
+  const events: ActivityRow[] = [
+    { kind: "call", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "first input" },
+    { kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "spoken line\n  indented line" },
+    { kind: "thought", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden reasoning" },
+    { kind: "note", sequence: 4, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "a note" },
+    completedTool(5, "bash", { kind: "run", command: "echo ok" }),
+    completedTool(6, "bash", { kind: "run", command: "false" }, { status: "error", exitCode: 1 }),
+    {
+      kind: "tell",
       sequence: 7,
       at: AKUMA_ACTIVITY_AT,
       tellId: "tell/grammar",
       text: "pending input",
-      state: "pending" as const,
+      state: "pending",
       deliveries: [],
-    }),
-    { kind: "gap" as const, count: 2 },
+    },
+    answeredOutcome(8, "the answer"),
   ];
   const text = historyText(
     {
       kind: "akuma",
       akumaId: parseAkumaId("aku/worker/abcd1234").id,
-      events: [
-        ...entries.flatMap((entry) => entry.kind === "row" ? [entry.row] : []),
-        answeredOutcome(8, "the answer"),
-      ],
+      events,
       omitted: 2,
       lowestRetainedSequence: 1,
       highestSequence: 8,
@@ -235,12 +223,8 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
     state: "pending",
     deliveries: [],
   };
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id: "aku/worker/abcd1234",
-    life: "asleep",
-    timeline: idleAkumaSnapshot([{ kind: "row", row: pending }]),
-  });
+  const rows = [pending];
+  const status = statusOf("aku/worker/abcd1234", "asleep", rows);
   const text = snapshotText(observation(status), DEFAULT_CONTEXT);
   assert.match(text, /pending input 1/u);
   assert.deepEqual(observation(status).work.pending, [{ id: 1, tellId: "tell/pending" }]);
@@ -248,12 +232,7 @@ test("sleeping with a pending Tell concludes pending, not completed", () => {
 });
 
 test("activity age writes a suffix only when the age names a unit", () => {
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id: "aku/worker/abcd1234",
-    life: "running",
-    timeline: openAkumaSnapshot([]),
-  });
+  const status = statusOf("aku/worker/abcd1234", "running", []);
   const observedAt = Date.parse(AKUMA_ACTIVITY_AT);
   const text = (lastActivityAt: string, now: number) =>
     snapshotText({ ...observation(status), lastActivityAt }, { ...DEFAULT_CONTEXT, now });
@@ -284,11 +263,11 @@ test("Akuma observation failures name the target and reason without carrier word
   );
 });
 
-function waitItem(status: LiveStatusObservation["status"]): AkumaWaitItem {
-  const pending = status.timeline.entries.some((entry) =>
-    entry.kind === "row" && entry.row.kind === "tell" && entry.row.state === "pending",
-  );
-  const outcome = status.timeline.kind === "idle" ? status.timeline.outcome : undefined;
+function waitItem(status: LiveStatusObservation["status"], rows: readonly ActivityRow[]): AkumaWaitItem {
+  const pending = status.work.pending !== undefined;
+  const outcome = status.work.kind === "idle"
+    ? rows.findLast((row): row is OutcomeRow => row.kind === "outcome")
+    : undefined;
   return {
     kind: "observed",
     id: status.id,
@@ -299,13 +278,17 @@ function waitItem(status: LiveStatusObservation["status"]): AkumaWaitItem {
   };
 }
 
-function waitStatus(
-  id: string,
-  life: LiveStatusObservation["status"]["life"],
-  timeline: LiveStatusObservation["status"]["timeline"],
-  extra: { strandedReason?: "resume-unsupported" } = {},
-): LiveStatusObservation["status"] {
-  return liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id, life, timeline, ...extra });
+function singleWait(
+  status: LiveStatusObservation["status"],
+  rows: readonly ActivityRow[],
+  columns = 120,
+  alias?: string,
+): string {
+  return waitText(
+    { kind: "akuma", reason: "completed", results: [waitItem(status, rows)] },
+    { ...(alias === undefined ? {} : { alias }) },
+    { columns, color: false },
+  );
 }
 
 function failedOutcome(sequence: number, diagnostic: string): OutcomeRow {
@@ -330,26 +313,18 @@ function pendingTellRow(sequence: number): Extract<ActivityRow, { kind: "tell" }
   };
 }
 
-function singleWait(status: LiveStatusObservation["status"], columns = 120, alias?: string): string {
-  return waitText(
-    { kind: "akuma", reason: "completed", results: [waitItem(status)] },
-    { ...(alias === undefined ? {} : { alias }) },
-    { columns, color: false },
-  );
-}
-
 test("wait renders compact member facts and complete labeled outcomes", () => {
-  const members = [
-    waitStatus("aku/worker/abcd0103", "asleep", idleAkumaSnapshot([], failedOutcome(1, "provider 503"))),
-    waitStatus("aku/worker/abcd0105", "killed", idleAkumaSnapshot([], answeredOutcome(1, "stale answer"))),
-    waitStatus("aku/worker/abcd0106", "hung", openAkumaSnapshot([])),
-    waitStatus("aku/worker/abcd0107", "untidy", openAkumaSnapshot([])),
-    waitStatus("aku/worker/abcd0108", "stranded", openAkumaSnapshot([]), { strandedReason: "resume-unsupported" }),
-    waitStatus("aku/worker/abcd0109", "asleep", idleAkumaSnapshot([snapshotRow(pendingTellRow(1))])),
-    waitStatus("aku/worker/abcd0110", "running", openAkumaSnapshot([snapshotRow(pendingTellRow(1))])),
+  const members: Array<[LiveStatusObservation["status"], readonly ActivityRow[]]> = [
+    [statusOf("aku/worker/abcd0103", "asleep", [failedOutcome(1, "provider 503")]), [failedOutcome(1, "provider 503")]],
+    [statusOf("aku/worker/abcd0105", "killed", [answeredOutcome(1, "stale answer")]), [answeredOutcome(1, "stale answer")]],
+    [statusOf("aku/worker/abcd0106", "hung", [turnStarted(1)]), [turnStarted(1)]],
+    [statusOf("aku/worker/abcd0107", "untidy", [turnStarted(1)]), [turnStarted(1)]],
+    [statusOf("aku/worker/abcd0108", "stranded", [turnStarted(1)], { strandedReason: "resume-unsupported" }), [turnStarted(1)]],
+    [statusOf("aku/worker/abcd0109", "asleep", [pendingTellRow(1)]), [pendingTellRow(1)]],
+    [statusOf("aku/worker/abcd0110", "running", [turnStarted(1), pendingTellRow(1)]), [turnStarted(1), pendingTellRow(1)]],
   ];
   const text = waitText(
-    { kind: "akuma", reason: "completed", results: members.map(waitItem) },
+    { kind: "akuma", reason: "completed", results: members.map(([status, rows]) => waitItem(status, rows)) },
     {},
     { columns: 120, color: false },
   );
@@ -377,15 +352,12 @@ test("wait renders compact member facts and complete labeled outcomes", () => {
 
 test("wait wraps its full answer without truncating identity or payload", () => {
   const id = "aku/worker/abcd0111";
-  const status = waitStatus(
-    id,
-    "asleep",
-    idleAkumaSnapshot([], answeredOutcome(1, "a very long answered preview that cannot fit")),
-  );
-  const narrow = singleWait(status, 40);
+  const rows = [answeredOutcome(1, "a very long answered preview that cannot fit")];
+  const status = statusOf(id, "asleep", rows);
+  const narrow = singleWait(status, rows, 40);
   assert.ok(narrow.startsWith(`✓ ${id} — `), "the mark, complete identity, and separator survive");
   assert.ok(narrow.endsWith("cannot fit"), "the answer tail remains complete at narrow width");
-  const wide = singleWait(status, 200);
+  const wide = singleWait(status, rows, 200);
   assert.equal(
     wide,
     `✓ ${id} — answered\n  turn/1 · answered\n  a very long answered preview that cannot fit`,
@@ -394,13 +366,14 @@ test("wait wraps its full answer without truncating identity or payload", () => 
 });
 
 test("wait keeps a single-target alias and none in plural output", () => {
-  const status = waitStatus("aku/worker/abcd0112", "asleep", idleAkumaSnapshot([]));
-  assert.equal(singleWait(status, 120, "@scout"), "✓ aku/worker/abcd0112 (@scout) — completed");
+  const status = statusOf("aku/worker/abcd0112", "asleep", []);
+  assert.equal(singleWait(status, [], 120, "@scout"), "✓ aku/worker/abcd0112 (@scout) — completed");
+  const other = statusOf("aku/worker/abcd0113", "asleep", []);
   const plural = waitText(
     {
       kind: "akuma",
       reason: "completed",
-      results: [waitItem(status), waitItem(waitStatus("aku/worker/abcd0113", "asleep", idleAkumaSnapshot([])))],
+      results: [waitItem(status, []), waitItem(other, [])],
     },
     { alias: "@scout" },
     DEFAULT_CONTEXT,
@@ -525,17 +498,11 @@ test("Akuma life mark covers the full life vocabulary from one definition site",
 });
 
 test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id: "aku/worker/abcd1234",
-    life: "running",
-    timeline: openAkumaSnapshot(
-      [],
-      [
-        reportedFileChange("/work/unknown"),
-        { ...reportedFileChange("/work/known"), diffstat: { added: 3, removed: 1 } },
-      ],
-    ),
+  const status = statusOf("aku/worker/abcd1234", "running", [turnStarted(1)], {
+    changes: [
+      reportedFileChange("/work/unknown"),
+      { ...reportedFileChange("/work/known"), diffstat: { added: 3, removed: 1 } },
+    ],
   });
   const text = snapshotText(observation(status), DEFAULT_CONTEXT);
   assert.ok(
@@ -832,15 +799,13 @@ test("Tell delivery keeps copyable log coordinates on its subject and bounds the
 test("an observation panel orders identity, context, activity, conclusion, outputs, and diagnostics", () => {
   const id = "aku/worker/abcd1234";
   const context = { columns: 100, color: false };
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id,
-    life: "running",
+  const rows = [
+    turnStarted(1),
+    { kind: "said" as const, sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" },
+  ];
+  const status = statusOf(id, "running", rows, {
     cwd: "/work/appointed",
-    timeline: openAkumaSnapshot(
-      [{ kind: "row", row: { kind: "said", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "edited" } }],
-      [reportedFileChange("/work/file")],
-    ),
+    changes: [reportedFileChange("/work/file")],
   });
   const text = snapshotText(
     observation(
@@ -882,18 +847,11 @@ test("an observation panel orders identity, context, activity, conclusion, outpu
 test("a narrow panel never truncates a copyable identity", () => {
   const id = "aku/worker/abcd1234";
   const context = { columns: 40, color: false };
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({
-    birth: DIRECT_BIRTH,
-    id,
-    life: "running",
-    cwd: "/work/界界界/deep/path",
-    timeline: openAkumaSnapshot([
-      {
-        kind: "row",
-        row: { kind: "said", sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "👩‍💻".repeat(30) },
-      },
-    ]),
-  });
+  const rows: ActivityRow[] = [
+    turnStarted(1),
+    { kind: "said", sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "👩‍💻".repeat(30) },
+  ];
+  const status = statusOf(id, "running", rows, { cwd: "/work/界界界/deep/path" });
   const lines = snapshotText(
     observation(status, { kind: "associated", contractId: contractId("kei/narrow-columns") }),
     context,

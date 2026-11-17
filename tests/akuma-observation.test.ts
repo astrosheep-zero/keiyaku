@@ -1,17 +1,19 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { rm, symlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { Akumas } from "../src/library/akumas.js";
 import { akumaObservationSchema } from "../src/akuma/selection-observation.js";
-import { snapshotText, DEFAULT_CONTEXT } from "../src/cli/render/akuma-activity.js";
 import { World } from "../src/world.js";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { recordTell, soulFixture } from "./support/akuma-fixtures.js";
-import { defaultWaitComplete } from "../src/akuma/akuma-observe.js";
+import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
+import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
+import { projectFact } from "../src/akuma/projection.js";
+import { summarizeFrontier } from "../src/akuma/projection-read.js";
 import {
   HeldAkumaLeash,
   activitySlice,
@@ -27,9 +29,6 @@ import {
 } from "../src/akuma/heart/index.js";
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
-import { bornStatus, readLiveStatus, waitForObservation } from "../src/akuma/akuma-observe.js";
-import { executeWaitAkuma } from "../src/akuma/akuma-wait.js";
-import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 
 async function fixture() {
@@ -45,7 +44,6 @@ test("chatty status keeps latest intent, observed activity age, current tools an
     const api = Akumas.of(await World.at(value.root));
     const empty = await api.status({ akuma: id });
     assert.equal(empty.lastActivityAt, undefined);
-    assert.doesNotMatch(snapshotText(empty, DEFAULT_CONTEXT), /last activity/u);
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
     const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
     assert.equal((await api.status({ akuma: id })).lastActivityAt, undefined, "a Turn opening alone is not activity");
@@ -74,13 +72,13 @@ test("chatty status keeps latest intent, observed activity age, current tools an
     assert.deepEqual(json.changes?.map(change => change.path), inside.slice(1));
     assert.equal(json.moreChanges, true);
     assert.equal(json.outsideChanges, outside.length);
-    const text = snapshotText(view, { ...DEFAULT_CONTEXT, now: Date.parse(at) + 19_000 });
-    assert.match(text, /running · last activity \S+ ago/u);
-    assert.ok(text.indexOf("last activity") < text.indexOf("watch current work"));
-    assert.equal(view.work.summary?.text, "run $ watch current work");
-    for (const content of ["watch current work", "3 outside worktree"])
-      assert.ok(text.includes(content), content);
-    for (const path of outside) assert.ok(!text.includes(path));
+    const frontier = (await readStatusFacts(paths)).map(projectFact);
+    assert.deepEqual(
+      json.recent?.map(row => row.sequence),
+      frontier.slice(-3).map(row => row.sequence),
+      "status carries exactly the latest Turn's three newest retained rows",
+    );
+    assert.equal(json.work.summary?.text, "run $ watch current work");
     const settledAt = "2026-08-08T00:00:02.000Z";
     await endTurn(paths, { turnSequence: turn.sequence, completedAt: settledAt,
       outcome: { kind: "answered", answer: "done", session: { sessionId: "status-trunk" } } });
@@ -92,14 +90,13 @@ test("chatty status keeps latest intent, observed activity age, current tools an
     const listed = (await api.list({ selection: "settled" })).rows?.find(row => row.id === id);
     assert.equal(listed?.lastActivityAt, asleep.lastActivityAt);
     assert.equal(listed?.lifeAt, settledAt, "Body settlement advances life time independently");
-    assert.match(snapshotText(asleep, DEFAULT_CONTEXT), /asleep · last activity \S+ ago/u);
   } finally {
     leash.release();
     value.close();
   }
 });
 
-test("reported changes partition by canonical containment through symlinks and case aliases", async () => {
+test("reported changes partition by lexical path spelling without canonicalization", async () => {
   const value = await fixture();
   const { paths, id } = value.allocated;
   const outsideRoot = mkdtempSync(join(tmpdir(), "keiyaku-outside-"));
@@ -115,6 +112,8 @@ test("reported changes partition by canonical containment through symlinks and c
     const append = (event: Parameters<typeof appendActivity>[1]["event"]) =>
       appendActivity(paths, { turnSequence: turn.sequence, at, event });
 
+    // A symlink spelling the very same directory is still a foreign path: containment
+    // reads the reported spelling and never asks the filesystem to canonicalize it.
     await symlink(value.root, alias, "dir");
     await writeFile(join(value.root, "kept.ts"), "kept\n");
     const deleted = join(value.root, "deleted.ts");
@@ -124,15 +123,16 @@ test("reported changes partition by canonical containment through symlinks and c
     await symlink(outsideRoot, escape, "dir");
     const swapCase = (text: string): string =>
       [...text].map((letter) => (letter === letter.toLowerCase() ? letter.toUpperCase() : letter.toLowerCase())).join("");
-    const swappedRoot = join(dirname(value.root), swapCase(basename(value.root)));
-    const caseFolds = (() => {
-      try { return realpathSync.native(swappedRoot) === value.root; } catch { return false; }
-    })();
-    const caseAlias = join(swappedRoot, "Case-Alias.ts");
-    if (caseFolds) await writeFile(join(value.root, "Case-Alias.ts"), "case\n");
+    // Case-folded spellings are foreign too, even where the filesystem would fold them.
+    const caseAlias = join(dirname(value.root), swapCase(basename(value.root)), "Case-Alias.ts");
 
-    const inside = [join(alias, "kept.ts"), join(alias, "deleted.ts"), ...(caseFolds ? [caseAlias] : [])];
-    const outside = [join(outsideRoot, "scratch.ts"), join(escape, "leak.ts")];
+    const inside = [join(value.root, "kept.ts"), join(value.root, "deleted.ts"), join(escape, "leak.ts")];
+    const outside = [
+      join(alias, "kept.ts"),
+      join(alias, "deleted.ts"),
+      join(outsideRoot, "scratch.ts"),
+      caseAlias,
+    ];
     await append({ type: "tool", phase: "completed", id: "changes", name: "Edit",
       call: { kind: "fileChange", changes: [...inside, ...outside].map(path => ({ op: "update", path })) },
       result: { status: "ok" } });
@@ -151,8 +151,7 @@ test("reported changes partition by canonical containment through symlinks and c
 test("status reports the one current model and follows confirmed native changes", async () => {
   const value = await fixture();
   const { paths } = value.allocated;
-  const input = { aperture: "monitoring" as const };
-  const status = async () => (await bornStatus(paths, value.soul.id, input)).status;
+  const status = async () => await bornStatus(paths, value.soul.id);
   const modelRows = async (): Promise<number> => {
     const database = new DatabaseSync(paths.heart);
     try {
@@ -335,12 +334,13 @@ test("wait rechecks its final status when a completed probe acquires a new pendi
     });
     const result = await executeWaitAkuma({ path: value.root, ids: [id], completion: "all", timeoutMs: 250 });
     assert.equal(result.reason, "deadline", "new pending work invalidates the completed probe");
-    assert.equal(defaultWaitComplete(result.observations[0]!), false);
-    assert.ok(
-      result.observations[0]!.timeline.entries.some(
-        (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "new-pending",
-      ),
-    );
+    const item = result.results[0]!;
+    assert.equal(item.kind, "observed");
+    assert.equal(item.kind === "observed" ? item.life : undefined, "asleep");
+    assert.equal(item.kind === "observed" ? item.pending : undefined, true);
+    const status = await bornStatus(paths, id);
+    assert.equal(status.work.kind, "idle");
+    assert.equal(status.work.pending?.[0]?.tellId, "new-pending", "pending input stays independently visible");
   } finally {
     leash.release();
     value.close();
@@ -369,14 +369,17 @@ test("wait returns stranded failure without consuming pending input", async () =
       path: value.root, ids: [id], completion: "all", signal: AbortSignal.timeout(2000),
     });
     assert.equal(result.reason, "completed");
-    const status = result.observations[0]!;
-    assert.equal(status.life, "stranded");
-    assert.equal(defaultWaitComplete(status), true);
-    assert.equal(status.timeline.kind, "idle");
-    assert.match(JSON.stringify(status.timeline), /session creation: 405/);
-    assert.ok(status.timeline.entries.some((entry) =>
-      entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === "undelivered" && entry.row.state === "pending",
-    ));
+    const item = result.results[0]!;
+    assert.ok(item.kind === "observed");
+    assert.equal(item.life, "stranded");
+    assert.equal(item.pending, true, "completion leaves the undelivered Tell pending");
+    assert.match(item.outcome?.kind === "failed" ? item.outcome.diagnostic : "", /session creation: 405/u);
+    const status = await bornStatus(paths, id);
+    assert.equal(status.work.kind, "idle");
+    assert.equal(status.work.outcome?.verdict, "failed");
+    assert.equal(status.work.pending?.[0]?.tellId, "undelivered");
+    assert.equal(status.recent?.at(-1)?.kind, "outcome");
+    assert.match(JSON.stringify(status.recent), /session creation: 405/u);
   } finally {
     leash.release();
     value.close();
@@ -414,14 +417,17 @@ test("a live status observation pairs its bounded status with the same complete 
     await leash.birth(paths, value.soul);
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
     await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt, call: "live frontier" });
-    const input = { aperture: "monitoring" as const, ordinaryBudget: 0 };
-    const observed = await readLiveStatus(value.root, id, input);
-    const facts = await readStatusFacts(paths, input);
-    const ledger = projectTurns(facts);
+    const observed = await readLiveStatus(value.root, id);
+    const rows = (await readStatusFacts(paths)).map(projectFact);
     assert.equal(observed.status.provider, "claude");
     assert.equal(observed.status.model, "claude-sonnet-4-5");
-    assert.deepEqual(observed.status.timeline, selectSnapshot(ledger, input).snapshot, "status keeps its bounded public shape");
-    assert.deepEqual(observed.rows, ledger.rows, "the callback companion is the complete projection of that frontier");
+    assert.deepEqual(observed.rows, rows, "the callback companion is the complete projection of that frontier");
+    assert.deepEqual(
+      observed.status.recent,
+      rows.slice(-3),
+      "status keeps only the latest Turn's three newest rows, projected from the same facts",
+    );
+    assert.equal(observed.status.work.kind, "open");
     assert.equal("rows" in observed.status, false, "the public status itself carries no companion field");
   } finally {
     leash.release();
@@ -491,11 +497,9 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
       isError: false,
       result: { details: { patch: "@@ -1 +1,2 @@\n-x\n+y\n+z" } },
     });
-    const snapshot = selectSnapshot(projectTurns((await activitySlice(paths)).rows), {
-      aperture: "monitoring",
-    }).snapshot;
-    assert.equal(snapshot.kind, "open");
-    const reported = snapshot.reportedChanges.map((change) => ({
+    const frontier = summarizeFrontier((await activitySlice(paths)).rows.map(projectFact), value.root);
+    assert.equal(frontier.work.kind, "open");
+    const reported = (frontier.changes ?? []).map((change) => ({
       path: change.path,
       ...(change.diffstat === undefined ? {} : { diffstat: change.diffstat }),
     }));
@@ -544,17 +548,10 @@ test("a retained unknown tool call keeps its bounded argument preview through pr
     await appendActivity(paths, { turnSequence: turn.sequence, at: at(1), event: started[0]! });
     await appendActivity(paths, { turnSequence: turn.sequence, at: at(2), event: completed[0]! });
 
-    const snapshot = selectSnapshot(projectTurns((await activitySlice(paths)).rows), { aperture: "monitoring" })
-      .snapshot;
-    const calls = snapshot.entries.flatMap((entry) =>
-      entry.kind === "row" && entry.row.kind === "tool" ? [entry.row.call] : [],
-    );
-    assert.deepEqual(calls, [
-      {
-        kind: "other",
-        input: { json: JSON.stringify(args) },
-      },
-    ]);
+    const calls = (await activitySlice(paths)).rows.map(projectFact).flatMap(row => row.kind === "tool" ? [row.call] : []);
+    assert.deepEqual(calls, Array.from({ length: 2 }, () => ({
+      kind: "other", input: { json: JSON.stringify(args) },
+    })));
     assert.doesNotMatch(JSON.stringify(calls), /secret output/u, "a tool result body never enters the preview");
   } finally {
     leash.release();
@@ -612,44 +609,23 @@ test("status reads retain delivered frontier Tells without a global told substit
       },
     ]);
 
-    const facts = await readStatusFacts(paths, { aperture: "monitoring" });
+    const facts = await readStatusFacts(paths);
     assert.deepEqual(
       facts.filter((fact) => fact.kind === "tell").map((fact) => fact.id),
       [opening.tell.id, live.tell.id],
     );
-    const zero = await bornStatus(paths, id, { aperture: "monitoring", ordinaryBudget: 0 });
-    assert.equal(zero.status.timeline.kind, "open");
-    if (zero.status.timeline.kind === "open") {
-      assert.equal(zero.status.timeline.openingSequence, opening.tell.sequence);
-      assert.deepEqual(
-        zero.status.timeline.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
-        [opening.tell.sequence, "gap:1"],
-      );
-    }
-    assert.equal(zero.ordinarySelected, 0);
-
-    const budgeted = await bornStatus(paths, id, { aperture: "monitoring", ordinaryBudget: 1 });
-    assert.equal(budgeted.status.timeline.kind, "open");
-    if (budgeted.status.timeline.kind === "open") {
-      assert.deepEqual(
-        budgeted.status.timeline.entries.map((entry) => (entry.kind === "gap" ? `gap:${entry.count}` : entry.row.sequence)),
-        [opening.tell.sequence, live.tell.sequence],
-      );
-      assert.equal(
-        budgeted.status.timeline.entries.some(
-          (entry) => entry.kind === "row" && entry.row.kind === "tell" && entry.row.tellId === unrelated.tell.id,
-        ),
-        false,
-      );
-    }
-    assert.equal(budgeted.ordinarySelected, 1);
+    const status = await bornStatus(paths, id);
+    assert.equal(status.work.kind, "open");
+    assert.deepEqual(status.recent?.map(row => row.sequence), [opening.tell.sequence, frontier.sequence, live.tell.sequence]);
+    assert.equal(status.recent?.some(row => row.kind === "tell" && row.tellId === unrelated.tell.id), false);
+    assert.equal(status.work.summary?.id, live.tell.sequence);
   } finally {
     leash.release();
     value.close();
   }
 });
 
-test("status preserves unborn and Tell-only apertures without a Turn", async () => {
+test("status preserves pending input before any Turn without inventing recent work", async () => {
   const value = await fixture();
   const { paths, id } = value.allocated;
   const leash = (await HeldAkumaLeash.try(paths))!;
@@ -665,20 +641,13 @@ test("status preserves unborn and Tell-only apertures without a Turn", async () 
           kind: "undelivered",
           receivedAt: value.soul.createdAt,
         });
-      for (const aperture of ["monitoring", "receipt"] as const) {
-        for (const admittedTellId of [undefined, "only-tell", "absent"]) {
-          const input = { aperture, ...(admittedTellId === undefined ? {} : { admittedTellId }) };
-          const observed = await bornStatus(paths, id, input);
-          assert.deepEqual(observed.status.timeline, selectSnapshot(projectTurns(await readStatusFacts(paths, input)), input).snapshot);
-          assert.equal(
-            observed.status.timeline.kind,
-            (phase === "pending" && (aperture === "monitoring" || admittedTellId !== "absent")) ||
-              (phase === "told" && admittedTellId === "only-tell")
-              ? "idle"
-              : "unborn",
-          );
-        }
-      }
+      const observed = await bornStatus(paths, id);
+      assert.equal(observed.work.kind, "idle");
+      assert.equal(observed.work.turn, undefined);
+      assert.equal(observed.recent, undefined);
+      assert.deepEqual(observed.work.pending, phase === "pending"
+        ? [{ id: (await readStatusFacts(paths)).find(fact => fact.kind === "tell")!.sequence, tellId: "only-tell" }]
+        : undefined);
     }
   } finally {
     leash.release();

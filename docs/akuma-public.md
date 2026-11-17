@@ -25,16 +25,13 @@ wrong-kind coordinate remains unknown rather than selecting other evidence.
 ## One Public Timeline
 
 Status and history derive from one retained Heart timeline in durable sequence
-order. They do not join outcomes by timestamp or read a second Turn projection.
-Active tool work appears where it began; once its completion is witnessed, its
-single completed row appears where it finished in that same durable order.
-Every tool row carries the producer's native invocation identity scoped to its
-Turn, so a start and its later witnessed completion name the same work without
-reconstruction from arguments, position, or retained neighbours; that identity
-also survives a completion whose start is no longer retained. Elapsed time is
-derived only when the retained start remains available. History
-cursors, live observation, current-work selection, and reported changes consume
-that one completion-ordered interpretation without replaying the earlier start.
+order. Each retained fact remains independently visible. A tool's start and
+completion keep their own durable identities, correlated by the producer's
+native invocation identity within the Turn. Completion neither relocates nor
+replaces the start, and observation synthesizes no tool duration or execution
+state. Narration remains visible even when it equals a later final answer.
+History, exact reads, live observation, current work, and reported changes share
+this one interpretation.
 A born status reports its frozen execution directory and provider, and the
 Akuma's one current model. The model is the selection its birth admitted until
 the running Body's own native evidence replaces it, and that evidence afterwards.
@@ -53,31 +50,25 @@ Turn never carries it forward. This is observed work, not a new life state,
 permission policy, or a channel for answering the request. Absence of such
 evidence never proves that the provider cannot be waiting.
 
-A status snapshot reports semantic current work: an open or idle frontier,
-pending input, exact retained activity coordinates and the latest known outcome
-identity and verdict. It does not carry a terminal-chat timeline or answer
-preview. One optional bounded current-action summary names the pending approval,
-the selected active tool, or the latest settled narration or input when neither
-supplies it.
-The native owner derives it from the same frontier using neutral activity
-formatting and exposes clipping; omission establishes neither inactivity nor
-idle. Its latest retained activity time is observation evidence for every life
-state, with the same Heart-owned meaning as the roster's activity time
-([akuma-heart.md](akuma-heart.md)).
-Exact history and live observation retain their full typed interpretation;
-status does not remove their capability. Reported changes
-are a read-time summary of successful file-change activity on that same frontier,
-grouped by path. When the execution directory is available, the summary bounds
-its own changes to the five most recently changed files and counts outside files
-separately; an unavailable directory preserves the unpartitioned summary.
-Repeated edits to one path become one summary with accumulated known diffstat;
-omitted counts refer to files, not events. They are never a file ledger or fact.
+A status reports semantic current work directly from the retained frontier:
+open or idle work, pending input, the latest Turn and known outcome, and exact
+activity coordinates. A bounded current-action summary prioritizes pending
+approval, then the latest unmatched tool start on an open Turn, then the latest
+speech or delivered input. Its clipping remains visible. Optional recent detail
+is a fixed small tail of frontier rows, independent of approval, tool, and input
+evidence; there are no pinned rows, inline gaps, or shared detail budgets.
+Status never proves native liveness, and an absent summary proves neither
+inactivity nor idle. Its latest retained activity time has the same Heart-owned
+meaning as roster activity ([akuma-heart.md](akuma-heart.md)). Exact history and
+live observation retain their complete typed meaning.
 
-A live observing command may receive, beside that bounded status and only for
-its still-open callback, the complete retained semantic frontier from the same
-fact read and Turn projection. That transient companion preserves final forms
-that a later bounded status no longer selects, including rows of a newly idle
-Turn. It neither widens a status nor enters a public wait or spawn result.
+Reported changes summarize successful file-change completions on the latest
+Turn. Distinct paths retain their latest-change order and accumulate known
+sizes; any constituent with unknown size leaves that path's total unknown.
+The bounded summary prefers changes lexically inside the frozen execution
+directory and counts outside paths separately. Containment uses path spelling,
+without filesystem, symlink, or case canonicalization, and grants no filesystem
+authority. This advisory summary is neither a file ledger nor a retained fact.
 
 Live consumers may present the native current-work summary as a replaceable
 observation, replacing all prior work and life facts on each callback. Ask uses
@@ -88,16 +79,9 @@ Status and history are frozen projections, so they never assert liveness. Native
 timeline streams retain their complete windows and ordinary retention semantics;
 consumer presentation neither expands nor removes that capability.
 
-For an open Turn, the public timeline projector retains its opening input (the
-retained call, or else the earliest retained settled Tell delivered at launch)
-and its latest settled say independently of the ordinary-detail budget,
-alongside bounded provider activity, explicit reports, and settled delivered
-Tells in durable sequence order. A settled tool row carries its observed result
-text and any per-file patch content, while the reported-change summary carries
-path and known diffstat alone. Omission gaps describe only that
-current window. Placement discharge of reported changes for an accepted
-associated Contract belongs to composite observation in [kanshi.md](kanshi.md)
-and never alters the Heart projection.
+Placement discharge of reported changes for an accepted associated Contract
+belongs to composite observation in [kanshi.md](kanshi.md) and never alters Heart
+evidence.
 
 Public status, idle, history, and input-bound answer observation may notify
 optional plugins when they establish a retained committed outcome identity.
@@ -110,19 +94,15 @@ History pages the same projected ledger and is the sole public execution-history
 read. Page boundaries distinguish retained extent, omission and retention loss;
 known completeness is never inferred from an unavailable observation. Requested
 historical delivery evidence remains exact rather than reconstructed by later reads.
-An exact activity read recovers that activity's retained content, including a
-start displaced by its completion or final narration folded from a page. It
-creates no outcome, fork point, or durable fact, and never substitutes a nearby
+An exact activity read recovers the independently retained fact at that identity.
+It creates no outcome, fork point, or durable fact, and never substitutes a nearby
 row or another result. Provider capture and retention still bound recovery;
 unretained and non-activity coordinates remain unknown.
 It retains exact answered outcome bytes, including an empty answer, and
 the public history identity for a retained answered Turn. Latest-answer selection
 returns both from one retained observation; later non-answer facts do not replace it.
-When final narration duplicates an answered outcome, the outcome names that
-narration's durable identity for correlation without text comparison. Truncated
-or differing narration is never named as a duplicate. Fork accepts only an exact
-answered point. Pruned history remains unavailable; snapshots fabricate neither
-cursor nor result nor loss marker.
+Fork accepts only an exact answered point. Pruned history remains unavailable;
+observations fabricate neither cursor nor result nor loss marker.
 
 A stream observes that same retained timeline continuously: the caller pulls
 complete bounded timeline windows, one at a time, instead of asking for a page.
@@ -182,23 +162,19 @@ can advance it. Completion names the end of observation, not successful work;
 the final status preserves the lifecycle cause, outcome, and pending input.
 Standalone `idle` and plural
 or CLI `wait` name this same judgment for their respective caller contexts, and
-one set-observation owner serves both: frozen caller order, any/all completion,
-a shared ordinary-detail budget, transient unreadable peers, and honest final
-observed/unobserved evidence. The standalone face is the same algorithm
-projected to one association-free identity, not an unrelated loop or an upper
-facade call. Wait returns compact completion observations, never a timeline, live activity
-stream or current cross-product associations. They retain selected order,
-stopped life, whether pending input exists, concurrent failure and the exact
-settled answer or outcome coordinate, with unreadable and missing subjects
-distinguished. It may use the owner's lightweight completion probe to skip
-expensive running snapshots; an internal custom completion judge observes fully.
-Invocation waiting reuses native lifecycle evidence without full status,
-provider discovery or reported changes. It preserves complete exact-turn
-outcomes and, for running deadline members, bounded actual recent events in
-native order and capture limits. Life, outcome and events share an observed
-frontier, never future evidence from a later read. Activity failure is local;
-final processing is bounded and cancellable after the observation deadline,
-never history polled during waiting. Every return says whether it completed
+one set-observation owner serves standalone, plural, and invocation waits:
+frozen caller order, any/all completion, transient unreadable peers, and honest
+final observed/unobserved evidence. Each caller consumes compact native member
+evidence, without an intermediate full-status collection or a private alternate
+completion predicate. Wait returns stopped life, pending input, concurrent
+failure, and the exact retained outcome and answer, distinguishing missing from
+unreadable subjects. Lightweight probes read life and pending input without
+narration. Final detail derives from the same directly observed native frontier;
+invocation deadline detail may retain bounded recent events, but never substitutes
+that tail for an exact input-bound answer. Life, outcome and recent detail share
+one observation rather than later inferred evidence. Activity failure remains
+local; final processing stays bounded and cancellable after the deadline.
+Every return says whether it completed
 or reached the deadline; completion wins when the final deadline-edge observation
 satisfies the judgment. A deadline
 remains a current observation rather than manufacturing a lifecycle arm.

@@ -7,7 +7,7 @@ import { canonicalDocument } from "../../akuma/schema.js";
 import { classifyVerb, verbs } from "../../library/keiyaku-verbs.js";
 import type { AskProgress } from "../../akuma/akuma-selection-execution.js";
 import { StatusLine } from "../render/status-line.js";
-import { projectCurrentWork, type CurrentWork } from "../../akuma/status-projection.js";
+import type { CurrentWork } from "../../akuma/status-projection.js";
 import type { AkumaId } from "../../akuma/identity.js";
 import type { AkumaStatus } from "../../akuma/akuma.js";
 import { type CliOutcome, displayContext, resultContext, writeCliStream, writeJson, writeStdout } from "../streams.js";
@@ -85,7 +85,7 @@ export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): 
             observed = { id: event.id, inputId: event.tell.admission.tellId };
           } else {
             if (observed === undefined) return;
-            const work = projectCurrentWork(event.observation.status.timeline);
+            const work = event.observation.status.work;
             observed = {
               id: observed.id,
               inputId: observed.inputId,

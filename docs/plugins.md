@@ -294,13 +294,14 @@ Each operation owns delivery and deduplicates the same Akuma/outcome only within
 that operation. Status and wait observe their selected views, never incidental
 history. History observes its returned page or chosen result; stream observes
 its emitted window; input-bound observation uses only its exact admission's
-outcome. Wait delivers final-status observations without reading answer text;
-completion probes establish no observation. Results established together receive
+outcome. Wait delivers the exact identities established by its compact final
+native evidence without reading answer text for notification; completion probes
+establish no observation. Results established together receive
 concurrent bounded attempts, awaited without a detached queue or multiplied
 timeout.
 
 Wait and ask observe once in the process returning the concrete result that
-establishes identity: wait uses its returned status frontier and ask carries
+establishes identity: wait uses its returned compact native evidence, and ask carries
 exact identity beside its private live result. Later reads never reconstruct or
 replay observation. Decoding follows observation, including invalid answers;
 bounded spawn observes in the submitting process after admission. These

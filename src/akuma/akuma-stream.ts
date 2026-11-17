@@ -4,7 +4,8 @@ import { AkumaNotBornError } from "./akuma-errors.js";
 import { OBSERVATION_POLL_MS, type OutcomeObserver } from "./akuma-observe.js";
 import { createTimelineReader } from "./heart/index.js";
 import type { AkumaId, AkumaPaths } from "./identity.js";
-import { projectTurns, selectHistory, type ActivityHistory, type ActivityRow } from "./projection.js";
+import { projectFact, type ActivityHistory, type ActivityRow } from "./projection.js";
+import { selectHistory } from "./projection-read.js";
 
 /** The complete bounded latest timeline window one stream emission carries; never a delta. */
 export type AkumaStreamSnapshot = ActivityHistory;
@@ -38,7 +39,7 @@ async function announceOutcomes(
 
 /**
  * The observation loop itself. It decodes the retained timeline through the
- * existing Turn projection on every pull and answers with the whole latest
+ * flat fact projection on every changed pull and answers with the whole latest
  * bounded window, holding only that window and one reader. Complete windows
  * coalesce; they are not lossless event delivery, and the existing retention
  * metadata keeps its honest meaning.
@@ -67,7 +68,10 @@ async function* observeTimeline(
       if (read.changed) {
         if (!read.born) throw new AkumaNotBornError(id);
         const { rows, lowestRetained, highest } = read.slice;
-        const snapshot = selectHistory(projectTurns(rows, { lowestRetained, highest }), { limit: STREAM_WINDOW });
+        const snapshot = selectHistory(
+          { rows: rows.map(projectFact), lowestRetained, highest },
+          { limit: STREAM_WINDOW },
+        );
         if (previous === undefined || !isDeepStrictEqual(snapshot, previous)) {
           observedOutcomes = await announceOutcomes(id, snapshot.rows, observedOutcomes, observe);
           previous = snapshot;

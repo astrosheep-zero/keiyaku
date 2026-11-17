@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { tellRowSchema } from "./projection.js";
 import type { WorldRoot } from "../world.js";
-import { bornStatus, defaultWaitComplete, readWaitComplete, waitForObservation } from "./akuma-observe.js";
+import { executeWaitAkuma } from "./akuma-wait.js";
 import { recordTell, type TellFact } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId } from "./identity.js";
 export const BIRTH_TIMEOUT_MS = 30_000;
@@ -86,14 +86,15 @@ export async function admitCallInitialTell(
   }>,
 ): Promise<CallInitialTellAdmission> {
   const paths = pathsForAkumaId(input.world, input.id);
-  const birth = await waitForObservation({
+  const birth = await executeWaitAkuma({
+    path: input.world,
+    ids: [input.id],
+    completion: "all",
     timeoutMs: BIRTH_TIMEOUT_MS,
     ...(input.signal === undefined ? {} : { signal: input.signal }),
-    probe: async () => await readWaitComplete(input.world, [input.id], "all", input.signal),
-    observe: async () => (await bornStatus(paths, input.id, { aperture: "receipt" })).status,
-    complete: defaultWaitComplete,
   });
-  if (birth.reason !== "completed" || birth.value.life !== "asleep") {
+  const observed = birth.results[0];
+  if (birth.reason !== "completed" || observed?.kind !== "observed" || observed.life !== "asleep") {
     return {
       kind: "birth-failed",
       diagnostic: `Akuma ${input.id} prompt-free birth did not settle cleanly`,

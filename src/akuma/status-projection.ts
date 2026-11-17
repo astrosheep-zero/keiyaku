@@ -1,12 +1,5 @@
 import { z } from "zod";
-import {
-  publicPermissionRequestSchema,
-  type PermissionRow,
-  type ActiveToolRow,
-  type ActivityRow,
-  type ActivitySnapshot,
-  type ToolRow,
-} from "./projection.js";
+import { publicPermissionRequestSchema, type PermissionRow, type ActivityRow, type ToolRow } from "./projection.js";
 import { turnHistoryIdSchema } from "./identity.js";
 
 const sequence = z.number().int().nonnegative().safe();
@@ -58,24 +51,11 @@ function oneLine(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
 }
 
-function duration(milliseconds: number): string {
-  if (milliseconds < 1_000) return `${milliseconds}ms`;
-  const seconds = Math.round(milliseconds / 1_000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const remainder = seconds % 60;
-  return remainder === 0 ? `${minutes}m` : `${minutes}m ${remainder}s`;
-}
-
 function result(row: ToolRow): Pick<ToolRepr, "suffix" | "diagnostic"> {
-  if (typeof row.state === "string") return { suffix: "", diagnostic: "" };
-  const exitCode = row.state.exitCode;
-  const disposition = exitCode !== undefined ? (exitCode === 0 ? "ok" : `exit ${exitCode}`) : row.state.status;
-  const parts = [
-    ...(row.call.kind === "run" && row.durationMs !== undefined ? [duration(row.durationMs)] : []),
-    ...(disposition === "ok" ? [] : [disposition]),
-  ];
-  return { suffix: parts.length === 0 ? "" : ` — ${parts.join(" · ")}`, diagnostic: row.state.message ?? "" };
+  if (row.result === undefined) return { suffix: "", diagnostic: "" };
+  const exitCode = row.result.exitCode;
+  const disposition = exitCode !== undefined ? (exitCode === 0 ? "ok" : `exit ${exitCode}`) : row.result.status;
+  return { suffix: disposition === "ok" ? "" : ` — ${disposition}`, diagnostic: row.result.message ?? "" };
 }
 
 function readText(call: Extract<ToolRow["call"], { kind: "read" }>): ToolRepr {
@@ -110,7 +90,7 @@ export function renderDiffstat(diffstat: Readonly<{ added: number; removed: numb
   return diffstat === undefined ? "~" : `+${diffstat.added} -${diffstat.removed}`;
 }
 
-function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, state: ToolRow["state"]): ToolRepr {
+function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, phase: ToolRow["phase"]): ToolRepr {
   const first = call.changes[0];
   if (first === undefined) return { label: "edit", text: "files", suffix: "", diagnostic: "" };
   const label =
@@ -118,7 +98,7 @@ function fileChange(call: Extract<ToolRow["call"], { kind: "fileChange" }>, stat
   const before = call.changes.length === 1 ? "" : `${call.changes.length} files · `;
   const path = oneLine(first.path);
   const complete = call.changes.every((change) => change.diffstat !== undefined);
-  if (!complete && (state === "active" || state === "unsettled")) {
+  if (!complete && phase === "started") {
     const detail = call.changes.length === 1 ? "" : " ...";
     return { label, text: `${before}${path}`, suffix: detail, diagnostic: "" };
   }
@@ -150,7 +130,7 @@ function toolCore(row: ToolRow): ToolRepr {
     case "search":
       return { label: searchLabel(row.call.scope), text: searchText(row.call), suffix: "", diagnostic: "" };
     case "fileChange":
-      return fileChange(row.call, row.state);
+      return fileChange(row.call, row.phase);
     case "other": {
       const input = row.call.input;
       return {
@@ -201,49 +181,63 @@ function currentAction(row: ActivityRow): CurrentWork["summary"] {
   };
 }
 
-function awaitedPermission(snapshot: ActivitySnapshot, rows: readonly ActivityRow[]): PermissionRow | undefined {
-  if (snapshot.kind !== "open") return undefined;
-  const latest = rows.findLast((row) => row.kind === "permission");
-  return latest?.requests.length ? latest : undefined;
+function unmatchedTools(rows: readonly ActivityRow[], turnSequence: number | undefined): readonly ToolRow[] {
+  const active = new Map<string, ToolRow>();
+  for (const row of rows) {
+    if (row.kind !== "tool" || row.turnSequence !== turnSequence) continue;
+    active.delete(row.toolId);
+    if (row.phase === "started") active.set(row.toolId, row);
+  }
+  return [...active.values()];
 }
 
-/** One semantic projection of the already selected retained frontier. */
-export function projectCurrentWork(snapshot: ActivitySnapshot): CurrentWork {
-  if (snapshot.kind === "unborn") return { kind: "idle" };
-  const rows = snapshot.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
-  const active = rows.filter((row): row is ActiveToolRow => row.kind === "tool" && row.state === "active");
+/** Current work reads the complete directly retained frontier, never a bounded tail. */
+export function projectCurrentWork(rows: readonly ActivityRow[]): CurrentWork {
+  const turn = rows.findLast((row) => row.kind === "turn");
+  const outcome = rows.findLast((row) => row.kind === "outcome");
+  const open = turn !== undefined && (outcome === undefined || outcome.turnSequence !== turn.sequence);
+  const active = open ? unmatchedTools(rows, turn.sequence) : [];
   const pending = rows.flatMap((row) =>
     row.kind === "tell" && row.state === "pending" ? [{ id: row.sequence, tellId: row.tellId }] : [],
   );
-  const awaiting = awaitedPermission(snapshot, rows);
+  const permission = open
+    ? rows.findLast((row): row is PermissionRow => row.kind === "permission" && row.turnSequence === turn.sequence)
+    : undefined;
+  const awaiting = permission?.requests.length ? permission : undefined;
   const selected =
     awaiting ??
     active.at(-1) ??
-    rows.findLast((row) => row.kind === "said" || row.kind === "call" || (row.kind === "tell" && row.state === "told"));
+    rows.findLast((row) =>
+      row.kind === "said" || row.kind === "call"
+        ? row.turnSequence === turn?.sequence
+        : row.kind === "tell" &&
+          row.state === "told" &&
+          row.deliveries.some((delivery) => delivery.turnSequence === turn?.sequence),
+    );
   const summary = selected === undefined ? undefined : currentAction(selected);
-  const outcome = snapshot.kind === "idle" ? snapshot.outcome : undefined;
-  const latest = Math.max(rows.at(-1)?.sequence ?? -1, outcome?.sequence ?? -1);
   return {
-    kind: snapshot.kind,
-    ...(snapshot.kind === "open"
-      ? { turn: { sequence: snapshot.turn.sequence, bodySequence: snapshot.turn.bodySequence } }
-      : {}),
+    kind: open ? "open" : "idle",
+    ...(turn === undefined ? {} : { turn: { sequence: turn.sequence, bodySequence: turn.bodySequence } }),
     ...(active.length === 0
       ? {}
       : {
-          activeTools: active.map((row) => ({ id: row.sequence, turnSequence: row.turnSequence, toolId: row.toolId })),
+          activeTools: active.map((row) => ({
+            id: row.sequence,
+            turnSequence: row.turnSequence,
+            toolId: row.toolId,
+          })),
         }),
     ...(awaiting === undefined
       ? {}
       : {
           awaiting: {
-            kind: "permission",
+            kind: "permission" as const,
             id: awaiting.sequence,
             requests: awaiting.requests,
             ...(awaiting.truncated === true ? { clipped: true as const } : {}),
           },
         }),
-    ...(latest < 0 ? {} : { latestActivity: latest }),
+    ...(rows.length === 0 ? {} : { latestActivity: rows.at(-1)!.sequence }),
     ...(pending.length === 0 ? {} : { pending }),
     ...(outcome === undefined
       ? {}

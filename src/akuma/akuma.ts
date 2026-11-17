@@ -26,7 +26,7 @@ import {
   rebuildAkumaLineage,
   type AkumaLineage,
 } from "./lineage-cache.js";
-import type { ActivitySnapshot } from "./projection.js";
+import { activityRowSchema, reportedFileChangeSchema } from "./projection.js";
 import { currentWorkSchema } from "./status-projection.js";
 import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
 
@@ -78,6 +78,10 @@ export const akumaStatusSchema = z
     model: z.string().exactOptional(),
     lastActivityAt: z.string().exactOptional(),
     work: currentWorkSchema,
+    recent: z.array(activityRowSchema).max(3).readonly().exactOptional(),
+    changes: z.array(reportedFileChangeSchema).nonempty().readonly().exactOptional(),
+    moreChanges: z.literal(true).exactOptional(),
+    outsideChanges: z.number().int().positive().exactOptional(),
     strandedReason: z.literal("resume-unsupported").exactOptional(),
   })
   .strict()
@@ -484,7 +488,7 @@ export async function readAkumaCompleteRoster(
   };
 }
 
-/** Internal timeline observation for composition owners. */
-export async function readAkumaTimeline(path: WorldRoot, id: AkumaId): Promise<ActivitySnapshot> {
-  return (await new AkumaOwner(id, path).status()).timeline;
+/** Internal current-work observation for composition owners. */
+export async function readAkumaWork(path: WorldRoot, id: AkumaId): Promise<AkumaStatus["work"]> {
+  return (await new AkumaOwner(id, path).status()).work;
 }
