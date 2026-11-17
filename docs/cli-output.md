@@ -252,10 +252,18 @@ are ephemeral process observations, useful only when they report an actual
 boundary — never simulated progress, persisted facts, or a hidden alternative
 protocol. Four laws govern them. A command's durable output is one receipt,
 plus refusals; progress is not durable output. Progress lives only in the
-redrawable live frame and vanishes at completion, except that verification's
-own stdout and stderr content is factual and may stream. Off a terminal only
-completed facts appear — phase-finish lines and bounded live output, never a
-phase start, a stage transition, or an admitted fact. Admitted facts are named
+redrawable live frame and vanishes at completion. Verification retains bounded
+stdout and stderr suffixes for each observed phase and emits their labeled
+blocks at the phase boundary, in stdout then stderr order. Each stream names
+the amount of earlier output omitted, preserving the latest failure evidence.
+An observed empty stream remains distinct from an absent stream.
+Both terminal and non-terminal progress share that bounded observation;
+output does not stream line by line. Only witnessed phase finishes supply
+outcome and timing facts. Replacing or closing an unfinished phase flushes its
+captured output without inventing a finish. Closing erases the live line and
+retires its clock, never leaving a synthesized verification summary. Off a
+terminal phase starts, stage transitions, and admitted facts produce no
+progress output. Admitted facts are named
 exactly once, in the receipt: a failure receipt names the facts admitted before
 the failure and then names the failure in outcome vocabulary with its reason,
 and internal phase names never appear in receipt text. A stop on a retryable

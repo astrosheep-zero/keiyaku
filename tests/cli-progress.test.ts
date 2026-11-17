@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
+import { setImmediate } from "node:timers/promises";
 import test from "node:test";
 import { Keiyaku, type ExecutionObservation } from "../src/index.js";
 import { StatusLine } from "../src/cli/render/status-line.js";
@@ -15,7 +16,7 @@ import { withTellFailureReceipt } from "../src/akuma/akuma-errors.js";
 import type { VerbInput, VerbName, VerbRunFor } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { contractId, documentKey, entryUlid, snapshotId, type JournalEntry } from "../src/core/facts/types.js";
-import { ExecutionProgressRenderer, executionProgressLines } from "../src/cli/render/execution-progress.js";
+import { createExecutionProgressRenderer } from "../src/cli/render/execution-progress.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
 
 const bindFact: JournalEntry = {
@@ -35,19 +36,6 @@ const bindFact: JournalEntry = {
     },
   },
 };
-
-const claimedFact: JournalEntry = {
-  v: 1,
-  kind: "claimed",
-  contract: contractId("kei/progress"),
-  entry: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAW"),
-  at: "2026-01-01T00:00:01.000Z",
-  data: { delivery: entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FAX") },
-};
-
-function admittedEvent(fact: JournalEntry): ExecutionObservation {
-  return { kind: "admitted", contractId: fact.contract, fact };
-}
 
 class CapturedStream extends Writable {
   readonly chunks: string[] = [];
@@ -79,8 +67,8 @@ function phase(
 ): ExecutionObservation {
   return {
     kind: "verification",
-    contractId: "kei/progress" as never,
-    snapshot: "snapshot" as never,
+    contractId: contractId("kei/progress"),
+    snapshot: snapshotId("snapshot"),
     observation: {
       kind: "phase",
       cwd: "/scratch",
@@ -91,18 +79,14 @@ function phase(
       total: 1,
       ...values,
     },
-  } as ExecutionObservation;
+  };
 }
 
-function output(text: string): ExecutionObservation {
-  return outputFor("stdout", text);
-}
-
-function outputFor(stream: "stdout" | "stderr", text: string): ExecutionObservation {
+function output(text: string, stream: "stdout" | "stderr" = "stdout"): ExecutionObservation {
   return {
     kind: "verification",
-    contractId: "kei/progress" as never,
-    snapshot: "snapshot" as never,
+    contractId: contractId("kei/progress"),
+    snapshot: snapshotId("snapshot"),
     observation: {
       kind: "output",
       phase: "declaration",
@@ -114,23 +98,45 @@ function outputFor(stream: "stdout" | "stderr", text: string): ExecutionObservat
       stream,
       text,
     },
-  } as ExecutionObservation;
+  };
 }
 
-async function renderDeclarationOutput(chunks: readonly string[]): Promise<string> {
-  const stream = new CapturedStream(false);
-  const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 20, color: false } });
-  await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
-  for (const chunk of chunks) await renderer.consume(output(chunk));
-  await renderer.consume(phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0" }));
-  return stream.text;
+for (const isTTY of [true, false]) {
+  test(`phase output buffers complete blocks in stdout/stderr order (TTY ${isTTY})`, async () => {
+    const stream = new CapturedStream(isTTY);
+    const renderer = createExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+    renderer.observe(phase("started", { phase: "declaration" }));
+    renderer.observe(output("error", "stderr"));
+    renderer.observe(output("complete line\npartial"));
+    await setImmediate();
+    assert.doesNotMatch(stream.text, /stdout|stderr|complete line|partial|error/u);
+    renderer.observe(output(" line\n"));
+    renderer.observe(output(" tail", "stderr"));
+    renderer.observe(phase("finished", { phase: "declaration", outcome: "exit 0", elapsedMs: 2_000 }));
+    await renderer.finish();
+    assert.match(stream.text, /stdout\n  complete line\n  partial line\n\nstderr\n  error tail\n✓ declaration 1\/1 · 2s\n$/u);
+  });
+
+  test(`admitted and stage observations produce no progress (TTY ${isTTY})`, async () => {
+    const stream = new CapturedStream(isTTY);
+    const renderer = createExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+    renderer.observe({ kind: "admitted", contractId: bindFact.contract, fact: bindFact });
+    for (const stage of ["placement", "continuation", "reconciliation"] as const) {
+      for (const state of ["started", "finished"] as const) {
+        renderer.observe({ kind: "stage", contractId: bindFact.contract, stage, state });
+      }
+    }
+    await renderer.finish();
+    assert.equal(stream.text, "");
+  });
 }
 
-test("TTY progress refreshes one ticking line, returns after output, and persists the verification summary", async () => {
+test("TTY ticks the observed phase, resets its clock and erases without a summary", async () => {
   const stream = new CapturedStream(true);
   let now = 0;
   let tick: (() => void) | undefined;
-  const renderer = new ExecutionProgressRenderer({
+  let cancelled = 0;
+  const renderer = createExecutionProgressRenderer({
     stream,
     context: { columns: 160, color: false },
     now: () => now,
@@ -138,164 +144,204 @@ test("TTY progress refreshes one ticking line, returns after output, and persist
       tick = next;
       return 1 as unknown as ReturnType<typeof setInterval>;
     },
-    cancel: () => undefined,
+    cancel: () => {
+      cancelled++;
+    },
   });
-
-  await renderer.consume(phase("started", { phase: "setup", name: "npm ci" }));
+  renderer.observe(phase("started", { phase: "setup", name: "npm ci" }));
+  await setImmediate();
   now = 42_000;
   tick?.();
-  await renderer.consume(output("hello\n"));
-  await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
-  await renderer.consume(
-    phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0", elapsedMs: 2_000 }),
-  );
-  renderer.finish();
-
-  assert.match(stream.text, /\r\x1b\[2Kverify  ● setup · check 1\/1 · npm ci · 0s/u);
-  assert.match(stream.text, /\r\x1b\[2Kverify  ● setup · check 1\/1 · npm ci · 42s/u);
-  assert.match(stream.text, /stdout\n  hello\n\r\x1b\[2Kverify/u);
-  assert.match(stream.text, /verify  ✓ 1\/1 checks · 42s\n$/u);
+  renderer.observe(output("hello\n"));
+  renderer.observe(phase("started", { phase: "declaration" }));
+  await setImmediate();
+  assert.match(stream.text, /verify  ● setup · check 1\/1 · npm ci · 42s/u);
+  assert.match(stream.text, /stdout\n  hello\n\n\r\x1b\[2Kverify  ● declaration 1\/1 · 0s/u);
+  renderer.observe(phase("finished", { phase: "declaration", outcome: "exit 0", elapsedMs: 2_000 }));
+  await renderer.finish();
+  const closed = stream.text;
+  tick?.();
+  await renderer.finish();
+  assert.equal(stream.text, closed);
+  assert.equal(cancelled, 2);
+  assert.match(stream.text, /✓ declaration 1\/1 · 2s\n$/u);
 });
 
-test("admitted and stage progress never render outside a live frame", () => {
-  const admitted = admittedEvent(bindFact);
-  assert.deepEqual(executionProgressLines(admitted, { columns: 80, color: false }), []);
-  for (const stage of ["placement", "continuation", "reconciliation"] as const) {
-    for (const state of ["started", "finished"] as const) {
-      const event = { kind: "stage", contractId: "kei/progress", stage, state } as ExecutionObservation;
-      assert.deepEqual(executionProgressLines(event, { columns: 80, color: false }), []);
-    }
-  }
-});
-
-test("stage and admitted events never render on a TTY either", async () => {
-  const stream = new CapturedStream(true);
-  const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
-  await renderer.consume(admittedEvent(claimedFact));
-  await renderer.consume({
-    kind: "stage",
-    contractId: "kei/progress",
-    stage: "placement",
-    state: "started",
-  } as ExecutionObservation);
-  await renderer.consume({
-    kind: "stage",
-    contractId: "kei/progress",
-    stage: "placement",
-    state: "finished",
-  } as ExecutionObservation);
-  renderer.finish();
-  assert.equal(stream.text, "");
-});
-
-test("non-TTY progress does not repeat a phase coordinate and never prints a phase start", async () => {
+test("cumulative UTF-8 suffixes retain late failures, count omissions and reset each phase", async () => {
   const stream = new CapturedStream(false);
-  const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
-  await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
-  await renderer.consume(phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0" }));
-  assert.equal(stream.text, "✓ declaration 1/1\n");
-  assert.doesNotMatch(stream.text, /●/u);
-});
-
-test("non-TTY progress emits sparse boundaries, bounded output, and no key-value vocabulary", async () => {
-  const stream = new CapturedStream(false);
-  async function* events(): AsyncGenerator<ExecutionObservation> {
-    yield phase("started", { phase: "setup", name: "npm ci" });
-    yield output("x".repeat(5_000));
-    yield phase("finished", { phase: "setup", name: "npm ci", outcome: "ok", elapsedMs: 42_000 });
-  }
-
-  const progress = await writeExecutionProgress(stream);
-  for await (const event of events()) progress.observe(event);
-  await progress.finish();
-
-  assert.match(stream.text, /stdout\n  x/u);
-  assert.match(stream.text, /\[live output truncated\]/u);
-  assert.match(stream.text, /✓ setup · check 1\/1 · npm ci · 42s\n/u);
-  assert.doesNotMatch(stream.text, /●/u);
-  assert.doesNotMatch(stream.text, /(?:cwd|hook|declaration|elapsed)=/u);
-});
-
-test("live output consolidates adjacent chunks by stream and resets at the next phase", async () => {
-  const stream = new CapturedStream(false);
-  const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
-
-  await renderer.consume(phase("started", { phase: "setup", name: "npm ci" }));
-  await renderer.consume(output("stdout one"));
-  await renderer.consume(output("stdout two"));
-  await renderer.consume({
-    kind: "verification",
-    contractId: "kei/progress" as never,
-    snapshot: "snapshot" as never,
-    observation: {
-      kind: "output",
-      phase: "setup",
-      cwd: "/scratch",
-      name: "npm ci",
-      requirement: "check-one",
-      snapshot: snapshotId("snapshot"),
-      index: 1,
-      total: 1,
-      stream: "stderr",
-      text: "stderr one",
-    },
-  } as ExecutionObservation);
-  await renderer.consume(output("stdout three"));
-  await renderer.consume(phase("finished", { phase: "setup", name: "npm ci", outcome: "ok" }));
-  await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
-  await renderer.consume(output("stdout next"));
-  await renderer.consume(phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0" }));
-
-  assert.equal((stream.text.match(/^stdout$/gmu) ?? []).length, 3);
-  assert.equal((stream.text.match(/^stderr$/gmu) ?? []).length, 1);
-  assert.match(stream.text, /stdout\n  stdout onestdout two\nstderr\n  stderr one\n/u);
-  assert.match(stream.text, /stderr\n  stderr one\nstdout\n  stdout three\n/u);
-  assert.match(stream.text, /stdout\n  stdout next\n✓ declaration 1\/1\n/u);
-});
-
-test("live output applies one cumulative UTF-8-safe stream budget", async () => {
-  const stream = new CapturedStream(false);
-  const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 120, color: false } });
-
-  await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
-  await renderer.consume(output("🙂".repeat(700)));
-  await renderer.consume(outputFor("stderr", "between runs"));
-  await renderer.consume(output("界".repeat(700)));
-  const afterTruncation = stream.text;
-  await renderer.consume(output("z"));
-  await renderer.consume(output("ignored after truncation"));
-
+  const renderer = createExecutionProgressRenderer({ stream, context: { columns: 120, color: false } });
+  renderer.observe(phase("started", { phase: "declaration" }));
+  renderer.observe(output("🙂".repeat(700)));
+  renderer.observe(output("界".repeat(700)));
+  renderer.observe(output("FAIL"));
+  renderer.observe(output("e".repeat(4_097), "stderr"));
+  renderer.observe(phase("finished", { phase: "declaration", outcome: "exit 1" }));
+  renderer.observe(phase("started", { phase: "cleanup", name: "tidy" }));
+  renderer.observe(output("next phase"));
+  renderer.observe(output("s".repeat(4_096), "stderr"));
+  renderer.observe(phase("finished", { phase: "cleanup", name: "tidy", outcome: "ok" }));
+  await renderer.finish();
   const payload = stream.text.match(/[🙂界]+/gu)?.join("") ?? "";
-  assert.equal(Buffer.byteLength(payload), 4_096);
-  assert.equal(payload, "🙂".repeat(700) + "界".repeat(432));
-  assert.equal((stream.text.match(/^stdout$/gmu) ?? []).length, 2);
-  assert.equal((stream.text.match(/^stderr$/gmu) ?? []).length, 1);
-  assert.equal((stream.text.match(/^  \[live output truncated\]$/gmu) ?? []).length, 1);
-  assert.equal(stream.text, afterTruncation);
+  assert.equal(Buffer.byteLength(payload) + Buffer.byteLength("FAIL"), 4_096);
+  assert.equal(payload, "🙂".repeat(498) + "界".repeat(700));
+  const stdout = stream.text.split("stdout\n")[1]?.split("stderr\n")[0] ?? "";
+  assert.equal(stdout.replace(/\s/gu, "").endsWith("FAIL"), true);
+  assert.match(stdout, /^  \[earlier output omitted: 808 bytes\]\n/u);
+  const stderr = stream.text.split("stderr\n")[1]?.split("× declaration")[0] ?? "";
+  assert.match(stderr, /^  \[earlier output omitted: 1 byte\]\n/u);
+  assert.equal(stderr.split("byte]\n")[1]?.replace(/\s/gu, ""), "e".repeat(4_096));
+  assert.equal((stream.text.match(/\[earlier output omitted:/gu) ?? []).length, 2);
+  assert.doesNotMatch(stream.text, /�/u);
+  assert.match(stream.text, /stdout\n  next phase\nstderr\n/u);
+  const cleanupOutput = stream.text.split("stdout\n  next phase\nstderr\n")[1]?.split("✓ cleanup")[0] ?? "";
+  assert.equal(cleanupOutput.replace(/\s/gu, ""), "s".repeat(4_096));
 });
 
-test("logical live output is independent of mid-line and mid-newline chunk boundaries", async () => {
-  const whole = "alpha line\nbeta line\ngamma line";
-  const singleChunk = await renderDeclarationOutput([whole]);
-  const splitChunks = await renderDeclarationOutput(["alpha l", "ine\nbe", "ta line\n", "gamma line"]);
-
-  assert.equal(splitChunks, singleChunk);
-});
-
-test("live output emits complete lines before phase finish and retains a split line", async () => {
+test("suffix eviction removes whole code points and keeps subsequent output", async () => {
   const stream = new CapturedStream(false);
-  const renderer = new ExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+  const renderer = createExecutionProgressRenderer({ stream, context: { columns: 120, color: false } });
+  renderer.observe(output("界".repeat(1_366)));
+  renderer.observe(output("X"));
+  await renderer.finish();
+  assert.match(stream.text, /^stdout\n  \[earlier output omitted: 3 bytes\]\n/u);
+  const payload = stream.text.split("bytes]\n")[1]?.replace(/\s/gu, "") ?? "";
+  assert.equal(payload, "界".repeat(1_365) + "X");
+  assert.equal(Buffer.byteLength(payload), 4_096);
+});
 
-  await renderer.consume(phase("started", { phase: "declaration", index: 1, total: 1 }));
-  await renderer.consume(output("complete line\npartial"));
+test("empty observed streams differ from absent streams and unfinished phases flush once", async () => {
+  const stream = new CapturedStream(false);
+  const renderer = createExecutionProgressRenderer({ stream, context: { columns: 80, color: false } });
+  renderer.observe(phase("started", { phase: "setup", name: "install" }));
+  renderer.observe(output(""));
+  await setImmediate();
+  assert.equal(stream.text, "");
+  renderer.observe(phase("started", { phase: "declaration" }));
+  renderer.observe(output("unfinished", "stderr"));
+  await renderer.finish();
+  await renderer.finish();
+  assert.equal(stream.text, "stdout\n\nstderr\n  unfinished\n");
+});
 
-  assert.match(stream.text, /stdout\n  complete line\n/u);
-  assert.doesNotMatch(stream.text, /partial/u);
+test("chunk boundaries do not change rendered blocks", async () => {
+  const results: string[] = [];
+  for (const chunks of [["alpha line\nbeta line\ngamma line"], ["alpha l", "ine\nbe", "ta line\n", "gamma line"]]) {
+    const stream = new CapturedStream(false);
+    const renderer = createExecutionProgressRenderer({ stream, context: { columns: 20, color: false } });
+    renderer.observe(phase("started", { phase: "declaration" }));
+    for (const chunk of chunks) renderer.observe(output(chunk));
+    await renderer.finish();
+    results.push(stream.text);
+  }
+  assert.equal(results[0], results[1]);
+});
 
-  await renderer.consume(output(" line\n"));
+test("runtime progress awaits destination backpressure before completing", async () => {
+  let release: (() => void) | undefined;
+  const chunks: string[] = [];
+  const stream = new Writable({
+    highWaterMark: 1,
+    write(chunk, _encoding, callback) {
+      chunks.push(String(chunk));
+      release = callback;
+    },
+  });
+  const progress = await writeExecutionProgress(stream);
+  progress.observe(output("held"));
+  let finished = false;
+  const completion = progress.finish().then(() => {
+    finished = true;
+  });
+  await setImmediate();
+  assert.equal(finished, false);
+  assert.deepEqual(chunks, ["stdout\n  held\n"]);
+  release?.();
+  await completion;
+  assert.equal(stream.listenerCount("error"), 0);
+  assert.equal(stream.listenerCount("close"), 0);
+});
 
-  assert.match(stream.text, /    partial line\n/u);
-  await renderer.consume(phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0" }));
+for (const failure of ["error", "close", "write"] as const) {
+  test(`destination ${failure} failure releases the clock, queue and listeners`, async () => {
+    const stream = new CapturedStream(true);
+    let tick: (() => void) | undefined;
+    let cancelled = 0;
+    const renderer = createExecutionProgressRenderer({
+      stream,
+      context: { columns: 80, color: false },
+      schedule: (next) => {
+        tick = next;
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      },
+      cancel: () => {
+        cancelled++;
+      },
+    });
+    renderer.observe(phase("started", { phase: "declaration" }));
+    await setImmediate();
+    if (failure === "write") {
+      stream._write = (_chunk, _encoding, callback) => callback(new Error("destination failed"));
+      renderer.observe(output("failed block"));
+    } else if (failure === "error") {
+      stream.emit("error", new Error("destination failed"));
+    } else {
+      stream.emit("close");
+    }
+    await assert.rejects(renderer.finish(), failure === "close" ? /prematurely closed/u : /destination failed/u);
+    const closed = stream.text;
+    tick?.();
+    assert.equal(stream.text, closed);
+    assert.equal(cancelled, 1);
+    assert.equal(stream.listenerCount("error"), 0);
+    assert.equal(stream.listenerCount("close"), 0);
+  });
+}
+
+test("StatusLine finish is erase-only and idempotent, retaining explicit final lines", () => {
+  const stream = new CapturedStream(true);
+  let cancelled = 0;
+  const status = new StatusLine(stream, {
+    schedule: () => 1 as unknown as ReturnType<typeof setInterval>,
+    cancel: () => {
+      cancelled++;
+    },
+  });
+  status.show(() => "observed");
+  status.finish();
+  const erased = stream.text;
+  status.finish("duplicate");
+  assert.equal(stream.text, erased);
+  assert.equal(cancelled, 1);
+  const next = new StatusLine(stream, {
+    schedule: () => 1 as unknown as ReturnType<typeof setInterval>,
+    cancel: () => undefined,
+  });
+  next.show(() => "next");
+  next.finish("explicit final");
+  assert.match(stream.text, /\r\x1b\[2Kexplicit final\n$/u);
+});
+
+test("StatusLine retires its timer and formatter even if erase throws", () => {
+  const stream = new CapturedStream(true);
+  let tick: (() => void) | undefined;
+  let cancelled = false;
+  const status = new StatusLine(stream, {
+    schedule: (next) => {
+      tick = next;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    },
+    cancel: () => {
+      cancelled = true;
+    },
+  });
+  status.show(() => "observed");
+  stream.write = () => {
+    throw new Error("erase failed");
+  };
+  assert.throws(() => status.finish(), /erase failed/u);
+  assert.equal(cancelled, true);
+  assert.doesNotThrow(() => tick?.());
+  assert.doesNotThrow(() => status.finish());
 });
 
 test("StatusLine erases once, retires its timer even on write failure, and cannot restart", () => {
