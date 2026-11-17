@@ -401,7 +401,7 @@ function writeOutcomePlugin(root: string): void {
   );
 }
 
-test("plugin runtime selects project-shadowed enabled plugins in manifest-id order", async () => {
+test("plugin runtime selects project-shadowed enabled plugins", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -459,14 +459,15 @@ test("plugin runtime selects project-shadowed enabled plugins in manifest-id ord
     });
 
     await eventually(() => trace(output).includes("signal:aku/example:2"));
-    assert.deepEqual(trace(output), ["activate:project-alpha", "activate:beta", "signal:aku/example:2"]);
+    assert.deepEqual(trace(output).slice(0, 2).sort(), ["activate:beta", "activate:project-alpha"]);
+    assert.equal(trace(output)[2], "signal:aku/example:2");
     assert.deepEqual(diagnostics, []);
   } finally {
     value.close();
   }
 });
 
-test("plugin activation stages handlers and isolates import and activation failures", async () => {
+test("plugin activation admits complete instances and isolates native import and activation failures", async () => {
   const value = fixture();
   try {
     const output = join(value.root, "trace.txt");
@@ -477,7 +478,7 @@ test("plugin activation stages handlers and isolates import and activation failu
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "broken", apiVersion: 1 },',
-        '  activate(context) { appendFileSync(context.config.trace, "broken-activation\\n"); return { signals: { "akuma.turn-outcome": "not-a-handler" } }; },',
+        '  activate(context) { appendFileSync(context.config.trace, "broken-activation\\n"); return { signals: { "akuma.turn-outcome": () => appendFileSync(context.config.trace, "partial-handler\\n"), "akuma.born": "not-a-handler" } }; },',
         "};",
       ].join("\n"),
     );
@@ -492,9 +493,16 @@ test("plugin activation stages handlers and isolates import and activation failu
         "};",
       ].join("\n"),
     );
+    writePlugin(value.root, "throwing", `
+      export default {
+        manifest: { id: "throwing", apiVersion: 1 },
+        activate() { throw new Error("native activation failure"); }
+      };
+    `);
     writeProjectPlugins(value.root, {
       broken: { package: "./plugins/broken.mjs", config: { trace: output } },
       missing: { package: "./plugins/not-found.mjs" },
+      throwing: { package: "./plugins/throwing.mjs" },
       working: { package: "./plugins/working.mjs", config: { trace: output } },
     });
 
@@ -514,15 +522,13 @@ test("plugin activation stages handlers and isolates import and activation failu
 
     await eventually(() => trace(output).includes("working-signal"));
     assert.deepEqual(trace(output), ["broken-activation", "working-signal"]);
-    await eventually(() => diagnostics.some((value) => value.startsWith("plugin missing import:")));
-    assert.equal(
-      diagnostics.some((value) => value.startsWith("plugin broken activation:")),
-      true,
+    assert.equal(diagnostics.length, 3, diagnostics.join("; "));
+    assert.match(diagnostics.find((value) => value.startsWith("plugin broken "))!, /^plugin broken activation:/u);
+    assert.match(
+      diagnostics.find((value) => value.startsWith("plugin missing "))!,
+      /^plugin missing activation:.*Cannot find module.*not-found\.mjs/su,
     );
-    assert.equal(
-      diagnostics.some((value) => value.startsWith("plugin missing import:")),
-      true,
-    );
+    assert.ok(diagnostics.includes("plugin throwing activation: native activation failure"));
   } finally {
     value.close();
   }
@@ -539,7 +545,7 @@ test("plugin runtime rejects a handler name outside the accepted vocabulary", as
         'import { appendFileSync } from "node:fs";',
         "export default {",
         '  manifest: { id: "loose", apiVersion: 1 },',
-        '  activate(context) { return { signals: { "akuma.unknown": () => appendFileSync(context.config.trace, "unknown\\n") } }; },',
+        '  activate(context) { return { signals: { "akuma.turn-outcome": () => appendFileSync(context.config.trace, "partial-handler\\n"), "akuma.unknown": () => appendFileSync(context.config.trace, "unknown\\n") } }; },',
         "};",
       ].join("\n"),
     );
@@ -572,8 +578,109 @@ test("plugin runtime rejects a handler name outside the accepted vocabulary", as
       outcome: { kind: "answered", text: "done" },
     });
 
-    await eventually(() => diagnostics.includes("plugin loose activation: plugin signal is unknown: akuma.unknown"));
+    assert.equal(diagnostics.length, 1);
+    assert.match(diagnostics[0]!, /^plugin loose activation:.*akuma\.unknown/su);
     assert.deepEqual(trace(output), ["working-signal"]);
+  } finally {
+    value.close();
+  }
+});
+
+test("original plugin, instance, signals and resource receivers survive validation", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    writePlugin(value.root, "alpha", `
+      import { appendFileSync } from "node:fs";
+      const plugin = {
+        manifest: { id: "alpha", apiVersion: 1 },
+        activate(context) {
+          if (this !== plugin || Object.isFrozen(this)) throw new Error("package replaced or frozen");
+          const record = text => appendFileSync(context.config.trace, text + "\\n");
+          const signals = {
+            "akuma.turn-started"() {
+              if (this !== signals || Object.isFrozen(this)) throw new Error("signals replaced or frozen");
+              record("signal");
+            }
+          };
+          const instance = {
+            signals,
+            waitDeferral() {
+              if (this !== instance || Object.isFrozen(this)) throw new Error("instance replaced or frozen");
+              record("acquire");
+              const resource = {
+                close() {
+                  if (this !== resource || Object.isFrozen(this)) throw new Error("resource replaced or frozen");
+                  record("close");
+                }
+              };
+              return resource;
+            }
+          };
+          return instance;
+        }
+      };
+      export default plugin;
+    `);
+    writeProjectPlugins(value.root, {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+      alpha: { package: "./plugins/alpha.mjs", config: { trace: output } },
+    });
+    const diagnostics: string[] = [];
+    const runtime = await pluginRuntime({
+      world: await World.at(value.root),
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    const result = await runtime.withWaitDeferrals({ akumaIds: ["aku/example"] }, undefined, async () => {
+      await runtime.emit({ kind: "akuma.turn-started", akumaId: "aku/example", turnSequence: 1 });
+      return "observed";
+    });
+    assert.equal(result, "observed");
+    assert.deepEqual(trace(output), ["acquire", "signal", "close"]);
+    assert.deepEqual(diagnostics, []);
+  } finally {
+    value.close();
+  }
+});
+
+test("incompatible identity, version or instance refuses all plugin hooks", async () => {
+  const value = fixture();
+  try {
+    const output = join(value.root, "trace.txt");
+    const plugins: Record<string, unknown> = {
+      square: { package: "@astrosheep/keiyaku-plugin-square", enabled: false },
+    };
+    const cases = [
+      { id: "identity", manifest: { id: "other", apiVersion: 1 }, instance: "{}" },
+      { id: "version", manifest: { id: "version", apiVersion: 2 }, instance: "{}" },
+      { id: "deferral", manifest: { id: "deferral", apiVersion: 1 }, instance: "{ signals, waitDeferral: 42 }" },
+      { id: "extra", manifest: { id: "extra", apiVersion: 1 }, instance: "{ signals, unexpected: true }" },
+    ];
+    for (const { id, manifest, instance } of cases) {
+      writePlugin(value.root, id, `
+        import { appendFileSync } from "node:fs";
+        export default {
+          manifest: ${JSON.stringify(manifest)},
+          activate(context) {
+            const signals = { "akuma.turn-started"() { appendFileSync(context.config.trace, "leaked\\n"); } };
+            return ${instance};
+          }
+        };
+      `);
+      plugins[id] = { package: `./plugins/${id}.mjs`, config: { trace: output } };
+    }
+    writeProjectPlugins(value.root, plugins);
+    const diagnostics: string[] = [];
+    const runtime = await pluginRuntime({
+      world: await World.at(value.root),
+      reportDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+    });
+    await runtime.emit({ kind: "akuma.turn-started", akumaId: "aku/example", turnSequence: 1 });
+    assert.deepEqual(trace(output), []);
+    assert.equal(diagnostics.length, cases.length);
+    for (const { id } of cases) {
+      assert.equal(diagnostics.filter((diagnostic) => diagnostic.startsWith(`plugin ${id} activation:`)).length, 1);
+    }
   } finally {
     value.close();
   }
@@ -716,7 +823,7 @@ test("plugin writable paths reject traversal, management custody, duplicate name
     assert.equal(existsSync(join(outside, "escape")), false);
     for (const id of ["case", "duplicate", "reserved", "symlink", "traversal"]) {
       assert.equal(
-        diagnostics.some((value) => value.startsWith(`plugin ${id} validation:`)),
+        diagnostics.some((value) => value.startsWith(`plugin ${id} activation:`)),
         true,
       );
     }
@@ -768,12 +875,12 @@ test("a healthy plugin is emitted to while another activation hangs", { timeout:
     // handler waits for, so no clock advance or staging delay is needed.
     const emission = runtime.emit({ kind: "akuma.born", akumaId: "aku/example", bodySequence: 1, origin: { kind: "direct" }, caller: { kind: "unknown" } }, (value) => diagnostics.push(value));
     await eventually(() => trace(output).includes("activation-started") && trace(output).includes("called"));
-    assert.deepEqual(trace(output), ["activation-started", "activated", "called"]);
+    assert.deepEqual([...trace(output)].sort(), ["activated", "activation-started", "called"]);
     advance(5_000);
     await emission;
     // The hung activation is bounded and diagnosed, and its late handler set
     // never replays the emission it missed.
-    assert.deepEqual(trace(output), ["activation-started", "activated", "called", "activation-aborted"]);
+    assert.deepEqual([...trace(output)].sort(), ["activated", "activation-aborted", "activation-started", "called"]);
     assert.equal(diagnostics.includes("plugin hanging activation: timed out after 5000ms"), true, diagnostics.join("; "));
     assert.equal(diagnostics.includes("plugin hanging signal: timed out after 5000ms"), true, diagnostics.join("; "));
   } finally {
@@ -781,7 +888,7 @@ test("a healthy plugin is emitted to while another activation hangs", { timeout:
   }
 });
 
-test("a plugin activated after the signal deadline cannot replay the emission", { timeout: 5_000 }, async (context) => {
+test("a stalled import leaves healthy delivery independent and cannot activate after its deadline", { timeout: 5_000 }, async (context) => {
   const value = fixture();
   const gateKey = `keiyaku-plugin-gate-${Date.now()}`;
   let openGate!: () => void;
@@ -790,17 +897,16 @@ test("a plugin activated after the signal deadline cannot replay the emission", 
   });
   try {
     const output = join(value.root, "trace.txt");
-    // A gated import holds the first activation attempt, which in turn holds the
-    // ordered start of the second plugin until that attempt bound.
     writePlugin(
       value.root,
       "blocked",
       [
         'import { appendFileSync } from "node:fs";',
         `await globalThis[${JSON.stringify(gateKey)}];`,
+        `appendFileSync(${JSON.stringify(output)}, "import-resumed\\n");`,
         "export default {",
         '  manifest: { id: "blocked", apiVersion: 1 },',
-        '  activate(context) { appendFileSync(context.config.trace, "blocked-activated\\n"); return {}; },',
+        '  activate(context) { appendFileSync(context.config.trace, "blocked-activated\\n"); return { signals: { "akuma.born": () => appendFileSync(context.config.trace, "blocked-signal\\n") } }; },',
         "};",
       ].join("\n"),
     );
@@ -828,14 +934,21 @@ test("a plugin activated after the signal deadline cannot replay the emission", 
       reportDiagnostic: (value) => diagnostics.push(value),
     });
     const emission = runtime.emit({ kind: "akuma.born", akumaId: "aku/example", bodySequence: 1, origin: { kind: "direct" }, caller: { kind: "unknown" } }, (value) => diagnostics.push(value));
+    await eventually(() => trace(output).includes("ready-signal"));
+    assert.deepEqual(trace(output), ["ready-activated", "ready-signal"]);
     advance(5_000);
-    await eventually(() => trace(output).includes("ready-activated"));
     await emission;
-    assert.deepEqual(trace(output), ["ready-activated"], "the late activation never receives the emission");
-    assert.equal(diagnostics.includes("plugin blocked activation: timed out after 5000ms"), true, diagnostics.join("; "));
-    assert.equal(diagnostics.some((value) => value.startsWith("plugin ready signal:")), true, diagnostics.join("; "));
+    openGate();
+    await eventually(() => trace(output).includes("import-resumed"));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(trace(output), ["ready-activated", "ready-signal", "import-resumed"]);
+    assert.deepEqual(diagnostics.sort(), [
+      "plugin blocked activation: timed out after 5000ms",
+      "plugin blocked signal: timed out after 5000ms",
+    ]);
   } finally {
     openGate();
+    delete (globalThis as Record<string, unknown>)[gateKey];
     value.close();
   }
 });
@@ -1003,7 +1116,7 @@ test("missing selected Paseo does not fall back to the core installation or bloc
   });
   await runtime.emit({ kind: "akuma.turn-started", akumaId: "aku/test", turnSequence: 1 });
   assert.equal(diagnostics.length, 1);
-  assert.match(diagnostics[0] ?? "", /plugin paseo import:.*@astrosheep\/keiyaku-plugin-paseo/u);
+  assert.match(diagnostics[0] ?? "", /plugin paseo activation:.*@astrosheep\/keiyaku-plugin-paseo/u);
   assert.deepEqual(trace(output), ["activate", "signal:aku/test"]);
 });
 

@@ -17,6 +17,7 @@ export const capabilityPolicy = {
         { source: "history.ts", symbols: ["z"] },
         { source: "region.ts", symbols: ["z"] },
         { source: "settings.ts", symbols: ["z"] },
+        { source: "plugin/runtime.ts", symbols: ["z"] },
         { source: "kanshi/report.ts", symbols: ["z"] },
         { source: "kanshi/read.ts", symbols: ["z"] },
         { source: "kanshi/counts.ts", symbols: ["z"] },

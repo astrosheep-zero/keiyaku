@@ -51,10 +51,11 @@ from the caller's World. An optional observer is not a core installation
 prerequisite; an explicitly selected but missing package is an activation
 diagnostic, not a product failure.
 
-Plugin identity is declared by the activated package and must agree with the
-selected name. In one process it is unique and activation follows that identity's
-lexicographic order. Compatibility is explicit: an unsupported plugin contract
-is not adapted or partially activated.
+Plugin identity is declared by the activated package and must equal the exact
+selected name, which is unique within a process's World selection. Selected
+plugins activate independently, with no start or completion ordering guarantee.
+Compatibility and instance admission are all-or-nothing: unsupported contracts,
+mismatched identities, or invalid hooks expose no part of that plugin.
 
 ## Activation And Capabilities
 
@@ -171,11 +172,13 @@ is never recalled. Ledger connections remain owned through asynchronous external
 settlement even when a bounded notification attempt has returned. This creates
 no retry queue, daemon, second store, or delivery guarantee.
 
-Activation is all-or-nothing for each plugin. The host validates a package and
-its declarations, then activates it before retaining any handlers. Import,
-validation, activation, or handler failure is attributed to that plugin through
-the producing process's diagnostic channel, is bounded by the five-second
-attempt limit, and does not prevent other selected plugins from proceeding. The
+Activation is all-or-nothing for each plugin. The host validates the package,
+its declarations, and the complete activated instance before retaining that
+original instance for direct hook invocation with its original receiver. Import,
+package, capability, and activation failures produce one activation diagnostic
+attributed to that plugin, preserving the underlying cause. Activation and
+handler attempts are bounded by the five-second attempt limit; their failures
+are diagnostic-only and do not prevent other selected plugins from proceeding. The
 host supplies each activation and handler attempt its own cancellation signal; a
 non-cooperative attempt that outlives its limit loses authority to participate in
 the operation; an invocation resource returned late receives only bounded cleanup.

@@ -2,6 +2,7 @@ import { lstat, mkdir, realpath } from "node:fs/promises";
 import { registerHooks } from "node:module";
 import { isAbsolute, join, posix, relative, sep } from "node:path";
 import { pathToFileURL } from "node:url";
+import { z } from "zod";
 import { Settings, type SettingsEntry } from "../settings.js";
 import type { WorldRoot } from "../world.js";
 import type {
@@ -9,7 +10,6 @@ import type {
   PluginContext,
   PluginHooks,
   PluginInstance,
-  PluginManifest,
   PluginSignal,
   PluginSignalMap,
   PluginWaitDeferral,
@@ -31,12 +31,6 @@ type PluginRuntimeInput = Readonly<{
   world: WorldRoot;
   settings?: Settings;
   reportDiagnostic?: PluginDiagnostic;
-}>;
-
-type RegisteredHandler = Readonly<{
-  pluginId: string;
-  kind: keyof PluginSignalMap;
-  handler: NonNullable<PluginHooks[keyof PluginSignalMap]>;
 }>;
 
 export type PluginRuntime = Readonly<{
@@ -61,18 +55,15 @@ type Attempt<T> =
   | Readonly<{ kind: "timed-out" }>;
 
 type Activation = Readonly<{
-  handlers: readonly RegisteredHandler[];
-  waitDeferral?: PluginInstance["waitDeferral"];
+  pluginId: string;
+  instance: z.infer<typeof instanceSchema> | undefined;
   timedOut: boolean;
 }>;
 
 type ActivationInput = Readonly<{
   selected: SelectedPlugin;
   world: WorldRoot;
-  activated: Set<string>;
-  report: PluginDiagnostic | undefined;
   cancellation: AbortSignal;
-  onStarted: () => void;
 }>;
 
 const ABORTED = Symbol("plugin attempt aborted");
@@ -217,38 +208,25 @@ function selectedPlugins(input: Settings, report: PluginDiagnostic | undefined):
   return Object.freeze(selected);
 }
 
-function manifest(value: unknown): KeiyakuPlugin {
-  if (!object(value)) throw new TypeError("plugin default export must be an object");
-  if (!object(value.manifest)) throw new TypeError("plugin manifest must be an object");
-  const candidate = value.manifest;
-  const names = Object.keys(candidate);
-  if (names.some((name) => !["id", "apiVersion", "writablePaths"].includes(name))) {
-    throw new TypeError("plugin manifest has unknown fields");
-  }
-  if (typeof candidate.id !== "string" || candidate.id.trim().length === 0) {
-    throw new TypeError("plugin manifest id must be nonblank");
-  }
-  if (candidate.apiVersion !== 1) throw new TypeError("plugin apiVersion must equal 1");
-  if (candidate.writablePaths !== undefined && !Array.isArray(candidate.writablePaths)) {
-    throw new TypeError("plugin writablePaths must be an array");
-  }
-  if (typeof value.activate !== "function") throw new TypeError("plugin activate must be a function");
-  return value as KeiyakuPlugin;
-}
+const writablePathSchema = z.strictObject({
+  name: z.string().refine((value) => value.trim().length > 0),
+  path: z.string().min(1),
+});
+const pluginSchema = z.object({
+  manifest: z.strictObject({
+    id: z.string().refine((value) => value.trim().length > 0),
+    apiVersion: z.literal(1),
+    writablePaths: z.array(writablePathSchema).optional(),
+  }),
+  activate: z.custom<KeiyakuPlugin["activate"]>((value) => typeof value === "function"),
+});
 
 function writablePathDeclaration(
-  value: unknown,
+  value: z.infer<typeof writablePathSchema>,
   names: Set<string>,
 ): Readonly<{ name: string; parts: readonly string[] }> {
-  if (!object(value)) throw new TypeError("plugin writable path must be an object");
-  if (Object.keys(value).some((name) => name !== "name" && name !== "path")) {
-    throw new TypeError("plugin writable path has unknown fields");
-  }
-  if (typeof value.name !== "string" || value.name.trim().length === 0) {
-    throw new TypeError("plugin writable path name must be nonblank");
-  }
   if (names.has(value.name)) throw new TypeError(`plugin writable path name is duplicated: ${value.name}`);
-  if (typeof value.path !== "string" || value.path.length === 0 || value.path.includes("\\")) {
+  if (value.path.includes("\\")) {
     throw new TypeError("plugin writable path must be a nonblank POSIX path");
   }
   if (posix.isAbsolute(value.path)) throw new TypeError("plugin writable path must be relative to the World");
@@ -287,7 +265,7 @@ async function createTrustedPath(
 
 async function writablePaths(
   world: WorldRoot,
-  declarations: PluginManifest["writablePaths"],
+  declarations: z.infer<typeof pluginSchema>["manifest"]["writablePaths"],
 ): Promise<ReadonlyMap<string, string>> {
   const names = new Set<string>();
   const paths = new Map<string, string>();
@@ -299,40 +277,26 @@ async function writablePaths(
   return paths;
 }
 
-/**
- * The runtime's acceptance vocabulary. The record is exhaustive over the public
- * payload map, so adding a signal there fails compilation here until the same
- * kind is accepted.
- */
-const SIGNAL_KINDS: Readonly<Record<keyof PluginSignalMap, true>> = Object.freeze({
-  "akuma.born": true,
-  "akuma.outcome-observed": true,
-  "akuma.reported": true,
-  "akuma.turn-started": true,
-  "akuma.turn-outcome": true,
-  "akuma.body-ended": true,
+// Exhaustive over the public payload map: a new signal must be admitted here too.
+const SIGNAL_KINDS: { readonly [K in keyof PluginSignalMap]: K } = {
+  "akuma.born": "akuma.born",
+  "akuma.outcome-observed": "akuma.outcome-observed",
+  "akuma.reported": "akuma.reported",
+  "akuma.turn-started": "akuma.turn-started",
+  "akuma.turn-outcome": "akuma.turn-outcome",
+  "akuma.body-ended": "akuma.body-ended",
+};
+const instanceSchema = z.strictObject({
+  signals: z
+    .partialRecord(
+      z.enum(SIGNAL_KINDS),
+      z.custom<NonNullable<PluginHooks[keyof PluginSignalMap]>>((value) => typeof value === "function"),
+    )
+    .optional(),
+  waitDeferral: z
+    .custom<NonNullable<PluginInstance["waitDeferral"]>>((value) => typeof value === "function")
+    .optional(),
 });
-
-function isSignalKind(kind: string): kind is keyof PluginSignalMap {
-  return Object.hasOwn(SIGNAL_KINDS, kind);
-}
-
-function handlers(pluginId: string, instance: PluginInstance): readonly RegisteredHandler[] {
-  if (!object(instance)) throw new TypeError("plugin activation must return an object");
-  if (Object.keys(instance).some((name) => name !== "signals" && name !== "waitDeferral"))
-    throw new TypeError("plugin instance has unknown fields");
-  if (instance.waitDeferral !== undefined && typeof instance.waitDeferral !== "function")
-    throw new TypeError("plugin waitDeferral must be a function");
-  if (instance.signals === undefined) return [];
-  if (!object(instance.signals)) throw new TypeError("plugin signals must be an object");
-  const registered: RegisteredHandler[] = [];
-  for (const [kind, handler] of Object.entries(instance.signals)) {
-    if (!isSignalKind(kind)) throw new TypeError(`plugin signal is unknown: ${kind}`);
-    if (typeof handler !== "function") throw new TypeError(`plugin signal handler is not a function: ${kind}`);
-    registered.push({ pluginId, kind, handler });
-  }
-  return Object.freeze(registered);
-}
 
 function sourceUrl(world: WorldRoot, packageName: string): string | null {
   if (packageName.startsWith("./")) {
@@ -368,89 +332,45 @@ async function importFromWorld(world: WorldRoot, packageName: string): Promise<R
   }
 }
 
-async function activate(
-  input: ActivationInput,
-): Promise<Readonly<{ handlers: readonly RegisteredHandler[]; waitDeferral?: PluginInstance["waitDeferral"] }>> {
-  const { selected, world, activated, report, cancellation, onStarted } = input;
-  let started = false;
-  const markStarted = () => {
-    if (started) return;
-    started = true;
-    onStarted();
-  };
-  let module: Record<string, unknown>;
-  try {
-    module = await importFromWorld(world, selected.package);
-  } catch (error) {
-    markStarted();
-    reportPluginDiagnostic(report, selected.id, "import", error);
-    return { handlers: [] };
+async function activate({ selected, world, cancellation }: ActivationInput): Promise<Activation["instance"]> {
+  const module = await importFromWorld(world, selected.package);
+  pluginSchema.parse(module.default);
+  const candidate = module.default as z.infer<typeof pluginSchema>;
+  if (candidate.manifest.id !== selected.id) {
+    throw new TypeError(`plugin manifest id does not match selected entry: ${candidate.manifest.id}`);
   }
-  if (cancellation.aborted) {
-    markStarted();
-    return { handlers: [] };
-  }
-
-  let candidate: KeiyakuPlugin;
-  try {
-    candidate = manifest(module.default);
-    if (candidate.manifest.id !== selected.id) {
-      throw new TypeError(`plugin manifest id does not match selected entry: ${candidate.manifest.id}`);
-    }
-    if (activated.has(candidate.manifest.id)) throw new TypeError(`plugin id is duplicated: ${candidate.manifest.id}`);
-  } catch (error) {
-    markStarted();
-    reportPluginDiagnostic(report, selected.id, "validation", error);
-    return { handlers: [] };
-  }
-
-  let context: PluginContext;
-  try {
-    const declared = await writablePaths(world, candidate.manifest.writablePaths);
-    context = Object.freeze({
-      world,
-      config: selected.config,
-      writablePath(name: string): string {
-        const path = declared.get(name);
-        if (path === undefined) throw new TypeError(`plugin writable path is undeclared: ${name}`);
-        return path;
-      },
-    });
-  } catch (error) {
-    markStarted();
-    reportPluginDiagnostic(report, selected.id, "validation", error);
-    return { handlers: [] };
-  }
-  if (cancellation.aborted) {
-    markStarted();
-    return { handlers: [] };
-  }
-
-  markStarted();
-  try {
-    const instance = await candidate.activate(context, cancellation);
-    if (cancellation.aborted) return { handlers: [] };
-    const registered = handlers(candidate.manifest.id, instance);
-    activated.add(candidate.manifest.id);
-    return {
-      handlers: registered,
-      ...(instance.waitDeferral === undefined ? {} : { waitDeferral: instance.waitDeferral.bind(instance) }),
-    };
-  } catch (error) {
-    reportPluginDiagnostic(report, selected.id, "activation", error);
-    return { handlers: [] };
-  }
+  const declared = await writablePaths(world, candidate.manifest.writablePaths);
+  const context: PluginContext = Object.freeze({
+    world,
+    config: selected.config,
+    writablePath(name: string): string {
+      const path = declared.get(name);
+      if (path === undefined) throw new TypeError(`plugin writable path is undeclared: ${name}`);
+      return path;
+    },
+  });
+  if (cancellation.aborted) return undefined;
+  const instance = await candidate.activate(context, cancellation);
+  if (cancellation.aborted) return undefined;
+  instanceSchema.parse(instance);
+  return instance;
 }
 
 async function deliver(
-  entry: RegisteredHandler,
+  { pluginId, instance }: Activation,
   signal: PluginSignal,
   reportDiagnostic: PluginDiagnostic | undefined,
   timeoutMs: number,
 ): Promise<void> {
-  const result = await boundedAttempt((cancellation) => entry.handler(signal as never, cancellation), timeoutMs);
-  if (result.kind === "timed-out") reportPluginDiagnostic(reportDiagnostic, entry.pluginId, "signal", timeoutError());
-  if (result.kind === "failed") reportPluginDiagnostic(reportDiagnostic, entry.pluginId, "signal", result.error);
+  const signals = instance?.signals;
+  const handler = signals?.[signal.kind];
+  if (handler === undefined) return;
+  const result = await boundedAttempt(
+    (cancellation) => handler.call(signals, signal as never, cancellation),
+    timeoutMs,
+  );
+  if (result.kind === "timed-out") reportPluginDiagnostic(reportDiagnostic, pluginId, "signal", timeoutError());
+  if (result.kind === "failed") reportPluginDiagnostic(reportDiagnostic, pluginId, "signal", result.error);
 }
 
 async function closeWaitDeferral(
@@ -481,7 +401,7 @@ async function acquireWaitDeferral(
   const completed = activation
     .then(async (activated) => {
       if (cancellation.aborted) return undefined;
-      const value = await activated.waitDeferral?.(input, cancellation);
+      const value = await activated.instance?.waitDeferral?.(input, cancellation);
       return value === undefined ? undefined : waitDeferralResource(value, pluginId, reportDiagnostic);
     })
     .catch((error: unknown) => {
@@ -508,7 +428,7 @@ function waitDeferralResource(
     const close = object(value) ? value.close : undefined;
     if (typeof close !== "function") throw new TypeError("resource close must be a function");
     // Normal and late acquisition have disjoint cleanup paths; the plugin owns its close lifetime.
-    return { close: close.bind(value) as PluginWaitDeferral["close"] };
+    return value as PluginWaitDeferral;
   } catch (error) {
     reportPluginDiagnostic(reportDiagnostic, pluginId, "wait deferral validation", error);
     return undefined;
@@ -527,23 +447,16 @@ export async function pluginRuntime(input: PluginRuntimeInput): Promise<PluginRu
 async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRuntime> {
   const report = input.reportDiagnostic;
   const selected = selectedPlugins(input.settings ?? (await Settings.load({ cwd: input.world })), report);
-  const activated = new Set<string>();
-  let previousStarted = Promise.resolve();
   const activations = selected.map((entry) => {
-    let releaseStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      releaseStarted = resolve;
-    });
-    const activation: Promise<Activation> = previousStarted.then(async () => {
-      const result = await boundedAttempt((cancellation) =>
-        activate({ selected: entry, world: input.world, activated, report, cancellation, onStarted: releaseStarted }),
-      );
-      releaseStarted();
-      if (result.kind === "settled") return { ...result.value, timedOut: false } satisfies Activation;
+    const activation = boundedAttempt((cancellation) =>
+      activate({ selected: entry, world: input.world, cancellation }),
+    ).then((result): Activation => {
+      if (result.kind === "settled") {
+        return { pluginId: entry.id, instance: result.value, timedOut: false };
+      }
       reportPluginDiagnostic(report, entry.id, "activation", result.kind === "failed" ? result.error : timeoutError());
-      return { handlers: [], timedOut: result.kind === "timed-out" } satisfies Activation;
+      return { pluginId: entry.id, instance: undefined, timedOut: result.kind === "timed-out" };
     });
-    previousStarted = started;
     return { pluginId: entry.id, activation };
   });
 
@@ -560,11 +473,7 @@ async function createPluginRuntime(input: PluginRuntimeInput): Promise<PluginRun
               reportPluginDiagnostic(reportDiagnostic, pluginId, "signal", timeoutError());
               if (activated === ABORTED) return;
             }
-            await Promise.all(
-              activated.handlers
-                .filter((entry) => entry.kind === signal.kind)
-                .map((entry) => deliver(entry, signal, reportDiagnostic, Math.max(0, deadline - performance.now()))),
-            );
+            await deliver(activated, signal, reportDiagnostic, Math.max(0, deadline - performance.now()));
           }),
         );
       } finally {
