@@ -42,6 +42,7 @@ export const LOCAL_TEST_FILES = [
   "tests/opencode-sse-custody.test.ts",
   "tests/paseo-attachment-repair.test.ts",
   "tests/paseo-best-effort-consumer.test.ts",
+  "tests/paseo-directory.test.ts",
   "tests/paseo-execution-provider.test.ts",
   "tests/paseo-forwarder.test.ts",
   "tests/paseo-mirror.test.ts",
