@@ -177,7 +177,7 @@ void [word, arbitraryGate, kind, category, gates, actions];
         "  assert.throws(() => require.resolve(specifier), /ERR_PACKAGE_PATH_NOT_EXPORTED/u, specifier);",
         "}",
         // Private composition, execution, and configuration helpers stay off the root entry.
-        'for (const name of ["gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiHandle", "classifyVerb", "renderVerb", "describeModelTools", "projectModelOutput"]) {',
+        'for (const name of ["gatesFrom", "requireBranchesToBeUpToDateFrom", "worktreeHooksFrom", "composeContractLibrary", "captureLocalContractComposition", "createKeiHandle", "classifyVerb", "renderVerb", "describeModelTools"]) {',
         "  assert.equal(name in root, false, name);",
         "}",
         'assert.ok(require.resolve("@astrosheep/keiyaku-plugin-square").endsWith("index.js"));',

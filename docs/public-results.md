@@ -25,9 +25,10 @@ recent activity is bounded native evidence, not a synthesized work summary.
 An unavailable activity observation never reverses the wait's conclusion or
 hides independently observed outcomes. Unobserved peers remain explicit even
 when the group completes. A standalone
-transport may project normal routing answers onto compact decision facts with
-its own structural declaration. This pure projection consumes the existing owner
-judgment, never reparses trusted answers or narrows the native schema.
+transport publishes normal routing answers with their producing owner's normal
+structural declaration. It serializes the native answer directly, consuming the
+existing owner judgment without reparsing trusted answers or declaring a second
+result model.
 Heterogeneous object answers
 and nested observations identify their alternatives explicitly. Each catalogue
 retains its owner-family identity through empty, absent, and unavailable answers;
@@ -83,12 +84,10 @@ native owner. Consumers share that projection rather than rebuilding native
 facts or declaring a second result authority. Exact guidance and addressed Debt
 detail remain complete native values. At the standalone transport edge they
 remain complete unclipped shared text, without a duplicate structured answer.
-Structured routing projections omit presentation-only detail and optional
-residue while leaving both the full text and native answer intact. Read
-projections remove identity-redundant alternatives and observation-only
-envelopes without dropping meaningful failure distinctions, current work or
-reported changes. Shared declarations reuse actual owner meaning; addressed
-status, thin catalogues and waiting legitimately retain different detail.
+Structured routing answers retain the native normal answer's detail,
+discriminants, associations, and nested observations through JSON serialization.
+Process-local capabilities remain outside that wire form. Addressed status,
+thin catalogues, and waiting retain their producing owners' different detail.
 Transport schema reuse must remain locally resolvable by the actual consumer
 and describe the structured answer it receives.
 

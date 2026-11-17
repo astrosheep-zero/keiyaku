@@ -10,7 +10,7 @@ import {
   type VerbOutput,
   type VerbName,
 } from "../library/keiyaku-verbs.js";
-import { describeModelTools, hasOutputSchema, modelCoordinates, projectModelOutput } from "../library/model-tools.js";
+import { describeModelTools, hasOutputSchema, modelCoordinates } from "../library/model-tools.js";
 import { projectFailure } from "../library/outcome.js";
 import { renderVerb } from "../cli/render/verbs.js";
 import { DEFAULT_CLI_COLUMNS } from "../cli/render/terminal.js";
@@ -82,14 +82,17 @@ export function registerKeiyakuTools(pi: ExtensionAPI): void {
           ...(environment.KEIYAKU_ACTOR_ID === undefined ? {} : { actor: environment.KEIYAKU_ACTOR_ID }),
         });
         return {
-          content: [{ type: "text", text: isError ? `${disposition}\n${text}` : text }],
+          content: [
+            { type: "text", text: isError ? `${disposition}\n${text}` : text },
+            ...(completion.kind === "threw"
+              ? [{ type: "text" as const, text: JSON.stringify(projectFailure(completion.error)) }]
+              : []),
+          ],
           isError,
           details: { disposition },
-          ...(completion.kind === "threw"
-            ? { structuredContent: projectFailure(completion.error) }
-            : !isError && hasOutputSchema(name)
-              ? { structuredContent: JSON.parse(JSON.stringify(projectModelOutput(name, completion.value))) }
-              : {}),
+          ...(!isError && hasOutputSchema(name) && completion.kind === "returned"
+            ? { structuredContent: JSON.parse(JSON.stringify(completion.value)) }
+            : {}),
         };
       },
     });

@@ -48,11 +48,13 @@ Observation bounds share duration semantics and never stop the observed work.
 Native Akuma SDK inputs and CLI flag grammar remain independent of this
 model-facing vocabulary.
 Structured output is reserved for routing
-operations: it projects normal owner answers onto compact facts needed to choose
-the next call. Every normal answer of such a tool carries that projection,
-including an answered negative verdict. Native callers and CLI JSON retain the
-full owner value. Guidance and Debt detail return complete unclipped text at the
-transport edge. These projections supply no new classification or authority.
+operations and retains the producing owner's native normal wire answer. Every
+normal answer of such a tool carries that same answer, including an answered
+negative verdict or an unanswered or deadline observation. Serialization retains
+native discriminants, member observations, associations, and owner detail while
+excluding process-local capabilities. Guidance and Debt detail return complete
+unclipped text at the transport edge. Serialization supplies no new classification
+or authority.
 Error results are text led by their classification and remain text-only, including
 their structured failure projection. Runtime recovery guidance uses MCP calls in
 MCP syntax, derived from the same native recovery facts used by other surfaces.

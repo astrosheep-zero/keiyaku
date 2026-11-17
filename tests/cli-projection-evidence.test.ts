@@ -17,7 +17,7 @@ import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { renderContractCatalogue } from "../src/cli/render/catalog.js";
 import { gateRequirementFacts } from "../src/cli/render/contract-observation.js";
 import { unmetRequirementLines } from "../src/cli/render/receipt.js";
-import { modelOutputSchemas as mcpOutputSchemas, projectModelOutput as projectMcpOutput } from "../src/library/model-tools.js";
+import { modelOutputSchemas as mcpOutputSchemas } from "../src/library/model-tools.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { akumaObservationSchema } from "../src/akuma/selection-observation.js";
 import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
@@ -37,7 +37,7 @@ import type { ContractHistory } from "../src/library/contract-types.js";
 import type { ContractSummary } from "../src/index.js";
 import type { Settings } from "../src/settings.js";
 
-test("model status keeps current work, last outcome and reported changes without internal turn coordinates", () => {
+test("model status retains native current work, turn coordinates and reported changes", () => {
   const value = akumaObservationSchema.parse({
     kind: "akuma", id: "aku/worker/12345678", life: "running", cwd: "/work", provider: "fixture",
     work: {
@@ -49,13 +49,12 @@ test("model status keeps current work, last outcome and reported changes without
     changes: [{ path: "source.ts", diffstat: { added: 2, removed: 1 } }],
     moreChanges: true, outsideChanges: 1,
   });
-  const projected = JSON.parse(JSON.stringify(projectMcpOutput("status", value)));
+  const projected = JSON.parse(JSON.stringify(value));
   assert.deepEqual(projected.changes, value.changes);
   assert.equal(projected.moreChanges, true);
   assert.equal(projected.outsideChanges, 1);
-  assert.deepEqual(projected.work, {
-    kind: "open", summary: value.work.summary, pending: value.work.pending, outcome: value.work.outcome,
-  });
+  assert.equal(projected.kind, "akuma");
+  assert.deepEqual(projected.work, value.work);
   assert.deepEqual(mcpOutputSchemas.status.parse(projected), projected);
 });
 
@@ -393,7 +392,7 @@ test("stale snapshot evidence keeps native identities across observations, recei
     placement: { kind: "gates-unsatisfied" as const, unmet: [problem] },
   };
   assert.deepEqual(verifyOutcomeSchema.parse(value), value);
-  const projected = JSON.parse(JSON.stringify(projectMcpOutput("verify", value)));
+  const projected = JSON.parse(JSON.stringify(value));
   assert.deepEqual(mcpOutputSchemas.verify.parse(projected), projected);
   assert.deepEqual((projected as typeof value).placement.unmet[0]?.reason, reason);
 });

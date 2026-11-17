@@ -7,8 +7,9 @@ import * as sdk from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-agent";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { harnessOwner } from "@astrosheep/square";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
-import { Akuma, World } from "../src/index.js";
+import { Akuma, Keiyaku, World } from "../src/index.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
 import { SERVER_DESCRIPTION } from "../src/mcp/description.js";
 import { beginTurn, endTurn, readHeart, readLatestTurnForBody } from "../src/akuma/heart/index.js";
@@ -185,7 +186,8 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     await native.run(`await tools.keiyaku_ls({selector: "aku/", mine: true});`, true);
     const usage = resultFor(native.results, "keiyaku_ls");
     assert.equal(usage.isError, true);
-    assert.equal((usage.structuredContent as { category: string }).category, "invalid-input");
+    assert.equal(usage.structuredContent, undefined);
+    assert.equal(JSON.parse(usage.content[1]!.type === "text" ? usage.content[1]!.text : "").category, "invalid-input");
     await native.run(`text(await tools.keiyaku_ls({selector: "aku/"}));`);
     const expectedRead = await client.callTool({ name: "ls", arguments: { selector: "aku/" } });
     const nativeRead = resultFor(native.results, "keiyaku_ls");
@@ -225,6 +227,22 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
       assert.ok(schema);
       const validation = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(schema)))(result.structuredContent);
       assert.equal(validation.valid, true, validation.errorMessage);
+      const facet = Keiyaku.for({
+        cwd: root,
+        environment: { ...process.env },
+        home: agentDir,
+        identity: { owner: harnessOwner({ channel: "pi", session: native.manager.getSessionId() }) },
+      });
+      const expected = name === "keiyaku_ls"
+        ? await facet.ls({ selector: "aku/*", mine: true })
+        : name === "keiyaku_status"
+          ? await facet.status({ selector: id })
+          : await facet.wait({ selectors: [id], timeout: "0ms" });
+      const withoutObservationTime = (key: string, value: unknown) => key === "observedAt" ? undefined : value;
+      assert.deepEqual(
+        JSON.parse(JSON.stringify(result.structuredContent, withoutObservationTime)),
+        JSON.parse(JSON.stringify(expected, withoutObservationTime)),
+      );
     }
 
     const retained = await bornBody(world, "feed0030", "2026-11-17T00:00:00.000Z");

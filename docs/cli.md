@@ -20,10 +20,11 @@ Protocol validation,
 connection lifetime, and cancellation remain at that edge; the facet and product
 owners retain their native admission, result, and retirement semantics. Text and
 outcome classification are shared with the CLI rather than re-decided by the
-transport. Structured output is reserved for routing operations and projects normal
-owner answers onto compact facts used to select another call. It does not judge
-normality or replace the complete native answer, which remains available to
-native callers and CLI JSON consumers. Guidance and Debt detail remain complete,
+transport. Structured output is reserved for routing operations and carries the
+producing owner's native normal answer in JSON wire form, described by that
+owner's normal schema. Serialization adds no result model, classification, or
+capability. Native callers and CLI JSON consumers retain the same owner value.
+Guidance and Debt detail remain complete,
 unclipped text at this edge. Returned refusals and operational stops, like thrown
 failures, retain their classification-led text and known effects and causes
 without structured output. Kanshi is always text-only at this edge. A disconnected caller cannot be promised a late receipt, even when

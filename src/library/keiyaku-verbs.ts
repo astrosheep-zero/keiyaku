@@ -2,21 +2,7 @@
 import { z } from "zod";
 import { lifecycleSelectionSchema } from "../bounded-list.js";
 export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
-// Native owner declarations shared with transport descriptions at this composition boundary.
-export {
-  akumaCatalogueSchema,
-  akumaCatalogueRowSchema,
-  akumaObservationSchema,
-  observedAkumaWaitItemSchema,
-} from "../akuma/selection-observation.js";
-export { dispatchAssociationSchema } from "../akuma/dispatch-association.js";
-export { currentWorkSchema } from "../akuma/status-projection.js";
-export { contractCatalogueSchema, contractSummarySchema } from "../protocol/read/status.js";
-export { contractNormalStatusSchema } from "../kanshi/report.js";
-export { akumaNameCatalogSchema, akumaNameCatalogRowSchema } from "../akuma/archetype.js";
-export { debtListSchema, debtSummarySchema } from "../debt/index.js";
-export { contractIdSchema } from "../git/identity.js";
-export { akumaIdSchema } from "../akuma/identity.js";
+
 import { parseDuration } from "../duration.js";
 import { addDebtInputSchema, updateDebtInputSchema } from "../debt/input.js";
 import { amendInputSchema } from "./input.js";

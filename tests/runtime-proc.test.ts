@@ -1151,7 +1151,7 @@ test("StdioProcess endInputAndDrain retains output until producer EOF", async ()
   }
 });
 
-test("StdioProcess close terminates its complete helper tree", async () => {
+test("StdioProcess close terminates its complete helper tree", { timeout: 60_000 }, async (context) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-v4-stdio-tree-"));
   const descendant = [
     'process.on("SIGTERM", () => process.stdout.write("descendant/exited\\n", () => process.exit(0)));',
@@ -1161,21 +1161,30 @@ test("StdioProcess close terminates its complete helper tree", async () => {
   const parent = descendantParent(descendant);
   let stdio: ReturnType<typeof spawnStdioProcess> | undefined;
   let closed = false;
-  const ready = waitForOutputLine("descendant/ready", "stdio helper did not signal readiness");
-  const terminated = waitForOutputLine("descendant/exited", "stdio descendant did not confirm termination");
+  let output = "";
+  const { promise: ready, resolve: markReady } = promiseBarrier<void>();
+  const { promise: terminated, resolve: markTerminated } = promiseBarrier<void>();
+  const abort = (): void => {
+    // The finally block awaits the same forced close and retains any failure.
+    void stdio?.close(true).catch(() => {});
+  };
+  context.signal.addEventListener("abort", abort, { once: true });
   try {
     stdio = spawnStdioProcess({ argv: [process.execPath, "-e", parent], cwd: root });
     stdio.output.on("data", (chunk) => {
-      ready.observe(chunk);
-      terminated.observe(chunk);
+      output += Buffer.from(chunk).toString("utf8");
+      if (output.includes("descendant/ready\n")) markReady();
+      if (output.includes("descendant/exited\n")) markTerminated();
     });
-    await ready.wait;
+    await awaitReadiness("the stdio descendant readiness", ready, stdio.exited);
     if (process.platform === "win32") await stdio.close(false);
-    else await Promise.all([stdio.close(false), terminated.wait]);
+    else await Promise.all([
+      stdio.close(false),
+      awaitReadiness("the stdio descendant termination", terminated, stdio.exited),
+    ]);
     closed = true;
   } finally {
-    ready.dispose();
-    terminated.dispose();
+    context.signal.removeEventListener("abort", abort);
     if (!closed) await stdio?.close(true);
     rmSync(root, { recursive: true, force: true });
   }
