@@ -20,7 +20,6 @@ import { observeContractAt } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { currentBranch, repositoryAt } from "../git/repository.js";
-import type { WorktreeLeak } from "../git/scratch.js";
 import { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
 export { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
 import { targetWorkspaceRefusalSchema } from "../git/target.js";
@@ -29,10 +28,7 @@ import type { VerificationDeclarationPreparation } from "../verification/declara
 import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
 import { forkSourceMovedRefusalSchema, targetInputRefusalSchema } from "./bind.js";
 import { admitIntent, type IntentAdmissionOptions } from "./intent.js";
-import type { VerificationResult } from "./intent.js";
-import type { VerificationCleanupFailure } from "./progress.js";
-import { verificationRuntimeStopSchema } from "./intent.js";
-import { complete, type AcceptedProtocolStep, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
+import { complete, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
 import type { PlacementProtocolResult } from "./placement.js";
 import type { ProtocolProgress } from "./progress.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
@@ -44,7 +40,7 @@ import {
   type ContractCatalogue,
   type ContractObservation,
 } from "./read/status.js";
-import type { ProtocolResult, ProtocolTerminal } from "./run.js";
+import type { ProtocolTerminal } from "./run.js";
 import { targetLifecycleReasonSchema } from "./result-reasons.js";
 import { protocolTerminalSchema } from "./run.js";
 
@@ -200,13 +196,6 @@ export type DocumentDerivation = Readonly<{
   verification: VerificationDeclarationPreparation;
 }>;
 
-type StepStop<R> = Readonly<{ refusal: R; retry?: never } | { retry: IntentRetry; refusal?: never }>;
-export const verificationStopSchema = z.union([
-  z.object({ refusal: activeContractRefusalSchema }).strict().readonly(),
-  z.object({ retry: protocolTerminalSchema }).strict().readonly(),
-  verificationRuntimeStopSchema,
-]);
-export type VerificationStop = z.infer<typeof verificationStopSchema>;
 export const placementStopSchema = z.union([
   z
     .object({
@@ -259,37 +248,6 @@ export type AttemptDecision<Value, Refusal = IntentRefusal> =
 
 export function timestamp(): string {
   return new Date().toISOString();
-}
-
-function stepStop<Refusal>(result: ProtocolResult<Refusal>): StepStop<Refusal> | undefined {
-  if (result.kind === "accepted") return undefined;
-  return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
-}
-
-export function unpackVerificationOutcome(verification: VerificationResult): Readonly<{
-  cleanup?: VerificationCleanupFailure;
-  leak?: WorktreeLeak;
-  stop?: VerificationStop;
-  admission?: AcceptedProtocolStep;
-  reuse?: VerificationResult["reuse"];
-  counts?: NonNullable<VerificationResult["counts"]>;
-}> {
-  const step = verification.step;
-  const stop: VerificationStop | undefined =
-    step === undefined || ("kind" in step && step.kind === "reused")
-      ? undefined
-      : "failure" in step
-        ? step
-        : stepStop(step);
-  const admission = step !== undefined && !("failure" in step) && step.kind === "accepted" ? step : undefined;
-  return {
-    ...(verification.cleanup === undefined ? {} : { cleanup: verification.cleanup }),
-    ...(verification.leak === undefined ? {} : { leak: verification.leak }),
-    ...(stop === undefined ? {} : { stop }),
-    ...(admission === undefined ? {} : { admission }),
-    ...(verification.reuse === undefined ? {} : { reuse: verification.reuse }),
-    ...(verification.counts === undefined ? {} : { counts: verification.counts }),
-  };
 }
 
 export function placementStop(

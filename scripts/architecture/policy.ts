@@ -281,20 +281,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "protocol/intent.ts",
-      allow: [
-        any("core/decide.ts"),
-        any("core/facts/gate.ts", ["latestCurrentAttestations"]),
-        any("core/facts/observation.ts"),
-        any("core/facts/types.ts"),
-        any("core/subject.ts"),
-        any("core/verbs/**"),
-        any("git/**"),
-        any("protocol/**"),
-        any("settings.ts"),
-        any("workspace-place.ts"),
-        any("verification/declaration.ts", ["VERIFIED", "VerificationDeclaration"]),
-        any("verification/execution.ts"),
-      ],
+      allow: [any("core/decide.ts"), any("core/facts/types.ts"), any("git/**"), any("protocol/**")],
       deny: [targetPlacementRuntime],
     },
     {
@@ -322,7 +309,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       deny: [
         ...protocolOwner.deny.filter((rule) => rule.target !== "core/facts/gate.ts"),
         runtime("verification/execution.ts"),
-        runtime("protocol/intent.ts", ["verifyRequirement"]),
+        runtime("protocol/verify.ts", ["verifyOperation"]),
       ],
     },
     {
@@ -401,6 +388,11 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         runtime("git/target-placement.ts", ["checkoutNotFollowableRefusalSchema"]),
       ],
       deny: [any("core/facts/gate.ts")],
+    },
+    {
+      source: "protocol/verify.ts",
+      allow: [...protocolOwner.allow, any("settings.ts")],
+      deny: protocolOwner.deny,
     },
     { source: "protocol/**", ...protocolOwner },
     {

@@ -161,10 +161,12 @@ contract or to production provider environments.
 ## Ownership
 
 Verification executes declarations and produces terminal verdicts. Protocol
-calls the producer only for explicit verify, admits each check's testimony, and
-uses the one generic requirement judgment for completion. Package and CLI
-readers render adjudicated reports without parsing process output or creating a
-timeline, rework count, elapsed-time authority, or derived aggregate attestation.
+owns explicit verify scheduling, testimony admission, and the final per-check
+judgment together, consuming execution evidence directly without a second
+private result authority. It uses the one generic requirement judgment for
+completion. Package and CLI readers render adjudicated reports without parsing
+process output or creating a timeline, rework count, elapsed-time authority, or
+derived aggregate attestation.
 
 Each check's evidence remains tied to the invocation's captured snapshot and its
 stable requirement. Completion never executes a replacement check after
