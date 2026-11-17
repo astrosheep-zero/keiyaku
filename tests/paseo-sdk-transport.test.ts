@@ -13,6 +13,7 @@ import { historySchema, tellSchema, type History, type Row } from "../plugins/pa
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
 import { tellPresentation } from "../plugins/paseo/plugin/server/message.js";
 import { createSdkTransport } from "../plugins/paseo/plugin/server/sdk.js";
+import { raceAbort } from "../plugins/paseo/plugin/server/transport.js";
 import { ProviderEventSchema, type ProviderConnection, type ProviderEvent,
   type ProviderRegistration } from "@getpaseo/plugin/server/provider";
 import type { PluginServerContribution } from "@getpaseo/plugin/server";
@@ -482,13 +483,34 @@ test("cancellation reaches only its own SDK request", async (t) => {
   await set({ tellPending: true, status: { provider: "pi" } });
   const controller = new AbortController();
   const abandoned = transport.tell("/world", AKU, controller.signal, "change direction")
-    .then(() => "resolved", (error: Error) => error.message);
+    .catch((error: unknown) => error);
   const requestSignal = await tellStarted;
-  controller.abort(new Error("observation closed"));
+  const reason = new Error("observation closed");
+  controller.abort(reason);
   assert.equal(requestSignal.aborted, true, "cancellation reaches the actual SDK call");
-  assert.equal(await abandoned, "observation closed", "a non-cooperative operation still releases its caller");
+  assert.equal(await abandoned, reason, "a non-cooperative operation still releases its caller with the same Error");
   assert.deepEqual(await transport.status("/world", "aku/test/1", new AbortController().signal), { provider: "pi" },
     "one request's cancellation never terminates unrelated work");
+});
+
+test("SDK normalizes only in-flight aborts while shared observers keep raw reasons", async (t) => {
+  const { transport, set, tellStarted, entry } = await fakeTransport(t);
+  await set({ tellPending: true });
+  const controller = new AbortController();
+  const request = transport.tell("/world", AKU, controller.signal, "change direction").catch((error: unknown) => error);
+  const observer = raceAbort(controller.signal, () => new Promise(() => {})).catch((error: unknown) => error);
+  await tellStarted;
+  controller.abort("observation closed");
+  const error = await request;
+  assert.ok(error instanceof Error);
+  assert.equal(error.message, "observation closed");
+  assert.equal(await observer, "observation closed");
+  await assert.rejects(transport.status("/world", AKU, controller.signal), (reason: unknown) => reason === controller.signal.reason,
+    "an already aborted SDK request keeps its raw reason");
+  const installed = await import(pathToFileURL(entry).href);
+  t.mock.method(installed.Akuma.prototype, "status", async () => { throw "SDK operation failed"; });
+  await assert.rejects(transport.status("/world", AKU, new AbortController().signal),
+    (reason: unknown) => reason === "SDK operation failed", "an operation rejection is never normalized as cancellation");
 });
 
 test("close aborts every owned request and subscription and refuses new work", async (t) => {
@@ -544,8 +566,9 @@ test("a subscription pulls one window at a time, opens on the current frame, and
   await set({ streamHistory: frame(4), streamDelayMs: 20 });
   assert.deepEqual(pulled(await other.next()), [4], "an unrelated subscription opens on its own subscription");
   const pending = stream.next();
-  released.abort(new Error("observation released"));
-  await assert.rejects(pending, /observation released/u, "abandoning a subscription settles its own pull");
+  released.abort("observation released");
+  await assert.rejects(pending, (error: unknown) => error instanceof Error && error.message === "observation released",
+    "abandoning a subscription normalizes its non-Error reason and settles only its own pull");
   assert.equal((await stream.next()).done, true, "a released observation serves no further frame");
   assert.equal(streams[0]?.signal.aborted, true);
   assert.equal(streams[0]?.returned, true);

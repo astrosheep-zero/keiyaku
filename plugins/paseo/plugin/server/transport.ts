@@ -3,15 +3,21 @@ import type { Tell } from "./message.js";
 import type { Stop } from "./stop.js";
 
 /** Bound an observer operation even when the public host request cannot cancel. */
-export function raceAbort<T>(signal: AbortSignal, operation: () => T | PromiseLike<T>): Promise<T> {
+export function raceAbort<T>(
+  signal: AbortSignal, operation: () => T | PromiseLike<T>, onAbortReason?: (signal: AbortSignal) => unknown,
+): Promise<T> {
   signal.throwIfAborted();
   return new Promise<T>((resolve, reject) => {
+    let settled = false;
     const finish = (outcome: Readonly<{ value: T }> | Readonly<{ error: unknown }>): void => {
+      if (settled) return;
+      settled = true;
       signal.removeEventListener("abort", onAbort);
       if ("error" in outcome) reject(outcome.error);
       else resolve(outcome.value);
     };
-    const onAbort = () => finish({ error: signal.reason ?? new Error("Keiyaku observation was cancelled") });
+    const onAbort = () => finish({ error: onAbortReason === undefined
+      ? signal.reason ?? new Error("Keiyaku observation was cancelled") : onAbortReason(signal) });
     signal.addEventListener("abort", onAbort, { once: true });
     if (signal.aborted) { onAbort(); return; }
     Promise.resolve().then(() => {

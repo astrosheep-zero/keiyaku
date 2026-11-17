@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { z } from "zod";
 import { historySchema, tellSchema, type History } from "./keiyaku.js";
 import { stopAttempt } from "./stop.js";
-import type { AkumaTransport } from "./transport.js";
+import { raceAbort, type AkumaTransport } from "./transport.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const PACKAGE_NAME = "@astrosheep/keiyaku";
@@ -115,31 +115,6 @@ function abortReason(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new Error(String(signal.reason ?? "Keiyaku SDK request was cancelled"));
 }
 
-/** Race an SDK operation with its owning signal even when the operation ignores cancellation. */
-function raceAbort<T>(signal: AbortSignal, operation: () => T | PromiseLike<T>): Promise<T> {
-  signal.throwIfAborted();
-  return new Promise<T>((resolve, reject) => {
-    let settled = false;
-    const finish = (outcome: Readonly<{ value: T }> | Readonly<{ error: unknown }>): void => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener("abort", onAbort);
-      if ("error" in outcome) reject(outcome.error);
-      else resolve(outcome.value);
-    };
-    const onAbort = () => finish({ error: abortReason(signal) });
-    signal.addEventListener("abort", onAbort, { once: true });
-    if (signal.aborted) { onAbort(); return; }
-    Promise.resolve().then(() => {
-      signal.throwIfAborted();
-      return operation();
-    }).then(
-      (value) => finish({ value }),
-      (error: unknown) => finish({ error }),
-    );
-  });
-}
-
 /**
  * Adapt the installed public SDK in this plugin process. Each request owns its
  * cancellation and timeout; a stream owns one signal across its idle frames.
@@ -147,26 +122,20 @@ function raceAbort<T>(signal: AbortSignal, operation: () => T | PromiseLike<T>):
 export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTransport {
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   let closed = false;
-  let sdk: KeiyakuSdk | undefined;
   let loading: Promise<KeiyakuSdk> | undefined;
   const active = new Set<ActiveScope>();
 
   async function loadSdk(): Promise<KeiyakuSdk> {
-    if (sdk !== undefined) return sdk;
-    if (loading !== undefined) return await loading;
-    const attempt = (async () => {
+    loading ??= (async () => {
       const resolved = await resolveEntry(options.entry);
       const loaded = await import(pathToFileURL(resolved.entry).href) as KeiyakuSdk;
       assertSdkSurface(loaded, resolved.version);
-      sdk = loaded;
       return loaded;
-    })();
-    loading = attempt;
-    try {
-      return await attempt;
-    } finally {
-      if (loading === attempt) loading = undefined;
-    }
+    })().catch((error: unknown) => {
+      loading = undefined;
+      throw error;
+    });
+    return await loading;
   }
 
   function createScope(signal: AbortSignal, closeMessage: string): ActiveScope {
@@ -187,7 +156,7 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
     const timer = setTimeout(() => scope.abort(
       new Error(`Keiyaku SDK request timed out after ${timeoutMs}ms; ${tail}`),
     ), timeoutMs);
-    return raceAbort(scope.signal, operation).finally(() => clearTimeout(timer));
+    return raceAbort(scope.signal, operation, abortReason).finally(() => clearTimeout(timer));
   }
 
   async function request<T>(
@@ -276,7 +245,7 @@ export function createSdkTransport(options: SdkTransportOptions = {}): AkumaTran
                 iterator = installed.Akuma.select(world, akuId).stream({ signal: currentScope.signal })[Symbol.asyncIterator]();
               });
             }
-            const frame = await raceAbort(currentScope.signal, () => iterator!.next());
+            const frame = await raceAbort(currentScope.signal, () => iterator!.next(), abortReason);
             if (frame.done) {
               finish();
               return { done: true, value: undefined };
