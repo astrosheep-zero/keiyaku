@@ -1,7 +1,24 @@
 import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import test from "node:test";
-import type { ExecutionObservation } from "../src/index.js";
+import { Keiyaku, type ExecutionObservation } from "../src/index.js";
+import { StatusLine } from "../src/cli/render/status-line.js";
+import { runAsk } from "../src/cli/commands/akuma.js";
+import { cliExitCode } from "../src/cli/streams.js";
+import { captureOutput } from "./support/cli-fixtures.js";
+import { parseAkumaId } from "../src/akuma/identity.js";
+import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
+import type { TellResult } from "../src/akuma/body.js";
+import {
+  activeTool,
+  idleAkumaSnapshot,
+  openAkumaSnapshot,
+  snapshotRow,
+  AKUMA_ACTIVITY_AT,
+} from "./support/kanshi-activity.js";
+import { withTellFailureReceipt } from "../src/akuma/akuma-errors.js";
+import type { VerbInput, VerbName, VerbRunFor } from "../src/library/keiyaku-verbs.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import { contractId, documentKey, entryUlid, snapshotId, type JournalEntry } from "../src/core/facts/types.js";
 import { ExecutionProgressRenderer, executionProgressLines } from "../src/cli/render/execution-progress.js";
 import { writeExecutionProgress } from "../src/cli/runtime.js";
@@ -284,4 +301,182 @@ test("live output emits complete lines before phase finish and retains a split l
 
   assert.match(stream.text, /    partial line\n/u);
   await renderer.consume(phase("finished", { phase: "declaration", index: 1, total: 1, outcome: "exit 0" }));
+});
+
+test("StatusLine erases once, retires its timer even on write failure, and cannot restart", () => {
+  for (const throws of [false, true]) {
+    const stream = new CapturedStream(true);
+    let tick: (() => void) | undefined;
+    let canceled = 0;
+    let formats = 0;
+    const status = new StatusLine(stream, {
+      schedule: (callback) => {
+        tick = callback;
+        return 1 as unknown as ReturnType<typeof setInterval>;
+      },
+      cancel: () => {
+        canceled += 1;
+      },
+    });
+    status.show(() => {
+      formats += 1;
+      return "current";
+    });
+    if (throws)
+      stream.write = () => {
+        throw new Error("terminal departed");
+      };
+    if (throws) assert.throws(() => status.finish(), /terminal departed/u);
+    else status.finish();
+    status.finish("must not print");
+    status.show(() => {
+      formats += 1;
+      return "must not restart";
+    });
+    tick?.();
+    assert.equal(canceled, 1);
+    assert.equal(formats, 1);
+    assert.doesNotMatch(stream.text, /must not/u);
+  }
+});
+
+test("StatusLine finishing inside formatting cannot leave a timer running", () => {
+  const stream = new CapturedStream(true);
+  let scheduled = 0;
+  const status = new StatusLine(stream, {
+    schedule: () => {
+      scheduled += 1;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    },
+  });
+  status.show(() => {
+    status.finish();
+    return "finished";
+  });
+  assert.equal(scheduled, 0);
+  assert.doesNotMatch(stream.text, /finished/u);
+});
+
+test("Ask replaces one TTY observation and closes on return, failure and cancellation", async (t) => {
+  const id = parseAkumaId("aku/worker/abcd1234").id;
+  const tell: TellResult = {
+    admission: { tellId: "tell/current" },
+    row: { sequence: 2, at: AKUMA_ACTIVITY_AT, text: "question" },
+    wake: { kind: "pursuing" },
+  };
+  const input = { akuma: id, prompt: "question", schema: {} };
+  for (const mode of ["answered", "error", "cancel", "non-TTY", "json"] as const) {
+    const controller = new AbortController();
+    let tick: (() => void) | undefined;
+    let scheduled = 0;
+    let canceled = 0;
+    const schedule = t.mock.method(globalThis, "setInterval", (callback: () => void) => {
+      scheduled += 1;
+      tick = callback;
+      return 1 as unknown as ReturnType<typeof setInterval>;
+    });
+    const cancel = t.mock.method(globalThis, "clearInterval", () => {
+      canceled += 1;
+    });
+    const result = {
+      kind: "answered" as const,
+      akumaId: id,
+      tellId: "tell/current",
+      answer: { ok: true },
+      wake: { kind: "failed" as const, diagnostic: "historical wake refused" },
+    };
+    const reason = withTellFailureReceipt(new Error(mode === "cancel" ? "caller canceled" : "read failed"), {
+      kind: "admitted",
+      akumaId: id,
+      tellId: "tell/current",
+    });
+    let now = 0;
+    const clock = t.mock.method(performance, "now", () => now);
+    const run = t.mock.method(
+      Keiyaku.prototype,
+      "run",
+      async (_name: VerbName, _input: VerbInput<VerbName>, controls?: VerbRunFor<"ask">) => {
+        const observe = controls?.observe;
+        if (mode === "json") assert.equal(observe, undefined);
+        observe?.({ kind: "admitted", tell, id });
+        if (mode === "answered") assert.equal(process.stderr.isTTY, true);
+        const status = liveStatusObservationSchema.unwrap().shape.status.parse({
+          birth: { origin: { kind: "direct" }, caller: { kind: "unknown" } },
+          id,
+          life: "running",
+          timeline: openAkumaSnapshot([snapshotRow(activeTool(3, "bash", { kind: "run", command: "first work" }))]),
+        });
+        observe?.({ kind: "live", observation: { status, rows: [], ordinarySelected: 0 } });
+        observe?.({
+          kind: "live",
+          observation: {
+            status: { ...status, life: "asleep", timeline: idleAkumaSnapshot([]) },
+            rows: [],
+            ordinarySelected: 0,
+          },
+        });
+        now = 42_000;
+        tick?.();
+        if (mode === "error" || mode === "cancel") {
+          if (mode === "cancel") controller.abort(reason);
+          throw reason;
+        }
+        return result;
+      },
+    );
+    try {
+      const captured = await captureOutput(async () => {
+        Object.assign(process.stderr, { isTTY: mode !== "non-TTY", columns: 200 });
+        const runtime = {
+          environment: {},
+          facet: Keiyaku.for({ cwd: process.cwd(), environment: {} }),
+          signal: controller.signal,
+          readStdin: async () => "",
+          draftWorld: async () => "",
+          progress: async () => {
+            throw new Error("unused");
+          },
+        };
+        try {
+          return cliExitCode(await runAsk({ name: "ask", input, output: mode === "json" ? "json" : "text" }, runtime));
+        } catch (error) {
+          assert.equal(error, reason, "the admitted native failure propagates unchanged");
+          process.stderr.write(renderVerb("ask", input, { kind: "threw", error }, { columns: 200, color: false }));
+          return 3;
+        }
+      });
+      if (mode === "json") {
+        assert.deepEqual(JSON.parse(captured.stdout), result);
+        assert.equal(captured.stderr, "");
+      } else if (mode === "error" || mode === "cancel") {
+        assert.equal(captured.stdout, "");
+        assert.match(captured.stderr, /tell\/current/u, "existing failure rendering retains admission evidence");
+        assert.doesNotMatch(captured.stderr, /✓ answered/u);
+      } else {
+        assert.equal(captured.stdout, JSON.stringify(result.answer));
+        assert.ok(
+          captured.stderr.endsWith(
+            `✓ answered ${id}\n  input tell/current\n  ! tell delivery failed\n    historical wake refused\n`,
+          ),
+        );
+      }
+      if (mode === "non-TTY" || mode === "json") {
+        assert.equal(scheduled, 0);
+        assert.doesNotMatch(captured.stderr, /observing|first work|last observed|\x1b/u);
+      } else {
+        const frames = captured.stderr.split("\r\x1b[2K").filter((line) => line.includes("observing"));
+        assert.equal(frames[0], `${id} · observing 0s`, "admission has no invented life or summary");
+        assert.match(frames[1]!, /last observed running · run \$ first work · observing/u);
+        assert.equal(frames[2], `${id} · last observed asleep · observing 0s`, "the next callback clears old work");
+        assert.equal(frames[3], `${id} · last observed asleep · observing 42s`, "the clock measures this observation");
+        assert.equal(scheduled, 1);
+        assert.equal(canceled, 1);
+      }
+    } finally {
+      clock.mock.restore();
+      run.mock.restore();
+      schedule.mock.restore();
+      cancel.mock.restore();
+    }
+  }
 });

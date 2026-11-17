@@ -6,11 +6,14 @@ import { readFile } from "node:fs/promises";
 import { canonicalDocument } from "../../akuma/schema.js";
 import { classifyVerb, verbs } from "../../library/keiyaku-verbs.js";
 import type { AskProgress } from "../../akuma/akuma-selection-execution.js";
-import { ActivityDriver } from "../activity.js";
-import { type CliOutcome, displayContext, resultContext, writeJson, writeStdout } from "../streams.js";
+import { StatusLine } from "../render/status-line.js";
+import { projectCurrentWork, type CurrentWork } from "../../akuma/status-projection.js";
+import type { AkumaId } from "../../akuma/identity.js";
+import type { AkumaStatus } from "../../akuma/akuma.js";
+import { type CliOutcome, displayContext, resultContext, writeCliStream, writeJson, writeStdout } from "../streams.js";
 import type { CliRuntime } from "../runtime.js";
 import { askRawAnswer, historyRawAnswer } from "../render/akuma-activity.js";
-import { askProgressStream } from "../render/akuma.js";
+import { askCurrentWorkLine, askResultText } from "../render/akuma.js";
 import { aliasSelector, renderVerb } from "../render/verbs.js";
 
 async function schemaFromFile(path: string) {
@@ -66,15 +69,34 @@ function emitAnswer(body: string, exact: boolean): void {
 
 export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
-  const progress =
-    output === "text" ? askProgressStream(undefined, aliasSelector(input.akuma), resultContext()) : undefined;
-  const driver = new ActivityDriver(process.stderr);
+  const context = resultContext();
+  const stderr = process.stderr;
+  const stdout = process.stdout;
+  const alias = aliasSelector(input.akuma);
+  const status = output === "text" ? new StatusLine(stderr) : undefined;
+  let observed:
+    | Readonly<{ id: AkumaId; inputId: string; life?: AkumaStatus["life"]; summary?: CurrentWork["summary"] }>
+    | undefined;
   const observe =
-    progress === undefined
+    status === undefined
       ? undefined
       : (event: AskProgress): void => {
-          if (event.kind === "admitted") driver.settle(progress.admitted(event.tell, event.id), progress.frame());
-          else driver.settle(progress.observe(event.observation), progress.frame());
+          if (event.kind === "admitted") {
+            observed = { id: event.id, inputId: event.tell.admission.tellId };
+          } else {
+            if (observed === undefined) return;
+            const work = projectCurrentWork(event.observation.status.timeline);
+            observed = {
+              id: observed.id,
+              inputId: observed.inputId,
+              life: event.observation.status.life,
+              summary: work.summary,
+            };
+          }
+          const current = observed;
+          status.show((elapsed) =>
+            askCurrentWorkLine({ ...current, ...(alias === undefined ? {} : { alias }) }, elapsed, context),
+          );
         };
   try {
     const run = {
@@ -82,13 +104,17 @@ export async function runAsk(request: VerbRequest<"ask">, runtime: CliRuntime): 
       ...(observe === undefined ? {} : { observe }),
     };
     const result = await runtime.facet.run("ask", request.input, run);
-    if (progress !== undefined) driver.conclude(progress.conclude(result).join("\n"));
+    status?.finish();
     const completion = { kind: "returned" as const, value: result };
     if (output === "json") writeJson(result);
-    else emitAnswer(askRawAnswer(result) ?? "", true);
+    else {
+      writeCliStream(stderr, askResultText(result, alias, context));
+      const answer = askRawAnswer(result);
+      if (answer !== undefined) stdout.write(answer);
+    }
     return classifyVerb(request.name, input, completion);
   } finally {
-    driver.close(progress?.flush() ?? []);
+    status?.finish();
   }
 }
 

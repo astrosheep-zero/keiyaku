@@ -5,16 +5,8 @@ import { AkumaAddressError, AkumaWorldScopeError } from "../../library/address.j
 import type { VerbCompletion, VerbInput, VerbName, VerbOutput } from "../../library/keiyaku-verbs.js";
 import { KeiyakuArcDocumentError, KeiyakuUsageError } from "../../library/keiyaku-coordinates.js";
 import { KeiyakuError, projectFailure } from "../../library/outcome.js";
-import {
-  askRawAnswer,
-  historyRawAnswer,
-  historyText,
-  snapshotText,
-  tellControlLines,
-  tellText,
-  waitText,
-} from "./akuma-activity.js";
-import { renderCallText, renderForkText, renderKillText, renderSpawnFailure, waitedTellProgress } from "./akuma.js";
+import { historyRawAnswer, historyText, snapshotText, tellText, waitText } from "./akuma-activity.js";
+import { renderCallText, renderForkText, renderKillText, renderSpawnFailure, renderAskText } from "./akuma.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "./catalog.js";
 import { renderAkumaBoard } from "./kanshi-akuma.js";
 import {
@@ -248,14 +240,7 @@ function renderInput(
   const selectedAlias = aliasSelector(input.akuma);
   if (result.kind === "admitted" || (result.kind === "failed" && "failures" in result))
     return tellText(result, input.prompt, selectedAlias, context);
-  const answer = askRawAnswer(result);
-  return answer !== undefined && tellControlLines(result, context).length === 0
-    ? answer
-    : waitedTellProgress(
-        result,
-        { prompt: input.prompt, ...(selectedAlias === undefined ? {} : { alias: selectedAlias }) },
-        context,
-      );
+  return renderAskText(result, selectedAlias, context);
 }
 
 function spawnPresentation(input: VerbInput<"spawn">) {

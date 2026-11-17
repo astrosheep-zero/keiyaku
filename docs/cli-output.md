@@ -271,14 +271,25 @@ second result model. Its final receipt preserves partial admissions, retained
 failure scenes, operational stops, and the ordinary completion judgment.
 
 Spawn and tell stop at their birth or admission receipt, without an answer or
-live observation frame. Ask streams witnessed timeline activity once in owner
-order on the progress channel; active work stays in the redrawable frame until
-it settles. Closing preserves unresolved activity rather than inventing
-completion. Observation begins at Ask's own admitted input, leaving earlier work
-to history, and its answer belongs to that input's exact terminal Turn. Stdout
-carries serialized JSON once. Deadline and failure preserve the observed life
-and explicit cause without fabricating an answer. Bounded omissions remain
-visible, settled rows never replay, and failures are never hidden by compaction.
+live observation frame. Ask shows one replaceable current-work line on a
+terminal: complete resolved identity, explicit last-observed life, the native
+owner's bounded work summary when available, and elapsed caller observation
+time. Admission may begin that clock before any life or work is observed.
+Each observation replaces the previous facts wholesale; Ask reconstructs no
+timeline, retains no activity rail, and flushes no unresolved rows. The clock
+proves observation time, never ongoing worker liveness. Off a terminal no
+running Ask activity appears, and JSON mode opens no frame.
+
+Ask erases its live frame on every exit. Its final progress-channel receipt
+names the resolved Akuma, admitted input, exact native outcome and meaningful
+control, wake or failure evidence. The exact input's outcome alone decides the
+conclusion; last-observed life never substitutes for it. An answered Ask keeps
+historical wake failure visible. Invalid output retains its native answer
+evidence as a diagnostic, without becoming a parsed answer. Text stdout carries
+only the parsed answer's JSON serialization once, without an appended newline;
+other outcomes fabricate no answer. Shared final rendering composes those native
+facts directly, preserving a raw serialized answer when no meaningful controls
+require a receipt. Native history and streaming retain their complete capability.
 
 A wait is not a stream and opens no live frame. Its compact projection preserves
 the invocation's global conclusion, frozen member order and complete identities,

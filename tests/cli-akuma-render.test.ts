@@ -5,11 +5,9 @@ import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
 import {
   type ActivityHistory,
   type ActivityRow,
-  type OpenSnapshotRow,
   type OutcomeRow,
 } from "../src/akuma/projection.js";
 import {
-  activityStream,
   DEFAULT_CONTEXT,
   frameRule,
   historyText,
@@ -19,11 +17,12 @@ import {
   waitText,
 } from "../src/cli/render/akuma-activity.js";
 import {
-  askProgressStream,
+  askCurrentWorkLine,
+  askResultText,
   renderCallText,
   renderForkText,
   renderKillText,
-  waitedTellProgress,
+  renderAskText,
 } from "../src/cli/render/akuma.js";
 import { askRawAnswer } from "../src/cli/render/akuma-activity.js";
 import { akumaMark } from "../src/cli/render/marks.js";
@@ -36,7 +35,6 @@ import { contractId } from "../src/core/facts/types.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import {
-  activeTool,
   answeredOutcome,
   completedTool,
   idleAkumaSnapshot,
@@ -67,10 +65,6 @@ function observation(
     }),
     ...(status.timeline.reportedChangesOmitted === 0 ? {} : { moreChanges: true }),
   };
-}
-
-function liveObservation(status: LiveStatusObservation["status"], rows: readonly ActivityRow[]) {
-  return { status, rows, ordinarySelected: 0 };
 }
 
 test("status retains execution context, current work, changes, and unavailable associations", () => {
@@ -414,7 +408,7 @@ test("wait keeps a single-target alias and none in plural output", () => {
   assert.doesNotMatch(plural, /@scout/u, "an ambiguous alias is not attached to any member");
 });
 
-test("waited Tell reserves stdout for its exact answer and keeps one JSON envelope", () => {
+test("Tell admission and final Ask answer retain their distinct native facts", () => {
   const id = parseAkumaId("aku/worker/deadbeef").id;
   const context = { columns: 80, color: false };
   const answer = { akumaId: id, tellId: "tell-id", kind: "answered" as const, answer: "exact answer" };
@@ -422,11 +416,8 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   const tell = { kind: "admitted" as const, akumaId: id, tellId: "tell-id" };
   const standalone = tellText(tell, "continue", undefined, context);
   assert.equal(standalone, "✓ told aku/worker/deadbeef — continue", "verdict, subject, and input on one line");
-  const progress = waitedTellProgress(answer, { prompt: "continue" }, context);
-  assert.match(progress, /▸ continue/u, "the panel keeps its timeline input row for admitted input");
-  assert.equal(progress.match(/^aku\/worker\/deadbeef$/gmu)?.length, 1, "one identity frame");
-  assert.equal(progress.match(/▸ continue/gu)?.length, 1, "the admission row is not replayed");
-  assert.ok(progress.endsWith(JSON.stringify("exact answer")), "the shared final rendering retains the answer bytes");
+  assert.equal(renderAskText(answer, undefined, context), JSON.stringify("exact answer"));
+  assert.equal(askResultText(answer, undefined, context), `✓ answered ${id}\n  input tell-id`);
   const longPrompt = "one line of caller input ".repeat(20);
   const receipt = tellText(tell, longPrompt, undefined, context).split("\n");
   assert.equal(receipt.length, 1, "one receipt line even past the terminal width");
@@ -457,111 +448,57 @@ test("waited Tell reserves stdout for its exact answer and keeps one JSON envelo
   assert.equal(askRawAnswer({ ...answer, answer: "decoded scalar" }), '"decoded scalar"');
 });
 
-test("ask activity starts at admission and includes a later settlement of an older tool", () => {
+test("Ask line preserves complete identity and explicit life while bounding native work", () => {
   const id = parseAkumaId("aku/worker/deadbeef").id;
-  const at = (minute: number) => `2026-01-01T10:${String(minute).padStart(2, "0")}:00.000Z`;
-  const opening: OpenSnapshotRow = { kind: "call", sequence: 1, turnSequence: 1, at: at(0), text: "original input" };
-  const oldNote: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at: at(1), text: "before ask" };
-  const oldActive = { ...activeTool(3, "bash", { kind: "run" as const, command: "old tool" }), at: at(2) };
-  const tell = {
-    admission: { fact: "recorded" as const, tellId: "tell-ask" },
-    row: {
-      kind: "tell" as const,
-      sequence: 4,
-      at: at(3),
-      tellId: "tell-ask",
-      text: "new question",
-      state: "told" as const,
-      deliveries: [],
-    },
-    wake: { kind: "told" as const },
-  };
-  const later: OpenSnapshotRow = { kind: "note", sequence: 5, turnSequence: 1, at: at(4), text: "after ask" };
-  const next: OpenSnapshotRow = { kind: "note", sequence: 6, turnSequence: 1, at: at(5), text: "new activity" };
-  const oldSettled = { ...completedTool(7, "bash", { kind: "run" as const, command: "old tool" }), at: at(6) };
-  const status = (rows: readonly OpenSnapshotRow[]) =>
-    liveStatusObservationSchema.unwrap().shape.status.parse({
-      birth: DIRECT_BIRTH,
-      id,
-      life: "running",
-      timeline: { ...openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))), openingSequence: 1 },
-    });
-  const stream = askProgressStream(undefined, undefined, { columns: 100, color: false });
-  const admission = stream.admitted(tell, id);
-  assert.match(admission.join("\n"), /▸ new question/u, "the receipt is returned before observation");
-  const firstRows = [opening, oldNote, oldActive, tell.row, later];
-  const first = stream.observe(liveObservation(status(firstRows), firstRows));
-  assert.deepEqual(first, ["   ···    1 omitted"], "only post-admission settled evidence counts as omitted");
-  const secondRows = [opening, oldNote, tell.row, later, next, oldSettled];
-  const second = stream.observe(liveObservation(status(secondRows), secondRows));
-  assert.match(second.join("\n"), /new activity/u);
-  assert.match(second.join("\n"), /old tool/u);
-  assert.deepEqual(stream.observe(liveObservation(status(secondRows), secondRows)), [], "later activity streams once");
-  const answer = { akumaId: id, tellId: "tell-ask", kind: "answered" as const, answer: "exact\nanswer" };
-  const conclusion = stream.conclude(answer);
-  const transcript = [...admission, ...first, ...second, ...conclusion].join("\n");
-  assert.equal((transcript.match(/new question/gu) ?? []).length, 1);
-  assert.equal((transcript.match(/new activity/gu) ?? []).length, 1);
-  assert.doesNotMatch(transcript, /original input|before ask|after ask/u);
-  assert.equal(transcript.match(/old tool/gu)?.length, 1);
-  assert.ok(transcript.indexOf("new question") < transcript.indexOf("new activity"));
-  assert.match(transcript, /✓ answered\n\n$/u);
-  assert.equal(askRawAnswer(answer), JSON.stringify("exact\nanswer"));
+  const context = { columns: 100, color: false };
+  assert.equal(askCurrentWorkLine({ id }, 2_900, context), `${id} · observing 2s`);
+  assert.equal(
+    askCurrentWorkLine({ id, life: "asleep" }, 4_000, context),
+    `${id} · last observed asleep · observing 4s`,
+  );
+  const narrow = askCurrentWorkLine(
+    { id, alias: "@scout", life: "running", summary: { id: 5, text: "run a long command", clipped: true } },
+    6_000,
+    { columns: 20, color: false },
+  );
+  assert.equal(narrow, `${id} (@scout) · last observed running · … · observing 6s`);
 });
 
-test("ask seed marks eligible omissions before a newer Turn opening in timeline order", () => {
-  const id = parseAkumaId("aku/worker/deadbeef").id;
-  const at = AKUMA_ACTIVITY_AT;
-  const tell = {
-    admission: { fact: "recorded" as const, tellId: "tell-ask" },
-    row: {
-      kind: "tell" as const,
-      sequence: 4,
-      at,
-      tellId: "tell-ask",
-      text: "question",
-      state: "told" as const,
-      deliveries: [],
-    },
-    wake: { kind: "told" as const },
+test("final Ask facts preserve exact native outcomes and historical wake failure", () => {
+  const subject = { akumaId: SPECIMEN_ID, tellId: "tell/answer" };
+  const context = { columns: 100, color: false };
+  const answered = {
+    ...subject,
+    kind: "answered" as const,
+    answer: { ok: true },
+    wake: { kind: "failed" as const, diagnostic: "launch refused", logPath: "/work/wake.log" },
   };
-  const earlier: OpenSnapshotRow = { kind: "note", sequence: 2, turnSequence: 1, at, text: "earlier" };
-  const beforeOpening: OpenSnapshotRow = {
-    kind: "note",
-    sequence: 5,
-    turnSequence: 1,
-    at,
-    text: "eligible but skipped",
-  };
-  const opening: OpenSnapshotRow = { kind: "call", sequence: 6, turnSequence: 2, at, text: "next turn" };
-  const afterOpening: OpenSnapshotRow = { kind: "note", sequence: 7, turnSequence: 2, at, text: "also skipped" };
-  const live: OpenSnapshotRow = { kind: "note", sequence: 8, turnSequence: 2, at, text: "live update" };
-  const status = (rows: readonly OpenSnapshotRow[]) =>
-    liveStatusObservationSchema.unwrap().shape.status.parse({
-      birth: DIRECT_BIRTH,
-      id,
-      life: "running",
-      timeline: {
-        ...openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
-        turn: { kind: "turn" as const, sequence: 6, bodySequence: 2, at },
-        openingSequence: 6,
-      },
-    });
-  const rows = [earlier, tell.row, beforeOpening, opening, afterOpening];
-  const stream = askProgressStream(undefined, undefined, { columns: 100, color: false });
-  const receipt = stream.admitted(tell, id);
-  const baseline = stream.observe(liveObservation(status(rows), rows));
-  assert.equal(baseline.length, 3);
-  assert.match(baseline[0]!, /··· +1 omitted/u);
-  assert.match(baseline[1]!, /▸ next turn/u);
-  assert.match(baseline[2]!, /··· +1 omitted/u);
-  const later = stream.observe(liveObservation(status([...rows, live]), [...rows, live]));
-  assert.match(later.join("\n"), /live update/u);
-  assert.deepEqual(stream.observe(liveObservation(status([...rows, live]), [...rows, live])), []);
-  const transcript = [...receipt, ...baseline, ...later].join("\n");
-  assert.ok(transcript.indexOf("question") < transcript.indexOf("next turn"));
-  assert.ok(transcript.indexOf("next turn") < transcript.indexOf("live update"));
-  assert.doesNotMatch(transcript, /earlier|eligible but skipped|also skipped/u);
+  const final = renderAskText(answered, "@worker", context);
+  for (const fact of [
+    "✓ answered",
+    SPECIMEN_ID,
+    "@worker",
+    subject.tellId,
+    "launch refused",
+    "/work/wake.log",
+    JSON.stringify(answered.answer),
+  ])
+    assert.ok(final.includes(fact), final);
+  assert.equal(
+    classifyVerb("ask", { akuma: SPECIMEN_ID, prompt: "go", schema: {} }, { kind: "returned", value: answered }),
+    "accepted",
+  );
+  for (const kind of ["deadline", "unanswered"] as const) {
+    const result = { ...subject, kind };
+    assert.match(askResultText(result, undefined, context), new RegExp(kind, "u"));
+    assert.equal(askRawAnswer(result), undefined);
+  }
+  const invalid = { ...subject, kind: "invalid-output" as const, diagnostic: "not JSON", answer: "broken\n  evidence" };
+  assert.equal(askRawAnswer(invalid), undefined);
+  assert.match(
+    askResultText(invalid, undefined, context),
+    /invalid-output[\s\S]*not JSON[\s\S]*invalid answer[\s\S]*broken\n    evidence/u,
+  );
 });
 
 test("Akuma presentation uses the settled six-mark vocabulary", () => {
@@ -585,54 +522,6 @@ test("Akuma life mark covers the full life vocabulary from one definition site",
   for (const life of Object.keys(expected) as Array<keyof typeof expected>) {
     assert.equal(akumaMark(life), expected[life], life);
   }
-});
-
-test("an open turn settles old says on the rail and only its trailing say flushes unresolved", () => {
-  const oldSay: OpenSnapshotRow = {
-    kind: "said",
-    sequence: 2,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "old settled say",
-  };
-  const tools = [3, 4, 5, 6].map((sequence) =>
-    completedTool(sequence, "bash", { kind: "run", command: `after-say-${sequence}` }),
-  );
-  const trailingSay: OpenSnapshotRow = {
-    kind: "said",
-    sequence: 7,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "still streaming",
-  };
-  const rows = [oldSay, ...tools, trailingSay];
-  const stream = activityStream({ columns: 80, color: false });
-  const settled = stream({
-    snapshot: openAkumaSnapshot(rows.map((row) => ({ kind: "row" as const, row }))),
-    rows,
-  });
-  assert.ok(
-    settled.some((line) => line.includes("▎ old settled say")),
-    "a say with a successor settles on the rail",
-  );
-  assert.ok(!settled.some((line) => line.includes("?")), "a settled say never prints as unresolved");
-  const live = stream.frame();
-  assert.ok(!live.some((line) => line.includes("old settled say")), "a settled say never enters the live frame");
-  const liveSay = live.find((line) => line.includes("still streaming"))!;
-  assert.match(liveSay, /^▎ still streaming$/u, "only the open turn's trailing say stays live");
-  assert.ok(liveSay.includes("still streaming"), "the trailing say's text is live");
-  assert.doesNotMatch(liveSay, /[“”]/u, "live speech has no added quote boundary");
-  const flushed = stream.flush();
-  assert.ok(
-    flushed.some((line) => line === "▎ still streaming"),
-    "only the trailing say flushes, on its rail",
-  );
-  assert.ok(!flushed.some((line) => line.includes("old settled say")), "a settled say is never flushed");
-  assert.ok(!flushed.some((line) => line.includes("after-say-6")), "an in-flight final say omits prior tail tools");
-  assert.ok(
-    flushed.some((line) => line.includes("···    1 omitted")),
-    "the earlier tool stays accounted for",
-  );
 });
 
 test("changes section renders unknown diffstat as ~ and known as +a -r", () => {
@@ -748,7 +637,7 @@ test("shared ask rendering serializes JSON answers and retains non-answer conclu
   assert.match(render({ kind: "failed", diagnostic: "provider stopped" }), /provider stopped/u);
   assert.match(render({ kind: "invalid-output", diagnostic: "schema mismatch", answer: "wrong" }), /schema mismatch/u);
   const deadline = render({ kind: "deadline" });
-  assert.match(deadline, /pending tell/u);
+  assert.match(deadline, /deadline/u);
   assert.doesNotMatch(deadline, /waited|NaN/u);
   assert.equal(render({ kind: "deadline" }), deadline);
 });

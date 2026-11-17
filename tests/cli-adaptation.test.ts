@@ -173,7 +173,9 @@ test("CLI ask returns JSON and invalid-output while tell returns admission", { t
     assert.deepEqual(decoded.value.answer, { ok: true });
     const printed = await runCli(["-C", root, "ask", born.id, "--schema", schema, "prompt"], runtime);
     assert.equal(printed.exit, 0, printed.stderr);
-    assert.deepEqual(JSON.parse(printed.stdout), { ok: true });
+    assert.equal(printed.stdout, answer, "one exact JSON serialization, without a newline");
+    assert.match(printed.stderr, new RegExp(`^✓ answered ${born.id}\\n  input `, "u"));
+    assert.equal(printed.stderr.trimEnd().split("\n").length, 2, "non-TTY Ask emits only final facts");
     writeFileSync(agent, readFileSync(agent, "utf8").replace(`text: ${JSON.stringify(answer)}`, 'text: "not-json"'));
     const invalid = await cliJson<{ kind: string; answer: unknown }>(
       ["-C", root, "ask", born.id, "--schema", schema, "prompt"], runtime,
@@ -181,6 +183,10 @@ test("CLI ask returns JSON and invalid-output while tell returns admission", { t
     assert.equal(invalid.exit, 3, invalid.stderr);
     assert.equal(invalid.value.kind, "invalid-output");
     assert.equal(invalid.value.answer, "not-json");
+    const invalidText = await runCli(["-C", root, "ask", born.id, "--schema", schema, "prompt"], runtime);
+    assert.equal(invalidText.exit, 3, invalidText.stderr);
+    assert.equal(invalidText.stdout, "");
+    assert.match(invalidText.stderr, /invalid-output[\s\S]*invalid answer\n  not-json/u);
     operationFailed = false;
   } finally {
     try {

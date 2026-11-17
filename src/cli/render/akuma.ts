@@ -1,110 +1,72 @@
-import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
-import type { TellResult } from "../../akuma/body.js";
 import type { AkumaId } from "../../akuma/identity.js";
 import type { AkumaAskResult, AkumaKillResult } from "../../akuma/selection-observation.js";
 import type { ForkResult, SpawnResult } from "../../library/akuma-creation.js";
 import {
   actionReceipt,
-  inputWaitStream,
   killResultText,
-  subordinateLines,
-  tellAdmissionRow,
   callFailureLines,
   askRawAnswer,
-  observationCompletedAt,
   tellControlLines,
   tellPayloadLines,
-  type ObservedCallHead,
 } from "./akuma-activity.js";
-import { safeText, type TextRenderContext } from "./terminal.js";
+import { displayColumns, safeText, truncateDisplayText, type TextRenderContext } from "./terminal.js";
+import type { AkumaStatus } from "../../akuma/akuma.js";
+import type { CurrentWork } from "../../akuma/status-projection.js";
 
-type AskProgress = Readonly<{
-  admitted: (tell: TellResult, id: AkumaId) => readonly string[];
-  observe: (observation: LiveStatusObservation) => readonly string[];
-  frame: () => readonly string[];
-  flush: () => readonly string[];
-  conclude: (result: AkumaAskResult) => readonly string[];
-}>;
-
-export function askProgressStream(
-  akuma: AkumaId | undefined,
-  alias: string | undefined,
-  context: TextRenderContext,
-  now?: () => number | undefined,
-): AskProgress {
-  let target = akuma;
-  const stream = inputWaitStream(
-    context,
-    () => {
-      if (target === undefined) throw new Error("Ask progress used before admission");
-      return { id: target, ...(alias === undefined ? {} : { alias }), contract: { kind: "none" }, facts: [] };
-    },
-    { cursor: "admission", answerSeparator: true, ...(now === undefined ? {} : { now }) },
-  );
-  return {
-    admitted: (tell, id) => {
-      target = id;
-      return stream.admitted({
-        at: tell.row.at,
-        sequence: tell.row.sequence,
-        rows: [tellAdmissionRow(tell.row.text, context, tell.wake)],
-      });
-    },
-    observe: (observation) => stream.observe(observation),
-    frame: () => stream.frame(),
-    flush: () => stream.flush(),
-    conclude: (result) => {
-      const controls = tellControlLines(result, context);
-      const observation = result;
-      const completedAt = observationCompletedAt(observation);
-      return [
-        stream.conclude({
-          kind: "observed",
-          observation,
-          ...(completedAt === undefined ? {} : { completedAt }),
-        }),
-        ...subordinateLines([
-          ...(controls.length === 0 && askRawAnswer(result) !== undefined ? [] : [`input ${result.tellId}`]),
-          ...controls,
-        ]),
-      ];
-    },
-  };
-}
-
-export function waitedTellProgress(
-  result: AkumaAskResult,
-  input: Readonly<{ prompt: string; alias?: string }>,
+/** One current observation; only its work preview can truncate. */
+export function askCurrentWorkLine(
+  observed: Readonly<{ id: AkumaId; alias?: string; life?: AkumaStatus["life"]; summary?: CurrentWork["summary"] }>,
+  elapsedMs: number,
   context: TextRenderContext,
 ): string {
-  const stream = inputWaitStream(
-    context,
-    () => ({
-      id: result.akumaId,
-      ...(input.alias === undefined ? {} : { alias: input.alias }),
-      contract: { kind: "none" },
-      facts: [],
-    }),
-    { cursor: "admission", answerSeparator: true, now: () => context.now },
+  const identity = `${observed.id}${observed.alias === undefined ? "" : ` (${safeText(observed.alias)})`}`;
+  const head = `${identity}${observed.life === undefined ? "" : ` · last observed ${observed.life}`}`;
+  const clock = ` · observing ${Math.floor(elapsedMs / 1_000)}s`;
+  const summary = observed.summary;
+  if (summary === undefined) return `${head}${clock}`;
+  const text = safeText(summary.text).replace(/\s+/gu, " ").trim();
+  const preview = truncateDisplayText(
+    summary.clipped === true ? `${text.replace(/…$/u, "")}…` : text,
+    Math.max(1, context.columns - displayColumns(`${head} · ${clock}`)),
   );
-  const admitted = stream.admitted({ rows: [tellAdmissionRow(input.prompt, context, result.wake)] });
-  const observation = result;
-  const completedAt = observationCompletedAt(observation);
-  return [
-    ...admitted,
-    stream.conclude({
-      kind: "observed",
-      observation,
-      ...(completedAt === undefined ? {} : { completedAt }),
-    }),
-    ...subordinateLines([`input ${result.tellId}`, ...tellControlLines(result, context)]),
-    ...(askRawAnswer(result) === undefined ? [] : [askRawAnswer(result)!]),
-    ...(result.kind === "invalid-output" ? ["invalid answer", result.answer] : []),
-  ].join("\n");
+  return `${head} · ${preview}${clock}`;
+}
+
+/** Final native Ask facts, independent of any live observation or caller clock. */
+export function askResultText(result: AkumaAskResult, alias: string | undefined, context: TextRenderContext): string {
+  const mark =
+    result.kind === "answered" ? "✓" : result.kind === "deadline" ? "⧗" : result.kind === "unanswered" ? "○" : "!";
+  return actionReceipt({
+    mark,
+    verb: result.kind,
+    id: result.akumaId,
+    ...(alias === undefined ? {} : { alias }),
+    evidence: [
+      `input ${result.tellId}`,
+      ...tellControlLines(result, context),
+      ...(result.kind === "failed" || result.kind === "invalid-output" ? [safeText(result.diagnostic)] : []),
+      ...(result.kind === "invalid-output" ? ["invalid answer", ...result.answer.split("\n").map(safeText)] : []),
+    ],
+  }).join("\n");
+}
+
+/** Shared final text keeps the answer raw unless native controls require context. */
+export function renderAskText(result: AkumaAskResult, alias: string | undefined, context: TextRenderContext): string {
+  const answer = askRawAnswer(result);
+  if (answer !== undefined && tellControlLines(result, context).length === 0) return answer;
+  return [askResultText(result, alias, context), ...(answer === undefined ? [] : [answer])].join("\n");
 }
 
 type SpawnPresentation = Readonly<{ prompt?: string; cwd?: string; alias?: string; contractId?: string }>;
-function spawnHead(input: SpawnResult, presentation: SpawnPresentation = {}): ObservedCallHead {
+type SpawnHead = Readonly<{
+  id: string;
+  alias?: string;
+  contract: Readonly<{ kind: "none" }> | Readonly<{ kind: "associated"; contractId: string }>;
+  facts: readonly string[];
+  cwd?: string;
+}>;
+
+function spawnHead(input: SpawnResult, presentation: SpawnPresentation = {}): SpawnHead {
   const failures = input.kind === "failed" ? input.failures : [];
   const alias = failures.some((failure) => failure.stage === "dispatch" || failure.stage === "alias")
     ? undefined

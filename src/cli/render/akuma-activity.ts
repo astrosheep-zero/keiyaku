@@ -1,5 +1,3 @@
-import type { LiveStatusObservation } from "../../akuma/akuma-observe.js";
-import { defaultWaitComplete } from "../../akuma/akuma-observe.js";
 import type { AkumaStatus } from "../../akuma/akuma.js";
 import type { KillEvidence } from "../../akuma/heart/index.js";
 import type { ActivityRow } from "../../akuma/projection.js";
@@ -12,7 +10,6 @@ import {
   type CurrentWork,
 } from "../../akuma/status-projection.js";
 import type {
-  AkumaAskObservation,
   AkumaAskResult,
   AkumaTellResult,
   AkumaWaitResult,
@@ -20,7 +17,6 @@ import type {
 } from "../../akuma/selection-observation.js";
 import type { AkumaObservation } from "../../index.js";
 import type { SpawnResult } from "../../library/akuma-creation.js";
-import type { TellResult } from "../../akuma/body.js";
 import type { AkumaHistoryResult } from "../../library/selection.js";
 import {
   ageText,
@@ -60,14 +56,7 @@ export function frameRule(headLines: readonly string[], columns?: number): strin
   return "─".repeat(width);
 }
 
-/** Tool rows an activity view prints after each say or Tell checkpoint; the surplus folds in place. */
-const TOOL_BUDGET = 3;
-
-type StatusTimeline = LiveStatusObservation["status"]["timeline"];
 type RenderRow = ActivityRow;
-type RenderedSnapshot = StatusTimeline;
-type RenderedActivity = Readonly<{ snapshot: RenderedSnapshot; rows: readonly ActivityRow[] }>;
-type CurrentTurnBoundary = Readonly<{ row: RenderRow; turnSequence: number }>;
 
 function identity(id: string, alias?: string): string {
   return `${id}${alias === undefined ? "" : ` (${alias})`}`;
@@ -112,7 +101,7 @@ export function panelHead(
  */
 export function actionReceipt(
   input: Readonly<{
-    mark: "✓" | "⧗" | "!";
+    mark: "✓" | "⧗" | "!" | "○";
     verb: string;
     id: string;
     alias?: string;
@@ -126,9 +115,9 @@ function contractFacts(contract: DisplayAssociation, columns: number): readonly 
   return contract.kind === "failed" ? diagnosticLines("contract association", contract.diagnostic, columns) : [];
 }
 
-/** The action family's one mark cell: a settled success stays blank, and live is only a frame mark. */
-function toolMargin(row: Extract<RenderRow, { kind: "tool" }>, live: boolean): string {
-  if (row.state === "active") return live ? "●  " : "?  ";
+/** Frozen rows distinguish unsettled work from a witnessed result. */
+function toolMargin(row: Extract<RenderRow, { kind: "tool" }>): string {
+  if (row.state === "active") return "?  ";
   if (row.state === "unsettled") return "?  ";
   return row.state.status === "ok" ? ACTION_MARGIN : "!  ";
 }
@@ -178,8 +167,6 @@ function actionPrefix(
 
 /** One row's shared prefix family and observation context. */
 type RowView = Readonly<{
-  /** Live frame: only an active tool asserts in-motion state. */
-  live?: true;
   /** History expands narrative payloads and complete diagnostics. */
   history?: true;
 }>;
@@ -190,7 +177,7 @@ function rowPrefix(
   columns: number,
   view: RowView,
 ): Readonly<{ first: string; continuation: string }> {
-  if (row.kind === "tool") return actionPrefix(toolMargin(row, view.live === true), tool!.label, columns);
+  if (row.kind === "tool") return actionPrefix(toolMargin(row), tool!.label, columns);
   if (row.kind === "thought") return actionPrefix(ACTION_MARGIN, "think", columns);
   if (row.kind === "report") {
     if (view.history !== true) return actionPrefix(ACTION_MARGIN, "report", columns);
@@ -260,275 +247,8 @@ function renderRow(row: RenderRow, context: TextRenderContext, view: RowView = {
   });
 }
 
-function groupedEntries(
-  entries: readonly StreamEmission[],
-  context: TextRenderContext,
-  view: RowView = {},
-): readonly string[] {
-  const lines: string[] = [];
-  for (const entry of entries) {
-    if (entry.kind === "gap") {
-      lines.push(omissionMarker(`${entry.count} omitted`, context.columns));
-      continue;
-    }
-    lines.push(...renderRow(entry.row, context, view));
-  }
-  return lines;
-}
-
 function groupedRows(rows: readonly RenderRow[], context: TextRenderContext, view: RowView = {}): readonly string[] {
-  return groupedEntries(
-    rows.filter((row) => row.kind !== "turn").map((row) => ({ kind: "row", row })),
-    context,
-    view,
-  );
-}
-
-function currentTurnBoundary(activity: RenderedActivity): CurrentTurnBoundary | undefined {
-  const snapshot = activity.snapshot;
-  if (snapshot.kind !== "open" || snapshot.openingSequence === undefined) return undefined;
-  const row = activity.rows.find((candidate) => candidate.sequence === snapshot.openingSequence);
-  if (row === undefined) return undefined;
-  // The projector selects a typed opening: its call or delivered launch Tell.
-  if (row.kind !== "call" && !(row.kind === "tell" && row.state === "told")) return undefined;
-  return { row, turnSequence: snapshot.turn.sequence };
-}
-
-/** One command's append-only activity view, with a baseline and a final tail flush. */
-export type ActivityStream = ((activity: RenderedActivity) => readonly string[]) &
-  Readonly<{
-    /** Establish a live baseline without spending the command's live tool budget. */
-    seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) => readonly string[];
-    /** Current live rows for the redrawable frame; never part of append-only output. */
-    frame: () => readonly string[];
-    /** Emit the pending omission count and unsettled rows once before the command's conclusion. */
-    flush: () => readonly string[];
-  }>;
-
-/** One decided piece of append-only output: a settled row, or an untimed omission count. */
-type StreamEmission = Readonly<{ kind: "gap"; count: number }> | Readonly<{ kind: "row"; row: RenderRow }>;
-
-type ActivityStreamState = {
-  newestSettledSequence: number | undefined;
-  admissionSequence: number | undefined;
-  pendingTellSequences: Set<number>;
-  renderedBoundaries: Set<number>;
-  admittedTellSequences: Set<number>;
-  checkpointTools: number;
-  omitted: number;
-  liveRows: Map<number, RenderRow>;
-};
-
-function isSettledStreamRow(row: RenderRow): boolean {
-  if (row.kind === "turn" || row.kind === "outcome") return false;
-  if (row.kind === "tell") return row.state === "told";
-  return row.kind !== "tool" || (row.state !== "active" && row.state !== "unsettled");
-}
-
-function sameTool(left: RenderRow, right: RenderRow): boolean {
-  return (
-    left.kind === "tool" &&
-    right.kind === "tool" &&
-    left.turnSequence === right.turnSequence &&
-    left.name === right.name &&
-    JSON.stringify(left.call) === JSON.stringify(right.call)
-  );
-}
-
-function settledRows(activity: RenderedActivity): readonly RenderRow[] {
-  return activity.rows.filter((row) => isSettledStreamRow(row) && !inFlightSay(activity, row));
-}
-
-function rememberPendingTells(state: ActivityStreamState, activity: RenderedActivity): void {
-  for (const row of activity.rows)
-    if (
-      row.kind === "tell" &&
-      row.state === "pending" &&
-      (state.admissionSequence === undefined || row.sequence >= state.admissionSequence)
-    )
-      state.pendingTellSequences.add(row.sequence);
-}
-
-/** Count skipped settled rows within the eligible part of a seeded baseline. */
-function baselineOmissionCount(activity: RenderedActivity, after: number, before?: number): number {
-  return activity.rows.filter(
-    (row) => row.sequence > after && (before === undefined || row.sequence < before) && isSettledStreamRow(row),
-  ).length;
-}
-
-/**
- * A say is in-flight only while it is the newest row of the open turn: it may still be streaming, so it
- * stays in the redrawable frame. A say with any successor row is settled evidence and renders on the rail.
- */
-function inFlightSay(activity: RenderedActivity, row: RenderRow): boolean {
-  if (activity.snapshot.kind !== "open" || row.kind !== "said") return false;
-  let newest: RenderRow | undefined;
-  for (const candidate of activity.rows) {
-    if (newest === undefined || candidate.sequence > newest.sequence) newest = candidate;
-  }
-  return newest !== undefined && newest.sequence === row.sequence;
-}
-
-function rememberLiveRows(state: ActivityStreamState, activity: RenderedActivity): void {
-  for (const row of activity.rows) {
-    if (row.kind === "tool" && row.state === "active") state.liveRows.set(row.sequence, row);
-    else if (row.kind === "said" && inFlightSay(activity, row)) state.liveRows.set(row.sequence, row);
-    else if (row.kind === "tool" && isSettledStreamRow(row)) {
-      for (const [sequence, live] of state.liveRows) {
-        if (sameTool(live, row)) {
-          state.liveRows.delete(sequence);
-          break;
-        }
-      }
-    } else if (isSettledStreamRow(row)) state.liveRows.delete(row.sequence);
-  }
-}
-
-/** A visible row first releases the untimed omission count accumulated before it. */
-function emitRow(state: ActivityStreamState, emissions: StreamEmission[], emission: StreamEmission): void {
-  if (state.omitted > 0) emissions.push({ kind: "gap", count: state.omitted });
-  state.omitted = 0;
-  emissions.push(emission);
-}
-
-function emitCurrentTurnBoundary(
-  state: ActivityStreamState,
-  activity: RenderedActivity,
-  emissions: StreamEmission[],
-): void {
-  const boundary = currentTurnBoundary(activity);
-  if (boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence)) {
-    state.renderedBoundaries.add(boundary.turnSequence);
-    if (boundary.row.kind !== "thought") emitRow(state, emissions, { kind: "row", row: boundary.row });
-  }
-}
-
-/**
- * Decide each newly settled row once, when first observed: it prints now or
- * becomes part of an untimed omission count. No timestamped row is held for a
- * later observation, so concurrent streams merge without moving backward.
- */
-function observeActivitySnapshot(state: ActivityStreamState, activity: RenderedActivity): readonly StreamEmission[] {
-  const emissions: StreamEmission[] = [];
-  const boundary = currentTurnBoundary(activity);
-  rememberPendingTells(state, activity);
-  // A row newly selected as this Turn's typed opening must still respect the
-  // settled cursor, even if its earlier pending form was remembered.
-  if (boundary !== undefined) state.pendingTellSequences.delete(boundary.row.sequence);
-  const observedRows = settledRows(activity)
-    .filter((row) => state.admissionSequence === undefined || row.sequence >= state.admissionSequence)
-    .filter((row) => !state.admittedTellSequences.has(row.sequence))
-    .filter(
-      (row) =>
-        boundary === undefined ||
-        !state.renderedBoundaries.has(boundary.turnSequence) ||
-        row.sequence !== boundary.row.sequence,
-    )
-    .filter(
-      (row) =>
-        state.pendingTellSequences.has(row.sequence) ||
-        state.newestSettledSequence === undefined ||
-        row.sequence > state.newestSettledSequence,
-    );
-  rememberLiveRows(state, activity);
-  if (observedRows.length === 0) return emissions;
-  for (const row of observedRows) state.pendingTellSequences.delete(row.sequence);
-  state.newestSettledSequence = observedRows.reduce(
-    (newest, row) => Math.max(newest, row.sequence),
-    state.newestSettledSequence ?? observedRows[0]!.sequence,
-  );
-  for (const row of observedRows) {
-    if (row.kind === "thought") continue;
-    // A failed tool is evidence, not routine progress, so it always prints and spends no budget.
-    const failed = row.kind === "tool" && typeof row.state === "object" && row.state.status === "error";
-    if (row.kind === "tool" && !failed) {
-      if (state.checkpointTools >= TOOL_BUDGET) {
-        state.omitted += 1;
-        continue;
-      }
-      state.checkpointTools += 1;
-    } else if (row.kind === "said" || row.kind === "tell") state.checkpointTools = 0;
-    emitRow(state, emissions, { kind: "row", row });
-  }
-  return emissions;
-}
-
-/**
- * Append-only live view over one command's successive settled snapshots.
- * After each say or Tell, the first three tools print as they settle; later
- * tools until the next checkpoint fold into one omission marker. Failed tools
- * always print.
- */
-export function activityStream(context: TextRenderContext): ActivityStream {
-  const state: ActivityStreamState = {
-    newestSettledSequence: undefined,
-    admissionSequence: undefined,
-    pendingTellSequences: new Set(),
-    renderedBoundaries: new Set(),
-    admittedTellSequences: new Set(),
-    checkpointTools: 0,
-    omitted: 0,
-    liveRows: new Map(),
-  };
-  const seed = (activity: RenderedActivity, alreadyRenderedSequence?: number): readonly StreamEmission[] => {
-    const emissions: StreamEmission[] = [];
-    if (alreadyRenderedSequence !== undefined) {
-      state.admissionSequence = alreadyRenderedSequence;
-      state.admittedTellSequences.add(alreadyRenderedSequence);
-    }
-    const boundary = currentTurnBoundary(activity);
-    const unseenBoundary = boundary !== undefined && !state.renderedBoundaries.has(boundary.turnSequence);
-    if (unseenBoundary) {
-      if (alreadyRenderedSequence !== undefined && boundary.row.sequence > alreadyRenderedSequence) {
-        const beforeBoundary = baselineOmissionCount(activity, alreadyRenderedSequence, boundary.row.sequence);
-        if (beforeBoundary > 0) emissions.push({ kind: "gap", count: beforeBoundary });
-      }
-      if (alreadyRenderedSequence !== undefined && boundary.row.sequence <= alreadyRenderedSequence)
-        state.renderedBoundaries.add(boundary.turnSequence);
-      else emitCurrentTurnBoundary(state, activity, emissions);
-      rememberLiveRows(state, activity);
-      const omitted = baselineOmissionCount(
-        activity,
-        alreadyRenderedSequence === undefined
-          ? boundary.row.sequence
-          : Math.max(boundary.row.sequence, alreadyRenderedSequence),
-      );
-      if (omitted > 0) emissions.push({ kind: "gap", count: omitted });
-    }
-    rememberPendingTells(state, activity);
-    rememberLiveRows(state, activity);
-    const rows = settledRows(activity);
-    if (rows.length > 0)
-      state.newestSettledSequence = rows.reduce((newest, row) => Math.max(newest, row.sequence), rows[0]!.sequence);
-    return emissions;
-  };
-  const flush = (): readonly StreamEmission[] => {
-    const emissions: StreamEmission[] = [];
-    if (state.omitted > 0) emissions.push({ kind: "gap", count: state.omitted });
-    state.omitted = 0;
-    for (const row of [...state.liveRows.values()].sort((left, right) => left.sequence - right.sequence)) {
-      const unresolved = row.kind === "tool" && row.state === "active" ? { ...row, state: "unsettled" as const } : row;
-      emissions.push({ kind: "row", row: unresolved });
-    }
-    state.liveRows.clear();
-    return emissions;
-  };
-  const render = (emissions: readonly StreamEmission[]): readonly string[] => groupedEntries(emissions, context);
-  const frame = (): readonly string[] =>
-    groupedEntries(
-      [...state.liveRows.values()]
-        .sort((left, right) => left.sequence - right.sequence)
-        .map((row) => ({ kind: "row", row })),
-      context,
-      { live: true },
-    );
-  const observe = (activity: RenderedActivity): readonly string[] => render(observeActivitySnapshot(state, activity));
-  return Object.assign(observe, {
-    seed: (activity: RenderedActivity, alreadyRenderedSequence?: number) =>
-      render(seed(activity, alreadyRenderedSequence)),
-    frame,
-    flush: () => render(flush()),
-  });
+  return rows.filter((row) => row.kind !== "turn").flatMap((row) => renderRow(row, context, view));
 }
 
 function lifeConclusion(life: AkumaStatus["life"], pending: boolean): Readonly<{ mark: string; verb: string }> {
@@ -537,179 +257,6 @@ function lifeConclusion(life: AkumaStatus["life"], pending: boolean): Readonly<{
   if (life === "killed") return { mark: "×", verb: "killed" };
   if (life === "hung") return { mark: "?", verb: "hung" };
   return { mark: "!", verb: life };
-}
-
-function durationText(durationMs: number): string {
-  const seconds = Math.max(0, Math.round(durationMs / 1000));
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m${String(seconds % 60)}s`;
-}
-
-/**
- * One wait-style conclusion for every observer of an input-bound Tell. A target
- * that settled at or after this wait began keeps its duration, a target already
- * settled names no duration, and an unfinished target carries the elapsed wait.
- * An ended wait is the deadline itself, so it never reads a pinned completion.
- */
-function waitConclusion(
-  observation: AkumaAskObservation,
-  input: Readonly<{
-    startedAt: number;
-    completedAt?: string | null;
-    now?: number;
-    status?: LiveStatusObservation["status"];
-  }>,
-): readonly string[] {
-  const ended = observation.kind === "deadline";
-  const pinned = input.completedAt == null ? Number.NaN : Date.parse(input.completedAt);
-  const at = ended ? input.now : Number.isFinite(pinned) ? pinned : undefined;
-  const failed =
-    observation.kind === "failed" ||
-    observation.kind === "invalid-output" ||
-    (input.status !== undefined && failedOutcomeDiagnostic(input.status) !== undefined);
-  const state = failed
-    ? { mark: "!", verb: "failed" }
-    : observation.kind === "answered"
-      ? { mark: "✓", verb: "answered" }
-      : observation.kind === "unanswered"
-        ? { mark: "○", verb: "unanswered" }
-        : input.status === undefined
-          ? { mark: "⧗", verb: "pending tell" }
-          : lifeConclusion(input.status.life, !defaultWaitComplete(input.status));
-  const elapsed = ended
-    ? at === undefined || !Number.isFinite(input.startedAt)
-      ? ""
-      : ` — waited ${durationText(Math.max(0, at - input.startedAt))}`
-    : at !== undefined && at >= input.startedAt
-      ? ` — ${durationText(Math.max(0, at - input.startedAt))}`
-      : "";
-  return [
-    `${state.mark} ${state.verb}${elapsed}`,
-    ...(observation.kind === "failed" || observation.kind === "invalid-output"
-      ? [`! ${safeText(observation.diagnostic)}`]
-      : []),
-  ];
-}
-
-/** The identity a streamed observing call's head frame renders from its resolved birth. */
-export type ObservedCallHead = Readonly<{
-  id: string;
-  alias?: string;
-  contract: DisplayAssociation;
-  facts: readonly string[];
-  /** A directory the invocation already resolved; never read here to fill the panel. */
-  cwd?: string;
-}>;
-
-export type InputWaitConclusion =
-  | Readonly<{
-      kind: "failed";
-      diagnostic?: string;
-      /** Already-decided evidence rows, such as a Tell admitted before the failure. */
-      evidence?: readonly string[];
-    }>
-  | Readonly<{
-      kind: "observed";
-      observation: AkumaAskObservation;
-      completedAt?: string | null;
-    }>;
-
-export type InputWaitStream = Readonly<{
-  admitted: (input: Readonly<{ at?: string; sequence?: number; rows: readonly string[] }>) => readonly string[];
-  observe: (
-    observation: Readonly<{ status: LiveStatusObservation["status"]; rows: readonly ActivityRow[] }>,
-  ) => readonly string[];
-  /** Current live rows for the redrawable frame; never part of append-only output. */
-  frame: () => readonly string[];
-  /** In-flight rows with their unresolved marks, emitted by a close that never concluded. */
-  flush: () => readonly string[];
-  conclude: (result: InputWaitConclusion) => string;
-  opened: () => boolean;
-}>;
-
-function failedOutcomeDiagnostic(status: LiveStatusObservation["status"]): string | undefined {
-  const outcome = status.timeline.kind === "idle" ? status.timeline.outcome : undefined;
-  return outcome !== undefined && outcome.outcome.kind === "failed" ? outcome.outcome.diagnostic : undefined;
-}
-
-/**
- * Live view over one observing input: its identity frame opens once, selected
- * activity follows, and the input-bound outcome supplies the closing row.
- */
-export function inputWaitStream(
-  context: TextRenderContext,
-  head: () => ObservedCallHead,
-  options: Readonly<{ cursor: "empty" | "admission"; now?: () => number | undefined; answerSeparator?: true }>,
-): InputWaitStream {
-  const now = options.now ?? ((): number => Date.now());
-  const activity = activityStream(context);
-  let startedAt = Number.NaN;
-  let admitted = false;
-  let admittedSequence: number | undefined;
-  let opened = false;
-  let cursorSeeded = false;
-  /** The last observed life, so a caller deadline concludes on the target's status rather than naming the deadline. */
-  let lastStatus: LiveStatusObservation["status"] | undefined;
-  const admit: InputWaitStream["admitted"] = (input) => {
-    if (admitted) throw new Error("input wait admitted more than once");
-    const pinned = input.at === undefined ? Number.NaN : Date.parse(input.at);
-    startedAt = Number.isFinite(pinned) ? pinned : (now() ?? Number.NaN);
-    admittedSequence = input.sequence;
-    admitted = true;
-    if (input.rows.length === 0) return [];
-    const lines: string[] = [];
-    open(lines);
-    lines.push(...input.rows);
-    return lines;
-  };
-  const open = (lines: string[], failedBeforeAdmission = false): void => {
-    if (opened) return;
-    if (!admitted && !failedBeforeAdmission) throw new Error("input wait observed before admission");
-    opened = true;
-    const identity = head();
-    const headLines = panelHead(
-      identity.id,
-      identity.alias,
-      identity.contract,
-      identity.cwd === undefined ? [] : [safeText(identity.cwd)],
-    );
-    // A streamed panel always states an observed conclusion before it closes, so its rule opens here.
-    lines.push(...headLines, frameRule(headLines, context.columns));
-  };
-  const observe: InputWaitStream["observe"] = (observation) => {
-    const lines: string[] = [];
-    lastStatus = observation.status;
-    open(lines);
-    const activityInput = { snapshot: observation.status.timeline, rows: observation.rows };
-    if (!cursorSeeded && options.cursor === "admission") lines.push(...activity.seed(activityInput, admittedSequence));
-    else lines.push(...activity(activityInput));
-    cursorSeeded = true;
-    return lines;
-  };
-  const frame: InputWaitStream["frame"] = () => activity.frame();
-  const flush: InputWaitStream["flush"] = () => activity.flush();
-  const conclude: InputWaitStream["conclude"] = (result) => {
-    const lines: string[] = [];
-    open(lines, result.kind === "failed");
-    if (result.kind === "failed" && result.evidence !== undefined) lines.push(...result.evidence);
-    lines.push(...activity.flush());
-    if (result.kind === "failed") {
-      if (result.diagnostic !== undefined) lines.push(`! ${safeText(result.diagnostic)}`);
-    } else {
-      const currentTime = now();
-      lines.push(
-        ...waitConclusion(result.observation, {
-          startedAt,
-          ...(result.completedAt === undefined ? {} : { completedAt: result.completedAt }),
-          ...(currentTime === undefined ? {} : { now: currentTime }),
-          ...(lastStatus === undefined ? {} : { status: lastStatus }),
-        }),
-      );
-    }
-    lines.push(...subordinateLines(head().facts));
-    return `${lines.join("\n")}${options.answerSeparator === true ? "\n\n" : ""}`;
-  };
-  return { admitted: admit, observe, frame, flush, conclude, opened: () => opened };
 }
 
 function renderReportedChangeLines(view: AkumaObservation): readonly string[] {
@@ -805,13 +352,6 @@ export function killResultText(id: string, evidence: KillEvidence, alias?: strin
 type AkumaPresentation = Readonly<{
   alias?: string;
 }>;
-
-/** The settlement instant a settled observation carries; an open observation has none. */
-export function observationCompletedAt(observation: AkumaAskObservation): string | undefined {
-  return observation.kind === "answered" || observation.kind === "failed" || observation.kind === "invalid-output"
-    ? observation.completedAt
-    : undefined;
-}
 
 export function askRawAnswer(result: AkumaAskResult): string | undefined {
   return result.kind === "answered" ? JSON.stringify(result.answer) : undefined;
@@ -974,25 +514,6 @@ export function tellPayloadLines(text: string, context: TextRenderContext): read
     quote: '"',
     truncated: false,
   });
-}
-
-/** One admitted Tell as a timeline input row inside a shared panel; the panel owns the identity. */
-export function tellAdmissionRow(
-  text: string,
-  context: TextRenderContext,
-  wake?: TellResult["wake"] | AkumaTellResult["wake"],
-): string {
-  const lead =
-    wake?.kind === "failed" ? TOP_FAILURE : wake?.kind === "held" || wake?.kind === "pending" ? TOP_PENDING : TOP_INPUT;
-  return renderBoundedPayload({
-    text,
-    first: lead,
-    continuation: TOP_CONTINUATION,
-    columns: context.columns,
-    maxLines: 1,
-    quote: "",
-    truncated: false,
-  })[0]!;
 }
 
 export function callFailureLines(

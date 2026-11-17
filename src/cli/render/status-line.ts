@@ -22,6 +22,7 @@ export class StatusLine {
   private timer: IntervalHandle | undefined;
   private format: ((elapsedMs: number) => string) | undefined;
   private startedAt: number | undefined;
+  private finished = false;
 
   constructor(
     private readonly stream: StatusLineStream,
@@ -35,11 +36,11 @@ export class StatusLine {
   }
 
   show(format: (elapsedMs: number) => string): void {
-    if (!this.isTTY) return;
+    if (!this.isTTY || this.finished) return;
     this.format = format;
     this.startedAt ??= this.now();
     this.redraw();
-    this.timer ??= this.schedule(() => this.redraw(), this.intervalMs);
+    if (!this.finished) this.timer ??= this.schedule(() => this.redraw(), this.intervalMs);
   }
 
   writeBlock(lines: readonly string[]): void {
@@ -49,16 +50,22 @@ export class StatusLine {
     if (this.isTTY && this.format !== undefined) this.redraw();
   }
 
-  finish(line: string): void {
-    if (!this.isTTY) return;
-    this.erase();
+  finish(line?: string): void {
+    if (this.finished) return;
+    this.finished = true;
+    const visible = this.format !== undefined;
     this.stop();
-    this.stream.write(`${line}\n`);
+    this.format = undefined;
+    this.startedAt = undefined;
+    if (!this.isTTY) return;
+    if (visible) this.stream.write("\r\u001b[2K");
+    if (line !== undefined) this.stream.write(`${line}\n`);
   }
 
   private redraw(): void {
     if (!this.isTTY || this.format === undefined || this.startedAt === undefined) return;
-    this.stream.write(`\r\u001b[2K${this.format(Math.max(0, this.now() - this.startedAt))}`);
+    const line = this.format(Math.max(0, this.now() - this.startedAt));
+    if (!this.finished) this.stream.write(`\r\u001b[2K${line}`);
   }
 
   private erase(): void {

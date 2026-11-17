@@ -79,10 +79,14 @@ fact read and Turn projection. That transient companion preserves final forms
 that a later bounded status no longer selects, including rows of a newly idle
 Turn. It neither widens a status nor enters a public wait or spawn result.
 
-Active tools and in-flight speech belong only to a live stream's redrawable
-frame. Append-only output admits activity only after settlement; closing
-accounts for every row still in flight with an explicit unknown (`?`) row.
-Status and history are frozen projections, so they never assert liveness.
+Live consumers may present the native current-work summary as a replaceable
+observation, replacing all prior work and life facts on each callback. Ask uses
+that bounded presentation rather than reconstructing a timeline or settlement
+cursor. Its elapsed clock measures the caller's observation, not worker liveness,
+and its conclusion belongs only to the exact admitted input's native outcome.
+Status and history are frozen projections, so they never assert liveness. Native
+timeline streams retain their complete windows and ordinary retention semantics;
+consumer presentation neither expands nor removes that capability.
 
 For an open Turn, the public timeline projector retains its opening input (the
 retained call, or else the earliest retained settled Tell delivered at launch)

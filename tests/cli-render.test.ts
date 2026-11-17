@@ -27,7 +27,6 @@ import type { ReconcileCompletion } from "../src/library/reconcile.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "../src/cli/render/catalog.js";
 import {
   DEFAULT_CONTEXT,
-  activityStream,
   frameRule,
   historyText as nativeHistoryText,
   snapshotText,
@@ -66,7 +65,7 @@ import {
   type ActivityToolCall,
 } from "./support/kanshi-activity.js";
 import { parseArgv } from "../src/cli/parse.js";
-import { askProgressStream } from "../src/cli/render/akuma.js";
+import { askCurrentWorkLine } from "../src/cli/render/akuma.js";
 import { projectTurns, selectSnapshot } from "../src/akuma/projection.js";
 import { activityFact } from "./support/akuma-fixtures.js";
 import type { TimelineFact } from "../src/akuma/heart/index.js";
@@ -152,10 +151,6 @@ function placedDelivery(
 /** Rows carried by a live observation; focused renderer fixtures need no second projection. */
 function activityRows(timeline: ActivitySnapshot): readonly ActivityRow[] {
   return timeline.entries.flatMap((entry) => (entry.kind === "row" ? [entry.row] : []));
-}
-
-function liveActivity(snapshot: ActivitySnapshot, rows: readonly ActivityRow[] = activityRows(snapshot)) {
-  return { snapshot, rows };
 }
 
 /** One generic tool row carrying the admitted bounded argument preview an adapter retains. */
@@ -2296,84 +2291,7 @@ test("status keeps current evidence while history retains thought narration", ()
     assert.match(historyText, new RegExp(`\\$ ${command}`, "u"), `history keeps intermediate tool ${command}`);
 });
 
-test("current attempt boundaries lead live streams exactly once", () => {
-  const context = { columns: 120, color: false } as const;
-  const call = snapshotRow({
-    kind: "call" as const,
-    sequence: 1,
-    turnSequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    text: "initial commission",
-  });
-  const tool = snapshotRow(completedTool(2, "bash", { kind: "run", command: "after-boundary" }));
-  const active = snapshotRow(activeTool(3, "bash", { kind: "run", command: "still-running" }));
-  const initial = { ...openAkumaSnapshot([call, tool, active]), openingSequence: 1 };
-
-  const live = activityStream(context);
-  const liveRows = [...live(liveActivity(initial)), ...live(liveActivity(initial)), ...live.flush()].join("\n");
-  assert.match(liveRows, /^▸ initial commission/mu);
-  assert.ok(liveRows.indexOf("initial commission") < liveRows.indexOf("after-boundary"));
-  assert.equal((liveRows.match(/initial commission/gu) ?? []).length, 1);
-
-  const id = "aku/worker/abcd0101";
-  const status = liveStatusObservationSchema.unwrap().shape.status.parse({ birth: DIRECT_BIRTH, id, life: "running", timeline: initial });
-  const statusText = snapshotText(observation(status), context);
-  assert.match(statusText, /3 run \$ still-running/u);
-
-  const wake = snapshotRow({
-    kind: "tell" as const,
-    sequence: 4,
-    at: AKUMA_ACTIVITY_AT,
-    tellId: "tell/wake",
-    text: "resume with the new direction",
-    state: "told" as const,
-    deliveries: [{ route: "launch" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
-  });
-  const woken = {
-    ...openAkumaSnapshot([
-      wake,
-      snapshotRow(completedTool(5, "bash", { kind: "run", command: "after-wake" })),
-      snapshotRow(activeTool(6, "bash", { kind: "run", command: "waking" })),
-    ]),
-    openingSequence: 4,
-  };
-  const wakeStatusText = snapshotText(
-    observation(
-      liveStatusObservationSchema.unwrap().shape.status.parse({
-        birth: DIRECT_BIRTH,
-        id: "aku/worker/abcd0102",
-        life: "running",
-        timeline: woken,
-      }),
-    ),
-    context,
-  );
-  assert.match(wakeStatusText, /6 run \$ waking/u);
-});
-
-test("current attempt boundaries consume the projection opening identity", () => {
-  const context = { columns: 120, color: false } as const;
-  const named = snapshotRow({
-    kind: "tell" as const,
-    sequence: 1,
-    at: AKUMA_ACTIVITY_AT,
-    tellId: "tell/named-opening",
-    text: "named opening",
-    state: "told" as const,
-    deliveries: [{ route: "launch" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
-  });
-  const activity = snapshotRow(completedTool(2, "bash", { kind: "run", command: "after-opening" }));
-  const namedSnapshot = { ...openAkumaSnapshot([named, activity]), openingSequence: 1 };
-  const seeded = activityStream(context).seed(liveActivity(namedSnapshot)).join("\n");
-  assert.match(seeded, /named opening/u);
-  assert.doesNotMatch(seeded, /after-opening/u);
-  assert.match(seeded, /··· +1 omitted/u, "a seeded opening marks its skipped settled successor");
-  assert.equal((seeded.match(/named opening/gu) ?? []).length, 1);
-
-  assert.deepEqual(activityStream(context).seed(liveActivity(openAkumaSnapshot([named, activity]))), []);
-});
-
-test("ask streams projected overlapping tool completions once in completion order", () => {
+test("Ask current work follows the native overlapping-tool frontier", () => {
   const id = parseAkumaId("aku/worker/abcd0104").id;
   const at = (minute: number) => `2026-08-10T00:${String(minute).padStart(2, "0")}:00.000Z`;
   const tool = (sequence: number, phase: "started" | "completed", name: string): TimelineFact =>
@@ -2427,215 +2345,22 @@ test("ask streams projected overlapping tool completions once in completion orde
       rows: ledger.rows,
     };
   };
-  const ask = askProgressStream(undefined, undefined, { columns: 120, color: false });
-  const admissionRow = projection(first).rows.find((row) => row.kind === "tell");
-  assert.ok(admissionRow?.kind === "tell");
-  ask.admitted(
-    { admission: { tellId: "tell/overlap" }, row: admissionRow, wake: { kind: "told" } },
-    id,
-  );
-  const observe = (value: ReturnType<typeof projection>) => ask.observe(value);
-  observe(projection(first));
-  const b = observe(projection(second)).join("\n");
-  const a = observe(projection(third)).join("\n");
-  assert.match(b, /\$ B[\s\S]*between tools/u);
-  assert.match(a, /\$ A/u);
-  assert.deepEqual(observe(projection(third)), []);
-});
-
-test("narrative selection is partition-invariant and repeated pending snapshots do not replay", () => {
-  const tool = (sequence: number) =>
-    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `c${sequence}` }));
-  const rows = [
-    tool(1),
-    tool(2),
-    tool(3),
-    tool(4),
-    snapshotRow({ kind: "thought", sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden between" }),
-    snapshotRow({ kind: "note", sequence: 6, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "between" }),
-    tool(7),
-    tool(8),
-    snapshotRow({ kind: "thought", sequence: 9, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden after" }),
-    snapshotRow({ kind: "said", sequence: 10, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "after" }),
-    tool(11),
-    tool(12),
-  ];
-  const render = (partitions: readonly number[]): readonly string[] => {
-    const stream = activityStream({ columns: 120, color: false });
-    let seen = 0;
-    const lines = partitions.flatMap((count) => {
-      seen += count;
-      return stream(liveActivity(idleAkumaSnapshot(rows.slice(0, seen))));
-    });
-    assert.deepEqual(
-      stream(liveActivity(idleAkumaSnapshot(rows.slice(0, seen)))),
-      [],
-      "an identical pending snapshot replays nothing",
+  const context = { columns: 120, color: false };
+  const line = (facts: readonly TimelineFact[]) => {
+    const observed = projection(facts);
+    return askCurrentWorkLine(
+      { id, life: observed.status.life, summary: projectCurrentWork(observed.status.timeline).summary },
+      2_000,
+      context,
     );
-    return [...lines, ...stream.flush()];
   };
-  assert.deepEqual(render([rows.length]), render([4, 1, 2, 1, 2, 2]));
-});
-
-test("live activity keeps unsettled rows in the frame and accounts for them on close", () => {
-  const active = snapshotRow(activeTool(1, "bash", { kind: "run", command: "slow" }));
-  const complete = snapshotRow(completedTool(2, "bash", { kind: "run", command: "slow" }));
-  const stream = activityStream({ columns: 120, color: false });
-
-  assert.deepEqual(stream(liveActivity(openAkumaSnapshot([active]))), []);
-  assert.match(stream.frame().join("\n"), /●  run +\$ slow/u);
-
-  const settled = stream(liveActivity(idleAkumaSnapshot([complete]))).join("\n");
-  assert.match(settled, /^ {3}run +\$ slow$/mu);
-  assert.equal(stream.frame().length, 0);
-  assert.deepEqual(stream.flush(), []);
-
-  const unresolved = activityStream({ columns: 120, color: false });
-  unresolved(liveActivity(openAkumaSnapshot([active])));
-  const closing = unresolved.flush().join("\n");
-  assert.match(closing, /\?  run +\$ slow/u);
-  assert.equal((closing.match(/\$ slow/gu) ?? []).length, 1);
-  assert.deepEqual(unresolved.flush(), []);
-});
-
-test("a live activity stream skips thoughts while advancing its sequence cursor", () => {
-  const rows = [
-    snapshotRow({ kind: "said" as const, sequence: 1, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "say-sentinel" }),
-    snapshotRow({
-      kind: "thought" as const,
-      sequence: 2,
-      turnSequence: 1,
-      at: AKUMA_ACTIVITY_AT,
-      text: "think-sentinel",
-    }),
-    snapshotRow({ kind: "note" as const, sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "note-sentinel" }),
-    snapshotRow({ kind: "call" as const, sequence: 4, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "call-sentinel" }),
-    snapshotRow({
-      kind: "tell" as const,
-      sequence: 5,
-      at: AKUMA_ACTIVITY_AT,
-      tellId: "tell/live-sentinel",
-      text: "tell-sentinel",
-      state: "told" as const,
-      deliveries: [{ route: "launch" as const, turnSequence: 1, deliveredAt: AKUMA_ACTIVITY_AT }],
-    }),
-    snapshotRow(completedTool(6, "bash", { kind: "run", command: "tool-sentinel" })),
-  ];
-  const stream = activityStream({ columns: 120, color: false });
-  stream.seed(liveActivity(openAkumaSnapshot([])));
-  const initial = stream(liveActivity(idleAkumaSnapshot(rows.slice(0, 1), answeredOutcome(1, "outcome-sentinel"))));
-  assert.match(initial.join("\n"), /say-sentinel/u, "eligible predecessors still stream");
-  const thoughtOnly = idleAkumaSnapshot(rows.slice(0, 2), answeredOutcome(1, "outcome-sentinel"));
-  assert.deepEqual(stream(liveActivity(thoughtOnly)), [], "a thought-only update advances the durable cursor");
-  const updated = idleAkumaSnapshot(rows, answeredOutcome(1, "outcome-sentinel"));
-  const text = [...initial, ...stream(liveActivity(updated)), ...stream(liveActivity(updated)), ...stream.flush()].join(
-    "\n",
-  );
-  for (const sentinel of ["say-sentinel", "note-sentinel", "call-sentinel", "tell-sentinel", "tool-sentinel"])
-    assert.equal((text.match(new RegExp(sentinel, "gu")) ?? []).length, 1, `${sentinel} streams once`);
-  assert.doesNotMatch(text, /think-sentinel/u, "thought narration is never live evidence");
-  assert.doesNotMatch(text, /outcome-sentinel/u, "outcomes remain conclusion evidence, not live narration");
-});
-
-test("thoughts do not consume a live stream's tool or omission budgets", () => {
-  const tool = (sequence: number) =>
-    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
-  const rows = [
-    tool(1),
-    snapshotRow({ kind: "thought" as const, sequence: 2, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden-1" }),
-    tool(3),
-    tool(4),
-    snapshotRow({ kind: "thought" as const, sequence: 5, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden-2" }),
-    tool(6),
-    tool(7),
-    tool(8),
-    snapshotRow({ kind: "thought" as const, sequence: 9, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "hidden-3" }),
-    tool(10),
-    tool(11),
-    tool(12),
-  ];
-  const stream = activityStream({ columns: 120, color: false });
-  const text = [...stream(liveActivity(idleAkumaSnapshot(rows))), ...stream.flush()].join("\n");
-  for (const sequence of [1, 3, 4]) assert.match(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  for (const sequence of [6, 7, 8, 10, 11, 12]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}`, "u"));
-  assert.equal((text.match(/··· +6 omitted/gu) ?? []).length, 1, "only six eligible tools are omitted");
-  assert.doesNotMatch(text, /hidden-[123]/u);
-});
-
-test("each say or Tell reopens the tool budget and failed tools always print", () => {
-  const tool = (sequence: number) =>
-    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
-  const fileChange = (sequence: number, path: string, state: CompletedToolRow["state"] = { status: "ok" }) =>
-    snapshotRow(
-      completedTool(
-        sequence,
-        "edit",
-        { kind: "fileChange", changes: [{ op: "update", path, diffstat: { added: 4, removed: 2 } }] },
-        state,
-      ),
-    );
-  const say = (sequence: number, text: string) =>
-    snapshotRow({ kind: "said" as const, sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
-  const rows = [
-    say(1, "before-tools"),
-    tool(2),
-    tool(3),
-    tool(4),
-    fileChange(5, "src/middle.ts"),
-    tool(6),
-    tool(7),
-    tool(8),
-    fileChange(9, "src/selected.ts", { status: "error", message: "refused" }),
-    say(10, "flush-now"),
-    tool(11),
-    tool(12),
-    tool(13),
-    fileChange(14, "src/last.ts", { status: "error", message: "refused" }),
-  ];
-  const stream = activityStream({ columns: 120, color: false });
-  const observed = stream(liveActivity(idleAkumaSnapshot(rows))).join("\n");
-  const text = [observed, ...stream.flush()].filter(Boolean).join("\n");
-
-  assert.match(observed, /flush-now/u, "the new say is emitted in its observation, before conclusion");
-  for (const sequence of [2, 3, 4, 11, 12, 13]) assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.doesNotMatch(text, /src\/middle\.ts/u);
-  assert.match(text, /!  edit +src\/selected\.ts — \+4 -2 — error · refused/u);
-  assert.match(text, /!  edit +src\/last\.ts — \+4 -2 — error · refused/u);
-  for (const sequence of [6, 7, 8]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.match(text, /··· +4 omitted[\s\S]*selected[\s\S]*flush-now[\s\S]*last\.ts/u);
-  assert.doesNotMatch(observed.split("flush-now")[1] ?? "", /omitted/u);
-  assert.equal(text.split("flush-now").length - 1, 1);
-});
-
-test("multiple says each print their first three tools as they settle", () => {
-  const tool = (sequence: number) =>
-    snapshotRow(completedTool(sequence, "bash", { kind: "run", command: `tool-${sequence}` }));
-  const say = (sequence: number, text: string) =>
-    snapshotRow({ kind: "said" as const, sequence, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text });
-  const rows = [
-    tool(1),
-    tool(2),
-    tool(3),
-    say(4, "first"),
-    tool(5),
-    tool(6),
-    tool(7),
-    tool(8),
-    say(9, "last"),
-    tool(10),
-    tool(11),
-    tool(12),
-    tool(13),
-  ];
-  const stream = activityStream({ columns: 120, color: false });
-  const before = stream(liveActivity(idleAkumaSnapshot(rows.slice(0, 9))));
-  const after = stream(liveActivity(idleAkumaSnapshot(rows)));
-  const text = [...before, ...after, ...stream.flush()].join("\n");
-
-  for (const sequence of [1, 2, 3, 5, 6, 7, 10, 11, 12])
-    assert.match(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  for (const sequence of [8, 13]) assert.doesNotMatch(text, new RegExp(`\\$ tool-${sequence}(?!\\d)`, "u"));
-  assert.match(text, /first[\s\S]*\$ tool-7[\s\S]*··· +1 omitted[\s\S]*last[\s\S]*\$ tool-12[\s\S]*··· +1 omitted/u);
+  assert.match(line(first), /run \$ B/u);
+  assert.match(line(second), /run \$ A/u);
+  assert.match(line(third), /last observed running/u);
+  assert.doesNotMatch(line(third), /\$ [AB]/u, "settled tools are no longer current work");
+  const ledger = projectTurns(third);
+  const history = nativeHistoryText({ kind: "akuma", akumaId: id, events: ledger.rows }, {}, context);
+  assert.ok(history.indexOf("$ B") < history.indexOf("$ A"), "native history retains completion order");
 });
 
 test("a plural wait text renders compact facts, exact-turn outcomes and unreadable peers", () => {
