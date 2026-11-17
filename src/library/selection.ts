@@ -34,7 +34,7 @@ import { KeiyakuError } from "../errors.js";
 import type { WorldRoot } from "../world.js";
 import { outcomePluginObserver, stderrPluginDiagnostic, withAkumaWaitDeferrals } from "../plugin/akuma-signals.js";
 import { addressAkuma, addressAkumaSet, type AkumaAddressInput, type AkumaSetAddressInput } from "./address.js";
-import { requireInput } from "./input.js";
+import { optionalSignal, requireInput } from "./input.js";
 import { scopeForRepo, type Repo } from "./repo.js";
 
 export type AkumaWaitInput = AkumaSetAddressInput &
@@ -187,21 +187,7 @@ function timeout(value: unknown): number | undefined {
   return validateAkumaInput(durationSchema.optional(), value);
 }
 
-function signal(value: unknown): AbortSignal | undefined {
-  if (value === undefined) return undefined;
-  if (!(value instanceof AbortSignal)) throw new KeiyakuError("invalid-input", "signal must be an AbortSignal");
-  return value;
-}
-
-function directAddress(values: Record<string, unknown>): Parameters<typeof addressAkuma>[0] {
-  return {
-    path: values.path,
-    akuma: values.akuma,
-    ...(values.repo === undefined ? {} : { repo: values.repo }),
-  };
-}
-
-function setAddress(values: Record<string, unknown>): Parameters<typeof addressAkumaSet>[0] {
+function addressInput(values: Record<string, unknown>): Parameters<typeof addressAkuma>[0] {
   return {
     path: values.path,
     akuma: values.akuma,
@@ -264,16 +250,18 @@ export async function waitAkuma(
   input: AkumaWaitInput & Readonly<{ path: WorldRoot }>,
   reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
 ): Promise<AkumaWaitResult> {
-  const values = requireInput(input, "Akumas.wait input");
-  for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "repo", "completion", "timeoutMs", "signal"].includes(key)) {
-      throw new KeiyakuError("invalid-input", `Akumas.wait input has unknown field: ${key}`);
-    }
-  }
+  const values = requireInput(input, "Akumas.wait input", [
+    "path",
+    "akuma",
+    "repo",
+    "completion",
+    "timeoutMs",
+    "signal",
+  ]);
   const selected = completionMode(values.completion);
   const timeoutMs = timeout(values.timeoutMs);
-  const callerSignal = signal(values.signal);
-  const addressed = await addressAkumaSet(setAddress(values), { contractSelectors: false });
+  const callerSignal = optionalSignal(values.signal);
+  const addressed = await addressAkumaSet(addressInput(values), { contractSelectors: false });
   return await withAkumaWaitDeferrals(
     { world: addressed.path, reportDiagnostic },
     { akumaIds: addressed.orderedIds },
@@ -293,15 +281,10 @@ export async function killAkuma(
   input: AkumaKillInput & Readonly<{ path: WorldRoot }>,
   spawn: BodyLauncher,
 ): Promise<AkumaKillResult> {
-  const values = requireInput(input, "Akumas.kill input");
-  for (const key of Object.keys(values)) {
-    if (!["path", "akuma", "repo", "signal"].includes(key)) {
-      throw new KeiyakuError("invalid-input", `Akumas.kill input has unknown field: ${key}`);
-    }
-  }
+  const values = requireInput(input, "Akumas.kill input", ["path", "akuma", "repo", "signal"]);
   if (typeof values.akuma !== "string" || values.akuma.trim().length === 0)
     throw new KeiyakuError("invalid-input", "akuma must be a nonblank string");
-  const callerSignal = signal(values.signal);
+  const callerSignal = optionalSignal(values.signal);
   const addressed = await addressAkumaSet({
     path: values.path,
     akuma: [values.akuma],
@@ -335,8 +318,8 @@ export async function tellAkuma(
   if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
     throw new KeiyakuError("invalid-input", "interrupt must be a boolean");
   validateTellObservation(values);
-  const callerSignal = signal(values.signal);
-  const addressed = await addressAkuma(directAddress(values));
+  const callerSignal = optionalSignal(values.signal);
+  const addressed = await addressAkuma(addressInput(values));
   const execution = {
     spawn,
     path: addressed.path,
@@ -360,34 +343,30 @@ export async function tellAkuma(
     : await executeTellAkuma(execution);
 }
 
-function validateAskInput(
-  values: Record<string, unknown>,
-): asserts values is Record<string, unknown> & Pick<AkumaAskInput, "body" | "timeoutMs"> {
-  for (const key of Object.keys(values)) {
-    if (
-      !["path", "akuma", "body", "repo", "timeoutMs", "schema", "interrupt", "initiator", "signal", "observe"].includes(
-        key,
-      )
-    ) {
-      throw new KeiyakuError("invalid-input", `Akumas.ask input has unknown field: ${key}`);
-    }
-  }
-  if (typeof values.body !== "string") throw new KeiyakuError("invalid-input", "body must be a string");
-  timeout(values.timeoutMs);
-  if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
-    throw new KeiyakuError("invalid-input", "interrupt must be a boolean");
-}
-
 export async function askAkuma(
   input: AkumaAskInput & Readonly<{ path: WorldRoot }>,
   spawn: BodyLauncher,
   reportDiagnostic: (message: string) => void = stderrPluginDiagnostic,
 ): Promise<AkumaAskResult> {
-  const values = requireInput(input, "Akumas.ask input");
-  validateAskInput(values);
+  const values = requireInput(input, "Akumas.ask input", [
+    "path",
+    "akuma",
+    "body",
+    "repo",
+    "timeoutMs",
+    "schema",
+    "interrupt",
+    "initiator",
+    "signal",
+    "observe",
+  ]);
+  if (typeof values.body !== "string") throw new KeiyakuError("invalid-input", "body must be a string");
+  timeout(values.timeoutMs);
+  if (values.interrupt !== undefined && typeof values.interrupt !== "boolean")
+    throw new KeiyakuError("invalid-input", "interrupt must be a boolean");
   const schema = canonicalDocument(input.schema);
-  const callerSignal = signal(values.signal);
-  const addressed = await addressAkuma(directAddress(values));
+  const callerSignal = optionalSignal(values.signal);
+  const addressed = await addressAkuma(addressInput(values));
   return await withAkumaWaitDeferrals(
     { world: addressed.path, reportDiagnostic },
     { akumaIds: [addressed.id] },
@@ -430,7 +409,7 @@ export async function historyAkuma(
   const values = requireInput(input, "Akumas.history input");
   const { path: _path, akuma: _akuma, repo: _repo, ...selection } = values;
   const { last, ...options } = validateAkumaInput(historySelectionSchema, selection);
-  const addressed = await addressAkuma(directAddress(values));
+  const addressed = await addressAkuma(addressInput(values));
   try {
     const handle = new AkumaOwner(
       addressed.id,

@@ -64,10 +64,7 @@ export function nonblank(value: unknown, label: string): string {
 
 export function optionalNonblank(value: unknown, label: string): string | undefined {
   if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new KeiyakuError("invalid-input", `${label} must be a nonblank string`);
-  }
-  return value;
+  return nonblank(value, label);
 }
 
 export function optionalBoolean(value: unknown, label: string): boolean | undefined {

@@ -1,7 +1,7 @@
 import { accepted } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { Debts, Kei, Keis, KeiyakuError, Repo, World } from "../src/index.js";
+import { Akumas, Debts, Kei, Keis, KeiyakuError, Repo, World } from "../src/index.js";
 import { makeGitRepository, withGitShim } from "./support/git.js";
 
 function invalidInput(error: unknown, message?: string): boolean {
@@ -10,6 +10,19 @@ function invalidInput(error: unknown, message?: string): boolean {
   if (message !== undefined) assert.equal(error.message, message);
   return true;
 }
+
+test("Akumas.tell preserves schema refusal in caller field order", async () => {
+  const repository = makeGitRepository();
+  const akumas = Akumas.of(await World.at(repository.path));
+  await assert.rejects(
+    () => akumas.tell({ extra: true, schema: {} } as never),
+    (error: unknown) => invalidInput(error, "Akumas.tell input has unknown field: extra"),
+  );
+  await assert.rejects(
+    () => akumas.tell({ schema: {}, extra: true } as never),
+    (error: unknown) => invalidInput(error, "Akumas.tell does not accept schema; use Akumas.ask"),
+  );
+});
 
 test("Contract and Debt boundaries reject actor before reading product authority", async () => {
   const repository = makeGitRepository();
