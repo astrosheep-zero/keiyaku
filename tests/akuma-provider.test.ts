@@ -41,7 +41,7 @@ import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js
 import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider, interpretGrokTool } from "../src/akuma/providers/grok-build/index.js";
 import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/providers/index.js";
-import { EMPTY_ACP_EVENT_STATE, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
+import { EMPTY_ACP_EVENT_STATE, flushAcpEvents, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
 import { emitClaudeMessage, type ClaudeObservationState } from "../src/akuma/providers/claude/events.js";
 import {
   codexNotificationResult,
@@ -1025,8 +1025,6 @@ test("ACP uses stable initialization, fresh sessions, mapped profile arguments, 
       call: { kind: "other", display: "Run tests" },
       result: { status: "ok" },
     },
-    { type: "note", text: "Plan updated: Verify" },
-    { type: "note", text: "ACP configuration updated" },
   ]);
   const records = acpLog(fake.log);
   assert.deepEqual(
@@ -1524,17 +1522,33 @@ test("ACP ignores assistant updates after terminal prompt evidence", async () =>
   ]);
 });
 
-test("ACP mapper preserves buffered state for an unknown runtime update discriminant", () => {
-  const previous = {
-    ...EMPTY_ACP_EVENT_STATE,
-    answer: "retained",
-    open: { type: "assistant" as const, text: "partial" },
-  };
-  const mapped = mapAcpUpdate({ sessionUpdate: "future_update" } as never, previous);
-  assert.deepEqual(mapped, {
-    events: [{ type: "unknown", kind: "future_update" }],
-    state: previous,
-  });
+test("ACP ignores unknown, administrative and unsupported content without splitting buffered text", () => {
+  const initial = mapAcpUpdate({
+    sessionUpdate: "agent_message_chunk",
+    messageId: "answer-1",
+    content: { type: "text", text: "complete " },
+  }, EMPTY_ACP_EVENT_STATE);
+  for (const update of [
+    { sessionUpdate: "future_update", secret: "hidden" },
+    { sessionUpdate: "plan", entries: [{ content: "hidden", priority: "high", status: "pending" }] },
+    { sessionUpdate: "config_option_update", configOptions: [] },
+    { sessionUpdate: "usage_update", used: 1, size: 10 },
+    { sessionUpdate: "agent_message_chunk", content: { type: "image", data: "hidden", mimeType: "image/png" } },
+  ]) {
+    const mapped = mapAcpUpdate(update as acp.SessionUpdate, initial.state);
+    assert.deepEqual(mapped.events, []);
+    assert.equal(mapped.state, initial.state);
+  }
+  const appended = mapAcpUpdate({
+    sessionUpdate: "agent_message_chunk",
+    messageId: "answer-1",
+    content: { type: "text", text: "answer" },
+  }, initial.state);
+  assert.deepEqual(appended.events, []);
+  assert.equal(appended.state.answer, "complete answer");
+  assert.deepEqual(flushAcpEvents(appended.state).events, [{ type: "assistant", text: "complete answer" }]);
+  assert.deepEqual(mapAcpUpdate({ sessionUpdate: "user_message_chunk", content: { type: "text", text: "next" } },
+    appended.state).events, [{ type: "assistant", text: "complete answer" }]);
 });
 
 type FakePiObservation = {
@@ -1729,7 +1743,7 @@ test("OpenCode v2 adapter admits and completes from native execution evidence", 
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "answer", historyId: "msg_terminal" });
   assert.deepEqual(
     observed.map((event) => event.type),
-    ["session", "model", "tool", "tool", "thought", "unknown", "assistant"],
+    ["session", "model", "tool", "tool", "thought", "assistant"],
   );
   assert.equal(JSON.stringify(observed).includes("secret"), false);
   const completedTool = observed[3];
@@ -1932,12 +1946,56 @@ test("OpenCode v2 fails terminal observation without native assistant evidence",
   assert.equal(native.closed(), 1);
 });
 
+test("OpenCode preserves model, permission replies and retry causes across ignored native traffic", async () => {
+  const native = opencodeFixture();
+  const attempt = createOpencodeProvider({ loader: native.loader }).start(freshInput("work"));
+  const session = await attempt.result;
+  const observed: AgentEvent[] = [];
+  const asked = promiseBarrier<void>();
+  const collecting = (async () => {
+    for await (const event of session.events) {
+      observed.push(event);
+      if (event.type === "permission" && event.requests.length > 0) asked.resolve();
+    }
+  })();
+  native.admitted(native.prompts[0]!.body.id);
+  native.delivered(native.prompts[0]!.body.id);
+  native.step();
+  native.push("future_event", { secret: "hidden" });
+  native.push("session.retry.scheduled", { assistantMessageID: "msg_assistant", attempt: 1, error: { message: "overloaded" } });
+  native.push("permission.asked", { id: "ask-1", action: "read", resources: ["/work"] });
+  await asked.promise;
+  native.push("session.usage.updated", { secret: "hidden" });
+  native.push("permission.replied", { requestID: "ask-1" });
+  native.push("session.compaction.ended");
+  native.push("session.compaction.failed", { error: { message: "summary unavailable" } });
+  native.complete("done");
+  assert.deepEqual(await session.completion, { kind: "answered", answer: "done", historyId: "msg_terminal" });
+  await attempt.closed;
+  await collecting;
+  assert.deepEqual(observed, [
+    { type: "session", coordinate: { sessionId: native.id } },
+    { type: "model", model: "vendor/model" },
+    { type: "note", text: "overloaded" },
+    { type: "permission", requests: [{ id: "ask-1", action: "read", resources: ["/work"] }] },
+    { type: "permission", requests: [] },
+    { type: "note", text: "Context compacted" },
+    { type: "note", text: "summary unavailable" },
+    { type: "assistant", text: "done" },
+  ]);
+});
+
 test("OpenCode v2 isolates other sessions and accepts the current execution error", async () => {
   const native = opencodeFixture();
   const drive = await createOpencodeProvider({ loader: native.loader }).start(freshInput("fail")).result;
   native.push("session.execution.failed", { sessionID: "ses_other", error: { message: "unrelated" } });
+  native.admitted(native.prompts[0]!.body.id);
+  native.delivered(native.prompts[0]!.body.id);
   native.push("session.execution.failed", { error: { message: "native failed" } });
   assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "native failed" });
+  assert.deepEqual((await collectEvents(drive.events)).filter((event) => event.type === "note"), [
+    { type: "note", text: "native failed" },
+  ]);
 });
 
 test("Pi adapter maps completed native evidence and disposes after answer", async () => {
@@ -1950,6 +2008,7 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
           role: "assistant",
           content: [
             { type: "thinking", thinking: "consider" },
+            { type: "future_content", secret: "hidden content" },
             { type: "text", text: "done" },
           ],
         },
@@ -1984,7 +2043,6 @@ test("Pi adapter maps completed native evidence and disposes after answer", asyn
       call: { kind: "run", command: "npm test" },
       result: { status: "ok" },
     },
-    { type: "unknown", kind: "future_event" },
   ]);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
   const bash = fake.seen.bash;
@@ -2362,7 +2420,7 @@ test("Pi retains observed tool text and edit patches as conservative file change
   assert.equal(fake.seen.disposed, 1);
 });
 
-test("Pi retains summarization retry evidence without progress deltas or premature failure", async () => {
+test("Pi retains retry diagnostics and completed compaction without progress prose or premature failure", async () => {
   const fake = fakePiSdk({
     events: [
       {
@@ -2372,6 +2430,10 @@ test("Pi retains summarization retry evidence without progress deltas or prematu
         delayMs: 1000,
         errorMessage: "temporarily unavailable",
       },
+      { type: "auto_retry_start", attempt: 2, maxAttempts: 3, delayMs: 1000, errorMessage: "upstream overloaded" },
+      { type: "compaction_end", result: undefined, aborted: false, errorMessage: "summary failed", willRetry: true },
+      { type: "compaction_end", result: { summary: "private summary" }, aborted: false, willRetry: false },
+      { type: "compaction_end", result: undefined, aborted: true, willRetry: false },
       { type: "summarization_retry_attempt_start", source: "compaction", reason: "threshold" },
       { type: "summarization_retry_attempt_start", source: "branchSummary" },
       { type: "summarization_retry_finished" },
@@ -2387,12 +2449,26 @@ test("Pi retains summarization retry evidence without progress deltas or prematu
   for await (const event of drive.events) events.push(event);
   assert.deepEqual(events, [
     { type: "session", coordinate: { sessionFile: "/sessions/pi.jsonl", sessionId: "pi-session" } },
-    { type: "note", text: "Retrying summarization 1/3: temporarily unavailable" },
+    { type: "note", text: "temporarily unavailable" },
+    { type: "note", text: "upstream overloaded" },
+    { type: "note", text: "summary failed" },
+    { type: "note", text: "Context compacted" },
     { type: "assistant", text: "done" },
   ]);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "entry-final" });
   await attempt.closed;
   assert.equal(fake.seen.disposed, 1);
+});
+
+test("Pi narrates native execution errors without selecting the terminal outcome", () => {
+  const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  assert.deepEqual(translatePiEvent({
+    type: "message_end",
+    message: { role: "assistant", stopReason: "error", errorMessage: "native request failed", content: [] },
+  } as never, state), [{ type: "note", text: "native request failed" }]);
+  assert.deepEqual(translatePiEvent({ type: "auto_retry_end", success: false, attempt: 3,
+    finalError: "retry budget exhausted" }, state), [{ type: "note", text: "retry budget exhausted" }]);
+  assert.deepEqual(translatePiEvent({ type: "auto_retry_end", success: true, attempt: 2 }, state), []);
 });
 
 test("Pi appends JSON Schema text when native structured output is unavailable", async () => {
@@ -2939,6 +3015,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
             message: {
               content: [
                 { type: "text", text: "working" },
+                { type: "future_content", secret: "hidden content" },
                 { type: "tool_use", id: "tool-1", name: "Bash", input: { command: "secret" } },
               ],
             },
@@ -2964,6 +3041,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
             subtype: "api_retry",
             attempt: 2,
             max_retries: 4,
+            error: "overloaded",
             session_id: "session-events",
           } as unknown as SDKMessage,
           {
@@ -2989,7 +3067,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
   assert.equal(typeof drive.tell, "function");
   const events = await collectEvents(drive.events);
 
-  assert.deepEqual(events.slice(0, 5), [
+  assert.deepEqual(events, [
     { type: "session", coordinate: { sessionId: "session-events" } },
     { type: "assistant", text: "working" },
     { type: "tool", phase: "started", id: "tool-1", name: "Bash", call: { kind: "run", command: "secret" } },
@@ -3001,19 +3079,34 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
       call: { kind: "run", command: "secret" },
       result: { status: "ok", output: "secret result body" },
     },
-    { type: "note", text: "Retrying request 2/4" },
-  ]);
-  assert.equal(events[5]?.type, "note");
-  if (events[5]?.type === "note") {
-    assert.deepEqual(events[5], noteEvent(longNotice));
-  }
-  assert.deepEqual(events.slice(6), [
-    { type: "unknown", kind: "future_type" },
-    { type: "unknown", kind: "future_subtype" },
+    { type: "note", text: "overloaded" },
   ]);
   assert.equal(JSON.stringify(events).includes("partial"), false, "a native stream delta never escapes");
   assert.equal(JSON.stringify(events).includes("must not escape"), false);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done", historyId: "assistant-events" });
+});
+
+test("Claude keeps observed hook and execution causes while administrative traffic stays silent", async () => {
+  const channel = new AgentEventChannel();
+  const state: ClaudeObservationState = { tools: new Map() };
+  for (const message of [
+    { type: "system", subtype: "task_progress", description: "private task status" },
+    { type: "system", subtype: "notification", message: "private notification" },
+    { type: "conversation_reset" },
+    { type: "system", subtype: "hook_response", outcome: "success", stdout: "private hook output" },
+    { type: "system", subtype: "hook_response", outcome: "error", stderr: "hook rejected input", exit_code: 2 },
+    { type: "system", subtype: "mirror_error", error: "mirror write failed" },
+    { type: "auth_status", error: "authentication expired" },
+    { type: "assistant", error: "server_error", message: { content: [] } },
+    { type: "system", subtype: "compact_boundary" },
+  ]) emitClaudeMessage(message as SDKMessage, channel, state);
+  assert.deepEqual(await drainChannel(channel), [
+    { type: "note", text: "hook rejected input" },
+    { type: "note", text: "mirror write failed" },
+    { type: "note", text: "authentication expired" },
+    { type: "note", text: "server_error" },
+    { type: "note", text: "Context compacted" },
+  ]);
 });
 
 test("Claude preserves execution config and uses its ordinary permission mode", async () => {
@@ -3283,6 +3376,11 @@ test("native adapters report only the runtime model their own payloads name", { 
     [{ type: "model", model: "claude-fallback" }],
     "a session fallback names the model the attempt is now running",
   );
+  assert.deepEqual(
+    await claudeModels({ type: "system", subtype: "model_refusal_fallback", scope: "session", direction: "retry" }),
+    [{ type: "model" }],
+    "an explicit unnamed fallback clears the previous confirmation",
+  );
 
   const opencodeEvents: AgentEvent[] = [];
   mapEvent(
@@ -3324,10 +3422,10 @@ test("native adapters report only the runtime model their own payloads name", { 
     codexChannel,
   );
   const codexEvents = await drainChannel(codexChannel);
-  assert.deepEqual(
-    codexEvents.filter((event) => event.type === "model"),
-    [{ type: "model", model: "gpt-5-codex-mini" }],
-  );
+  assert.deepEqual(codexEvents, [{ type: "model", model: "gpt-5-codex-mini" }]);
+  const unnamedChannel = new AgentEventChannel();
+  codexNotificationResult({ method: "model/rerouted", params: { reason: "unnamed replacement" } }, codexState, unnamedChannel);
+  assert.deepEqual(await drainChannel(unnamedChannel), [{ type: "model" }]);
 
   const root = temporaryDirectory(context, "keiyaku-codex-model-");
   const fake = fakeCodex(root, "model-evidence");
@@ -3483,10 +3581,8 @@ test("Codex maps observations preserving aggregated output without leaking delta
       call: { kind: "run", command: "npm test" },
       result: { status: "ok", exitCode: 0, output: "secret output" },
     },
-    { type: "note", text: "Plan updated: Verify the adapter" },
-    { type: "note", text: "Retrying after error: temporary outage" },
+    { type: "note", text: "temporary outage" },
     { type: "assistant", text: "first answer" },
-    { type: "unknown", kind: "future/native-event" },
     { type: "assistant", text: "second answer" },
   ]);
   assert.deepEqual(await drive.completion, {
@@ -3496,6 +3592,29 @@ test("Codex maps observations preserving aggregated output without leaking delta
   });
   assert.equal(JSON.stringify(events).includes("must not escape"), false);
   assert.equal(JSON.stringify(events).includes("999"), false);
+});
+
+test("Codex selects completed compaction and native hook diagnostics without administrative notes", async () => {
+  const channel = new AgentEventChannel();
+  const state: CodexTurnState = { threadId: "thread-own", turnId: "turn-own", settled: false, tools: new Map() };
+  for (const notification of [
+    { method: "configWarning", params: { message: "private configuration" } },
+    { method: "item/completed", params: { item: { type: "plan", text: "private plan" } } },
+    { method: "item/completed", params: { item: { type: "future_item", secret: "hidden" } } },
+    { method: "item/started", params: { item: { type: "contextCompaction" } } },
+    { method: "item/completed", params: { item: { type: "contextCompaction" } } },
+    { method: "hook/completed", params: { run: { status: "completed", entries: [] } } },
+    { method: "hook/completed", params: { run: { status: "failed", entries: [{ kind: "error", text: "hook failed natively" }] } } },
+    { method: "thread/realtime/error", params: { message: "connection failed" } },
+  ]) assert.equal(codexNotificationResult(notification, state, channel), undefined);
+  assert.deepEqual(codexNotificationResult({ method: "turn/completed", params: {
+    threadId: "thread-own", turn: { id: "turn-own", status: "failed", error: { message: "terminal cause" } },
+  } }, state, channel), { kind: "failed", diagnostic: "terminal cause" });
+  assert.deepEqual(await drainChannel(channel), [
+    { type: "note", text: "Context compacted" },
+    { type: "note", text: "hook failed natively" },
+    { type: "note", text: "connection failed" },
+  ]);
 });
 
 test("Codex retains a command's aggregated output and every file change's patch", async () => {

@@ -1,5 +1,5 @@
 import type { SessionUpdate, ToolCallLocation } from "@agentclientprotocol/sdk";
-import { noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
+import { otherToolCall, type AgentEvent, type ToolCall } from "../../provider.js";
 import { nonblank, object, positiveLine, stringValue } from "../decode.js";
 
 type OpenBlock = Readonly<{ type: "assistant" | "thought"; text: string }> | null;
@@ -152,8 +152,7 @@ export function mapAcpUpdate(
     case "agent_message_chunk":
     case "agent_thought_chunk": {
       const text = update.content.type === "text" ? update.content.text : undefined;
-      if (text === undefined)
-        return flushAcpEvents(previous, [unknownEvent(`${update.sessionUpdate}/${update.content.type}`)]);
+      if (text === undefined) return { events: [], state: previous };
       return appendBlock(
         previous,
         update.sessionUpdate === "agent_message_chunk" ? "assistant" : "thought",
@@ -191,24 +190,7 @@ export function mapAcpUpdate(
             { type: "tool", phase: "started", id: update.toolCallId, ...observed },
           ]);
     }
-    case "plan":
-      return flushAcpEvents(previous, [
-        noteEvent(`Plan updated: ${update.entries.map((entry) => entry.content).join("; ")}`),
-      ]);
-    case "available_commands_update":
-      return flushAcpEvents(previous, [noteEvent("ACP commands updated")]);
-    case "current_mode_update":
-      return flushAcpEvents(previous, [noteEvent("ACP mode updated")]);
-    case "config_option_update":
-      return flushAcpEvents(previous, [noteEvent("ACP configuration updated")]);
-    case "session_info_update":
-      return flushAcpEvents(previous, [noteEvent("ACP session metadata updated")]);
-    case "usage_update":
-      return flushAcpEvents(previous);
-    case "plan_update":
-    case "plan_removed":
-      return flushAcpEvents(previous, [unknownEvent(update.sessionUpdate)]);
     default:
-      return { events: [unknownEvent(String((update as { sessionUpdate?: unknown }).sessionUpdate))], state: previous };
+      return { events: [], state: previous };
   }
 }

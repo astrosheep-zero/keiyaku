@@ -1,12 +1,5 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import {
-  AgentEventChannel,
-  modelEvent,
-  noteEvent,
-  otherToolCall,
-  unknownEvent,
-  type ToolCall,
-} from "../../provider.js";
+import { AgentEventChannel, modelEvent, noteEvent, otherToolCall, type ToolCall } from "../../provider.js";
 import {
   finiteNumber,
   object,
@@ -18,56 +11,7 @@ import {
 } from "../decode.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
-type ClaudeMessageType = SDKMessage["type"];
-type ClaudeSystemSubtype = Extract<SDKMessage, { type: "system" }>["subtype"];
-type MessageDisposition = "assistant" | "auth" | "note" | "system" | "tool-results" | "drop" | "terminal";
-type SystemDisposition = "hook-response" | "note" | "control-progress" | "drop";
 export type ClaudeObservationState = { tools: Map<string, Readonly<{ name: string; call: ToolCall }>> };
-
-export const CLAUDE_MESSAGE_DISPOSITIONS = {
-  assistant: "assistant",
-  auth_status: "auth",
-  conversation_reset: "note",
-  prompt_suggestion: "drop",
-  rate_limit_event: "drop",
-  result: "terminal",
-  stream_event: "drop",
-  system: "system",
-  tool_progress: "drop",
-  tool_use_summary: "drop",
-  user: "tool-results",
-} as const satisfies Record<ClaudeMessageType, MessageDisposition>;
-
-export const CLAUDE_SYSTEM_DISPOSITIONS = {
-  api_retry: "note",
-  background_tasks_changed: "note",
-  commands_changed: "drop",
-  compact_boundary: "note",
-  control_request_progress: "control-progress",
-  elicitation_complete: "drop",
-  files_persisted: "note",
-  hook_progress: "drop",
-  hook_response: "hook-response",
-  hook_started: "drop",
-  informational: "note",
-  init: "drop",
-  local_command_output: "drop",
-  memory_recall: "drop",
-  mirror_error: "note",
-  model_refusal_fallback: "note",
-  model_refusal_no_fallback: "note",
-  notification: "note",
-  permission_denied: "note",
-  plugin_install: "note",
-  session_state_changed: "drop",
-  status: "note",
-  task_notification: "note",
-  task_progress: "note",
-  task_started: "note",
-  task_updated: "note",
-  thinking_tokens: "drop",
-  worker_shutting_down: "note",
-} as const satisfies Record<ClaudeSystemSubtype, SystemDisposition>;
 
 function readRange(value: Readonly<Record<string, unknown>>): Readonly<{ offset?: number; limit?: number }> {
   const offset = positiveLine(value.offset);
@@ -77,42 +21,6 @@ function readRange(value: Readonly<Record<string, unknown>>): Readonly<{ offset?
     ...(limit === undefined ? {} : { limit }),
   };
 }
-
-const CLAUDE_SYSTEM_NOTES = {
-  api_retry: (message) => {
-    const attempt = finiteNumber(message.attempt);
-    const maximum = finiteNumber(message.max_retries);
-    return attempt === undefined || maximum === undefined
-      ? "Retrying request"
-      : `Retrying request ${attempt}/${maximum}`;
-  },
-  compact_boundary: () => "Context compacted",
-  background_tasks_changed: (message) => `Background tasks: ${Array.isArray(message.tasks) ? message.tasks.length : 0}`,
-  files_persisted: (message) => {
-    const files = Array.isArray(message.files) ? message.files.length : 0;
-    const failed = Array.isArray(message.failed) ? message.failed.length : 0;
-    return failed === 0 ? `Persisted ${files} files` : `Persisted ${files} files; ${failed} failed`;
-  },
-  informational: (message) => trimmed(message.content) ?? "Informational notice",
-  mirror_error: (message) =>
-    `Transcript mirror warning: ${trimmed(message.error) ?? trimmed(message.message) ?? "unknown error"}`,
-  model_refusal_fallback: () => "Model refusal; using fallback",
-  model_refusal_no_fallback: () => "Model refusal; no fallback available",
-  notification: (message) => trimmed(message.message) ?? trimmed(message.content) ?? "Notification",
-  permission_denied: (message) =>
-    `Permission refused${trimmed(message.message) === undefined ? "" : `: ${trimmed(message.message)}`}`,
-  plugin_install: (message) =>
-    `Plugin install ${trimmed(message.status) ?? "updated"}${trimmed(message.name) === undefined ? "" : `: ${trimmed(message.name)}`}`,
-  status: (message) =>
-    `Status: ${trimmed(message.status) ?? "idle"}${trimmed(message.error) === undefined ? "" : ` (${trimmed(message.error)})`}`,
-  task_notification: (message) =>
-    `Task ${trimmed(message.task_id) ?? "unknown"} ${trimmed(message.status) ?? "updated"}`,
-  task_progress: (message) =>
-    trimmed(message.description) ?? `Task ${trimmed(message.task_id) ?? "unknown"} progressed`,
-  task_started: (message) => trimmed(message.description) ?? `Task ${trimmed(message.task_id) ?? "unknown"} started`,
-  task_updated: (message) => `Task ${trimmed(message.task_id) ?? "unknown"} updated`,
-  worker_shutting_down: (message) => `Worker stopping: ${trimmed(message.reason) ?? "unknown reason"}`,
-} satisfies Partial<Record<ClaudeSystemSubtype, (message: Readonly<Record<string, unknown>>) => string>>;
 
 function runCall(name: string, value: Readonly<Record<string, unknown>>, input: unknown): ToolCall | undefined {
   if (name !== "Bash") return undefined;
@@ -271,7 +179,7 @@ function assistantEvents(
   if (model !== undefined) events.emit(modelEvent(model));
   if (message.aborted === true) return;
   if (message.error !== undefined) {
-    events.emit(noteEvent(`Assistant error: ${message.error}`));
+    events.emit(noteEvent(message.error));
     return;
   }
   const text = message.message.content
@@ -324,62 +232,51 @@ function toolResultEvents(
   }
 }
 
-function hookResponseNote(value: Readonly<Record<string, unknown>>): string | undefined {
-  const outcome = trimmed(value.outcome);
-  if (outcome !== "error" && outcome !== "cancelled") return undefined;
-  const hook = trimmed(value.hook_name) ?? "unknown";
-  const exitCode = finiteNumber(value.exit_code);
-  return `Hook ${hook} ${outcome}${exitCode === undefined ? "" : ` (exit ${exitCode})`}`;
-}
-
-/**
- * Native system notices that prove which model the session is actually using.
- * `init` reports the startup selection. A refusal fallback reports the model
- * that serves the retried request; only a session-scoped fallback swaps the
- * session model, and `local` leaves it unchanged. The two no-longer-emitted
- * directions stay in the native enum and are never treated as evidence.
- */
-function systemModelEvidence(subtype: string, value: Readonly<Record<string, unknown>>): string | undefined {
-  if (subtype === "init") return trimmed(value.model);
-  if (subtype !== "model_refusal_fallback" || value.scope === "local") return undefined;
-  return value.direction === "revert" || value.direction === "sticky" ? undefined : trimmed(value.fallback_model);
-}
-
 function emitSystemMessage(value: Readonly<Record<string, unknown>>, events: AgentEventChannel): void {
-  const subtype = trimmed(value?.subtype) ?? "unknown";
-  if (!Object.hasOwn(CLAUDE_SYSTEM_DISPOSITIONS, subtype)) {
-    events.emit(unknownEvent(subtype));
-    return;
+  switch (value.subtype) {
+    case "init": {
+      const model = trimmed(value.model);
+      if (model !== undefined) events.emit(modelEvent(model));
+      return;
+    }
+    case "model_refusal_fallback":
+      if (value.scope !== "local" && value.direction !== "revert" && value.direction !== "sticky") {
+        events.emit(modelEvent(trimmed(value.fallback_model)));
+      }
+      return;
+    case "compact_boundary":
+      events.emit(noteEvent("Context compacted"));
+      return;
+    case "hook_response": {
+      if (value.outcome !== "error" && value.outcome !== "cancelled") return;
+      const diagnostic = trimmed(value.stderr) ?? trimmed(value.output) ?? trimmed(value.stdout);
+      if (diagnostic !== undefined) events.emit(noteEvent(diagnostic));
+      return;
+    }
+    case "api_retry":
+    case "mirror_error": {
+      const diagnostic = trimmed(value.error);
+      if (diagnostic !== undefined) events.emit(noteEvent(diagnostic));
+      return;
+    }
   }
-  const evidence = systemModelEvidence(subtype, value);
-  if (evidence !== undefined) events.emit(modelEvent(evidence));
-  const systemDisposition = CLAUDE_SYSTEM_DISPOSITIONS[subtype as ClaudeSystemSubtype];
-  if (systemDisposition === "drop") return;
-  if (systemDisposition === "hook-response") {
-    const note = hookResponseNote(value);
-    if (note !== undefined) events.emit(noteEvent(note));
-    return;
-  }
-  if (systemDisposition === "control-progress" && value?.status !== "api_retry") return;
-  const note = CLAUDE_SYSTEM_NOTES[subtype as keyof typeof CLAUDE_SYSTEM_NOTES];
-  events.emit(noteEvent(note?.(value ?? {}) ?? subtype));
 }
 
 export function emitClaudeMessage(message: SDKMessage, events: AgentEventChannel, state: ClaudeObservationState): void {
-  const value = object(message) ?? {};
-  const kind = trimmed(value.type) ?? "unknown";
-  if (!Object.hasOwn(CLAUDE_MESSAGE_DISPOSITIONS, kind)) return events.emit(unknownEvent(kind));
-  const disposition = CLAUDE_MESSAGE_DISPOSITIONS[kind as ClaudeMessageType];
-  if (disposition === "assistant") {
-    assistantEvents(message as Extract<SDKMessage, { type: "assistant" }>, events, state);
-  } else if (disposition === "tool-results") {
-    toolResultEvents(message as Extract<SDKMessage, { type: "user" }>, events, state);
-  } else if (disposition === "auth") {
-    const error = trimmed(value.error);
-    if (error !== undefined) events.emit(noteEvent(`Authentication warning: ${error}`));
-  } else if (disposition === "note") {
-    events.emit(noteEvent("Conversation reset"));
-  } else if (disposition === "system") {
-    emitSystemMessage(value, events);
+  switch (message.type) {
+    case "assistant":
+      assistantEvents(message, events, state);
+      return;
+    case "user":
+      toolResultEvents(message, events, state);
+      return;
+    case "auth_status": {
+      const diagnostic = trimmed(message.error);
+      if (diagnostic !== undefined) events.emit(noteEvent(diagnostic));
+      return;
+    }
+    case "system":
+      emitSystemMessage(object(message) ?? {}, events);
+      return;
   }
 }

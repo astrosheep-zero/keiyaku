@@ -98,38 +98,6 @@ function output(content: unknown): string | undefined {
   });
   return parts.length === 0 ? undefined : parts.join("\n\n");
 }
-const DROPPED = new Set([
-  "server.connected",
-  "server.heartbeat",
-  "session.created",
-  "session.forked",
-  "session.deleted",
-  "session.inbox.enqueued",
-  "session.inbox.delivered",
-  "session.inbox.cancelled",
-  "session.inbox.delivery.changed",
-  "session.execution.started",
-  "session.execution.succeeded",
-  "session.execution.failed",
-  "session.execution.interrupted",
-  "session.model.selected",
-  "session.agent.selected",
-  "session.instructions.updated",
-  "session.permissions",
-  "session.step.streamed",
-  "session.step.ended",
-  "session.usage.updated",
-  "session.usage.recorded",
-  "session.text.started",
-  "session.text.delta",
-  "session.reasoning.started",
-  "session.reasoning.delta",
-  "session.tool.input.delta",
-  "session.tool.input.ended",
-  "session.tool.progress",
-  "session.retry.scheduled",
-]);
-
 function toolResult(type: string, data: NativeData): ToolResult {
   const observed = output(data.content);
   const nativeExit = object(data.metadata)?.exit;
@@ -218,13 +186,12 @@ export function mapEvent(value: unknown, events: Emitter, state: State): void {
       events.emit(noteEvent("Context compacted"));
       return;
     case "session.compaction.failed":
+    case "session.execution.failed":
+    case "session.retry.scheduled":
       events.emit(noteEvent(diagnostic(data.error)));
       return;
-    case "session.compaction.started":
-    case "session.compaction.delta":
-      return;
     default:
-      if (!DROPPED.has(type)) events.emit({ type: "unknown", kind: type });
+      return;
   }
 }
 export function createEventState(sessionId?: string): State {

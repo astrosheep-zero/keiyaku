@@ -159,13 +159,27 @@ no option is silently discarded or translated into an invented native promise.
 
 ## Narration And Admission
 
-Adapters translate native events into bounded provider-neutral narration, using typed construction rather than decoding their own trusted neutral values. The neutral structural declaration belongs to Heart; provider code owns only native dialect adaptation and capability meaning.
+Adapters select a small set of execution observations directly from native events,
+using typed construction rather than decoding their own trusted neutral values.
+The neutral structural declaration belongs to Heart; provider code owns only
+native dialect adaptation and capability meaning.
 
-Adapters drop raw payloads, deltas, raw thinking, usage telemetry, and unsupported detail, and
-preserve unknown kinds as bounded unknown narration. Activity is execution
-history only: deleting retained activity never changes recovery, resume, fork,
-outcome, failure, or life. Complete answers and native fork coordinates remain
-Turn authority; sessions remain resume authority.
+Narration preserves complete assistant messages, supported bounded thought
+observations, observed tool execution and results, compaction, and actual
+execution, extension, and hook diagnostics. Completed compaction has one concise
+note; failures retain the observed cause. A retryable diagnostic does not itself
+fail a Turn. Raw payloads, token deltas, usage telemetry, administrative notices,
+plan prose, task status, retry progress prose, and unsupported kinds or content
+are silent. Silence neither leaks unsupported payloads nor infers an outcome.
+Ignored traffic does not split contiguous buffered narration; native answer
+boundaries remain authoritative independently of which observations are narrated.
+
+Activity is execution history only: deleting retained activity never changes
+recovery, resume, fork, outcome, failure, or life. Existing retained activity
+remains readable. Complete answers and native fork coordinates remain Turn
+authority; sessions remain resume authority. Native session admission and terminal
+interpretation remain independent of narration selection, as do model and
+permission observations.
 
 Slow consumers receive bounded disposable narration in arrival order. Saturation
 drops the oldest ordinary narration, including notes, unknown kinds and failed

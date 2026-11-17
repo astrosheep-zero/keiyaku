@@ -1,35 +1,7 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { modelEvent, noteEvent, otherToolCall, unknownEvent, type AgentEvent, type ToolCall } from "../../provider.js";
+import { modelEvent, noteEvent, otherToolCall, type AgentEvent, type ToolCall } from "../../provider.js";
 import { nonblank, observedTextContent, positiveLine, searchToolCall } from "../decode.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
-
-type Disposition = "drop" | "message" | "note" | "tool-end" | "tool-start";
-
-export const PI_EVENT_DISPOSITIONS = {
-  agent_end: "drop",
-  agent_settled: "drop",
-  agent_start: "drop",
-  auto_retry_end: "drop",
-  auto_retry_start: "note",
-  bash_execution_update: "drop",
-  compaction_end: "note",
-  compaction_start: "drop",
-  entry_appended: "drop",
-  message_end: "message",
-  message_start: "drop",
-  message_update: "drop",
-  queue_update: "drop",
-  session_info_changed: "drop",
-  summarization_retry_attempt_start: "drop",
-  summarization_retry_finished: "drop",
-  summarization_retry_scheduled: "note",
-  thinking_level_changed: "drop",
-  tool_execution_end: "tool-end",
-  tool_execution_start: "tool-start",
-  tool_execution_update: "drop",
-  turn_end: "drop",
-  turn_start: "drop",
-} as const satisfies Readonly<Record<AgentSessionEvent["type"], Disposition>>;
 
 function record(value: unknown): Readonly<Record<string, unknown>> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -123,17 +95,6 @@ export type PiEventState = {
   tools: Map<string, Readonly<{ name: string; call: ToolCall }>>;
 };
 
-type PiNoteEvent = Extract<
-  AgentSessionEvent,
-  { type: "auto_retry_start" | "compaction_end" | "summarization_retry_scheduled" }
->;
-
-function translateNote(event: PiNoteEvent): readonly AgentEvent[] {
-  if (event.type === "compaction_end") return event.errorMessage === undefined ? [] : [noteEvent(event.errorMessage)];
-  const subject = event.type === "auto_retry_start" ? "request" : "summarization";
-  return [noteEvent(`Retrying ${subject} ${event.attempt}/${event.maxAttempts}: ${event.errorMessage}`)];
-}
-
 function translateToolStart(
   event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
   state: PiEventState,
@@ -176,6 +137,8 @@ function translateMessage(
   const translated: AgentEvent[] = [];
   const model = piModel(message.provider, message.model);
   if (model !== undefined) translated.push(modelEvent(model));
+  const error = message.stopReason === "error" ? nonblank(message.errorMessage) : undefined;
+  if (error !== undefined) translated.push(noteEvent(error));
   if (Array.isArray(message.content)) {
     for (const block of message.content) {
       const value = record(block);
@@ -206,16 +169,24 @@ function translateMessage(
 }
 
 export function translatePiEvent(event: AgentSessionEvent, state: PiEventState): readonly AgentEvent[] {
-  const disposition = PI_EVENT_DISPOSITIONS[event.type];
-  if (disposition === "drop") return [];
-  if (disposition === "note") return translateNote(event as PiNoteEvent);
-  if (disposition === "tool-start")
-    return translateToolStart(event as Extract<AgentSessionEvent, { type: "tool_execution_start" }>, state);
-  if (disposition === "tool-end")
-    return translateToolEnd(event as Extract<AgentSessionEvent, { type: "tool_execution_end" }>, state);
-  if (disposition === "message")
-    return translateMessage(event as Extract<AgentSessionEvent, { type: "message_end" }>, state);
-  return [unknownEvent(event.type)];
+  switch (event.type) {
+    case "compaction_end":
+      if (event.errorMessage !== undefined) return [noteEvent(event.errorMessage)];
+      return event.result !== undefined && !event.aborted ? [noteEvent("Context compacted")] : [];
+    case "auto_retry_start":
+    case "summarization_retry_scheduled":
+      return [noteEvent(event.errorMessage)];
+    case "auto_retry_end":
+      return !event.success && event.finalError !== undefined ? [noteEvent(event.finalError)] : [];
+    case "tool_execution_start":
+      return translateToolStart(event, state);
+    case "tool_execution_end":
+      return translateToolEnd(event, state);
+    case "message_end":
+      return translateMessage(event, state);
+    default:
+      return [];
+  }
 }
 
 export function piTerminalFailure(messages: readonly unknown[]): string | null {

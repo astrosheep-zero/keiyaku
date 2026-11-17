@@ -95,16 +95,11 @@ function timelineNarration(item: AgentTimelineItem, calls: Map<string, ToolCall>
       };
     }
     case "error":
-    case "notification":
       return { type: "note", text: item.message };
     case "compaction":
-      return { type: "note", text: `Context compaction ${item.status}` };
-    case "reasoning":
-    case "user_message":
-    case "assistant_message":
-      return undefined;
+      return item.status === "completed" ? { type: "note", text: "Context compacted" } : undefined;
     default:
-      return { type: "unknown", kind: item.type };
+      return undefined;
   }
 }
 

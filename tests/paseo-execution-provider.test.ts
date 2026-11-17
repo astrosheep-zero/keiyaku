@@ -469,6 +469,50 @@ test("Paseo start and resume retain native id and complete only the admitted tur
   );
 });
 
+test("Paseo silently filters administrative items while retaining native answer boundaries and diagnostics", async () => {
+  const fake = new NativeFixture();
+  const attempt = provider(fake).start({ ...drive(), session: { kind: "fresh" } });
+  const session = await attempt.result;
+  assistant(fake, "before notice", "answer-before");
+  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
+    type: "notification", level: "info", message: "private administrative notice",
+  } });
+  assistant(fake, "after notice", "answer-after");
+  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
+    type: "todo", items: [{ text: "private plan", completed: false }],
+  } });
+  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
+    type: "plugin", id: "event-1", pluginId: "plugin-1", kind: "private", version: 1, data: { secret: "hidden" },
+  } });
+  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
+    type: "compaction", status: "loading",
+  } });
+  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
+    type: "compaction", status: "completed",
+  } });
+  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
+    type: "error", message: "native execution diagnostic",
+  } });
+  assistant(fake, "before unknown", "answer-unknown");
+  fake.event({ type: "timeline", provider: "claude", turnId: "own-turn", item: {
+    type: "future_item", secret: "hidden",
+  } } as never);
+  assistant(fake, "final", "answer-final");
+  complete(fake);
+  assert.deepEqual(await session.completion, { kind: "answered", answer: "final", historyId: "own-turn" });
+  await attempt.closed;
+  assert.deepEqual(await narration(session.events), [
+    { type: "session", coordinate: { sessionId: "native-agent" } },
+    { type: "model", model: "original-model" },
+    { type: "note", text: "Context compacted" },
+    { type: "note", text: "native execution diagnostic" },
+    { type: "assistant", text: "before notice" },
+    { type: "assistant", text: "after notice" },
+    { type: "assistant", text: "before unknown" },
+    { type: "assistant", text: "final" },
+  ]);
+});
+
 test("Paseo refuses observed human execution and unconfirmed native selectors before prompt", async () => {
   const busy = new NativeFixture();
   busy.agent.status = "running";

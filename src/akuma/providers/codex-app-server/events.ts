@@ -3,7 +3,6 @@ import {
   AgentEventChannel,
   modelEvent,
   noteEvent,
-  unknownEvent,
   type ToolCall,
   type ToolResult,
   type TurnResult,
@@ -19,113 +18,6 @@ export type CodexTurnState = {
   settled: boolean;
   tools: Map<string, Readonly<{ name: string; call: ToolCall }>>;
 };
-
-type NotificationDisposition =
-  | "hook-completed"
-  | "note"
-  | "drop"
-  | "error"
-  | "item-completed"
-  | "item-started"
-  | "plan"
-  | "terminal";
-type ItemDisposition = "tool" | "note" | "assistant" | "thought" | "drop" | "plan";
-
-export const CODEX_NOTIFICATION_DISPOSITIONS = {
-  "account/login/completed": "drop",
-  "account/rateLimits/updated": "drop",
-  "account/updated": "drop",
-  "app/list/updated": "drop",
-  "command/exec/outputDelta": "drop",
-  configWarning: "note",
-  deprecationNotice: "note",
-  error: "error",
-  "externalAgentConfig/import/completed": "note",
-  "externalAgentConfig/import/progress": "note",
-  "fs/changed": "note",
-  "fuzzyFileSearch/sessionCompleted": "drop",
-  "fuzzyFileSearch/sessionUpdated": "drop",
-  guardianWarning: "note",
-  "hook/completed": "hook-completed",
-  "hook/started": "drop",
-  "item/agentMessage/delta": "drop",
-  "item/autoApprovalReview/completed": "note",
-  "item/autoApprovalReview/started": "note",
-  "item/commandExecution/outputDelta": "drop",
-  "item/commandExecution/terminalInteraction": "drop",
-  "item/completed": "item-completed",
-  "item/fileChange/outputDelta": "drop",
-  "item/fileChange/patchUpdated": "drop",
-  "item/mcpToolCall/progress": "drop",
-  "item/plan/delta": "drop",
-  "item/reasoning/summaryPartAdded": "drop",
-  "item/reasoning/summaryTextDelta": "drop",
-  "item/reasoning/textDelta": "drop",
-  "item/started": "item-started",
-  "mcpServer/oauthLogin/completed": "drop",
-  "mcpServer/startupStatus/updated": "drop",
-  "model/rerouted": "note",
-  "model/safetyBuffering/updated": "drop",
-  "model/verification": "drop",
-  "process/exited": "drop",
-  "process/outputDelta": "drop",
-  "rawResponse/completed": "drop",
-  "rawResponseItem/completed": "drop",
-  "remoteControl/status/changed": "drop",
-  "serverRequest/resolved": "drop",
-  "skills/changed": "drop",
-  "thread/archived": "drop",
-  "thread/closed": "drop",
-  "thread/compacted": "note",
-  "thread/deleted": "drop",
-  "thread/environment/connected": "drop",
-  "thread/environment/disconnected": "drop",
-  "thread/goal/cleared": "note",
-  "thread/goal/updated": "note",
-  "thread/name/updated": "drop",
-  "thread/realtime/closed": "drop",
-  "thread/realtime/error": "note",
-  "thread/realtime/itemAdded": "drop",
-  "thread/realtime/outputAudio/delta": "drop",
-  "thread/realtime/sdp": "drop",
-  "thread/realtime/started": "drop",
-  "thread/realtime/transcript/delta": "drop",
-  "thread/realtime/transcript/done": "drop",
-  "thread/settings/updated": "drop",
-  "thread/started": "drop",
-  "thread/status/changed": "drop",
-  "thread/tokenUsage/updated": "drop",
-  "thread/unarchived": "drop",
-  "turn/completed": "terminal",
-  "turn/diff/updated": "drop",
-  "turn/moderationMetadata": "drop",
-  "turn/plan/updated": "plan",
-  "turn/started": "drop",
-  warning: "note",
-  "windows/worldWritableWarning": "note",
-  "windowsSandbox/setupCompleted": "note",
-} as const satisfies Readonly<Record<string, NotificationDisposition>>;
-
-export const CODEX_ITEM_DISPOSITIONS = {
-  agentMessage: "assistant",
-  collabAgentToolCall: "tool",
-  commandExecution: "tool",
-  contextCompaction: "note",
-  dynamicToolCall: "tool",
-  enteredReviewMode: "note",
-  exitedReviewMode: "note",
-  fileChange: "tool",
-  hookPrompt: "drop",
-  imageGeneration: "tool",
-  imageView: "tool",
-  mcpToolCall: "tool",
-  plan: "plan",
-  reasoning: "thought",
-  sleep: "note",
-  subAgentActivity: "note",
-  userMessage: "drop",
-  webSearch: "tool",
-} as const satisfies Readonly<Record<string, ItemDisposition>>;
 
 export function codexObject(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -143,21 +35,6 @@ function turnError(value: unknown): string | undefined {
   const details = codexText(error?.additionalDetails);
   if (message === undefined) return details;
   return details === undefined || details === message ? message : `${message}: ${details}`;
-}
-
-function itemNote(item: Readonly<Record<string, unknown>>, kind: string): string {
-  switch (kind) {
-    case "enteredReviewMode":
-      return "Entered review mode";
-    case "exitedReviewMode":
-      return "Exited review mode";
-    case "sleep":
-      return "Waiting";
-    case "subAgentActivity":
-      return `Agent activity: ${codexText(item.kind) ?? "updated"}`;
-    default:
-      return kind;
-  }
 }
 
 function itemToolName(item: Readonly<Record<string, unknown>>, kind: string): string {
@@ -249,41 +126,40 @@ function emitItem(
   events: AgentEventChannel,
   state: CodexTurnState,
 ): void {
-  const kind = codexText(item.type) ?? "unknown";
-  if (!Object.hasOwn(CODEX_ITEM_DISPOSITIONS, kind)) {
-    events.emit(unknownEvent(kind));
-    return;
-  }
-  const disposition = CODEX_ITEM_DISPOSITIONS[kind as keyof typeof CODEX_ITEM_DISPOSITIONS];
-  if (disposition === "assistant") {
-    if (!completed) return;
-    const message = typeof item.text === "string" ? item.text : undefined;
-    if (message !== undefined) {
-      state.lastAnswer = message;
-      events.emit({ type: "assistant", text: message });
+  const kind = codexText(item.type);
+  switch (kind) {
+    case "agentMessage": {
+      if (!completed) return;
+      const message = typeof item.text === "string" ? item.text : undefined;
+      if (message !== undefined) {
+        state.lastAnswer = message;
+        events.emit({ type: "assistant", text: message });
+      }
+      return;
     }
-    return;
+    case "reasoning": {
+      if (!completed) return;
+      const summary = reasoningSummary(item);
+      if (summary !== undefined) events.emit({ type: "thought", text: summary });
+      return;
+    }
+    case "contextCompaction":
+      if (completed) events.emit(noteEvent("Context compacted"));
+      return;
+    case "collabAgentToolCall":
+    case "commandExecution":
+    case "dynamicToolCall":
+    case "fileChange":
+    case "imageGeneration":
+    case "imageView":
+    case "mcpToolCall":
+    case "webSearch":
+      break;
+    default:
+      return;
   }
-  if (disposition === "plan") {
-    if (completed) events.emit(noteEvent(`Plan updated: ${codexText(item.text) ?? "updated"}`));
-    return;
-  }
-  if (disposition === "thought") {
-    if (!completed) return;
-    const summary = reasoningSummary(item);
-    if (summary !== undefined) events.emit({ type: "thought", text: summary });
-    return;
-  }
-  if (disposition === "note") {
-    if (!completed) events.emit(noteEvent(itemNote(item, kind)));
-    return;
-  }
-  if (disposition !== "tool") return;
   const id = codexText(item.id);
-  if (id === undefined) {
-    events.emit(unknownEvent(`${kind}/missing-id`));
-    return;
-  }
+  if (id === undefined) return;
   if (!completed) {
     const observed = { name: itemToolName(item, kind), call: itemToolCall(item, kind) };
     state.tools.set(id, observed);
@@ -299,49 +175,7 @@ function emitItem(
   events.emit({ type: "tool", phase: "completed", id, ...observed, result: itemToolResult(item) });
 }
 
-function notificationAction(method: string, params: Readonly<Record<string, unknown>>): string {
-  const message = codexText(params.message) ?? codexText(params.reason) ?? codexText(params.error);
-  switch (method) {
-    case "configWarning":
-      return `Configuration warning: ${message ?? "unknown warning"}`;
-    case "deprecationNotice":
-      return `Deprecation warning: ${message ?? "deprecated behavior"}`;
-    case "externalAgentConfig/import/completed":
-      return "External agent configuration import completed";
-    case "externalAgentConfig/import/progress":
-      return "External agent configuration import updated";
-    case "fs/changed":
-      return "Filesystem changed";
-    case "guardianWarning":
-      return `Guardian warning: ${message ?? "action warned"}`;
-    case "item/autoApprovalReview/completed":
-      return "Action approval review completed";
-    case "item/autoApprovalReview/started":
-      return "Action approval review started";
-    case "model/rerouted":
-      return `Model rerouted${message === undefined ? "" : `: ${message}`}`;
-    case "thread/compacted":
-      return "Context compacted";
-    case "contextCompaction":
-      return "Context compaction completed";
-    case "thread/goal/cleared":
-      return "Goal cleared";
-    case "thread/goal/updated":
-      return "Goal updated";
-    case "thread/realtime/error":
-      return `Realtime warning: ${message ?? "unknown error"}`;
-    case "warning":
-      return `Warning: ${message ?? "unknown warning"}`;
-    case "windows/worldWritableWarning":
-      return `Filesystem warning: ${message ?? "world-writable path"}`;
-    case "windowsSandbox/setupCompleted":
-      return "Windows sandbox setup completed";
-    default:
-      return method;
-  }
-}
-
-function hookCompletionNote(params: Readonly<Record<string, unknown>>): string | undefined {
+function hookDiagnostic(params: Readonly<Record<string, unknown>>): string | undefined {
   const run = codexObject(params.run);
   const status = codexText(run?.status);
   const issue = Array.isArray(run?.entries)
@@ -352,18 +186,7 @@ function hookCompletionNote(params: Readonly<Record<string, unknown>>): string |
     : undefined;
   const issueKind = codexText(issue?.kind);
   if (status !== "failed" && status !== "blocked" && status !== "stopped" && issueKind === undefined) return undefined;
-  const eventName = codexText(run?.eventName) ?? "unknown";
-  const label = status === "failed" || status === "blocked" || status === "stopped" ? status : issueKind!;
-  const diagnostic = codexText(run?.statusMessage) ?? codexText(issue?.text);
-  return `Hook ${eventName} ${label}${diagnostic === undefined ? "" : `: ${diagnostic}`}`;
-}
-
-/**
- * A reroute names the model that now serves this thread, so it is runtime-model
- * evidence as well as narration. Other notifications carry no model identity.
- */
-function notificationModel(method: string, params: Readonly<Record<string, unknown>>): string | undefined {
-  return method === "model/rerouted" ? codexText(params.toModel) : undefined;
+  return codexText(run?.statusMessage) ?? codexText(issue?.text);
 }
 
 function observeError(
@@ -373,7 +196,7 @@ function observeError(
 ): void {
   const detail = turnError(params.error) ?? codexText(params.message) ?? "codex app-server error";
   state.error = detail;
-  events.emit(noteEvent(params.willRetry === true ? `Retrying after error: ${detail}` : `Error: ${detail}`));
+  events.emit(noteEvent(detail));
 }
 
 function terminalResult(params: Readonly<Record<string, unknown>>, state: CodexTurnState): TurnResult {
@@ -399,40 +222,36 @@ export function codexNotificationResult(
   if (state.threadId !== undefined && notificationThreadId !== undefined && notificationThreadId !== state.threadId) {
     return undefined;
   }
-  if (!Object.hasOwn(CODEX_NOTIFICATION_DISPOSITIONS, method)) {
-    events.emit(unknownEvent(method));
-    return undefined;
-  }
-  const disposition = CODEX_NOTIFICATION_DISPOSITIONS[method as keyof typeof CODEX_NOTIFICATION_DISPOSITIONS];
-  const rerouted = notificationModel(method, params);
-  if (rerouted !== undefined) events.emit(modelEvent(rerouted));
-  switch (disposition) {
-    case "drop":
+  switch (method) {
+    case "model/rerouted":
+      events.emit(modelEvent(codexText(params.toModel)));
       return undefined;
-    case "hook-completed": {
-      const note = hookCompletionNote(params);
-      if (note !== undefined) events.emit(noteEvent(note));
+    case "hook/completed": {
+      const diagnostic = hookDiagnostic(params);
+      if (diagnostic !== undefined) events.emit(noteEvent(diagnostic));
       return undefined;
     }
-    case "note":
-      events.emit(noteEvent(notificationAction(method, params)));
+    case "thread/compacted":
+      events.emit(noteEvent("Context compacted"));
       return undefined;
-    case "plan": {
-      const explanation = codexText(params.explanation);
-      const steps = Array.isArray(params.plan) ? params.plan.length : 0;
-      events.emit(noteEvent(`Plan updated: ${explanation ?? `${steps} steps`}`));
+    case "thread/realtime/error": {
+      const diagnostic =
+        codexText(params.message) ?? codexText(params.reason) ?? codexText(params.error) ?? turnError(params.error);
+      if (diagnostic !== undefined) events.emit(noteEvent(diagnostic));
       return undefined;
     }
-    case "item-started":
-    case "item-completed": {
+    case "item/started":
+    case "item/completed": {
       const item = codexObject(params.item);
-      if (item !== undefined) emitItem(item, disposition === "item-completed", events, state);
+      if (item !== undefined) emitItem(item, method === "item/completed", events, state);
       return undefined;
     }
     case "error":
       observeError(params, state, events);
       return undefined;
-    case "terminal":
+    case "turn/completed":
       return terminalResult(params, state);
+    default:
+      return undefined;
   }
 }
