@@ -175,6 +175,22 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
       assert.deepEqual(tool.annotations, expected.annotations);
       assert.deepEqual(native.session.getToolDefinition(tool.name)?.outputSchema, expected.outputSchema);
     }
+    for (const [name, input] of [
+      ["bind", { terms: "terms", forkOf: "kei/source" }],
+      ["deliver", { dryRun: true, overwrite: false }],
+      ["history", { selector: "@worker", before: 2, since: 1 }],
+      ["history", { selector: "kei/example", item: "answer" }],
+      ["history", { selector: "@worker", limit: 5001 }],
+    ] as const) {
+      const args = { cwd: join(root, "missing"), ...input };
+      await native.run(`await tools.keiyaku_${name}(${JSON.stringify(args)});`, true);
+      const rejected = resultFor(native.results, `keiyaku_${name}`);
+      assert.equal(rejected.isError, true);
+      assert.equal(rejected.structuredContent, undefined);
+      const failure = rejected.content[1];
+      assert.ok(failure?.type === "text");
+      assert.equal(JSON.parse(failure.text).category, "invalid-input");
+    }
     const read = await native.run(`
       const ns = await describeNamespace("keiyaku");
       text(ns);

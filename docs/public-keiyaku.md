@@ -21,8 +21,12 @@ accompany text rendering without being echoed in that answer, and adapters
 consume the owner's outcome judgment rather than reconstructing authority from
 omitted implementation evidence.
 
-An owner supplies each described verb's business input as one object, including
-operations with no business fields. Typed calls and generic execution cross that
+An owner supplies each described verb's business input as one strict flat object,
+including operations with no business fields. Discovery publishes its authored
+fields and leaf constraints directly; pure invocation admission owns cross-field
+applicability and contradictions before coordinate discovery. Discovery does not
+merge alternative input structures or reinterpret authored JSON values.
+Typed calls and generic execution cross that
 same boundary, with the same business inputs and optional execution controls.
 Omitted business input has the same meaning on both faces when the operation
 accepts an empty input. An amendment's fields are all optional, so both faces

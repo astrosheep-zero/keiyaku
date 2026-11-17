@@ -68,8 +68,10 @@ shared in composed answers rather than expanding a separate vocabulary for each
 use. Core does not depend on a schema implementation. The nearest
 schema-using owner projecting a core fact owns its declaration; shared
 declarations live below their consumers without cycles. Caller values are
-validated once at their Library boundary. Structural validation grants no
-product capability and never judges legality, admission, finality, or recovery.
+validated once at their Library boundary. Invocation discovery describes directly
+authored flat fields and leaf constraints; pure invocation admission owns their
+cross-field applicability before coordinate observation. Structural validation
+grants no product capability and never judges legality, admission, finality, or recovery.
 
 ## Invocation Answers
 

@@ -96,7 +96,7 @@ async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime): Promi
 
 async function runBind(request: VerbRequest<"bind">, runtime: CliRuntime): Promise<CliOutcome> {
   const { input, output } = request;
-  if ("forkOf" in input) return invokeAndFinish(request, runtime);
+  if (input.forkOf !== undefined || input.terms === undefined) return invokeAndFinish(request, runtime);
   const markdown = input.terms;
   try {
     const answer = await runtime.facet.run("bind", input);

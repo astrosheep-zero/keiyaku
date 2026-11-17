@@ -136,17 +136,16 @@ export class Keiyaku {
   }
 
   readonly #execute: Executions = {
-    bind: async (input) => {
+    bind: async ({ terms, forkOf, debt, target, after, gates }) => {
       const { library } = await this.#keis();
-      if ("forkOf" in input)
-        return await library.bind({
-          ...input,
-          forkOf: this.#fullId(library, input.forkOf),
-        });
-      const { after, ...rest } = input;
+      const destination = target === undefined ? {} : { target };
+      if (forkOf !== undefined) return await library.bind({ forkOf: this.#fullId(library, forkOf), ...destination });
       return await library.bind({
-        ...rest,
+        terms: terms!,
+        ...destination,
+        ...(debt === undefined ? {} : { debt }),
         ...(after === undefined ? {} : { after: after.map((id) => this.#fullId(library, id)) }),
+        ...(gates === undefined ? {} : { gates }),
       });
     },
     amend: async ({ contract, ...input }) => {
@@ -168,12 +167,29 @@ export class Keiyaku {
       }
       return await selected.contract.arc(input);
     },
-    deliver: async ({ contract, ...input }, controls) => {
+    deliver: async (
+      { contract, dryRun, includeDirty, showDiff, message, materializeConflict, overwrite },
+      controls,
+    ) => {
       const selected = (await this.#selected(contract)).contract;
-      const { dryRun, ...native } = input;
-      return dryRun
-        ? await selected.previewDelivery({ ...native, ...executionSignal(controls) }, mutationProgress(controls))
-        : await selected.deliver({ ...native, ...executionSignal(controls) }, mutationProgress(controls));
+      const common = {
+        ...executionSignal(controls),
+        ...(includeDirty === undefined ? {} : { includeDirty }),
+      };
+      return dryRun === true
+        ? await selected.previewDelivery(
+            { ...common, ...(showDiff === undefined ? {} : { showDiff }) },
+            mutationProgress(controls),
+          )
+        : await selected.deliver(
+            {
+              ...common,
+              ...(message === undefined ? {} : { message }),
+              ...(materializeConflict === undefined ? {} : { materializeConflict }),
+              ...(overwrite === undefined ? {} : { overwrite }),
+            },
+            mutationProgress(controls),
+          );
     },
     verify: async ({ contract, ...input }, controls) => {
       return await (
@@ -277,17 +293,22 @@ export class Keiyaku {
         ...(timeout === undefined ? {} : { timeoutMs: observationTimeout(timeout) }),
       });
     },
-    history: async ({ selector, ...input }) => {
+    history: async ({ selector, item, before, since, limit }) => {
+      const page = {
+        ...(before === undefined ? {} : { before }),
+        ...(since === undefined ? {} : { since }),
+        ...(limit === undefined ? {} : { limit }),
+      };
       if (selector.startsWith("kei/")) {
         const at = await this.#coordinates("required");
         if (at.repo === undefined) throw new KeiyakuUsageError("this command requires a resolved Repo");
         const library = Keis.of(at.repo);
-        return await library.kei({ id: this.#fullId(library, selector) }).history(input);
+        return await library.kei({ id: this.#fullId(library, selector) }).history(item === undefined ? page : { item });
       }
       const { at, akumas } = await this.#akumas();
       return await akumas.history({
         akuma: selector,
-        ...("item" in input ? (input.item === "answer" ? { last: true } : { id: input.item }) : input),
+        ...(item === undefined ? page : item === "answer" ? { last: true } : { id: item }),
         ...(at.repo === undefined ? {} : { repo: at.repo }),
       });
     },

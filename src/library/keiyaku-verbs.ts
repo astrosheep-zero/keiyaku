@@ -103,8 +103,6 @@ const commonBind = {
     ),
 };
 const jsonDocument = z.record(z.string(), z.unknown()).readonly();
-const contractSelector = text.startsWith("kei/");
-const akumaSelector = text.regex(/^(?!kei\/)/u);
 const historySelectorDescription = "Single subject: kei/... for a Contract, or aku/<name>/<hex> / @alias for an Akuma.";
 const historyItemDescription =
   'Open one complete retained item: a canonical positive safe decimal address for a Contract record or Akuma activity; Akumas also accept turn/<n> for an outcome, report/<n> for a report, or "answer" for the latest answered Turn and its exact coordinate. Cannot be combined with before, since, or limit.';
@@ -156,35 +154,37 @@ export const verbs = Object.freeze({
   bind: {
     description:
       "Bind a Contract: give exactly one of terms (complete Contract Markdown) or forkOf (copy another Contract). Returns a kei/... id and its own worktree. target is where accepted work lands; gates is what must pass first. Runs no checks.",
-    input: z.union([
-      z
-        .strictObject({
-          terms: text.describe(
-            "Complete Contract Markdown document (# Title, ## Context, ## Objective, ## Design, ## Region, ## Criteria, optional ## Verification). Mutually exclusive with forkOf.",
+    input: z
+      .strictObject({
+        terms: optText.describe(
+          "Complete Contract Markdown document (# Title, ## Context, ## Objective, ## Design, ## Region, ## Criteria, optional ## Verification). Mutually exclusive with forkOf.",
+        ),
+        forkOf: optText.describe(
+          "Existing Contract selector (kei/...) whose terms are copied into a new Contract. Mutually exclusive with terms, debt, after, and gates.",
+        ),
+        debt: debtIdSchema
+          .exactOptional()
+          .describe("Open Debt ID (debt/<slug>-<hex>) to associate as this Contract's held Debt."),
+        ...commonBind,
+        after: strings
+          .exactOptional()
+          .describe("Logical prerequisite Contract IDs (kei/...) that must be accepted before placement completes."),
+        gates: strings
+          .exactOptional()
+          .describe(
+            'Acceptance gate names overriding default gates (for example ["reviewed", "verified"], or [] for ungated placement).',
           ),
-          debt: debtIdSchema
-            .exactOptional()
-            .describe("Open Debt ID (debt/<slug>-<hex>) to associate as this Contract's held Debt."),
-          ...commonBind,
-          after: strings
-            .exactOptional()
-            .describe("Logical prerequisite Contract IDs (kei/...) that must be accepted before placement completes."),
-          gates: strings
-            .exactOptional()
-            .describe(
-              'Acceptance gate names overriding default gates (for example ["reviewed", "verified"], or [] for ungated placement).',
-            ),
-        })
-        .readonly(),
-      z
-        .strictObject({
-          forkOf: text.describe(
-            "Existing Contract selector (kei/...) whose terms are copied into a new Contract. Mutually exclusive with terms, debt, after, and gates.",
-          ),
-          ...commonBind,
-        })
-        .readonly(),
-    ]),
+      })
+      .refine(
+        ({ terms, forkOf }) => (terms !== undefined) !== (forkOf !== undefined),
+        "exactly one of terms or forkOf is required",
+      )
+      .refine(
+        ({ forkOf, debt, after, gates }) =>
+          forkOf === undefined || (debt === undefined && after === undefined && gates === undefined),
+        "forkOf cannot be combined with debt, after, or gates",
+      )
+      .readonly(),
     output: bindOutcomeSchema,
     normal: bindNormalOutcomeSchema,
     effect: "write",
@@ -225,47 +225,33 @@ export const verbs = Object.freeze({
   deliver: {
     description:
       "Hand in the work from a Contract's worktree. It lands on the target once prerequisites are accepted and every gate passes (reviewed: a satisfied review; verified: passing verify results); until then it waits, delivered. Uncommitted changes need includeDirty. dryRun: true only looks. Runs no checks and records no review.",
-    input: z.union([
-      z
-        .strictObject({
-          ...contract,
-          dryRun: z
-            .literal(true)
-            .describe(
-              "Preview the candidate, current gate evidence, and target readiness without submitting delivery.",
-            ),
-          includeDirty: optBool.describe(
-            "Include uncommitted and untracked worktree changes in the candidate without staging them.",
-          ),
-          showDiff: optBool.describe(
-            "Include the candidate patch diff in dryRun preview output (valid only with dryRun: true).",
-          ),
-        })
-        .readonly(),
-      z
-        .strictObject({
-          ...contract,
-          dryRun: z
-            .literal(false)
-            .exactOptional()
-            .describe(
-              "Preview the candidate, current gate evidence, and target readiness without submitting delivery.",
-            ),
-          message: optText.describe(
-            "Optional commit/integration message for the delivered candidate (submission only).",
-          ),
-          includeDirty: optBool.describe(
-            "Include uncommitted and untracked worktree changes in the candidate without staging them.",
-          ),
-          materializeConflict: optBool.describe(
-            "When target integration conflicts, materialize conflict markers into the appointed worktree for resolution instead of refusing cleanly (submission only).",
-          ),
-          overwrite: optBool.describe(
-            "Allow replacing an earlier delivered candidate when required by conflict or rewrite state (submission only).",
-          ),
-        })
-        .readonly(),
-    ]),
+    input: z
+      .strictObject({
+        ...contract,
+        dryRun: optBool.describe(
+          "Preview the candidate, current gate evidence, and target readiness without submitting delivery.",
+        ),
+        includeDirty: optBool.describe(
+          "Include uncommitted and untracked worktree changes in the candidate without staging them.",
+        ),
+        showDiff: optBool.describe(
+          "Include the candidate patch diff in dryRun preview output (valid only with dryRun: true).",
+        ),
+        message: optText.describe("Optional commit/integration message for the delivered candidate (submission only)."),
+        materializeConflict: optBool.describe(
+          "When target integration conflicts, materialize conflict markers into the appointed worktree for resolution instead of refusing cleanly (submission only).",
+        ),
+        overwrite: optBool.describe(
+          "Allow replacing an earlier delivered candidate when required by conflict or rewrite state (submission only).",
+        ),
+      })
+      .refine(
+        ({ dryRun, message, materializeConflict, overwrite }) =>
+          dryRun !== true || (message === undefined && materializeConflict === undefined && overwrite === undefined),
+        "dryRun cannot be combined with message, materializeConflict, or overwrite",
+      )
+      .refine(({ dryRun, showDiff }) => dryRun === true || showDiff === undefined, "showDiff requires dryRun: true")
+      .readonly(),
     output: z.union([deliverOutcomeSchema, deliveryPreviewOutcomeSchema]),
     progress: executionObservationSchema,
     effect: "write",
@@ -471,32 +457,32 @@ export const verbs = Object.freeze({
   },
   history: {
     description: "Read a bounded Contract or Akuma timeline, or open one complete item by its visible address.",
-    input: z.union([
-      z
-        .strictObject({
-          selector: contractSelector.describe(historySelectorDescription),
-          item: canonicalDecimalSchema.describe(historyItemDescription),
-        })
-        .readonly(),
-      z
-        .strictObject({
-          selector: akumaSelector.describe(historySelectorDescription),
-          item: text
-            .refine(
-              (value) => value === "answer" || historyInputSchemas[0].shape.id.safeParse(value).success,
-              "item must be answer, turn/<positive safe integer>, report/<positive safe integer>, or a canonical positive safe decimal sequence",
-            )
-            .describe(historyItemDescription),
-        })
-        .readonly(),
-      ...historyPageSchemas.map((branch) =>
-        branch
-          .extend({
-            selector: text.describe(historySelectorDescription),
-          })
-          .readonly(),
-      ),
-    ]),
+    input: z
+      .strictObject({
+        selector: text.describe(historySelectorDescription),
+        item: z
+          .union([historyInputSchemas[0].shape.id, z.literal("answer")])
+          .exactOptional()
+          .describe(historyItemDescription),
+        before: historyPageSchemas[0].shape.before,
+        since: historyPageSchemas[1].shape.since.exactOptional(),
+        limit: historyPageSchemas[0].shape.limit,
+      })
+      .refine(
+        ({ item, before, since, limit }) =>
+          item === undefined || (before === undefined && since === undefined && limit === undefined),
+        "item cannot be combined with before, since, or limit",
+      )
+      .refine(
+        ({ before, since }) => before === undefined || since === undefined,
+        "before and since are mutually exclusive",
+      )
+      .refine(
+        ({ selector, item }) =>
+          item === undefined || !selector.startsWith("kei/") || canonicalDecimalSchema.safeParse(item).success,
+        "Contract item requires a canonical positive safe decimal address",
+      )
+      .readonly(),
     output: z.union([contractHistorySchema, akumaHistoryResultSchema]),
     effect: "read",
   },

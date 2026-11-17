@@ -55,6 +55,23 @@ const markdown = contractMarkdown("Invocation fixture", {
   Criteria: "### Read\nReturn the native result.",
 });
 
+test("flat bind preserves fork target omission and explicit null", async (t) => {
+  const home = temporaryDirectory(t, "flat-bind-home-");
+  const repository = repositoryWithCommit();
+  const facet = Keiyaku.for({ cwd: repository.path, environment: {}, home });
+  const source = accepted(await facet.bind({ terms: markdown, gates: ["reviewed"] }));
+  assert.ok(source.target);
+  const inherited = accepted(await facet.bind({ forkOf: source.contractId }));
+  const detached = accepted(await facet.bind({ forkOf: source.contractId, target: null }));
+  assert.deepEqual(inherited.target, source.target);
+  assert.equal(detached.target, undefined);
+  for (const bound of [source, inherited, detached]) {
+    const page = await facet.history({ selector: bound.contractId, limit: 1 });
+    assert.deepEqual(page, await bound.kei.history({ limit: 1 }));
+    assert.deepEqual(await facet.history({ selector: bound.contractId, item: "1" }), await bound.kei.history({ item: "1" }));
+  }
+});
+
 test("construction captures explicit inputs synchronously without observing cwd", async (t) => {
   const home = temporaryDirectory(t, "keiyaku-invocation-home-");
   const missing = join(home, "missing");

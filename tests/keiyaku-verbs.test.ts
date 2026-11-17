@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { z } from "zod";
@@ -30,7 +30,9 @@ type TypedMethod<K extends VerbName> = K extends "debt.add"
         ? "debtDoctor"
         : K;
 type VerbParameters<K extends VerbName> =
-  {} extends VerbInput<K>
+  K extends "bind"
+    ? [input: VerbInput<K>, run?: VerbRunFor<K> | undefined]
+    : {} extends VerbInput<K>
     ? [input?: VerbInput<K> | undefined, run?: VerbRunFor<K> | undefined]
     : [input: VerbInput<K>, run?: VerbRunFor<K> | undefined];
 export type TypedVerbParity = Assert<
@@ -216,6 +218,48 @@ test("wire validation and classification reject malformed calls before observati
   assert.equal(Keiyaku.verbs.bind.input.safeParse({ terms: document(), forkOf: "kei/example" }).success, false);
   assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "returned", value: { kind: "missing" } }), "refused");
   assert.equal(classifyVerb("show", { selector: "kei/missing" }, { kind: "threw", error: new TypeError("unexpected") }), "failed");
+});
+
+test("flat bind, delivery, and history refuse invalid intent before discovery or allocation", async (t) => {
+  const root = temporaryDirectory(t, "flat-input-admission-");
+  const missing = join(root, "missing");
+  const facet = Keiyaku.for({ cwd: missing, repo: join(root, "missing-repo"), environment: {}, home: root });
+  const invalid: readonly (readonly ["bind" | "deliver" | "history", Record<string, unknown>])[] = [
+    ["bind", {}],
+    ["bind", { terms: "terms", forkOf: "kei/source" }],
+    ["bind", { forkOf: "kei/source", debt: "debt/example-12345678" }],
+    ["bind", { forkOf: "kei/source", after: [] }],
+    ["bind", { forkOf: "kei/source", gates: [] }],
+    ["bind", { terms: "terms", extra: true }],
+    ["deliver", { dryRun: true, message: "unused" }],
+    ["deliver", { dryRun: true, materializeConflict: false }],
+    ["deliver", { dryRun: true, overwrite: false }],
+    ["deliver", { showDiff: false }],
+    ["deliver", { dryRun: false, showDiff: true }],
+    ["deliver", { dryRun: true, extra: true }],
+    ["history", { selector: "@worker", item: "1", before: 2 }],
+    ["history", { selector: "@worker", item: "1", since: 2 }],
+    ["history", { selector: "@worker", item: "1", limit: 2 }],
+    ["history", { selector: "kei/example", before: 2, since: 1 }],
+    ["history", { selector: "@worker", extra: true }],
+  ];
+  for (const [name, input] of [
+    ...invalid,
+    ...["answer", "turn/1", "report/1"].map((item) => ["history", { selector: "kei/example", item }] as const),
+    ...["0", "01", "9007199254740992", "turn/0", "report/01", "turn/9007199254740992", "unknown/1"].map(
+      (item) => ["history", { selector: "@worker", item }] as const,
+    ),
+    ...["before", "since", "limit"].flatMap((key) =>
+      [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, ...(key === "limit" ? [5001] : [])].map(
+        (value) => ["history", { selector: "@worker", [key]: value }] as const,
+      ),
+    ),
+  ]) {
+    assert.equal(Keiyaku.verbs[name].input.safeParse(input).success, false, JSON.stringify(input));
+    await assert.rejects(facet.run(name, input as never), KeiyakuUsageError);
+    await assert.rejects(facet[name](input as never), KeiyakuUsageError);
+  }
+  assert.deepEqual(readdirSync(root), []);
 });
 
 test("history selects one item or a page and observation deadlines share duration grammar", () => {

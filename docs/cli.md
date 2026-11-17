@@ -12,10 +12,12 @@ through the CLI. Discovery observes or establishes no World,
 and each call supplies explicit coordinates independently. The transport composes
 those coordinates with the invocation owner's business declaration without an
 extra business envelope or another tool inventory. Coordinate names cannot
-shadow business intent. MCP publishes flat object inputs, while native validation
-owns cross-field admission and preserves each input alternative's restrictions.
-Pure caller contradictions are refused before coordinate or product
-observation through the same owner validation used by native invocation.
+shadow business intent. MCP and Pi publish directly authored flat object inputs
+and their leaf constraints. Pure native invocation admission owns cross-field
+applicability and contradictions before coordinate or product observation;
+discovery does not derive a shared structure from input alternatives or alter
+authored JSON documents and default values. Both transports use the same owner
+validation as native invocation.
 Protocol validation,
 connection lifetime, and cancellation remain at that edge; the facet and product
 owners retain their native admission, result, and retirement semantics. Text and

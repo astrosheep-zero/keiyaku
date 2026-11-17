@@ -18,7 +18,7 @@ import { z } from "zod";
 import { AjvJsonSchemaValidator } from "@modelcontextprotocol/sdk/validation/ajv";
 import { classifyVerb, type VerbInput, type VerbName, type VerbOutput } from "../src/library/keiyaku-verbs.js";
 import { createKeiyakuMcpServer } from "../src/mcp/adapter.js";
-import { modelInputSchema as mcpInputSchema, modelJsonSchema, normalizeModelSchema as normalizeMcpSchema, modelOutputSchemas } from "../src/library/model-tools.js";
+import { modelCoordinates, modelInputSchema as mcpInputSchema, modelJsonSchema, modelOutputSchemas } from "../src/library/model-tools.js";
 import { Keiyaku, KeiyakuUsageError } from "../src/library/keiyaku.js";
 import { projectFailure } from "../src/library/outcome.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
@@ -91,17 +91,14 @@ test("Contract page addresses open exact historical records through invocation, 
   }
 });
 
-test("coordinate composition preserves native branches and rejects collisions at construction", () => {
+test("coordinate composition preserves flat refinements and rejects collisions at construction", () => {
   const schema = mcpInputSchema(Keiyaku.verbs.bind.input);
   assert.equal(schema.safeParse({ cwd: "/invocation", repo: "/contract", terms: "terms" }).success, true);
   assert.equal(schema.safeParse({ repo: "/contract", forkOf: "kei/source" }).success, true);
   assert.equal(schema.safeParse({ terms: "terms", forkOf: "kei/source" }).success, false);
   assert.equal(schema.safeParse({ input: { terms: "terms" } }).success, false);
   assert.equal(schema.safeParse({ forkOf: "kei/source", extra: true }).success, false);
-  assert.throws(() => mcpInputSchema(z.union([
-    z.strictObject({ terms: z.string() }).readonly(),
-    z.strictObject({ repo: z.string() }).readonly(),
-  ])), /coordinate collides.*repo/u);
+  assert.throws(() => mcpInputSchema(z.strictObject({ repo: z.string() }).readonly()), /coordinate collides.*repo/u);
   assert.throws(() => mcpInputSchema(z.strictObject({ cwd: z.string() })), /coordinate collides.*cwd/u);
 });
 
@@ -199,7 +196,13 @@ test("bad spawn workdir agrees on CLI usage and MCP failure category", async (t)
 });
 
 test("schema cleanup retains authored property names and values", () => {
-  const authored = { readOnly: true, $schema: "authored", nested: { readOnly: false } };
+  const authored = {
+    readOnly: true,
+    $schema: "authored",
+    nested: { readOnly: false },
+    properties: { readOnly: { type: "boolean" }, $schema: { type: "string" } },
+    anyOf: [{ const: "a" }, { const: "b" }],
+  };
   const schema = modelJsonSchema(z.strictObject({
     readOnly: z.boolean().readonly(),
     payload: z.unknown().meta({ const: authored }),
@@ -217,33 +220,29 @@ test("schema cleanup retains authored property names and values", () => {
   });
 });
 
-test("input publication keeps shared structure, enum choices, and authored property unions", () => {
-  const propertyUnion = { anyOf: [{ type: "string" }, { type: "null" }] };
-  const branch = (choice: string, pattern: string, description: string, required: string[]) => ({
-    type: "object",
-    additionalProperties: false,
-    required,
-    properties: {
-      choice: { type: "string", const: choice, description },
-      selectors: { type: "array", minItems: 1, items: { type: "string", pattern } },
-      nested: { type: "object", properties: { value: { type: "string", pattern } } },
-      parent: propertyUnion,
-    },
-  });
-  assert.deepEqual(normalizeMcpSchema(JSON.parse(JSON.stringify({ anyOf: [
-    branch("a", "^a", "", ["choice", "selectors"]),
-    branch("b", "^b", "Choose a branch", ["choice"]),
-  ] })), true), {
-    type: "object",
-    additionalProperties: false,
-    required: ["choice"],
-    properties: {
-      choice: { type: "string", enum: ["a", "b"], description: "Choose a branch" },
-      selectors: { type: "array", minItems: 1, items: { type: "string" } },
-      nested: { type: "object", properties: { value: { type: "string" } } },
-      parent: propertyUnion,
-    },
-  });
+test("flat publication retains authored leaves while native admission owns contradictions", () => {
+  for (const name of ["bind", "deliver", "history"] as const) {
+    const business = Keiyaku.verbs[name].input.unwrap();
+    assert.ok(business instanceof z.ZodObject);
+    assert.ok(business.def.catchall instanceof z.ZodNever);
+    const published = modelJsonSchema(mcpInputSchema(Keiyaku.verbs[name].input));
+    assert.equal(published.type, "object");
+    assert.equal(published.anyOf, undefined);
+    assert.deepEqual(published.properties, {
+      ...modelJsonSchema(business).properties,
+      ...modelJsonSchema(modelCoordinates(name)).properties,
+    });
+  }
+  const history = modelJsonSchema(mcpInputSchema(Keiyaku.verbs.history.input));
+  const validator = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(history)));
+  assert.equal(validator({ selector: "@worker", before: 2, since: 1 }).valid, true);
+  assert.equal(Keiyaku.verbs.history.input.safeParse({ selector: "@worker", before: 2, since: 1 }).success, false);
+  for (const input of [
+    { selector: "@worker", before: 0 },
+    { selector: "@worker", since: 1.5 },
+    { selector: "@worker", limit: 5001 },
+    { selector: "@worker", item: "turn/0" },
+  ]) assert.equal(validator(input).valid, false, JSON.stringify(input));
 });
 
 test("real flat and native calls reject contradictory intent before coordinate I/O or Akuma allocation", async (t) => {
@@ -253,7 +252,17 @@ test("real flat and native calls reject contradictory intent before coordinate I
   const facet = Keiyaku.for({ cwd, environment, home: cwd });
   const invalid: readonly (readonly [VerbName, Record<string, unknown>])[] = [
     ["bind", { terms: "terms", forkOf: "kei/source" }],
+    ["bind", {}],
+    ["bind", { forkOf: "kei/source", after: [] }],
+    ["bind", { forkOf: "kei/source", gates: [] }],
+    ["bind", { forkOf: "kei/source", debt: "debt/example-12345678" }],
     ["bind", { terms: "terms", actor: "operator" }],
+    ["deliver", { dryRun: true, message: "unused" }],
+    ["deliver", { dryRun: true, materializeConflict: false }],
+    ["deliver", { dryRun: true, overwrite: false }],
+    ["deliver", { showDiff: false }],
+    ["deliver", { dryRun: false, showDiff: true }],
+    ["deliver", { dryRun: true, extra: true }],
     ["amend", { edits: "## Context\nChanged\n", actor: "operator" }],
     ["arc", { body: "# Chapter", actor: "operator" }],
     ["review", { verdict: "satisfied", summary: "ok", actor: "operator" }],
@@ -276,6 +285,16 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["history", { selector: "@worker", item: "turn/1", before: 1 }],
     ["history", { selector: "@worker", item: "answer", limit: 1 }],
     ["history", { selector: "@worker", before: 2, since: 1 }],
+    ["history", { selector: "@worker", item: "1", since: 2 }],
+    ["history", { selector: "kei/example", item: "answer" }],
+    ["history", { selector: "kei/example", item: "turn/1" }],
+    ["history", { selector: "kei/example", item: "report/1" }],
+    ["history", { selector: "@worker", item: "01" }],
+    ["history", { selector: "@worker", item: "turn/9007199254740992" }],
+    ["history", { selector: "@worker", before: 0 }],
+    ["history", { selector: "@worker", since: Number.MAX_SAFE_INTEGER + 1 }],
+    ["history", { selector: "@worker", limit: 5001 }],
+    ["history", { selector: "@worker", extra: true }],
     ["debt.update", { id: "debt/example" }],
     ["debt.update", { id: "debt/example", state: "paused" }],
     ["debt.add", { title: " \n" }],
@@ -287,7 +306,7 @@ test("real flat and native calls reject contradictory intent before coordinate I
     ["ls", { selector: "aku/*", caller: "aku/intern/00000001" }],
   ];
   for (const [name, input] of invalid) {
-    const args = { cwd, ...input };
+    const args = { cwd: join(cwd, "missing"), repo: join(cwd, "missing-repo"), ...input };
     const response = await client.callTool({ name: name.replaceAll(".", "_"), arguments: args });
     assert.equal(response.isError, true, `${name}: ${JSON.stringify(response)}`);
     assert.equal(response._meta?.["keiyaku/disposition"], "usage", name);
@@ -357,6 +376,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     for (const keyword of ["anyOf", "oneOf", "allOf"]) assert.equal(tool.inputSchema[keyword], undefined, tool.name);
     const properties = tool.inputSchema.properties as Record<string, { anyOf?: unknown }>;
     for (const [key, schema] of Object.entries(properties)) {
+      if (tool.name === "history" && key === "item") continue;
       assert.equal(schema.anyOf, undefined, `${tool.name}.${key}`);
     }
     assert.equal(JSON.stringify(tool.inputSchema).includes('"$ref"'), false);
@@ -370,7 +390,7 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     assert.equal(tool.annotations?.readOnlyHint, entry.effect === "read");
     assert.equal(tool.annotations?.destructiveHint, entry.effect === "destroy");
   }
-  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "timeout", "string"], ["history", "item", "string"], ["show", "selector", "string"], ["kill", "akuma", "string"]]) {
+  for (const [name, key, type] of [["deliver", "dryRun", "boolean"], ["wait", "timeout", "string"], ["show", "selector", "string"], ["kill", "akuma", "string"]]) {
     const properties = tools.find((tool) => tool.name === name)!.inputSchema.properties as Record<string, { type?: string }>;
     assert.equal(properties[key!]!.type, type);
   }
