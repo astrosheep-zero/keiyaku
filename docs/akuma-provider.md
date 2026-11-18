@@ -287,6 +287,15 @@ fail after birth under ordinary execution semantics. The retained
 recipe preserves explicit configuration, including previously retained policy,
 without discovering or freezing external native defaults or files.
 
+Configuration admission is owned by the selected adapter as one executable
+declaration, not a shared provider configuration language. A refused
+configuration is an invalid caller input whose diagnostic is the declaration's
+own structured schema failure; that phrasing and the order of independent
+checks are presentation, never a continuity promise. Admission neither trims
+supplied values nor fabricates absent ones, and the admitted result stays
+immutable. Admitting a mapping is not native acceptance: the adapter confirms
+the native selection before the first prompt.
+
 Option admission happens once before identity allocation. Prompt and
 structured-answer changes apply only when the provider begins a new Turn,
 never as live-tell mutation. Persisted records are not rewritten during option

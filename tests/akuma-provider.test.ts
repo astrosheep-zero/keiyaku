@@ -2,13 +2,14 @@ import { opencodeFixture } from "./support/opencode-v2.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
 import test from "node:test";
 import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as acp from "@agentclientprotocol/sdk";
+import { z } from "zod";
 import {
   AGENT_EVENT_QUEUE_LIMIT,
   createProviderAttempt,
@@ -25,6 +26,7 @@ import {
   type TurnResult,
   type DriveInput,
 } from "../src/akuma/provider.js";
+import { KeiyakuError } from "../src/errors.js";
 import { encodeActivityEvent, decodeActivityRow } from "../src/akuma/heart/rows.js";
 import { decodeResumeCoordinate } from "../src/akuma/coordinate.js";
 import { type ProviderExecution } from "../src/akuma/provider-recipe.js";
@@ -38,7 +40,7 @@ import {
   type OpencodeSdkLoader,
 } from "../src/akuma/providers/opencode-sdk/session.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
-import { createAcpProvider } from "../src/akuma/providers/acp/index.js";
+import { createAcpProvider, decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider, interpretGrokTool } from "../src/akuma/providers/grok-build/index.js";
 import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { EMPTY_ACP_EVENT_STATE, flushAcpEvents, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
@@ -1214,8 +1216,86 @@ test("ACP refuses unavailable model and effort choices before sending a prompt",
         ...fake.execution,
         config: { argvBefore: [], argvAfter: [], modelArg: "--model", modelConfigId: "model" },
       }),
-    /cannot map model to both/u,
+    /modelConfigId conflicts with modelArg/u,
   );
+});
+
+test("ACP admits one strict configuration declaration and refuses invalid or conflicting configurations", (context) => {
+  assert.deepEqual(
+    decodeAcpConfig({ argvBefore: ["--mode", "fast"], argvAfter: [], modelArg: "--model", effortArg: "--effort" }),
+    { argvBefore: ["--mode", "fast"], argvAfter: [], modelArg: "--model", effortArg: "--effort" },
+  );
+  assert.deepEqual(
+    decodeAcpConfig({ argvBefore: ["serve"], argvAfter: ["stdio"], modelConfigId: "model", effortConfigId: "thinking" }),
+    { argvBefore: ["serve"], argvAfter: ["stdio"], modelConfigId: "model", effortConfigId: "thinking" },
+  );
+  assert.deepEqual(
+    decodeAcpConfig({ argvBefore: [], argvAfter: [], systemPromptArg: "--prompt", systemPromptMode: "replace" }),
+    { argvBefore: [], argvAfter: [], systemPromptArg: "--prompt", systemPromptMode: "replace" },
+  );
+
+  const admitted = decodeAcpConfig({ argvBefore: [" probe "], argvAfter: [], modelArg: " --model " });
+  assert.deepEqual(admitted, { argvBefore: [" probe "], argvAfter: [], modelArg: " --model " }, "bytes stay as supplied");
+  assert.equal("effortArg" in admitted, false, "absent members are not fabricated");
+  assert.equal(Object.isFrozen(admitted), true);
+  assert.equal(Object.isFrozen(admitted.argvBefore), true);
+  assert.equal(Object.isFrozen(admitted.argvAfter), true);
+  assert.throws(() => (admitted.argvBefore as string[]).push("--late"), TypeError);
+
+  const callerArgs = ["--kept"];
+  const copied = decodeAcpConfig({ argvBefore: callerArgs, argvAfter: [] });
+  assert.notEqual(copied.argvBefore, callerArgs, "admission freezes its own array, never the caller's");
+  assert.equal(Object.isFrozen(callerArgs), false);
+
+  const explicitUndefined = decodeAcpConfig({ argvBefore: [], argvAfter: [], modelArg: undefined });
+  assert.deepEqual(
+    Object.keys(explicitUndefined),
+    ["argvBefore", "argvAfter"],
+    "an explicit undefined is absence, not an own key",
+  );
+
+  const refusals: readonly (readonly [unknown, RegExp])[] = [
+    [null, /object/u],
+    [{ argvBefore: [], argvAfter: [], unexpected: true }, /unexpected/u],
+    [{ argvAfter: [] }, /argvBefore/u],
+    [{ argvBefore: ["  "], argvAfter: [] }, /argvBefore\.0/u],
+    [{ argvBefore: [], argvAfter: [], systemPromptMode: "merge" }, /systemPromptMode must be append or replace/u],
+    [{ argvBefore: [], argvAfter: [], systemPromptMode: "append" }, /systemPromptMode requires systemPromptArg/u],
+    [
+      { argvBefore: [], argvAfter: [], modelArg: "--model", modelConfigId: "model" },
+      /modelConfigId conflicts with modelArg/u,
+    ],
+    [
+      { argvBefore: [], argvAfter: [], effortArg: "--effort", effortConfigId: "thinking" },
+      /effortConfigId conflicts with effortArg/u,
+    ],
+    [
+      { argvBefore: [], argvAfter: [], modelConfigId: "model", effortConfigId: "model" },
+      /effortConfigId must differ from modelConfigId/u,
+    ],
+  ];
+  for (const [config, expected] of refusals) {
+    assert.throws(
+      () => decodeAcpConfig(config),
+      (error: unknown) => {
+        assert.ok(error instanceof KeiyakuError);
+        assert.equal(error.category, "invalid-input");
+        assert.match(error.message, expected);
+        assert.ok(error.cause instanceof z.ZodError);
+        return true;
+      },
+    );
+  }
+
+  const root = temporaryDirectory(context, "keiyaku-acp-admission-");
+  const fake = fakeAcp(root);
+  for (const config of [
+    { argvBefore: [], argvAfter: [], unexpected: true },
+    { argvBefore: [], argvAfter: [], modelArg: "--model", modelConfigId: "model" },
+  ]) {
+    assert.throws(() => createAcpProvider({ ...fake.execution, config }), KeiyakuError);
+  }
+  assert.equal(existsSync(fake.log), false, "refused configuration starts no native execution");
 });
 
 test("ACP forced disposal closes its owned process tree after standard session/cancel", async (context) => {
@@ -2712,7 +2792,7 @@ test("provider recipe preserves opaque config until adapter construction", async
   assert.doesNotThrow(() => createOpencodeProvider(recipes[1]));
   assert.doesNotThrow(() => createPiProvider(recipes[2]));
   assert.doesNotThrow(() => createGrokBuildProvider(recipes[3]));
-  assert.throws(() => createAcpProvider(recipes[4]), /unknown field unexpected/u);
+  assert.throws(() => createAcpProvider(recipes[4]), /unexpected/u);
   const resolved = await resolveProviderExecution(recipes[0]);
   assert.equal(resolved.execution.config?.unexpected, true);
 });
