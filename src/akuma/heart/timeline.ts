@@ -42,6 +42,22 @@ export function lastActivityAt(database: DatabaseSync): string | null {
   return row.at;
 }
 
+export function waitReportFrontier(database: DatabaseSync, after: number | null) {
+  if (after === null) {
+    const row = database.prepare("SELECT sequence FROM reports ORDER BY sequence DESC LIMIT 1").get() as
+      | { sequence: number }
+      | undefined;
+    return { sequence: row?.sequence ?? 0, report: undefined };
+  }
+  const row = database
+    .prepare(
+      `SELECT sequence, body_sequence, turn_sequence, text, at
+      FROM reports WHERE sequence > ? ORDER BY sequence DESC LIMIT 1`,
+    )
+    .get(after) as ReportRow | undefined;
+  return row === undefined ? undefined : { sequence: row.sequence, report: decodeReportRow(row) };
+}
+
 export function pruneActivityFacts(database: DatabaseSync, limit: number, protectionReleased = false): void {
   const highest = database.prepare("SELECT COALESCE(MAX(sequence), 0) AS value FROM timeline").get() as {
     value: number;

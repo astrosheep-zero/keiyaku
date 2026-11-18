@@ -32,7 +32,7 @@ import {
 } from "./refusal.js";
 import { renderRegionText } from "./region.js";
 import { renderSettingsText } from "./settings.js";
-import { formatNextCall, safeText, type TextRenderContext } from "./terminal.js";
+import { formatNextCall, renderBoundedPayload, safeText, type TextRenderContext } from "./terminal.js";
 import { renderWhoami } from "./whoami.js";
 
 export function aliasSelector(selector: string | undefined): string | undefined {
@@ -162,11 +162,27 @@ function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, contex
   const rows = result.members.map((member) => {
     if (member.kind === "contract") return contractWaitMemberText(member.observation);
     if (member.observation.kind === "unknown") return `? ${member.observation.id} (unobserved)`;
-    return waitText(
+    const row = waitText(
       { kind: "akuma", reason: result.reason === "deadline" ? "deadline" : "completed", results: [member.observation] },
       selectedAlias === undefined ? {} : { alias: selectedAlias },
       context,
     );
+    if (result.reason !== "reported" || result.report.akumaId !== member.observation.id) return row;
+    const { reportId, text, clipped } = result.report;
+    return [
+      row,
+      `  ${reportId}`,
+      ...renderBoundedPayload({
+        text: text.trim() === "" && clipped ? "…" : text,
+        first: "    ",
+        continuation: "    ",
+        columns: context.columns,
+        maxLines: 4,
+        quote: "",
+        preserveLines: true,
+        truncated: clipped === true,
+      }),
+    ].join("\n");
   });
   return [result.reason, ...rows].join("\n");
 }

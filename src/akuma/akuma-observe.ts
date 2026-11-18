@@ -14,6 +14,7 @@ import {
   type WaitFacts,
 } from "./heart/index.js";
 import { pathsForAkumaId, type AkumaId, type AkumaPaths } from "./identity.js";
+import type { LeashProbe } from "./heart/facts.js";
 import { projectFact, type ActivityRow } from "./projection.js";
 import { summarizeFrontier } from "./projection-read.js";
 import { resolveProviderExecution } from "./providers/index.js";
@@ -63,34 +64,34 @@ export async function rosterListRow(paths: AkumaPaths, expected: AkumaId): Promi
 async function bornObservation<T extends Pick<HeartSnapshot, "soul" | "latestBody" | "latestKill">>(
   paths: AkumaPaths,
   expected: AkumaId,
-  read: () => Promise<T>,
+  read: (leash: LeashProbe) => Promise<T>,
   snapshot?: T,
 ) {
-  const fresh = async () => {
+  const fresh = async (leash: LeashProbe) => {
     try {
-      return await read();
+      return await read(leash);
     } catch (error) {
       if (isHeartAbsent(error)) throw new AkumaNotBornError(expected);
       throw error;
     }
   };
-  snapshot ??= await fresh();
+  snapshot ??= await fresh("held");
   if (snapshot.soul === null) throw new AkumaNotBornError(expected);
   const claim = await HeldAkumaLeash.try(paths);
   try {
-    if (claim !== null) snapshot = await fresh();
+    if (claim !== null) snapshot = await fresh("free");
     const soul = snapshot.soul;
     if (soul === null) throw new AkumaNotBornError(expected);
     if (soul.id !== expected) throw new Error("Akuma soul does not match its coordinate");
-    const currentLife = life({
-      leash: claim === null ? "held" : "free",
-      body: snapshot.latestBody,
-      kill: snapshot.latestKill,
-    });
+    const currentLife = observedLife(snapshot, claim === null ? "held" : "free");
     return { snapshot, soul, currentLife };
   } finally {
     claim?.release();
   }
+}
+
+function observedLife(snapshot: Pick<HeartSnapshot, "latestBody" | "latestKill">, leash: LeashProbe) {
+  return life({ leash, body: snapshot.latestBody, kill: snapshot.latestKill });
 }
 
 export async function readBornLife(paths: AkumaPaths, expected: AkumaId): Promise<AkumaStatus["life"]> {
@@ -122,13 +123,25 @@ export function createLiveStatusReader(paths: AkumaPaths, expected: AkumaId) {
       const observed = await bornObservation(paths, expected, () => reader.tellOutcome(id, signal));
       return { ...observed.snapshot, life: observed.currentLife };
     },
-    async wait(recent: boolean, signal?: AbortSignal): Promise<WaitStatusObservation> {
-      const observed = await bornObservation(paths, expected, () => reader.wait(recent, signal));
+    async wait(
+      recent: boolean,
+      reportAfter: number | null | undefined,
+      skipAdvancingOutcome: boolean,
+      signal?: AbortSignal,
+    ): Promise<WaitStatusObservation> {
+      const observed = await bornObservation(paths, expected, (leash) =>
+        reader.wait(
+          recent,
+          reportAfter,
+          (snapshot) => !skipAdvancingOutcome || waitComplete(observedLife(snapshot, leash), snapshot.hasPendingTell),
+          signal,
+        ),
+      );
       return { ...observed.snapshot, id: expected, life: observed.currentLife };
     },
     async complete(signal?: AbortSignal): Promise<boolean> {
       const observed = await bornObservation(paths, expected, () => reader.life(signal));
-      return executionProgress(observed.currentLife, observed.snapshot.hasPendingTell) !== "advancing";
+      return waitComplete(observed.currentLife, observed.snapshot.hasPendingTell);
     },
     async read(signal?: AbortSignal): Promise<LiveStatusObservation> {
       try {
@@ -194,8 +207,11 @@ export function executionProgress(
   if (life === "asleep") return pending ? "advancing" : "settled";
   return "stopped";
 }
+export function waitComplete(life: AkumaStatus["life"], pending: boolean): boolean {
+  return executionProgress(life, pending) !== "advancing";
+}
 export function defaultWaitComplete(status: AkumaStatus): boolean {
-  return executionProgress(status.life, status.work.pending !== undefined) !== "advancing";
+  return waitComplete(status.life, status.work.pending !== undefined);
 }
 
 export type WaitReason = "completed" | "deadline";

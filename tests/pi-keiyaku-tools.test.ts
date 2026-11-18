@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import * as sdk from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ToolResultEvent } from "@earendil-works/pi-coding-agent";
@@ -274,6 +275,40 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
         assert.deepEqual(observed.content, expected.content);
       }
     } finally { retained.holder.release(); }
+
+    const baseline = deferred<void>();
+    const prepare = DatabaseSync.prototype.prepare;
+    t.mock.method(DatabaseSync.prototype, "prepare", function(this: DatabaseSync, sql: string) {
+      if (sql === "SELECT sequence FROM reports ORDER BY sequence DESC LIMIT 1") baseline.resolve();
+      return prepare.call(this, sql);
+    });
+    try {
+      const waiting = native.run(`text(await tools.keiyaku_wait({selectors: [${JSON.stringify(id)}], timeout: "10s"}));`);
+      await Promise.race([baseline.promise, waiting.then(() => assert.fail("wait stopped before its report baseline"))]);
+      const milestone = `worker reached the checkpoint\n${"work in progress ".repeat(50)}\nexact report tail`;
+      const recorded = await child.report(milestone);
+      assert.ok(recorded.kind === "recorded");
+      await waiting;
+      const wake = resultFor(native.results, "keiyaku_wait");
+      assert.equal(wake.isError, false, text(wake));
+      const schema = native.session.getToolDefinition("keiyaku_wait")?.outputSchema;
+      assert.ok(schema);
+      const validation = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(schema)))(wake.structuredContent);
+      assert.equal(validation.valid, true, validation.errorMessage);
+      const { reason, report } = wake.structuredContent as {
+        reason: string; report: { akumaId: string; reportId: string; text: string; clipped?: true };
+      };
+      assert.equal(reason, "reported");
+      assert.equal(report.akumaId, id);
+      assert.equal(report.reportId, recorded.reportId);
+      assert.equal(report.clipped, true);
+      assert.ok(milestone.startsWith(report.text) && report.text.length < milestone.length);
+      assert.ok(text(wake).includes(recorded.reportId));
+      assert.match(text(wake), /worker reached the checkpoint/u);
+      assert.ok(processExists(pid));
+      await native.run(`text(await tools.keiyaku_history(${JSON.stringify({ selector: id, item: recorded.reportId })}));`);
+      assert.equal(text(resultFor(native.results, "keiyaku_history")), milestone);
+    } finally { t.mock.restoreAll(); }
 
     const observing = deferred<void>();
     native.session.subscribe((event) => {

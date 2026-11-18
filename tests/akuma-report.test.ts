@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
+import { DatabaseSync } from "node:sqlite";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { Akuma, Akumas, Keiyaku, KeiyakuError, type AkumaReportResult } from "../src/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
-import { activitySlice, beginTurn, breakBody, endTurn, readHeart, recordReport } from "../src/akuma/heart/index.js";
+import { activitySlice, beginTurn, breakBody, endTurn, finishBodyIfIdle, readHeart, recordReport } from "../src/akuma/heart/index.js";
 import { insertActivityFact } from "../src/akuma/heart/rows.js";
 import { withHeartTransaction } from "../src/akuma/heart/storage.js";
 import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
@@ -22,7 +23,7 @@ import { bornBody, bornDirectAkuma, allocatedHeart, claudeBodyLaunch, noBodyLaun
 import { createProviderAttempt } from "../src/akuma/provider.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
-import { temporaryDirectory } from "./support/process.js";
+import { deferred, temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
@@ -116,6 +117,63 @@ test("native report is a distinct durable history/stream row and does not comple
       assert.deepEqual(final.rows.filter(row => row.kind === "report"), [report]);
     } finally { await stream.return?.(); }
   } finally { value.holder.release(); }
+});
+
+test("a deadline crossing the completion and report witness retains the exact answer", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-report-completion-edge-");
+  const { world, holder, body, turn, allocated: { id, paths } } = await reportFixture(root, "feed0021");
+  t.after(() => holder.release());
+  const facet = Keiyaku.for({ cwd: world, environment: {}, home: join(root, "empty-home") });
+  const baseline = deferred<void>();
+  const answer = "final answer\n  preserve exact bytes\n";
+  let settled = false;
+  let probes = 0;
+  let atDeadline = false;
+  let baselineClock: number | undefined;
+  let expire: (() => void) | undefined;
+  const connections = new WeakSet<DatabaseSync>();
+  const prepare = DatabaseSync.prototype.prepare;
+  const exec = DatabaseSync.prototype.exec;
+  const realTimeout = setTimeout;
+  const realNow = performance.now.bind(performance);
+  t.mock.method(performance, "now", () => settled ? realNow() + (atDeadline ? 10_000 : 0) : baselineClock ?? realNow());
+  t.mock.method(globalThis, "setTimeout", (callback: () => void, ms?: number) => {
+    if (ms !== undefined && ms > 9_000 && ms <= 10_000) expire = callback;
+    return realTimeout(callback, ms);
+  });
+  t.mock.method(DatabaseSync.prototype, "prepare", function(this: DatabaseSync, sql: string) {
+    if (sql === "SELECT sequence FROM reports ORDER BY sequence DESC LIMIT 1") {
+      baselineClock = realNow();
+      baseline.resolve();
+    }
+    if (settled && sql.includes("FROM reports WHERE sequence > ?")) connections.add(this);
+    return prepare.call(this, sql);
+  });
+  t.mock.method(DatabaseSync.prototype, "exec", function(this: DatabaseSync, sql: string) {
+    exec.call(this, sql);
+    // The first probe precedes the free-leash claim. Expire at the end of the read under that claim.
+    if (sql === "COMMIT" && connections.delete(this) && ++probes === 2) {
+      atDeadline = true;
+      assert.ok(expire);
+      expire();
+    }
+  });
+  const pending = facet.wait({ selectors: [id], timeout: "10s" });
+  await Promise.race([baseline.promise, pending.then(() => assert.fail("wait stopped before its report baseline"))]);
+  const worker = Akuma.select(world, id);
+  assert.equal((await worker.report("last progress before completion")).kind, "recorded");
+  await endTurn(paths, { turnSequence: turn.sequence, completedAt: AT,
+    outcome: { kind: "answered", answer, session: { sessionId: "completion-witness" } } });
+  assert.equal((await finishBodyIfIdle(paths, { sequence: body.sequence, at: AT })).kind, "finished");
+  holder.release();
+  settled = true;
+  const result = await pending;
+  assert.ok(atDeadline, "the bound expired as the confirming read committed");
+  assert.equal(result.reason, "completed");
+  const member = result.members[0];
+  assert.ok(member?.kind === "akuma" && member.observation.kind === "observed");
+  assert.equal(member.observation.life, "asleep");
+  assert.deepEqual(member.observation.outcome, { kind: "answered", answer, historyId: `turn/${turn.sequence}` });
 });
 
 test("exact report history selects retained identity without observing outcomes", async (context) => {

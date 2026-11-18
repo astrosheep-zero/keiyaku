@@ -71,6 +71,7 @@ import {
   timelineDataVersion,
   lastActivityAt as readLastActivityAt,
   pruneActivityFacts,
+  waitReportFrontier,
   type ActivityFactSlice,
 } from "./timeline.js";
 import {
@@ -240,10 +241,17 @@ export function createStatusFactReader(paths: AkumaPaths) {
   const reader = createHeartReader(paths);
   return {
     life: (signal?: AbortSignal) => readLifeSnapshot(paths, signal, reader.read),
-    wait: (recent: boolean, signal?: AbortSignal): Promise<WaitFacts> =>
+    wait: (
+      recent: boolean,
+      reportAfter: number | null | undefined,
+      needsOutcome: (snapshot: LifeSnapshot) => boolean,
+      signal?: AbortSignal,
+    ): Promise<WaitFacts> =>
       reader.read((heart) => {
         const snapshot = lifeSnapshot(heart);
-        const outcome = latestTurnEndFact(heart);
+        const reportFrontier = reportAfter === undefined ? undefined : waitReportFrontier(heart, reportAfter);
+        const outcomeRead = reportFrontier?.report !== undefined || needsOutcome(snapshot);
+        const outcome = outcomeRead ? latestTurnEndFact(heart) : undefined;
         let activity: readonly TimelineFact[] | undefined;
         let activityDiagnostic: string | undefined;
         if (recent) {
@@ -253,7 +261,7 @@ export function createStatusFactReader(paths: AkumaPaths) {
             activityDiagnostic = error instanceof Error ? error.message : String(error);
           }
         }
-        return { ...snapshot, outcome, activity, activityDiagnostic };
+        return { ...snapshot, reportFrontier, outcomeRead, outcome, activity, activityDiagnostic };
       }, signal),
     tellOutcome: (id: string, signal?: AbortSignal) =>
       reader.read((heart) => {
@@ -271,8 +279,12 @@ export function createStatusFactReader(paths: AkumaPaths) {
 type LifeSnapshot = Pick<HeartSnapshot, "soul" | "latestBody" | "latestSession" | "latestKill" | "lastActivityAt"> &
   Readonly<{ hasPendingTell: boolean }>;
 
+export type WaitReportFrontier = ReturnType<typeof waitReportFrontier>;
+
 export type WaitFacts = LifeSnapshot &
   Readonly<{
+    reportFrontier: WaitReportFrontier;
+    outcomeRead: boolean;
     outcome: TurnEndFact | undefined;
     activity: readonly TimelineFact[] | undefined;
     activityDiagnostic: string | undefined;

@@ -5,7 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { Akumas, Keis, Keiyaku, Repo, World, type InvocationWaitResult } from "../src/index.js";
+import { Akuma, Akumas, Keis, Keiyaku, Repo, World, type InvocationWaitResult } from "../src/index.js";
 import { appendActivity, beginTurn, endTurn, finishBodyIfIdle } from "../src/akuma/heart/index.js";
 import { modelOutputSchemas } from "../src/library/model-tools.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -17,7 +17,7 @@ import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { withContractWaitBarrier } from "./support/contract-wait.js";
 import { withGitShim } from "./support/git.js";
 import { accepted, document, repositoryWithMain } from "./support/library-verbs.js";
-import { temporaryDirectory } from "./support/process.js";
+import { deferred, temporaryDirectory } from "./support/process.js";
 import { assertWireConformance } from "./support/schema-parity.js";
 
 const AT = "2026-11-16T00:00:00.000Z";
@@ -106,6 +106,55 @@ test("mixed all waits for both members, freezing aliases/globs and first-seen or
     assert.equal(result.members[1].observation.summary?.id, f.bound.contractId);
     assertWireConformance(Keiyaku.verbs.wait.normal, result);
   });
+});
+
+test("mixed all returns new selected progress without completing or replaying it", async t => {
+  const f = await fixture(t);
+  const worker = Akuma.select(f.world, f.worker.allocated.id);
+  const unrelated = await bornBody(f.world, "abcd0002", AT);
+  t.after(() => unrelated.holder.release());
+  await beginTurn(unrelated.allocated.paths, { bodySequence: unrelated.body.sequence, startedAt: AT });
+  await beginTurn(f.worker.allocated.paths, { bodySequence: f.worker.body.sequence, startedAt: AT });
+  assert.equal((await worker.report("old report")).kind, "recorded");
+  const input = { selectors: [f.bound.contractId, worker.id], completion: "all" as const };
+  let baseline = deferred<void>();
+  const prepare = DatabaseSync.prototype.prepare;
+  t.mock.method(DatabaseSync.prototype, "prepare", function(this: DatabaseSync, sql: string) {
+    if (sql === "SELECT sequence FROM reports ORDER BY sequence DESC LIMIT 1") baseline.resolve();
+    return prepare.call(this, sql);
+  });
+  const started = (pending: Promise<unknown>) => Promise.race([
+    baseline.promise,
+    pending.then(() => assert.fail("wait stopped before capturing the report baseline")),
+  ]);
+
+  const old = f.facet().wait({ ...input, timeout: "1200ms" });
+  await started(old);
+  const other = await Akuma.select(f.world, unrelated.allocated.id).report("not a selected member");
+  assert.equal(other.kind, "recorded");
+  assert.equal((await old).reason, "deadline");
+
+  baseline = deferred<void>();
+  await withContractWaitBarrier(f.world, async barrier => {
+    const pending = cliJson<InvocationWaitResult>(["wait", ...input.selectors, "--all", "--timeout", "10s"], {
+      cwd: f.world, environment: { ...f.environment, KEIYAKU_GIT_PATH: barrier.gitPath },
+    });
+    await started(pending);
+    await barrier.reads();
+    const recorded = await worker.report("a new milestone");
+    assert.ok(recorded.kind === "recorded");
+    const { exit, value } = await pending;
+    assert.equal(exit, 0);
+    assert.ok(value.reason === "reported");
+    assert.deepEqual(value.report, { akumaId: worker.id, reportId: recorded.reportId, text: "a new milestone" });
+    assert.deepEqual(observations(value).map(member => member.id), input.selectors);
+    assert.ok(value.members[0]?.kind === "contract" && value.members[0].observation.changed === undefined);
+    assert.ok(value.members[1]?.kind === "akuma" && value.members[1].observation.kind === "observed");
+    assert.equal(value.members[1].observation.life, "running");
+    assertWireConformance(Keiyaku.verbs.wait.normal, value);
+  });
+
+  assert.equal((await f.facet().wait({ ...input, timeout: "600ms" })).reason, "deadline");
 });
 
 test("already satisfied members count immediately and slow peers stay honestly unknown", async t => {

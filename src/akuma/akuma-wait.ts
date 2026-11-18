@@ -1,14 +1,16 @@
+import { z } from "zod";
 import type { WorldRoot } from "../world.js";
 import { AkumaNotBornError } from "./akuma-errors.js";
 import {
   createLiveStatusReader,
-  executionProgress,
+  waitComplete,
   waitForObservation,
   type WaitStatusObservation,
   type WaitReason,
   type OutcomeObserver,
 } from "./akuma-observe.js";
-import { pathsForAkumaId } from "./identity.js";
+import { akumaIdSchema, pathsForAkumaId, reportHistoryIdSchema, type AkumaId } from "./identity.js";
+import type { WaitReportFrontier } from "./heart/index.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { AkumaWaitItem, AkumaWaitOutcome } from "./selection-observation.js";
 import { projectFact, type OutcomeRow } from "./projection.js";
@@ -16,6 +18,17 @@ import { frontierRows } from "./projection-read.js";
 
 export type NativeWaitResult = Readonly<{ reason: WaitReason; results: readonly AkumaWaitItem[] }>;
 export const AKUMA_WAIT_POLL_MS = 250;
+
+const REPORT_PREVIEW_LIMIT = 300;
+export const waitReportSchema = z
+  .strictObject({
+    akumaId: akumaIdSchema,
+    reportId: reportHistoryIdSchema,
+    text: z.string().max(REPORT_PREVIEW_LIMIT),
+    clipped: z.literal(true).exactOptional(),
+  })
+  .readonly();
+type WaitReport = z.output<typeof waitReportSchema>;
 
 function waitOutcome(row: OutcomeRow): AkumaWaitOutcome {
   return { ...row.outcome, historyId: `turn/${row.turnSequence}` };
@@ -42,11 +55,28 @@ function completionItem(snapshot: WaitStatusObservation): AkumaWaitItem {
   };
 }
 
-/** One compact native observer supplies every set-wait caller. */
-export function createAkumaWaitObserver(path: WorldRoot, selected: readonly AkumaStatus["id"][]) {
+/** One compact native observer supplies every set-wait caller; only invocation tracks reports. */
+export function createAkumaWaitObserver(path: WorldRoot, selected: readonly AkumaId[], trackReports = false) {
   const ids = [...new Set(selected)];
-  const readers = new Map<AkumaStatus["id"], ReturnType<typeof createLiveStatusReader>>();
-  const items = new Map<AkumaStatus["id"], AkumaWaitItem>();
+  const readers = new Map<AkumaId, ReturnType<typeof createLiveStatusReader>>();
+  const items = new Map<AkumaId, AkumaWaitItem>();
+  const watermarks = trackReports ? new Map<AkumaId, number>() : undefined;
+  let report: WaitReport | undefined;
+  const reportAfter = (id: AkumaId) =>
+    watermarks === undefined || report !== undefined ? undefined : (watermarks.get(id) ?? null);
+  const observeReport = (id: AkumaId, frontier: WaitReportFrontier): void => {
+    if (watermarks === undefined || frontier === undefined) return;
+    if (!watermarks.has(id)) watermarks.set(id, frontier.sequence);
+    if (frontier.report === undefined) return;
+    const { sequence, text } = frontier.report;
+    report = {
+      akumaId: id,
+      reportId: `report/${sequence}`,
+      ...(text.length <= REPORT_PREVIEW_LIMIT
+        ? { text }
+        : { text: text.slice(0, REPORT_PREVIEW_LIMIT).replace(/[\uD800-\uDBFF]$/u, ""), clipped: true }),
+    };
+  };
   const readerFor = (id: AkumaStatus["id"]) => {
     let reader = readers.get(id);
     if (reader === undefined) {
@@ -55,32 +85,36 @@ export function createAkumaWaitObserver(path: WorldRoot, selected: readonly Akum
     }
     return reader;
   };
-  const satisfied = (id: AkumaStatus["id"]) => {
+  const satisfied = (id: AkumaId) => {
     const item = items.get(id);
-    return (
-      item?.kind === "missing" ||
-      (item?.kind === "observed" && executionProgress(item.life, item.pending === true) !== "advancing")
-    );
+    return item?.kind === "missing" || (item?.kind === "observed" && waitComplete(item.life, item.pending === true));
+  };
+  const observe = async (signal: AbortSignal | undefined, mode: "compact" | "recent" | "paced"): Promise<void> => {
+    for (const id of ids) {
+      signal?.throwIfAborted();
+      try {
+        const skipAdvancing = mode === "paced" && items.get(id)?.kind === "observed" && !satisfied(id);
+        const snapshot = await readerFor(id).wait(mode === "recent", reportAfter(id), skipAdvancing, signal);
+        observeReport(id, snapshot.reportFrontier);
+        // Keep an earlier coherent observation of advancing work rather than mixing it with a thin probe.
+        if (snapshot.outcomeRead) items.set(id, completionItem(snapshot));
+      } catch (error) {
+        signal?.throwIfAborted();
+        items.set(
+          id,
+          error instanceof AkumaNotBornError
+            ? { kind: "missing", id }
+            : { kind: "unobserved", id, diagnostic: diagnostic(error) },
+        );
+      }
+    }
   };
   return {
     items,
     satisfied,
-    async observe(signal?: AbortSignal, recent = false): Promise<void> {
-      for (const id of ids) {
-        signal?.throwIfAborted();
-        try {
-          items.set(id, completionItem(await readerFor(id).wait(recent, signal)));
-        } catch (error) {
-          signal?.throwIfAborted();
-          items.set(
-            id,
-            error instanceof AkumaNotBornError
-              ? { kind: "missing", id }
-              : { kind: "unobserved", id, diagnostic: diagnostic(error) },
-          );
-        }
-      }
-    },
+    reported: () => report,
+    observe: (signal?: AbortSignal, recent = false) => observe(signal, recent ? "recent" : "compact"),
+    observePaced: (signal: AbortSignal) => observe(signal, "paced"),
     unavailableRecent(message: string): void {
       for (const [id, item] of items) {
         if (item.kind === "observed" && item.life === "running" && item.events === undefined)

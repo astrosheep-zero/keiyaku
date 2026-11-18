@@ -20,7 +20,7 @@ import { type KillEvidence } from "./heart/index.js";
 import { captureAkumaHost, type AkumaHostOptions } from "../body-host.js";
 export type { AkumaHostOptions } from "../body-host.js";
 import type { BodyLauncher } from "./body-launch.js";
-import { parseAkumaId, type AkumaId } from "./identity.js";
+import { parseAkumaId, reportHistoryIdSchema, type AkumaId } from "./identity.js";
 import type { ActivityHistory } from "./projection.js";
 import { canonicalDocument, type JsonSchemaDocument } from "./schema.js";
 import { type AkumaAskResult, type AkumaTellResult } from "./selection-observation.js";
@@ -31,7 +31,7 @@ export const akumaIdleResultSchema = z
   .strictObject({ reason: z.enum(["completed", "deadline"]), status: observedAkumaWaitItemSchema })
   .readonly();
 export const akumaReportResultSchema = z.union([
-  z.strictObject({ kind: z.literal("recorded"), reportId: z.string().regex(/^report\/[1-9][0-9]*$/u) }).readonly(),
+  z.strictObject({ kind: z.literal("recorded"), reportId: reportHistoryIdSchema }).readonly(),
   z.strictObject({ kind: z.literal("refused"), reason: z.enum(["not-born", "not-executing"]) }).readonly(),
 ]);
 

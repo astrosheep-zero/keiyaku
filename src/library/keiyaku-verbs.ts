@@ -416,7 +416,7 @@ export const verbs = Object.freeze({
   },
   wait: {
     description:
-      "Wait for Contracts to change or close and Akumas to finish their current work, together or separately. Any/all applies to the whole selection. Already satisfied members count immediately. A timeout ends observation, never the work.",
+      "Wait for Contracts to change or close and Akumas to finish their current work, together or separately. A new Akuma progress report returns reported with an exact history address, without satisfying any member. Already satisfied members count immediately. A timeout ends observation, never the work.",
     input: z
       .strictObject({
         selectors: z
@@ -443,7 +443,7 @@ export const verbs = Object.freeze({
         completion: z
           .enum(["any", "all"])
           .exactOptional()
-          .describe('Wake when "any" member satisfies (default), or wait for "all" members.'),
+          .describe('Completion requires "any" member (default) or "all" members; a new report can wake either mode.'),
         timeout: duration
           .exactOptional()
           .describe(

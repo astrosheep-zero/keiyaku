@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { AKUMA_WAIT_POLL_MS, createAkumaWaitObserver } from "../akuma/akuma-wait.js";
+import { AKUMA_WAIT_POLL_MS, createAkumaWaitObserver, waitReportSchema } from "../akuma/akuma-wait.js";
 import { akumaIdSchema, type AkumaId } from "../akuma/identity.js";
 import { akumaWaitItemSchema } from "../akuma/selection-observation.js";
 import type { ContractId } from "../core/facts/types.js";
@@ -22,39 +22,39 @@ const akumaMember = z
   })
   .readonly();
 export const invocationWaitMemberSchema = z.union([contractMember, akumaMember]);
-export const invocationWaitResultSchema = z
-  .strictObject({
-    kind: z.literal("wait"),
-    reason: z.enum(["completed", "deadline", "missing", "unavailable"]),
-    members: z.array(invocationWaitMemberSchema).nonempty().readonly(),
-  })
-  .readonly();
-export const invocationWaitNormalResultSchema = invocationWaitResultSchema
-  .unwrap()
-  .extend({
-    reason: z.enum(["completed", "deadline"]),
-    members: z
-      .array(
-        z.union([
-          contractMember
+const waitResult = z.strictObject({
+  kind: z.literal("wait"),
+  members: z.array(invocationWaitMemberSchema).nonempty().readonly(),
+});
+const reported = waitResult.extend({ reason: z.literal("reported"), report: waitReportSchema });
+export const invocationWaitResultSchema = z.union([
+  waitResult.extend({ reason: z.enum(["completed", "deadline", "missing", "unavailable"]) }).readonly(),
+  reported.readonly(),
+]);
+const normalMembers = z
+  .array(
+    z.union([
+      contractMember
+        .unwrap()
+        .extend({
+          observation: contractWaitMemberSchema
             .unwrap()
-            .extend({
-              observation: contractWaitMemberSchema
-                .unwrap()
-                .extend({ presence: z.literal("unknown").exactOptional() })
-                .readonly(),
-            })
+            .extend({ presence: z.literal("unknown").exactOptional() })
             .readonly(),
-          akumaMember
-            .unwrap()
-            .extend({ observation: z.union([akumaWaitItemSchema.options[0], unknownAkuma]) })
-            .readonly(),
-        ]),
-      )
-      .nonempty()
-      .readonly(),
-  })
+        })
+        .readonly(),
+      akumaMember
+        .unwrap()
+        .extend({ observation: z.union([akumaWaitItemSchema.options[0], unknownAkuma]) })
+        .readonly(),
+    ]),
+  )
+  .nonempty()
   .readonly();
+export const invocationWaitNormalResultSchema = z.union([
+  waitResult.extend({ reason: z.enum(["completed", "deadline"]), members: normalMembers }).readonly(),
+  reported.extend({ members: normalMembers }).readonly(),
+]);
 export type InvocationWaitMember = z.output<typeof invocationWaitMemberSchema>;
 export type InvocationWaitResult = z.output<typeof invocationWaitResultSchema>;
 
@@ -127,7 +127,8 @@ function waitEvidence(
     const satisfied = subjects.map((subject) =>
       subject.kind === "contract" ? changed.has(subject.id) : akumas!.satisfied(subject.id),
     );
-    return (completion === "all" ? satisfied.every(Boolean) : satisfied.some(Boolean)) ? "completed" : undefined;
+    if (completion === "all" ? satisfied.every(Boolean) : satisfied.some(Boolean)) return "completed";
+    return akumas?.reported() === undefined ? undefined : "reported";
   };
   return {
     conclusion,
@@ -154,35 +155,24 @@ function waitEvidence(
         const { events: _events, eventsUnavailable: _unavailable, ...observation } = member.observation;
         return { kind: "akuma", observation };
       });
-      return { kind: "wait", reason: finalReason, members: finalMembers };
+      return finalReason === "reported"
+        ? { kind: "wait", reason: finalReason, members: finalMembers, report: akumas!.reported()! }
+        : { kind: "wait", reason: finalReason, members: finalMembers };
     },
   };
 }
 
-function pacedAkumaRounds(
-  observer: ReturnType<typeof createAkumaWaitObserver>,
-  completion: "any" | "all",
-  initialRecent: boolean,
-) {
-  let initial = true;
+function pacedAkumaRounds(observer: ReturnType<typeof createAkumaWaitObserver>, initialRecent: boolean) {
   let next = 0;
   return {
     remaining: () => Math.max(0, next - performance.now()),
     async observe(signal: AbortSignal): Promise<void> {
-      if (performance.now() < next) return;
-      next = performance.now() + AKUMA_WAIT_POLL_MS;
-      if (!initial) {
-        let ready: boolean;
-        try {
-          ready = await observer.probe(completion, signal);
-        } catch {
-          signal.throwIfAborted();
-          ready = true;
-        }
-        if (!ready) return;
-      }
-      initial = false;
-      await observer.observe(signal, initialRecent);
+      const now = performance.now();
+      if (now < next) return;
+      const initial = next === 0;
+      next = now + AKUMA_WAIT_POLL_MS;
+      if (initial) await observer.observe(signal, initialRecent);
+      else await observer.observePaced(signal);
     },
   };
 }
@@ -195,7 +185,8 @@ async function observeSubjects(
   const contracts = subjects.flatMap((subject) => (subject.kind === "contract" ? [subject.id] : []));
   const journals =
     contracts.length === 0 ? undefined : createContractWaitObserver(scopeForRepo(input.repo!), contracts);
-  const akumas = addressed === undefined ? undefined : createAkumaWaitObserver(addressed.path, addressed.orderedIds);
+  const akumas =
+    addressed === undefined ? undefined : createAkumaWaitObserver(addressed.path, addressed.orderedIds, true);
   const deadline = input.timeoutMs === undefined ? Infinity : performance.now() + input.timeoutMs;
   const stop = new AbortController();
   const signal = input.signal === undefined ? stop.signal : AbortSignal.any([input.signal, stop.signal]);
@@ -211,8 +202,7 @@ async function observeSubjects(
   // Like native waits, zero still takes an initial snapshot; positive bounds also cover reads.
   if (input.timeoutMs !== undefined && input.timeoutMs > 0) schedule();
   const { conclusion, answer } = waitEvidence(subjects, journals, akumas, input.completion);
-  const akumaRounds =
-    akumas === undefined ? undefined : pacedAkumaRounds(akumas, input.completion ?? "any", input.timeoutMs === 0);
+  const akumaRounds = akumas === undefined ? undefined : pacedAkumaRounds(akumas, input.timeoutMs === 0);
   const observe = async (): Promise<InvocationWaitResult> => {
     let reason: InvocationWaitResult["reason"] | undefined;
     let failure: { error: unknown } | undefined;
