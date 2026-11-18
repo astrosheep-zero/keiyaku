@@ -158,10 +158,11 @@ observed target with identical candidate content are benign conclusions, while
 retry remains distinct from failure. Verification testimony admission has its
 own judgment: refusal or cancellation is a failure to finish recording, and
 retry remains retryable regardless of the executed check's verdict.
-The addressed Contract and attempted dependents share the same
-stop meaning; dependent ownership never creates a second classification.
-Successful placement retains the destination and before and
-after movement. A Contract destination is named as a Contract, not a branch or private
+The addressed result and dependent continuation carry the native placement
+judgment without reinterpreting it. A stop belongs to the work it prevented;
+an independent failure after a confirmed claim is an issue, not another
+placement conclusion. Successful placement retains the destination and before
+and after movement. A Contract destination is named as a Contract, not a branch or private
 reference. Known movement survives later presentation failure. Unmet gates and
 prerequisites retain their ordered actionable identities and distinguish
 missing, stale, and unsatisfied testimony; already satisfied evidence need not
@@ -185,9 +186,10 @@ dependents alongside independent semantic, physical, or operational stops.
 Ordinary continuation does not repeat each child's complete movement receipt;
 that detail remains available from the addressed child. Exceptional invocation
 evidence preserves consequential movements already confirmed before failure.
-Discovery failure and cancellation retain earlier confirmed effects. Dependent
-ownership is explicit and never substitutes a dependent's identity for the
-addressed Contract.
+A discovery or traversal stop outside a dependent attempt is an invocation
+issue, not a dependent result. It preserves any earlier dependent results and
+confirmed effects. Dependent ownership is explicit and never substitutes a
+dependent's identity for the addressed Contract.
 
 A normal integration conflict refuses without admission. Explicit conflict
 materialization instead hands off the appointed worktree, captured handoff

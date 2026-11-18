@@ -5,8 +5,7 @@ import type { ContractHead, ContractId, JournalEntry } from "../core/facts/types
 import type { PrivateStateSeatCloseLag } from "../git/private-state-seat.js";
 import type { ReconcileResult } from "../git/reconcile.js";
 import type { DeliveryPreviewReport } from "../protocol/delivery-preview.js";
-import type { CandidateCompletion, CompletionEvidence } from "../protocol/completion.js";
-import { compactPlacement } from "../protocol/completion.js";
+import type { Placed, Placement } from "../protocol/completion.js";
 import { compactDelivery, type DeliveryIdentity } from "../protocol/deliver.js";
 import {
   observeExecution,
@@ -183,15 +182,17 @@ export class InvocationAccumulator implements ProtocolProgress {
   }
 
   /** Replace the current candidate's conclusions; accumulated resources are never erased. */
-  recordCandidate(contract: ContractId, evidence: CompletionEvidence): void {
+  recordCandidate(contract: ContractId, placement: Placement | undefined): void {
     const { placement: _placement, ...current } = this.candidateConclusions.get(contract) ?? {};
-    const placement = compactPlacement(evidence);
     this.candidateConclusions.set(contract, { ...current, ...(placement === undefined ? {} : { placement }) });
   }
 
-  /** The candidate's completion base, known before an optional observation can fail. */
-  recordCompletion(contract: ContractId, completion: CandidateCompletion): void {
-    this.extendConclusions(contract, { placement: { kind: "placed", ...completion } });
+  recordCompletion(contract: ContractId, movement: Omit<Placed, "kind">): Placed {
+    const retained = this.conclusions(contract)?.placement;
+    if (retained?.kind === "placed") return retained;
+    const placement: Placed = { kind: "placed", ...movement };
+    this.recordCandidate(contract, placement);
+    return placement;
   }
 
   recordDeliveryPreview(contract: ContractId, report: Partial<DeliveryPreviewReport>): void {

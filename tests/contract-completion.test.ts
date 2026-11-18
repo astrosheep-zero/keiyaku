@@ -92,12 +92,9 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
       controller.abort(new Error("cancel review after its receipt"));
       const reviewed = accepted(await pending);
       assert.equal(present(await primary.state()).attestations.length, 1);
-      assert.notEqual(reviewed.placement?.kind, "placed");
-      assert.ok(
-        reviewed.issues?.some(
-          (stop) => stop.kind === "execution-stopped" && stop.reason === "cancelled",
-        ),
-      );
+      assert.equal(reviewed.placement?.kind, "execution-stopped");
+      assert.equal(reviewed.placement.reason, "cancelled");
+      assert.ok(reviewed.placement.diagnostic);
       assert.equal(present(await primary.state()).terminal, null);
     } finally {
       held.close();
@@ -105,6 +102,51 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const reacquired = await acquireTargetPlacementFence(scope, "refs/heads/main");
     reacquired.close();
   });
+
+  for (const when of ["without dependents", "after a child's claim"] as const) {
+    test(`review reports traversal cancellation as an issue ${when}`, async () => {
+      const { repository, contract: primary, state } = await fixture();
+      const child =
+        when === "without dependents"
+          ? undefined
+          : accepted(
+              await Keis.of(await Repo.at({ path: repository.path })).bind({
+                terms: document(),
+                target: null,
+                gates: [],
+                after: [state.id],
+              }),
+            );
+      if (child !== undefined) accepted(await child.kei.deliver());
+      const delivered = accepted(await primary.deliver());
+      const controller = new AbortController();
+      const reason = new Error("cancel continuation traversal");
+      const reviewed = accepted(
+        await primary.review(
+          { verdict: "satisfied", summary: "Release the prerequisite", signal: controller.signal },
+          {
+            observe: (event) => {
+              if (event.kind !== "stage") return;
+              const atBoundary =
+                child === undefined
+                  ? event.stage === "continuation" && event.state === "started"
+                  : event.stage === "placement" && event.state === "finished" && event.contractId === child.contractId;
+              if (atBoundary) controller.abort(reason);
+            },
+          },
+        ),
+      );
+      assert.deepEqual(reviewed.placement, { kind: "placed", integration: delivered.integration });
+      assert.deepEqual(reviewed.continuation, child === undefined ? undefined : { claimed: [child.contractId] });
+      // A claimed child may also have its own, independently cancelled reconciliation.
+      assert.deepEqual(
+        reviewed.issues?.filter(({ kind, contractId }) => kind === "execution-stopped" && contractId === undefined),
+        [{ kind: "execution-stopped", severity: "required", reason: "cancelled", diagnostic: reason.message }],
+      );
+      assert.equal(present(await primary.state()).terminal?.kind, "claimed");
+      if (child !== undefined) assert.equal(present(await child.kei.state()).terminal?.kind, "claimed");
+    });
+  }
 
   test("dependent continuation skips ungated Verification", async () => {
     const { repository, contract: primary, state: prerequisite } = await fixture();
@@ -130,6 +172,28 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const final = present(await bound.kei.state());
     assert.deepEqual(final.attestations, []);
     assert.equal(final.terminal?.kind, "claimed");
+  });
+
+  test("dependent physical lag stops completion before any claim attempt", async () => {
+    const { repository, contract: primary, state } = await fixture();
+    const dependent = accepted(
+      await Keis.of(await Repo.at({ path: repository.path })).bind({
+        terms: document(),
+        gates: [],
+        target: null,
+        after: [state.id],
+      }),
+    );
+    const child = present(await dependent.kei.state());
+    assert.equal(accepted(await dependent.kei.deliver()).placement?.kind, "prerequisites-unsatisfied");
+    const localEdit = join(dependent.worktreePath!, "local-edit");
+    writeFileSync(localEdit, "keep this edit\n");
+    await primary.deliver();
+    const reviewed = accepted(await primary.review({ verdict: "satisfied", summary: "Release the prerequisite" }));
+    assert.equal(reviewed.placement?.kind, "placed");
+    assert.deepEqual(reviewed.continuation, { stopped: [{ contractId: child.id, stop: { kind: "physical-lag" } }] });
+    assert.equal(present(await dependent.kei.state()).terminal, null);
+    assert.equal(readFileSync(localEdit, "utf8"), "keep this edit\n");
   });
 
   test("delivery, review, target refresh and redelivery consume evidence without executing Verification", async () => {
@@ -428,6 +492,10 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     assert.equal(result.contractId, state.id);
     assert.equal(present(await contract.state()).attestations.length, 1);
     assert.equal(present(await contract.state()).terminal, null);
-    assert.ok(result.issues?.some((stop) => stop.kind === "execution-stopped" && stop.reason === "cancelled"));
+    assert.deepEqual(result.placement, {
+      kind: "execution-stopped",
+      reason: "cancelled",
+      diagnostic: "cancel after physical publication",
+    });
   });
 });

@@ -38,7 +38,7 @@ const contractOwner = {
     ...protocolOperations,
     any("protocol/operations.ts"),
     any("protocol/result-reasons.ts"),
-    runtime("protocol/completion.ts", ["completionEvidenceShape", "placementSchema"]),
+    runtime("protocol/completion.ts", ["placementSchema"]),
     runtime("protocol/result-leaves.ts", [
       "gateSchema",
       "journalEntrySchema",
@@ -175,13 +175,7 @@ const outcomeOwner = {
     types("protocol/outcome.ts"),
     types("protocol/verify.ts", ["VerifyValue"]),
     runtime("protocol/verify.ts", ["verificationAdmissionOutcome"]),
-    any("protocol/completion.ts", [
-      "CompletionEvidence",
-      "compactPlacement",
-      "placedSchema",
-      "placementSchema",
-      "placementOutcome",
-    ]),
+    any("protocol/completion.ts", ["placedSchema", "placementSchema", "placementOutcome"]),
     runtime("protocol/deliver.ts", ["materializedConflictSchema"]),
     types("protocol/operations.ts"),
     runtime("protocol/operations.ts", ["contractIdSchema"]),
@@ -475,9 +469,8 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         ...outcomeOwner.allow,
         types("library/outcome.ts"),
         runtime("library/outcome.ts", ["compactEffect", "reconcileLagScope", "reconcileLagIsFailure"]),
-        runtime("protocol/completion.ts", ["compactPlacement"]),
         any("protocol/deliver.ts", ["compactDelivery", "DeliveryIdentity"]),
-        types("protocol/completion.ts", ["CandidateCompletion", "CompletionEvidence"]),
+        types("protocol/completion.ts", ["Placement", "Placed"]),
       ],
     },
     {
@@ -551,17 +544,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "library/delivery.ts",
-      allow: [
-        ...libraryOwner.allow,
-        any("protocol/completion.ts", [
-          "CompletionEvidence",
-          "compactPlacement",
-          "placementSchema",
-          "placedSchema",
-          "placementStopSchema",
-          "completionEvidenceShape",
-        ]),
-      ],
+      allow: [...libraryOwner.allow, runtime("protocol/completion.ts", ["placedSchema", "placementStopSchema"])],
       deny: libraryOwner.deny,
     },
     {

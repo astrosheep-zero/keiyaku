@@ -221,8 +221,8 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["protocol/operations.ts", ["git/target-placement.ts", "prepareTargetPlacement"], false],
   ["library/outcome.ts", ["settlement/settle.ts", "settlementLagSchema"], true],
   ["library/outcome.ts", ["settlement/settle.ts", "settleContract"], false],
-  ["library/outcome.ts", ["protocol/completion.ts", "CompletionEvidence", true], true],
-  ["library/outcome.ts", ["protocol/completion.ts", "compactPlacement"], true],
+  ["library/outcome.ts", ["protocol/completion.ts", "placementOutcome"], true],
+  ["library/invocation.ts", ["protocol/completion.ts", "Placement", true], true],
   ["library/outcome.ts", ["protocol/completion.ts", "completeCandidate"], false],
   ["library/outcome.ts", ["protocol/verify.ts", "VerifyValue", true], true],
   ["library/outcome.ts", ["protocol/verify.ts", "verifyOperation"], false],
@@ -258,9 +258,9 @@ const directionCases: readonly (readonly [owner: string, edge: Edge, allowed: bo
   ["library/contract-types.ts", ["git/workspace.ts", "worktreeWorkspaceSchema"], true],
   ["index.ts", ["library/contract-types.ts", "contractHistorySchema"], false],
   ["library/contract-outcomes.ts", ["protocol/delivery-preview.ts", "deliveryPreviewReportSchema"], true],
-  ["library/contract-outcomes.ts", ["protocol/completion.ts", "completionEvidenceShape"], true],
+  ["library/contract-outcomes.ts", ["protocol/completion.ts", "placementSchema"], true],
   ["library/outcome.ts", ["protocol/deliver.ts", "materializedConflictSchema"], true],
-  ["library/delivery.ts", ["protocol/completion.ts", "completionEvidenceShape"], true],
+  ["library/delivery.ts", ["protocol/completion.ts", "placementStopSchema"], true],
   ["index.ts", ["library/delivery.ts", "deliverySchema"], false],
   ["library/contract-outcomes.ts", ["git/workspace.ts", "worktreeWorkspaceSchema"], true],
   ["index.ts", ["library/contract-outcomes.ts", "arcOutcomeSchema"], false],
@@ -312,7 +312,7 @@ for (const owner of [
 
 for (const verb of ["review", "deliver"]) {
   test(`${verb} admits completion types, never completion effects`, () => {
-    assert.deepEqual(graph(`protocol/${verb}.ts`, [["protocol/completion.ts", "CompletionEvidence", true]]), []);
+    assert.deepEqual(graph(`protocol/${verb}.ts`, [["protocol/completion.ts", "Placement", true]]), []);
     for (const node of ["completion", "placement", "reintegrate"]) {
       assert.deepEqual(rules(graph(`protocol/${verb}.ts`, [[`protocol/${node}.ts`, "advance"]])), [
         "architecture/dependency-direction",

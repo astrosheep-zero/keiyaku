@@ -14,13 +14,11 @@ export {
   gateReportSchema,
 } from "./result-leaves.js";
 import { contractIdSchema, snapshotIdSchema } from "../git/identity.js";
-import type { IntegrationPreparationRefusal } from "../git/integration.js";
 import { integrationPreparationRefusalSchema } from "../git/integration.js";
 import { observeContractAt } from "../git/observe.js";
 import type { GitRepository } from "../git/process.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { currentBranch, repositoryAt } from "../git/repository.js";
-import { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
 export { checkoutNotFollowableRefusalSchema } from "../git/target-placement.js";
 import { targetWorkspaceRefusalSchema } from "../git/target.js";
 import { dirtyWorkspaceRefusalSchema, worktreeMissingRefusalSchema } from "../git/tender.js";
@@ -29,7 +27,6 @@ import type { AcceptedAdmission, DecidedOfferResult } from "./attempt.js";
 import { forkSourceMovedRefusalSchema, targetInputRefusalSchema } from "./bind.js";
 import { admitIntent, type IntentAdmissionOptions } from "./intent.js";
 import { complete, type IntentOutcome as ProtocolIntentOutcome } from "./outcome.js";
-import type { PlacementProtocolResult } from "./placement.js";
 import type { ProtocolProgress } from "./progress.js";
 import { readDocuments, type ContractDocumentProjection } from "./read/documents.js";
 import {
@@ -42,7 +39,6 @@ import {
 } from "./read/status.js";
 import type { ProtocolTerminal } from "./run.js";
 import { targetLifecycleReasonSchema } from "./result-reasons.js";
-import { protocolTerminalSchema } from "./run.js";
 
 export { changeIdSchema, contractIdSchema, snapshotIdSchema } from "../git/identity.js";
 export { entryUlidSchema } from "./attempt.js";
@@ -196,48 +192,6 @@ export type DocumentDerivation = Readonly<{
   verification: VerificationDeclarationPreparation;
 }>;
 
-export const placementStopSchema = z.union([
-  z
-    .object({
-      refusal: z.union([
-        placementRefusalSchema,
-        checkoutNotFollowableRefusalSchema,
-        integrationPreparationRefusalSchema,
-        targetMissingRefusalSchema,
-      ]),
-    })
-    .strict()
-    .readonly(),
-  z.object({ retry: protocolTerminalSchema }).strict().readonly(),
-  z
-    .object({
-      failure: z.literal("target-placement-failed"),
-      diagnostic: z.string().refine((value) => value.trim() !== ""),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      failure: z.literal("target-moved"),
-      target: z.string().refine((value) => value.trim() !== ""),
-      integratedAt: snapshotIdSchema,
-      observed: snapshotIdSchema.nullable(),
-      observedTreeEqualsCandidate: z.boolean(),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      failure: z.literal("target-moved"),
-      target: z.string().refine((value) => value.trim() !== ""),
-      expected: snapshotIdSchema,
-      observed: snapshotIdSchema.nullable(),
-      observedTreeEqualsCandidate: z.boolean(),
-    })
-    .strict()
-    .readonly(),
-]);
-export type PlacementStop = z.infer<typeof placementStopSchema>;
 export type AttemptDecision<Value, Refusal = IntentRefusal> =
   | (AcceptedAdmission & Readonly<{ value: Value }>)
   | Readonly<{ kind: "refused"; refusal: Refusal }>
@@ -248,18 +202,6 @@ export type AttemptDecision<Value, Refusal = IntentRefusal> =
 
 export function timestamp(): string {
   return new Date().toISOString();
-}
-
-export function placementStop(
-  result: PlacementProtocolResult<IntegrationPreparationRefusal>,
-): PlacementStop | undefined {
-  if (result.kind === "accepted") return undefined;
-  if (result.kind === "placement-failed") return { failure: "target-placement-failed", diagnostic: result.diagnostic };
-  if (result.kind === "target-moved") {
-    const { target, expected, observed, observedTreeEqualsCandidate } = result;
-    return { failure: "target-moved", target, expected, observed, observedTreeEqualsCandidate };
-  }
-  return result.kind === "refused" ? { refusal: result.refusal } : { retry: result };
 }
 
 export type RepositoryScope = GitRepository;

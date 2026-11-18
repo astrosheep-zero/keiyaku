@@ -49,9 +49,10 @@ Contract without inventing a leading act. Only newly admitted facts belong to
 that completion's execution progress; historical facts remain in its observed
 journal. Combining progress with a leading receipt preserves the addressed
 Contract's identity and does not turn a dependent's head into the leading head.
-Execution progress is transient and never a second recovery authority.
-Confirmed publication is recorded before trailing interpretation or effects can
-fail. Receipt identity is the admitted fact identity: exact repeat observations
+Execution progress is transient and never a second recovery authority. It retains
+one native placement judgment per attempted Contract, not a parallel completion
+record. Confirmed publication is recorded before trailing interpretation or
+effects can fail. Receipt identity is the admitted fact identity: exact repeat observations
 do not duplicate the invocation's facts, while conflicting bytes for that
 identity remain corruption. The addressed Contract's receipt head is not a
 later observation and cannot be replaced by another Contract's completion.

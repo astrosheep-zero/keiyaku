@@ -1,24 +1,27 @@
 import { z } from "zod";
-import { targetName, type ContractId } from "../core/facts/types.js";
+import { targetName, type ContractState } from "../core/facts/types.js";
 import { snapshotIdSchema, contractIdSchema } from "../git/identity.js";
 import { deliveryDiffScopeSchema } from "../git/integration.js";
 import { requirementIdSchema, gateSchema, snapshotChangeSchema } from "./result-leaves.js";
 import type { GateReport } from "../core/facts/gate.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import { admitPlacement, observeTargetPlacement, observeIntegrationTargetMovement } from "./placement.js";
+import {
+  admitPlacement,
+  observeTargetPlacement,
+  observeIntegrationTargetMovement,
+  type PlacementProtocolResult,
+} from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
 import {
   contractCheckpoint,
-  executionStop,
+  executionIssue,
   isOperationalFailure,
   isOperationalStop,
   type ContractCheckpoint,
   type ProtocolProgress,
-  type ExecutionStop,
 } from "./progress.js";
-import type { PlacementStop } from "./operations.js";
-import { placementStop, timestamp } from "./operations.js";
+import { timestamp } from "./operations.js";
 import {
   activeReasonSchema,
   targetLifecycleReasonSchema,
@@ -207,35 +210,32 @@ export function compactScope(scope: z.output<typeof deliveryDiffScopeSchema>): z
   };
 }
 
-export function compactPlacementStop(stop: PlacementStop): CompactPlacementStop {
-  if ("refusal" in stop) {
-    const reason = stop.refusal;
-    if (reason.kind === "gates-unsatisfied") return { kind: reason.kind, unmet: unmetGateProblems(reason.unmet) };
-    if (reason.kind === "prerequisites-unsatisfied") return { kind: reason.kind, unmet: reason.unmet };
-    if (reason.kind === "checkout-not-followable") return reason;
-    return compactReason(reason);
+type PlacementAttempt = PlacementProtocolResult | ReintegrationResult;
+
+function placementConclusion(result: Exclude<PlacementAttempt, { kind: "accepted" }>): CompactPlacementStop {
+  switch (result.kind) {
+    case "refused": {
+      const reason = result.refusal;
+      return reason.kind === "gates-unsatisfied"
+        ? { kind: reason.kind, unmet: unmetGateProblems(reason.unmet) }
+        : compactReason(reason);
+    }
+    case "placement-failed":
+      return { kind: "failed", diagnostic: result.diagnostic };
+    case "target-moved": {
+      const { target, expected, observed, observedTreeEqualsCandidate } = result;
+      if (!observedTreeEqualsCandidate || observed === null)
+        throw new Error("unexhausted returned target movement requires identical content");
+      return { kind: "target-content-identical", target, expected, observed };
+    }
+    case "retry":
+      return compactRetry(result.reason);
+    default:
+      return compactRetry(result);
   }
-  if ("retry" in stop) return compactRetry(stop.retry);
-  if (stop.failure === "target-placement-failed") return { kind: "failed", diagnostic: stop.diagnostic };
-  if ("integratedAt" in stop)
-    return { kind: "target-moved", target: stop.target, integration: stop.integratedAt, observed: stop.observed };
-  if (!stop.observedTreeEqualsCandidate || stop.observed === null)
-    throw new Error("unexhausted returned target movement requires identical content");
-  return { kind: "target-content-identical", target: stop.target, expected: stop.expected, observed: stop.observed };
 }
 
-export function compactPlacement(evidence: CompletionEvidence): Placement | undefined {
-  if (evidence.completion !== undefined) return { kind: "placed", ...evidence.completion };
-  return evidence.placement === undefined ? undefined : compactPlacementStop(evidence.placement);
-}
-
-export const candidateCompletionSchema = placedSchema.unwrap().omit({ kind: true }).readonly();
-export type CandidateCompletion = z.output<typeof candidateCompletionSchema>;
-export type CompletionEvidence = Readonly<{
-  completion?: CandidateCompletion;
-  placement?: PlacementStop;
-}>;
-export type CompletionInput = Readonly<{
+type CompletionInput = Readonly<{
   channel: GitDecodeChannel;
   repository: GitRepository;
   checkpoint: ContractCheckpoint;
@@ -243,207 +243,117 @@ export type CompletionInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-export type CompletionResult =
-  | Readonly<{
-      kind: "completed";
-      checkpoint: ContractCheckpoint;
-      evidence: CompletionEvidence & { completion: CandidateCompletion };
-    }>
-  | Readonly<{
-      kind: "stopped";
-      checkpoint: ContractCheckpoint;
-      evidence: CompletionEvidence;
-      stop: PlacementStop | ExecutionStop;
-    }>;
+type CompletionResult = Readonly<{ checkpoint: ContractCheckpoint; placement: Placement }>;
 
-// A cursor controls this node only; it is neither a receipt nor a persisted lifecycle.
-type CompletionCursor = {
-  checkpoint: ContractCheckpoint;
-  evidence: CompletionEvidence;
-  completion?: CandidateCompletion;
-};
-
-function reintegrationStop(result: Exclude<ReintegrationResult, { kind: "accepted" }>): PlacementStop {
-  if (result.kind === "placement-failed") return { failure: "target-placement-failed", diagnostic: result.diagnostic };
-  if (result.kind === "refused") return { refusal: result.refusal };
-  return { retry: result.reason };
-}
-
-async function observeCandidateTarget(
-  input: CompletionInput,
-  cursor: CompletionCursor,
-): Promise<PlacementStop | undefined> {
-  const target = cursor.checkpoint.state.coordinates.target;
-  if (target === undefined) return undefined;
-  const integration = cursor.checkpoint.state.currentIntegration;
-  if (integration === null) return undefined;
+async function observeCandidateTarget(input: CompletionInput, state: ContractState) {
+  const { target } = state.coordinates;
+  const integration = state.currentIntegration;
+  if (target === undefined || integration === null) return undefined;
   try {
     const observed = await observeTargetPlacement(input.repository, {
-      contractId: cursor.checkpoint.state.id,
-      coordinates: { ...cursor.checkpoint.state.coordinates, target },
+      contractId: state.id,
+      coordinates: { ...state.coordinates, target },
       predecessor: integration.predecessor,
       candidate: integration.snapshot,
     });
-    return observed.kind === "refused" ? { refusal: observed.refusal } : undefined;
+    return observed.kind === "refused" ? placementConclusion(observed) : undefined;
   } catch (error) {
     if (!isOperationalFailure(error)) throw error;
-    return { failure: "target-placement-failed", diagnostic: error.message };
+    return placementConclusion({ kind: "placement-failed", diagnostic: error.message });
   }
 }
 
-async function completedResult(
-  input: CompletionInput,
-  cursor: CompletionCursor,
-): Promise<Extract<CompletionResult, { kind: "completed" }>> {
-  const state = cursor.checkpoint.state;
-  const integration = state.currentIntegration?.snapshot;
-  if (integration === undefined) throw new Error("accepted placement requires its integration snapshot");
-  const target = state.coordinates.target;
-  const predecessor = state.currentIntegration?.predecessor;
-  const completion: CandidateCompletion = {
-    integration,
-    ...(predecessor === undefined || target === undefined ? {} : { predecessor, target: targetName(target) }),
-  };
-  cursor.completion = completion;
-  input.progress.recordCompletion(state.id, completion);
-  cursor.evidence = {};
-  input.progress.recordCandidate(state.id, { ...cursor.evidence, completion });
-  return {
-    kind: "completed",
-    checkpoint: cursor.checkpoint,
-    evidence: { ...cursor.evidence, completion },
-  };
-}
-
-function stoppedResult(
-  cursor: CompletionCursor,
-  stop: PlacementStop | ExecutionStop,
-): Extract<CompletionResult, { kind: "stopped" }> {
-  const evidence = "kind" in stop ? cursor.evidence : { ...cursor.evidence, placement: stop };
-  return { kind: "stopped", checkpoint: cursor.checkpoint, evidence, stop };
-}
-
-async function placeCurrentCandidate(input: CompletionInput, cursor: CompletionCursor) {
-  input.signal?.throwIfAborted();
-  input.progress.observe({
-    kind: "stage",
-    contractId: cursor.checkpoint.state.id,
-    stage: "placement",
-    state: "started",
+function confirmPlacement(progress: ProtocolProgress, state: ContractState): Placed {
+  const {
+    currentIntegration,
+    coordinates: { target },
+  } = state;
+  if (currentIntegration === null) throw new Error("accepted placement requires its integration snapshot");
+  return progress.recordCompletion(state.id, {
+    integration: currentIntegration.snapshot,
+    ...(target === undefined ? {} : { target: targetName(target), predecessor: currentIntegration.predecessor }),
   });
-  const result = await (async () => {
-    try {
-      return await admitPlacement({
-        channel: input.channel,
-        repository: input.repository,
-        progress: input.progress,
-        target: cursor.checkpoint.state.coordinates.target,
-        placement: {
-          contractId: cursor.checkpoint.state.id,
-          at: timestamp(),
-        },
-      });
-    } finally {
-      input.progress.observe({
-        kind: "stage",
-        contractId: cursor.checkpoint.state.id,
-        stage: "placement",
-        state: "finished",
-      });
-    }
-  })();
-  if (result.kind === "accepted") {
-    cursor.checkpoint = contractCheckpoint(result);
-    input.progress.recordResidue(result.state.id, result);
-    const acceptedIntegration = result.state.currentIntegration?.snapshot;
-    if (acceptedIntegration !== undefined) {
-      const acceptedPredecessor = result.state.currentIntegration?.predecessor;
-      input.progress.recordCompletion(result.state.id, {
-        integration: acceptedIntegration,
-        ...(acceptedPredecessor === undefined ? {} : { predecessor: acceptedPredecessor }),
-      });
-    }
-  }
-  return result;
 }
 
-async function advanceCandidate(input: CompletionInput, cursor: CompletionCursor): Promise<CompletionResult> {
-  const target = cursor.checkpoint.state.coordinates.target;
-  for (let cycles = 0; ; cycles += 1) {
-    input.signal?.throwIfAborted();
-    cursor.evidence = {};
-    input.progress.recordCandidate(cursor.checkpoint.state.id, cursor.evidence);
-    let placement: Awaited<ReturnType<typeof placeCurrentCandidate>> | undefined =
-      await observeIntegrationTargetMovement(input.repository, cursor.checkpoint.state);
-    if (placement === undefined) {
-      const targetStop = await observeCandidateTarget(input, cursor);
-      if (targetStop !== undefined) return stoppedResult(cursor, targetStop);
-      placement = await placeCurrentCandidate(input, cursor);
-      cursor.evidence = {};
-      input.progress.recordCandidate(cursor.checkpoint.state.id, cursor.evidence);
-    }
-    if (placement.kind === "accepted") return await completedResult(input, cursor);
-    if (placement.kind !== "target-moved" || target === undefined || placement.observedTreeEqualsCandidate) {
-      const stop = placementStop(placement);
-      if (stop === undefined) throw new Error("non-accepted placement requires a stop");
-      return stoppedResult(cursor, stop);
-    }
-    if (cycles === MAX_REINTEGRATION_CYCLES) {
-      return stoppedResult(cursor, {
-        failure: "target-moved",
-        target: targetName(target),
-        integratedAt: cursor.checkpoint.state.currentIntegration!.snapshot,
-        observed: placement.observed,
-        observedTreeEqualsCandidate: placement.observedTreeEqualsCandidate,
-      });
-    }
-    input.signal?.throwIfAborted();
-    const reintegrated = await reintegrateOperation({
+async function placeCurrentCandidate(input: CompletionInput, state: ContractState) {
+  input.signal?.throwIfAborted();
+  input.progress.observe({ kind: "stage", contractId: state.id, stage: "placement", state: "started" });
+  try {
+    return await admitPlacement({
       channel: input.channel,
       repository: input.repository,
       progress: input.progress,
-      contractId: cursor.checkpoint.state.id,
-      target,
+      target: state.coordinates.target,
+      placement: { contractId: state.id, at: timestamp() },
     });
-    if (reintegrated.kind !== "accepted") return stoppedResult(cursor, reintegrationStop(reintegrated));
-    cursor.checkpoint = contractCheckpoint(reintegrated);
-    input.progress.recordResidue(reintegrated.state.id, reintegrated);
+  } finally {
+    input.progress.observe({ kind: "stage", contractId: state.id, stage: "placement", state: "finished" });
   }
 }
 
 /** Advance one contract. The trigger owns the leading act; this node owns no other contract. */
 export async function completeCandidate(input: CompletionInput): Promise<CompletionResult> {
-  const cursor: CompletionCursor = {
-    checkpoint: input.checkpoint,
-    evidence: {},
+  let checkpoint = input.checkpoint;
+  const {
+    id,
+    coordinates: { target },
+  } = checkpoint.state;
+  const { progress } = input;
+  const stopped = (placement: CompactPlacementStop): CompletionResult => {
+    progress.recordCandidate(id, placement);
+    return { checkpoint, placement };
   };
   try {
-    return await advanceCandidate(input, cursor);
+    input.signal?.throwIfAborted();
+    progress.recordCandidate(id, undefined);
+    for (let cycles = 0; ; cycles += 1) {
+      input.signal?.throwIfAborted();
+      let attempt: PlacementProtocolResult | undefined = await observeIntegrationTargetMovement(
+        input.repository,
+        checkpoint.state,
+      );
+      if (attempt === undefined) {
+        const stop = await observeCandidateTarget(input, checkpoint.state);
+        if (stop !== undefined) return stopped(stop);
+        attempt = await placeCurrentCandidate(input, checkpoint.state);
+      }
+      if (attempt.kind === "accepted") {
+        checkpoint = contractCheckpoint(attempt);
+        const placement = confirmPlacement(progress, checkpoint.state);
+        progress.recordResidue(id, attempt);
+        return { checkpoint, placement };
+      }
+      if (attempt.kind !== "target-moved" || target === undefined || attempt.observedTreeEqualsCandidate)
+        return stopped(placementConclusion(attempt));
+      if (cycles === MAX_REINTEGRATION_CYCLES)
+        return stopped({
+          kind: "target-moved",
+          target: targetName(target),
+          integration: checkpoint.state.currentIntegration!.snapshot,
+          observed: attempt.observed,
+        });
+      input.signal?.throwIfAborted();
+      const reintegrated = await reintegrateOperation({
+        channel: input.channel,
+        repository: input.repository,
+        progress,
+        contractId: id,
+        target,
+      });
+      if (reintegrated.kind !== "accepted") return stopped(placementConclusion(reintegrated));
+      checkpoint = contractCheckpoint(reintegrated);
+      progress.recordResidue(id, reintegrated);
+    }
   } catch (error) {
     if (!isOperationalStop(error, input.signal)) throw error;
-    const contractId: ContractId = input.checkpoint.state.id;
-    const stop = executionStop(contractId, error, input.signal);
-    input.progress.recordStop(stop);
-    const admitted = input.progress.checkpoint(contractId);
-    if (admitted !== undefined) cursor.checkpoint = admitted;
-    // Only this invocation's confirmed claim can complete the node after a trailing failure.
-    if (admitted?.state.terminal?.kind === "claimed" && input.progress.hasFact(admitted.state.terminal)) {
-      if (cursor.completion === undefined) {
-        const integration = admitted.state.currentIntegration;
-        if (integration === null) throw error;
-        const target = admitted.state.coordinates.target;
-        cursor.completion = {
-          integration: integration.snapshot,
-          ...(target === undefined ? {} : { target: targetName(target), predecessor: integration.predecessor }),
-        };
-        input.progress.recordCompletion(contractId, cursor.completion);
-      }
-      return {
-        kind: "completed",
-        checkpoint: cursor.checkpoint,
-        evidence: { ...cursor.evidence, completion: cursor.completion },
-      };
+    const stop = executionIssue(error, input.signal);
+    checkpoint = progress.checkpoint(id) ?? checkpoint;
+    // An observed historical claim is not movement by this invocation.
+    const claim = checkpoint.state.terminal;
+    if (claim?.kind === "claimed" && progress.hasFact(claim)) {
+      progress.recordStop({ contractId: id, ...stop });
+      return { checkpoint, placement: confirmPlacement(progress, checkpoint.state) };
     }
-    return stoppedResult(cursor, stop);
+    return stopped(stop);
   }
 }

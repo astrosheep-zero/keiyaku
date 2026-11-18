@@ -959,14 +959,14 @@ async function advanceAndContinue(
     progress: accumulator,
     ...(signal === undefined ? {} : { signal }),
   });
-  accumulator.recordCandidate(contractId, result.evidence);
-  if (result.kind !== "completed") return;
+  if (result.placement.kind !== "placed") return;
   accumulator.observe({ kind: "stage", contractId, stage: "continuation", state: "started" });
   await continueDeliveredDependents({
     scope,
     channel,
     progress: accumulator,
-    completed: result,
+    primary: result.checkpoint.state.id,
+    placed: result.placement,
     ...(signal === undefined ? {} : { signal }),
   });
   accumulator.observe({ kind: "stage", contractId, stage: "continuation", state: "finished" });
