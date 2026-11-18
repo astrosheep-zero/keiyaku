@@ -62,9 +62,15 @@ export function deliveryTargetObserver(
   };
 }
 
-type GitJournalRecord =
-  | Readonly<{ entries: readonly []; state: null }>
-  | Readonly<{ path: string; oid: GitOid; bytes: Buffer; entries: readonly JournalEntry[]; state: ContractState }>;
+type PresentJournalRecord = Readonly<{
+  path: string;
+  oid: GitOid;
+  bytes: Buffer;
+  entries: readonly JournalEntry[];
+  state: ContractState;
+}>;
+
+type GitJournalRecord = Readonly<{ entries: readonly []; state: null }> | PresentJournalRecord;
 
 type ContractJournals = ReadonlyMap<ContractId, GitJournalRecord>;
 
@@ -196,6 +202,8 @@ export async function observeBindCoordinates(
 
 const CONTRACT_JOURNAL_PATH = /^contracts\/(active|terminal)\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/u;
 type JournalSelection = ContractJournalClass | readonly ContractId[];
+type PresentJournalBlob = Readonly<{ kind: "present"; bytes: Buffer }>;
+type DecodedJournal = Readonly<{ id: ContractId; entries: readonly JournalEntry[] }>;
 
 function journalSources(paths: GitSnapshot["paths"], journalClass?: ContractJournalClass) {
   return [...paths].filter(([path]) => {
@@ -207,6 +215,29 @@ function journalSources(paths: GitSnapshot["paths"], journalClass?: ContractJour
 function journalOid(path: string, entry: TreeEntry): GitOid {
   if (entry.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
   return entry.oid;
+}
+
+function decodeJournalEntries(path: string, blob: PresentJournalBlob): DecodedJournal {
+  if (!isUtf8(blob.bytes)) throw new AuthorityCorruptionError(`journal is not UTF-8: ${path}`);
+  const entries = decodeJournal(blob.bytes.toString("utf8"));
+  const id = entries[0]?.contract;
+  if (id === undefined || !contractJournalPaths(id).includes(path)) {
+    throw new AuthorityCorruptionError(`journal path does not match canonical contract identity: ${path}`);
+  }
+  return { id, entries };
+}
+
+function foldJournalRecord(
+  path: string,
+  oid: GitOid,
+  blob: PresentJournalBlob,
+  decoded: DecodedJournal,
+): PresentJournalRecord {
+  const state = foldJournal(decoded.id, decoded.entries, mintContractHead(oid));
+  if (path !== contractJournalPath(decoded.id, state.terminal === null ? "active" : "terminal")) {
+    throw new AuthorityCorruptionError(`journal path class does not match folded state: ${path}`);
+  }
+  return { path, oid, bytes: blob.bytes, entries: decoded.entries, state };
 }
 
 export function countActiveContractJournals(observation: GitReadObservation): number {
@@ -248,21 +279,46 @@ async function collectJournals(
     const blob = blobs.get(oid);
     if (blob === undefined) throw new Error(`missing batched journal result: ${path}`);
     if (blob.kind === "missing") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
-    if (!isUtf8(blob.bytes)) throw new AuthorityCorruptionError(`journal is not UTF-8: ${path}`);
-    const entries = decodeJournal(blob.bytes.toString("utf8"));
-    const id = entries[0]?.contract;
-    if (id === undefined || !contractJournalPaths(id).includes(path)) {
-      throw new AuthorityCorruptionError(`journal path does not match canonical contract identity: ${path}`);
+    const decoded = decodeJournalEntries(path, blob);
+    if (journals.has(decoded.id)) {
+      throw new AuthorityCorruptionError(`duplicate contract journal identity: ${decoded.id}`);
     }
-    if (journals.has(id)) throw new AuthorityCorruptionError(`duplicate contract journal identity: ${id}`);
-    const state = foldJournal(id, entries, mintContractHead(oid));
-    if (path !== contractJournalPath(id, state.terminal === null ? "active" : "terminal")) {
-      throw new AuthorityCorruptionError(`journal path class does not match folded state: ${path}`);
-    }
-    journals.set(id, { path, oid, bytes: blob.bytes, entries, state });
+    journals.set(decoded.id, foldJournalRecord(path, oid, blob, decoded));
   }
   for (const id of requested ?? []) if (!journals.has(id)) journals.set(id, { entries: [], state: null });
   return journals;
+}
+
+/** Readable-only catalogue collection over one frozen batch read; only local journal corruption leaves no row. */
+export async function observeReadableContractJournals(
+  read: GitReadObservation,
+  selection?: ContractJournalClass,
+): Promise<Readonly<{ journals: ContractJournals; skipped: number }>> {
+  const skippedPaths = new Set<string>();
+  const selected: Array<readonly [string, GitOid]> = [];
+  for (const [path, entry] of journalSources(read.snapshot.paths, selection)) {
+    if (entry.type !== "blob") skippedPaths.add(path);
+    else selected.push([path, entry.oid]);
+  }
+  const blobs = await read.readBlobs(selected.map(([, oid]) => oid));
+  const journals = new Map<ContractId, GitJournalRecord>();
+  for (const [path, oid] of selected) {
+    const blob = blobs.get(oid);
+    if (blob === undefined) throw new Error(`missing batched journal result: ${path}`);
+    try {
+      if (blob.kind === "missing") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
+      const decoded = decodeJournalEntries(path, blob);
+      if (contractJournalPaths(decoded.id).some((other) => other !== path && read.snapshot.paths.has(other))) {
+        skippedPaths.add(path);
+        continue;
+      }
+      journals.set(decoded.id, foldJournalRecord(path, oid, blob, decoded));
+    } catch (error) {
+      if (!(error instanceof AuthorityCorruptionError)) throw error;
+      skippedPaths.add(path);
+    }
+  }
+  return { journals, skipped: skippedPaths.size };
 }
 
 export function observeContractJournals(

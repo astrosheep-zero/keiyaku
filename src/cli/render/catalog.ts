@@ -21,9 +21,14 @@ export function contractRowLines(
 
 export function renderContractCatalogue(list: ContractCatalogue): string {
   const rows = list.rows ?? [];
-  if (rows.length === 0) return emptyCatalogue("contracts");
+  const skipped =
+    list.skipped === undefined ? [] : [`! ${list.skipped} journal${list.skipped === 1 ? "" : "s"} skipped`];
+  if (rows.length === 0) {
+    return skipped.length === 0 ? emptyCatalogue("contracts") : ["CONTRACTS", "", ...skipped].join("\n");
+  }
   return [
     "CONTRACTS",
+    ...(skipped.length === 0 ? [] : ["", ...skipped]),
     "",
     ...rows.flatMap((row) => contractRowLines(row, list.observedAt)),
     ...(list.more === true ? ["…"] : []),

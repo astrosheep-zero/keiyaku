@@ -9,6 +9,7 @@ import {
   deliveryTargetObserver,
   observeContractJournals,
   observeContractView,
+  observeReadableContractJournals,
   withContractReadObservationAt,
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
@@ -110,6 +111,7 @@ export const contractCatalogueSchema = z
     observedAt: z.string(),
     rows: z.array(contractSummarySchema).min(1).readonly().exactOptional(),
     more: z.literal(true).exactOptional(),
+    skipped: z.number().int().positive().exactOptional(),
   })
   .readonly();
 export type ContractCatalogue = z.output<typeof contractCatalogueSchema>;
@@ -518,6 +520,8 @@ function selectedContractStates(
   );
 }
 
+export type ContractCatalogueReadPolicy = "strict" | "readable";
+
 /**
  * Observe selected lifecycle classes under one recent-journal order and bound,
  * from one immutable Git observation. Settled rows never observe physical state.
@@ -526,12 +530,14 @@ export async function readContractCatalogue(
   observation: GitReadObservation,
   limit?: number,
   selection: LifecycleSelection = "active",
+  policy: ContractCatalogueReadPolicy = "strict",
 ): Promise<ContractCatalogue> {
   const observedAt = new Date().toISOString();
-  const contracts = await observeContractJournals(
-    observation,
-    selection === "all" ? undefined : selection === "active" ? "active" : "terminal",
-  );
+  const journalSelection = selection === "all" ? undefined : selection === "active" ? "active" : "terminal";
+  const { journals: contracts, skipped } =
+    policy === "readable"
+      ? await observeReadableContractJournals(observation, journalSelection)
+      : { journals: await observeContractJournals(observation, journalSelection), skipped: 0 };
   const matching = selectedContractStates(contracts)
     .filter(({ state }) => selection === "all" || contractLifecycle(phaseFor(state)) === selection)
     .sort(compareRecentContracts);
@@ -560,6 +566,7 @@ export async function readContractCatalogue(
     observedAt,
     ...(rows.length === 0 ? {} : { rows }),
     ...(selected.hasMore ? { more: true as const } : {}),
+    ...(skipped === 0 ? {} : { skipped }),
   };
 }
 

@@ -133,8 +133,14 @@ Contract listing defaults to active work and may select settled work or both,
 using the lifecycle owner's classification before bounding. It preserves complete
 matching membership when no limit is selected, with one recent-journal order over
 the selected set. An explicit bound reports whether that same observation contains
-additional matching rows. Active rows retain compact actionable physical attention
-and explicit unknown availability from the existing workspace and target observers;
+additional matching rows. Listing is readable-only for individual journal
+records: a locally unreadable or conflicting Contract journal contributes no row.
+[public-results.md](public-results.md) owns its skipped count and partial-coverage
+meaning. Cancellation, shared enumeration, frozen snapshot, and Git execution
+failures still fail the catalogue. Exact addressed reads, mutations,
+Verification, and every other reader keep their strict authority contract. Active
+rows retain compact actionable physical attention and explicit unknown
+availability from the existing workspace and target observers;
 only selected active rows receive physical observation. Settled rows come from
 existing terminal journals, retain their terminal phase, and carry no workspace
 or target attention. They never observe retired workspaces or physical targets.

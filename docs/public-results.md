@@ -39,7 +39,11 @@ Missing
 authority, unavailable observation, unrequested detail, and known emptiness are
 different answers; an omitted optional collection means known empty, not a
 failed or skipped observation. An omitted catalogue remainder means the
-observation is known complete.
+observation is known complete. A readable-only catalogue keeps the rows it
+proved readable apart from records omitted locally; its skipped count is
+independent of the bounded row budget and remainder and never becomes a
+placeholder row or inferred terms. When every selected record was omitted, the
+observation is explicitly partial rather than known empty.
 
 The owner emits its decision in that form. Creation and Tell admission distinguish
 ordinary completion from a later operational stop explicitly; a normal completion

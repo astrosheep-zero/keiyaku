@@ -17,7 +17,12 @@ import {
   writeCommit,
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
-import { readContractCount, readContractMembership, readContractObservation } from "../src/protocol/read/status.js";
+import {
+  contractCatalogueSchema,
+  readContractCount,
+  readContractMembership,
+  readContractObservation,
+} from "../src/protocol/read/status.js";
 import { Keis, KeiyakuError, Repo, Kanshi } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
@@ -36,6 +41,7 @@ import {
 import { changeId, entryUlid, snapshotId, type ContractId, type JournalEntry } from "../src/core/facts/types.js";
 import { renderContractCatalogue } from "../src/cli/render/catalog.js";
 import { protocolContractId } from "./support/git.js";
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 
 function terms(title: string, after: readonly ContractId[] = []) {
   const document = decodeContractDocument(
@@ -227,6 +233,63 @@ test("public Contract rows select the source entry for every phase", async () =>
   repository.run(["update-ref", GIT_REF, corruptCommit, current.commit!]);
   const unchanged = await withGitDecodeChannel(scope, (channel) => contractsOperation({ scope, channel }));
   assert.deepEqual(unchanged, membership, "contextual membership never expands prerequisite journals");
+});
+
+test("readable Contract catalogue skips one malformed journal while exact authority stays strict", async () => {
+  const repository = repositoryWithMain();
+  const healthy = await bind(repository, "Readable catalogue healthy");
+  const laterHealthy = await bind(repository, "Readable catalogue later");
+  const malformed = await bind(repository, "Malformed catalogue journal");
+  const repo = await Repo.at({ path: repository.path });
+  const contracts = Keis.of(repo);
+  assert.equal((await contracts.list()).skipped, undefined, "a complete catalogue reports no skipped count");
+
+  const git = await repositoryAt(repository.path);
+  const path = contractJournalPath(malformed);
+  const before = await readGitPaths(git, [path]);
+  const journal = before.paths.get(path);
+  if (journal?.type !== "blob") throw new Error(`missing active journal for ${malformed}`);
+  const bytes = `${(await readBlob(git, journal.oid))
+    .toString("utf8")
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const entry = JSON.parse(line) as { kind: string; data: { terms?: { requirements?: unknown } } };
+      if (entry.kind === "bind") delete entry.data.terms!.requirements;
+      return JSON.stringify(entry);
+    })
+    .join("\n")}\n`;
+  const oid = await writeBlob(git, bytes);
+  const tree = await updateGitTree(git, before.tree, new Map([[path, { oid }]]));
+  const commit = await writeCommit({ repository: git, tree, parent: before.commit });
+  repository.run(["update-ref", GIT_REF, commit, before.commit!]);
+
+  const catalogue = await contracts.list();
+  assert.deepEqual(new Set(catalogue.rows?.map((row) => row.id)), new Set([healthy, laterHealthy]));
+  assert.equal(catalogue.more, undefined);
+  assert.equal(catalogue.skipped, 1);
+  assertWireRoundTrip(contractCatalogueSchema, catalogue);
+  const bounded = await contracts.list({ limit: 1 });
+  assert.equal(bounded.rows?.length, 1, "the readable row bound is independent of the skipped count");
+  assert.equal(bounded.more, true);
+  assert.equal(bounded.skipped, 1);
+
+  const twinPath = contractJournalPath(laterHealthy, "terminal");
+  const twinTree = await updateGitTree(
+    git,
+    tree,
+    new Map([[twinPath, { oid: await writeBlob(git, "corrupt twin\n") }]]),
+  );
+  const twinCommit = await writeCommit({ repository: git, tree: twinTree, parent: commit });
+  repository.run(["update-ref", GIT_REF, twinCommit, commit]);
+  const twinned = await contracts.list();
+  assert.deepEqual(twinned.rows?.map((row) => row.id), [healthy], "an unreadable canonical twin suppresses its row");
+  assert.equal(twinned.skipped, 2, "only selected source paths are skipped");
+  const text = renderContractCatalogue(catalogue);
+  assert.match(text, /! 1 journal skipped/u);
+  assert.ok(!text.includes(malformed), "the omitted record has no placeholder row");
+  await assert.rejects(contracts.observe({ id: malformed }), { category: "authority-corruption" });
+  assert.equal((await Kanshi.of({ world: null, repo }).board()).contracts.kind, "failed");
 });
 
 test("counts and selection observe only their membership authority", async () => {

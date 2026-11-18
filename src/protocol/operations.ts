@@ -242,7 +242,7 @@ export async function contractCatalogueOperation(
 ): Promise<ContractCatalogue> {
   const limit = input.limit === undefined ? undefined : boundedListLimit(input.limit);
   return withGitReadObservation(input.scope, input.channel, (observation) =>
-    readContractCatalogue(observation, limit, input.selection),
+    readContractCatalogue(observation, limit, input.selection, "readable"),
   );
 }
 
