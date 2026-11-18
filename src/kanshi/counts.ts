@@ -1,13 +1,27 @@
 import { z } from "zod";
-import { countCallerRunningAkuma, countRunningAkuma } from "../akuma/akuma.js";
+import {
+  activeAkumaCountsSchema,
+  countActiveAkumas,
+  countCallerRunningAkuma,
+  countRunningAkuma,
+} from "../akuma/akuma.js";
 import { akumaCallerSchema } from "../akuma/caller.js";
 import { KeiyakuError } from "../errors.js";
 import { DebtAuthorityCorruptionError } from "../debt/index.js";
 import { observeDebtBoard } from "../debt/operations.js";
-import { withGitDecodeChannel, withGitTargetedReadObservation } from "../git/read-observation.js";
-import { scopeForRepo } from "../library/repo.js";
-import { readContractCount } from "../protocol/read/status.js";
-import { World, worldRootSchema } from "../world.js";
+import {
+  withGitDecodeChannel,
+  withGitTargetedReadObservation,
+  type GitReadObservation,
+} from "../git/read-observation.js";
+import { scopeForRepo, type Repo } from "../library/repo.js";
+import {
+  activeContractCountsSchema,
+  currentContractSummarySchema,
+  readActiveContractSummary,
+  readContractCount,
+} from "../protocol/read/status.js";
+import { World, worldRootSchema, type WorldRoot } from "../world.js";
 import { sectionSchema, type Section } from "./report.js";
 import type { KanshiCoordinates } from "./read.js";
 
@@ -27,21 +41,75 @@ export const kanshiCountsReportSchema = z
   })
   .readonly();
 
-async function section(read: () => Promise<number>): Promise<Section<number>> {
+const count = z.number().int().nonnegative();
+const activeDebtCountsSchema = z.strictObject({ total: count, ready: count, blocked: count }).readonly();
+export const kanshiStatusSummarySchema = z
+  .strictObject({
+    kind: z.literal("active-work-summary"),
+    contracts: sectionSchema(activeContractCountsSchema),
+    akumas: sectionSchema(activeAkumaCountsSchema),
+    debts: sectionSchema(activeDebtCountsSchema),
+    currentContract: currentContractSummarySchema.exactOptional(),
+  })
+  .readonly();
+export type KanshiStatusSummary = z.output<typeof kanshiStatusSummarySchema>;
+
+const absent = { kind: "absent" } as const;
+
+function failure(error: unknown): Extract<Section<never>, { kind: "failed" }> {
+  const text = (error instanceof Error ? error.message : String(error)).replaceAll(/\s+/gu, " ").trim();
+  return {
+    kind: "failed",
+    failure: {
+      message: text.length <= 240 ? text : `${text.slice(0, 239)}…`,
+      ...(error instanceof DebtAuthorityCorruptionError && error.coordinate !== undefined
+        ? { coordinate: error.coordinate }
+        : {}),
+    },
+  };
+}
+
+async function section<Value>(read: () => Value | Promise<Value>): Promise<Section<Value>> {
   try {
     return { kind: "present", value: await read() };
   } catch (error) {
-    const text = (error instanceof Error ? error.message : String(error)).replaceAll(/\s+/gu, " ").trim();
-    return {
-      kind: "failed",
-      failure: {
-        message: text.length <= 240 ? text : `${text.slice(0, 239)}…`,
-        ...(error instanceof DebtAuthorityCorruptionError && error.coordinate !== undefined
-          ? { coordinate: error.coordinate }
-          : {}),
-      },
-    };
+    return failure(error);
   }
+}
+
+function contractSection<Value>(repo: Repo | undefined, read: (at: GitReadObservation) => Value | Promise<Value>) {
+  if (repo === undefined) return Promise.resolve(absent);
+  const scope = scopeForRepo(repo);
+  return section(() =>
+    withGitDecodeChannel(scope, (channel) =>
+      withGitTargetedReadObservation(scope, channel, { subtrees: ["contracts/active"] }, read),
+    ),
+  );
+}
+
+async function worldSections<A, D>(
+  world: WorldRoot | null,
+  akumas: (world: WorldRoot) => Promise<A>,
+  debts: (world: WorldRoot) => Promise<D>,
+): Promise<readonly [Section<A>, Section<D>]> {
+  if (world === null) return [absent, absent];
+  try {
+    if (!(await World.established(world))) return [absent, absent];
+  } catch (error) {
+    const failed = failure(error);
+    return [failed, failed];
+  }
+  return Promise.all([section(() => akumas(world)), section(() => debts(world))]);
+}
+
+async function activeDebtCounts(world: WorldRoot): Promise<z.output<typeof activeDebtCountsSchema>> {
+  let ready = 0;
+  let blocked = 0;
+  for (const { disposition } of await observeDebtBoard(world)) {
+    if (disposition === "ready") ++ready;
+    if (disposition === "blocked") ++blocked;
+  }
+  return { total: ready + blocked, ready, blocked };
 }
 
 export async function kanshiCounts(
@@ -54,40 +122,36 @@ export async function kanshiCounts(
   const { akumaCaller } = parsed.data;
   const world = input.world === null ? null : await World.prove(input.world);
   const observedAt = new Date().toISOString();
-  const absent = { kind: "absent" } as const;
-  const contracts =
-    input.repo === undefined
-      ? Promise.resolve(absent)
-      : section(async () => {
-          const repo = scopeForRepo(input.repo!);
-          return withGitDecodeChannel(repo, (channel) =>
-            withGitTargetedReadObservation(repo, channel, { subtrees: ["contracts/active"] }, readContractCount),
-          );
-        });
-  const worldSections = async (): Promise<readonly [Section<number>, Section<number>]> => {
-    if (world === null) return [absent, absent];
-    let established: boolean;
-    try {
-      established = await World.established(world);
-    } catch (error) {
-      const failed = await section(async () => {
-        throw error;
-      });
-      return [failed, failed];
-    }
-    if (!established) return [absent, absent];
-    return Promise.all([
-      section(async () => {
+  const [contracts, [akuma, debts]] = await Promise.all([
+    contractSection(input.repo, readContractCount),
+    worldSections(
+      world,
+      async (world) => {
         if (akumaCaller === null) throw new Error("Akuma caller selection unavailable");
         return akumaCaller === undefined ? countRunningAkuma(world) : countCallerRunningAkuma(world, akumaCaller);
-      }),
-      section(
-        async () =>
-          (await observeDebtBoard(world)).filter((row) => row.disposition === "ready" || row.disposition === "blocked")
-            .length,
-      ),
-    ]);
+      },
+      async (world) => (await activeDebtCounts(world)).total,
+    ),
+  ]);
+  return { root: world, observedAt, akuma, contracts, debts };
+}
+
+/** The invocation already resolved its independent Repo and World coordinates. */
+export async function kanshiStatusSummary(
+  input: KanshiCoordinates,
+  invocationWorktree?: string,
+): Promise<KanshiStatusSummary> {
+  const [contract, [akumas, debts]] = await Promise.all([
+    contractSection(input.repo, (at) => readActiveContractSummary(at, invocationWorktree)),
+    worldSections(input.world, countActiveAkumas, activeDebtCounts),
+  ]);
+  if (contract.kind !== "present") return { kind: "active-work-summary", contracts: contract, akumas, debts };
+  const { counts, currentContract } = contract.value;
+  return {
+    kind: "active-work-summary",
+    contracts: { kind: "present", value: counts },
+    akumas,
+    debts,
+    ...(currentContract === undefined ? {} : { currentContract }),
   };
-  const [contractSection, [akuma, debts]] = await Promise.all([contracts, worldSections()]);
-  return { root: world, observedAt, akuma, contracts: contractSection, debts };
 }

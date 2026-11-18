@@ -199,7 +199,7 @@ test("wire validation and classification reject malformed calls before observati
     ["kill", [{ akuma: ["aku/worker/1234abcd"] }, { akuma: " " }]],
     ["ls", [{ selector: "aku/", lifecycle: "all" }, { selector: "debt/", mine: true },
       { selector: "aku/", mine: true }, { selector: "aku/*", caller: "aku/intern/00000001" }, { selector: "aku/*", lifecycle: "closed" }]],
-    ["status", [{}, { id: "kei/a" }, { selector: "kei/a", id: "kei/a" },
+    ["status", [{ selector: null }, { id: "kei/a" }, { selector: "kei/a", id: "kei/a" },
       { selector: "debt/a" }, { selector: "aku/*" }, { selector: "kei/" }, { selector: "@" },
       { selector: "@worker*" }, { selector: ["kei/a", "kei/b"] }, { selectors: ["kei/a", "kei/b"] }]],
   ] as const) for (const input of inputs) {

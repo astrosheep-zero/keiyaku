@@ -16,6 +16,7 @@ import { canonicalBirthCwd } from "../akuma/call-input.js";
 import { World, WorldError } from "../world.js";
 import { Akuma } from "../akuma/akuma-instance.js";
 import { Kanshi, type KanshiRegionSelection } from "../kanshi/index.js";
+import { kanshiStatusSummary } from "../kanshi/counts.js";
 import { Akumas } from "./akumas.js";
 import { observeNamedAddress, resolveNamedAddress } from "./address.js";
 import { waitInvocation } from "./keiyaku-wait.js";
@@ -348,9 +349,9 @@ export class Keiyaku {
       const at = await this.#coordinates("optional");
       return Kanshi.of({ world: at.world, ...(at.repo === undefined ? {} : { repo: at.repo }) }).board();
     },
-    status: async (input) => {
+    status: async ({ selector }) => {
       const at = await this.#coordinates("optional");
-      const selector = input.selector;
+      if (selector === undefined) return kanshiStatusSummary(at, at.contractWorktree);
       const id = selector.startsWith("@")
         ? resolveNamedAddress({
             selector,
@@ -448,7 +449,7 @@ export class Keiyaku {
   debtUpdate = this.#verb("debt.update");
   debtDoctor = this.#verb("debt.doctor", {});
   kanshi = this.#verb("kanshi", {});
-  status = this.#verb("status");
+  status = this.#verb("status", {});
   region = this.#verb("region", {});
   whoami = this.#verb("whoami", {});
   settings = this.#verb("settings", {});

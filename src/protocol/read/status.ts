@@ -13,7 +13,7 @@ import {
   withContractReadObservationAt,
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
-import { observeTargetLag, observeWorkspace, worktreePath } from "../../git/workspace.js";
+import { observeTargetLag, observeWorkspace, workspaceHasUnmergedPaths, worktreePath } from "../../git/workspace.js";
 import { readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
 import type { ContractWorkspaceObservation, HandoffReceiptCoordinate } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
@@ -208,6 +208,63 @@ export type ContractMembership = Pick<ContractDetail, "id" | "phase" | "workspac
 
 export function readContractCount(observation: GitReadObservation): number {
   return countActiveContractJournals(observation);
+}
+
+const count = z.number().int().nonnegative();
+export const activeContractCountsSchema = z
+  .strictObject({
+    total: count,
+    awaitingReview: count,
+    conflicts: z.strictObject({ known: count, unavailable: count }).readonly(),
+  })
+  .readonly();
+export const currentContractSummarySchema = z
+  .strictObject({ id: contractIdSchema, state: z.enum(["bound", "delivered", "awaiting-review", "conflict"]) })
+  .readonly();
+
+type ActiveContractSummary = Readonly<{
+  counts: z.output<typeof activeContractCountsSchema>;
+  currentContract?: z.output<typeof currentContractSummarySchema>;
+}>;
+
+/** Count one complete active journal observation, with only the needed workspace evidence. */
+export async function readActiveContractSummary(
+  observation: GitReadObservation,
+  invocationWorktree?: string,
+): Promise<ActiveContractSummary> {
+  const { repository } = observation;
+  const active = [...(await observeContractJournals(observation, "active")).values()].flatMap(({ state }) =>
+    state !== null && contractLifecycle(phaseFor(state)) === "active" ? [state] : [],
+  );
+  const register = active.length === 0 ? undefined : await readPlaceRegister(repository).catch(() => undefined);
+  const conflicts = { known: 0, unavailable: 0 };
+  let awaitingReview = 0;
+  let currentContract: ActiveContractSummary["currentContract"];
+  for (const state of active) {
+    const delivered = state.delivery !== null;
+    const awaitsReview =
+      delivered &&
+      gateReports(state).reports.some(
+        (report) =>
+          report.gate === "reviewed" && report.requirements.some(({ current }) => current.kind !== "attested"),
+      );
+    if (awaitsReview) awaitingReview++;
+    const path = register === undefined ? undefined : appointedWorkspace(repository, register, state)?.workspace;
+    const conflict =
+      path === undefined ? undefined : await workspaceHasUnmergedPaths(repository, path).catch(() => undefined);
+    if (conflict === undefined) conflicts.unavailable++;
+    else if (conflict) conflicts.known++;
+    if (path !== undefined && path === invocationWorktree) {
+      currentContract = {
+        id: state.id,
+        state: conflict ? "conflict" : awaitsReview ? "awaiting-review" : delivered ? "delivered" : "bound",
+      };
+    }
+  }
+  return {
+    counts: { total: active.length, awaitingReview, conflicts },
+    ...(currentContract === undefined ? {} : { currentContract }),
+  };
 }
 
 /** Selection observes journals and appointments, never physical state or dependencies. */

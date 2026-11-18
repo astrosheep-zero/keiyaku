@@ -4,8 +4,9 @@ usage  keiyaku-mcp [--help]
 
 Each tool accepts coordinates and business fields as one object. World-only
 Debt mutations and report accept cwd; other tools accept cwd and repo.
-Kanshi has no business fields; status requires selector (a complete Contract or
-Akuma identity or @name). Unknown fields and incompatible options are usage errors.
+Kanshi has no business fields. Status summarizes active work without a selector;
+supply a complete Contract or Akuma identity or @name for exact status.
+Unknown fields and incompatible options are usage errors.
 Relative cwd is resolved from the server startup directory; repo independently
 selects the Contract repository. Tool results share
 Keiyaku's CLI text. Nine routing tools publish compact JSON decision facts;

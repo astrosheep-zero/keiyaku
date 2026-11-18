@@ -1,4 +1,5 @@
-import type { KanshiContractReport, KanshiReport, ContractKanshiDetail } from "../../kanshi/report.js";
+import type { KanshiStatusSummary } from "../../kanshi/counts.js";
+import type { KanshiContractReport, KanshiReport, ContractKanshiDetail, Section } from "../../kanshi/report.js";
 import {
   abbreviateGitIds,
   afterWording,
@@ -80,6 +81,40 @@ function renderSelectedContract(report: KanshiContractReport, context: TextRende
     return [`! ${safeText(report.id)} · unavailable · ${safeText(report.diagnostic)}`];
   if (report.kind === "contract-missing") return [`○ ${safeText(report.id)} · missing`];
   return renderSelectedContractRow(report, context);
+}
+
+function countLine<Value>(label: string, section: Section<Value>, render: (value: Value) => string): string {
+  if (section.kind === "present") return `${label}  ${render(section.value)}`;
+  if (section.kind === "absent") return `${label}  absent`;
+  const { message, coordinate } = section.failure;
+  return `${label}  unavailable · ${safeText(coordinate === undefined ? message : `${coordinate} · ${message}`)}`;
+}
+
+export function renderStatusSummary(report: KanshiStatusSummary): string {
+  const lines = [
+    countLine("Contracts", report.contracts, ({ total, awaitingReview, conflicts }) => {
+      const facts = [`${total} active`, `${awaitingReview} awaiting review`];
+      const { known, unavailable } = conflicts;
+      if (unavailable === 0 || known > 0)
+        facts.push(`${known}${unavailable === 0 ? "" : " known"} conflict${known === 1 ? "" : "s"}`);
+      if (unavailable > 0) facts.push(`conflict evidence unavailable for ${unavailable}`);
+      return facts.join(" · ");
+    }),
+    countLine("Akumas", report.akumas, ({ total, byLife }) =>
+      [`${total} active`, ...Object.entries(byLife).map(([life, count]) => `${count} ${life}`)].join(" · "),
+    ),
+    countLine(
+      "Debts",
+      report.debts,
+      ({ total, ready, blocked }) => `${total} open · ${ready} ready · ${blocked} blocked`,
+    ),
+  ];
+  const current = report.currentContract;
+  if (current !== undefined) {
+    const state = current.state === "awaiting-review" ? "awaiting review" : current.state;
+    lines.push(`Current Contract  ${safeText(current.id)} · ${state}`);
+  }
+  return lines.join("\n");
 }
 
 export function renderKanshiText(

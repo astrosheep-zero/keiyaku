@@ -93,6 +93,7 @@ export type {
   KanshiBoardOptions,
   KanshiCountsReport,
   KanshiCountsOptions,
+  KanshiStatusSummary,
   AkumaKanshiRow,
   AkumaKanshiWorld,
   ContractEndpointObservation,

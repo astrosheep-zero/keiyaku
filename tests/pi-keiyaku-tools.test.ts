@@ -210,6 +210,13 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     const nativeRead = resultFor(native.results, "keiyaku_ls");
     assert.deepEqual(nativeRead.content, expectedRead.content);
     assert.deepEqual(nativeRead.structuredContent, expectedRead.structuredContent);
+    await native.run(`text(await tools.keiyaku_status({}));`);
+    const nativeSummary = resultFor(native.results, "keiyaku_status");
+    assert.equal(nativeSummary.isError, false, text(nativeSummary));
+    assert.equal(Keiyaku.verbs.status.normal.parse(nativeSummary.structuredContent).kind, "active-work-summary");
+    const mcpSummary = await client.callTool({ name: "status", arguments: {} });
+    assert.deepEqual(nativeSummary.content, mcpSummary.content);
+    assert.deepEqual(nativeSummary.structuredContent, mcpSummary.structuredContent);
     await native.run(`text(await tools.keiyaku_show({selector: "debt/missing"}));`, true);
     const missingDetail = resultFor(native.results, "keiyaku_show");
     const expectedDetail = await client.callTool({ name: "show", arguments: { selector: "debt/missing" } });

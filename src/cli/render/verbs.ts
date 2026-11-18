@@ -20,7 +20,7 @@ import {
 import { renderDeliveryPreview } from "./delivery-preview.js";
 import { contractWaitMemberText } from "./contract-wait.js";
 import { renderDebtList, renderDebtMutation, renderDebtShow, renderDebtUpdate, renderDoctor } from "./debt.js";
-import { renderKanshiText } from "./kanshi.js";
+import { renderKanshiText, renderStatusSummary } from "./kanshi.js";
 import { renderNukeText } from "./nuke.js";
 import { executionFailureLines } from "./receipt.js";
 import { renderReconcile } from "./reconcile.js";
@@ -356,6 +356,7 @@ export function renderVerb<K extends VerbName>(
       return renderKanshiText(value as VerbOutput<"kanshi">, context);
     case "status": {
       const result = value as VerbOutput<"status">;
+      if (result.kind === "active-work-summary") return renderStatusSummary(result);
       const alias = aliasSelector((input as VerbInput<"status">).selector);
       return result.kind === "akuma"
         ? snapshotText(result, context, alias === undefined ? {} : { alias })

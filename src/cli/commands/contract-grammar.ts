@@ -182,7 +182,7 @@ function showSelector(parts: ContractTokens): string {
 function parseStatus(parts: ContractTokens): VerbRequest<"status"> {
   if (parts.positionals.length > 1) refuse("status", "status accepts at most one complete identity or @name");
   const selector = parts.positionals[0];
-  if (selector === undefined) refuse("status", "status requires one subject; use kanshi for the World board");
+  if (selector === undefined) return { name: "status", input: {}, output: parts.output };
   if (/[*?\[\]]/u.test(selector)) refuse("status", `unsupported status glob: ${selector}`);
   try {
     if (selector.startsWith("@")) parseReadableAkumaAlias(selector);

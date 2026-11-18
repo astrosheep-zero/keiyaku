@@ -129,7 +129,11 @@ the label is omitted without another observation or a new result envelope.
 Ordinary catalogue rows keep their shape.
 
 Kanshi owns what a composite report means; this chapter owns its terminal
-projection. World presents independent flat Contract, Akuma, and Debt sections
+projection. The active-work summary states the independent section totals and
+availability without rendering any roster or expanding the current appointment.
+Incomplete conflict evidence stays visible beside any known conflicts, never as
+a zero total. A present empty section reports zero in this counting view.
+World presents independent flat Contract, Akuma, and Debt sections
 in that order, preserving each owner's native row order and catalogue aperture.
 World and standalone catalogues share each family's thin row projection. An
 Akuma's supplied Contract association stays inline with its complete identity,

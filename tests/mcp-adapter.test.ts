@@ -525,8 +525,18 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   await moveAlias({ world, alias: parseAkumaAlias("@mcp-status"), akumaId: worker.id });
   const statusTool = (await client.listTools()).tools.find(tool => tool.name === "status")!;
   const validateStatus = new AjvJsonSchemaValidator().getValidator(JSON.parse(JSON.stringify(statusTool.inputSchema)));
+  assert.equal(validateStatus({}).valid, true);
   assert.equal(validateStatus({ selector: "@mcp-status" }).valid, true);
+  assert.equal(validateStatus({ selector: null }).valid, false);
   assert.equal(validateStatus({ id: worker.id }).valid, false);
+  const summary = await client.callTool({ name: "status", arguments: { cwd: first, repo: otherRepo.path } });
+  assert.equal(summary.isError, false);
+  assert.deepEqual(summary.structuredContent, {
+    kind: "active-work-summary",
+    contracts: { kind: "present", value: { total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 } } },
+    akumas: { kind: "present", value: { total: 0, byLife: {} } },
+    debts: { kind: "present", value: { total: 1, ready: 1, blocked: 0 } },
+  });
   const catalogue = await Akumas.of(world).list({ repo, limit: 1, selection: "all" });
   assert.deepEqual(catalogue.rows?.[0]?.contract, { kind: "associated", contractId: bound.contractId });
   for (const [name, input, expected] of [
@@ -593,6 +603,12 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const cliFailedStatus = await runCli(["-C", otherRepo.path, "status", bound.contractId, "--json"], { environment });
   assert.equal(cliFailedStatus.exit, 3);
   assert.equal(JSON.parse(cliFailedStatus.stdout).kind, "contract-failed");
+  const partialSummary = await client.callTool({ name: "status", arguments: { cwd: first, repo: otherRepo.path } });
+  assert.equal(partialSummary.isError, false);
+  const partial = Keiyaku.verbs.status.normal.parse(partialSummary.structuredContent);
+  assert.equal(partial.kind, "active-work-summary");
+  assert.equal(partial.contracts.kind, "failed");
+  assert.deepEqual(partial.debts, { kind: "present", value: { total: 1, ready: 1, blocked: 0 } });
   const failedWorld = await client.callTool({ name: "kanshi", arguments: { repo: otherRepo.path } });
   assert.equal(failedWorld.isError, false);
   assert.equal(failedWorld.structuredContent, undefined);

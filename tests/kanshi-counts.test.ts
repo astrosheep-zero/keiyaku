@@ -1,15 +1,25 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { breakBody, finishBodyIfIdle, readSoul, recordTell } from "../src/akuma/heart/index.js";
-import { Debts, Kanshi, Keis, KeiyakuError, Repo, World } from "../src/index.js";
+import { Debts, Kanshi, Keis, Keiyaku, KeiyakuError, Repo, World } from "../src/index.js";
 import type { AkumaCaller, KanshiCountsOptions, KanshiScopeInput } from "../src/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { makeGitRepository } from "./support/git.js";
-import { accepted } from "./support/library-verbs.js";
+import { accepted, commitCandidate, document, repositoryWithMain } from "./support/library-verbs.js";
+import { runCli } from "./support/cli-fixtures.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
@@ -25,16 +35,26 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   const empty = await Kanshi.of({ world, repo }).counts();
   assert.deepEqual([empty.akuma, empty.contracts, empty.debts], Array(3).fill({ kind: "present", value: 0 }));
   const debts = Debts.of(world);
-  for (let i = 0; i < 12; i++) accepted(await debts.add({ title: `Open ${i}` }));
+  const ready = accepted(await debts.add({ title: "Pioneer" })).id;
+  accepted(await debts.add({ title: "Waiting", needs: [ready] }));
+  for (let i = 0; i < 10; i++) accepted(await debts.add({ title: `Open ${i}` }));
   const done = accepted(await debts.add({ title: "Done" })).id;
   const drop = accepted(await debts.add({ title: "Drop" })).id;
   accepted(await debts.debt({ id: done }).update({ state: "done" }));
   accepted(await debts.debt({ id: drop }).update({ state: "drop" }));
+  const active = [];
   for (let i = 0; i < 12; i++) {
-    accepted(await Keis.of(repo).bind({ target: "main", terms: contractMarkdown(`Count ${i}`, {
+    active.push(accepted(await Keis.of(repo).bind({ target: "main", terms: contractMarkdown(`Count ${i}`, {
       Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
-    }), gates: [] }));
+    }), gates: ["reviewed"] })));
   }
+  const [waiting, denied] = [active[0]!, active[1]!];
+  for (const item of [waiting, denied]) {
+    assert.ok(item.worktreePath);
+    commitCandidate(repository, item.worktreePath);
+    accepted(await item.kei.deliver());
+  }
+  accepted(await denied.kei.review({ verdict: "unsatisfied", summary: "Review answered negatively" }));
   const terminal = accepted(await Keis.of(repo).bind({ target: "main", terms: contractMarkdown("Terminal", {
     Context: "counts", Objective: "observe", Design: "owner", Region: "src/**", Criteria: "### Count\nCorrect.",
   }), gates: [] }));
@@ -48,6 +68,29 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   const body = await stopped.leash.recordBody(stopped.paths, { leashTakenAt: stopped.soul.createdAt });
   await breakBody(stopped.paths, { sequence: body.sequence, end: "put-down", at: stopped.soul.createdAt });
   stopped.leash.release();
+  const sleeping = await bornDirectAkuma({ root: world, akumaName: "worker", draw: "000000fe", createdAt: stopped.soul.createdAt });
+  const sleepingBody = await sleeping.leash.recordBody(sleeping.paths, { leashTakenAt: sleeping.soul.createdAt });
+  await finishBodyIfIdle(sleeping.paths, { sequence: sleepingBody.sequence, at: sleeping.soul.createdAt });
+  sleeping.leash.release();
+  const summaryAt = (cwd: string, repo?: string) => Keiyaku.for({
+    cwd,
+    environment: { KEIYAKU_ACTOR_ID: stopped.id, KEIYAKU_ACTOR_WORLD: world },
+    ...(repo === undefined ? {} : { repo }),
+  }).status();
+  const summary = await summaryAt(world);
+  assert.deepEqual(summary, {
+    kind: "active-work-summary",
+    contracts: { kind: "present", value: { total: 12, awaitingReview: 1, conflicts: { known: 0, unavailable: 0 } } },
+    akumas: { kind: "present", value: { total: 13, byLife: { running: 12, stranded: 1 } } },
+    debts: { kind: "present", value: { total: 12, ready: 11, blocked: 1 } },
+  });
+  const worktree = waiting.worktreePath;
+  assert.ok(worktree);
+  const child = join(worktree, "child");
+  mkdirSync(child);
+  const contextual = { ...summary, currentContract: { id: waiting.contractId, state: "awaiting-review" } };
+  assert.deepEqual(await summaryAt(worktree), contextual);
+  assert.deepEqual(await summaryAt(child, world), contextual);
   const report = await Kanshi.of({ world, repo }).counts();
   assert.deepEqual([report.akuma, report.contracts, report.debts], [
     { kind: "present", value: 12 }, { kind: "present", value: 12 }, { kind: "present", value: 12 },
@@ -60,6 +103,12 @@ test("exact counts observe complete independent owners and isolate corrupt Heart
   assert.equal(broken.akuma.kind, "failed");
   assert.deepEqual(broken.contracts, report.contracts);
   assert.deepEqual(broken.debts, report.debts);
+  const partial = await summaryAt(world);
+  assert.equal(partial.kind, "active-work-summary");
+  assert.equal(summary.kind, "active-work-summary");
+  assert.equal(partial.akumas.kind, "failed");
+  assert.deepEqual(partial.contracts, summary.contracts);
+  assert.deepEqual(partial.debts, summary.debts);
   writeFileSync(join(world, ".keiyaku", "debts", "bad.md"), "not a debt document\n");
   const brokenDebt = await Kanshi.of({ world, repo }).counts();
   assert.equal(brokenDebt.debts.kind, "failed");
@@ -72,6 +121,14 @@ test("absence, explicit Repo and crossing validation remain independent", async 
   const world = await World.prove(directory);
   const absent = await Kanshi.of({ world }).counts();
   assert.deepEqual([absent.akuma, absent.contracts, absent.debts], Array(3).fill({ kind: "absent" }));
+  const invocation = Keiyaku.for({ cwd: directory, environment: {} });
+  assert.deepEqual(await invocation.status(), {
+    kind: "active-work-summary",
+    contracts: { kind: "absent" },
+    akumas: { kind: "absent" },
+    debts: { kind: "absent" },
+  });
+  assert.equal(existsSync(join(directory, ".keiyaku")), false);
   const repository = makeGitRepository();
   context.after(() => rmSync(repository.path, { recursive: true, force: true }));
   repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
@@ -95,11 +152,93 @@ test("absence, explicit Repo and crossing validation remain independent", async 
   await assert.rejects(Kanshi.of({ world }).counts({ akumaCaller: {} } as KanshiCountsOptions),
     (error: unknown) => error instanceof KeiyakuError && error.category === "invalid-input");
   await World.at(world);
+  assert.deepEqual(await Keiyaku.for({ cwd: world, repo: repository.path, environment: {} }).status(), {
+    kind: "active-work-summary",
+    contracts: { kind: "present", value: { total: 0, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 } } },
+    akumas: { kind: "present", value: { total: 0, byLife: {} } },
+    debts: { kind: "present", value: { total: 0, ready: 0, blocked: 0 } },
+  });
+  assert.equal(existsSync(join(repository.path, ".keiyaku")), false);
   mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akuma", "run"), "not a directory");
   const unavailable = await Kanshi.of({ world }).counts(selection);
   assert.equal(unavailable.akuma.kind, "failed");
   assert.deepEqual(unavailable.debts, { kind: "present", value: 0 });
+});
+
+async function divergentFixture() {
+  const repository = repositoryWithMain({ files: { "shared.txt": "base\n" } });
+  const contracts = Keis.of(await Repo.at({ path: repository.path }));
+  const bind = () => contracts.bind({ terms: document(), target: "main", gates: ["reviewed"] }).then(accepted);
+  const conflicting = await bind();
+  const lagging = await bind();
+  const conflictPath = conflicting.worktreePath;
+  const lagPath = lagging.worktreePath;
+  assert.ok(conflictPath && lagPath);
+  writeFileSync(join(conflictPath, "shared.txt"), "candidate\n");
+  repository.run(["-C", conflictPath, "commit", "-qam", "candidate"]);
+  writeFileSync(join(repository.path, "shared.txt"), "target\n");
+  repository.run(["commit", "-qam", "target"]);
+  const invocation = Keiyaku.for({ cwd: repository.path, environment: {} });
+  const admin = repository.run(["-C", conflictPath, "rev-parse", "--path-format=absolute", "--git-dir"]).trim();
+  return { repository, invocation, conflicting, conflictPath, lagPath, admin };
+}
+
+test("active status counts a relative linked-worktree conflict, not target drift or unavailable workspaces", async () => {
+  const { repository, invocation, conflicting, conflictPath, lagPath, admin } = await divergentFixture();
+  const before = await invocation.status();
+  assert.equal(before.kind, "active-work-summary");
+  assert.deepEqual(before.contracts, {
+    kind: "present", value: { total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 0 } },
+  });
+  assert.equal((await conflicting.kei.deliver({ materializeConflict: true })).kind, "handoff");
+  repository.run(["-c", "worktree.useRelativePaths=true", "worktree", "repair", conflictPath]);
+  const backlinkPath = join(admin, "gitdir");
+  if (isAbsolute(readFileSync(backlinkPath, "utf8").trim())) {
+    // Older Git accepts the real linked index but does not produce a relative backlink.
+    writeFileSync(backlinkPath, `${relative(admin, join(conflictPath, ".git"))}\n`);
+  }
+  const backlink = readFileSync(backlinkPath, "utf8").trim();
+  assert.equal(isAbsolute(backlink), false);
+  assert.equal(resolve(admin, backlink), join(conflictPath, ".git"));
+  repository.run(["-C", conflictPath, "merge", "--quit"]);
+  // Preserve the unmerged index without MERGE_HEAD, and an unusable appointment
+  // directory that Git must not silently replace with the enclosing checkout.
+  repository.run(["worktree", "remove", lagPath]);
+  mkdirSync(lagPath);
+  const refs = repository.run(["show-ref"]);
+  const index = repository.run(["-C", conflictPath, "ls-files", "-u"]);
+  assert.notEqual(index, "");
+  const observed = await invocation.status();
+  assert.equal(observed.kind, "active-work-summary");
+  assert.deepEqual(observed.contracts, {
+    kind: "present", value: { total: 2, awaitingReview: 0, conflicts: { known: 1, unavailable: 1 } },
+  });
+  const text = await runCli(["-C", repository.path, "status"], { environment: {} });
+  assert.equal(text.exit, 0, text.stderr);
+  assert.match(text.stdout, /1 known conflict · conflict evidence unavailable for 1/u);
+  assert.equal(repository.run(["show-ref"]), refs);
+  assert.equal(repository.run(["-C", conflictPath, "ls-files", "-u"]), index);
+});
+
+test("active status cannot turn a missing index during a real merge into a zero conflict total", async () => {
+  const { repository, invocation, conflicting, conflictPath, admin } = await divergentFixture();
+  assert.equal((await conflicting.kei.deliver({ materializeConflict: true })).kind, "handoff");
+  const index = join(admin, "index");
+  const displaced = join(admin, "index.fixture");
+  renameSync(index, displaced);
+  try {
+    assert.notEqual(repository.run(["-C", conflictPath, "rev-parse", "--verify", "MERGE_HEAD"]).trim(), "");
+    assert.equal(repository.run(["-C", conflictPath, "ls-files", "--unmerged"]), "");
+    const observed = await invocation.status();
+    assert.equal(observed.kind, "active-work-summary");
+    assert.deepEqual(observed.contracts, {
+      kind: "present", value: { total: 2, awaitingReview: 0, conflicts: { known: 0, unavailable: 1 } },
+    });
+    assert.equal(existsSync(index), false);
+  } finally {
+    renameSync(displaced, index);
+  }
 });
 
 test("caller running count preserves readable ancestry beyond the display bound", async (context) => {

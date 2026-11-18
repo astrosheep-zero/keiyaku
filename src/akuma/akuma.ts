@@ -80,6 +80,26 @@ export const akumaStatusSchema = z
   .readonly();
 export type AkumaStatus = z.output<typeof akumaStatusSchema>;
 
+const rosterLives = [...akumaStatusSchema.unwrap().shape.life.options, "unborn", "stillborn"] as const;
+const activeRosterLife = z.enum(rosterLives.filter((life) => akumaLifecycle(life) === "active"));
+export const activeAkumaCountsSchema = z
+  .strictObject({
+    total: z.number().int().nonnegative(),
+    byLife: z.partialRecord(activeRosterLife, z.number().int().positive()).readonly(),
+  })
+  .readonly();
+
+type ActiveAkumaCounts = z.output<typeof activeAkumaCountsSchema>;
+
+/** Count all owner-classified active life from one strict, unscoped roster read. */
+export async function countActiveAkumas(path: WorldRoot): Promise<ActiveAkumaCounts> {
+  const observed = await observeRows((await knownAkuma(path)).rows, "active");
+  if (observed.skipped > 0) throw new Error("Cannot classify every recognized Akuma", { cause: observed.failure });
+  const byLife: Partial<Record<AkumaRosterRow["life"], number>> = {};
+  for (const { life } of observed.rows) byLife[life] = (byLife[life] ?? 0) + 1;
+  return { total: observed.rows.length, byLife };
+}
+
 /** One recognized Akuma directory under this World's run root. */
 export type KnownAkuma = Readonly<{ id: AkumaId; paths: AkumaPaths }>;
 

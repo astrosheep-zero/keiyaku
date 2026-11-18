@@ -36,8 +36,10 @@ test("CLI adapts public Contract selector refusals without owning matching", asy
   await assert.rejects(facet.show({} as never), KeiyakuUsageError);
 });
 
-test("status parses one complete identity or name without authority acquisition", () => {
-  assert.throws(() => parseArgv(["status"]), CliUsageError);
+test("status parses omission or one complete identity or name without authority acquisition", () => {
+  assert.deepEqual(parseArgv(["status"]), {
+    command: { name: "status", input: {}, output: "text" },
+  });
   assert.deepEqual(parseArgv(["status", "kei/example"]), {
     command: { name: "status", input: { selector: "kei/example" }, output: "text" },
   });
@@ -64,11 +66,15 @@ test("CLI list and status families preserve their native owner answers", async (
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWorker.\n");
   accepted(await Debts.of(world).add({ title: "Root work" }));
+  const worktree = bound.worktreePath;
+  assert.ok(worktree);
+  const appointment = Keiyaku.for({ cwd: worktree, environment: {}, home: world });
   for (const [args, expected] of [
     [["ls", "kei/", "--limit", "1"], await Keis.of(repo).list({ limit: 1 })],
     [["ls", "aku/*/*", "--limit", "1"], await Akumas.of(world).list({ repo, limit: 1 })],
     [["ls", "aku/"], await Akumas.akumaNames({ cwd: world, home: world })],
     [["ls", "debt/"], await Keiyaku.for({ cwd: world, environment: {}, home: world }).ls({ selector: "debt/" })],
+    [["status"], await Keiyaku.for({ cwd: world, environment: {} }).status()],
     [["status", bound.contractId], await Kanshi.of({ world, repo }).contract(bound.contractId)],
     [["status", worker.id], await Akumas.of(world).status({ akuma: worker.id, repo })],
     [["kanshi"], await Kanshi.of({ world, repo }).board()],
@@ -81,6 +87,17 @@ test("CLI list and status families preserve their native owner answers", async (
       args.join(" "),
     );
   }
+  const inside = await cliJson(["-C", worktree, "status"], { environment: {} });
+  assert.equal(inside.exit, 0, inside.stderr);
+  assert.deepEqual(inside.value, await appointment.status());
+  const text = await runCli(["-C", worktree, "status"], { environment: {} });
+  assert.equal(text.exit, 0, text.stderr);
+  assert.deepEqual(text.stdout.trim().split("\n"), [
+    "Contracts  1 active · 0 awaiting review · 0 conflicts",
+    "Akumas  0 active",
+    "Debts  1 open · 1 ready · 0 blocked",
+    `Current Contract  ${bound.contractId} · bound`,
+  ]);
 });
 
 test("exact Contract status without a Repo keeps the usage boundary", async (t) => {
@@ -135,8 +152,8 @@ test("named status shares invocation resolution, complete live membership and Al
   const name = `@${oldest.contractId.slice(4)}`;
   const facet = Keiyaku.for({ cwd: world, environment: {} });
   const native = await facet.status({ selector: name });
-  assert.equal(native.id, oldest.contractId);
   assert.equal(native.kind, "contract");
+  assert.equal(native.id, oldest.contractId);
   const selected = await cliJson<KanshiContractReport>(["-C", world, "status", name], { environment: {} });
   assert.equal(selected.exit, 0, selected.stderr);
   assert.equal(selected.value.id, oldest.contractId);
@@ -154,7 +171,9 @@ test("named status shares invocation resolution, complete live membership and Al
   const readableAlias = await cliJson<{ id: string }>(["-C", world, "status", name], { environment: {} });
   assert.equal(readableAlias.exit, 0, readableAlias.stderr);
   assert.equal(readableAlias.value.id, born.id);
-  assert.equal((await facet.run("status", { selector: name })).id, born.id);
+  const addressed = await facet.run("status", { selector: name });
+  assert.equal(addressed.kind, "akuma");
+  assert.equal(addressed.id, born.id);
   await assert.rejects(facet.status({ selector: "@unknown" }), /Contract world is failed/u);
   const unresolved = await cliJson<{ diagnostic: string }>(["-C", world, "status", "@unknown"], { environment: {} });
   assert.equal(unresolved.exit, 3, unresolved.stderr);

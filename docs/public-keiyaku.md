@@ -124,9 +124,13 @@ Debt reads retain native absence and refusal distinctions, including prerequisit
 availability in complete detail; listing defaults to open work.
 
 Each list and addressed status operation selects one producing owner before
-observation. The independent selector-free Kanshi read owns the World report;
-status requires one complete Contract or Akuma identity or one named selector
-and never falls back to World observation. Named status selection reuses the
+observation. Omitted status selection requests the Kanshi active-work summary,
+even inside an active Contract appointment. Repo and World retain independent
+invocation scope; the actual enclosing Git worktree supplies appointment context,
+not the worktree named by a Repo override. Invocation identity does not narrow the
+summary. The Kanshi board and running-count observation remain separate reads.
+Supplied status selection asks for one complete Contract or Akuma identity or
+one named selector and never falls back to the summary. Named selection reuses the
 Address authority and its cross-family collision judgment, freezing the resolved
 identity once before exact observation. Later alias movement cannot retarget that
 read. Exact selection consults no named authority; native exact-owner operations

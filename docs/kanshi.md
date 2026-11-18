@@ -88,7 +88,21 @@ explicit without changing roster membership. Native history and live observation
 keep exact retained detail. The bounded report retains owner order and whether
 more rows exist without claiming totals or supplying a complete selector set.
 
-An exact aggregate observes the complete owner-classified running Akumas and
+Active-work status is a roster-free observation over each owner's complete
+active membership, before any display bound. It counts Contracts whose delivered
+work awaits current review testimony, distinguishes witnessed workspace conflicts
+from unavailable conflict evidence, counts active Akumas by their observed life,
+and splits open Debts by the Debt owner's readiness judgment. A current negative
+review is a verdict, not missing testimony. Conflict evidence comes from the
+appointed workspace, never target lag or a prospective merge. An absent index
+is unavailable evidence, not an observed empty index. Unavailable workspace
+evidence does not erase known Contract membership or known conflicts;
+incomplete product membership does not become a total. Section availability
+remains independent. The report may name the active Contract appointed to the
+invocation's canonical enclosing Git worktree with only a short current state;
+context does not change any count. It establishes no World and records nothing.
+
+The separate running-count observation observes the complete owner-classified running Akumas and
 open Debts, and counts active Contract journal membership in the observed Git
 tree. Contract counting does not decode journals or observe prerequisites,
 workspaces, targets, or gates. It never uses bounded catalogue rows as totals;

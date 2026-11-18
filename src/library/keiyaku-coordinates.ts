@@ -23,12 +23,21 @@ export class KeiyakuUsageError extends KeiyakuError {
 export type InvocationCoordinates = Readonly<{
   cwd: string;
   repo?: Repo;
+  contractWorktree?: string;
   world: WorldRoot | null;
   candidateWorld: WorldRoot | null;
   establishWorld: () => Promise<WorldRoot>;
 }>;
 
 type RepoDiscovery = Readonly<{ kind: "present"; repo: Repo }> | Readonly<{ kind: "absent"; error: NoGitWorldError }>;
+
+function contractCoordinates(
+  repo: Repo | undefined,
+  invocation: Repo | undefined,
+): Pick<InvocationCoordinates, "repo" | "contractWorktree"> {
+  if (repo === undefined) return {};
+  return invocation?.root === repo.root ? { repo, contractWorktree: invocation.cwd } : { repo };
+}
 
 async function discoverRepo(path: string, gitPath?: string): Promise<RepoDiscovery> {
   try {
@@ -80,7 +89,7 @@ export async function invocationCoordinates(
     const world = await World.resolve({ cwd, ...(worldRepo === undefined ? {} : { repositoryRoot: worldRepo.root }) });
     return {
       cwd,
-      ...(repo === undefined ? {} : { repo }),
+      ...contractCoordinates(repo, worldRepo),
       world: world.root,
       candidateWorld: world.candidate,
       establishWorld: async () => {

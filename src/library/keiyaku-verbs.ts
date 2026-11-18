@@ -25,6 +25,7 @@ import {
   contractStatusSchema,
   contractNormalStatusSchema,
 } from "../kanshi/report.js";
+import { kanshiStatusSummarySchema } from "../kanshi/counts.js";
 import { settingsSchema } from "../settings.js";
 import { contractCatalogueSchema } from "../protocol/read/status.js";
 import { executionObservationSchema } from "../protocol/execution-observation.js";
@@ -525,19 +526,20 @@ export const verbs = Object.freeze({
   },
   status: {
     description:
-      "Where one Contract stands (stage, gates, prerequisites, worktree) or what one Akuma is doing (state, current work, changed files). Select one complete identity or @name; returns its canonical id.",
+      "Summarize active Contracts, Akumas and Debts without listing them, or select one Contract or Akuma for its exact status and canonical identity.",
     input: z
       .strictObject({
         selector: z
           .union([contractIdSchema, akumaIdSchema, akumaAliasSchema])
           .refine((value) => !/[*?\[\]]/u.test(value), "status does not accept globs")
+          .exactOptional()
           .describe(
-            "One complete Contract ID (kei/...), Akuma ID (aku/<name>/<hex>), or @name (Contract shorthand or World-local Akuma alias). Ambiguous names, globs and categories are refused.",
+            "Omit for the active-work summary, even inside a Contract worktree. Otherwise: one complete Contract ID (kei/...), Akuma ID (aku/<name>/<hex>), or @name (Contract shorthand or World-local Akuma alias). Ambiguous names, globs and categories are refused.",
           ),
       })
       .readonly(),
-    output: z.union([contractStatusSchema, akumaObservationSchema]),
-    normal: z.union([contractNormalStatusSchema, akumaObservationSchema]),
+    output: z.union([kanshiStatusSummarySchema, contractStatusSchema, akumaObservationSchema]),
+    normal: z.union([kanshiStatusSummarySchema, contractNormalStatusSchema, akumaObservationSchema]),
     effect: "read",
   },
   ls: {

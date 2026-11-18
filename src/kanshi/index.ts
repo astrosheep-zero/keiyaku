@@ -43,7 +43,7 @@ export const Kanshi = Object.freeze({
 });
 
 export { kanshiObservationSchema } from "./read.js";
-export type { KanshiCountsOptions, KanshiCountsReport } from "./counts.js";
+export type { KanshiCountsOptions, KanshiCountsReport, KanshiStatusSummary } from "./counts.js";
 export { regionReadSchema, kanshiReportSchema, kanshiContractReportSchema, kanshiResultSchema } from "./report.js";
 export type { KanshiBoardOptions, KanshiScopeInput } from "./read.js";
 export type {

@@ -25,9 +25,13 @@ test("named invocation status freezes the canonical subject before observation",
     return original.call(this, input);
   });
   const facet = Keiyaku.for({ cwd: world, environment: {} });
-  assert.equal((await facet.status({ selector: alias })).id, first.id);
+  const originalSubject = await facet.status({ selector: alias });
+  assert.equal(originalSubject.kind, "akuma");
+  assert.equal(originalSubject.id, first.id);
   assert.deepEqual(observed, [first.id]);
-  assert.equal((await facet.run("status", { selector: alias })).id, second.id);
+  const movedSubject = await facet.run("status", { selector: alias });
+  assert.equal(movedSubject.kind, "akuma");
+  assert.equal(movedSubject.id, second.id);
   assert.deepEqual(observed, [first.id, second.id]);
 });
 
@@ -45,6 +49,8 @@ test("named status preserves unknown and unavailable authority without establish
   const worker = await bornLineageAkuma({ root: world, akumaName: "worker", draw: "a0000043", createdAt: "2026-08-09T00:00:00.000Z" });
   mkdirSync(join(world, ".keiyaku", "akuma"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akuma", "alias.json"), "broken\n");
-  assert.equal((await facet.status({ selector: worker.id })).id, worker.id);
+  const exact = await facet.status({ selector: worker.id });
+  assert.equal(exact.kind, "akuma");
+  assert.equal(exact.id, worker.id);
   await assert.rejects(facet.status({ selector: "@unknown" }), /Alias authority is failed/u);
 });

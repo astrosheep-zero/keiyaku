@@ -45,9 +45,10 @@ test("packaged stdio server launches from its documented standalone configuratio
   });
   const { tools } = await client.listTools();
   assert.ok(tools.some((tool) => tool.name === "report"));
-  const status = tools.find((tool) => tool.name === "status")!;
-  for (const field of status.inputSchema.required ?? [])
-    assert.ok(help.includes(`status requires ${field}`), `help must name the required status field ${field}`);
+  assert.match(help, /Status summarizes active work without a selector/u);
+  const status = await client.callTool({ name: "status", arguments: {} });
+  assert.equal(status.isError, false);
+  assert.equal((status.structuredContent as { kind?: string } | undefined)?.kind, "active-work-summary");
   const result = await client.callTool({ name: "whoami", arguments: {} });
   assert.equal(result.isError, false);
   const created = await client.callTool({ name: "debt_add", arguments: { cwd: root, title: "Stdio flat business input" } });

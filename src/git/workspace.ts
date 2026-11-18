@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { access } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { access, readFile, realpath, stat } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId, SnapshotId } from "../core/facts/types.js";
 import { contractPhysicalName, gitObjectId, mintSnapshotId, snapshotIdSchema, type GitObjectId } from "./identity.js";
@@ -70,6 +70,30 @@ async function workspaceRevision(
     if (error instanceof GitPlumbingError && error.status === 1) return null;
     throw error;
   }
+}
+
+/** Read the appointed linked index, not a containing checkout or a proposed merge. */
+export async function workspaceHasUnmergedPaths(repository: GitRepository, workspace: string): Promise<boolean> {
+  const admin = await worktreeGitDirectory(repository, workspace);
+  if (dirname(admin) !== join(repository.commonDirectory, "worktrees") || (await realpath(workspace)) !== workspace)
+    throw new Error(`Cannot prove linked Git worktree at ${workspace}`);
+  const reverse = (await readFile(join(admin, "gitdir"), "utf8")).trim();
+  if ((await realpath(resolve(admin, reverse))) !== join(workspace, ".git"))
+    throw new Error(`Cannot prove linked Git worktree at ${workspace}`);
+  // Git reads a missing index as an empty one; that does not prove absence of conflicts.
+  const index = join(admin, "index");
+  if (!(await stat(index)).isFile()) throw new Error(`Cannot read linked Git index at ${index}`);
+  const unmerged = await executeGit(repository, [
+    "-C",
+    workspace,
+    `--git-dir=${admin}`,
+    "ls-files",
+    "--unmerged",
+    "-z",
+  ]);
+  if (unmerged.length > 0) return true;
+  if (!(await stat(index)).isFile()) throw new Error(`Cannot read linked Git index at ${index}`);
+  return false;
 }
 
 async function workspaceOperationState(
