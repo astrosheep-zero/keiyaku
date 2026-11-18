@@ -38,14 +38,17 @@ Turn and remain opaque outside this boundary. Providers never return product
 identities; Body supplies Heart correlation and is the sole writer of Heart
 facts.
 
-Live tell exists when the adapter can prove native admission into the active
-session. An exact native enqueue broadcast is sufficient terminal delivery
-evidence; delivery does not promise model consumption or obedience. Mere
-submission or transport acknowledgement without native admission is not a
-receipt. Stronger native receipts remain authoritative where available. A
-provider without native admission evidence carries pending text into a later
-launch instead. Missing receipt evidence remains missing; adapters and Body do
-not synthesize it.
+Live tell exists when the adapter can prove exact native admission into the
+active session. That proof is sufficient terminal delivery evidence; delivery
+does not promise model consumption or obedience, and providers need not produce
+a later consumption receipt. Queueing input, first yielding it, or receiving a
+transport acknowledgement alone does not prove admission. If execution ends
+before admission is witnessed, the input is not delivered; a later terminal
+cannot retract admission already witnessed. A provider without native admission
+evidence carries pending text into a later launch instead. Stronger native
+receipts remain authoritative where available; previously recorded deliveries
+that require them still do. Missing evidence remains missing; adapters and Body
+do not synthesize it.
 An adapter without resume starts fresh only when no durable native resume promise
 exists. An adapter without fork offers no emulation or capability registry.
 

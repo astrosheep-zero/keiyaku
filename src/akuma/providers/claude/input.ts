@@ -6,7 +6,7 @@ type Deferred = Readonly<{
   reject(error: unknown): void;
 }>;
 
-type QueuedInput = Readonly<{ message: SDKUserMessage; pulled: Deferred; onPulled?(): void }>;
+type QueuedInput = Readonly<{ message: SDKUserMessage; pulled: Deferred }>;
 type InputWaiter = Readonly<{
   resolve(value: IteratorResult<SDKUserMessage>): void;
   reject(error: unknown): void;
@@ -20,10 +20,6 @@ function deferred(): Deferred {
     reject = refuse;
   });
   return { promise, resolve, reject };
-}
-
-function ended(): Error {
-  return new Error("Claude input ended before the SDK acknowledged the message");
 }
 
 const turnEnded = Symbol("claude-turn-ended");
@@ -42,10 +38,8 @@ export function isClaudeTurnEnded(error: unknown): boolean {
 export type ClaudeInput = Readonly<{
   iterable: AsyncIterable<SDKUserMessage>;
   get closed(): boolean;
-  get pending(): number;
-  push(message: SDKUserMessage, onPulled?: () => void): Promise<void>;
+  push(message: SDKUserMessage): Promise<void>;
   end(): void;
-  close(): void;
   fail(error: unknown): void;
 }>;
 
@@ -65,7 +59,6 @@ export function createClaudeInput(): ClaudeInput {
   let closed = false;
 
   const acknowledgePrevious = (): void => {
-    previous?.onPulled?.();
     previous?.pulled.resolve();
     previous = undefined;
   };
@@ -83,12 +76,9 @@ export function createClaudeInput(): ClaudeInput {
     get closed() {
       return closed;
     },
-    get pending() {
-      return queue.length + (previous === undefined ? 0 : 1);
-    },
-    push(message, onPulled) {
-      if (closed) return Promise.reject(failure ?? ended());
-      const entry = { message, pulled: deferred(), ...(onPulled === undefined ? {} : { onPulled }) };
+    push(message) {
+      if (closed) return Promise.reject(failure ?? turnEndedError());
+      const entry = { message, pulled: deferred() };
       const waiter = waiters.shift();
       if (waiter === undefined) queue.push(entry);
       else waiter.resolve(take(entry));
@@ -98,13 +88,6 @@ export function createClaudeInput(): ClaudeInput {
       if (closed) return;
       closed = true;
       rejectUnresolved(turnEndedError());
-      for (const waiter of waiters.splice(0)) waiter.resolve({ done: true, value: undefined });
-    },
-    close() {
-      if (closed) return;
-      closed = true;
-      const error = ended();
-      rejectUnresolved(error);
       for (const waiter of waiters.splice(0)) waiter.resolve({ done: true, value: undefined });
     },
     fail(error) {
@@ -118,6 +101,7 @@ export function createClaudeInput(): ClaudeInput {
       [Symbol.asyncIterator](): AsyncIterator<SDKUserMessage> {
         return {
           next(): Promise<IteratorResult<SDKUserMessage>> {
+            // Only this subsequent SDK pull acknowledges the previous yield.
             acknowledgePrevious();
             const entry = queue.shift();
             if (entry !== undefined) return Promise.resolve(take(entry));

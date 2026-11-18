@@ -2875,7 +2875,7 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
-function claudeResult(index: number): readonly SDKMessage[] {
+function claudeResult(index: number): readonly [SDKMessage, SDKMessage] {
   return [
     {
       type: "assistant",
@@ -2897,50 +2897,51 @@ function controlledClaude() {
   const outputs: SDKMessage[] = [
     { type: "system", subtype: "init", session_id: "session-live" } as unknown as SDKMessage,
   ];
-  const outputWaiters: Array<() => void> = [];
+  let outputWaiter: ReturnType<typeof deferred<IteratorResult<SDKMessage>>> | undefined;
   let inputIterator: AsyncIterator<SDKUserMessage> | undefined;
   let pendingInput: Promise<IteratorResult<SDKUserMessage>> | undefined;
-  let failure: unknown;
   let ended = false;
-  const wakeOutput = () => outputWaiters.shift()?.();
+  let queries = 0;
+  const end = () => {
+    ended = true;
+    outputWaiter?.resolve({ done: true, value: undefined });
+    outputWaiter = undefined;
+  };
   const pullInput = () => {
     if (inputIterator === undefined) throw new Error("Claude input is not attached");
     pendingInput = inputIterator.next();
     void pendingInput.then(
       (next) => {
-        if (!next.done) return;
-        ended = true;
-        wakeOutput();
+        if (next.done) end();
       },
       () => {},
     );
   };
+  const provider = createClaudeProvider(async () => ({
+    query({ prompt }) {
+      queries += 1;
+      assert.notEqual(typeof prompt, "string");
+      inputIterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+      void inputIterator.next().then(pullInput);
+      return {
+        [Symbol.asyncIterator]() {
+          return this;
+        },
+        next() {
+          const message = outputs.shift();
+          if (message !== undefined) return Promise.resolve({ done: false, value: message });
+          if (ended) return Promise.resolve({ done: true, value: undefined });
+          outputWaiter = deferred<IteratorResult<SDKMessage>>();
+          return outputWaiter.promise;
+        },
+        close: end,
+      } as unknown as Query;
+    },
+  }));
   return {
-    sdk: {
-      query({ prompt }: { prompt: string | AsyncIterable<SDKUserMessage> }) {
-        inputIterator = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
-        void inputIterator.next().then(() => {
-          pullInput();
-        });
-        const query = (async function* () {
-          try {
-            for (;;) {
-              if (failure !== undefined) throw failure;
-              const message = outputs.shift();
-              if (message !== undefined) yield message;
-              else if (ended) return;
-              else await new Promise<void>((resolve) => outputWaiters.push(resolve));
-            }
-          } catch (error) {
-            throw error;
-          }
-        })() as unknown as Query;
-        query.close = () => {
-          ended = true;
-          wakeOutput();
-        };
-        return query;
-      },
+    start: () => provider.start(freshInput("initial", { cwd: "/work" })).result,
+    get queries() {
+      return queries;
     },
     async receiveInput() {
       await waitForCondition("the provider input iterator to pull its first message", () => pendingInput !== undefined);
@@ -2950,18 +2951,18 @@ function controlledClaude() {
     acknowledgeInput() {
       pullInput();
     },
-    output(...messages: SDKMessage[]) {
-      outputs.push(...messages);
-      wakeOutput();
+    output(first: SDKMessage, ...rest: SDKMessage[]) {
+      assert.ok(outputWaiter, "Query is waiting directly on the next native message");
+      outputs.push(...rest);
+      outputWaiter.resolve({ done: false, value: first });
+      outputWaiter = undefined;
     },
     fail(error: unknown) {
-      failure = error;
-      wakeOutput();
+      assert.ok(outputWaiter);
+      outputWaiter.reject(error);
+      outputWaiter = undefined;
     },
-    end() {
-      ended = true;
-      wakeOutput();
-    },
+    end,
   };
 }
 
@@ -3214,17 +3215,11 @@ test("Claude closes the terminal gate before a delayed Query iterator tail", asy
   await iteratorEnded.promise;
 });
 
-test("Claude live tell waits for a post-yield source pull and shares one Query", async () => {
+test("Claude live tell waits for a post-yield source pull and shares one Query", async (context) => {
   const harness = controlledClaude();
-  let queries = 0;
-  const provider = createClaudeProvider(async () => ({
-    query(input) {
-      queries += 1;
-      return harness.sdk.query(input);
-    },
-  }));
-  const drive = await provider.start(freshInput("initial", { cwd: "/work" })).result;
-  assert.equal(queries, 1);
+  context.after(harness.end);
+  const drive = await harness.start();
+  assert.equal(harness.queries, 1);
   let resolved = false;
   const submission = drive.tell!({ id: "tell-live-1", text: "steer now" }).then((value) => {
     resolved = true;
@@ -3236,13 +3231,61 @@ test("Claude live tell waits for a post-yield source pull and shares one Query",
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(resolved, false);
   harness.acknowledgeInput();
-  const accepted = await submission;
-  assert.equal(accepted.kind, "accepted");
-  assert.equal(queries, 1);
-  harness.output(...claudeResult(1));
-  const receipt = await drive.receipts![Symbol.asyncIterator]().next();
-  assert.deepEqual(receipt, { done: false, value: { evidence: "exact", tellId: "tell-live-1", kind: "consumed" } });
+  assert.equal((await submission).kind, "accepted");
+  assert.equal(drive.receipts, undefined);
+  assert.equal(harness.queries, 1);
+  const [assistant, result] = claudeResult(1);
+  harness.output(assistant, result);
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
+  assert.equal((await harness.receiveInput()).done, true);
+});
+
+test("Claude preserves an acknowledged Tell when native terminal handling wins the continuation race", async (context) => {
+  const harness = controlledClaude();
+  context.after(harness.end);
+  const drive = await harness.start();
+  const submission = drive.tell!({ id: "tell-live-1", text: "steer now" });
+  assert.equal((await harness.receiveInput()).done, false);
+  // Queue the observer's continuation first, then witness the pull synchronously.
+  // The result fences input before the Tell continuation can report the witnessed admission.
+  harness.output(claudeResult(1)[1]);
+  harness.acknowledgeInput();
+  assert.equal((await submission).kind, "accepted");
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1" });
+});
+
+test("Claude ends unacknowledged input at a failed native result and fences later Tells", async (context) => {
+  const harness = controlledClaude();
+  context.after(harness.end);
+  const drive = await harness.start();
+  const yielded = drive.tell!({ id: "tell-live-1", text: "unacknowledged" });
+  assert.equal((await harness.receiveInput()).done, false);
+  const queued = drive.tell!({ id: "tell-live-2", text: "still queued" });
+  harness.output({
+    type: "result",
+    subtype: "error_during_execution",
+    session_id: "session-live",
+    errors: ["native result failure"],
+  } as SDKMessage);
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "native result failure" });
+  assert.deepEqual(await yielded, { kind: "turn-ended" });
+  assert.deepEqual(await queued, { kind: "turn-ended" });
+  assert.deepEqual(await drive.tell!({ id: "tell-live-3", text: "too late" }), { kind: "turn-ended" });
+  harness.acknowledgeInput();
+  assert.equal((await harness.receiveInput()).done, true);
+});
+
+test("Claude rejects unacknowledged input with the original transport failure", async (context) => {
+  const harness = controlledClaude();
+  context.after(harness.end);
+  const drive = await harness.start();
+  const submission = drive.tell!({ id: "tell-live-1", text: "unacknowledged" });
+  assert.equal((await harness.receiveInput()).done, false);
+  const nativeError = new Error("SDK stream broke");
+  const rejection = assert.rejects(submission, (error) => error === nativeError);
+  harness.fail(nativeError);
+  await rejection;
+  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: nativeError.message });
 });
 
 test("Codex app-server maps admitted options, native session, answer, and exact turn history", async (context) => {

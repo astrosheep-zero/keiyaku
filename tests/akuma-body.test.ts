@@ -17,9 +17,11 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import type { Query, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { CONTROL_RESPONSE_MS, driveAkumaBody } from "../src/akuma/body.js";
 import { bodyLaunchSchema, type BodyLaunch, type LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { bodyProcessInput, spawnAkumaBody } from "../src/akuma/detached-body.js";
+import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import {
@@ -898,78 +900,73 @@ test("live receipt persistence waits for its Body-scoped delivery mapping", asyn
   }
 });
 
-test("a receipt-free live acknowledgement settles the tell in the current Body", async () => {
+test("Claude's receipt-free live acknowledgement settles the Tell in the current Body", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-live-ack-");
   const { promise: eventsReleased, resolve: releaseEvents } = promiseBarrier<void>();
   let body: ReturnType<typeof driveAkumaBody> | undefined;
   try {
-    const allocated = await allocatedHeart(root, "codex", "1a2b3c40");
-    let observed = false;
-    const tellObserved = () => { observed = true; };
-    let sessionStarted = false;
-    const live: ProviderAdapter = scenarioProvider((input) => createProviderAttempt(input.signal, async (custody) => {
-        const session = {
-          admission: { fence: "initial-turn" },
-          events: {
-            async *[Symbol.asyncIterator]() {
-              sessionStarted = true;
-              yield { type: "session" as const, coordinate: { sessionId: "live-session" } };
-              await eventsReleased;
-            },
-          },
-          completion: eventsReleased.then(() => ({
-            kind: "answered" as const,
-            answer: "done",
-            historyId: "live-history",
-          })),
-          async tell() {
-            tellObserved();
-            return { kind: "accepted" as const, fence: "turn-1:tell-live" };
-          },
-        };
-        custody.own(sessionResource(session.completion));
-        return session;
+    const allocated = await allocatedHeart(root, "claude", "1a2b3c40");
+    let input: AsyncIterator<SDKUserMessage>;
+    let pullingLive = false;
+    let yielded: IteratorResult<SDKUserMessage> | undefined;
+    const live = createClaudeProvider(async () => ({
+      query({ prompt }) {
+        assert.notEqual(typeof prompt, "string");
+        input = (prompt as AsyncIterable<SDKUserMessage>)[Symbol.asyncIterator]();
+        const query = (async function* () {
+          await input.next();
+          // The next pull acknowledges launch and waits for the first live Tell.
+          void input.next().then((message) => { yielded = message; }, () => {});
+          pullingLive = true;
+          yield { type: "system", subtype: "init", session_id: "live-session" };
+          await eventsReleased;
+          yield { type: "result", subtype: "success", session_id: "live-session", result: "done" };
+        })() as unknown as Query;
+        query.close = releaseEvents;
+        return query;
+      },
     }));
-    body = driveAkumaBody(
-      {
-        paths: allocated.paths,
-        seed: {
-          id: allocated.id,
-          akumaName: "codex",
-          provider: { name: "codex", kind: "codex-app-server" },
-          options: {},
-          origin: { kind: "direct" },
-          cwd: root,
-        },
-        initialBody: "work",
-      },
-      live,
-      {
-        now: () => "2026-08-08T00:00:00.000Z",
-      },
-    );
+    body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), live, {
+      now: () => "2026-08-08T00:00:00.000Z",
+    });
     await waitUntilLatestBody(allocated.paths, body);
     await awaitProviderSession(
-      () => sessionStarted,
+      () => pullingLive,
       body,
-      "the provider session to start before recording the live Tell",
+      "the Claude Query to pull after launch before recording the live Tell",
     );
     await recordTell(allocated.paths, {
       id: "tell-live",
       body: "steer",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    await waitForCondition("the receipt-free live Tell callback", () => observed, {
-      terminalState: settlementProbe(body, () => "Body settled before the live Tell callback"),
+    await waitForCondition("Claude to receive the live Tell", () => yielded !== undefined, {
+      terminalState: settlementProbe(body, () => "Body settled before Claude received the live Tell"),
     });
+    assert.ok(yielded && !yielded.done);
+    assert.equal(yielded.value.message.content, "steer");
+    assert.equal((await readTell(allocated.paths, "tell-live"))?.state, "pending");
+
+    const afterAcknowledgement = input!.next();
     await waitForCondition(
       "the live acknowledgement to settle the pending Tell",
-      async () => (await readHeart(allocated.paths)).pending.length === 0,
+      async () => (await readTell(allocated.paths, "tell-live"))?.state === "told",
       { terminalState: settlementProbe(body, () => "the driving Body pump settled with the Tell still pending") },
     );
+    const tell = await readTell(allocated.paths, "tell-live");
+    assert.ok(tell?.binding);
+    assert.deepEqual(tell.deliveries, [
+      {
+        route: "live",
+        turnSequence: tell.binding.turnSequence,
+        receipt: "unavailable",
+        deliveredAt: "2026-08-08T00:00:00.000Z",
+      },
+    ]);
     assert.deepEqual((await readHeart(allocated.paths)).pending, []);
     releaseEvents();
     await body;
+    assert.equal((await afterAcknowledgement).done, true);
     assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 1);
   } finally {
     releaseEvents();
