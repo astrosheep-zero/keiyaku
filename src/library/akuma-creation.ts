@@ -1,7 +1,7 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
 import { contractIdSchema } from "../git/identity.js";
-import { tellResultSchema } from "../akuma/call-initial-tell.js";
+import { pendingWakeSchema, tellActionSchema, tellResultSchema } from "../akuma/call-initial-tell.js";
 import {
   completedTextObservationSchema,
   operationDiagnosticSchema,
@@ -87,10 +87,8 @@ const spawnAnswer = {
   akumaId: akumaIdSchema,
   ...publicationFields,
   tellId: z.string().exactOptional(),
-  wake: z
-    .strictObject({ kind: z.literal("pending") })
-    .readonly()
-    .exactOptional(),
+  action: tellActionSchema.exactOptional(),
+  wake: pendingWakeSchema.exactOptional(),
   input: completedTextObservationSchema.exactOptional(),
 };
 export const spawnNormalResultSchema = z.strictObject({ kind: z.literal("spawned"), ...spawnAnswer }).readonly();
@@ -100,6 +98,8 @@ export const spawnResultSchema = z.union([
     .strictObject({
       kind: z.literal("failed"),
       ...spawnAnswer,
+      contractId: contractIdSchema.exactOptional(),
+      aliasName: akumaAliasSchema.exactOptional(),
       failures: z.tuple([spawnFailureSchema], spawnFailureSchema).readonly(),
     })
     .readonly(),
@@ -401,7 +401,7 @@ async function settleCall(
   reportDiagnostic?: (message: string) => void,
 ): Promise<SpawnResult> {
   const receipt = admitted.tell;
-  const { cwd: _cwd, contractId: _contract, aliasName: _alias, failures: associationFailures, ...publication } = head;
+  const { cwd: _cwd, contractId, aliasName, failures: associationFailures, ...publication } = head;
   const compact = receipt === undefined ? undefined : completeTell(tellAdmissionEvidence(admitted.id, receipt));
   const failures = callAdmissionFailures(admitted, parsed.initialTell);
   if (compact?.kind === "failed") failures.push(...compact.failures);
@@ -411,7 +411,11 @@ async function settleCall(
     ...publication,
     ...(compact === undefined
       ? {}
-      : { tellId: compact.tellId, ...(compact.wake === undefined ? {} : { wake: compact.wake }) }),
+      : {
+          tellId: compact.tellId,
+          ...(compact.action === undefined ? {} : { action: compact.action }),
+          ...(compact.wake === undefined ? {} : { wake: compact.wake }),
+        }),
   };
   let input: SpawnResult["input"];
   const result = (): SpawnResult => {
@@ -419,12 +423,18 @@ async function settleCall(
     const observed = { ...answer, ...(input === undefined ? {} : { input }) };
     return first === undefined
       ? { kind: "spawned", ...observed }
-      : { kind: "failed", ...observed, failures: [first, ...rest] };
+      : {
+          kind: "failed",
+          ...observed,
+          failures: [first, ...rest],
+          ...(contractId === undefined ? {} : { contractId }),
+          ...(aliasName === undefined ? {} : { aliasName }),
+        };
   };
-  if (parsed.signal?.aborted === true && admitted.failure !== undefined)
-    throw withSpawnFailureReceipt(parsed.signal.reason, result(), parsed.signal);
+  const failed = (reason: unknown) => withSpawnFailureReceipt(reason, spawnResultSchema.parse(result()), parsed.signal);
+  if (parsed.signal?.aborted === true) throw failed(parsed.signal.reason);
   if (admitted.failure !== undefined && (parsed.initialTell === undefined || admitted.failureStage === "wake"))
-    throw withSpawnFailureReceipt(admitted.failure, result(), parsed.signal);
+    throw failed(admitted.failure);
   if (receipt !== undefined && parsed.mode === "wait") {
     try {
       const {
@@ -458,7 +468,7 @@ async function settleCall(
         failures.push({ stage: "observation", diagnostic: observation.diagnostic });
       else input = observation;
     } catch (error) {
-      if (parsed.signal?.aborted) throw withSpawnFailureReceipt(error, result(), parsed.signal);
+      if (parsed.signal?.aborted) throw failed(error);
       failures.push({ stage: "observation", diagnostic: integrationFailure(error).diagnostic });
     }
   }
@@ -476,7 +486,12 @@ export async function callAkumas(
   const prepared = await prepareAkumaCall(
     parsed.path,
     parsed,
-    { ...parsed, ...(cwd === undefined ? {} : { cwd }), ...(seat === undefined ? {} : { contractId: seat.id }) },
+    {
+      ...parsed,
+      observeAnswer: parsed.mode === "wait",
+      ...(cwd === undefined ? {} : { cwd }),
+      ...(seat === undefined ? {} : { contractId: seat.id }),
+    },
     cwd === undefined ? {} : { cwdCanonical: true },
     spawn,
   );

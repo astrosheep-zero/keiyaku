@@ -328,13 +328,17 @@ export class HeldAkumaLeash {
     return sealFact(this.database);
   }
 
-  async clearStop(paths: AkumaPaths): Promise<void> {
-    await withHeartTransaction(paths, deleteStopControl);
+  async clearStop(paths: AkumaPaths, signal?: AbortSignal): Promise<void> {
+    await withHeartTransaction(paths, deleteStopControl, signal);
   }
 
-  async completeInterruptBarrier(paths: AkumaPaths, expected?: PauseFact): Promise<InterruptCompletion> {
+  async completeInterruptBarrier(
+    paths: AkumaPaths,
+    expected?: PauseFact,
+    signal?: AbortSignal,
+  ): Promise<InterruptCompletion> {
     if (this.closed) throw new Error("Akuma interrupt completion requires a held leash");
-    return await withHeartTransaction(paths, (heart) => judgeInterruptBarrier(heart, expected));
+    return await withHeartTransaction(paths, (heart) => judgeInterruptBarrier(heart, expected), signal);
   }
 
   async recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): Promise<BodyFact> {
@@ -361,29 +365,34 @@ export class HeldAkumaLeash {
   async settleStop(
     paths: AkumaPaths,
     expectedBodySequence?: number,
+    signal?: AbortSignal,
   ): Promise<Readonly<{ target: StopFact; result: "recorded" | "already-killed" }> | null> {
-    return await withHeartTransaction(paths, (heart) => {
-      const target = stopFact(heart);
-      if (target === null) {
-        if (expectedBodySequence === undefined) return null;
-        const existing = killFactForBody(heart, expectedBodySequence);
-        return existing === null
-          ? null
-          : { target: { bodySequence: expectedBodySequence, requestedAt: existing.at }, result: "already-killed" };
-      }
-      if (expectedBodySequence !== undefined && target.bodySequence !== expectedBodySequence) {
-        throw new Error("Akuma stop target changed while kill was in progress");
-      }
-      const latest = latestBodyFact(heart);
-      if (latest?.sequence !== target.bodySequence) throw new Error("Akuma stop target is not the latest Body");
-      if (latest.end !== "put-down") return null;
-      const result =
-        latestKillFact(heart)?.bodySequence === target.bodySequence
-          ? ("already-killed" as const)
-          : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);
-      deleteStopControl(heart);
-      return { target, result };
-    });
+    return await withHeartTransaction(
+      paths,
+      (heart) => {
+        const target = stopFact(heart);
+        if (target === null) {
+          if (expectedBodySequence === undefined) return null;
+          const existing = killFactForBody(heart, expectedBodySequence);
+          return existing === null
+            ? null
+            : { target: { bodySequence: expectedBodySequence, requestedAt: existing.at }, result: "already-killed" };
+        }
+        if (expectedBodySequence !== undefined && target.bodySequence !== expectedBodySequence) {
+          throw new Error("Akuma stop target changed while kill was in progress");
+        }
+        const latest = latestBodyFact(heart);
+        if (latest?.sequence !== target.bodySequence) throw new Error("Akuma stop target is not the latest Body");
+        if (latest.end !== "put-down") return null;
+        const result =
+          latestKillFact(heart)?.bodySequence === target.bodySequence
+            ? ("already-killed" as const)
+            : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);
+        deleteStopControl(heart);
+        return { target, result };
+      },
+      signal,
+    );
   }
 
   release(): void {

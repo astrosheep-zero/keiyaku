@@ -34,6 +34,7 @@ export {
   AkumaNameError,
   AkumaBusyError,
   AkumaDecodeError,
+  AkumaKillError,
   AkumaNotBornError,
   AkumaObservationError,
   AkumaProviderError,
@@ -65,6 +66,7 @@ export type {
   AkumaNameCatalogRow,
   JsonSchema,
   JsonSchemaDocument,
+  KillAdmission,
   KillEvidence,
 } from "./akuma/index.js";
 export type { AskObserver, AskProgress } from "./akuma/akuma-selection-execution.js";

@@ -239,7 +239,7 @@ test("packaged spawn and tell refuse the removed --wait option", { timeout: 120_
 });
 
 test(
-  "packaged spawn and tell admissions leave observation to separate waits",
+  "packaged spawn and tell confirm submission and leave answers to separate waits",
   { timeout: 120_000 },
   async () => {
     assert.equal(existsSync(packagedCli), true, "npm run build must produce the packaged CLI before this test");
@@ -253,8 +253,9 @@ test(
       assert.match(
         started.stdout,
         /^✓ spawned aku\/worker\/[0-9a-f]{8} \(@notes\)$/mu,
-        "spawn returns its admission receipt",
+        "spawn identifies the born Akuma",
       );
+      assert.match(started.stdout, /^  started turn\/[1-9][0-9]*$/mu);
       assert.doesNotMatch(started.stdout, /attempt \d+|answered|● running/u, "spawn waits for no answer");
       assert.equal(started.stderr, "", "spawn writes no live progress");
 
@@ -322,12 +323,9 @@ test(
         env,
       });
       assert.equal(tell.code, 0, tell.stderr);
-      assert.match(
-        tell.stdout.split("\n")[0]!,
-        new RegExp(`^(?:✓ told|⧗ tell) ${finisherId} — continue$`, "u"),
-        "tell returns its admission receipt",
-      );
-      assert.doesNotMatch(tell.stdout, /the answer/u, "tell returns admission, not an answer");
+      assert.equal(tell.stdout.split("\n")[0], `✓ tell ${finisherId}`);
+      assert.match(tell.stdout, /^  started turn\/[1-9][0-9]*$/mu);
+      assert.doesNotMatch(tell.stdout, /the answer/u, "tell returns submission, not an answer");
       assert.equal(tell.stderr, "");
       const toldWait = await runPackagedCli(["-C", world, "wait", finisherId!, "--timeout", "20s"], {
         cwd: world,

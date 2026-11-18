@@ -1,5 +1,5 @@
 import type { AkumaStatus } from "../../akuma/akuma.js";
-import type { KillEvidence } from "../../akuma/heart/index.js";
+import type { KillAdmission } from "../../akuma/akuma-errors.js";
 import type { ActivityRow } from "../../akuma/projection.js";
 import { parseExactHistorySelector } from "../../akuma/identity.js";
 import {
@@ -328,15 +328,16 @@ export function snapshotText(
 }
 
 function killResultLabel(
-  evidence: KillEvidence,
+  evidence: KillAdmission["outcome"],
 ): Readonly<{ mark: "✓" | "!"; verb: string; evidence: readonly string[] }> {
   if (evidence === "killed") return { mark: "✓", verb: "killed", evidence: [] };
   if (evidence === "already-killed") return { mark: "✓", verb: "already killed", evidence: [] };
   if (evidence === "already-stopped") return { mark: "✓", verb: "already stopped", evidence: [] };
+  if (evidence === "stop-admitted") return { mark: "!", verb: "stop admitted", evidence: [] };
   return { mark: "!", verb: "not killed", evidence: [evidence] };
 }
 
-export function killResultText(id: string, evidence: KillEvidence, alias?: string): string {
+export function killResultText(id: string, evidence: KillAdmission["outcome"], alias?: string): string {
   const label = killResultLabel(evidence);
   return actionReceipt({
     mark: label.mark,
@@ -534,11 +535,16 @@ export function callFailureLines(
 }
 
 export function tellControlLines(
-  result: Pick<AkumaAskResult, "wake" | "interrupt"> &
-    Readonly<{ failures?: Extract<AkumaTellResult, { kind: "failed" }>["failures"] }>,
+  result: Readonly<{
+    action?: AkumaTellResult["action"];
+    wake?: AkumaAskResult["wake"];
+    interrupt?: AkumaTellResult["interrupt"];
+    failures?: Extract<AkumaTellResult, { kind: "failed" }>["failures"];
+  }>,
   context: TextRenderContext,
 ): readonly string[] {
-  const lines: string[] = [...callFailureLines(result.failures ?? [], context)];
+  const lines: string[] = [];
+  if (result.action !== undefined) lines.push(`${result.action.kind} ${result.action.historyId}`);
   const wake = result.wake;
   if (wake?.kind === "failed") {
     lines.push(...callFailureLines([{ ...wake, stage: "wake" }], context));
@@ -546,14 +552,11 @@ export function tellControlLines(
   const interrupt = result.interrupt;
   if (interrupt !== undefined)
     lines.push(`interrupt ${interrupt.kind}${interrupt.kind === "unavailable" ? ` · ${interrupt.evidence}` : ""}`);
-  return lines;
+  return [...lines, ...callFailureLines(result.failures ?? [], context)];
 }
 
 /**
- * One Tell action receipt: the delivery verdict and complete subject stand whole on the first line
- * with the submitted payload folded onto that same line, bounded so only its preview truncates. A
- * held Tell keeps neutral vocabulary; a failed delivery keeps its concrete diagnosis and native log
- * coordinates as separate supporting facts.
+ * Only unresolved or failed Tell receipts need the submitted payload preview.
  */
 export function tellText(
   result: AkumaTellResult,
@@ -563,14 +566,14 @@ export function tellText(
 ): string {
   const wake = result.wake;
   const mark = result.kind === "failed" ? "!" : wake?.kind === "pending" ? "⧗" : "✓";
-  const verb = result.kind === "failed" || wake?.kind === "pending" ? "tell" : "told";
+  const verb = result.kind === "failed" || wake?.kind === "pending" || result.action !== undefined ? "tell" : "told";
   const head = actionReceipt({
     mark,
     verb,
     id: result.akumaId,
     ...(alias === undefined ? {} : { alias }),
   })[0]!;
-  const preview = safeText(prompt).replace(/\s+/gu, " ").trim();
+  const preview = result.action === undefined ? safeText(prompt).replace(/\s+/gu, " ").trim() : "";
   const prefix = `${head} — `;
   // The verdict and identity never truncate, so an over-wide identity still keeps one visible
   // ellipsis for the input it could not show.

@@ -37,10 +37,9 @@ as its own integration stage and never rolls back the Akuma. A Dispatch failure
 prevents the requested Alias move; an Alias failure preserves Dispatch. A
 contract-free birth is complete and writes no Dispatch. Fork may carry an
 existing Dispatch relation to its child but never inherits an Alias or invents a
-provider fork capability. The submitting process writes its spawn wiring after
-spawn admission -- including any exact first Tell -- and before it observes the
-spawn outcome. Dispatch and Alias remain independent cross-product authority,
-not child identity. Creation completes only when its requested association work
+provider fork capability. The submitting process writes spawn wiring after the
+birth and first-Tell attempt, before optional answer observation. Dispatch and
+Alias remain independent cross-product authority, not child identity. Creation completes only when its requested association work
 completes. Later stops retain all independently observed stage failures in their
 operation order, including an observation failure after failed association; none
 can replace earlier evidence. A first Tell precedes Dispatch, requested Alias
@@ -100,8 +99,12 @@ causes and gives independent invocations separate receipts. Public consumers
 need no adapter projection or execution capability to inspect that evidence;
 an arbitrary foreign error property does not establish confirmed admission.
 
-A spawn composes prompt-free birth with admission of its first ordinary Tell when one is supplied; a Tell is the admitted message. The Tell is optional and a spawn without it reports birth alone, but a clean birth is reported only when every birth stage actually succeeded: a child that became durable while a later stage failed is reported as that failure, with the child identity retained rather than a fabricated success. With an observation bound, a spawn awaits the text answer to that first Tell without withdrawing it at the deadline.
-Akuma execution owns that admission and wake. Library composes surrounding
+Ordinary spawn confirms clean birth and, when an instruction is supplied, exact
+first-Tell submission through the same Akuma owner as ordinary Tell. A prompt-free
+spawn invents no input or Turn. A child made durable before birth settlement fails
+is retained as partial creation, not clean birth. Explicit SDK answer observation
+instead watches the first Tell's text answer without withdrawing its admission
+at the deadline. Akuma execution owns admission and submission; Library composes
 Dispatch and Alias facts. Structured input is a separate Ask after birth; its
 admission follows a successful prompt-free spawn only after its empty birth Body
 has settled cleanly asleep. An immediate Ask or Tell therefore does not contend
@@ -164,8 +167,9 @@ historical content and correlation independently of current associations.
 Latest-answer selection keeps the actual answered Turn coordinate beside its full
 answer from the same retained observation; a later report, failed or cancelled
 Turn cannot replace it. Composition never searches again to infer that coordinate.
-Selection uses one verb per meaning on both faces: `tell` admits a Tell and may
-observe its text answer; `ask` requires a JSON Schema document and observes the
+Selection uses one verb per meaning on both faces: `tell` admits a Tell and
+normally confirms its submission, or may explicitly observe its text answer;
+`ask` requires a JSON Schema document and observes the
 parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide
 work. Ask alone distinguishes invalid output; text observation reports it as
 failure with the same diagnostic. Schema belongs only to ask. Bounds and
@@ -185,9 +189,9 @@ Tell and ask address one Akuma directly. Wait accepts a
 caller-selected batch; kill accepts exactly one selector, which may expand through
 a glob or Contract membership to several Akumas.
 Cancellation before admission preserves the native reason unchanged. After
-admission, exceptional Tell evidence remains directly readable on KeiyakuError
-with that reason retained in its cause chain. Standalone `idle` and plural or CLI `wait` name the same
-Akuma-owned completion judgment in their respective caller contexts. Wait freezes
+admission, exceptional Tell or stop evidence remains directly readable on the
+error with the reason retained as its cause. Standalone `idle` and plural or CLI
+`wait` name the same Akuma-owned completion judgment in their respective caller contexts. Wait freezes
 its subject set at entry in the caller's deduplicated selection order. Kill freezes
 its selector's expansion order and retains each member's native stop evidence. An
 omitted completion mode is any: the wait returns when any selected member

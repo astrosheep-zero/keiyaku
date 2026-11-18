@@ -6,16 +6,17 @@ import { join } from "node:path";
 import { DeliveryLedger, deliveryKeyPrefix, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import test, { type TestContext } from "node:test";
-import { Akuma, Akumas, KeiyakuError, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
+import { Akuma, Akumas, KeiyakuError, World, type WorldRoot } from "../src/index.js";
+import type { FailureProjection } from "../src/library/outcome.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { readAkumaWork } from "../src/akuma/akuma.js";
-import { beginTurn, endTurn, finishBodyIfIdle, readTell, recordTell } from "../src/akuma/heart/index.js";
+import { beginTurn, endTurn, finishBodyIfIdle, readHeart, readTell, recordTell } from "../src/akuma/heart/index.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { bornBody } from "./support/akuma-fixtures.js";
 import { answering, bornWorld, fixtureAdapter, fixtureLauncher, settleFixtureBodies } from "./support/akuma-tell.js";
-import { deferred, restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
+import { deferred, restoreEnvironmentValues, temporaryDirectory, waitForCondition } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 const AT = "2026-10-14T00:00:00.000Z";
@@ -533,13 +534,26 @@ test("CLI native Owners survive coalesced Tell admission into direct Body ledger
     ["requester-session", observed.owner],
     ["other-session", observed.other],
   ] as const) {
-    const result = await cliJson<AkumaTellResult>(["-C", world, "tell", target.allocated.id, `input ${session}`], {
+    const controller = new AbortController();
+    const prompt = `input ${session}`;
+    const pending = cliJson<FailureProjection>(["-C", world, "tell", target.allocated.id, prompt], {
+      signal: controller.signal,
       environment: { PI_SESSION_ID: session, SQUARE_DELIVERY: process.env.SQUARE_DELIVERY },
     });
-    assert.equal(result.exit, 0, result.stderr);
-    const fact = await readTell(target.allocated.paths, result.value.tellId);
+    try {
+      await waitForCondition("CLI Tell admission in held custody", async () =>
+        (await readHeart(target.allocated.paths)).pending.some((tell) => tell.body === prompt),
+      );
+    } finally {
+      controller.abort(new Error("CLI observer disconnected"));
+    }
+    const result = await pending;
+    assert.equal(result.exit, 3, result.stderr);
+    assert.equal(result.value.category, "aborted");
+    assert.ok(result.value.tell);
+    const fact = await readTell(target.allocated.paths, result.value.tell.tellId);
     assert.equal(fact?.initiator, owner);
-    receipts.push(result.value.tellId);
+    receipts.push(result.value.tell.tellId);
   }
   target.holder.release();
   await driveAkumaBody(

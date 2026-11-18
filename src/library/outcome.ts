@@ -555,10 +555,12 @@ export type FailureProjection = Readonly<{
   outcome?: PartialOutcomeEnvelope;
   spawn?: SpawnResult;
   tell?: AkumaTellResult;
+  kill?: NonNullable<KeiyakuError["kill"]>;
 }>;
 export function projectFailure(error: unknown): FailureProjection {
   let cause = error;
-  while (cause instanceof KeiyakuError && cause.constructor === KeiyakuError) cause = cause.cause;
+  while (cause instanceof KeiyakuError && (cause.constructor === KeiyakuError || cause.kill !== undefined))
+    cause = cause.cause;
   return {
     kind: "failed",
     category: errorCategory(error),
@@ -567,6 +569,7 @@ export function projectFailure(error: unknown): FailureProjection {
     ...(cause instanceof Error ? { causeClass: cause.name, causeDiagnostic: cause.message } : {}),
     ...(error instanceof KeiyakuError && error.spawn !== undefined ? { spawn: error.spawn } : {}),
     ...(error instanceof KeiyakuError && error.tell !== undefined ? { tell: error.tell } : {}),
+    ...(error instanceof KeiyakuError && error.kill !== undefined ? { kill: error.kill } : {}),
     ...(error instanceof KeiyakuError && error.outcome !== undefined ? { outcome: error.outcome } : {}),
   };
 }

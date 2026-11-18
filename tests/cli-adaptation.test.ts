@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Akuma } from "../src/akuma/index.js";
@@ -14,6 +14,7 @@ import { accepted } from "./support/library-verbs.js";
 import { installHostAcpFixture } from "./support/acp-host-fixture.js";
 import {
   cleanupSpawnCapableFixtureForTest,
+  deferred,
   installAkumaBodyPidReceipt,
   temporaryDirectory,
   waitForCondition,
@@ -138,7 +139,7 @@ test("retired status guidance is a usage refusal before World or guidance acquis
   assert.equal(read.mock.callCount(), 0);
 });
 
-test("CLI ask returns JSON and invalid-output while tell returns admission", { timeout: 60_000 }, async (t) => {
+test("CLI ask returns JSON and invalid-output while Tell confirms exact submission", { timeout: 60_000 }, async (t) => {
   const root = mkdtempSync(join(tmpdir(), "keiyaku-cli-tell-"));
   const home = temporaryDirectory(t, "keiyaku-cli-tell-home-");
   const world = await World.at(root);
@@ -161,7 +162,7 @@ test("CLI ask returns JSON and invalid-output while tell returns admission", { t
     const runtime = { environment: { KEIYAKU_HOME: home }, signal: t.signal, readStdin: async () => "answer this" };
     const text = await runCli(["-C", root, "tell", born.id, "-"], runtime);
     assert.equal(text.exit, 0, text.stderr);
-    assert.ok(text.stdout.includes(born.id), text.stdout);
+    assert.match(text.stdout, new RegExp(`^✓ tell ${born.id}\\n  started turn/[1-9][0-9]*`, "u"));
     const waited = await runCli(["-C", root, "wait", born.id, "--timeout", "30s"], runtime);
     assert.equal(waited.exit, 0, waited.stderr);
     assert.ok(waited.stdout.includes(answer), waited.stdout);
@@ -204,6 +205,7 @@ test("an observer-held leash cannot strand the original Tell", async (t) => {
   const restore = installAkumaBodyPidReceipt(receipt);
   let operationFailed = true;
   let observation: Promise<unknown> | undefined;
+  const blockedTry = deferred<void>();
   try {
     const born = await Akuma.birth("acp-worker", { root: world, cwd: world, home, bare: true });
     const paths = pathsForAkumaId(world, born.id);
@@ -211,37 +213,32 @@ test("an observer-held leash cannot strand the original Tell", async (t) => {
       (await readHeart(paths)).latestBody?.end === "exited" && (await probeLeash(paths)) === "free",
     );
     await waitForPidReceiptExit(receipt, 60_000, { requireBirth: true });
-    const settledLog = readFileSync(paths.log, "utf8");
     const take = HeldAkumaLeash.try;
-    let contended = false;
+    const observerHolding = deferred<void>();
+    let denied = false;
     t.mock.method(HeldAkumaLeash, "try", async (observed: Parameters<typeof take>[0]) => {
       const observer = new Error().stack?.includes("bornObservation") === true;
       const claim = await take.call(HeldAkumaLeash, observed);
-      if (observed.leash === paths.leash && observer && claim !== null && !contended) {
-        contended = true;
-        try {
-          await waitForCondition("real launch refused by the observer's exclusive leash", () =>
-            existsSync(paths.log) && readFileSync(paths.log, "utf8").slice(settledLog.length).includes("[child exit 75]"),
-          );
-        } catch (error) {
-          claim.release();
-          throw error;
-        }
+      if (observed.leash === paths.leash && observer && claim !== null) {
+        observerHolding.resolve();
+        await blockedTry.promise;
+      } else if (observed.leash === paths.leash && !observer && claim === null) {
+        denied = true;
+        blockedTry.resolve();
       }
       return claim;
     });
-    // Establish actual observation custody before admitting the Tell, so child
-    // startup speed cannot choose whether the launch encounters the held seat.
     observation = born.status();
     void observation.catch(() => undefined);
-    await waitForCondition("observer acquired the exclusive leash before Tell admission", () => contended);
+    await observerHolding.promise;
     const result = await runCli(["-C", root, "tell", born.id, "answer this"], {
       environment: { KEIYAKU_HOME: home },
       signal: t.signal,
     });
-    await observation;
-    assert.equal(contended, true, "the observer held the actual admission leash across launch");
     assert.equal(result.exit, 0, result.stderr);
+    assert.equal(denied, true, "the first wake probe met actual observation custody");
+    await observation;
+    assert.match(result.stdout, /started turn\/[1-9][0-9]*/u);
     const waited = await runCli(["-C", root, "wait", born.id, "--timeout", "60s"], {
       environment: { KEIYAKU_HOME: home }, signal: t.signal,
     });
@@ -250,6 +247,7 @@ test("an observer-held leash cannot strand the original Tell", async (t) => {
     assert.deepEqual((await readHeart(paths)).pending, []);
     operationFailed = false;
   } finally {
+    blockedTry.resolve();
     try {
       await observation?.catch(() => undefined);
       await cleanupSpawnCapableFixtureForTest(t, {

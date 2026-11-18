@@ -1755,9 +1755,9 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   const owner = new AkumaOwner(allocated.id, await World.at(root));
   const held = await HeldAkumaLeash.try(allocated.paths);
   assert.ok(held);
-  const admission = await owner.admitInterrupt("next", { tellId: "idle-interrupt" });
-  assert.equal(admission.kind, "admitted");
-  if (admission.kind !== "admitted") throw new Error("interrupt Tell was not admitted");
+  const admission = await owner.admitTell("next", { tellId: "idle-interrupt", interrupt: true });
+  assert.equal(admission.kind, "recorded");
+  if (admission.kind !== "recorded") throw new Error("interrupt Tell was not admitted");
   const admitted = await readHeart(allocated.paths);
   assert.equal(admitted.pause?.bodySequence, admitted.latestBody?.sequence);
   assert.equal(admitted.pause?.frontierTellId, admission.tell.id);
@@ -1766,7 +1766,7 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
     [admission.tell.id],
   );
   held.release();
-  const receipt = await owner.completeInterruptAdmission(admission, {
+  const receipt = await owner.settleTell(admission, {
     async spawn() {
       throw new Error("fixture successor unavailable");
     },
@@ -1786,12 +1786,13 @@ test("interrupt completion refuses unexplained successor custody", async (contex
   let successorLeash: HeldAkumaLeash | null = null;
   try {
     const owner = new AkumaOwner(allocated.id, await World.at(root));
-    const admission = await owner.admitInterrupt("protected", {
+    const admission = await owner.admitTell("protected", {
+      interrupt: true,
       tellId: "unexplained-successor-interrupt",
       recordedAt: "2026-08-08T00:00:01.000Z",
     });
-    assert.equal(admission.kind, "admitted");
-    if (admission.kind !== "admitted") throw new Error("interrupt Tell was not admitted");
+    assert.equal(admission.kind, "recorded");
+    if (admission.kind !== "recorded") throw new Error("interrupt Tell was not admitted");
     await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-08T00:00:02.000Z" });
     holder.release();
 
@@ -1801,7 +1802,7 @@ test("interrupt completion refuses unexplained successor custody", async (contex
       insertBodyFact(heart, { leashTakenAt: "2026-08-08T00:00:03.000Z" });
     });
 
-    const receipt = await owner.completeInterruptAdmission(admission, tellWakeRuntime(noBodyLaunch));
+    const receipt = await owner.settleTell(admission, tellWakeRuntime(noBodyLaunch));
     assert.deepEqual(receipt.interruption, {
       kind: "unavailable",
       bodySequence: body.sequence,
@@ -1889,12 +1890,12 @@ test("interrupt cancellation after admission stops waiting but keeps Tell and fr
     const controller = new AbortController();
     const reason = new Error("caller stopped waiting");
     const { promise: admitted, resolve: witnessAdmission } =
-      promiseBarrier<Awaited<ReturnType<AkumaOwner["admitInterrupt"]>>>();
-    const original = AkumaOwner.prototype.admitInterrupt;
+      promiseBarrier<Awaited<ReturnType<AkumaOwner["admitTell"]>>>();
+    const original = AkumaOwner.prototype.admitTell;
     context.mock.method(
       AkumaOwner.prototype,
-      "admitInterrupt",
-      async function (this: AkumaOwner, body: string, options?: Parameters<AkumaOwner["admitInterrupt"]>[1]) {
+      "admitTell",
+      async function (this: AkumaOwner, body: string, options?: Parameters<AkumaOwner["admitTell"]>[1]) {
         const result = await original.call(this, body, options);
         witnessAdmission(result);
         return result;
@@ -1906,7 +1907,7 @@ test("interrupt cancellation after admission stops waiting but keeps Tell and fr
       signal: controller.signal,
     });
     const admission = await admitted;
-    assert.equal(admission.kind, "admitted");
+    assert.equal(admission.kind, "recorded");
     controller.abort(reason);
     await assert.rejects(operation, (error: unknown) => error === reason);
     const heart = await readHeart(value.allocated.paths);
@@ -1936,7 +1937,7 @@ test("interrupt preserves an admitted Tell when predecessor custody is untidy", 
     bodySequence: (await readHeart(allocated.paths)).latestBody!.sequence,
     evidence: "untidy",
   });
-  assert.notEqual(receipt.wake.kind, "failed");
+  assert.equal(receipt.wake.kind, "confirmation-stopped");
   const heart = await readHeart(allocated.paths);
   assert.equal(heart.pause?.frontierTellId, "untidy-interrupt");
   assert.deepEqual(

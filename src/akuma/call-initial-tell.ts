@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { tellRowSchema } from "./projection.js";
-import type { WorldRoot } from "../world.js";
-import { executeWaitAkuma } from "./akuma-wait.js";
-import { recordTell, type TellFact } from "./heart/index.js";
-import { pathsForAkumaId, type AkumaId } from "./identity.js";
-export const BIRTH_TIMEOUT_MS = 30_000;
+import type { PauseFact, TellFact } from "./heart/index.js";
+import { turnHistoryIdSchema, type AkumaId } from "./identity.js";
 
 export type CallInitialTell = Readonly<{
   tellId: string;
@@ -18,23 +15,29 @@ export type InitialTellAdmissionInput = Readonly<{
   signal?: AbortSignal;
 }>;
 
-export const tellWakeSchema = z.union([
-  z.strictObject({ kind: z.literal("told") }).readonly(),
-  z.strictObject({ kind: z.literal("held") }).readonly(),
-  z.strictObject({ kind: z.literal("pursuing") }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("failed"),
-      diagnostic: z.string(),
-      child: z
-        .strictObject({
-          log: z.strictObject({ path: z.string() }).readonly(),
-        })
-        .readonly()
-        .exactOptional(),
-    })
-    .readonly(),
-]);
+export const tellActionSchema = z
+  .strictObject({
+    kind: z.enum(["started", "steering"]),
+    historyId: turnHistoryIdSchema,
+  })
+  .readonly();
+export const tellConfirmationStopSchema = z
+  .strictObject({
+    kind: z.literal("confirmation-stopped"),
+    reason: z.enum(["deadline", "hung", "untidy", "stopped"]),
+    diagnostic: z.string(),
+  })
+  .readonly();
+export const pendingWakeSchema = z.strictObject({ kind: z.literal("pending") }).readonly();
+export const failedWakeSchema = z
+  .strictObject({
+    kind: z.literal("failed"),
+    diagnostic: z.string(),
+    reason: z.literal("undelivered").exactOptional(),
+    logPath: z.string().exactOptional(),
+  })
+  .readonly();
+const tellWakeSchema = z.union([tellActionSchema, tellConfirmationStopSchema, pendingWakeSchema, failedWakeSchema]);
 export const tellResultSchema = z
   .strictObject({
     admission: z.strictObject({ tellId: z.string() }).readonly(),
@@ -62,52 +65,15 @@ export type TellWake = z.output<typeof tellWakeSchema>;
 export type TellResult = z.output<typeof tellResultSchema>;
 
 /** Freeze known admission before waiting for wake; no later read can replace it. */
-export function pendingTellReceipt(tell: TellFact): TellResult {
+export function pendingTellReceipt(tell: TellFact, barrier?: PauseFact): TellResult {
   return {
     admission: { tellId: tell.id },
     row: { sequence: tell.sequence, at: tell.recordedAt, text: tell.body },
-    wake: { kind: "pursuing" },
+    wake: { kind: "pending" },
+    ...(barrier === undefined ? {} : { interruption: { kind: "pending", bodySequence: barrier.bodySequence } }),
   };
 }
 
 export type CallInitialTellAdmission =
   | Readonly<{ kind: "admitted"; tell: TellFact; wake: Promise<TellResult> }>
-  | Readonly<{ kind: "not-born" }>
-  | Readonly<{ kind: "birth-failed"; diagnostic: string }>;
-
-export async function admitCallInitialTell(
-  input: Readonly<{
-    world: WorldRoot;
-    id: AkumaId;
-    initialTell: CallInitialTell;
-    signal?: AbortSignal;
-    now?: () => string;
-    wake(tell: TellFact): Promise<TellResult>;
-  }>,
-): Promise<CallInitialTellAdmission> {
-  const paths = pathsForAkumaId(input.world, input.id);
-  const birth = await executeWaitAkuma({
-    path: input.world,
-    ids: [input.id],
-    completion: "all",
-    timeoutMs: BIRTH_TIMEOUT_MS,
-    ...(input.signal === undefined ? {} : { signal: input.signal }),
-  });
-  const observed = birth.results[0];
-  if (birth.reason !== "completed" || observed?.kind !== "observed" || observed.life !== "asleep") {
-    return {
-      kind: "birth-failed",
-      diagnostic: `Akuma ${input.id} prompt-free birth did not settle cleanly`,
-    };
-  }
-  input.signal?.throwIfAborted();
-  const recorded = await recordTell(paths, {
-    kind: "tell",
-    id: input.initialTell.tellId,
-    body: input.initialTell.body,
-    recordedAt: input.now?.() ?? new Date().toISOString(),
-    ...(input.initialTell.initiator === undefined ? {} : { initiator: input.initialTell.initiator }),
-  });
-  if (recorded.kind === "not-born") return recorded;
-  return { kind: "admitted", tell: recorded.tell, wake: input.wake(recorded.tell) };
-}
+  | Readonly<{ kind: "not-born" }>;

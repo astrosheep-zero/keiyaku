@@ -194,10 +194,10 @@ One Akuma action family covers spawns, forks, tells, and kills, including plural
 and partial outcomes. Receipts lead with the action verdict and complete Akuma
 identity; aliases supplement identity. Association, source, execution directory,
 submitted input, and diagnostics remain distinct supporting facts. No receipt
-claims unqualified success over a failed stage. A Tell proves admission and
-delivery, never work finished; its input and admitted child survive a later
-failure, alongside the native cause and known recovery coordinates. Empty input
-adds nothing and held input stays distinct from failed delivery. Kill preserves
+claims success over a failed stage or pending confirmation. A submitted Tell
+names its exact Turn once and distinguishes start from steering without repeating
+the input or claiming consumption, an answer, or liveness. Failed or stopped
+actions preserve known admissions and their cause. Kill preserves
 each member's native outcome in frozen selection order instead of collapsing
 partial failures into one verdict.
 
@@ -294,7 +294,7 @@ identities. Native observations retain complete identities without becoming a
 second result model. Its final receipt preserves partial admissions, retained
 failure scenes, operational stops, and the ordinary completion judgment.
 
-Spawn and tell stop at their birth or admission receipt, without an answer or
+Spawn, Tell, and kill return one final action receipt, without an answer or
 live observation frame. Ask shows one replaceable current-work line on a
 terminal: complete resolved identity, explicit last-observed life, the native
 owner's bounded work summary when available, and elapsed caller observation

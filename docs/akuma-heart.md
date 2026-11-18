@@ -157,7 +157,8 @@ Kill admission classifies the latest Body in one transaction. A Body already
 settled without a witness — a stranded life — is witnessed in place and its
 matching stop control is consumed, so no stop is ever requested of a dead
 process. A normally exited Body remains already stopped without a witness, and
-a witnessed Body remains already killed.
+a witnessed Body remains already killed. Hung custody is not a stop, even if an
+end has been recorded.
 
 Tell admission retains its optional submitting initiator alongside its input;
 this is opaque integration attribution, with no participant lookup or historical
@@ -182,9 +183,15 @@ successor may bind and deliver the same stable Tell identity after a crash
 between binding and delivery. A binding on an open Turn of the currently
 running Body remains in that Body's active attempt; it does not settle the
 Tell for later recovery.
-Provider submission can be at least once: lacking durable witness leaves a Tell
-pending for a later Body, while a terminal witness settles it without rollback.
-Kill never settles or discards a Tell. Provider adapters own live processes and
+Heart judges action confirmation in one consistent observation of the exact
+Tell's delivery and terminal witnesses and relevant Turn, Body, and control.
+Delivery proves submission to its owning Turn even if the Turn has since ended
+or the Tell still lacks a stronger provider receipt. Binding, held custody,
+and Body publication do not prove submission or queue acceptance. Historical
+undelivered evidence is negative; missing or pruned proof is not success.
+Lacking a durable witness can leave an already submitted Tell pending for a
+later attempt. A terminal receipt settles the Tell without rollback. Neither
+deadline nor kill settles or discards a Tell. Provider adapters own live processes and
 never write Heart. Body is the only mover and tell-fact writer after Heart
 admission. Product operations retain their native local owner and admission.
 No observer store, capability registry, duplicate tell pipeline, or

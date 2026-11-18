@@ -10,7 +10,6 @@ import {
   stderrPluginDiagnostic,
   withAkumaWaitDeferrals,
 } from "../plugin/akuma-signals.js";
-import { abortable } from "./abort.js";
 import { admitAkumaCall } from "./akuma-call.js";
 import type { AkumaStreamSnapshot } from "./akuma-stream.js";
 import { AkumaOwner } from "./akuma-owner.js";
@@ -244,10 +243,7 @@ class AkumaHandle {
     }
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
-    return await abortable(
-      this.owner().kill(signal === undefined ? {} : { signal }),
-      signal ?? new AbortController().signal,
-    );
+    return await this.owner().kill(signal === undefined ? {} : { signal });
   }
 }
 

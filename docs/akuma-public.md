@@ -145,25 +145,22 @@ operation that reads Heart, leash, or filesystem state is asynchronous. The
 surface contains no owner, born, Turn, spawn, fork, receipt, ledger,
 provider-event, or process-signaling handle.
 
-A Tell is the admitted message. `tell` distinguishes admitted completion from a
-wake or requested-observation stop, preserving that same admission in either
-case. It may explicitly observe the text answer to that exact admission. The
-receipt identifies the resolved Akuma and admitted input once, omitting routine
-successful wake and interruption mechanics. It retains pending or unavailable
-interruption only when that evidence changes whether the admitted input can
-advance, including the known hung or untidy cause, without exposing Body identity.
+A Tell is the admitted message. Ordinary `tell` reports the exact Turn to which
+that input was submitted, distinguishing start from steering. It does not await
+an answer or claim continuing execution. No pending submission or interrupt is
+ordinary success. A confirmation stop or exceptional cancellation keeps known
+admission and control evidence and the native cause, without exposing Body
+identity or promising that pending work cannot advance.
 `ask` admits a Tell under a required JSON Schema document and observes its parsed
 JSON answer. Only Ask distinguishes invalid output from execution failure; a
 text observer of invalid schema output sees the same failure diagnostic as the
-timeline. Both observations distinguish an answer, failure, absence of an answer,
-and a deadline. Observation is unbounded by default; a deadline or caller signal
-stops observation without retracting an admitted Tell. A spawn composes
-prompt-free birth with optional first ordinary Tell admission; bounded spawn
-observation awaits that first text answer without changing admission. Schema
-belongs only to ask.
+timeline. Tell may explicitly observe the exact text answer instead of using the
+ordinary confirmation window. Both answer observations distinguish answer,
+failure, absence, and deadline. A deadline or caller signal stops observation
+without retracting the input. Schema belongs only to ask.
 
-Ordinary Tell uses native live submission when available; otherwise it waits for
-natural Turn completion and another Turn under the same Body. Failed execution
+Ordinary Tell uses native live submission when available; otherwise its input
+can drain in another Turn under the same Body. Failed execution
 leaves unrelated admitted input pending for a later ordinary wake. Interrupt is
 a flag on tell and ask: it atomically admits the Tell with a request for the
 current Body to yield, then observes completion before waking a successor. If

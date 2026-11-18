@@ -217,7 +217,9 @@ test("shipped Pi extension exposes the shared catalogue through real codemode an
     await native.run(`text(await tools.keiyaku_spawn({akumaName: "acp-worker", prompt: "first", alias: "native-child", bare: true}));`);
     const spawned = resultFor(native.results, "keiyaku_spawn");
     assert.equal(spawned.isError, false, text(spawned));
-    const id = (spawned.structuredContent as { akumaId: string }).akumaId;
+    const { akumaId: id, action } = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
+    assert.equal(action?.kind, "started");
+    assert.match(text(spawned), new RegExp(`started ${action.historyId}`, "u"));
     const child = Akuma.select(world, id);
     await native.run(`text(await tools.keiyaku_status({selector: "@native-child"}));`);
     const namedStatus = resultFor(native.results, "keiyaku_status");

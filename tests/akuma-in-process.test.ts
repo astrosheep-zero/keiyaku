@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { Akuma, AkumaHost, Akumas, Keis, Repo, World, type AkumaHostOptions, type WorldRoot } from "../src/index.js";
 import { allocateAkumaDirectory, pathsForAkumaId } from "../src/akuma/identity.js";
-import { initializeHeart, probeLeash, readHeart, readSeal, readTell, readLatestTurnForBody } from "../src/akuma/heart/index.js";
+import { initializeHeart, probeLeash, readHeart, readSeal, readTell, readTurn, readLatestTurnForBody } from "../src/akuma/heart/index.js";
 import { launchInProcessBody } from "../src/akuma/in-process-body.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { KeiyakuError } from "../src/index.js";
@@ -151,15 +151,20 @@ test(
       assert.equal(await first.kill({ signal: t.signal }), "killed");
       assert.equal((await firstAsk).input?.kind, "unanswered");
       assert.equal((await api.status({ akuma: second.akumaId })).life, "running");
-      await api.tell({ akuma: second.akumaId, body: "keep going", signal: t.signal });
+      const paths = pathsForAkumaId(world, second.akumaId);
+      const running = await readLatestTurnForBody(paths, (await readHeart(paths)).latestBody!.sequence);
+      assert.ok(running);
+      const telling = api.tell({ akuma: second.akumaId, body: "keep going", signal: t.signal });
+      await waitForCondition("second host admitted follow-up work", async () =>
+        (await readHeart(paths)).pending.some((tell) => tell.body === "keep going"),
+      );
       writeFileSync(join(world, "second.release"), "release");
+      assert.ok((await telling).action, "the follow-up confirms exact submission");
       const secondHandle = Akuma.select(world, second.akumaId, { hosting: "in-process" });
       assert.ok(secondHandle instanceof Akuma);
       assert.equal((await secondHandle.idle({ timeoutMs: 20_000, signal: t.signal })).reason, "completed");
-      const heart = await readHeart(pathsForAkumaId(world, second.akumaId));
-      assert.equal(heart.pending.length, 0);
-      const outcome = (await readLatestTurnForBody(pathsForAkumaId(world, second.akumaId), heart.latestBody!.sequence))?.end
-        ?.outcome;
+      assert.equal((await readHeart(paths)).pending.length, 0);
+      const outcome = (await readTurn(paths, running.sequence))?.end?.outcome;
       assert.equal(outcome?.kind, "answered");
       if (outcome?.kind !== "answered") throw new Error("second Body lost its answer");
       const identity = JSON.parse(outcome.answer);
@@ -480,6 +485,8 @@ test(
         assert.ok(receipt !== undefined && typeof receipt.akumaId === "string");
         assert.match(error.message, /stop these observations/u);
         assert.ok(receipt.tellId, "cancellation retains the exact confirmed input");
+        const action = receipt.action ?? receipt.wake;
+        assert.ok(action !== undefined && Object.isFrozen(action));
         assert.equal(error.category, "aborted");
         assert.ok(error.cause instanceof KeiyakuError);
         assert.equal(error.cause.cause, reason);
@@ -527,10 +534,15 @@ test(
     try {
       await waitForCondition("first ACP session", () => existsSync(join(world, "first.ready")));
       const before = (await readHeart(paths)).latestBody!.sequence;
-      const tell = await api.tell({ akuma: called.akumaId, body: "second", signal: t.signal });
-      assert.equal((await readTell(paths, tell.tellId))?.state, "pending");
+      const telling = api.tell({ akuma: called.akumaId, body: "second", signal: t.signal });
+      await waitForCondition("second Tell is admitted behind the first ACP Turn", async () =>
+        (await readHeart(paths)).pending.some((tell) => tell.body === "second"),
+      );
       writeFileSync(join(world, "first.release"), "release");
       await waitForCondition("second ACP Turn", () => existsSync(join(world, "second.ready")));
+      const tell = await telling;
+      assert.equal(tell.action?.kind, "started");
+      assert.equal((await readTell(paths, tell.tellId))?.state, "told");
       assert.equal((await readHeart(paths)).latestBody?.sequence, before);
       writeFileSync(join(world, "hold-body-end"), String(before));
       const closing = scope.close();
@@ -574,7 +586,7 @@ export default pi => {
   );
   const scope = AkumaHost.inProcess();
   const api = Akumas.of(world, scope);
-  const called = await api.spawn({
+  const calling = api.spawn({
     akumaName: "worker",
     cwd: world,
     body: prompt("printf should-not-run"),
@@ -592,6 +604,8 @@ export default pi => {
     assert.equal(done, false, "in-flight extension setup is still real custody");
     writeFileSync(join(world, "binding.release"), "release");
     await close;
+    const called = await calling;
+    assert.equal(called.kind, "failed");
     assert.ok(existsSync(join(world, "binding.finished")));
     assert.equal(existsSync(join(world, "late-prompt")), false);
     assert.equal(await probeLeash(pathsForAkumaId(world, called.akumaId)), "free");
@@ -605,6 +619,7 @@ export default pi => {
   } finally {
     writeFileSync(join(world, "binding.release"), "release");
     await scope.close();
+    await calling.catch(() => undefined);
   }
 });
 

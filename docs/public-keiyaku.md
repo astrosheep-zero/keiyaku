@@ -75,9 +75,10 @@ Observation uses the dedicated Contract preview operation; submission uses nativ
 delivery admission. Both return their existing native answers without an envelope,
 and the selected mode supplies presentation context without becoming authority.
 
-Invocation spawn returns birth and optional first Tell admission; invocation tell
-returns admission. Neither bundles answer observation. Existing work is observed
-through wait, while ask admits structured input and observes its exact answer.
+Invocation spawn confirms birth and any first input's submission; Tell confirms
+submission of its exact input, and kill confirms the selected stops. Each
+returns the native action judgment without observing an answer. Wait observes
+existing work; Ask admits structured input and observes its exact answer.
 Standalone Akuma and Akumas SDK observation and hosting remain independent
 capabilities, not invocation conveniences.
 

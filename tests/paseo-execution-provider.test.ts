@@ -18,7 +18,7 @@ import { createPaseoProvider, type PaseoDependencies } from "../src/akuma/provid
 import { resolveProviderExecution } from "../src/akuma/providers/index.js";
 import { decodeProviderRecipe } from "../src/akuma/provider-recipe.js";
 import { encodeAgentEvent, type DriveInput, type AgentEvent } from "../src/akuma/provider.js";
-import { deferred, settlementProbe, temporaryDirectory, expectBodySettles } from "./support/process.js";
+import { deferred, settlementProbe, temporaryDirectory, expectBodySettles, waitForCondition } from "./support/process.js";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { World } from "../src/world.js";
@@ -942,11 +942,14 @@ test(
       assert.equal((await recordReport(allocated.paths, { ...reportExecution, text: "Retained creation context" })).kind, "recorded");
 
       const bodySequence = (await readHeart(allocated.paths)).latestBody!.sequence;
-      await owner.tell("pending continuation", "queued", undefined, wake);
-      assert.equal((await readTell(allocated.paths, "queued"))?.state, "pending");
+      const continuation = owner.tell("pending continuation", "queued", undefined, wake);
+      await waitForCondition("retained Tell pending behind native work", async () =>
+        (await readTell(allocated.paths, "queued"))?.state === "pending",
+      );
       assistant(second, "second answer");
       complete(second);
       const third = await launched[2]!.promise;
+      assert.equal((await continuation).wake.kind, "started");
       assert.equal(second.calls.includes("cancel"), false);
       assert.equal(third.sendInput!.agentId, first.agent.id);
       assert.equal(third.createInput, undefined);

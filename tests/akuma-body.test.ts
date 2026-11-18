@@ -1670,9 +1670,8 @@ test("ordinary wake recovers an interrupt admitted before its caller disappears"
     await eventsEnded;
 
     const owner = new AkumaOwner(allocated.id, await World.at(root));
-    const admission = await owner.admitInterrupt("continue", { tellId: "caller-lost-interrupt" });
-    assert.equal(admission.kind, "admitted");
-    if (admission.kind !== "admitted") throw new Error("interrupt Tell was not durably admitted");
+    const admission = await owner.admitTell("continue", { tellId: "caller-lost-interrupt", interrupt: true });
+    assert.equal(admission.kind, "recorded");
     assert.equal((await readHeart(allocated.paths)).pause?.frontierTellId, admission.tell.id);
 
     // No completion observer runs: the durable barrier and Tell are all that survive.

@@ -1,6 +1,6 @@
 import { projectAkumaBirth } from "./caller.js";
 import { appendFile } from "node:fs/promises";
-import { abortableDelay } from "./abort.js";
+import { abortable, abortableDelay } from "./abort.js";
 import { BodySupervisor } from "./body-supervisor.js";
 import { driveTurn, type DrivenTurn } from "./turn-drive.js";
 import {
@@ -14,11 +14,10 @@ import {
   finishBodyIfIdle,
   heartExists,
   isHeartAbsent,
-  probeLeash,
   readHeart,
   readLatestTurnForBody,
   readOpenBoundTurns,
-  readTell,
+  readTellAction,
   readTurn,
   readTurnParticipants,
   type BodyEnd,
@@ -26,20 +25,14 @@ import {
   type TurnOutcome,
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
-import type { TellResult, TellWake } from "./call-initial-tell.js";
+import type { TellWake } from "./call-initial-tell.js";
 export type { TellResult, TellWake } from "./call-initial-tell.js";
 import { emitPluginSignal } from "../plugin/akuma-signals.js";
 import { World, type WorldRoot } from "../world.js";
 import type { ProviderAdapter } from "./provider.js";
 import type { ExecutionAssociationReader } from "./execution-instructions.js";
 import { resolveProviderExecution } from "./providers/index.js";
-import {
-  observeBodyLaunch,
-  launchEndWake,
-  type BodyLaunch,
-  type BodyLauncher,
-  type LiveBodyLaunch,
-} from "./body-launch.js";
+import { observeBodyLaunch, type BodyLaunch, type BodyLauncher, type LiveBodyLaunch } from "./body-launch.js";
 
 const LEASH_RETRY_MS = 100;
 export { CONTROL_RESPONSE_MS } from "./body-supervisor.js";
@@ -542,74 +535,124 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function settledWake(
-  paths: AkumaPaths,
-  tellId: string | undefined,
-  after: number,
-): Promise<Exclude<TellWake, Readonly<{ kind: "held" }> | Extract<TellWake, { kind: "failed" }>> | null> {
-  const heart = await readHeart(paths);
-  if (tellId !== undefined && !heart.pending.some((tell) => tell.id === tellId)) return { kind: "told" };
-  if (heart.latestBody !== null && heart.latestBody.sequence > after) {
-    return { kind: "pursuing" };
+type TellActionEvidence = Awaited<ReturnType<typeof readTellAction>>;
+
+export function evidencedTellWake(observed: TellActionEvidence): TellWake | null {
+  switch (observed.kind) {
+    case "pending":
+      return null;
+    case "launch":
+    case "live":
+      return { kind: observed.kind === "launch" ? "started" : "steering", historyId: `turn/${observed.turnSequence}` };
+    case "undelivered":
+      return { kind: "failed", reason: "undelivered", diagnostic: "Heart recorded this Tell as undelivered" };
+    case "submission-failed":
+      return { kind: "failed", diagnostic: observed.diagnostic };
+    case "hung":
+      return { kind: "confirmation-stopped", reason: "hung", diagnostic: observed.diagnostic };
+    case "untidy":
+      return { kind: "confirmation-stopped", reason: "untidy", diagnostic: "Interrupt predecessor custody changed" };
   }
-  return null;
 }
 
-async function wakePendingTells(
+async function launchForTell(
   paths: AkumaPaths,
-  tellId: string | undefined,
   runtime: TellWakeRuntime,
-  signal?: AbortSignal,
+  signal: AbortSignal,
+  read: () => Promise<TellActionEvidence>,
+  successorAfter: number | undefined,
 ): Promise<TellWake | null> {
+  signal.throwIfAborted();
+  const launched = Promise.resolve().then(() => {
+    signal.throwIfAborted();
+    return runtime.spawn(paths);
+  });
+  let child: LiveBodyLaunch;
   try {
-    for (;;) {
-      signal?.throwIfAborted();
-      const before = await readHeart(paths);
-      if (tellId === undefined && before.pending.length === 0) return null;
-      const child = await runtime.spawn(paths);
-      try {
-        const result = await observeBodyLaunch(
-          child,
-          async () => await settledWake(paths, tellId, before.latestBody?.sequence ?? 0),
-          runtime.schedule ?? abortableDelay,
-          signal,
-        );
-        if (result.kind === "observed") {
-          child.release();
-          return result.value;
-        }
-        const wake = launchEndWake(result.end);
-        if (wake.kind !== "held") return wake;
-        const heart = await readHeart(paths);
-        if (tellId !== undefined && !heart.pending.some((tell) => tell.id === tellId)) return { kind: "told" };
-        if (
-          heart.pause !== null ||
-          (heart.latestBody !== null && heart.latestBody.end === undefined && (await probeLeash(paths)) === "held")
-        )
-          return wake;
-      } catch (error) {
-        child.release();
-        throw error;
-      }
-    }
+    child = await abortable(launched, signal);
   } catch (error) {
-    if (signal?.aborted) throw error;
-    return { kind: "failed", diagnostic: diagnostic(error) };
+    // Launch may yield a handle even after our observer is gone. Only release it.
+    void launched.then((late) => late.release()).catch(() => undefined);
+    signal.throwIfAborted();
+    return evidencedTellWake(await read()) ?? { kind: "failed", diagnostic: diagnostic(error) };
   }
+  try {
+    const result = await observeBodyLaunch(
+      child,
+      async () => {
+        const current = await read();
+        if (
+          current.kind === "pending" &&
+          successorAfter !== undefined &&
+          (current.body?.sequence ?? 0) > successorAfter
+        )
+          return { kind: "pending" } as const;
+        return evidencedTellWake(current);
+      },
+      runtime.schedule ?? abortableDelay,
+      signal,
+    );
+    if (result.kind === "observed") return result.value;
+    if (result.end.held) return null;
+    const { diagnostic, child: failedChild } = result.end;
+    return { kind: "failed", diagnostic, ...(failedChild === undefined ? {} : { logPath: failedChild.log.path }) };
+  } finally {
+    child.release();
+  }
+}
+
+function wakeFromFreeSeat(current: TellActionEvidence, followedBody: number | undefined): TellWake | null {
+  if (current.kind !== "pending") return evidencedTellWake(current);
+  const { body, control } = current;
+  if (body !== null && body.end === undefined)
+    return {
+      kind: "confirmation-stopped",
+      reason: "untidy",
+      diagnostic: "Previous Body released custody without settlement",
+    };
+  if (control !== "interrupt" && body !== null && body.sequence === followedBody && body.end !== "exited")
+    return {
+      kind: "confirmation-stopped",
+      reason: "stopped",
+      diagnostic: "Body stopped before confirming submission; admitted input is retained",
+    };
+  return null;
 }
 
 export async function wakeRecordedTell(
   paths: AkumaPaths,
   tellId: string,
   runtime: TellWakeRuntime,
-  signal?: AbortSignal,
-): Promise<TellResult> {
-  const wake = (await wakePendingTells(paths, tellId, runtime, signal))!;
-  const tell = await readTell(paths, tellId);
-  if (tell === null) throw new Error(`recorded Tell ${tellId} is missing from Heart`);
-  return {
-    admission: { tellId },
-    row: { sequence: tell.sequence, at: tell.recordedAt, text: tell.body },
-    wake,
-  };
+  signal: AbortSignal,
+  submission: boolean,
+): Promise<TellWake> {
+  const read = () => readTellAction(paths, tellId, signal);
+  const delay = runtime.schedule ?? abortableDelay;
+  let followedBody: number | undefined;
+  for (;;) {
+    const before = await read();
+    if (before.kind !== "pending") return evidencedTellWake(before)!;
+    const leash = await HeldAkumaLeash.try(paths);
+    if (leash === null) {
+      if (before.body !== null && before.body.end === undefined) followedBody = before.body.sequence;
+      if (!submission && (before.control === "interrupt" || followedBody !== undefined)) return { kind: "pending" };
+      await delay(LEASH_RETRY_MS, signal);
+      continue;
+    }
+    try {
+      const wake = wakeFromFreeSeat(await read(), followedBody);
+      if (wake !== null) return wake;
+    } finally {
+      leash.release();
+    }
+    const wake = await launchForTell(
+      paths,
+      runtime,
+      signal,
+      read,
+      submission ? undefined : (before.body?.sequence ?? 0),
+    );
+    if (wake !== null) return wake;
+    await delay(LEASH_RETRY_MS, signal);
+  }
 }

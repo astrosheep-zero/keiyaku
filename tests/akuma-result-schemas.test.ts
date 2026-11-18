@@ -323,6 +323,10 @@ test("spawn and fork results describe real creation and refusal", async (context
   assert.equal(spawned.input, undefined);
   assertWireRoundTrip(spawnResultSchema, spawned);
   assertWireConformance(root.Keiyaku.verbs.spawn.normal, spawned);
+  const submitted = await akumas.spawn({ akumaName: "worker", home, cwd: directory, body: "submit" });
+  assert.equal(submitted.kind, "spawned");
+  assert.equal(submitted.action?.kind, "started");
+  assertWireConformance(root.Keiyaku.verbs.spawn.normal, submitted);
   let admitted = false;
   const observed = await akumas.spawn({
     akumaName: "worker",
@@ -343,7 +347,7 @@ test("spawn and fork results describe real creation and refusal", async (context
   assert.equal(admitted, true);
   assert.equal(observed.input?.kind, "answered");
   assertWireRoundTrip(spawnResultSchema, observed);
-  assertWireConformance(root.Keiyaku.verbs.spawn.normal, observed);
+  assert.equal(root.Keiyaku.verbs.spawn.normal.safeParse(observed).success, false);
   assertWireRoundTrip(forkResultSchema, await akumas.fork({ akuma: observed.akumaId, at: "turn/999" }));
   await settleFixtureBodies(bodies);
   const mutable = claudeProvider as { fork?: ProviderAdapter["fork"] };

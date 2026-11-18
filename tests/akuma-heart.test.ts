@@ -1,4 +1,5 @@
-import { temporaryDirectory } from "./support/process.js";
+import { deferred, temporaryDirectory } from "./support/process.js";
+import { abortableDelay } from "../src/akuma/abort.js";
 import { recordTell, seedLegacySchema, soulFixture, bornBody, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
@@ -6,8 +7,10 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { settleAkumaKill } from "../src/akuma/akuma-owner.js";
-import { AkumaOwner } from "../src/akuma/akuma-owner.js";
+import { AkumaOwner, settleAkumaKill } from "../src/akuma/akuma-owner.js";
+import { AkumaKillError } from "../src/akuma/akuma-errors.js";
+import { executeKillAkuma } from "../src/akuma/akuma-selection-execution.js";
+import { projectFailure } from "../src/library/outcome.js";
 import type { LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { tellWakeRuntime } from "../src/akuma/body.js";
 import { spawnAkumaBody } from "../src/akuma/detached-body.js";
@@ -227,7 +230,17 @@ test("cancellation after kill admission stops observation without retracting the
       return result;
     });
     try {
-      await assert.rejects(settleAkumaKill(paths, controller.signal), (error) => error === reason);
+      const id = value.allocated.id;
+      await assert.rejects(executeKillAkuma({ path: value.root, ids: [id], signal: controller.signal }), (error) => {
+        assert.ok(error instanceof AkumaKillError);
+        assert.equal(error.cause, reason);
+        const failure = projectFailure(error);
+        assert.equal(failure.category, "aborted");
+        assert.equal(failure.causeDiagnostic, reason.message);
+        assert.deepEqual(failure.kill, [{ id, outcome: "stop-admitted" }]);
+        assert.ok(Object.isFrozen(failure.kill) && Object.isFrozen(failure.kill[0]));
+        return true;
+      });
       assert.equal(committed, true);
     } finally {
       injected.mock.restore();
@@ -237,6 +250,40 @@ test("cancellation after kill admission stops observation without retracting the
     leash.release();
     value.close();
   }
+});
+
+test("a non-aborted kill caller has a finite stop confirmation window", async (t) => {
+  const value = await fixture();
+  const { id, paths } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  t.after(() => { leash.release(); value.close(); });
+  await leash.birth(paths, value.soul);
+  const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+  const admitted = deferred<void>();
+  const exec = DatabaseSync.prototype.exec;
+  const injected = t.mock.method(DatabaseSync.prototype, "exec", function (this: DatabaseSync, sql: string) {
+    const result = exec.call(this, sql);
+    if (sql === "COMMIT") admitted.resolve();
+    return result;
+  });
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const waiting = new AkumaOwner(id, value.root).kill({ signal: new AbortController().signal });
+  await admitted.promise;
+  // The commit precedes the promise continuation that starts the action timer.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  injected.mock.restore();
+  t.mock.timers.tick(29_900);
+  await assert.rejects(waiting, (error) => {
+    assert.ok(error instanceof AkumaKillError);
+    assert.deepEqual(error.kill, [{ id, outcome: "stop-admitted" }]);
+    assert.match(error.message, /admitted stop can still advance/u);
+    return true;
+  });
+  const heart = await readHeart(paths);
+  assert.equal(heart.stop?.bodySequence, body.sequence);
+  assert.equal(heart.latestBody?.end, undefined);
+  assert.equal(heart.latestBody?.hung, undefined);
+  assert.equal(heart.latestKill, null);
 });
 
 test("a commit failure rolls back the Heart mutation without replaying it", async (context) => {
@@ -528,41 +575,86 @@ test("wake names both missing pieces when the executable and frozen directory ar
   }
 });
 
-test("Tell reports held when the refused launch leaves a Body owning the leash", async () => {
+test("a held foreign Body cannot confirm submission without an exact delivery", async (t) => {
   const value = await fixture();
-  let spawned = 0;
+  const paths = value.allocated.paths;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  t.after(() => { leash.release(); value.close(); });
+  await leash.birth(paths, value.soul);
+  const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
+  const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
+  const waiting = deferred<void>();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const pending = tellFixture(value, {
+    body: "continue", tellId: "tell-held", recordedAt: value.soul.createdAt,
+    runtime: {
+      async spawn() { assert.fail("must not launch into held custody"); },
+      async schedule(ms, signal) { waiting.resolve(); await abortableDelay(ms, signal); },
+    },
+  });
+  await waiting.promise;
+  await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: ["tell-held"], boundAt: value.soul.createdAt });
+  t.mock.timers.tick(29_900);
+  const result = await pending;
+  assert.equal(result.wake.kind, "confirmation-stopped");
+  if (result.wake.kind !== "confirmation-stopped") assert.fail("expected a typed stop");
+  assert.equal(result.wake.reason, "deadline");
+  assert.match(result.wake.diagnostic, /admitted input can still advance/u);
+  assert.equal((await readTell(paths, "tell-held"))?.state, "pending");
+  assert.equal((await readTurn(paths, turn.sequence))?.end, undefined);
+  assert.equal((await readHeart(paths)).latestBody?.hung, undefined);
+});
+
+test("an exact historical undelivered witness is a negative action result", async () => {
+  const value = await fixture();
+  const { paths } = value.allocated;
+  const at = value.soul.createdAt;
+  const leash = (await HeldAkumaLeash.try(paths))!;
   try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    await leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-    const result = await tellFixture(value, {
-      body: "continue",
-      tellId: "tell-held",
-      recordedAt: value.soul.createdAt,
-      runtime: {
-        async spawn(): Promise<LiveBodyLaunch> {
-          spawned += 1;
-          return {
-            completed: Promise.resolve({ diagnostic: "fixture leash held", held: true }),
-            async cancel() {},
-            release() {},
-          };
-        },
-      },
+    await leash.birth(paths, value.soul);
+    await heartRecordTell(paths, { kind: "tell", id: "old", body: "old input", recordedAt: at });
+    await recordTellReceipt(paths, { evidence: "exact", tellId: "old", kind: "undelivered", receivedAt: at });
+    const receipt = await tellFixture(value, {
+      body: "old input", tellId: "old", recordedAt: at,
+      runtime: { async spawn() { assert.fail("a terminal historical Tell is not replayed"); } },
     });
-    assert.deepEqual(result.wake, { kind: "held" });
-    assert.equal(spawned, 1);
-    assert.deepEqual(
-      (await readHeart(value.allocated.paths)).pending.map((tell) => tell.id),
-      ["tell-held"],
-    );
-    leash.release();
+    assert.deepEqual(receipt.wake, {
+      kind: "failed", reason: "undelivered", diagnostic: "Heart recorded this Tell as undelivered",
+    });
+    assert.equal((await readTell(paths, "old"))?.state, "told");
   } finally {
+    leash.release();
     value.close();
   }
 });
 
-test("Tell lets a successor Body win when its child exit races Heart observation", async () => {
+test("action deadline releases even a launch handle that arrives after the invocation", async (t) => {
+  const value = await fixture();
+  t.after(value.close);
+  const { paths } = value.allocated;
+  const leash = (await HeldAkumaLeash.try(paths))!;
+  await leash.birth(paths, value.soul);
+  leash.release();
+  const started = deferred<void>();
+  const handle = deferred<LiveBodyLaunch>();
+  const released = deferred<void>();
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const confirming = tellFixture(value, {
+    body: "pending", tellId: "slow-prepare", runtime: {
+      async spawn() { started.resolve(); return await handle.promise; },
+    },
+  });
+  await started.promise;
+  t.mock.timers.tick(29_900);
+  const result = await confirming;
+  assert.equal(result.wake.kind, "confirmation-stopped");
+  assert.equal((await readTell(paths, "slow-prepare"))?.state, "pending");
+  assert.equal((await readHeart(paths)).latestBody, null);
+  handle.resolve({ completed: new Promise(() => {}), async cancel() { assert.fail("no execution cancellation"); }, release: released.resolve });
+  await released.promise;
+});
+
+test("an unrelated Body cannot hide actual launch failure", async () => {
   const value = await fixture();
   let winnerSequence: number | undefined;
   try {
@@ -587,7 +679,7 @@ test("Tell lets a successor Body win when its child exit races Heart observation
         },
       },
     });
-    assert.deepEqual(result.wake, { kind: "pursuing" });
+    assert.deepEqual(result.wake, { kind: "failed", diagnostic: "fixture launch failed" });
     assert.equal((await readHeart(value.allocated.paths)).latestBody?.sequence, winnerSequence);
   } finally {
     value.close();
@@ -829,6 +921,20 @@ test("kill admission of a put-down stranded Body consumes its stop control", asy
     );
   } finally {
     value.close();
+  }
+});
+
+test("ended but hung custody is never a successful kill", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-kill-ended-hung-");
+  const { allocated, body, holder } = await bornBody(root, "b0000910", "2026-08-08T00:00:00.000Z");
+  try {
+    await holder.recordBodyHung(allocated.paths, { sequence: body.sequence, diagnostic: "foreign custody", at: body.leashTakenAt });
+    await breakBody(allocated.paths, { sequence: body.sequence, end: "broke-off", at: body.leashTakenAt });
+    const result = await settleAkumaKill(allocated.paths, new AbortController().signal);
+    assert.deepEqual(result, { evidence: "hung" });
+    assert.equal((await readHeart(allocated.paths)).latestKill, null);
+  } finally {
+    holder.release();
   }
 });
 

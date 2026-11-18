@@ -5,9 +5,11 @@ export type { AkumaNameCatalog, AkumaNameCatalogInput, AkumaNameCatalogRow } fro
 export {
   AkumaBusyError,
   AkumaDecodeError,
+  AkumaKillError,
   AkumaNotBornError,
   AkumaObservationError,
   AkumaProviderError,
+  type KillAdmission,
 } from "./akuma-errors.js";
 export { Akuma } from "./akuma-instance.js";
 export type {

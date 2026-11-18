@@ -76,6 +76,7 @@ test("public ./akuma barrel exposes only the contracted names", async () => {
       "AkumaNameError",
       "AkumaBusyError",
       "AkumaDecodeError",
+      "AkumaKillError",
       "AkumaNotBornError",
       "AkumaObservationError",
       "AkumaProviderError",
@@ -249,6 +250,8 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
       assert.equal(error.tell?.tellId, tellId);
       assert.equal(error.tell?.akumaId, canceled.allocated.id);
       assert.ok(Object.isFrozen(error.tell));
+      const action = error.tell?.action ?? error.tell?.wake;
+      assert.ok(action !== undefined && Object.isFrozen(action));
       assert.throws(() => Object.assign(error, { tell: undefined }), TypeError);
       return true;
     });
@@ -268,7 +271,7 @@ test("bounded Tell and zero window preserve exact admission through waited Tell 
 test("bounded interrupt Tell keeps provider errors distinct", async (context) => {
   await withWaitedTellFixture(async ({ born }) => {
     const interrupt = await born("a1000012", answering("unused"));
-    context.mock.method(AkumaOwner.prototype, "admitInterrupt", async () => ({
+    context.mock.method(AkumaOwner.prototype, "admitTell", async () => ({
       kind: "unavailable" as const,
       evidence: "hung" as const,
     }));

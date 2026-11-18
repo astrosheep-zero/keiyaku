@@ -67,11 +67,8 @@ type SpawnHead = Readonly<{
 }>;
 
 function spawnHead(input: SpawnResult, presentation: SpawnPresentation = {}): SpawnHead {
-  const failures = input.kind === "failed" ? input.failures : [];
-  const alias = failures.some((failure) => failure.stage === "dispatch" || failure.stage === "alias")
-    ? undefined
-    : presentation.alias;
-  const contractId = failures.some((failure) => failure.stage === "dispatch") ? undefined : presentation.contractId;
+  const alias = input.kind === "failed" ? input.aliasName : presentation.alias;
+  const contractId = input.kind === "failed" ? input.contractId : presentation.contractId;
   const cwd = presentation.cwd;
   const facts = [
     ...(input.dispatchWarning === undefined ? [] : [`dispatch lag ${safeText(input.dispatchWarning)}`]),
@@ -86,15 +83,21 @@ function spawnHead(input: SpawnResult, presentation: SpawnPresentation = {}): Sp
   };
 }
 
-function spawnEvidence(result: SpawnResult, context: TextRenderContext, input: SpawnPresentation): readonly string[] {
+function spawnEvidence(
+  result: SpawnResult,
+  context: TextRenderContext,
+  input: SpawnPresentation,
+  exceptional = false,
+): readonly string[] {
   const head = spawnHead(result, input);
+  const showInput = exceptional || result.kind === "failed" || result.action === undefined;
   return [
     ...(head.contract.kind === "associated" ? [safeText(head.contract.contractId)] : []),
     ...(head.cwd === undefined ? [] : [safeText(head.cwd)]),
     ...head.facts,
-    ...tellControlLines(result.wake === undefined ? {} : { wake: result.wake }, context),
-    ...(result.tellId === undefined ? [] : [`input ${result.tellId}`]),
-    ...(result.tellId === undefined || input.prompt === undefined
+    ...tellControlLines({ action: result.action, wake: result.wake }, context),
+    ...(result.tellId === undefined || !showInput ? [] : [`input ${result.tellId}`]),
+    ...(result.tellId === undefined || input.prompt === undefined || !showInput
       ? []
       : tellPayloadLines(input.prompt, context).map((line) => line.trimStart())),
     ...(result.kind === "failed" ? callFailureLines(result.failures, context) : []),
@@ -124,7 +127,7 @@ export function renderSpawnFailure(
     verb: "spawn failed",
     id: result.akumaId,
     ...(head.alias === undefined ? {} : { alias: head.alias }),
-    evidence: [...spawnEvidence(result, context, input), `reason ${safeText(diagnostic)}`],
+    evidence: [...spawnEvidence(result, context, input, true), `reason ${safeText(diagnostic)}`],
   }).join("\n");
 }
 

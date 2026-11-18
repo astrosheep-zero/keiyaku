@@ -119,7 +119,7 @@ for (const version of [29, 30] as const) {
       await assert.rejects(readHeart(paths), refused);
       await assert.rejects(owner.history(), refused);
       await assert.rejects(owner.wait({ signal: AbortSignal.timeout(2_000) }), refused);
-      await assert.rejects(wakeRecordedTell(paths, "pending", { spawn }), refused);
+      await assert.rejects(wakeRecordedTell(paths, "pending", { spawn }, AbortSignal.timeout(2_000), true), refused);
       await assert.rejects(appendActivity(paths, { turnSequence: 11, event: { type: "note", text: "new" }, at }), refused);
       assert.equal(spawn.mock.callCount(), 0);
       assert.ok(readers.size >= 5);

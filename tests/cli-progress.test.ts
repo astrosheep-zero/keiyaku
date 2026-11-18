@@ -403,7 +403,7 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
   const tell: TellResult = {
     admission: { tellId: "tell/current" },
     row: { sequence: 2, at: AKUMA_ACTIVITY_AT, text: "question" },
-    wake: { kind: "pursuing" },
+    wake: { kind: "pending" },
   };
   const input = { akuma: id, prompt: "question", schema: {} };
   for (const mode of ["answered", "error", "cancel", "non-TTY", "json"] as const) {

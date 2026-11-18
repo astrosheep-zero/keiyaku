@@ -41,7 +41,7 @@ export type AdmittedAkumaCall = Readonly<{
 }>;
 
 type AkumaCallLaunchInput = Omit<AkumaCallInput, "body"> &
-  Readonly<{ initialTell?: InitialCallTell; contractId?: string }>;
+  Readonly<{ initialTell?: InitialCallTell; contractId?: string; observeAnswer?: boolean }>;
 
 async function callExecution(
   path: WorldRoot,
@@ -100,6 +100,7 @@ export async function prepareAkumaCall(
       admitInitialTell: async ({ id, initialTell, signal }) =>
         await new AkumaOwner(id, path).admitInitialTell(initialTell, {
           runtime: tellWakeRuntime(launch),
+          observeAnswer: input.observeAnswer === true,
           ...(signal === undefined ? {} : { signal }),
         }),
     });

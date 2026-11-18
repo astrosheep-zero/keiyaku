@@ -3,7 +3,7 @@ import { bareOption, durationSchema, validateAkumaInput } from "./call-input.js"
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { randomUUID } from "node:crypto";
 import type { WorldRoot } from "../world.js";
-import { AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
+import { AkumaKillError, AkumaNotBornError, AkumaProviderError } from "./akuma-errors.js";
 import {
   createLiveStatusReader,
   bornStatus,
@@ -18,19 +18,19 @@ import {
 import { executeWaitAkuma } from "./akuma-wait.js";
 import { createAkumaStream, type AkumaStreamSnapshot } from "./akuma-stream.js";
 import type { BodyLauncher } from "./body-launch.js";
-import { wakeRecordedTell, type TellResult, type TellWakeRuntime } from "./body.js";
-import { admitCallInitialTell, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
-import { acquireLeash } from "./control.js";
+import { evidencedTellWake, wakeRecordedTell, type TellResult, type TellWakeRuntime } from "./body.js";
+import { pendingTellReceipt, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
+import { acquireLeash, confirmAction, confirmationTimedOut } from "./control.js";
 import {
   HeldAkumaLeash,
   activitySlice,
   readForkPoint,
-  readHeart,
   readInterruptCompletion,
-  readKill,
+  readStopEvidence,
   readLastAnsweredTurn,
   readSoul,
   readTell,
+  readTellAction,
   recordReport,
   recordTell,
   requestStop,
@@ -96,27 +96,17 @@ export type LastAnswer =
   | Readonly<{ kind: "answer"; answer: string; historyId: `turn/${number}` }>
   | Readonly<{ kind: "no-answer" }>;
 
-type TellAdmission =
-  | Readonly<{ kind: "not-born" }>
-  | Readonly<{ kind: "admitted"; tell: TellFact; wake: Promise<TellResult> }>;
-type InitialTellAdmission = CallInitialTellAdmission;
-
-type InterruptAdmission =
-  | Extract<InterruptTellAdmission, { kind: "unavailable" }>
-  | (Omit<Extract<InterruptTellAdmission, { kind: "recorded" }>, "kind"> & Readonly<{ kind: "admitted" }>);
+type AdmittedTell = Readonly<{ tell: TellFact; barrier?: PauseFact }>;
 
 async function awaitInterruptCompletion(
   paths: AkumaPaths,
   barrier: PauseFact,
-  signal?: AbortSignal,
+  signal: AbortSignal,
 ): Promise<Extract<InterruptCompletion, { kind: "completed" | "unavailable" }>> {
-  const leash = await acquireLeash(paths, {
-    bodySequence: barrier.bodySequence,
-    ...(signal === undefined ? { deadline: Number.POSITIVE_INFINITY } : { signal }),
-  });
-  if (leash === null) return await readInterruptCompletion(paths, barrier);
+  const leash = await acquireLeash(paths, { bodySequence: barrier.bodySequence, deadline: Infinity, signal });
+  if (leash === null) return await readInterruptCompletion(paths, barrier, signal);
   try {
-    const result = await leash.completeInterruptBarrier(paths, barrier);
+    const result = await leash.completeInterruptBarrier(paths, barrier, signal);
     if (result.kind === "completed" || result.kind === "unavailable") return result;
     return { kind: "unavailable", evidence: "untidy" };
   } finally {
@@ -128,64 +118,65 @@ function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function takeLeashUntilSignal(
-  paths: AkumaPaths,
-  bodySequence: number,
-  signal?: AbortSignal,
-): Promise<HeldAkumaLeash | Readonly<{ kind: "unavailable"; evidence: "hung" | "untidy" | "unavailable" }>> {
-  const leash = await acquireLeash(paths, {
-    bodySequence,
-    ...(signal === undefined ? {} : { signal }),
-  });
-  if (leash !== null) return leash;
-  const latestBody = (await readHeart(paths)).latestBody;
-  if (latestBody?.sequence === bodySequence && latestBody.hung !== undefined)
-    return { kind: "unavailable", evidence: "hung" };
-  if (latestBody?.sequence === bodySequence && latestBody.end !== undefined)
-    return { kind: "unavailable", evidence: "untidy" };
-  return { kind: "unavailable", evidence: "unavailable" };
-}
+type KillSettlement = Readonly<{ evidence: KillEvidence; leash?: HeldAkumaLeash }>;
 
 export async function settleAkumaKill(
   paths: AkumaPaths,
   signal?: AbortSignal,
   retainLeash = false,
-): Promise<Readonly<{ evidence: KillEvidence; leash?: HeldAkumaLeash }>> {
+  onStop?: () => void,
+): Promise<KillSettlement> {
   const request = await requestStop(paths, new Date().toISOString(), signal);
   if (request.kind !== "requested") {
     // A witnessed Body was already settled: the kill witness Heart recorded is
     // the kill evidence, not a stop outcome.
     const evidence: KillEvidence = request.kind === "witnessed" ? "killed" : request.kind;
-    if (!retainLeash) return { evidence };
+    if (!retainLeash || evidence === "hung") return { evidence };
     const leash = await acquireLeash(paths, signal === undefined ? {} : { signal });
     return leash === null ? { evidence: "unavailable" } : { evidence, leash };
   }
-  const target = request.body;
-  const waited = await takeLeashUntilSignal(paths, target.sequence, signal);
-  if ("kind" in waited) {
-    if ((await readKill(paths, target.sequence)) !== null) return { evidence: "killed" };
-    return { evidence: waited.evidence };
-  }
-  const leash = waited;
-  let retain = false;
-  try {
-    if ((await readKill(paths, target.sequence)) !== null) return { evidence: "killed" };
-    const settledBody = (await readHeart(paths)).latestBody;
-    if (settledBody?.sequence !== target.sequence) {
-      return { evidence: (await readKill(paths, target.sequence)) === null ? "unavailable" : "killed" };
-    }
-    if (settledBody.hung !== undefined) return { evidence: "hung" };
-    if (settledBody.end !== "put-down") {
-      await leash.clearStop(paths);
-      return { evidence: "untidy" };
-    }
-    const settled = await leash.settleStop(paths, target.sequence);
-    if (settled === null) return { evidence: "unavailable" };
-    retain = retainLeash;
-    return retainLeash ? { evidence: "killed", leash } : { evidence: "killed" };
-  } finally {
-    if (!retain) leash.release();
-  }
+  onStop?.();
+  const bodySequence = request.body.sequence;
+  const stopped = async (observation: AbortSignal): Promise<KillEvidence | undefined> => {
+    const { body, outcome } = await readStopEvidence(paths, bodySequence, observation);
+    return outcome ?? (body?.end === undefined ? undefined : "untidy");
+  };
+  return await confirmAction<KillSettlement>(
+    signal,
+    async (observation) => {
+      const leash = await acquireLeash(paths, {
+        bodySequence,
+        signal: observation,
+        ...(signal === undefined ? {} : { deadline: Infinity }),
+      });
+      if (leash === null) return { evidence: (await stopped(observation)) ?? "unavailable" };
+      let retain = false;
+      try {
+        const { outcome, body } = await readStopEvidence(paths, bodySequence, observation);
+        if (outcome !== undefined) return { evidence: outcome };
+        if (body?.end !== "put-down") {
+          await leash.clearStop(paths, observation);
+          return { evidence: "untidy" };
+        }
+        if ((await leash.settleStop(paths, bodySequence, observation)) === null) return { evidence: "unavailable" };
+        retain = retainLeash;
+        return retain ? { evidence: "killed", leash } : { evidence: "killed" };
+      } finally {
+        if (!retain) leash.release();
+      }
+    },
+    async (observation) => {
+      try {
+        const evidence = await stopped(observation);
+        if (evidence !== undefined) return { evidence };
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (!confirmationTimedOut(error)) throw error;
+      }
+      if (retainLeash) return { evidence: "unavailable" };
+      throw new Error("Stop not confirmed before the action deadline; admitted stop can still advance");
+    },
+  );
 }
 
 /**
@@ -291,15 +282,12 @@ export class AkumaOwner {
 
   async admitInitialTell(
     initialTell: CallInitialTell,
-    options: Readonly<{ signal?: AbortSignal; runtime: TellWakeRuntime }>,
-  ): Promise<InitialTellAdmission> {
-    return await admitCallInitialTell({
-      world: this.worldPath,
-      id: this.id,
-      initialTell,
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
-      wake: (tell) => wakeRecordedTell(this.paths, tell.id, options.runtime, options.signal),
-    });
+    options: Readonly<{ signal?: AbortSignal; runtime: TellWakeRuntime; observeAnswer?: boolean }>,
+  ): Promise<CallInitialTellAdmission> {
+    const admitted = await this.admitTell(initialTell.body, { ...options, ...initialTell });
+    if (admitted.kind === "not-born") return admitted;
+    if (admitted.kind !== "recorded") throw new Error("Uninterrupting initial Tell refused control");
+    return { kind: "admitted", tell: admitted.tell, wake: this.settleTell(admitted, options.runtime, options) };
   }
 
   async tell(
@@ -309,59 +297,42 @@ export class AkumaOwner {
     runtime: TellWakeRuntime,
     options: Readonly<{ schemaJson?: string; initiator?: string; signal?: AbortSignal }> = {},
   ): Promise<TellResult> {
-    const admitted = await this.admitTell(body, tellId, recordedAt, runtime, options);
-    if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
-    return await admitted.wake;
+    const admitted = await this.admitTell(body, { ...options, tellId, recordedAt });
+    if (admitted.kind !== "recorded") throw new AkumaNotBornError(this.id);
+    return await this.settleTell(admitted, runtime, options);
   }
 
-  /**
-   * Record one Tell and start its wake without waiting for delivery. A bounded
-   * caller starts its own deadline at this admission boundary while the wake
-   * continues in the background; the unbounded public Tell awaits `wake`.
-   */
+  /** Admission is independent of the invocation's action or answer observation. */
   async admitTell(
     body: string,
-    tellId: string = randomUUID(),
-    recordedAt = new Date().toISOString(),
-    runtime: TellWakeRuntime,
-    options: Readonly<{ schemaJson?: string; initiator?: string; signal?: AbortSignal }> = {},
-  ): Promise<TellAdmission> {
+    options: Readonly<{
+      tellId?: string;
+      recordedAt?: string;
+      schemaJson?: string;
+      initiator?: string;
+      signal?: AbortSignal;
+      interrupt?: boolean;
+    }> = {},
+  ): Promise<InterruptTellAdmission> {
     const { schemaJson, initiator, signal } = options;
-    const admitted = await recordTell(this.paths, {
-      kind: "tell",
-      id: tellId,
+    const tell = {
+      kind: "tell" as const,
+      id: options.tellId ?? randomUUID(),
       body,
-      recordedAt,
+      recordedAt: options.recordedAt ?? new Date().toISOString(),
       ...(initiator === undefined ? {} : { initiator }),
       ...(schemaJson === undefined ? {} : { schemaJson }),
-    });
-    if (admitted.kind === "not-born") return admitted;
-    return {
-      kind: "admitted",
-      tell: admitted.tell,
-      wake: wakeRecordedTell(this.paths, admitted.tell.id, runtime, signal),
     };
+    const cancellation = signal === undefined ? {} : { signal };
+    return options.interrupt === true
+      ? await recordTell(this.paths, tell, { interrupt: true, ...cancellation })
+      : await recordTell(this.paths, tell, cancellation);
   }
 
-  /**
-   * The admitted Tell's receipt as it stands now. A bounded caller that stops
-   * waiting before the wake settles reports this honest instant rather than a
-   * delivery that has not happened yet.
-   */
   async admittedReceipt(tellId: string): Promise<TellResult> {
     const tell = await readTell(this.paths, tellId);
     if (tell === null) throw new AkumaProviderError(`recorded Tell ${tellId} is missing from Heart`);
-    const latestBody = (await readHeart(this.paths)).latestBody;
-    return {
-      admission: { tellId },
-      row: { sequence: tell.sequence, at: tell.recordedAt, text: tell.body },
-      wake:
-        tell.state === "told" || tell.binding !== undefined
-          ? { kind: "told" }
-          : latestBody !== null && latestBody.end === undefined && latestBody.hung === undefined
-            ? { kind: "pursuing" }
-            : { kind: "held" },
-    };
+    return pendingTellReceipt(tell);
   }
 
   /** Observe the exact admitted Tell's bound Turn without substituting Akuma-wide idleness. */
@@ -416,66 +387,74 @@ export class AkumaOwner {
       runtime: TellWakeRuntime;
     }>,
   ): Promise<InterruptReceipt> {
-    const admitted = await this.admitInterrupt(body, options);
-    if (admitted.kind === "unavailable") return admitted;
-    return await this.completeInterruptAdmission(admitted, options.runtime, options.signal);
-  }
-
-  /** Atomic Tell-plus-barrier admission; no leash wait or completion observation occurs here. */
-  async admitInterrupt(
-    body: string,
-    options: Readonly<{
-      tellId?: string;
-      recordedAt?: string;
-      schemaJson?: string;
-      initiator?: string;
-      signal?: AbortSignal;
-    }> = {},
-  ): Promise<InterruptAdmission> {
-    const admitted = await recordTell(
-      this.paths,
-      {
-        kind: "tell",
-        id: options.tellId ?? randomUUID(),
-        body,
-        recordedAt: options.recordedAt ?? new Date().toISOString(),
-        ...(options.initiator === undefined ? {} : { initiator: options.initiator }),
-        ...(options.schemaJson === undefined ? {} : { schemaJson: options.schemaJson }),
-      },
-      { interrupt: true, ...(options.signal === undefined ? {} : { signal: options.signal }) },
-    );
+    const admitted = await this.admitTell(body, { ...options, interrupt: true });
     if (admitted.kind === "not-born") throw new AkumaNotBornError(this.id);
     if (admitted.kind === "unavailable") return admitted;
-    return { ...admitted, kind: "admitted" };
+    return await this.settleTell(admitted, options.runtime, options);
   }
 
-  /** Complete only the exact admitted predecessor barrier, then wake the stable Tell. */
-  async completeInterruptAdmission(
-    admission: Extract<InterruptAdmission, { kind: "admitted" }>,
+  async settleTell(
+    { tell, barrier }: AdmittedTell,
     runtime: TellWakeRuntime,
-    signal?: AbortSignal,
+    options: Readonly<{
+      signal?: AbortSignal;
+      observeAnswer?: boolean;
+      onProgress?: (receipt: TellResult) => void;
+    }> = {},
   ): Promise<TellResult> {
-    if (admission.barrier === undefined) return await wakeRecordedTell(this.paths, admission.tell.id, runtime, signal);
-    const completion = await awaitInterruptCompletion(this.paths, admission.barrier, signal);
-    if (completion.kind === "unavailable") {
-      const receipt = await this.admittedReceipt(admission.tell.id);
+    const paths = this.paths;
+    let receipt = pendingTellReceipt(tell, barrier);
+    const interruption = (result: Extract<InterruptCompletion, { kind: "completed" | "unavailable" }>) => {
+      receipt = { ...receipt, interruption: { ...result, bodySequence: barrier!.bodySequence } };
+      if (result.kind === "unavailable") {
+        receipt = {
+          ...receipt,
+          wake: {
+            kind: "confirmation-stopped",
+            reason: result.evidence,
+            diagnostic: `Could not complete interrupt: ${result.evidence} custody`,
+          },
+        };
+      }
+      options.onProgress?.(receipt);
+    };
+    const settle = async (signal: AbortSignal): Promise<TellResult> => {
+      if (barrier !== undefined) {
+        const result = await awaitInterruptCompletion(paths, barrier, signal);
+        interruption(result);
+        if (result.kind === "unavailable") return receipt;
+      }
+      const wake = await wakeRecordedTell(paths, tell.id, runtime, signal, options.observeAnswer !== true);
+      return { ...receipt, wake };
+    };
+    if (options.observeAnswer) return await settle(options.signal ?? new AbortController().signal);
+    return await confirmAction(options.signal, settle, async (signal) => {
+      let custody = "";
+      try {
+        if (barrier !== undefined && receipt.interruption?.kind === "pending") {
+          const latest = await readInterruptCompletion(paths, barrier, signal);
+          if (latest.kind === "completed" || latest.evidence === "hung") {
+            interruption(latest);
+            if (latest.kind === "unavailable") return receipt;
+          }
+        }
+        const observed = await readTellAction(paths, tell.id, signal);
+        const wake = evidencedTellWake(observed);
+        if (wake !== null && receipt.interruption?.kind !== "pending") return { ...receipt, wake };
+        if (observed.kind === "pending" && observed.control !== null) custody = ` (${observed.control} retained)`;
+      } catch (error) {
+        options.signal?.throwIfAborted();
+        if (!confirmationTimedOut(error)) throw error;
+      }
       return {
         ...receipt,
-        interruption: {
-          kind: "unavailable",
-          bodySequence: admission.barrier.bodySequence,
-          evidence: completion.evidence,
+        wake: {
+          kind: "confirmation-stopped",
+          reason: "deadline",
+          diagnostic: `Tell submission not confirmed before the action deadline${custody}; admitted input can still advance`,
         },
       };
-    }
-    const receipt = await wakeRecordedTell(this.paths, admission.tell.id, runtime, signal);
-    return {
-      ...receipt,
-      interruption: {
-        kind: "completed",
-        bodySequence: admission.barrier.bodySequence,
-      },
-    };
+    });
   }
 
   async fork(
@@ -545,7 +524,17 @@ export class AkumaOwner {
   }
 
   async kill(options: Readonly<{ signal?: AbortSignal }> = {}): Promise<KillEvidence> {
-    return (await settleAkumaKill(this.paths, options.signal)).evidence;
+    let admitted = false;
+    try {
+      return (
+        await settleAkumaKill(this.paths, options.signal, false, () => {
+          admitted = true;
+        })
+      ).evidence;
+    } catch (error) {
+      if (!admitted) throw error;
+      throw new AkumaKillError(error, [{ id: this.id, outcome: "stop-admitted" }], options.signal);
+    }
   }
 
   async lastAnswer(): Promise<LastAnswer> {

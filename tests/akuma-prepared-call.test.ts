@@ -53,7 +53,7 @@ function tellResult(tellId: string): TellResult {
   return {
     admission: { tellId },
     row: { sequence: 1, at: AT, text: "" },
-    wake: { kind: "told" },
+    wake: { kind: "started", historyId: "turn/2" },
   };
 }
 

@@ -4,8 +4,8 @@ import type { ContractId } from "../../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../../library/address.js";
 import type { VerbCompletion, VerbInput, VerbName, VerbOutput } from "../../library/keiyaku-verbs.js";
 import { KeiyakuArcDocumentError, KeiyakuUsageError } from "../../library/keiyaku-coordinates.js";
-import { KeiyakuError, projectFailure } from "../../library/outcome.js";
-import { historyRawAnswer, historyText, snapshotText, tellText, waitText } from "./akuma-activity.js";
+import { KeiyakuError, projectFailure, type FailureProjection } from "../../library/outcome.js";
+import { historyRawAnswer, historyText, killResultText, snapshotText, tellText, waitText } from "./akuma-activity.js";
 import { renderCallText, renderForkText, renderKillText, renderSpawnFailure, renderAskText } from "./akuma.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "./catalog.js";
 import { renderAkumaBoard } from "./kanshi-akuma.js";
@@ -87,8 +87,12 @@ function contractAnswer(
   }
 }
 
-function thrown(name: string, error: unknown, context: TextRenderContext, input: VerbInput<VerbName>): string {
-  const failure = projectFailure(error);
+function actionFailure(
+  name: string,
+  failure: FailureProjection,
+  context: TextRenderContext,
+  input: VerbInput<VerbName>,
+): string | undefined {
   if (failure.spawn !== undefined)
     return renderSpawnFailure(
       failure.spawn,
@@ -108,6 +112,21 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
       `  input ${failure.tell.tellId}`,
       `  reason ${safeText(failure.diagnostic)}`,
     ].join("\n");
+  if (failure.kill !== undefined) {
+    const alias = name === "kill" ? aliasSelector((input as VerbInput<"kill">).akuma) : undefined;
+    return [
+      `× ${name} failed`,
+      ...failure.kill.map((member) => killResultText(member.id, member.outcome, alias)),
+      `  reason ${safeText(failure.diagnostic)}`,
+    ].join("\n");
+  }
+  return undefined;
+}
+
+function thrown(name: string, error: unknown, context: TextRenderContext, input: VerbInput<VerbName>): string {
+  const failure = projectFailure(error);
+  const action = actionFailure(name, failure, context, input);
+  if (action !== undefined) return action;
   if (error instanceof KeiyakuArcDocumentError) {
     return renderRefusal(
       { operation: "arc", contract: error.contract, refusal: { kind: "invalid-document", diagnostic: error.message } },

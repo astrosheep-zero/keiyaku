@@ -136,7 +136,8 @@ test("Tell failure and exact Ask precedence retain answer and historical wake re
   const receipt = await new AkumaOwner(fixture.allocated.id, fixture.world).admittedReceipt(original.tellId);
   const logPath = fixture.allocated.paths.log;
   const nativeFailure = Object.freeze(new TypeError("unexpected wake rejection"));
-  const rejected = t.mock.method(AkumaOwner.prototype, "admitTell", async () => ({ kind: "admitted", tell: fact, wake: Promise.reject(nativeFailure) }));
+  t.mock.method(AkumaOwner.prototype, "admitTell", async () => ({ kind: "recorded", tell: fact }));
+  const rejected = t.mock.method(AkumaOwner.prototype, "settleTell", async () => { throw nativeFailure; });
   await assert.rejects(api.tell({ akuma: fixture.allocated.id, body: "answer" }), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.cause, nativeFailure);
@@ -144,8 +145,9 @@ test("Tell failure and exact Ask precedence retain answer and historical wake re
     return true;
   });
   rejected.mock.restore();
-  t.mock.method(AkumaOwner.prototype, "admitTell", async () => ({ kind: "admitted", tell: fact,
-    wake: Promise.resolve({ ...receipt, wake: { kind: "failed", diagnostic: "historical wake failed", child: { log: { path: logPath } } } }) }));
+  t.mock.method(AkumaOwner.prototype, "settleTell", async () => ({
+    ...receipt, wake: { kind: "failed", diagnostic: "historical wake failed", logPath },
+  }));
   const input = { akuma: fixture.allocated.id, prompt: "answer", schema: {} };
   const told = await api.tell({ akuma: fixture.allocated.id, body: "answer", wait: true });
   assert.equal(told.kind, "failed");

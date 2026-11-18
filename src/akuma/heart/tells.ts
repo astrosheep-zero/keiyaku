@@ -128,6 +128,14 @@ export function tellFact(database: DatabaseSync, id: string): TellFact | null {
   return row === undefined ? null : decodeTellRows(database, [row])[0]!;
 }
 
+export function tellWasUndelivered(database: DatabaseSync, id: string): boolean {
+  return (
+    database
+      .prepare("SELECT 1 FROM tell_receipts WHERE tell_id = ? AND evidence = 'exact' AND kind = 'undelivered'")
+      .get(id) !== undefined
+  );
+}
+
 export function sameTellInput(
   existing: TellFact,
   tell: Omit<TellFact, "sequence" | "state" | "deliveries" | "binding">,

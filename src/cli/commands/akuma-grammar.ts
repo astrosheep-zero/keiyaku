@@ -55,7 +55,7 @@ const AKUMA_COMMAND_SPECS = {
       "Omit the prompt to birth without a Tell; otherwise give <prompt> as one argument, or use - to read stdin.",
       "--bare omits Keiyaku's runtime instruction section for this birth and its later execution; personality, tools, permissions, and report remain unchanged.",
       "Generic ACP needs --bare: it has no verified native runtime-instruction channel. Existing sessions without the section are not retrofitted; ordinary resume retains existing native instructions.",
-      "Spawn returns birth and optional first Tell admission, not an answer. Observe work separately with wait.",
+      "Returns clean birth and, with a prompt, confirmed submission to its exact Turn. Does not wait for an answer.",
       "--contract records an association, not the work or execution directory; include the Contract and worktree context in the prompt as needed. --repo requires --contract.",
       "--workdir selects where the Akuma works; relative paths resolve from the invocation directory selected by -C/--cwd, or the process cwd when omitted. Without --workdir, the invocation directory is used.",
       "--alias <name> gives the new Akuma the selector @name instead of aku/<id>; an existing @name is reassigned to this Akuma.",
@@ -81,11 +81,11 @@ const AKUMA_COMMAND_SPECS = {
     stdin: true,
     flags: { interrupt: "boolean", json: "boolean" },
     usage: "tell <aku/...|@name> [--interrupt] (<prompt> | -)",
-    purpose: "Admit new orders for an Akuma.",
+    purpose: "Submit new orders to an Akuma.",
     details: [
       "Give <prompt> as one argument, or use - to read stdin.",
       "--interrupt admits the Tell and asks current work to yield; the Tell remains admitted even if yielding cannot be confirmed.",
-      "Returns Tell admission, not an answer. Observe work separately with wait, or use ask for a structured answer.",
+      "Returns the confirmed start or steering and its exact Turn, not an answer. If confirmation stops, admitted input can still advance.",
     ].join("\n"),
   },
   ask: {

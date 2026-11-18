@@ -4,9 +4,9 @@ import { join } from "node:path";
 import test from "node:test";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { Akuma } from "../src/akuma/index.js";
-import { readHeart, readTell, readTurn, recordTell } from "../src/akuma/heart/index.js";
+import { readHeart, readTell, readTurn, recordTell, recordTellReceipt } from "../src/akuma/heart/index.js";
 import { runProcess } from "../src/runtime/proc/run.js";
-import { appendNodeOptionsImport, temporaryDirectory } from "./support/process.js";
+import { appendNodeOptionsImport, temporaryDirectory, waitForCondition } from "./support/process.js";
 import { bornWorld, settledInput } from "./support/akuma-tell.js";
 import { pathToFileURL } from "node:url";
 import { akumasWithLauncher } from "../src/library/akumas.js";
@@ -160,16 +160,25 @@ test("an ordinary Tell waits for provider closure and drains under the same Body
   try {
     const api = akumasWithLauncher(world, spawn);
     const result = await api.spawn({ akumaName: "worker", body: "first", signal: context.signal });
+    assert.equal(result.kind, "spawned");
     assert.ok(result.tellId);
     await started.promise;
     const { paths } = launches[0]!;
     const current = (await readHeart(paths)).latestBody!;
-    const next = await api.tell({ akuma: result.akumaId, body: "second", signal: context.signal });
-    assert.deepEqual((await readHeart(paths)).pending.map((tell) => tell.id), [next.tellId]);
+    const opening = (await readTell(paths, result.tellId))!.deliveries[0]!;
+    assert.deepEqual(result.action, { kind: "started", historyId: `turn/${opening.turnSequence}` });
+    assert.equal((await readTurn(paths, opening.turnSequence))?.end, undefined);
+    const submitting = api.tell({ akuma: result.akumaId, body: "second", signal: context.signal });
+    let returned = false;
+    void submitting.then(() => { returned = true; }, () => { returned = true; });
+    await waitForCondition("second Tell admitted", async () => (await readHeart(paths)).pending.length === 1);
+    assert.equal(returned, false, "an admitted Tell behind an open Turn is not successful submission");
     assert.deepEqual(inputs, [["first"]]);
     answer.resolve();
     firstClosed = true;
     closed.resolve();
+    const next = await submitting;
+    assert.equal(next.kind, "admitted");
     await Promise.all(bodies);
 
     assert.equal(aborts, 0);
@@ -180,6 +189,7 @@ test("an ordinary Tell waits for provider closure and drains under the same Body
     assert.equal(second?.state, "told");
     assert.ok(first?.binding && second?.binding);
     assert.ok(first.binding.turnSequence < second.binding.turnSequence);
+    assert.deepEqual(next.action, { kind: "started", historyId: `turn/${second.binding.turnSequence}` });
     const firstTurn = await readTurn(paths, first.binding.turnSequence);
     const secondTurn = await readTurn(paths, second.binding.turnSequence);
     assert.equal(firstTurn?.bodySequence, current.sequence);
@@ -198,6 +208,57 @@ test("an ordinary Tell waits for provider closure and drains under the same Body
     firstClosed = true;
     closed.resolve();
     await Promise.all(bodies);
+  }
+});
+
+test("live Tell confirms exact steering, not a binding, receipt, or answer", { timeout: 10_000 }, async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-live-action-");
+  const { allocated, world } = await bornWorld(root, "b0000011");
+  const { paths } = allocated;
+  const providerReady = deferred<void>();
+  const bound = deferred<void>();
+  const accept = deferred<void>();
+  const answer = deferred<void>();
+  const completion = answer.promise.then(() => ({ kind: "answered" as const, answer: "later" }));
+  const adapter = fixtureAdapter((input) => createProviderAttempt(input.signal, async (custody) => {
+    const abort = async () => { accept.resolve(); answer.resolve(); };
+    custody.own({ closed: completion.then(() => undefined), abort, forceDispose: abort });
+    return {
+      admission: { fence: "opening" }, completion,
+      async tell() { bound.resolve(); await accept.promise; return { kind: "accepted", fence: "exact-live" }; },
+      events: { async *[Symbol.asyncIterator]() {
+        yield { type: "session" as const, coordinate: { sessionId: "live-action" } };
+        providerReady.resolve();
+        await answer.promise;
+      } },
+      receipts: { async *[Symbol.asyncIterator]() { await answer.promise; } },
+    };
+  }));
+  const running = driveAkumaBody({ paths, initialBody: "opening" }, adapter);
+  t.after(async () => { accept.resolve(); answer.resolve(); await running; });
+  try {
+    await providerReady.promise;
+    const submitting = new AkumaOwner(allocated.id, world).tell("steer", "later", undefined, {
+      async spawn() { assert.fail("do not launch into a live Body"); },
+    }, { signal: t.signal });
+    let returned = false;
+    void submitting.then(() => { returned = true; }, () => { returned = true; });
+    await bound.promise;
+    const recorded = (await readTell(paths, "later"))!;
+    assert.ok(recorded.binding);
+    assert.deepEqual(recorded.deliveries, []);
+    assert.equal(returned, false);
+    accept.resolve();
+    const receipt = await submitting;
+    assert.deepEqual(receipt.wake, { kind: "steering", historyId: `turn/${recorded.binding.turnSequence}` });
+    assert.equal((await readTell(paths, "later"))?.state, "pending");
+    assert.equal((await readTurn(paths, recorded.binding.turnSequence))?.end, undefined);
+    // Complete the real provider receipt independently of the returned action.
+    await recordTellReceipt(paths, { evidence: "exact", tellId: "later", kind: "consumed", receivedAt: recorded.recordedAt });
+  } finally {
+    accept.resolve();
+    answer.resolve();
+    await running;
   }
 });
 

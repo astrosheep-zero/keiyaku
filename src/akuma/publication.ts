@@ -11,10 +11,11 @@ import type {
   InitialTellAdmissionInput,
   TellResult,
 } from "./call-initial-tell.js";
-import { BIRTH_TIMEOUT_MS, pendingTellReceipt } from "./call-initial-tell.js";
+import { pendingTellReceipt } from "./call-initial-tell.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import type { WorldRoot } from "../world.js";
 
+const BIRTH_TIMEOUT_MS = 30_000;
 const POLL_MS = 100;
 const CUSTODY_HANDOFF_MS = 1_000;
 
@@ -221,7 +222,8 @@ async function awaitAsleepBirth(paths: AkumaPaths, signal?: AbortSignal): Promis
   });
   if (leash === null) throw new Error("Akuma did not finish its birth body");
   try {
-    if ((await readHeart(paths)).latestBody?.end !== "exited") {
+    const body = (await readHeart(paths, signal)).latestBody;
+    if (body?.end !== "exited" || body.hung !== undefined) {
       throw new Error("Akuma birth body did not exit cleanly");
     }
   } finally {
@@ -430,7 +432,6 @@ export async function publishPreparedCall(prepared: PreparedCall): Promise<Prepa
       initialTell: input.initialTell,
       ...(input.signal === undefined ? {} : { signal: input.signal }),
     });
-    if (admitted.kind === "birth-failed") throw new Error(admitted.diagnostic);
     if (admitted.kind === "not-born") throw new Error(`Akuma ${child.id} was not born for its initial Tell`);
     told = pendingTellReceipt(admitted.tell);
     told = await admitted.wake;

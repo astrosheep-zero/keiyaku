@@ -157,10 +157,9 @@ usage boundary rather than returning a misleading empty list.
 The ask edge acquires a required JSON Schema from a caller-selected file and
 passes its document to the public Akuma surface. Schema acquisition failures are
 usage or input failures. Ask returns parsed JSON; tell and spawn admit text only.
-Spawn returns birth and optional first Tell admission; tell returns admission.
-Neither waits for an answer. Existing work is observed separately through wait,
-while ask observes its exact structured answer. Deadlines bound observation only,
-preserving the owner's interruption and cancellation semantics.
+Spawn and Tell return the owner's action judgment, not merely admission or an
+answer. Kill returns native stop evidence. Wait observes existing work; Ask
+observes its exact structured answer. Deadlines bound observation only.
 
 Spawn, fork, tell, and ask select the submitting process's opaque host Owner at
 the invocation facet and pass it unchanged as optional initiator attribution.

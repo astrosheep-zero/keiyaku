@@ -2,6 +2,12 @@ import { z } from "zod";
 import type { AkumaId, AkumaTellResult } from "@astrosheep/keiyaku";
 
 const text = z.string();
+const turnHistoryIdPattern = /^turn\/[1-9][0-9]*$/u;
+const isTurnHistoryId = (value: string): value is `turn/${number}` => turnHistoryIdPattern.test(value);
+const turnHistoryId = text.regex(turnHistoryIdPattern).transform((value): `turn/${number}` => {
+  if (!isTurnHistoryId(value)) throw new Error("invalid turn history id");
+  return value;
+});
 const nonblank = text.refine((value) => value.trim() !== "");
 const count = z.number().int().nonnegative();
 const sequence = count.positive().safe();
@@ -62,8 +68,10 @@ const subject = {
   tellId: text,
   interrupt: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("pending") }),
+    z.strictObject({ kind: z.literal("completed") }),
     z.strictObject({ kind: z.literal("unavailable"), evidence: z.enum(["hung", "untidy"]) }),
   ]).exactOptional(),
+  action: z.strictObject({ kind: z.enum(["started", "steering"]), historyId: turnHistoryId }).exactOptional(),
   wake: z.strictObject({ kind: z.literal("pending") }).exactOptional(),
   input: z.discriminatedUnion("kind", [
     z.strictObject({ kind: z.literal("answered"), answer: text }),
@@ -72,7 +80,8 @@ const subject = {
   ]).exactOptional(),
 };
 const failure = z.discriminatedUnion("stage", [
-  z.strictObject({ stage: z.literal("wake"), diagnostic: text, logPath: text.exactOptional() }),
+  z.strictObject({ stage: z.literal("wake"), diagnostic: text, reason: z.literal("undelivered").exactOptional(), logPath: text.exactOptional() }),
+  z.strictObject({ stage: z.literal("confirmation"), reason: z.enum(["deadline", "hung", "untidy", "stopped"]), diagnostic: text }),
   z.strictObject({ stage: z.literal("observation"), diagnostic: text }),
 ]);
 export const tellSchema = z.discriminatedUnion("kind", [

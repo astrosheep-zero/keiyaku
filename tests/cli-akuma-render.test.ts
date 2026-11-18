@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
+import { AkumaKillError } from "../src/akuma/akuma-errors.js";
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
 import { type ActivityHistory, type ActivityRow, type OutcomeRow } from "../src/akuma/projection.js";
 import {
@@ -773,6 +774,16 @@ test("Tell and kill keep pending, failure, and plural evidence inside the action
     ].join("\n"),
     "plural kill keeps one compact block per member in frozen order",
   );
+  const stopped = new AkumaKillError(new Error("observation canceled"), [
+    { id: parseAkumaId("aku/worker/1234abcd").id, outcome: "killed" },
+    { id: parseAkumaId("aku/worker/5678abcd").id, outcome: "stop-admitted" },
+  ]);
+  assert.equal(renderVerb("kill", { akuma: "aku/worker/*" }, { kind: "threw", error: stopped }, context), [
+    "× kill failed",
+    "✓ killed aku/worker/1234abcd",
+    "! stop admitted aku/worker/5678abcd",
+    "  reason observation canceled",
+  ].join("\n"));
 });
 
 test("Tell delivery keeps copyable log coordinates on its subject and bounds the cause beneath", () => {

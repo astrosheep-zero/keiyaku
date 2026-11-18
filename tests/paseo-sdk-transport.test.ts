@@ -6,7 +6,8 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test, { type TestContext } from "node:test";
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
-import { appendActivity, beginTurn, endTurn, HeldAkumaLeash, recordReport } from "../src/akuma/heart/index.js";
+import { appendActivity, beginTurn, bindTellsToTurn, endTurn, HeldAkumaLeash, readHeart, recordReport, recordTellDeliveries } from "../src/akuma/heart/index.js";
+import { waitForCondition } from "./support/process.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
 import { historySchema, tellSchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
@@ -791,7 +792,7 @@ test("the evaluated bundle mirrors a real Akuma through the public streaming sur
     `a later Turn (${later.sequence}) after an idle stretch arrives through the same observation, never a timer`);
 });
 
-test("the real public package admits one Tell through the transport while custody is held", async (t) => {
+test("the real public package confirms an exact live Tell through the transport", async (t) => {
   const value = await soulFixture("paseo-sdk-tell-");
   const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
   let released = false;
@@ -800,13 +801,20 @@ test("the real public package admits one Tell through the transport while custod
   t.after(async () => { await transport.close(); release(); value.close(); });
   await writeFile(join(value.root, ".keiyaku", "settings.json"), JSON.stringify({ plugins: {} }));
   await leash.birth(value.allocated.paths, value.soul);
-  await leash.recordBody(value.allocated.paths, { leashTakenAt: at });
+  const { paths } = value.allocated;
+  const body = await leash.recordBody(paths, { leashTakenAt: at });
+  const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
   const root = await realpath(value.root);
 
-  const admitted = await transport.tell(root, value.allocated.id, new AbortController().signal, "change direction");
-  assert.equal(admitted.akumaId, value.allocated.id, "the flat receipt resolves the selected Akuma");
-  assert.equal(typeof admitted.tellId, "string");
-  assert.deepEqual(admitted.wake, { kind: "pending" }, "a held leash is reported as pending, not as a failed wake");
+  const submitting = transport.tell(root, value.allocated.id, t.signal, "change direction");
+  await waitForCondition("the original native Tell to be admitted", async () => (await readHeart(paths)).pending.length === 1);
+  const tellId = (await readHeart(paths)).pending[0]!.id;
+  await bindTellsToTurn(paths, { turnSequence: turn.sequence, tellIds: [tellId], boundAt: at });
+  await recordTellDeliveries(paths, [{ tellId, turnSequence: turn.sequence, route: "live", receipt: "required", fence: "test-live", deliveredAt: at }]);
+  const admitted = await submitting;
+  assert.equal(admitted.akumaId, value.allocated.id);
+  assert.equal(admitted.tellId, tellId);
+  assert.deepEqual(admitted.action, { kind: "steering", historyId: `turn/${turn.sequence}` });
   assert.deepEqual(tellSchema.parse(admitted), admitted,
     "the local boundary preserves the installed owner's receipt without a caller text echo");
 
@@ -818,4 +826,5 @@ test("the real public package admits one Tell through the transport while custod
   assert.ok(recorded?.kind === "tell");
   assert.equal(recorded.tellId, admitted.tellId, "the admitted Tell is durably recorded, not merely acknowledged");
   assert.equal(recorded.text, "change direction");
+  assert.equal(recorded.state, "pending", "live submission does not invent the stronger provider receipt");
 });

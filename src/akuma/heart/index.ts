@@ -8,7 +8,6 @@ import type {
   ForkPoint,
   HeartSnapshot,
   InterruptCompletion,
-  KillFact,
   PauseFact,
   SealFact,
   SessionFact,
@@ -22,9 +21,10 @@ import type {
   TurnStartFact,
   ReportAdmission,
 } from "./facts.js";
-import { BodyControlledError } from "./facts.js";
+import { BodyControlledError, HeartAuthorityCorruptionError } from "./facts.js";
 import {
   answeredTurnFact,
+  bodyFact,
   completeInterruptBarrier as judgeInterruptBarrier,
   endBodyFact,
   finishBodyFact,
@@ -63,6 +63,7 @@ import {
   sameTellInput,
   tellFact,
   tellIdsForFence,
+  tellWasUndelivered,
   turnParticipants,
 } from "./tells.js";
 import {
@@ -118,8 +119,9 @@ const ACTIVITY_LIMIT = 5_000;
 export async function readInterruptCompletion(
   paths: AkumaPaths,
   expected: PauseFact,
+  signal?: AbortSignal,
 ): Promise<Extract<InterruptCompletion, { kind: "completed" | "unavailable" }>> {
-  const result = await withReadOnlyHeart(paths, (heart) => judgeInterruptBarrier(heart, expected, false));
+  const result = await withReadOnlyHeart(paths, (heart) => judgeInterruptBarrier(heart, expected, false), signal);
   return result.kind === "clear" ? { kind: "unavailable", evidence: "untidy" } : result;
 }
 
@@ -451,6 +453,37 @@ export async function readTell(paths: AkumaPaths, id: string): Promise<TellFact 
   return await withReadOnlyHeart(paths, (heart) => tellFact(heart, id));
 }
 
+/** The receipt judge observes only retained witnesses of this exact admitted input. */
+export async function readTellAction(paths: AkumaPaths, id: string, signal?: AbortSignal) {
+  return await withReadOnlyHeart(
+    paths,
+    (heart) => {
+      const tell = tellFact(heart, id);
+      if (tell === null) throw new Error(`Recorded Tell ${id} is missing from Heart`);
+      if (tellWasUndelivered(heart, id)) return { kind: "undelivered" } as const;
+      const delivery = tell.deliveries[0];
+      if (delivery !== undefined) {
+        const turn = turnFact(heart, delivery.turnSequence);
+        if (turn === null || bodyFact(heart, turn.bodySequence) === null)
+          throw new HeartAuthorityCorruptionError(`Akuma Tell ${id} delivery has no owning Turn and Body`);
+        return { kind: delivery.route, turnSequence: turn.sequence } as const;
+      }
+      const body = latestBodyFact(heart);
+      if (body?.hung !== undefined) return { kind: "hung", diagnostic: body.hung.diagnostic } as const;
+      const pause = pauseFact(heart);
+      if (pause !== null && pause.bodySequence !== body?.sequence) return { kind: "untidy" } as const;
+      if (tell.binding !== undefined) {
+        const bound = turnFact(heart, tell.binding.turnSequence);
+        if (bound?.bodySequence === body?.sequence && bound?.end?.outcome.kind === "failed")
+          return { kind: "submission-failed", diagnostic: bound.end.outcome.diagnostic } as const;
+      }
+      const control = pause !== null ? "interrupt" : stopFact(heart) !== null ? "stop" : null;
+      return { kind: "pending", body, control } as const;
+    },
+    signal,
+  );
+}
+
 export async function recordTellDeliveries(paths: AkumaPaths, inputs: readonly TellDeliveryInput[]): Promise<void> {
   await withHeartTransaction(paths, (heart) => {
     for (const input of inputs) {
@@ -481,8 +514,18 @@ export async function recordTellReceipt(paths: AkumaPaths, input: TellReceiptInp
   });
 }
 
-export async function readKill(paths: AkumaPaths, bodySequence: number): Promise<KillFact | null> {
-  return await withReadOnlyHeart(paths, (heart) => killFactForBody(heart, bodySequence));
+export async function readStopEvidence(paths: AkumaPaths, sequence: number, signal: AbortSignal) {
+  return await withReadOnlyHeart(
+    paths,
+    (heart) => {
+      const latest = latestBodyFact(heart);
+      const body = latest?.sequence === sequence ? latest : null;
+      if (body?.hung !== undefined) return { body, outcome: "hung" } as const;
+      if (killFactForBody(heart, sequence) !== null) return { body, outcome: "killed" } as const;
+      return { body, outcome: body === null ? "unavailable" : undefined } as const;
+    },
+    signal,
+  );
 }
 
 export async function requestStop(
@@ -492,19 +535,17 @@ export async function requestStop(
 ): Promise<
   | Readonly<{ kind: "requested"; body: BodyFact }>
   | Readonly<{ kind: "witnessed"; body: BodyFact }>
-  | Readonly<{ kind: "already-killed" | "already-stopped"; body: BodyFact }>
+  | Readonly<{ kind: "already-killed" | "already-stopped" | "hung"; body: BodyFact }>
 > {
   return await withHeartTransaction(
     paths,
     (heart) => {
       const body = latestBodyFact(heart);
       if (body === null) throw new Error("Akuma has no Body to kill");
+      if (body.hung !== undefined) return { kind: "hung", body };
       if (latestKillFact(heart)?.bodySequence === body.sequence) return { kind: "already-killed", body };
       if (body.end !== undefined) {
-        // A stranded Body is already explicitly settled: kill witnesses it in
-        // place rather than requesting a stop from a dead process. A normally
-        // exited Body remains already-stopped, and hung custody is untouched.
-        if (body.hung === undefined && body.end !== "exited") {
+        if (body.end !== "exited") {
           insertKillFact(heart, body.sequence, at);
           if (stopFact(heart)?.bodySequence === body.sequence) deleteStopControl(heart);
           return { kind: "witnessed", body };
@@ -668,18 +709,22 @@ export function createBodyHeartReader(paths: AkumaPaths) {
   };
 }
 
-export async function readHeart(paths: AkumaPaths): Promise<HeartSnapshot> {
+export async function readHeart(paths: AkumaPaths, signal?: AbortSignal): Promise<HeartSnapshot> {
   try {
-    return await withReadOnlyHeart(paths, (heart) => ({
-      soul: soulFact(heart),
-      latestBody: latestBodyFact(heart),
-      latestSession: latestSessionFact(heart),
-      pending: pendingTellFacts(heart),
-      latestKill: latestKillFact(heart),
-      stop: stopFact(heart),
-      pause: pauseFact(heart),
-      lastActivityAt: readLastActivityAt(heart),
-    }));
+    return await withReadOnlyHeart(
+      paths,
+      (heart) => ({
+        soul: soulFact(heart),
+        latestBody: latestBodyFact(heart),
+        latestSession: latestSessionFact(heart),
+        pending: pendingTellFacts(heart),
+        latestKill: latestKillFact(heart),
+        stop: stopFact(heart),
+        pause: pauseFact(heart),
+        lastActivityAt: readLastActivityAt(heart),
+      }),
+      signal,
+    );
   } catch (error) {
     if (isHeartAbsent(error)) {
       return {

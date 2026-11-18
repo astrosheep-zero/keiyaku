@@ -658,12 +658,10 @@ test("Akumas.spawn preserves its child when initial Tell admission fails", async
   let akumaId: string | undefined;
   let admissionCalls = 0;
   let operationFailed = true;
-  t.mock.method(AkumaOwner.prototype, "admitInitialTell", async function (this: AkumaOwner) {
+  const refusal = `initial Tell's Heart write failed`;
+  t.mock.method(AkumaOwner.prototype, "admitTell", async () => {
     admissionCalls += 1;
-    return {
-      kind: "birth-failed" as const,
-      diagnostic: `Akuma ${this.id} prompt-free birth did not settle cleanly`,
-    };
+    throw new Error(refusal);
   });
   try {
     const result = await Akumas.of(world).spawn({
@@ -678,7 +676,7 @@ test("Akumas.spawn preserves its child when initial Tell admission fails", async
     if (result.kind !== "failed") assert.fail("expected initial Tell failure");
     assert.equal(result.failures[0].stage, "tell");
     if (result.failures[0].stage !== "tell") assert.fail("expected Tell stage");
-    assert.match(result.failures[0].diagnostic, /did not settle cleanly/u);
+    assert.equal(result.failures[0].diagnostic, refusal);
     assert.equal(admissionCalls, 1);
     const history = await PublicAkuma.select(world, result.akumaId).history();
     assert.equal(history.rows.filter((row) => row.kind === "tell").length, 0);

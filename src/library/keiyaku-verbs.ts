@@ -344,7 +344,7 @@ export const verbs = Object.freeze({
   },
   spawn: {
     description:
-      "Birth a new Akuma from akumaName (ls aku/), with an optional first order. Returns birth and admission, not an answer; observe separately with wait. contract only marks whose work it is; give it a workdir and the terms yourself. A failed result with an akumaId still left an Akuma alive.",
+      "Birth a new Akuma from akumaName (ls aku/), with an optional first order. Returns clean birth and, with an order, confirmed submission to its exact Turn, not an answer. A failed result can retain the born Akuma and admitted input. contract associates the child without choosing its work directory.",
     input: z
       .strictObject({
         ...spawnFields,
@@ -352,7 +352,7 @@ export const verbs = Object.freeze({
       })
       .readonly(),
     output: spawnResultSchema,
-    normal: spawnNormalResultSchema,
+    normal: spawnNormalResultSchema.unwrap().omit({ wake: true, input: true }).readonly(),
     effect: "write",
   },
   fork: {
@@ -371,7 +371,7 @@ export const verbs = Object.freeze({
   },
   tell: {
     description:
-      "Give an Akuma new orders: steers its current work or wakes it. Returns admission, not an answer. Observe work separately with wait, or use ask for a structured answer.",
+      "Give an Akuma an order. Returns confirmed start or steering at its exact Turn, not an answer. Unconfirmed submission can leave the order admitted and able to advance.",
     input: z
       .strictObject({
         ...tellFields,
@@ -403,7 +403,7 @@ export const verbs = Object.freeze({
   },
   kill: {
     description:
-      "Kill an Akuma's current execution. Nothing is erased: history and queued orders remain, and tell or ask wakes it.",
+      "Stop an Akuma's current execution and return each selected member's stop evidence. History and admitted orders are retained.",
     input: z
       .strictObject({
         akuma: nonblank.describe(

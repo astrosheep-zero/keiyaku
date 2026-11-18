@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { abortable, abortableDelay } from "./abort.js";
-import type { TellWake } from "./call-initial-tell.js";
+import { abortableDelay } from "./abort.js";
 import type { Soul } from "./heart/index.js";
 import type { AkumaPaths } from "./identity.js";
 import { decodeSoulSeed } from "./heart/soul.js";
@@ -41,7 +40,7 @@ export type ChildBodyLaunch = Readonly<{
 export type BodyLaunchEnd = Readonly<{
   diagnostic: string;
   held?: boolean;
-  child?: Extract<TellWake, { kind: "failed" }>["child"];
+  child?: Readonly<{ log: Readonly<{ path: string }> }>;
 }>;
 export type LiveBodyLaunch = Readonly<{
   /** Launch completion evidence, never a product outcome or closure proof. */
@@ -60,28 +59,30 @@ export async function observeBodyLaunch<T>(
   schedule: (milliseconds: number, signal: AbortSignal) => Promise<void> = abortableDelay,
   signal?: AbortSignal,
 ): Promise<Readonly<{ kind: "observed"; value: T }> | Readonly<{ kind: "completed"; end: BodyLaunchEnd }>> {
+  let end: BodyLaunchEnd | undefined;
+  let polling: AbortController | undefined;
+  const complete = (value: BodyLaunchEnd): void => {
+    end = value;
+    polling?.abort();
+  };
+  void child.completed.then(complete, (error: unknown) => {
+    complete({ diagnostic: error instanceof Error ? error.message : String(error) });
+  });
   for (;;) {
     signal?.throwIfAborted();
+    const completed = end;
     const value = await observe();
     if (value !== null) return { kind: "observed", value };
-    const controller = new AbortController();
-    const timer = schedule(100, controller.signal).then(() => ({ kind: "timer" as const }));
-    let winner;
+    if (completed !== undefined) return { kind: "completed", end: completed };
+    if (end !== undefined) continue;
+    const poll = (polling = new AbortController());
     try {
-      const waited = Promise.race([child.completed.then((end) => ({ kind: "completed" as const, end })), timer]);
-      winner = signal === undefined ? await waited : await abortable(waited, signal);
+      await schedule(100, signal === undefined ? poll.signal : AbortSignal.any([poll.signal, signal]));
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (!poll.signal.aborted) throw error;
     } finally {
-      controller.abort();
-      await timer.catch(() => undefined);
+      polling = undefined;
     }
-    if (winner.kind === "timer") continue;
-    const final = await observe();
-    return final === null ? winner : { kind: "observed", value: final };
   }
-}
-
-export function launchEndWake(end: BodyLaunchEnd): Extract<TellWake, { kind: "held" | "failed" }> {
-  return end.held
-    ? { kind: "held" }
-    : { kind: "failed", diagnostic: end.diagnostic, ...(end.child === undefined ? {} : { child: end.child }) };
 }

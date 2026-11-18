@@ -95,10 +95,9 @@ Wake is level-triggered by pending Tell plus absence of a live Body. The leash
 alone admits a successor, but a held leash is not proof that a Body services the
 input: observation may briefly hold that same custody. An owned wake that loses
 only to observation rechecks durable Tell and Body custody and retries within its
-existing cancellation boundary. It reports only durable delivery, a successor
-Body, held execution or control custody, or an honest failure. Reboot or failed
-launch can leave a Tell pending for a later ordinary interaction; no daemon
-guarantees recovery. Successors never reconstruct predecessor custody. They may
+same invocation. Neither held custody nor a new Body proves submission.
+Reboot or failed launch can leave a Tell pending for a later ordinary interaction;
+no daemon guarantees recovery. Successors never reconstruct predecessor custody. They may
 continue from clean history, but hung permanently refuses them and untidy
 remains conservative.
 
@@ -156,15 +155,17 @@ store. Both paths use the same leash-held Heart settlement judgment, and Body
 publication cannot cross an unsettled barrier admitted during preparation.
 A crash after barrier consumption but before launch leaves ordinary pending Tell.
 
-Admission and completion are separate evidence. A completed interruption requires
-explicit non-hung settlement of the exact predecessor, not elapsed time or a free
-leash alone. Failure to establish completion retains the admitted Tell identity
-and its recovery boundary rather than implying non-admission. Known hung refuses
-fresh admission. Cancellation before admission leaves no input or control;
-after admission it stops waiting only. A bounded ask starts observing its own
-Tell immediately after admission and leaves no detached completion wait when
-observation ends. Hung remains a Body/provider-custody fact, never a caller's
-timeout judgment.
+Ordinary Tell confirms submission of its exact input within one finite action
+window after admission, including launch preparation and any requested interrupt.
+Interrupt first requires non-hung settlement of the exact predecessor and
+consumption of its barrier; neither a free leash nor elapsed time is proof, and
+completed interruption does not prove successor submission. Known hung refuses
+fresh interrupt admission. An unconfirmed action reports its stop and known
+cause while leaving admitted input and control available to advance. Final
+observation is bounded too. Neither a deadline nor caller cancellation creates a
+lifecycle fact or retracts admission; the observer releases any launch custody
+without canceling admitted work. A bounded Ask observes its own answer from
+admission on its own clock, without leaving a detached interrupt wait.
 
 Kill similarly requires explicit settlement of the exact stopped Body before it
 can record a witness. A Body that is already explicitly settled without a kill
@@ -173,11 +174,11 @@ witnesses that exact settled Body in place, receipts the kill, and later status
 and roster observation present the killed life instead of stranded. A genuinely
 running or asleep Body keeps its semantics: the running Body is asked to stop
 and is witnessed only after settlement, the asleep Body receipts already
-stopped, and only an already witnessed Body receipts already killed. Hung,
-untidy, held, or changed custody returns the existing unavailable evidence and
-never authorizes external signaling. Stop and interrupt remain distinct controls.
-Cancellation before kill admission starts neither control nor successor recovery;
-after admission it stops observation without retracting the admitted control.
+stopped, and only an already witnessed Body receipts already killed. Hung takes
+precedence over an end; untidy, held, or changed custody cannot prove a stop.
+Stop confirmation remains finite with or without a caller signal. Cancellation
+or a confirmation deadline can leave a known admitted stop without a kill witness.
+Stop and interrupt remain distinct controls and never authorize external signaling.
 For an externally hosted persistent runtime, kill and interrupt control current
 native execution while preserving the runtime for later resume. Ordinary Turn
 completion only disconnects the adapter's owned client. Neither client retirement

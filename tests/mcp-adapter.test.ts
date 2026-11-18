@@ -1070,7 +1070,8 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
     });
     assert.equal(spawned.isError, false, JSON.stringify(spawned));
     const child = Keiyaku.verbs.spawn.normal.parse(spawned.structuredContent);
-    assert.equal(child.wake?.kind, "pending");
+    assert.equal(child.action?.kind, "started");
+    assert.match(child.action.historyId, /^turn\/[1-9][0-9]*$/u);
     const waited = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
     assert.equal(waited.isError, false);
     const completion = modelOutputSchemas.wait.parse(waited.structuredContent);
@@ -1079,7 +1080,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
       name: "tell", arguments: { akuma: child.akumaId, prompt: "structured" },
     });
     assert.equal(told.isError, false, JSON.stringify(told));
-    assert.match(JSON.stringify(told.content), /tell|told/u);
+    assert.match(JSON.stringify(told.content), /started turn\/[1-9][0-9]*/u);
     const toldWait = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
     assert.equal(toldWait.isError, false, JSON.stringify(toldWait));
     assert.equal(modelOutputSchemas.wait.parse(toldWait.structuredContent).reason, "completed");

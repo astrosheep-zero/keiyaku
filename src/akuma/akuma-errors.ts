@@ -1,6 +1,7 @@
 import { KeiyakuError, errorCategory } from "../errors.js";
 import type { AkumaId } from "./identity.js";
 import type { AkumaTellResult } from "./selection-observation.js";
+import type { KillEvidence } from "./heart/facts.js";
 
 export function withTellFailureReceipt(reason: unknown, tell: AkumaTellResult, signal?: AbortSignal): KeiyakuError {
   return new KeiyakuError(errorCategory(reason, signal), reason instanceof Error ? reason.message : String(reason), {
@@ -9,6 +10,26 @@ export function withTellFailureReceipt(reason: unknown, tell: AkumaTellResult, s
     tell,
   });
 }
+export type KillAdmission = Readonly<{ id: AkumaId; outcome: KillEvidence | "stop-admitted" }>;
+
+declare module "../errors.js" {
+  interface KeiyakuError {
+    readonly kill?: readonly KillAdmission[];
+  }
+}
+
+export class AkumaKillError extends KeiyakuError {
+  declare readonly kill: readonly KillAdmission[];
+
+  constructor(reason: unknown, members: readonly KillAdmission[], signal?: AbortSignal) {
+    super(errorCategory(reason, signal), reason instanceof Error ? reason.message : String(reason), { cause: reason });
+    Object.defineProperty(this, "kill", {
+      value: Object.freeze(members.map((member) => Object.freeze({ ...member }))),
+      enumerable: true,
+    });
+  }
+}
+
 export { AkumaBusyError } from "./heart/facts.js";
 
 export class AkumaNotBornError extends KeiyakuError {
