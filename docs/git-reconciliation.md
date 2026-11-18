@@ -111,6 +111,21 @@ collection that cannot confirm physical absence retains custody and reports a
 diagnostic. Reconciliation never produces Verification testimony or satisfies
 missing requirements.
 
+Both physical owners share ordered command semantics while each keeps its own
+failure meaning. The first failed command stops its phase, a retried phase
+begins again from its start, and child retirement is awaited. Managed
+reconciliation reports that failure as a lag and retains custody. Verification
+scratch reports a failed setup as that attempt's environment failure, a
+declaration result as its check verdict, and a failed cleanup as cleanup
+evidence without rejudging the declaration. Managed hooks execute as the
+worktree's own physical effect and do not adopt the invoking caller's
+cancellation or output observation. Verification scratch setup runs with the
+executing caller's environment, its cancellation boundary, and its ephemeral
+output observation; scratch cleanup deliberately outlives caller cancellation
+while retaining that environment and observation. Shared execution never
+flattens those caller policies or lets one owner's failure category stand for
+another's.
+
 ## World Reconciliation
 
 A world reconcile first obtains one complete frozen Contract-world observation.

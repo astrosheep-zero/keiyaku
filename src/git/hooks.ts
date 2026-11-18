@@ -8,36 +8,11 @@ export type WorktreeHooks = Readonly<{
   create: readonly HookCommand[];
   destroy: readonly HookCommand[];
 }>;
-const hookOutputFields = {
-  stdout: z.string().exactOptional(),
-  stderr: z.string().exactOptional(),
-  truncated: z.boolean().exactOptional(),
-};
-export const hookFailureSchema = z.union([
-  z
-    .object({
-      kind: z.literal("exit"),
-      code: z.number().int(),
-      stdout: z.string(),
-      stderr: z.string(),
-      truncated: z.boolean(),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({ kind: z.literal("timeout"), ...hookOutputFields })
-    .strict()
-    .readonly(),
-  z
-    .object({ kind: z.literal("unknown-exit"), ...hookOutputFields })
-    .strict()
-    .readonly(),
-  z
-    .object({ kind: z.literal("spawn-error"), diagnostic: z.string().refine((value) => value.trim() !== "") })
-    .strict()
-    .readonly(),
-]);
-export type HookFailure = z.infer<typeof hookFailureSchema>;
+export type HookFailure =
+  | Readonly<{ kind: "exit"; code: number; stdout: string; stderr: string; truncated: boolean }>
+  | Readonly<{ kind: "timeout"; stdout?: string; stderr?: string; truncated?: boolean }>
+  | Readonly<{ kind: "unknown-exit"; stdout?: string; stderr?: string; truncated?: boolean }>
+  | Readonly<{ kind: "spawn-error"; diagnostic: string }>;
 export const worktreeHookLagSchema = z
   .object({
     kind: z.literal("worktree-hook-failed"),
@@ -148,14 +123,14 @@ function failedOutcome(outcome: Exclude<ProcessOutcome, { kind: "cancelled" }>):
 
 type HookCommandRun =
   | Readonly<{ kind: "ok" }>
-  | Readonly<{ kind: "cancelled"; stdout?: string; stderr?: string; truncated?: boolean }>
+  | Readonly<{ kind: "cancelled"; name: string; stdout?: string; stderr?: string; truncated?: boolean }>
   | Readonly<{
       kind: "failed";
       name: string;
       failure: HookFailure;
     }>;
 
-/** Execute an ordered command list without lifecycle state. Scratch owns this policy. */
+/** Execute an ordered command list without lifecycle state; the physical owner owns failure policy. */
 export async function runHookCommands(
   worktree: string,
   commands: readonly HookCommand[],
@@ -172,7 +147,7 @@ export async function runHookCommands(
       ...(environment === undefined ? {} : { env: environment }),
       ...(onOutput === undefined ? {} : { onOutput }),
     });
-    if (outcome.kind === "cancelled") return outcome;
+    if (outcome.kind === "cancelled") return { ...outcome, name: value.name };
     const failure = failedOutcome(outcome);
     if (failure !== null) return { kind: "failed", name: value.name, failure };
   }
@@ -181,33 +156,19 @@ export async function runHookCommands(
 
 type HookPhaseRun = Readonly<{ lag: WorktreeHookLag | null }>;
 
-async function runPhase(worktree: string, hooks: readonly HookCommand[], phase: HookPhase): Promise<HookPhaseRun> {
-  for (const value of hooks) {
-    const outcome = await runProcess({ argv: value.argv, timeoutMs: value.timeoutMs, cwd: worktree });
-    if (outcome.kind === "cancelled") {
-      return {
-        lag: {
-          kind: "worktree-hook-failed",
-          phase,
-          path: worktree,
-          name: value.name,
-          diagnostic: processDiagnostic({ kind: "unknown-exit" }),
-        },
-      };
-    }
-    const failure = failedOutcome(outcome);
-    if (failure !== null)
-      return {
-        lag: {
-          kind: "worktree-hook-failed",
-          phase,
-          path: worktree,
-          name: value.name,
-          diagnostic: processDiagnostic(failure),
-        },
-      };
-  }
-  return { lag: null };
+async function runPhase(worktree: string, commands: readonly HookCommand[], phase: HookPhase): Promise<HookPhaseRun> {
+  const result = await runHookCommands(worktree, commands);
+  if (result.kind === "ok") return { lag: null };
+  const failure = result.kind === "cancelled" ? { kind: "unknown-exit" as const } : result.failure;
+  return {
+    lag: {
+      kind: "worktree-hook-failed",
+      phase,
+      path: worktree,
+      name: result.name,
+      diagnostic: processDiagnostic(failure),
+    },
+  };
 }
 
 export function runCreateHooks(worktree: string, hooks: WorktreeHooks): Promise<HookPhaseRun> {

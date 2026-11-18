@@ -9,7 +9,13 @@ import { join } from "node:path";
 import test from "node:test";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
-import { runCreateHooks, worktreeHooksFrom, type HookCommand, type WorktreeHooks } from "../src/git/hooks.js";
+import {
+  runCreateHooks,
+  runHookCommands,
+  worktreeHooksFrom,
+  type HookCommand,
+  type WorktreeHooks,
+} from "../src/git/hooks.js";
 import { appointedWorktreePath } from "./support/git.js";
 import { commonGitDirectory, repositoryAt, worktreeGitDirectory } from "../src/git/repository.js";
 import { materializeScratchCandidate } from "../src/git/scratch.js";
@@ -123,6 +129,107 @@ test("hook action names must be unique within each phase", async () => {
   settingsHooks(repository.path, { create: [duplicate, duplicate], destroy: [] });
   const settings = await projectSettings(repository.path);
   assert.throws(() => worktreeHooksFrom({ settings }), /name must be unique within its phase/u);
+});
+
+test("a managed create phase reports its first failing command and runs no later command", async () => {
+  const repository = repositoryWithMain();
+  const commands = join(mkdtempSync(join(tmpdir(), "keiyaku-hook-failure-")), "commands.log");
+  const append = (value: string) =>
+    `require("node:fs").appendFileSync(${JSON.stringify(commands)}, ${JSON.stringify(value)})`;
+  const prepare = (fails: boolean): HookCommand => ({
+    name: "prepare",
+    argv: [
+      process.execPath,
+      "-e",
+      `${append("prepare\n")}${fails ? '; process.stderr.write("prepare failed\\n"); process.exit(7)' : ""}`,
+    ],
+    timeoutMs: 5_000,
+  });
+  const later: HookCommand = { name: "later", argv: [process.execPath, "-e", append("later\n")], timeoutMs: 5_000 };
+  settingsHooks(repository.path, { create: [prepare(true), later], destroy: [] });
+  const settings = await projectSettings(repository.path);
+  const repo = await Repo.at({ path: repository.path });
+  const bound = accepted(
+    await Keis.of(repo, { settings }).bind({
+      terms: contractBody("Failing create hook"),
+    }),
+  );
+  const id = present(await bound.kei.state()).id;
+  const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
+
+  const lag = (bound.issues ?? []).find((issue) => issue.kind === "worktree-hook-failed");
+  assert.ok(lag?.kind === "worktree-hook-failed", JSON.stringify(bound));
+  assert.equal(lag.phase, "create");
+  assert.equal(lag.path, worktree);
+  assert.equal(lag.name, "prepare");
+  assert.match(lag.diagnostic, /exit 7/u);
+  assert.match(lag.diagnostic, /prepare failed/u);
+  assert.deepEqual(lines(commands), ["prepare"]);
+  assert.equal(existsSync(worktree), true);
+
+  settingsHooks(repository.path, { create: [prepare(false), later], destroy: [] });
+  const repaired = await Keis.of(repo, { settings: await projectSettings(repository.path) }).reconcile({
+    contract: id,
+    retryHooks: true,
+  });
+  assert.ok(repaired.kind === "contract");
+  assert.equal(
+    (repaired.issues ?? []).some((issue) => issue.kind === "worktree-hook-failed"),
+    false,
+  );
+  assert.deepEqual(lines(commands), ["prepare", "prepare", "later"]);
+});
+
+test("a managed phase keeps timeout and unavailable-execution diagnoses", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-diagnosis-"));
+  try {
+    const slow: HookCommand = {
+      name: "slow",
+      argv: [process.execPath, "-e", "setTimeout(() => {}, 30_000)"],
+      timeoutMs: 25,
+    };
+    const timed = await runCreateHooks(directory, { create: [slow], destroy: [] });
+    assert.ok(timed.lag?.kind === "worktree-hook-failed");
+    assert.equal(timed.lag.name, "slow");
+    assert.match(timed.lag.diagnostic, /^timeout/u);
+
+    const missing: HookCommand = { name: "missing", argv: ["keiyaku-v4-no-such-executable"], timeoutMs: 5_000 };
+    const unavailable = await runCreateHooks(directory, { create: [missing], destroy: [] });
+    assert.ok(unavailable.lag?.kind === "worktree-hook-failed");
+    assert.equal(unavailable.lag.name, "missing");
+    assert.match(unavailable.lag.diagnostic, /^spawn error/u);
+    assert.match(unavailable.lag.diagnostic, /ENOENT/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("a cancelled ordered run names the command it stopped", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-hook-cancelled-"));
+  const started = join(directory, "started");
+  const controller = new AbortController();
+  const commands: readonly HookCommand[] = [
+    { name: "first", argv: [process.execPath, "-e", ""], timeoutMs: 5_000 },
+    {
+      name: "waiting",
+      argv: [
+        process.execPath,
+        "-e",
+        `require("node:fs").writeFileSync(${JSON.stringify(started)}, "started"); setInterval(() => {}, 1_000)`,
+      ],
+      timeoutMs: 5_000,
+    },
+  ];
+  try {
+    const pending = runHookCommands(directory, commands, controller.signal);
+    await waitForFile(started);
+    controller.abort();
+    const result = await pending;
+    assert.ok(result.kind === "cancelled");
+    assert.equal(result.name, "waiting");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("abandon chains destroy-hook changes after the initial ephemeral recovery", async () => {
