@@ -392,7 +392,7 @@ test("selected Contract failure names its identity and bounded cause without a r
     assert.equal(report.kind, "contract-failed");
     if (report.kind !== "contract-failed") return;
     assert.equal(report.id, contract.id);
-    assert.match(report.diagnostic, /git cat-file --batch: git cat-file --batch did not close cleanly/u);
+    assert.match(report.diagnostic, /cat-file --batch: git exited with status 73/u);
     assert.equal("workspace" in report, false, "a failed exact read carries no replayable partial detail");
   });
 });

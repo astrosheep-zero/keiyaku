@@ -1,18 +1,21 @@
 import { KeiyakuError } from "../errors.js";
 import { lstat, realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
 import { executeGit, GitPlumbingError, withPrivateGitIndex, type GitRepository } from "./process.js";
-import { validPath, type TreeChange, type TreeEntry } from "./tree.js";
+import {
+  assertAssertionRef,
+  assertRef,
+  GIT_REF,
+  withGitDecodeChannel,
+  withGitTargetedReadObservation,
+} from "./read-observation.js";
+import { parseTreeEntries, validPath, type TreeChange, type TreeEntry } from "./tree.js";
+export { GIT_REF, GIT_FORMAT_PATH, GIT_FORMAT_BYTES, readRef } from "./read-observation.js";
 export type { TreeChange } from "./tree.js";
-export const GIT_REF = "refs/heads/keiyaku-state";
 export const DELIVERY_REF_NAMESPACE = "refs/keiyaku/delivery";
 export const CANDIDATE_PIN_REF_NAMESPACE = "refs/keiyaku/candidate";
 export const HANDOFF_RECEIPT_REF_NAMESPACE = "refs/keiyaku/handoff";
-export const GIT_FORMAT_PATH = "meta/format.json";
-const CURRENT_FORMAT_VERSION = 4;
-export const GIT_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
 const STATE_COMMIT_SUBJECT = "keiyaku authority - do not delete or rewrite";
 export function isKeiyakuOwnedRef(ref: string): boolean {
   return (
@@ -206,29 +209,6 @@ async function worktreeRoot(repository: GitRepository): Promise<string> {
   return await absoluteGitPath(repository, ["--show-toplevel"], "worktree root");
 }
 
-function assertRef(ref: string): void {
-  const linkedWorktreeHead = /^worktrees\/(?!\.)(?![^/]*\.lock\/)(?![^/]*\.\.)[^/\s\0~^:?*\[\\]+\/HEAD$/u.test(ref);
-  if (
-    !linkedWorktreeHead &&
-    (!ref.startsWith("refs/") || /[\s\0]/.test(ref) || ref.endsWith("/") || ref.includes(".."))
-  ) {
-    throw new Error(`invalid Git ref: ${ref}`);
-  }
-}
-function assertAssertionRef(ref: string): void {
-  if (ref !== "HEAD") assertRef(ref);
-}
-export async function readRef(repository: GitRepository, ref: string): Promise<GitOid | null> {
-  assertAssertionRef(ref);
-  try {
-    const oid = (await executeGit(repository, ["rev-parse", "--verify", "--quiet", ref])).toString("utf8").trim();
-    return oid.length === 0 ? null : gitObjectId(oid, `ref ${ref}`);
-  } catch (error) {
-    if (error instanceof GitPlumbingError && error.status === 1) return null;
-    throw error;
-  }
-}
-
 /** Read an explicit set of asserted refs from one fresh Git observation. */
 export async function readRefs(repository: GitRepository, refs: readonly string[]) {
   const refsToRead = [...new Set(refs)];
@@ -250,43 +230,11 @@ export async function readRefs(repository: GitRepository, refs: readonly string[
   );
 }
 
-async function readTreeForCommit(repository: GitRepository, commit: GitOid): Promise<GitOid> {
-  gitObjectId(commit, "Git commit");
-  const tree = (await executeGit(repository, ["show", "-s", "--format=%T", commit])).toString("utf8").trim();
-  gitObjectId(tree, "Git tree");
-  return tree;
-}
-
-function parseTreeEntries(output: Buffer): Map<string, TreeEntry> {
-  const entries = new Map<string, TreeEntry>();
-  for (const record of output.toString("utf8").split("\0")) {
-    if (record.length === 0) continue;
-    const separator = record.indexOf("\t");
-    if (separator < 0)
-      throw new GitPlumbingError({ stderr: record, status: null, message: `malformed ls-tree record: ${record}` });
-    const [mode, type, oid] = record.slice(0, separator).split(" ");
-    const path = record.slice(separator + 1);
-    if (mode === undefined || type === undefined || oid === undefined || path.length === 0) {
-      throw new GitPlumbingError({ stderr: record, status: null, message: `malformed ls-tree record: ${record}` });
-    }
-    gitObjectId(oid, `tree entry ${path}`);
-    entries.set(path, { mode, type, oid });
-  }
-  return entries;
-}
-
-/** Read only the requested private Git paths from one immutable Git tree. */
-export async function readGitPaths(repository: GitRepository, requestedPaths: readonly string[]): Promise<GitSnapshot> {
-  for (const path of requestedPaths) validPath(path);
-  const commit = await readRef(repository, GIT_REF);
-  if (commit === null) return { commit: null, tree: null, paths: new Map() };
-
-  const tree = await readTreeForCommit(repository, commit);
-  const paths = parseTreeEntries(
-    await executeGit(repository, ["ls-tree", "-z", "--full-tree", tree, "--", GIT_FORMAT_PATH, ...requestedPaths]),
+/** Read selected paths through the same frozen authority capability as product reads. */
+export function readGitPaths(repository: GitRepository, paths: readonly string[]): Promise<GitSnapshot> {
+  return withGitDecodeChannel(repository, (channel) =>
+    withGitTargetedReadObservation(repository, channel, { paths }, ({ snapshot }) => snapshot),
   );
-  await validateGitFormat(repository, paths);
-  return { commit, tree, paths };
 }
 
 export async function writeBlob(repository: GitRepository, bytes: string | Uint8Array): Promise<GitOid> {
@@ -298,16 +246,6 @@ export async function writeBlob(repository: GitRepository, bytes: string | Uint8
 export async function readBlob(repository: GitRepository, oid: GitOid): Promise<Buffer> {
   gitObjectId(oid, "blob");
   return await executeGit(repository, ["cat-file", "blob", oid]);
-}
-
-async function validateGitFormat(repository: GitRepository, paths: ReadonlyMap<string, TreeEntry>): Promise<void> {
-  const format = paths.get(GIT_FORMAT_PATH);
-  if (format === undefined) throw new AuthorityCorruptionError(`Git is missing ${GIT_FORMAT_PATH}`);
-  if (format.type !== "blob") throw new AuthorityCorruptionError(`Git format is not a blob: ${GIT_FORMAT_PATH}`);
-  const bytes = await readBlob(repository, format.oid);
-  if (bytes.toString("utf8") !== GIT_FORMAT_BYTES) {
-    throw new AuthorityCorruptionError(`Git format is not current: ${GIT_FORMAT_PATH}`);
-  }
 }
 
 function validateTreeChanges(changes: ReadonlyMap<string, TreeChange>): ReadonlySet<string> {

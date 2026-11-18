@@ -228,7 +228,6 @@ describe("library-contract-operations isolated repositories", { concurrency: 4 }
             }),
           );
           assert.equal(refBatches, 0, "the summary catalogue reads no handoff refs");
-          assert.equal(blobChannels, 1, "journal reads share one blob channel");
           assert.equal(statusWalks, count, "only selected catalogue workspaces are observed");
           assert.equal(individualHandoffRefs, 0);
           assert.equal(individualBlobs, 0);

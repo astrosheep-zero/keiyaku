@@ -268,13 +268,6 @@ export class InvocationAccumulator implements ProtocolProgress {
     for (const failure of report.seatClose ?? []) this.recordSeatClose(contract, failure);
   }
 
-  recordChannelRetirement(contract: ContractId, error: unknown): void {
-    this.recordDiagnostic(contract, {
-      severity: "optional",
-      diagnostic: error instanceof Error ? error.message : String(error),
-    });
-  }
-
   recordDelivery(contract: ContractId, value: DeliveryIdentity): void {
     this.extendConclusions(contract, value);
   }

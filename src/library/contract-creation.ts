@@ -6,7 +6,7 @@ import type { WorktreeHooks } from "../git/hooks.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../git/read-observation.js";
 import type { BindTargetSelection } from "../protocol/bind.js";
 import type { IntentOutcome, RepositoryScope } from "../protocol/operations.js";
-import { executionStop, isOperationalFailure, isOperationalStop } from "../protocol/progress.js";
+import { executionStop, isOperationalStop } from "../protocol/progress.js";
 import { readManagedWorktreeAppointment } from "../workspace-place.js";
 import { admitForkBindWithAppointment, prepareMarkdownBind } from "./bind.js";
 import type { BindOutcome, BindValue } from "./contract-outcomes.js";
@@ -74,55 +74,38 @@ export async function bindKei(
   const handle = (id: ContractId) => createHandle(id, scope, composition);
   const accumulator = new InvocationAccumulator();
   const projection = await (async (): Promise<BindOutcome | InvocationFailure> => {
-    let completed: BindOutcome | InvocationFailure | undefined;
-    let retirement: { error: unknown } | undefined;
     try {
-      return await withGitDecodeChannel(
-        scope,
-        async (channel) => {
-          completed = await (async (): Promise<BindOutcome | InvocationFailure> => {
-            if (forkOf !== undefined) {
-              const fork = await admitForkBindWithAppointment({
-                scope,
-                channel,
-                progress: accumulator,
-                sourceId: forkOf,
-                ...(target === undefined ? {} : { target }),
-              });
-              if (fork.kind === "refused") return { kind: "refused", reason: compactReason(fork.refusal) };
-              const admission = fork.admission;
-              if (admission.kind !== "accepted")
-                return admission.kind === "refused"
-                  ? { kind: "refused", reason: compactReason(admission.refusal) }
-                  : compactRetry(admission.reason);
-              const id = admission.value.contractId;
-              retainBindCoordinates(accumulator, admission);
-              const value = await bindComplete(accumulator, id, scope, channel, admission, hooks, () =>
-                observeRegion(scope, channel, id, fork.document.region).then((region) => bindValue(handle(id), region)),
-              );
-              return acceptedBind(id, value);
-            }
-            if (document === undefined) throw new Error("Markdown bind requires its prepared document");
-            return await markdownBind(prepared, document, hooks, scope, channel, accumulator, handle);
-          })();
-          if (completed.kind === "accepted" && accumulator.head(completed.contractId) === undefined)
-            throw new Error("missing leading admission receipt");
-          return completed;
-        },
-        (error) => {
-          retirement = { error };
-          const id = accumulator.snapshot().facts.find((fact) => fact.kind === "bind")?.contract;
-          if (id !== undefined) accumulator.recordChannelRetirement(id, error);
-        },
-      );
-    } catch (error) {
-      if (
-        retirement !== undefined &&
-        error === retirement.error &&
-        completed?.kind === "accepted" &&
-        isOperationalFailure(error)
-      )
+      return await withGitDecodeChannel(scope, async (channel) => {
+        const completed = await (async (): Promise<BindOutcome | InvocationFailure> => {
+          if (forkOf !== undefined) {
+            const fork = await admitForkBindWithAppointment({
+              scope,
+              channel,
+              progress: accumulator,
+              sourceId: forkOf,
+              ...(target === undefined ? {} : { target }),
+            });
+            if (fork.kind === "refused") return { kind: "refused", reason: compactReason(fork.refusal) };
+            const admission = fork.admission;
+            if (admission.kind !== "accepted")
+              return admission.kind === "refused"
+                ? { kind: "refused", reason: compactReason(admission.refusal) }
+                : compactRetry(admission.reason);
+            const id = admission.value.contractId;
+            retainBindCoordinates(accumulator, admission);
+            const value = await bindComplete(accumulator, id, scope, channel, admission, hooks, () =>
+              observeRegion(scope, channel, id, fork.document.region).then((region) => bindValue(handle(id), region)),
+            );
+            return acceptedBind(id, value);
+          }
+          if (document === undefined) throw new Error("Markdown bind requires its prepared document");
+          return await markdownBind(prepared, document, hooks, scope, channel, accumulator, handle);
+        })();
+        if (completed.kind === "accepted" && accumulator.head(completed.contractId) === undefined)
+          throw new Error("missing leading admission receipt");
         return completed;
+      });
+    } catch (error) {
       const contract = accumulator.snapshot().facts.find((fact) => fact.kind === "bind")?.contract;
       return { kind: "failed", ...(contract === undefined ? {} : { contract }), error };
     }

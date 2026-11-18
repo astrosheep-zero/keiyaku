@@ -223,8 +223,9 @@ preparation does not establish prerequisite or gate satisfaction, and an
 unavailable or unobserved target never becomes implicitly followable.
 
 Preview never executes declarations or hooks, admits facts, places, reconciles,
-settles, or continues dependents. Retirement of its owned observation may report
-an issue without erasing the observed preview or changing it into admission. Standing evidence is judged independently for
+settles, or continues dependents. A failed finite Git read preserves any preview
+already confirmed through the invocation's existing exceptional evidence.
+Standing evidence is judged independently for
 every prospective requirement by generic currentness. Requested diff and scope,
 including a genuinely empty diff, are presentation data rather than journal,
 gate, or cache authority. Real delivery observes afresh. Cancellation retains
@@ -251,8 +252,13 @@ a required operational stop remains actionable.
 
 Reconciliation retains each confirmed physical effect once, in the order it
 was observed, including effects that precede a later failure. Resource problems
-accumulate across attempts and dependents. Newer candidate conclusions cannot
-overwrite an earlier resource problem. A failure during
+accumulate across attempts and dependents. Finite Git reads report command and
+frame failures at the affected read after owned command retirement. Later read
+failures preserve known admitted work through the invocation's exceptional
+evidence. Scope exit awaits already issued reads. An independent failure found
+while draining accompanies the original operation failure. A consumer exception
+retains its exact identity when there is no independent failure to attach.
+Newer candidate conclusions cannot overwrite an earlier resource problem. A failure during
 retirement keeps every previously confirmed admission and effect, including when
 an earlier exceptional receipt was already attached to the native cause. Merging
 evidence creates a fresh error with immutable receipt properties and preserves

@@ -1,14 +1,40 @@
-import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
-import { spawnCancellableProcess } from "../runtime/proc/run.js";
 import { gitObjectId } from "./identity.js";
-import { parseTreeObject, validPath, type TreeEntry } from "./tree.js";
-import { GIT_FORMAT_BYTES, GIT_FORMAT_PATH, GIT_REF, readRef, type GitOid, type GitSnapshot } from "./repository.js";
-import { gitChildEnvironment, GitPlumbingError, type GitRepository } from "./process.js";
+import { parseTreeEntries, validPath, type TreeEntry } from "./tree.js";
+import type { GitOid, GitSnapshot } from "./repository.js";
+import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
+
+export const GIT_REF = "refs/heads/keiyaku-state";
+export const GIT_FORMAT_PATH = "meta/format.json";
+const CURRENT_FORMAT_VERSION = 4;
+export const GIT_FORMAT_BYTES = `{"version":${CURRENT_FORMAT_VERSION}}\n`;
+
+export function assertRef(ref: string): void {
+  const linkedWorktreeHead = /^worktrees\/(?!\.)(?![^/]*\.lock\/)(?![^/]*\.\.)[^/\s\0~^:?*\[\\]+\/HEAD$/u.test(ref);
+  if (
+    !linkedWorktreeHead &&
+    (!ref.startsWith("refs/") || /[\s\0]/.test(ref) || ref.endsWith("/") || ref.includes(".."))
+  )
+    throw new Error(`invalid Git ref: ${ref}`);
+}
+
+export function assertAssertionRef(ref: string): void {
+  if (ref !== "HEAD") assertRef(ref);
+}
+
+export async function readRef(repository: GitRepository, ref: string): Promise<GitOid | null> {
+  assertAssertionRef(ref);
+  try {
+    const oid = (await executeGit(repository, ["rev-parse", "--verify", "--quiet", ref])).toString("utf8").trim();
+    return oid.length === 0 ? null : gitObjectId(oid, `ref ${ref}`);
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1) return null;
+    throw error;
+  }
+}
 
 const gitReadObservationBrand: unique symbol = Symbol("GitReadObservation");
 const gitDecodeChannelBrand: unique symbol = Symbol("GitDecodeChannel");
-const BATCH_RETIREMENT_GRACE_MS = 5_000;
 
 export type GitBlobResult = Readonly<{ kind: "present"; bytes: Buffer }> | Readonly<{ kind: "missing" }>;
 
@@ -25,233 +51,213 @@ export type GitObjectResult =
   | Readonly<{ kind: "present"; type: string; bytes: Buffer }>
   | Readonly<{ kind: "missing" }>;
 
+export type GitTreeSelection = Readonly<{
+  paths?: readonly string[];
+  subtrees?: readonly string[];
+}>;
+
 export type GitDecodeChannel = Readonly<{
   readonly [gitDecodeChannelBrand]: true;
   readObjects(oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>>;
+  readRef(ref: string): Promise<GitOid | null>;
+  readTreeSelection(root: GitOid, selection: GitTreeSelection | null): Promise<GitSnapshot["paths"]>;
 }>;
 
-type StreamCursor = Readonly<{
-  line(): Promise<Buffer>;
-  exact(length: number): Promise<Buffer>;
-}>;
-
-function streamCursor(stream: NodeJS.ReadableStream): StreamCursor {
-  const iterator = (stream as NodeJS.ReadableStream & AsyncIterable<string | Buffer>)[Symbol.asyncIterator]();
-  let buffer: Buffer = Buffer.alloc(0);
-  let offset = 0;
-  const pull = async (expected: string): Promise<void> => {
-    const next = await iterator.next();
-    if (next.done) throw new Error(`git cat-file --batch ended while reading ${expected}`);
-    buffer = typeof next.value === "string" ? Buffer.from(next.value) : next.value;
-    offset = 0;
-  };
-  const line = async (): Promise<Buffer> => {
-    const parts: Buffer[] = [];
-    let length = 0;
-    for (;;) {
-      if (offset === buffer.length) await pull("line");
-      const newline = buffer.indexOf(0x0a, offset);
-      const part = buffer.subarray(offset, newline < 0 ? buffer.length : newline);
-      offset = newline < 0 ? buffer.length : newline + 1;
-      if (newline >= 0 && parts.length === 0) return part;
-      parts.push(part);
-      length += part.length;
-      if (newline >= 0) return Buffer.concat(parts, length);
-    }
-  };
-  const exact = async (length: number): Promise<Buffer> => {
-    const value = Buffer.allocUnsafe(length);
-    let filled = 0;
-    while (filled < length) {
-      if (offset === buffer.length) await pull(`${length} bytes`);
-      const count = Math.min(length - filled, buffer.length - offset);
-      buffer.copy(value, filled, offset, offset + count);
-      offset += count;
-      filled += count;
-    }
-    return value;
-  };
-  return { line, exact };
-}
-
-type BatchStatus = { spawnError: Error | null; failure: GitPlumbingError | null };
-
-type BatchObjectReader = Readonly<{
-  objects(oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>>;
-  close(): Promise<void>;
-}>;
-
-function batchChild(repository: GitRepository) {
-  return spawnCancellableProcess({
-    argv: [repository.gitPath, "cat-file", "--batch"],
-    cwd: repository.effectiveCwd,
-    env: gitChildEnvironment(),
-    ...(repository.signal === undefined ? {} : { signal: repository.signal }),
-  });
-}
-
-function batchError(
-  child: ChildProcessWithoutNullStreams,
-  stderr: readonly Buffer[],
-  message: string,
-  status: number | null,
-): GitPlumbingError {
-  return new GitPlumbingError({
-    stderr: Buffer.concat(stderr),
-    status,
-    message: `git cat-file --batch: ${message}`,
-    pid: child.pid ?? null,
-  });
-}
-
-async function closeBatchProcess(
-  process: ReturnType<typeof spawnCancellableProcess>,
-  reader: Readonly<{
-    child: ChildProcessWithoutNullStreams;
-    closed: Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null }>>;
-    tail: Promise<void>;
-    status: BatchStatus;
-    stderr: readonly Buffer[];
-  }>,
-): Promise<void> {
-  const { child, closed, stderr } = reader;
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const deadline = new Promise<null>((resolve) => {
-    timer = setTimeout(() => resolve(null), BATCH_RETIREMENT_GRACE_MS);
-  });
-  try {
-    const drained = await Promise.race([reader.tail, process.terminationFailure, deadline]);
-    if (drained !== null && reader.status.failure !== null) {
-      await process.waitTermination();
-      return;
-    }
-    if (drained !== null && !child.stdin.destroyed) child.stdin.end();
-    const outcome = drained === null ? null : await Promise.race([closed, process.terminationFailure, deadline]);
-    if (outcome === null) {
-      try {
-        await process.terminate(true);
-      } finally {
-        child.stdin.destroy();
-        child.stdout.destroy();
-        child.stderr.destroy();
-        await process.waitTermination();
-      }
-      throw batchError(child, stderr, "decode-channel retirement exceeded its EOF close bound", child.exitCode);
-    }
-    await process.waitTermination();
-    if (reader.status.spawnError !== null || outcome.code !== 0) {
-      throw batchError(
-        child,
-        stderr,
-        process.cancelled() ? "git process cancelled" : "git cat-file --batch did not close cleanly",
-        outcome.code,
-      );
-    }
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-async function readBatchObject(cursor: StreamCursor, oid: GitOid): Promise<GitObjectResult> {
-  const header = (await cursor.line()).toString("ascii").split(" ");
-  if (header.length === 2 && header[0] === oid && header[1] === "missing") return { kind: "missing" };
-  if (header.length !== 3 || header[0] !== oid || header[1] === undefined || header[2] === undefined) {
-    throw new Error(`unexpected header for ${oid}`);
-  }
-  if (!/^(0|[1-9][0-9]*)$/.test(header[2])) throw new Error(`invalid size for ${oid}`);
-  const size = Number(header[2]);
-  if (!Number.isSafeInteger(size)) throw new Error(`unsafe size for ${oid}`);
-  const bytes = await cursor.exact(size);
-  const delimiter = await cursor.exact(1);
-  if (delimiter[0] !== 0x0a) throw new Error(`missing content delimiter for ${oid}`);
-  return { kind: "present", type: header[1], bytes };
-}
-
-async function writeBatchRequests(child: ChildProcessWithoutNullStreams, oids: readonly GitOid[]): Promise<void> {
-  for (let index = 0; index < oids.length; index += 256) {
-    const request = `${oids.slice(index, index + 256).join("\n")}\n`;
-    await new Promise<void>((resolve, reject) => {
-      child.stdin.write(request, (error) => (error == null ? resolve() : reject(error)));
+function parseBatch(output: Buffer, oids: readonly GitOid[]): ReadonlyMap<GitOid, GitObjectResult> {
+  const malformed = (detail: string): never => {
+    throw new GitPlumbingError({
+      stderr: Buffer.alloc(0),
+      status: null,
+      message: `malformed cat-file --batch output: ${detail}`,
     });
+  };
+  const objects = new Map<GitOid, GitObjectResult>();
+  let offset = 0;
+  for (const oid of oids) {
+    const end = output.indexOf(0x0a, offset);
+    if (end < 0) malformed(`missing header for ${oid}`);
+    const fields = output.subarray(offset, end).toString("utf8").split(" ");
+    offset = end + 1;
+    if (fields.length === 2 && fields[0] === oid && fields[1] === "missing") {
+      objects.set(oid, { kind: "missing" });
+      continue;
+    }
+    const [, type, length] = fields;
+    if (fields.length !== 3 || fields[0] !== oid || !/^(blob|tree|commit|tag)$/.test(type ?? ""))
+      malformed(`unexpected header for ${oid}`);
+    if (!/^(0|[1-9][0-9]*)$/.test(length ?? "")) malformed(`invalid size for ${oid}`);
+    const size = Number(length);
+    if (!Number.isSafeInteger(size) || size > output.length - offset) malformed(`invalid content length for ${oid}`);
+    const bytes = output.subarray(offset, offset + size);
+    offset += size;
+    if (output[offset] !== 0x0a) malformed(`missing content delimiter for ${oid}`);
+    offset += 1;
+    objects.set(oid, { kind: "present", type: type!, bytes });
   }
+  if (offset !== output.length) malformed("trailing bytes");
+  return objects;
 }
 
-function batchObjectReader(repository: GitRepository): BatchObjectReader {
-  const process = batchChild(repository);
-  const child = process.child as ChildProcessWithoutNullStreams;
-  const cursor = streamCursor(child.stdout);
-  const cache = new Map<GitOid, Promise<GitObjectResult>>();
-  const stderr: Buffer[] = [];
-  const closed = new Promise<Readonly<{ code: number | null; signal: NodeJS.Signals | null }>>((resolve) => {
-    child.once("close", (code, signal) => resolve({ code, signal }));
-  });
-  let tail: Promise<void> = Promise.resolve();
-  const status: BatchStatus = { spawnError: null, failure: null };
-  child.stderr.on("data", (chunk: Buffer) => stderr.push(Buffer.from(chunk)));
-  child.on("error", (error) => {
-    status.spawnError = error;
-  });
-  child.stdin.on("error", (error) => {
-    status.spawnError ??= error;
-  });
+async function allTrees(repository: GitRepository, oids: readonly GitOid[]): Promise<boolean> {
+  const metadata = `${oids.join("\n")}\n`;
+  const output = await executeGit(repository, ["cat-file", "--batch-check=%(objectname) %(objecttype)"], metadata);
+  const lines = output.toString("utf8").split("\n");
+  const typeLine = /^([0-9a-f]+) (tree|blob|commit|tag|missing)$/u;
+  if (
+    lines.pop() !== "" ||
+    lines.length !== oids.length ||
+    lines.some((line, index) => typeLine.exec(line)?.[1] !== oids[index])
+  )
+    throw new GitPlumbingError({ stderr: "", status: null, message: "malformed cat-file --batch-check output" });
+  return lines.every((line) => line.endsWith(" tree"));
+}
 
-  const batch = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>> => {
-    if (status.failure !== null) throw status.failure;
-    // Feed bounded request chunks while the single parser drains responses.
-    const sending = writeBatchRequests(child, oids);
-    const receiving = (async () => {
-      const results = new Map<GitOid, GitObjectResult>();
-      for (const oid of oids) results.set(oid, await readBatchObject(cursor, oid));
-      return results;
-    })();
+/** Native directory reads rooted only in an immutable tree, shared by later selections. */
+function treeLoader(repository: GitRepository, root: GitOid) {
+  const directoriesAreCorrupt = async (output: Buffer): Promise<boolean> => {
     try {
-      const [, results] = await Promise.race([Promise.all([sending, receiving]), process.terminationFailure]);
-      return results;
-    } catch (error) {
-      child.stdin.destroy();
-      child.stdout.destroy();
-      await Promise.allSettled([sending, receiving]);
-      status.failure = batchError(child, stderr, process.cancelled() ? "git process cancelled" : String(error), null);
-      await process.terminate(true);
-      await closed;
-      await process.waitTermination();
-      status.failure = batchError(
-        child,
-        stderr,
-        process.cancelled() ? "git process cancelled" : error instanceof Error ? error.message : String(error),
-        process.cancelled() ? null : child.exitCode,
+      const oids = new Set(
+        [...parseTreeEntries(output).values()].filter((entry) => entry.type === "tree").map(({ oid }) => oid),
       );
-      throw status.failure;
+      return oids.size > 0 && !(await allTrees(repository, [...oids]));
+    } catch {
+      // Partial listings and failed probes cannot prove the cause of the native failure.
+      return false;
     }
   };
-  const objects = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>> => {
+  const list = async (oid: GitOid, recursive = false): Promise<ReadonlyMap<string, TreeEntry>> => {
+    if (!(await allTrees(repository, [oid])))
+      throw new AuthorityCorruptionError(`Git directory object is missing or not a tree: ${oid}`);
+    const args = ["ls-tree", "-z", ...(recursive ? ["-r", "-t"] : []), oid];
+    const output = await executeGit(repository, args).catch(async (error: unknown) => {
+      if (!recursive || !(error instanceof GitPlumbingError) || error.status === null || repository.signal?.aborted)
+        throw error;
+      if (await directoriesAreCorrupt(error.stdout))
+        throw new AuthorityCorruptionError("Git directory object is missing or not a tree", { cause: error });
+      throw error;
+    });
+    return parseTreeEntries(output);
+  };
+  const pending = new Map<string, Promise<ReadonlyMap<string, TreeEntry>>>();
+  const directory = (path: string, oid: GitOid) => {
+    const loaded = pending.get(path) ?? list(oid);
+    pending.set(path, loaded);
+    return loaded;
+  };
+  return async (selection: GitTreeSelection | null): Promise<GitSnapshot["paths"]> => {
+    const paths = new Map<string, TreeEntry>();
+    const select = async (path: string, subtree: boolean): Promise<void> => {
+      validPath(path);
+      let oid = root;
+      let prefix = "";
+      for (const name of path.split("/")) {
+        const entry = (await directory(prefix, oid)).get(name);
+        if (entry === undefined) return;
+        prefix = prefix.length === 0 ? name : `${prefix}/${name}`;
+        if (prefix === path || entry.type !== "tree") {
+          paths.set(prefix, entry);
+          if (prefix === path && subtree && entry.type === "tree") await enumerate(path, entry.oid);
+          return;
+        }
+        oid = entry.oid;
+      }
+    };
+    const enumerate = async (path: string, oid: GitOid): Promise<void> => {
+      const entries = await list(oid, true);
+      const loaded = new Map<string, Map<string, TreeEntry>>([[path, new Map()]]);
+      for (const [relative, entry] of entries) {
+        const full = path.length === 0 ? relative : `${path}/${relative}`;
+        const slash = full.lastIndexOf("/");
+        const parent = slash < 0 ? "" : full.slice(0, slash);
+        loaded.get(parent)!.set(full.slice(slash + 1), entry);
+        if (entry.type === "tree") loaded.set(full, new Map());
+        else paths.set(full, entry);
+      }
+      for (const [parent, children] of loaded) pending.set(parent, Promise.resolve(children));
+    };
+    if (selection === null) await enumerate("", root);
+    else {
+      const subtrees = new Set(selection.subtrees);
+      for (const path of new Set([GIT_FORMAT_PATH, ...(selection.paths ?? []), ...subtrees]))
+        await select(path, subtrees.has(path));
+    }
+    return paths;
+  };
+}
+
+export async function withGitDecodeChannel<Value>(
+  repository: GitRepository,
+  consume: (channel: GitDecodeChannel) => Value | PromiseLike<Value>,
+): Promise<Value> {
+  let active = true;
+  const objects = new Map<GitOid, Promise<GitObjectResult>>();
+  const trees = new Map<GitOid, ReturnType<typeof treeLoader>>();
+  const pending = new Set<Promise<unknown>>();
+  const own = <Result>(read: Promise<Result>): Promise<Result> => {
+    pending.add(read);
+    void read.then(
+      () => pending.delete(read),
+      () => pending.delete(read),
+    );
+    return read;
+  };
+  const assertActive = (): void => {
+    if (!active) throw new Error("Git decode channel is closed");
+  };
+  const readObjects = async (oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitObjectResult>> => {
+    assertActive();
     const unique = [...new Set(oids)];
     for (const oid of unique) gitObjectId(oid, "Git object");
-    const uncached = unique.filter((oid) => !cache.has(oid));
+    const uncached = unique.filter((oid) => !objects.has(oid));
     if (uncached.length > 0) {
-      const requested = tail.then(() => batch(uncached));
-      tail = requested.then(
-        () => undefined,
-        () => undefined,
+      // Install every promise before starting IO so concurrent callers share the same batch.
+      const batch = own(
+        Promise.resolve().then(async () =>
+          parseBatch(await executeGit(repository, ["cat-file", "--batch"], `${uncached.join("\n")}\n`), uncached),
+        ),
       );
       for (const oid of uncached)
-        cache.set(
+        objects.set(
           oid,
-          requested.then((results) => results.get(oid)!),
+          batch.then((results) => results.get(oid)!),
         );
     }
-    return new Map(await Promise.all(unique.map(async (oid) => [oid, await cache.get(oid)!] as const)));
+    return new Map(await Promise.all(unique.map(async (oid) => [oid, await objects.get(oid)!] as const)));
   };
-  const close = async (): Promise<void> => {
-    await closeBatchProcess(process, {
-      child,
-      closed,
-      tail,
-      status,
-      stderr,
-    });
+  const readTreeSelection = async (root: GitOid, selection: GitTreeSelection | null): Promise<GitSnapshot["paths"]> => {
+    assertActive();
+    gitObjectId(root, "Git tree");
+    const load = trees.get(root) ?? treeLoader(repository, root);
+    trees.set(root, load);
+    return await load(selection);
   };
-  return { objects, close };
+  const channel = {
+    [gitDecodeChannelBrand]: true,
+    readObjects: (oids) => own(readObjects(oids)),
+    readRef: async (ref) => {
+      assertActive();
+      return await own(readRef(repository, ref));
+    },
+    readTreeSelection: (root, selection) => own(readTreeSelection(root, selection)),
+  } satisfies GitDecodeChannel;
+  let failure: unknown[] = [];
+  try {
+    return await consume(channel);
+  } catch (error) {
+    failure = [error];
+    throw error;
+  } finally {
+    active = false;
+    const retired = await Promise.allSettled(pending);
+    objects.clear();
+    trees.clear();
+    const failures = new Set(retired.flatMap((read) => (read.status === "rejected" ? [read.reason] : [])));
+    if (failure.length > 0) failures.delete(failure[0]);
+    if (failures.size > 0)
+      throw new AggregateError([...failure, ...failures], "Git read scope failed while awaiting outstanding reads", {
+        cause: failure[0],
+      });
+  }
 }
 
 function commitTree(result: GitObjectResult, commit: GitOid): GitOid {
@@ -259,170 +265,23 @@ function commitTree(result: GitObjectResult, commit: GitOid): GitOid {
   if (result.type !== "commit") throw new AuthorityCorruptionError(`Git state ref does not name a commit: ${commit}`);
   const newline = result.bytes.indexOf(0x0a);
   if (newline < 0) throw new AuthorityCorruptionError(`Git state commit has no headers: ${commit}`);
-  const firstLine = result.bytes.subarray(0, newline).toString("ascii");
+  const firstLine = result.bytes.subarray(0, newline).toString("utf8");
   if (!firstLine.startsWith("tree "))
     throw new AuthorityCorruptionError(`Git state commit has no root tree: ${commit}`);
   return gitObjectId(firstLine.slice("tree ".length), "Git state tree");
 }
 
-async function completeTree(channel: GitDecodeChannel, root: GitOid): Promise<GitSnapshot["paths"]> {
-  const paths = new Map<string, TreeEntry>();
-  let level = [{ path: "", oid: root }];
-  while (level.length > 0) {
-    const objects = await channel.readObjects(level.map(({ oid }) => oid));
-    const next: Array<{ path: string; oid: GitOid }> = [];
-    for (const tree of level) {
-      const object = objects.get(tree.oid);
-      if (object?.kind !== "present") throw new AuthorityCorruptionError(`Git tree is missing: ${tree.oid}`);
-      if (object.type !== "tree") throw new AuthorityCorruptionError(`Git object is not a tree: ${tree.oid}`);
-      const entries = parseTreeObject(object.bytes, tree.oid.length / 2);
-      for (const [name, entry] of entries) {
-        const path = tree.path.length === 0 ? name : `${tree.path}/${name}`;
-        if (entry.type === "tree") next.push({ path, oid: entry.oid });
-        else paths.set(path, entry);
-      }
-    }
-    level = next;
-  }
-  return paths;
-}
-
-type TreeSelectionNode = {
-  exact: boolean;
-  subtree: boolean;
-  children: Map<string, TreeSelectionNode>;
-};
-
-export type GitTreeSelection = Readonly<{
-  paths?: readonly string[];
-  subtrees?: readonly string[];
-}>;
-
-function selectionTree(selection: GitTreeSelection): TreeSelectionNode {
-  const root: TreeSelectionNode = { exact: false, subtree: false, children: new Map() };
-  const add = (path: string, kind: "exact" | "subtree"): void => {
-    validPath(path);
-    let node = root;
-    for (const segment of path.split("/")) {
-      let child = node.children.get(segment);
-      if (child === undefined) {
-        child = { exact: false, subtree: false, children: new Map() };
-        node.children.set(segment, child);
-      }
-      node = child;
-    }
-    node[kind] = true;
-  };
-  add(GIT_FORMAT_PATH, "exact");
-  for (const path of selection.paths ?? []) add(path, "exact");
-  for (const path of selection.subtrees ?? []) add(path, "subtree");
-  return root;
-}
-
-async function readGitTreeSelection(
-  channel: GitDecodeChannel,
-  root: GitOid,
-  selection: GitTreeSelection,
-): Promise<GitSnapshot["paths"]> {
-  const paths = new Map<string, TreeEntry>();
-  const readDirectory = async (oid: GitOid): Promise<ReadonlyMap<string, TreeEntry>> => {
-    const object = (await channel.readObjects([oid])).get(oid);
-    if (object?.kind !== "present") throw new AuthorityCorruptionError(`Git tree is missing: ${oid}`);
-    if (object.type !== "tree") throw new AuthorityCorruptionError(`Git object is not a tree: ${oid}`);
-    return parseTreeObject(object.bytes, oid.length / 2);
-  };
-  const enumerate = async (path: string, oid: GitOid): Promise<void> => {
-    const entries = await readDirectory(oid);
-    await Promise.all(
-      [...entries].map(async ([name, entry]) => {
-        const childPath = path.length === 0 ? name : `${path}/${name}`;
-        if (entry.type === "tree") await enumerate(childPath, entry.oid);
-        else paths.set(childPath, entry);
-      }),
-    );
-  };
-  const visit = async (path: string, oid: GitOid, node: TreeSelectionNode): Promise<void> => {
-    const entries = await readDirectory(oid);
-    await Promise.all(
-      [...node.children].map(async ([name, child]) => {
-        const entry = entries.get(name);
-        if (entry === undefined) return;
-        const childPath = path.length === 0 ? name : `${path}/${name}`;
-        if (entry.type !== "tree") {
-          paths.set(childPath, entry);
-          return;
-        }
-        if (child.exact || child.subtree) paths.set(childPath, entry);
-        if (child.subtree) await enumerate(childPath, entry.oid);
-        else if (child.children.size > 0) await visit(childPath, entry.oid, child);
-      }),
-    );
-  };
-  await visit("", root, selectionTree(selection));
-  return paths;
-}
-
-async function readFormat(observation: GitReadObservation): Promise<void> {
-  const entry = observation.snapshot.paths.get(GIT_FORMAT_PATH);
-  if (entry === undefined) throw new AuthorityCorruptionError(`Git is missing ${GIT_FORMAT_PATH}`);
-  if (entry.type !== "blob") throw new AuthorityCorruptionError(`Git format is not a blob: ${GIT_FORMAT_PATH}`);
-  const result = (await observation.readBlobs([entry.oid])).get(entry.oid);
-  if (result?.kind !== "present" || result.bytes.toString("utf8") !== GIT_FORMAT_BYTES) {
-    throw new AuthorityCorruptionError(`Git format is not current: ${GIT_FORMAT_PATH}`);
-  }
-}
-
-export async function withGitDecodeChannel<Value>(
-  repository: GitRepository,
-  consume: (channel: GitDecodeChannel) => Value | PromiseLike<Value>,
-  onRetirementFailure?: (error: unknown) => void,
-): Promise<Value> {
-  const transport: { reader: BatchObjectReader | null } = { reader: null };
-  let active = true;
-  const objectReader = (): BatchObjectReader => (transport.reader ??= batchObjectReader(repository));
-  const channel = {
-    [gitDecodeChannelBrand]: true,
-    readObjects: (oids: readonly GitOid[]) => {
-      if (!active) throw new Error("Git decode channel is closed");
-      return oids.length === 0 ? Promise.resolve(new Map()) : objectReader().objects(oids);
-    },
-  } satisfies GitDecodeChannel;
-
-  let result: Value | undefined;
-  let failure: { error: unknown } | undefined;
-  try {
-    result = await consume(channel);
-  } catch (error) {
-    failure = { error };
-  }
-  active = false;
-  try {
-    if (transport.reader !== null) await transport.reader.close();
-  } catch (error) {
-    onRetirementFailure?.(error);
-    failure ??= { error };
-  }
-  if (failure !== undefined) throw failure.error;
-  return result as Value;
-}
-
-/**
- * Blob-only reads over a decode channel: a missing object stays missing, and a present
- * non-blob object is authority corruption, never a silent skip.
- */
+/** A present non-blob authority is corruption, never a silent skip. */
 export async function readBlobResults(
   channel: GitDecodeChannel,
   oids: readonly GitOid[],
 ): Promise<ReadonlyMap<GitOid, GitBlobResult>> {
-  if (oids.length === 0) return new Map();
   const objects = await channel.readObjects(oids);
   const blobs = new Map<GitOid, GitBlobResult>();
   for (const [oid, object] of objects) {
-    if (object.kind === "missing") blobs.set(oid, object);
-    else {
-      if (object.type !== "blob") throw new AuthorityCorruptionError(`Git object is not a blob: ${oid}`);
-      blobs.set(oid, { kind: "present", bytes: object.bytes });
-    }
+    if (object.kind === "present" && object.type !== "blob")
+      throw new AuthorityCorruptionError(`Git object is not a blob: ${oid}`);
+    blobs.set(oid, object.kind === "missing" ? object : { kind: "present", bytes: object.bytes });
   }
   return blobs;
 }
@@ -433,7 +292,6 @@ async function observeEpoch<Value>(
   selection: GitTreeSelection | null,
   consume: (observation: GitReadObservation) => Value | PromiseLike<Value>,
 ): Promise<Value> {
-  const commit = await readRef(repository, GIT_REF);
   let active = true;
   const refs = new Map<string, Promise<GitOid | null>>();
   const assertActive = (): void => {
@@ -441,38 +299,22 @@ async function observeEpoch<Value>(
   };
   const resolveRef = async (ref: string): Promise<GitOid | null> => {
     assertActive();
-    let resolved = refs.get(ref);
-    if (resolved === undefined) {
-      resolved = readRef(repository, ref);
-      refs.set(ref, resolved);
-    }
-    return await resolved;
+    const resolved = refs.get(ref) ?? channel.readRef(ref);
+    refs.set(ref, resolved);
+    return resolved;
   };
-
-  let result: Value | undefined;
-  let failure: { error: unknown } | undefined;
   try {
-    let snapshot: GitSnapshot;
-    if (commit === null) {
-      snapshot = { commit: null, tree: null, paths: new Map() };
-    } else {
-      const commitObject = (await channel.readObjects([commit])).get(commit);
-      if (commitObject === undefined) throw new Error(`missing state commit result: ${commit}`);
-      const tree = await commitTree(commitObject, commit);
-      const paths =
-        selection === null ? await completeTree(channel, tree) : await readGitTreeSelection(channel, tree, selection);
-      snapshot = { commit, tree, paths };
-    }
-    const exactPaths = new Set(selection?.paths);
+    for (const path of [...(selection?.paths ?? []), ...(selection?.subtrees ?? [])]) validPath(path);
+    const commit = await resolveRef(GIT_REF);
+    const tree = commit === null ? null : commitTree((await channel.readObjects([commit])).get(commit)!, commit);
+    const paths = tree === null ? new Map() : await channel.readTreeSelection(tree, selection);
     const observation = {
       [gitReadObservationBrand]: true,
       repository,
-      snapshot,
-      selectPaths: async (paths) => {
+      snapshot: { commit, tree, paths },
+      selectPaths: async (requested) => {
         assertActive();
-        return snapshot.tree === null || paths.every((path) => exactPaths.has(path))
-          ? snapshot.paths
-          : await readGitTreeSelection(channel, snapshot.tree, { paths });
+        return tree === null ? paths : channel.readTreeSelection(tree, { paths: requested });
       },
       readBlobs: async (oids) => {
         assertActive();
@@ -480,29 +322,34 @@ async function observeEpoch<Value>(
       },
       resolveRef,
     } satisfies GitReadObservation;
-    if (commit !== null) await readFormat(observation);
-    result = await consume(observation);
-  } catch (error) {
-    failure = { error };
+    if (commit !== null) {
+      const format = paths.get(GIT_FORMAT_PATH);
+      if (format === undefined) throw new AuthorityCorruptionError(`Git is missing ${GIT_FORMAT_PATH}`);
+      if (format.type !== "blob") throw new AuthorityCorruptionError(`Git format is not a blob: ${GIT_FORMAT_PATH}`);
+      const result = (await observation.readBlobs([format.oid])).get(format.oid);
+      if (result?.kind !== "present" || result.bytes.toString("utf8") !== GIT_FORMAT_BYTES)
+        throw new AuthorityCorruptionError(`Git format is not current: ${GIT_FORMAT_PATH}`);
+    }
+    return await consume(observation);
+  } finally {
+    active = false;
+    refs.clear();
   }
-  active = false;
-  if (failure !== undefined) throw failure.error;
-  return result as Value;
 }
 
-export async function withGitReadObservation<Value>(
+export function withGitReadObservation<Value>(
   repository: GitRepository,
   channel: GitDecodeChannel,
   consume: (observation: GitReadObservation) => Value | PromiseLike<Value>,
 ): Promise<Value> {
-  return await observeEpoch(repository, channel, null, consume);
+  return observeEpoch(repository, channel, null, consume);
 }
 
-export async function withGitTargetedReadObservation<Value>(
+export function withGitTargetedReadObservation<Value>(
   repository: GitRepository,
   channel: GitDecodeChannel,
   selection: GitTreeSelection,
   consume: (observation: GitReadObservation) => Value | PromiseLike<Value>,
 ): Promise<Value> {
-  return await observeEpoch(repository, channel, selection, consume);
+  return observeEpoch(repository, channel, selection, consume);
 }

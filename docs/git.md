@@ -23,10 +23,21 @@ Every product read receives one call-scoped, frozen Git observation. Product
 owners select and decode only their own data; Git supplies object custody but
 does not interpret product codecs. Targeted reads remain proportional to the
 requested authority, while only a deliberate world read enumerates the whole
-world. Extending a selection reads only from the captured root, never from the
-live state ref. The frozen Git evidence can outlive its read scope as plain data;
-further object reads need the invocation's live Git capability. Object reuse
-ends with the call, and a new semantic attempt captures fresh authority.
+world. Extending a selection reads only from the captured root. Frozen Git
+evidence can outlive its read scope as plain data, while further object reads
+need the invocation's live Git capability. Object reuse ends with the call. A
+new semantic attempt captures fresh authority, and each mutable reference is
+resolved at most once within an epoch.
+
+Reads use finite native Git commands. Each command and its owned child retire
+before its bytes become available to the read. Failed commands and malformed
+frames provide no partial authority. A directory's recorded mode cannot prove
+the object's actual type. Only valid object evidence establishes a missing or
+wrong-type directory, and inconclusive diagnostics preserve the native command
+failure. Scope exit awaits all issued reads and retains independent failures.
+Latency and transient memory follow the finite batches and selected directories.
+Git promises neither a fixed subprocess count nor resident transport, pipelining,
+or a separate channel-close stage.
 
 Private-state publication deliberately spends work proportional to the whole
 private tree, using the exact immutable base captured by its decision observation.

@@ -11,7 +11,7 @@ import {
   Kei,
   Keis,
 } from "../src/index.js";
-import { deliveryPreviewOutcomeSchema, deliverOutcomeSchema } from "../src/library/contract-outcomes.js";
+import { deliverOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { createKeiHandle } from "../src/library/kei.js";
 import { withOutcomeReceipt, projectFailure } from "../src/library/outcome.js";
@@ -192,45 +192,6 @@ test("native delivery never treats an aborted signal as proof that an independen
   assert.throws(
     () => executionStop(contractId("kei/independent"), original, controller.signal),
     (error) => error === original,
-  );
-});
-
-test("decode-channel teardown never replaces the original failure, including a thrown undefined", async () => {
-  const repository = repositoryWithMain();
-  const scope = scopeForRepo(await Repo.at({ path: repository.path }));
-  await withGitShim(
-    [
-      'if [ "$1 $2" = "cat-file --batch" ]; then',
-      '  "$KEIYAKU_REAL_GIT" "$@"',
-      "  exit 73",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    {},
-    async (gitPath) => {
-      for (const original of [new TypeError("original failure before failed retirement"), undefined]) {
-        let caught = false;
-        let retirement: unknown;
-        try {
-          await withGitDecodeChannel(
-            { ...scope, gitPath },
-            async (channel) => {
-              await channel.readObjects(["0".repeat(40)]);
-              throw original;
-            },
-            (error) => {
-              retirement = error;
-            },
-          );
-        } catch (error) {
-          caught = true;
-          assert.equal(error, original);
-        }
-        assert.equal(caught, true);
-        assert.ok(retirement instanceof Error);
-        assert.match(retirement.message, /git cat-file --batch did not close cleanly/u);
-      }
-    },
   );
 });
 
@@ -415,16 +376,15 @@ test("read observation preserves exact exceptional identity and thrown undefined
   const original = new AuthorityCorruptionError("original observation failure");
   for (const failure of [original, undefined]) {
     let caught = false;
-    await withGitDecodeChannel(scope, async (channel) => {
-      try {
-        await withGitReadObservation(scope, channel, () => {
-          throw failure;
-        });
-      } catch (error) {
-        caught = true;
-        assert.equal(error, failure);
-      }
-    });
+    try {
+      await withGitDecodeChannel(scope, (channel) => withGitReadObservation(scope, channel, async (epoch) => {
+        await epoch.readBlobs(["0".repeat(40)]);
+        throw failure;
+      }));
+    } catch (error) {
+      caught = true;
+      assert.equal(error, failure);
+    }
     assert.equal(caught, true);
   }
 });
@@ -616,37 +576,29 @@ test("native preview preserves partial observation on unexpected target-lag fail
   assert.equal(present(await bound.kei.state()).head, witnessedHead);
 });
 
-test("native bind retains its complete accepted value when its owned decode channel has an operational close failure", async () => {
-  const { withGitShim } = await import("./support/git.js");
+test("native bind retains its admission and handle when a later finite read fails before appointment", async () => {
   const repository = repositoryWithMain();
   await withGitShim(
-    [
-      'if [ "$1 $2" = "cat-file --batch" ]; then',
-      '  "$KEIYAKU_REAL_GIT" "$@"',
-      "  exit 73",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
+    'if [ "$1 $2" = "cat-file --batch" ]; then "$KEIYAKU_REAL_GIT" "$@"; exit 73; fi\nexec "$KEIYAKU_REAL_GIT" "$@"',
     {},
     async (gitPath) => {
       const repo = await Repo.at({ path: repository.path, gitPath });
       const result = accepted(await Keis.of(repo).bind({ terms: document(), gates: [] }));
       assert.ok(result.kei instanceof Kei);
-      assert.ok(result.worktreePath);
+      assert.equal(result.worktreePath, undefined);
       const healthy = Keis.of(await Repo.at({ path: repository.path })).kei({ id: result.contractId });
-      assert.equal(present(await healthy.state()).id, result.contractId);
-      assert.ok((result.issues ?? []).some((effect) => effect.kind === "diagnostic" && effect.severity === "optional"));
-      assert.equal(classifyVerb("bind", { terms: document() }, { kind: "returned", value: result }), "accepted");
-      const preview = await result.kei.previewDelivery();
-      assert.ok(preview.kind === "ready");
-      assert.ok(preview.issues?.some((issue) => issue.kind === "diagnostic" && issue.severity === "optional"));
-      const previewWire = JSON.parse(JSON.stringify(preview));
-      assert.deepEqual(deliveryPreviewOutcomeSchema.parse(previewWire), previewWire);
+      const state = present(await healthy.state());
+      assert.equal(state.id, result.contractId);
+      assert.equal(state.terminal, null);
+      assert.ok(result.issues?.some((issue) => issue.severity === "required" &&
+        "diagnostic" in issue && /git exited with status 73/u.test(issue.diagnostic)), JSON.stringify(result));
+      assert.equal(classifyVerb("bind", { terms: document() }, { kind: "returned", value: result }), "failed");
+      await assert.rejects(result.kei.previewDelivery(), /git exited with status 73/u);
     },
   );
 });
 
-test("a no-admission cleanup failure keeps its native cause without claiming delivery", async () => {
+test("a pre-admission finite read failure keeps its native cause without claiming delivery", async () => {
   const repository = repositoryWithMain();
   const bound = accepted(
     await Keis.of(await Repo.at({ path: repository.path })).bind({ terms: document(), gates: ["reviewed"] }),
@@ -671,14 +623,11 @@ test("a no-admission cleanup failure keeps its native cause without claiming del
         assert.equal(error.category, "internal");
         assert.ok(error.cause instanceof Error);
         assert.equal(error.cause.name, "GitPlumbingError");
-        assert.match(error.cause.message, /did not close cleanly/u);
+        assert.match(error.cause.message, /git exited with status 73/u);
         assert.ok(error.outcome?.kind === "contract");
         assert.equal(error.outcome.contractId, id);
         assert.equal(error.outcome.admitted, undefined);
-        const cleanup = error.outcome.issues?.filter((issue) => issue.kind === "diagnostic");
-        assert.equal(cleanup?.length, 1);
-        assert.ok(cleanup?.[0]?.kind === "diagnostic" && cleanup[0].severity === "optional");
-        assert.match(cleanup[0].diagnostic, /did not close cleanly/u);
+        assert.equal(error.outcome.issues, undefined);
         assert.equal(classifyVerb("deliver", { contract: id }, { kind: "threw", error }), "failed");
         return true;
       });
@@ -788,71 +737,6 @@ test("native terminal removal survives a subsequent malformed ref read, includin
       assert.equal(existsSync(path), false);
       for (const ref of [deliveryRefFor(bound.contractId), candidatePinRefFor(bound.contractId)])
         assert.match(repository.run(["rev-parse", "--verify", ref]).trim(), /^[0-9a-f]{40}$/u);
-    },
-  );
-});
-
-test("native delivery independently bounds stalled EOF retirement and proves the owned process exited", async () => {
-  const repository = repositoryWithMain();
-  const bound = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
-      terms: document(),
-      gates: ["reviewed"],
-    }),
-  );
-  const marker = join(repository.path, ".git", "stalled-batch-eof-pid");
-  await withGitShim(
-    [
-      'if [ "$1 $2" = "cat-file --batch" ]; then',
-      '  "$KEIYAKU_REAL_GIT" "$@" || exit "$?"',
-      '  echo "$$" > "$KEIYAKU_EOF_MARKER"',
-      "  sleep 30",
-      "  exit 0",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_EOF_MARKER: marker },
-    async (gitPath) => {
-      const repo = await Repo.at({ path: repository.path, gitPath });
-      const native = Keis.of(repo).kei({ id: bound.contractId });
-      const controller = new AbortController();
-      let watchdogFired = false;
-      let finishedAt: number | undefined;
-      let watchdog: ReturnType<typeof setTimeout> | undefined;
-      try {
-        const result = accepted(
-          await native.deliver(
-            { signal: controller.signal },
-            {
-              observe: (event) => {
-                if (event.kind === "stage" && event.stage === "reconciliation" && event.state === "finished") {
-                  finishedAt = performance.now();
-                  watchdog = setTimeout(() => {
-                    watchdogFired = true;
-                    controller.abort(new Error("test backstop: retirement was not independently bounded"));
-                  }, 10_000);
-                }
-              },
-            },
-          ),
-        );
-        assert.equal(watchdogFired, false);
-        assert.equal(controller.signal.aborted, false);
-        assert.ok(finishedAt !== undefined && performance.now() - finishedAt < 10_000);
-        const cleanup = (result.issues ?? []).filter((effect) => effect.kind === "diagnostic");
-        assert.equal(cleanup.length, 1);
-        assert.ok(cleanup[0]?.kind === "diagnostic" && cleanup[0].severity === "optional");
-        assert.match(cleanup[0].diagnostic, /retirement exceeded its EOF close bound/u);
-        const pid = Number(readFileSync(marker, "utf8").trim());
-        assert.ok(Number.isSafeInteger(pid) && pid > 0);
-        assert.throws(
-          () => process.kill(pid, 0),
-          (error: unknown) => error instanceof Error && "code" in error && error.code === "ESRCH",
-        );
-      } finally {
-        clearTimeout(watchdog);
-        controller.abort();
-      }
     },
   );
 });

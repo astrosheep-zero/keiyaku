@@ -99,12 +99,7 @@ import { previewDeliveryOperation } from "../protocol/delivery-preview.js";
 import { completeCandidate } from "../protocol/completion.js";
 import { type ExecutionObserver } from "../protocol/execution-observation.js";
 import { type AcceptedProtocolStep } from "../protocol/outcome.js";
-import {
-  executionStop,
-  isOperationalFailure,
-  isOperationalStop,
-  type ContractCheckpoint,
-} from "../protocol/progress.js";
+import { executionStop, isOperationalStop, type ContractCheckpoint } from "../protocol/progress.js";
 import { admitReviewOperation } from "../protocol/review.js";
 import { verifyOperation } from "../protocol/verify.js";
 import { releaseDebtHolder, releaseDebtHolderWithFence, debtHolderObservationSelection } from "../settlement/holder.js";
@@ -600,30 +595,15 @@ export class Kei {
     const accumulator = new InvocationAccumulator(observer, operation);
     const scope = withScopeAbortSignal(this.scope, signal);
     let projection: Answer | InvocationFailure;
-    let completed: Answer | undefined;
-    let retirement: unknown;
     try {
-      projection = await withGitDecodeChannel(
-        scope,
-        async (channel) => {
-          completed = await run(accumulator, channel, scope);
-          if (completed.kind === "accepted" && accumulator.head(this.id) === undefined)
-            throw new Error("missing leading admission receipt");
-          return completed;
-        },
-        (error) => {
-          retirement = error;
-          accumulator.recordChannelRetirement(this.id, error);
-        },
-      );
+      projection = await withGitDecodeChannel(scope, async (channel) => {
+        const completed = await run(accumulator, channel, scope);
+        if (completed.kind === "accepted" && accumulator.head(this.id) === undefined)
+          throw new Error("missing leading admission receipt");
+        return completed;
+      });
     } catch (error) {
-      projection =
-        error === retirement &&
-        completed !== undefined &&
-        (completed.kind === "accepted" || completed.kind === "ready" || completed.kind === "blocked") &&
-        isOperationalFailure(error)
-          ? completed
-          : { kind: "failed", contract: this.id, error };
+      projection = { kind: "failed", contract: this.id, error };
     }
     const projected = project<Answer>(operation, accumulator.snapshot(), projection, scope.signal);
     if (projected.kind === "failed") throw projected.error;

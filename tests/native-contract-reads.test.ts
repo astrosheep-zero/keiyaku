@@ -7,7 +7,7 @@ import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { parseAkumaId } from "../src/akuma/identity.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
-import { publishDispatch } from "../src/dispatch/index.js";
+import { publishDispatch, readDispatchesAt } from "../src/dispatch/index.js";
 import { GitPlumbingError } from "../src/git/process.js";
 import { createKeiHandle } from "../src/library/kei.js";
 import { captureLocalContractComposition } from "../src/library/contract-settings.js";
@@ -36,6 +36,24 @@ import { waitForFile, withGitShim } from "./support/git.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { temporaryDirectory } from "./support/process.js";
+
+test("Dispatch enrichment remains on its captured authority when publication advances", async () => {
+  const raw = repositoryWithMain();
+  const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({
+    terms: document(), target: null, gates: [],
+  }));
+  const git = await repositoryAt(raw.path);
+  const akumaId = parseAkumaId("aku/worker/00000005").id;
+  await withGitDecodeChannel(git, async (channel) => {
+    await withGitReadObservation(git, channel, async (epoch) => {
+      assert.equal((await publishDispatch({ repository: git, akumaId, contractId: bound.contractId })).kind, "dispatched");
+      assert.deepEqual(await readDispatchesAt(epoch), []);
+    });
+    await withGitReadObservation(git, channel, async (epoch) => {
+      assert.deepEqual((await readDispatchesAt(epoch)).map((dispatch) => dispatch.akumaId), [akumaId]);
+    });
+  });
+});
 
 /** Address-bearing row labels: enough to prove order, stable addresses and enrichment placement. */
 function rowLabels(history: ContractHistory): readonly string[] {
@@ -448,7 +466,7 @@ test("history reports internal unavailable Dispatch enrichment when the Dispatch
   );
 });
 
-test("history preserves observation and decode-channel retirement failures", async (t) => {
+test("history reports finite read and ref observation failures after command retirement", async (t) => {
   const raw = repositoryWithMain();
   const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ terms: document(), target: null }));
   const log = join(temporaryDirectory(t, "history-retirement-"), "closed");
@@ -464,7 +482,7 @@ test("history preserves observation and decode-channel retirement failures", asy
     { KEIYAKU_CLOSE_LOG: log },
     async (gitPath) => {
       const kei = Keis.of(await Repo.at({ path: raw.path, gitPath })).kei({ id: bound.contractId });
-      await assert.rejects(kei.history(), /did not close cleanly/u);
+      await assert.rejects(kei.history(), /git exited with status 73/u);
       assert.equal(readFileSync(log, "utf8"), "closed");
     },
   );

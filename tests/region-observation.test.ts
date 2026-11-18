@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Keis, Repo } from "../src/index.js";
 import { runCli } from "./support/cli-fixtures.js";
-import { makeGitRepository, type TestGitRepository, withGitShim } from "./support/git.js";
+import { makeGitRepository, type TestGitRepository } from "./support/git.js";
 
 function repositoryWithHead(): TestGitRepository {
   const repository = makeGitRepository();
@@ -78,40 +78,4 @@ test("region names a terminal Contract instead of reporting it missing", async (
   assert.equal(result.exit, 1);
   assert.match(result.stdout, /reason  terminal/u);
   assert.doesNotMatch(result.stdout, /contract missing/u);
-});
-
-
-test("post-admission observation failure preserves the admitted Contract without abandonment", async () => {
-  const repository = repositoryWithHead();
-  await bind(repository, "Existing", ["src/**"]);
-  const marker = `${repository.path}/region-observation-admitted`;
-  const batchPid = `${repository.path}/region-observation-batch.pid`;
-  const result = await withGitShim(
-    [
-      'if [ "$1 $2" = "cat-file --batch" ]; then',
-      '  printf \'%s\\n\' "$$" > "$KEIYAKU_REGION_BATCH_PID"',
-      "fi",
-      'if [ "$1" = "update-ref" ] && [ ! -e "$KEIYAKU_REGION_MARKER" ]; then',
-      '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
-      '  kill -TERM "$(cat "$KEIYAKU_REGION_BATCH_PID")"',
-      '  touch "$KEIYAKU_REGION_MARKER"',
-      "  exit 0",
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_REGION_MARKER: marker, KEIYAKU_REGION_BATCH_PID: batchPid },
-    async (gitPath) =>
-      Keis.of(await Repo.at({ path: repository.path, gitPath })).bind({
-        terms: document("Observed failure", ["docs/**"]),
-      }),
-  );
-  const receipt = accepted(result);
-  const failure = receipt.issues?.find((issue) => issue.kind === "reconcile-failed");
-  assert.equal(failure?.kind, "reconcile-failed");
-  if (failure?.kind === "reconcile-failed") assert.match(failure.diagnostic, /git cat-file --batch/u);
-  const state = present(await accepted(result).kei.state());
-  assert.equal(state.id, receipt.contractId);
-  assert.equal(state.terminal, null);
-  const observed = await Keis.of(await Repo.at({ path: repository.path })).observe({ id: state.id });
-  assert.equal(observed.kind, "present");
 });

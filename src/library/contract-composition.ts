@@ -116,15 +116,10 @@ async function reconcileKeiyaku(
   const accumulator = new InvocationAccumulator();
   const id = contract === undefined ? undefined : callerContractId(contract);
   try {
-    return await withGitDecodeChannel<ReconcileCompletion | RepoReconcileReport>(
-      primary,
-      (channel) =>
-        id === undefined
-          ? completeRepoReconcile({ ...options, channel, accumulator })
-          : completeReconcile({ ...options, channel, contractId: id, accumulator }),
-      (error) => {
-        if (id !== undefined) accumulator.recordChannelRetirement(id, error);
-      },
+    return await withGitDecodeChannel<ReconcileCompletion | RepoReconcileReport>(primary, (channel) =>
+      id === undefined
+        ? completeRepoReconcile({ ...options, channel, accumulator })
+        : completeReconcile({ ...options, channel, contractId: id, accumulator }),
     );
   } catch (error) {
     return reconcileException(error, accumulator, id);

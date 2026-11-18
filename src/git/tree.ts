@@ -1,4 +1,5 @@
 import { gitObjectId } from "./identity.js";
+import { GitPlumbingError } from "./process.js";
 
 export type TreeEntry = Readonly<{ mode: string; type: string; oid: string }>;
 export type TreeChange = Readonly<{ oid: string; mode?: string; type?: string }> | null;
@@ -14,27 +15,18 @@ export function validPath(path: string): void {
     throw new Error(`invalid Git path: ${path}`);
 }
 
-function entryType(mode: string): string {
-  return mode === "040000" || mode === "40000" ? "tree" : mode === "160000" ? "commit" : "blob";
-}
-
-export function parseTreeObject(bytes: Buffer, oidBytes: number): Map<string, TreeEntry> {
+export function parseTreeEntries(output: Buffer): Map<string, TreeEntry> {
   const entries = new Map<string, TreeEntry>();
-  let offset = 0;
-  while (offset < bytes.length) {
-    const modeEnd = bytes.indexOf(0x20, offset);
-    const nameEnd = modeEnd < 0 ? -1 : bytes.indexOf(0, modeEnd + 1);
-    if (modeEnd < 0 || nameEnd < 0 || nameEnd + 1 + oidBytes > bytes.length) {
-      throw new Error("malformed Git tree object");
-    }
-    const rawMode = bytes.subarray(offset, modeEnd).toString("ascii");
-    const mode = rawMode === "40000" ? "040000" : rawMode;
-    const name = bytes.subarray(modeEnd + 1, nameEnd).toString("utf8");
-    if (name.length === 0 || entries.has(name)) throw new Error("malformed Git tree object");
-    const oid = bytes.subarray(nameEnd + 1, nameEnd + 1 + oidBytes).toString("hex");
-    gitObjectId(oid, `tree entry ${name}`);
-    entries.set(name, { mode, type: entryType(mode), oid });
-    offset = nameEnd + 1 + oidBytes;
+  const records = output.toString("utf8").split("\0");
+  if (records.pop() !== "")
+    throw new GitPlumbingError({ stderr: output, status: null, message: "unterminated ls-tree output" });
+  for (const record of records) {
+    const match = /^([0-7]{6}) (blob|tree|commit) ([0-9a-f]+)\t([^\0]+)$/u.exec(record);
+    if (match === null || entries.has(match[4]!))
+      throw new GitPlumbingError({ stderr: record, status: null, message: `malformed ls-tree record: ${record}` });
+    const [, mode, type, oid, path] = match;
+    validPath(path!);
+    entries.set(path!, { mode: mode!, type: type!, oid: gitObjectId(oid!, `tree entry ${path}`) });
   }
   return entries;
 }

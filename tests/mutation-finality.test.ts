@@ -235,7 +235,7 @@ test("the local failure projector never decodes partial owner evidence or masks 
   assert.equal(first.error.cause, native);
   assert.equal(first.error.category, "internal");
   assert.equal(first.error.message, native.message);
-  progress.recordChannelRetirement(id, new Error("retirement failed"));
+  progress.recordStop({ kind: "execution-stopped", contractId: id, reason: "failed", diagnostic: "later read failed" });
   const final = project("deliver-preview", progress.snapshot(), { kind: "failed", contract: id, error: first.error });
   assert.ok(final.kind === "failed");
   assert.ok(final.error instanceof KeiyakuError);
