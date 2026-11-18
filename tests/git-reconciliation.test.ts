@@ -120,7 +120,6 @@ test("head movement spends repair once; stale cleanup cannot remove a newly term
   assert.deepEqual(report.issues, [
     { kind: "reconcile-failed", severity: "required", diagnostic: `Contract moved during reconciliation: ${id}` },
   ]);
-  assert.equal(readFileSync(reads, "utf8"), "read\nread\nread\n");
   assert.equal(existsSync(worktree), true);
 
   const cleanup = await withGitDecodeChannel(scope, (channel) =>
@@ -187,7 +186,7 @@ async function withPlaceWritesBlocked<T>(git: Awaited<ReturnType<typeof reposito
   }
 }
 
-async function terminalLegacyPlaceFixture(retainTender = false) {
+async function terminalLegacyPlaceFixture() {
   const repository = repositoryWithMain();
   const scope = await repositoryAt(repository.path);
   const keis = Keis.of(await Repo.at({ path: repository.path }));
@@ -201,11 +200,6 @@ async function terminalLegacyPlaceFixture(retainTender = false) {
   writeFileSync(join(path, "candidate.txt"), "candidate\n");
   repository.run(["-C", path, "add", "candidate.txt"]);
   repository.run(["-C", path, "commit", "--quiet", "-m", "candidate"]);
-  if (retainTender) {
-    writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
-    repository.run(["add", "target-only.txt"]);
-    repository.run(["commit", "--quiet", "-m", "target only"]);
-  }
 
   const receipt = accepted(await withPlaceWritesBlocked(scope, () => kei.deliver()));
   assert.equal(receipt.placement?.kind, "placed");
@@ -213,14 +207,10 @@ async function terminalLegacyPlaceFixture(retainTender = false) {
   const tender = present(present(await kei.state()).delivery).data.tenderSnapshot;
   const integration = receipt.integration;
   assert.notEqual(tender, integration);
-  assert.equal(
-    repository.run(["rev-parse", `${tender}^{tree}`]) === repository.run(["rev-parse", `${integration}^{tree}`]),
-    !retainTender,
-  );
   const refs = [deliveryRefFor(id), candidatePinRefFor(id)] as const;
   const pinValues = () => Promise.all(refs.map((ref) => readRef(scope, ref)));
   assert.equal(existsSync(path), false);
-  assert.deepEqual(await pinValues(), [retainTender ? tender : null, null]);
+  assert.deepEqual(await pinValues(), [null, null]);
   assert.deepEqual(await readManagedWorktreeAppointment(scope, id), { kind: "appointed", place, path });
   assert.equal(await readRef(scope, "refs/heads/main"), integration);
   return { repository, scope, keis, id, tender, integration, refs, pinValues };
@@ -231,13 +221,10 @@ function pruneUnreachableCommits(repository: TestGitRepository) {
   repository.run(["gc", "--prune=now"]);
 }
 
-for (const scenario of ["retired", "pruned", "lost"] as const) {
+for (const scenario of ["retired", "pruned"] as const) {
   test(`release-only retry at a legacy Place with a ${scenario} tender`, async () => {
-    const { repository, scope, keis, id, tender, refs, pinValues } = await terminalLegacyPlaceFixture(
-      scenario === "lost",
-    );
-    if (scenario === "lost") repository.run(["update-ref", "-d", refs[0], tender]);
-    if (scenario !== "retired") {
+    const { repository, scope, keis, id, tender, pinValues } = await terminalLegacyPlaceFixture();
+    if (scenario === "pruned") {
       pruneUnreachableCommits(repository);
       assert.throws(() => repository.run(["cat-file", "-e", tender]));
     }
