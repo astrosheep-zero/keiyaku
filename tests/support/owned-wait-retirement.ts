@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { register } from "node:module";
 import { join } from "node:path";
-import { allocatedHeart, claudeBodyLaunch, noBodyLaunch } from "./akuma-fixtures.js";
+import { allocatedHeart, claudeBodyLaunch } from "./akuma-fixtures.js";
 import { deferred, expectBodySettles, waitForCondition } from "./process.js";
 import { readHeart, readLatestTurnForBody } from "../../src/akuma/heart/index.js";
 import { createProviderAttempt, type ProviderAdapter } from "../../src/akuma/provider.js";
@@ -31,7 +31,7 @@ if (mode === "gates") {
           throw new Error("empty fixture must not start provider work");
         },
       },
-      { spawn: noBodyLaunch, signal: controller.signal },
+      { signal: controller.signal },
     );
     void body.catch(() => undefined);
     try {
@@ -83,7 +83,6 @@ if (mode === "gates") {
     },
   };
   const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), adapter, {
-    spawn: noBodyLaunch,
     signal: controller.signal,
   });
   await started.promise;

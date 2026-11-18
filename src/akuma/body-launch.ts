@@ -25,7 +25,6 @@ export const bodyLaunchSchema = z
     birthInitiator: z.string().optional(),
     initialSchemaJson: z.string().optional(),
     refuseIfHeld: z.boolean().optional(),
-    handoffFromBodySequence: z.number().int().positive().optional(),
     completion: z.object({ contractId: z.string().optional() }).strict().optional(),
   })
   .strict();

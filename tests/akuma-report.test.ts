@@ -67,7 +67,7 @@ test("a driven Body supplies exact execution to a real reporting CLI child befor
     };
   }));
   await driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), adapter, {
-    world, spawn: noBodyLaunch,
+    world,
   });
   const akuma = Akuma.select(world, allocated.id);
   assert.equal((await akuma.status()).life, "asleep");

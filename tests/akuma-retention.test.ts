@@ -1,4 +1,3 @@
-import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import {
@@ -67,7 +66,7 @@ async function oldAkuma(world: WorldRoot, suffix: string, at = OLD): Promise<All
       initialBody: "old work",
     },
     answering("done"),
-    { spawn: noBodyLaunch, now: () => at },
+    { now: () => at },
   );
   ageAkuma(allocated, at);
   return allocated;

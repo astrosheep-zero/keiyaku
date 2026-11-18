@@ -1,5 +1,4 @@
 import { temporaryDirectory } from "./support/process.js";
-import { deferred as promiseBarrier } from "./support/process.js";
 import { recordTell, seedLegacySchema, soulFixture, bornBody, insertLegacyPauseControl } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, unlinkSync } from "node:fs";
@@ -7,7 +6,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
-import { killAkumaWithRecovery } from "../src/akuma/akuma-owner.js";
+import { settleAkumaKill } from "../src/akuma/akuma-owner.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import type { LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { tellWakeRuntime } from "../src/akuma/body.js";
@@ -23,9 +22,6 @@ import {
   bindTellsToTurn,
   breakBody,
   cancelBodyTurns,
-  decidePendingTellDisposition,
-  resolvePendingTellDisposition,
-  readOpenPendingTellDisposition,
   drainPendingTells,
   endTurn,
   finishBodyIfIdle,
@@ -149,7 +145,7 @@ test("control cancellation while waiting for Heart admission leaves no stop or p
     const handle = new AkumaOwner(value.allocated.id, value.root);
     const results = Promise.allSettled([
       handle.interrupt("not admitted", { runtime: tellWakeRuntime(noBodyLaunch), signal: controller.signal }),
-      handle.kill(noBodyLaunch, { signal: controller.signal }),
+      handle.kill({ signal: controller.signal }),
     ]);
     const timer = setTimeout(() => controller.abort(reason), 20);
     try {
@@ -172,7 +168,7 @@ test("control cancellation while waiting for Heart admission leaves no stop or p
   }
 });
 
-test("cancelled kill admission does not start successor recovery", async (context) => {
+test("cancelled kill admission leaves no stop or successor work", async (context) => {
   const value = await fixture();
   const paths = value.allocated.paths;
   const leash = (await HeldAkumaLeash.try(paths))!;
@@ -196,20 +192,9 @@ test("cancelled kill admission does not start successor recovery", async (contex
         throw error;
       }
     });
-    let recoveries = 0;
     try {
-      await assert.rejects(
-        killAkumaWithRecovery(
-          paths,
-          async () => {
-            recoveries++;
-          },
-          controller.signal,
-        ),
-        (error) => error === reason,
-      );
+      await assert.rejects(settleAkumaKill(paths, controller.signal), (error) => error === reason);
       assert.equal(contended, true);
-      assert.equal(recoveries, 0);
     } finally {
       injected.mock.restore();
     }
@@ -222,7 +207,7 @@ test("cancelled kill admission does not start successor recovery", async (contex
   }
 });
 
-test("cancellation after kill admission still starts successor recovery", async (context) => {
+test("cancellation after kill admission stops observation without retracting the stop", async (context) => {
   const value = await fixture();
   const paths = value.allocated.paths;
   const leash = (await HeldAkumaLeash.try(paths))!;
@@ -241,20 +226,9 @@ test("cancellation after kill admission still starts successor recovery", async 
       }
       return result;
     });
-    let recoveries = 0;
     try {
-      await assert.rejects(
-        killAkumaWithRecovery(
-          paths,
-          async () => {
-            recoveries++;
-          },
-          controller.signal,
-        ),
-        (error) => error === reason,
-      );
+      await assert.rejects(settleAkumaKill(paths, controller.signal), (error) => error === reason);
       assert.equal(committed, true);
-      assert.equal(recoveries, 1);
     } finally {
       injected.mock.restore();
     }
@@ -884,7 +858,7 @@ test("kill of a normally exited Body stays already stopped without a witness", a
   }
 });
 
-test("kill evaluates stranded pending Tell recovery exactly once", async () => {
+test("kill witnesses a stranded Body and leaves its pending Tell for an ordinary wake", async () => {
   const value = await fixture();
   try {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
@@ -897,26 +871,40 @@ test("kill evaluates stranded pending Tell recovery exactly once", async () => {
       recordedAt: value.soul.createdAt,
     });
     leash.release();
-    let recoveries = 0;
-    const { promise: recoveryDone, resolve: recoveryFinished } = promiseBarrier<void>();
-    assert.equal(
-      await killAkumaWithRecovery(value.allocated.paths, async (paths) => {
-        try {
-          recoveries += 1;
-          assert.deepEqual(
-            (await readHeart(paths)).pending.map((tell) => tell.id),
-            ["tell-recover-on-kill"],
-          );
-          assert.equal(await probeLeash(paths), "free");
-        } finally {
-          recoveryFinished();
-        }
-      }),
-      "killed",
+    assert.deepEqual(await settleAkumaKill(value.allocated.paths), { evidence: "killed" });
+    const settled = await readHeart(value.allocated.paths);
+    assert.equal(settled.latestKill?.bodySequence, body.sequence);
+    assert.deepEqual(
+      settled.pending.map((tell) => tell.id),
+      ["tell-recover-on-kill"],
+      "kill never settles or discards admitted input",
     );
-    assert.equal((await readHeart(value.allocated.paths)).latestKill?.bodySequence, body.sequence);
-    assert.equal(recoveries, 1);
-    await recoveryDone;
+    assert.equal(await probeLeash(value.allocated.paths), "free");
+
+    const successor = (await HeldAkumaLeash.try(value.allocated.paths))!;
+    const successorBody = await successor.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
+    const turn = await beginTurn(value.allocated.paths, {
+      bodySequence: successorBody.sequence,
+      startedAt: value.soul.createdAt,
+    });
+    const [queued] = drainPendingTells((await readHeart(value.allocated.paths)).pending);
+    assert.equal(queued?.id, "tell-recover-on-kill");
+    await bindTellsToTurn(value.allocated.paths, {
+      turnSequence: turn.sequence,
+      tellIds: [queued!.id],
+      boundAt: value.soul.createdAt,
+    });
+    await recordTellDeliveries(value.allocated.paths, [
+      {
+        tellId: queued!.id,
+        route: "launch",
+        turnSequence: turn.sequence,
+        fence: "successor",
+        deliveredAt: value.soul.createdAt,
+      },
+    ]);
+    assert.deepEqual((await readHeart(value.allocated.paths)).pending, []);
+    successor.release();
   } finally {
     value.close();
   }
@@ -983,7 +971,8 @@ test("schema Tell admission refuses a running Body and binds once with frozen sc
     const pending = (await readHeart(value.allocated.paths)).pending;
     assert.deepEqual(
       drainPendingTells(pending).map((tell) => tell.id),
-      ["schema-idle", "plain-join"],
+      ["schema-idle"],
+      "a schema Tell takes its own Turn and absorbs no ordinary input",
     );
     const turn = await beginTurn(value.allocated.paths, {
       bodySequence: body.sequence,
@@ -1002,7 +991,8 @@ test("schema Tell admission refuses a running Body and binds once with frozen sc
     });
     assert.deepEqual(
       drainPendingTells((await readHeart(value.allocated.paths)).pending).map((tell) => tell.id),
-      ["schema-idle", "plain-join"],
+      ["schema-idle"],
+      "binding never widens a schema Tell's dedicated Turn",
     );
     const rebindingTurn = await beginTurn(value.allocated.paths, {
       bodySequence: body.sequence,
@@ -1029,6 +1019,17 @@ test("schema Tell admission refuses a running Body and binds once with frozen sc
     if (ended?.end?.outcome.kind === "invalid-output") {
       assert.equal(ended.end.outcome.answer, "not-json");
     }
+    await recordTellReceipt(value.allocated.paths, {
+      evidence: "exact",
+      tellId: "schema-idle",
+      kind: "consumed",
+      receivedAt: "2026-08-08T00:00:10.000Z",
+    });
+    assert.deepEqual(
+      drainPendingTells((await readHeart(value.allocated.paths)).pending).map((tell) => tell.id),
+      ["plain-join"],
+      "ordinary drain stops before the next schema Tell",
+    );
     leash.release();
   } finally {
     value.close();
@@ -1082,39 +1083,6 @@ test("a binding-before-delivery crash remains recoverable without predecessor te
     assert.equal((await readTurn(value.allocated.paths, firstTurn.sequence))?.end, undefined);
     assert.equal((await readHeart(value.allocated.paths)).latestBody?.sequence, secondBody.sequence);
     successor.release();
-  } finally {
-    value.close();
-  }
-});
-
-test("an unresolved Tell disposition remains eligible for recovery", async () => {
-  const value = await fixture();
-  try {
-    const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
-    await leash.birth(value.allocated.paths, value.soul);
-    const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: value.soul.createdAt });
-    await heartRecordTell(value.allocated.paths, {
-      kind: "tell",
-      id: "unresolved-disposition",
-      body: "recover me",
-      recordedAt: "2026-08-08T00:00:01.000Z",
-    });
-    await breakBody(value.allocated.paths, {
-      sequence: body.sequence,
-      end: "put-down",
-      at: "2026-08-08T00:00:02.000Z",
-    });
-    const disposition = await decidePendingTellDisposition(value.allocated.paths, {
-      bodySequence: body.sequence,
-      at: "2026-08-08T00:00:02.000Z",
-      handoff: true,
-    });
-    assert.deepEqual(disposition?.tellIds, ["unresolved-disposition"]);
-    assert.deepEqual(
-      drainPendingTells((await readHeart(value.allocated.paths)).pending).map((tell) => tell.id),
-      ["unresolved-disposition"],
-    );
-    leash.release();
   } finally {
     value.close();
   }
@@ -1624,12 +1592,20 @@ test("fork birth admits the child session in the soul birth transaction", async 
   }
 });
 
-test("Body idle settlement atomically obeys current control", async () => {
+test("Body idle settlement atomically checks queued work and current control", async () => {
   const value = await fixture();
   try {
     const leash = (await HeldAkumaLeash.try(value.allocated.paths))!;
     await leash.birth(value.allocated.paths, value.soul);
     const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: "2026-08-08T00:00:00.000Z" });
+    await recordTell(value.allocated.paths, { id: "racing-idle", body: "run next", recordedAt: value.soul.createdAt });
+    assert.deepEqual(
+      await finishBodyIfIdle(value.allocated.paths, {
+        sequence: body.sequence,
+        at: "2026-08-08T00:00:01.000Z",
+      }),
+      { kind: "pending", tells: ["racing-idle"] },
+    );
     await insertLegacyPauseControl(value.allocated.paths, body.sequence, "2026-08-08T00:00:01.000Z");
     assert.deepEqual(
       await finishBodyIfIdle(value.allocated.paths, {
@@ -1854,106 +1830,61 @@ function seedClosedHistoryActivity(paths: Parameters<typeof readHeart>[0], turnS
   }
 }
 
-test("open disposition pins witnessed Tells until atomic resolution, then pruning releases the members", async () => {
-  const value = await fixture();
-  const paths = value.allocated.paths;
-  const at = value.soul.createdAt;
-  let leash = (await HeldAkumaLeash.try(paths))!;
-  try {
-    await leash.birth(paths, value.soul);
-    const predecessor = await leash.recordBody(paths, { leashTakenAt: at });
-    await recordTell(paths, { id: "frozen", body: "continue", recordedAt: at });
-    const disposition = await decidePendingTellDisposition(paths, {
-      bodySequence: predecessor.sequence,
-      at,
-      handoff: true,
-    });
-    assert.deepEqual(disposition?.tellIds, ["frozen"]);
-    assert.equal(await resolvePendingTellDisposition(paths, predecessor.sequence, at), false);
-    leash.release();
-    leash = (await HeldAkumaLeash.try(paths))!;
-    const successor = await leash.recordBody(paths, { leashTakenAt: at });
-    const delivered = await beginTurn(paths, { bodySequence: successor.sequence, startedAt: at });
-    await recordTellDeliveries(paths, [
-      {
-        tellId: "frozen",
-        route: "launch",
-        turnSequence: delivered.sequence,
-        fence: "delivered",
-        deliveredAt: at,
-      },
-    ]);
-    await endTurn(paths, {
-      turnSequence: delivered.sequence,
-      outcome: { kind: "failed", diagnostic: "fixture end" },
-      completedAt: at,
-    });
-    const active = await beginTurn(paths, { bodySequence: successor.sequence, startedAt: at });
-    seedClosedHistoryActivity(paths, active.sequence, 5501);
-    await appendActivity(paths, {
-      turnSequence: active.sequence,
-      event: { type: "note", text: "prune while open" },
-      at,
-    });
-    assert.equal((await readTell(paths, "frozen"))?.state, "told");
-    assert.ok(
-      await readTurn(paths, delivered.sequence),
-      "the delivery witness must survive while the decision is open",
-    );
-    assert.deepEqual(await readOpenPendingTellDisposition(paths), disposition);
-    assert.deepEqual(
-      await Promise.all([
-        resolvePendingTellDisposition(paths, predecessor.sequence, at),
-        resolvePendingTellDisposition(paths, predecessor.sequence, at),
-      ]),
-      [true, true],
-    );
-    assert.equal(await readOpenPendingTellDisposition(paths), null);
-    seedClosedHistoryActivity(paths, active.sequence, 501);
-    await appendActivity(paths, {
-      turnSequence: active.sequence,
-      event: { type: "note", text: "prune after consumption" },
-      at,
-    });
-    assert.equal(await readTell(paths, "frozen"), null);
-    assert.equal(await readTurn(paths, delivered.sequence), null);
-    assert.equal(
-      await resolvePendingTellDisposition(paths, predecessor.sequence, at),
-      true,
-      "late resolution uses the resolved decision, not retired Tells",
-    );
-    const database = new DatabaseSync(paths.heart);
-    try {
-      assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
-      assert.equal(database.prepare("SELECT COUNT(*) AS count FROM tell_disposition_members").get()?.count, 0);
-    } finally {
-      database.close();
-    }
-  } finally {
-    leash.release();
-    value.close();
-  }
-});
-
-test("undelivered disposition settles only its persisted snapshot and cannot decide twice", async () => {
+test("pruning preserves historical Tell references and their terminal evidence", async () => {
   const value = await fixture();
   const paths = value.allocated.paths;
   const at = value.soul.createdAt;
   const leash = (await HeldAkumaLeash.try(paths))!;
+  const database = new DatabaseSync(paths.heart);
   try {
     await leash.birth(paths, value.soul);
     const body = await leash.recordBody(paths, { leashTakenAt: at });
-    await recordTell(paths, { id: "before", body: "frozen", recordedAt: at });
-    await decidePendingTellDisposition(paths, { bodySequence: body.sequence, at, handoff: true });
-    await recordTell(paths, { id: "after", body: "not this decision", recordedAt: at });
-    assert.equal(await resolvePendingTellDisposition(paths, body.sequence, at, "undelivered"), true);
-    assert.equal((await readTell(paths, "before"))?.state, "told");
-    assert.equal((await readTell(paths, "after"))?.state, "pending");
-    assert.equal(await decidePendingTellDisposition(paths, { bodySequence: body.sequence, at, handoff: true }), null);
-    assert.equal(await resolvePendingTellDisposition(paths, body.sequence, at, "undelivered"), true);
-    assert.equal((await readTell(paths, "after"))?.state, "pending");
-    await assert.rejects(resolvePendingTellDisposition(paths, body.sequence + 100, at), /disposition .* is missing/);
+    for (const id of ["delivered", "undelivered", "unreferenced"]) {
+      await recordTell(paths, { id, body: id, recordedAt: at });
+    }
+    database.prepare("INSERT INTO tell_dispositions (body_sequence, decided_at, resolved_at) VALUES (?, ?, ?)")
+      .run(body.sequence, at, at);
+    database.prepare("INSERT INTO tell_disposition_members (body_sequence, tell_id) VALUES (?, 'delivered'), (?, 'undelivered')")
+      .run(body.sequence, body.sequence);
+    const originalDecision = database.prepare("SELECT * FROM tell_dispositions").all();
+    const originalMembers = database.prepare("SELECT * FROM tell_disposition_members ORDER BY tell_id").all();
+    await recordTellReceipt(paths, { kind: "undelivered", evidence: "exact", tellId: "undelivered", receivedAt: at });
+    for (const tellId of ["delivered", "unreferenced"]) {
+      const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+      await recordTellDeliveries(paths, [{
+        tellId,
+        route: "live",
+        receipt: "required",
+        turnSequence: turn.sequence,
+        fence: tellId,
+        deliveredAt: at,
+      }]);
+      await recordTellReceipt(paths, {
+        kind: "confirmed",
+        evidence: "fence",
+        turnSequence: turn.sequence,
+        fence: tellId,
+        receivedAt: at,
+      });
+      await endTurn(paths, {
+        turnSequence: turn.sequence,
+        outcome: { kind: "answered", answer: "done", session: { sessionId: "historical" } },
+        completedAt: at,
+      });
+    }
+    const active = await beginTurn(paths, { bodySequence: body.sequence, startedAt: at });
+    seedClosedHistoryActivity(paths, active.sequence, 5501);
+    await appendActivity(paths, { turnSequence: active.sequence, event: { type: "note", text: "prune" }, at });
+
+    assert.equal(await readTell(paths, "unreferenced"), null);
+    assert.equal((await readTell(paths, "delivered"))?.state, "told");
+    assert.equal((await readTell(paths, "undelivered"))?.state, "told");
+    assert.deepEqual((await readHeart(paths)).pending, []);
+    assert.deepEqual(database.prepare("SELECT * FROM tell_dispositions").all(), originalDecision);
+    assert.deepEqual(database.prepare("SELECT * FROM tell_disposition_members ORDER BY tell_id").all(), originalMembers);
+    assert.deepEqual(database.prepare("PRAGMA foreign_key_check").all(), []);
   } finally {
+    database.close();
     leash.release();
     value.close();
   }

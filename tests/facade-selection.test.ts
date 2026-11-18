@@ -1,5 +1,4 @@
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { accepted, present } from "./support/library-verbs.js";
 import { boundedListLimit, projectBoundedList } from "../src/bounded-list.js";
 import { deferred as promiseBarrier, temporaryDirectory } from "./support/process.js";
@@ -144,7 +143,7 @@ async function answered(root: string, akumaName: string, suffix: string) {
       initialBody: "work",
     },
     provider,
-    { spawn: noBodyLaunch, now: () => "2026-08-11T00:00:00.000Z" },
+    { now: () => "2026-08-11T00:00:00.000Z" },
   );
   return allocated;
 }

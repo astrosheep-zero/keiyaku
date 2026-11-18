@@ -11,13 +11,7 @@ import {
   type CallRow,
   type TurnRow,
 } from "./rows.js";
-import {
-  decodeTellBatch,
-  tellBatchAtSequences,
-  tellStateSql,
-  pendingTellProtectionSql,
-  pendingTellSequencesSql,
-} from "./tells.js";
+import { decodeTellBatch, tellBatchAtSequences, tellStateSql } from "./tells.js";
 
 export type TimelineFact = TurnStartFact | CallFact | ReportFact | ActivityFact | TellFact | TurnEndFact;
 export type ActivityFactSlice = Readonly<{
@@ -65,15 +59,23 @@ export function pruneActivityFacts(database: DatabaseSync, limit: number, protec
     .prepare(`SELECT sequence FROM timeline ORDER BY sequence DESC LIMIT 1 OFFSET ?`)
     .get(limit - 1) as { sequence: number } | undefined;
   if (cutoff === undefined) return;
+  // A pending Tell, or a Tell still referenced by a historical disposition
+  // member row, keeps its own evidence and delivered Turns for storage
+  // integrity. No disposition decision or resolution state is consulted.
   database
     .prepare(
-      `WITH protected_turns(sequence) AS (
+      `WITH protected_tells(sequence) AS (
+      SELECT sequence FROM tells WHERE ${tellStateSql} = 'pending'
+      UNION SELECT tells.sequence FROM tells JOIN tell_disposition_members m ON m.tell_id = tells.id
+    ), protected_turns(sequence) AS (
       SELECT sequence FROM turns WHERE end_sequence IS NULL
       UNION SELECT turn_sequence FROM calls WHERE sequence >= ?
       UNION SELECT turn_sequence FROM activity WHERE sequence >= ?
       UNION SELECT turn_sequence FROM reports WHERE sequence >= ?
       UNION SELECT sequence FROM turns WHERE end_sequence >= ?
-      UNION ${pendingTellProtectionSql}
+      UNION SELECT d.turn_sequence FROM tell_deliveries d
+        JOIN tells ON tells.id = d.tell_id
+        WHERE tells.sequence IN (SELECT sequence FROM protected_tells)
     ), protected(sequence) AS (
       SELECT sequence FROM protected_turns
       UNION SELECT MAX(sequence) FROM activity
@@ -81,7 +83,7 @@ export function pruneActivityFacts(database: DatabaseSync, limit: number, protec
         AND json_extract(event_json, '$.type') = 'permission' GROUP BY turn_sequence
       UNION SELECT sequence FROM calls WHERE turn_sequence IN (SELECT sequence FROM protected_turns)
       UNION SELECT end_sequence FROM turns WHERE sequence IN (SELECT sequence FROM protected_turns) AND end_sequence IS NOT NULL
-      UNION ${pendingTellSequencesSql}
+      UNION SELECT sequence FROM protected_tells
     )
     DELETE FROM timeline WHERE sequence < ? AND sequence NOT IN protected`,
     )

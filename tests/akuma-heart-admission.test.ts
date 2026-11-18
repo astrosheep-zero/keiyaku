@@ -41,12 +41,12 @@ test("controlled cancellation atomically closes all exact-Body open Turns and pr
     broken.mock.restore();
     assert.equal((await readHeart(paths)).latestBody?.end, undefined);
     assert.deepEqual(await activitySlice(paths), before, "failed terminalization leaves neither Body end nor stray timeline row");
-    assert.deepEqual(await cancelBodyTurns(paths, { bodySequence: body.sequence, at }), { canceled: [unbound.sequence, bound.sequence], disposition: null });
+    assert.deepEqual(await cancelBodyTurns(paths, { bodySequence: body.sequence, at }), { canceled: [unbound.sequence, bound.sequence] });
     assert.deepEqual((await readTurn(paths, unbound.sequence))?.end?.outcome, { kind: "canceled" });
     assert.equal((await readTurn(paths, answered.sequence))?.end?.outcome.kind, "answered");
     assert.deepEqual((await readTurn(paths, failed.sequence))?.end?.outcome, { kind: "failed", diagnostic: "real failure" });
     assert.deepEqual((await readHeart(paths)).pending.map((tell) => tell.id), ["pending"]);
-    assert.deepEqual(await cancelBodyTurns(paths, { bodySequence: body.sequence, at }), { canceled: [], disposition: null }, "retry invents no second terminal");
+    assert.deepEqual(await cancelBodyTurns(paths, { bodySequence: body.sequence, at }), { canceled: [] }, "retry invents no second terminal");
     holder.release();
     const nextHolder = (await HeldAkumaLeash.try(paths))!;
     try {
@@ -70,7 +70,7 @@ test("an answer committing at the stop boundary remains the single terminal winn
       endTurn(paths, { turnSequence: turn.sequence, outcome: answer, completedAt: at }),
       cancelBodyTurns(paths, { bodySequence: body.sequence, at }),
     ]);
-    assert.deepEqual(canceled, { canceled: [], disposition: null });
+    assert.deepEqual(canceled, { canceled: [] });
     assert.deepEqual((await readTurn(paths, turn.sequence))?.end?.outcome, answer);
     assert.equal((await activitySlice(paths)).rows.filter((row) => row.kind === "turn-end").length, 1);
     assert.equal((await readHeart(paths)).latestBody?.end, "put-down");

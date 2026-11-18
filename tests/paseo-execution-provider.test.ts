@@ -30,7 +30,7 @@ import {
   readHeart,
   readLatestTurnForBody,
   readTell,
-  readOpenPendingTellDisposition,
+  readTurn,
   recordReport,
   activitySlice,
 } from "../src/akuma/heart/index.js";
@@ -856,7 +856,7 @@ test("Paseo observation invalidation fails honestly and control failure survives
 });
 
 test(
-  "retained Paseo execution reports through wake and pending-Tell handoff",
+  "retained Paseo execution reports through wake and ordinary queued Turns",
   { timeout: 15_000 },
   async (context) => {
     const root = await World.at(temporaryDirectory(context, "keiyaku-paseo-retained-"));
@@ -887,23 +887,20 @@ test(
         },
       },
     );
-    const owned = (body: Promise<unknown>): LiveBodyLaunch => ({
+    const owned = (body: ReturnType<typeof driveAkumaBody>): LiveBodyLaunch => ({
       completed: body.then(
-        () => ({ diagnostic: "fixture Body completed" }),
+        (result) => ({ diagnostic: "fixture Body completed", held: result === "held" }),
         (error: unknown) => ({ diagnostic: error instanceof Error ? error.message : String(error) }),
       ),
       cancel: async () => undefined,
       release: () => undefined,
     });
-    const startBody = (launch: BodyLaunch): Promise<unknown> => {
-      const body = driveAkumaBody(launch, adapter, {
-        world: root,
-        spawn: async (next) => owned(startBody(next)),
-      });
+    const startBody = (launch: BodyLaunch) => {
+      const body = driveAkumaBody(launch, adapter);
       bodies.push(body);
       return body;
     };
-    const wake = { spawn: async () => owned(startBody({ paths: allocated.paths })) };
+    const wake = { spawn: async () => owned(startBody({ paths: allocated.paths, refuseIfHeld: true })) };
     const owner = new AkumaOwner(allocated.id, root);
     try {
       const firstBody = startBody({
@@ -934,29 +931,35 @@ test(
 
       // Ordinary Tell wake resumes the exact retained native id with its original
       // creation environment; no replacement agent is created or environment rewritten.
-      const receipt = owner.tell("successor work", "ordinary-wake", undefined, wake);
+      const receipt = owner.tell("more work", "ordinary-wake", undefined, wake);
       const second = await launched[1]!.promise;
       await receipt;
       assert.equal(second.createInput, undefined);
       assert.equal(second.sendInput!.agentId, first.agent.id);
       assert.equal((await recordReport(allocated.paths, { ...reportExecution, text: "Retained creation context" })).kind, "recorded");
 
-      // A live session without native tell takes the existing Heart-owned handoff,
-      // not a provider emulation. Native cancel is explicit control for that work.
-      const pending = owner.tell("pending continuation", "pending-handoff", undefined, wake);
+      const bodySequence = (await readHeart(allocated.paths)).latestBody!.sequence;
+      await owner.tell("pending continuation", "queued", undefined, wake);
+      assert.equal((await readTell(allocated.paths, "queued"))?.state, "pending");
+      assistant(second, "second answer");
+      complete(second);
       const third = await launched[2]!.promise;
-      await pending;
-      assert.equal(second.calls.filter((call) => call === "cancel").length, 1);
+      assert.equal(second.calls.includes("cancel"), false);
       assert.equal(third.sendInput!.agentId, first.agent.id);
       assert.equal(third.createInput, undefined);
       assert.match(third.sendInput!.text, /pending continuation/u);
-      assistant(third, "successor answer");
+      assistant(third, "third answer");
       complete(third);
-      await expectBodySettles(Promise.all(bodies), "retained Paseo successor did not settle");
-      assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, 3);
-      assert.equal((await readLatestTurnForBody(allocated.paths, 3))?.end?.outcome.kind, "answered");
-      assert.equal((await readTell(allocated.paths, "pending-handoff"))?.state, "told");
-      assert.equal(await readOpenPendingTellDisposition(allocated.paths), null);
+      await expectBodySettles(Promise.all(bodies), "retained Paseo Body did not settle");
+      assert.equal((await readHeart(allocated.paths)).latestBody?.sequence, bodySequence);
+      for (const id of ["ordinary-wake", "queued"]) {
+        const tell = await readTell(allocated.paths, id);
+        assert.equal(tell?.state, "told");
+        assert.ok(tell?.binding);
+        const turn = await readTurn(allocated.paths, tell.binding.turnSequence);
+        assert.equal(turn?.bodySequence, bodySequence);
+        assert.equal(turn?.end?.outcome.kind, "answered");
+      }
       assert.equal(clients.filter((client) => client.createInput !== undefined).length, 1);
       assert.equal((await activitySlice(allocated.paths)).rows.filter((row) => row.kind === "report").length, 2);
       assert.ok(clients.every((client) => client.closed));

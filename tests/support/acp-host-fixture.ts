@@ -1,8 +1,8 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-/** Real ACP stdio agent; no live Tell capability, so pending input exercises Body succession. */
-export function installHostAcpFixture(world: string, holdSuccessorEnd = false): void {
+/** Real ACP stdio agent without live Tell capability. */
+export function installHostAcpFixture(world: string): void {
   const executable = join(world, "host-acp.mjs");
   writeFileSync(
     executable,
@@ -17,7 +17,7 @@ const app = acp.agent({ name: "host-fixture" })
   .onRequest(acp.methods.agent.session.load, () => ({}))
   .onRequest(acp.methods.agent.session.prompt, async ({ params, client }) => {
     const text = params.prompt.filter(block => block.type === "text").map(block => block.text).join("");
-    const name = text.includes("successor") ? "successor" : text.includes("first") ? "first" : undefined;
+    const name = text.includes("second") ? "second" : text.includes("first") ? "first" : undefined;
     if (name) {
       writeFileSync(join(process.cwd(), name + ".ready"), String(process.pid));
       await new Promise(resolve => { const timer = setInterval(() => { if (existsSync(join(process.cwd(), name + ".release"))) { clearInterval(timer); resolve(); } }, 10); });
@@ -34,16 +34,21 @@ app.connect(acp.ndJsonStream(Writable.toWeb(process.stdout), Readable.toWeb(proc
   writeFileSync(
     join(world, "plugins", "host-proof.mjs"),
     `
-import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 export default { manifest: { id: "host-proof", apiVersion: 1 }, activate(ctx) {
-  let firstBody;
   const log = async signal => {
-    if (signal.kind === "akuma.born") firstBody ??= signal.bodySequence;
     appendFileSync(ctx.config.log, JSON.stringify({ kind: signal.kind, pid: process.pid, body: signal.bodySequence }) + "\\n");
-    if (ctx.config.holdSuccessorEnd && signal.kind === "akuma.body-ended" && signal.bodySequence !== firstBody) {
-      writeFileSync(join(ctx.world, "successor-end.ready"), "ready");
-      await new Promise(resolve => { const timer = setInterval(() => { if (existsSync(join(ctx.world, "successor-end.release"))) { clearInterval(timer); resolve(); } }, 10); });
+    const target = join(ctx.world, "hold-body-end");
+    if (signal.kind === "akuma.body-ended" && existsSync(target) && readFileSync(target, "utf8") === String(signal.bodySequence)) {
+      writeFileSync(join(ctx.world, "body-end.ready"), "ready");
+      await new Promise(resolve => {
+        const timer = setInterval(() => {
+          if (!existsSync(join(ctx.world, "body-end.release"))) return;
+          clearInterval(timer);
+          resolve();
+        }, 10);
+      });
     }
   };
   return { signals: { "akuma.born": log, "akuma.turn-started": log, "akuma.body-ended": log } };
@@ -63,7 +68,7 @@ export default { manifest: { id: "host-proof", apiVersion: 1 }, activate(ctx) {
       plugins: {
         "host-proof": {
           package: "./plugins/host-proof.mjs",
-          config: { log: join(world, "host-proof.jsonl"), holdSuccessorEnd },
+          config: { log: join(world, "host-proof.jsonl") },
         },
       },
     }),

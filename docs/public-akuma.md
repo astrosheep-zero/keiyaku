@@ -105,7 +105,8 @@ Akuma execution owns that admission and wake. Library composes surrounding
 Dispatch and Alias facts. Structured input is a separate Ask after birth; its
 admission follows a successful prompt-free spawn only after its empty birth Body
 has settled cleanly asleep. An immediate Ask or Tell therefore does not contend
-with its own birth; concurrent work retains the ordinary busy refusal.
+with its own birth; concurrent input follows ordinary Tell queueing and schema
+admission rules.
 
 After a successful spawn or fork has made its new Akuma durable, and outside that
 birth transaction, one best-effort inactive-retention sweep may follow. It can
@@ -163,7 +164,24 @@ historical content and correlation independently of current associations.
 Latest-answer selection keeps the actual answered Turn coordinate beside its full
 answer from the same retained observation; a later report, failed or cancelled
 Turn cannot replace it. Composition never searches again to infer that coordinate.
-Selection uses one verb per meaning on both faces: `tell` admits a Tell and may observe its text answer; `ask` requires a JSON Schema document and observes the parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide work. Ask alone distinguishes invalid output; text observation reports it as failure with the same diagnostic. Bounds are optional and limit observation only, never admission. Schema belongs only to ask. Interrupt is a flag on tell or ask: it durably admits the Tell with a request for the current Body to yield, then observes completion before waking a successor; if completion is not proven, the Tell remains admitted and recoverable. Cancellation after admission stops observation, not admission. Kill is the pure stop. Tell and ask address one Akuma directly. Wait accepts a
+Selection uses one verb per meaning on both faces: `tell` admits a Tell and may
+observe its text answer; `ask` requires a JSON Schema document and observes the
+parsed JSON answer bound to that admission; `wait` observes existing Akuma-wide
+work. Ask alone distinguishes invalid output; text observation reports it as
+failure with the same diagnostic. Schema belongs only to ask. Bounds and
+cancellation after admission stop observation, not admission.
+
+Ordinary input without native live submission waits for natural Turn completion
+and drains in another Turn of the same Body. Failure retains unrelated pending
+input for a later ordinary wake. Interrupt on tell or ask durably admits the
+Tell with a request for the current Body to yield, then observes completion
+before waking a successor. If completion is not proven, the Tell remains
+admitted and recoverable. Kill stops its exact Body without launching recovery.
+
+Input-bound observation without its own outcome returns unanswered when execution
+stops, retaining admission. A sleeping Akuma with pending input keeps waiting
+unless its invocation witnessed a failed launch or observation reaches its bound.
+Tell and ask address one Akuma directly. Wait accepts a
 caller-selected batch; kill accepts exactly one selector, which may expand through
 a glob or Contract membership to several Akumas.
 Cancellation before admission preserves the native reason unchanged. After

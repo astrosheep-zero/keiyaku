@@ -10,7 +10,6 @@ import { publishAkuma } from "../src/akuma/publication.js";
 import { KeiyakuError } from "../src/index.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import type { BodyLauncher, LiveBodyLaunch } from "../src/akuma/body-launch.js";
-import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
 import { fixtureAdapter, settledInput } from "./support/akuma-tell.js";
 import { deferred, temporaryDirectory, waitForCondition } from "./support/process.js";
@@ -373,7 +372,7 @@ test("launch cancellation before preparation cannot create a late Body, and publ
         async () => {
           entered.resolve();
           await preparation.promise;
-          return { world, spawn: noBodyLaunch };
+          return { world };
         },
       );
     },
@@ -416,7 +415,7 @@ test("owned in-process cancellation retires only its own prepared Body", async (
   const spawn: BodyLauncher = async (launch) =>
     await launchInProcessBody(
       launch,
-      async () => ({ world, spawn }),
+      async () => ({ world }),
       adapter,
     );
   for (const [index, child] of [first, second].entries())
@@ -511,11 +510,11 @@ test(
 );
 
 test(
-  "a scoped host owns automatic succession and awaits exact Body plugin callbacks",
+  "a scoped host drains queued ACP work and awaits the same Body's end callback",
   { timeout: 30_000 },
   async (t) => {
-    const world = await World.at(temporaryDirectory(t, "keiyaku-scope-succession-"));
-    installHostAcpFixture(world, true);
+    const world = await World.at(temporaryDirectory(t, "keiyaku-scope-queue-"));
+    installHostAcpFixture(world);
     const scope = AkumaHost.inProcess();
     const api = Akumas.of(world, scope);
     const called = await api.spawn({ akumaName: "acp-worker", cwd: world, body: "first", bare: true, signal: t.signal });
@@ -528,40 +527,29 @@ test(
     try {
       await waitForCondition("first ACP session", () => existsSync(join(world, "first.ready")));
       const before = (await readHeart(paths)).latestBody!.sequence;
-      const tell = await api.tell({ akuma: called.akumaId, body: "successor", signal: t.signal });
-      assert.equal(typeof tell.tellId, "string");
-      await waitForCondition("automatic successor ACP session", () => existsSync(join(world, "successor.ready")));
-      assert.ok((await readHeart(paths)).latestBody!.sequence > before);
-      // Let the predecessor finish its admission observation and relinquish its
-      // launch holder, before scope close takes the live successor snapshot.
-      await waitForCondition("predecessor Body-end observation", () =>
-        proof().some((row) => row.kind === "akuma.body-ended" && row.body === before),
-      );
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      const tell = await api.tell({ akuma: called.akumaId, body: "second", signal: t.signal });
+      assert.equal((await readTell(paths, tell.tellId))?.state, "pending");
+      writeFileSync(join(world, "first.release"), "release");
+      await waitForCondition("second ACP Turn", () => existsSync(join(world, "second.ready")));
+      assert.equal((await readHeart(paths)).latestBody?.sequence, before);
+      writeFileSync(join(world, "hold-body-end"), String(before));
       const closing = scope.close();
       let closed = false;
       void closing.then(() => {
         closed = true;
       });
-      await waitForCondition("successor Body-end callback", () => existsSync(join(world, "successor-end.ready")));
-      assert.equal(closed, false, "scope must drain the enrolled successor, not just abort it");
-      writeFileSync(join(world, "successor-end.release"), "release");
+      await waitForCondition("exact Body-end callback", () => existsSync(join(world, "body-end.ready")));
+      assert.equal(closed, false, "scope must drain its enrolled Body, not just abort it");
+      writeFileSync(join(world, "body-end.release"), "release");
       await closing;
       assert.equal(await probeLeash(paths), "free");
       const observations = proof();
-      assert.ok(observations.filter((row) => row.kind === "akuma.turn-started").length >= 2);
-      assert.ok(
-        observations.every((row) => row.pid === process.pid),
-        "non-Pi provider and succession must retain the invoking Body host",
-      );
-      assert.ok(
-        observations.some((row) => row.kind === "akuma.body-ended" && row.body > before),
-        "close awaits the successor's exact Body-end callback",
-      );
+      assert.equal(observations.filter((row) => row.kind === "akuma.turn-started").length, 2);
+      assert.ok(observations.every((row) => row.pid === process.pid), "both Turns retain the invoking Body host");
     } finally {
       writeFileSync(join(world, "first.release"), "release");
-      writeFileSync(join(world, "successor.release"), "release");
-      writeFileSync(join(world, "successor-end.release"), "release");
+      writeFileSync(join(world, "second.release"), "release");
+      writeFileSync(join(world, "body-end.release"), "release");
       await scope.close();
     }
   },

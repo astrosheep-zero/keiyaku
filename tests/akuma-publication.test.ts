@@ -9,7 +9,7 @@ import { HeldAkumaLeash, readSeal, readSoul } from "../src/akuma/heart/index.js"
 import { allocateAkumaDirectory, type AkumaId } from "../src/akuma/identity.js";
 import { publishAkuma } from "../src/akuma/publication.js";
 import { World } from "../src/world.js";
-import { allocatedHeart, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { allocatedHeart } from "./support/akuma-fixtures.js";
 import { deferred as promiseBarrier, temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
 
@@ -255,7 +255,7 @@ test("publication preserves a Body failure that occurs before birth", async (con
   await assert.rejects(
     publishWorker(root, undefined, async (allocated) => {
         childPaths = allocated.paths;
-        await assert.rejects(driveAkumaBody({ paths: allocated.paths }, undefined, { spawn: noBodyLaunch }), /Akuma wake has no born soul/u);
+        await assert.rejects(driveAkumaBody({ paths: allocated.paths }, undefined), /Akuma wake has no born soul/u);
         assert.equal((await readSeal(allocated.paths))?.evidence, "Akuma wake has no born soul");
     }),
     /Akuma wake has no born soul/u,

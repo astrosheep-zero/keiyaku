@@ -37,7 +37,6 @@ import {
   insertSessionFact,
   insertStopControl,
   killFactForBody,
-  hasBodyHandoffControl,
   latestBodyFact,
   insertInterruptBarrier,
   isTellProtectedByPause,
@@ -56,19 +55,12 @@ import {
 import type { AgentEvent } from "./activity-schema.js";
 import {
   insertTellDeliveryFact,
-  dispositionSnapshotProven,
   insertTellBindingFact,
-  insertTellDispositionSnapshot,
   insertTellReceiptFact,
-  insertUndeliveredTellReceipts,
-  latestOpenTellDisposition,
   openBoundTurns,
-  openTellDispositionIds,
   pendingTellFacts,
   hasPendingTell,
-  resolveTellDispositionSnapshot,
   sameTellInput,
-  tellDispositionResolved,
   tellFact,
   tellIdsForFence,
   turnParticipants,
@@ -91,7 +83,7 @@ import {
   withReadOnlyHeart,
 } from "./storage.js";
 import { setSoulModel, soulFact } from "./soul.js";
-import { AkumaBusyError, HeartAuthorityCorruptionError } from "./facts.js";
+import { AkumaBusyError } from "./facts.js";
 export {
   HeartAbsentError,
   HeldAkumaLeash,
@@ -477,76 +469,6 @@ export async function recordTellReceipt(paths: AkumaPaths, input: TellReceiptInp
   });
 }
 
-export type PendingTellDisposition = Readonly<{
-  bodySequence: number;
-  tellIds: readonly string[];
-}>;
-
-function decidePendingTellDispositionInHeart(
-  heart: DatabaseSync,
-  input: Readonly<{ bodySequence: number; at: string; handoff: boolean }>,
-): PendingTellDisposition | null {
-  const body = latestBodyFact(heart);
-  if (body === null || body.sequence !== input.bodySequence) return null;
-  if (tellDispositionResolved(heart, input.bodySequence) === true) return null;
-  if (hasBodyHandoffControl(heart, input.bodySequence)) {
-    if (input.handoff && body.end === undefined)
-      endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
-    return null;
-  }
-  const existing = openTellDispositionIds(heart, input.bodySequence);
-  if (existing !== null) return { bodySequence: input.bodySequence, tellIds: existing };
-  const tellIds = pendingTellFacts(heart).map((tell) => tell.id);
-  if (tellIds.length === 0) return null;
-  if (body.end === undefined) {
-    if (!input.handoff) return null;
-    endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
-  } else if (body.end === "broke-off") {
-    return null;
-  }
-  insertTellDispositionSnapshot(heart, input.bodySequence, tellIds, input.at);
-  return { bodySequence: input.bodySequence, tellIds };
-}
-
-export async function decidePendingTellDisposition(
-  paths: AkumaPaths,
-  input: Readonly<{ bodySequence: number; at: string; handoff: boolean }>,
-): Promise<PendingTellDisposition | null> {
-  return await withHeartTransaction(paths, (heart) => {
-    const decided = decidePendingTellDispositionInHeart(heart, input);
-    pruneActivityFacts(heart, ACTIVITY_LIMIT);
-    return decided;
-  });
-}
-
-export async function readOpenPendingTellDisposition(paths: AkumaPaths): Promise<PendingTellDisposition | null> {
-  return await withReadOnlyHeart(paths, (heart) => latestOpenTellDisposition(heart));
-}
-
-/** Prove and consume the persisted decision in one transaction, never a caller's stale member list. */
-export async function resolvePendingTellDisposition(
-  paths: AkumaPaths,
-  bodySequence: number,
-  at: string,
-  outcome: "custody" | "undelivered" = "custody",
-): Promise<boolean> {
-  return await withHeartTransaction(paths, (heart) => {
-    if (tellDispositionResolved(heart, bodySequence) === true) return true;
-    const tellIds = openTellDispositionIds(heart, bodySequence);
-    if (tellIds === null) throw new HeartAuthorityCorruptionError(`Akuma disposition ${bodySequence} is missing`);
-    if (hasBodyHandoffControl(heart, bodySequence)) {
-      resolveTellDispositionSnapshot(heart, bodySequence, at);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
-      return true;
-    }
-    if (outcome === "undelivered") insertUndeliveredTellReceipts(heart, tellIds, at);
-    if (!dispositionSnapshotProven(heart, tellIds)) return false;
-    resolveTellDispositionSnapshot(heart, bodySequence, at);
-    pruneActivityFacts(heart, ACTIVITY_LIMIT, true);
-    return true;
-  });
-}
-
 export async function readKill(paths: AkumaPaths, bodySequence: number): Promise<KillFact | null> {
   return await withReadOnlyHeart(paths, (heart) => killFactForBody(heart, bodySequence));
 }
@@ -572,9 +494,6 @@ export async function requestStop(
         // exited Body remains already-stopped, and hung custody is untouched.
         if (body.hung === undefined && body.end !== "exited") {
           insertKillFact(heart, body.sequence, at);
-          const released = tellDispositionResolved(heart, body.sequence) === false;
-          resolveTellDispositionSnapshot(heart, body.sequence, at);
-          pruneActivityFacts(heart, ACTIVITY_LIMIT, released);
           if (stopFact(heart)?.bodySequence === body.sequence) deleteStopControl(heart);
           return { kind: "witnessed", body };
         }
@@ -601,8 +520,8 @@ export async function breakBody(
 /** The owning Body calls this only after proving its provider custody retired. */
 export async function cancelBodyTurns(
   paths: AkumaPaths,
-  input: Readonly<{ bodySequence: number; at: string; handoff?: boolean }>,
-): Promise<Readonly<{ canceled: readonly number[]; disposition: PendingTellDisposition | null }>> {
+  input: Readonly<{ bodySequence: number; at: string }>,
+): Promise<Readonly<{ canceled: readonly number[] }>> {
   return await withHeartTransaction(paths, (heart) => {
     const body = latestBodyFact(heart);
     if (
@@ -620,10 +539,8 @@ export async function cancelBodyTurns(
         completedAt: input.at,
       });
     endBodyFact(heart, { sequence: input.bodySequence, end: "put-down", at: input.at });
-    const disposition =
-      input.handoff === true ? decidePendingTellDispositionInHeart(heart, { ...input, handoff: true }) : null;
     pruneActivityFacts(heart, ACTIVITY_LIMIT, sequences.length > 0);
-    return { canceled: sequences, disposition };
+    return { canceled: sequences };
   });
 }
 

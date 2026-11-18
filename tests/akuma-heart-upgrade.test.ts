@@ -96,7 +96,7 @@ for (const entry of ["read", "write"] as const) test(`v29 upgrades at normal ${e
       } finally { database.close(); }
     }
     assert.equal((await readTurn(value.paths, 6))?.end?.outcome.kind, "failed", "historical diagnostic never infers cancellation");
-    assert.deepEqual(await cancelBodyTurns(value.paths, { bodySequence: 2, at }), { canceled: [11], disposition: null });
+    assert.deepEqual(await cancelBodyTurns(value.paths, { bodySequence: 2, at }), { canceled: [11] });
     assert.deepEqual((await readTurn(value.paths, 11))?.end?.outcome, { kind: "canceled" });
     assert.deepEqual((await readHeart(value.paths)).pending.map((tell) => tell.id), ["pending"]);
     await withReadOnlyHeart(value.paths, (database) => {

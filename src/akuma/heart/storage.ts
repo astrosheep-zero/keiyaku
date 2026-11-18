@@ -31,7 +31,6 @@ import {
   insertSealFact,
   insertSessionFact,
   killFactForBody,
-  hasBodyHandoffControl,
   latestBodyFact,
   latestKillFact,
   markBodyHung,
@@ -39,7 +38,7 @@ import {
   sealFact,
   stopFact,
 } from "./rows.js";
-import { insertTellFact, resolveTellDispositionSnapshot, tellDispositionResolved } from "./tells.js";
+import { insertTellFact } from "./tells.js";
 import { pruneActivityFacts } from "./timeline.js";
 import { insertSoulFact, soulFact } from "./soul.js";
 
@@ -367,20 +366,9 @@ export class HeldAkumaLeash {
     return await withHeartTransaction(paths, (heart) => judgeInterruptBarrier(heart, expected));
   }
 
-  async recordBody(
-    paths: AkumaPaths,
-    input: Readonly<{ leashTakenAt: string; handoffFromBodySequence?: number }>,
-  ): Promise<BodyFact> {
+  async recordBody(paths: AkumaPaths, input: Readonly<{ leashTakenAt: string }>): Promise<BodyFact> {
     if (this.closed || this.bodySequence !== undefined) throw new Error("Akuma leash cannot start another Body");
     const sequence = await withHeartTransaction(paths, (heart) => {
-      const predecessor = input.handoffFromBodySequence;
-      if (
-        predecessor !== undefined &&
-        (latestBodyFact(heart)?.sequence !== predecessor ||
-          hasBodyHandoffControl(heart, predecessor) ||
-          tellDispositionResolved(heart, predecessor) !== false)
-      )
-        throw new BodyControlledError();
       const completion = judgeInterruptBarrier(heart);
       if (completion.kind === "unavailable") throw new BodyControlledError();
       return insertBodyFact(heart, input);
@@ -422,9 +410,6 @@ export class HeldAkumaLeash {
         latestKillFact(heart)?.bodySequence === target.bodySequence
           ? ("already-killed" as const)
           : (insertKillFact(heart, target.bodySequence, target.requestedAt), "recorded" as const);
-      const released = tellDispositionResolved(heart, target.bodySequence) === false;
-      resolveTellDispositionSnapshot(heart, target.bodySequence, target.requestedAt);
-      pruneActivityFacts(heart, ACTIVITY_LIMIT, released);
       deleteStopControl(heart);
       return { target, result };
     });

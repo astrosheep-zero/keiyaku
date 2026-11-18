@@ -9,7 +9,6 @@ import { KeiyakuError, type SpawnResult } from "../src/index.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { Settings } from "../src/settings.js";
-import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering, settledInput } from "./support/akuma-tell.js";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
@@ -184,7 +183,6 @@ test(
       }
       // Complete provider work before returning launch/admission to expose the fast-first-Tell gap.
       await driveAkumaBody(launch, answering('{"ok":true}'), {
-        spawn: noBodyLaunch,
         now: () => AT,
       });
       return { completed: Promise.resolve({ diagnostic: "fixture finished" }), cancel: async () => {}, release() {} };

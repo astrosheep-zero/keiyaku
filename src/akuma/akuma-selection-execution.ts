@@ -216,7 +216,6 @@ async function executeObservedTellAkuma(input: AskExecutionInput): Promise<TextA
 }
 
 type KillExecutionInput = Readonly<{
-  spawn: BodyLauncher;
   path: WorldRoot;
   ids: readonly AkumaStatus["id"][];
   signal?: AbortSignal;
@@ -226,9 +225,7 @@ export async function executeKillAkuma(input: KillExecutionInput): Promise<Akuma
   input.signal?.throwIfAborted();
   const owners = input.ids.map((id) => new AkumaOwner(id, input.path));
   const evidence = await Promise.all(
-    owners.map(
-      async (owner) => await owner.kill(input.spawn, input.signal === undefined ? {} : { signal: input.signal }),
-    ),
+    owners.map(async (owner) => await owner.kill(input.signal === undefined ? {} : { signal: input.signal })),
   );
   input.signal?.throwIfAborted();
   return {

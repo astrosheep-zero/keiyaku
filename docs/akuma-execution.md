@@ -13,10 +13,8 @@ cancellation of all its still-open Turns commit together, including Turns withou
 Tell bindings. Existing terminals win unchanged. Cancellation supplies neither an
 answer nor a failure diagnostic; unproven execution loss leaves Turns open, while
 hung custody and genuine execution or cleanup failures remain failures. A failed
-cancellation cannot publish an ordinarily settled put-down. When provider
-retirement requires a handoff, that same Heart mutation also judges control and
-records the pending-input disposition before optional outcome observation. A Body
-uses the persisted Soul and latest valid session recipe; Heart loss makes it
+cancellation cannot publish an ordinarily settled put-down. A Body uses the
+persisted Soul and latest valid session recipe; Heart loss makes it
 retire only provider custody it directly owns and exit.
 
 An input may carry its submitting initiator for outcome addressing. A Turn
@@ -57,13 +55,11 @@ was submitted.
 
 Process custody is a live handle, not a stored pid, process group, start token,
 or reconstructed identity. Product composition selects Body hosting and supplies
-its launch capability to execution, publication, wake, delegation, and
-succession. Those algorithms never choose a host, including when a capability
-is missing. Hosting is captured by the invoking composition, defaults to
-detached execution, and may instead run the Body in the calling host. It is
-never persisted in Soul or inferred from an observation bound. A Body's
-automatic succession uses that composition's hosting, but forked children do
-not inherit their parent's host choice.
+its launch capability to publication, wake, and delegation. Those algorithms
+never choose a host, including when a capability is missing. Hosting is captured
+by the invoking composition, defaults to detached execution, and may instead run
+the Body in the calling host. It is never persisted in Soul or inferred from an
+observation bound. Forked children do not inherit their parent's host choice.
 
 Body launch custody is separate from provider-attempt custody. Launch completion
 is evidence only that the launch finished, never a product outcome or proof of
@@ -75,12 +71,11 @@ provider execution, without permitting later preparation to start canceled work.
 Release relinquishes only the launch holder's custody: it neither kills execution nor
 guarantees host survival, and never substitutes for closure proof. An explicit
 in-process host scope independently retains cancellation of its exact live
-launches, including preparation and automatic succession, after publication
-releases its holder. Closing that scope is idempotent: it prevents new launches,
+launches, including preparation, after publication releases its holder. Closing
+that scope is idempotent: it prevents new launches,
 requests retirement of its owned work, and awaits their execution and bounded
 plugin callbacks. It never stops by Akuma identity, follows a later foreign wake,
-or includes detached launches. A close racing setup prevents late execution;
-closing during succession refuses that successor rather than relocating it.
+or includes detached launches. A close racing setup prevents late execution.
 Closure failure and hung custody remain visible, even if execution later retires;
 closure never claims that noncooperative native work physically stopped. There is
 no persisted scope, registry, scheduler, or recovery promise. In-process
@@ -121,46 +116,34 @@ never substitutes another directory for a missing frozen cwd. Diagnosis
 changes no identity, session, pending Tell, history, or Soul interpretation,
 and adds no daemon, watcher, or periodic repair.
 
-Normal session completion is distinct from admission-failure termination. When a
-Body ends a live session normally with pending Tell and no live tell channel, that
-ending Body decides exactly one disposition once. Heart records that decision in
-the same atomic operation as ending-Body state, capturing the exact pending-Tell
-identity snapshot before leash release. There is no async window between body end,
-leash release, and handoff that leaves those Tell identities without a Heart
-disposition decision. A successor holds the snapshotted pending Tell only after
-Heart proves that exact successor took those identities; sequence growth, spawn
-resolution, Body existence alone, or an unqualified held leash is not proof. Until
-that proof, those Tell identities remain pending and the disposition is not
-consumed. If spawn, release, or custody proof fails, the same session-end step
-records a Heart-owned undelivered terminal projection for exactly that snapshot.
-Concurrent Tells admitted after the snapshot remain pending for their own wake. A
-Body log line is never the disposition; it is at most evidence of one. Absent
-superseding control, no path leaves a disposition's Tell identities with neither
-a proven successor nor a Heart-owned undelivered projection. An admitted stop or
-interrupt supersedes that automatic disposition without terminalizing its
-pending input. A kill witness prevents that predecessor's delayed automatic
-launch from admitting a successor; a later ordinary Tell may still wake the
-retained input. Successor creation is a consequence of the exact still-authorized
-disposition, never a second decision, and duplicate wake must not create two
-dispositions. Admission failure remains terminal: it produces no automatic handoff
-or retry. There is no generalized retry loop and no change to provider tell
-capability.
+Ordinary pending input never retires an active provider attempt. After a
+successful Turn and proof of provider closure, the same Body takes the next
+eligible pending input into another Turn under its held leash. Clean idle
+settlement atomically refuses pending input or admitted control, so input racing
+settlement is either drained there or remains pending for an ordinary wake.
+Failed provider setup or execution strands the Body and retains unrelated
+pending input. There is no automatic successor launch, terminalization of queued
+input, or recovery service; a later ordinary Tell can wake retained work.
 
 ## Tell And Control
 
 Tell admission is atomic with Soul existence, so unborn targets refuse without
 leaving future input behind. Body records delivery only after provider submission
-evidence and provider terminal receipts only from provider evidence. Session-end
-pending-Tell disposition may record a Heart undelivered terminal witness when
-successor custody is not proven. Tell is at-least-once by stable identity, not
-exactly-once: lost unrecorded submission remains pending, while any terminal
-witness settles it without rollback. Kill never discards a Tell. A durable resume
+evidence and provider terminal receipts only from provider evidence. Tell is
+at-least-once by stable identity, not exactly-once: lost unrecorded submission
+remains pending, while any terminal witness settles it without rollback.
+Historical undelivered terminal witnesses retain their meaning; queued input
+never creates new ones. Native live Tell remains optional and uses the adapter's
+submission and receipt evidence; without it ordinary input waits for the current
+Turn to complete. Explicit interrupt is the preemption operation. Kill never
+discards a Tell or launches recovery. A durable resume
 promise with no adapter resume capability refuses without starting fresh, deleting
 the promise, or creating a recovery machine. There is no public resume verb.
 
-Schema remains a Tell input property and does not invent a second recovery
-machine; busy and interrupt behavior remain shared with ordinary Tell. A schema Tell is answered by a Turn dedicated to that schema Tell. Drain
-groups ordinary Tells only until the next schema Tell.
+Schema remains a Tell input property and does not invent another recovery
+authority. A schema Tell is answered by a Turn dedicated to that Tell; ordinary
+input waits outside that Turn. Drain groups ordinary Tells only until the next
+schema Tell.
 A body-less publication composed before a schema Tell exits cleanly before that
 Tell is admitted; it never makes the Tell contend with its own birth Body.
 

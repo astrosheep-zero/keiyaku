@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { Akuma } from "../src/akuma/index.js";
-import { readHeart } from "../src/akuma/heart/index.js";
+import { readHeart, readTell, readTurn, recordTell } from "../src/akuma/heart/index.js";
 import { runProcess } from "../src/runtime/proc/run.js";
 import { appendNodeOptionsImport, temporaryDirectory } from "./support/process.js";
 import { bornWorld, settledInput } from "./support/akuma-tell.js";
@@ -13,7 +13,7 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLaunch, BodyLauncher } from "../src/akuma/body-launch.js";
 import { fixtureAdapter } from "./support/akuma-tell.js";
-import { createProviderAttempt, type DriveInput, type ProviderAdapter } from "../src/akuma/provider.js";
+import { createProviderAttempt, type DriveInput } from "../src/akuma/provider.js";
 import { deferred } from "./support/process.js";
 import { World } from "../src/world.js";
 import { isolateUserHome } from "./support/user-home.js";
@@ -68,7 +68,7 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus str
   }));
   const spawn: BodyLauncher = async (launch) => {
     launches.push(launch);
-    const body = driveAkumaBody(launch, adapter, { spawn, world });
+    const body = driveAkumaBody(launch, adapter);
     bodies.push(body);
     return {
       completed: body.then((result) => ({ diagnostic: "fixture launch completed", held: result === "held" })),
@@ -107,43 +107,49 @@ test("one composed launcher reaches birth, first Tell, and nested birth plus str
   }
 });
 
-test("the composed launcher also owns ordinary wake and authorized succession", async (context) => {
-  const world = await World.at(temporaryDirectory(context, "keiyaku-launch-succession-"));
+test("an ordinary Tell waits for provider closure and drains under the same Body", { timeout: 10_000 }, async (context) => {
+  const world = await World.at(temporaryDirectory(context, "keiyaku-launch-queue-"));
   mkdirSync(join(world, ".keiyaku", "akumas"), { recursive: true });
   writeFileSync(join(world, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\nWork.\n");
   writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({ plugins: { square: { enabled: false } } }));
   const started = deferred<void>();
-  const retired = deferred<void>();
+  const answer = deferred<void>();
+  const closed = deferred<void>();
   const launches: BodyLaunch[] = [];
   const bodies: Promise<unknown>[] = [];
-  const inputs: string[] = [];
-  const drive = (input: DriveInput) =>
-    createProviderAttempt(input.signal, async (custody) => {
-      const text = input.launchTells[0]!.text;
-      inputs.push(text);
-      const finished = text === "first" ? retired.promise : Promise.resolve();
-      const abort = async () => { retired.resolve(); };
-      custody.own({ closed: finished, abort, forceDispose: abort });
-      return {
-        admission: { fence: `succession-${text}` },
-        events: {
-          async *[Symbol.asyncIterator]() {
-            yield { type: "session" as const, coordinate: { sessionId: "succession-session" } };
-            if (text === "first") started.resolve();
-            await finished;
-          },
+  const inputs: string[][] = [];
+  let firstClosed = false;
+  let aborts = 0;
+  const drive = (input: DriveInput) => createProviderAttempt(input.signal, async (custody) => {
+    const texts = input.launchTells.map((tell) => tell.text);
+    inputs.push(texts);
+    const text = texts[0]!;
+    const first = text === "first";
+    if (!first) assert.equal(firstClosed, true, "next Turn must follow provider closure");
+    const abort = async () => {
+      aborts += 1;
+      answer.resolve();
+      closed.resolve();
+    };
+    custody.own({ closed: first ? closed.promise : Promise.resolve(), abort, forceDispose: abort });
+    return {
+      admission: { fence: `queue-${text}` },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "queue-session" } };
+          if (first) {
+            started.resolve();
+            await answer.promise;
+          }
         },
-        completion: finished.then(() => ({ kind: "answered" as const, answer: text })),
-      };
-    });
-  const adapter: ProviderAdapter = {
-    admitOptions: (options) => ({ kind: "admitted", options }),
-    start: drive,
-    resume: drive,
-  };
+      },
+      completion: (first ? answer.promise : Promise.resolve()).then(() => ({ kind: "answered" as const, answer: text })),
+    };
+  });
+  const adapter = { ...fixtureAdapter(drive), resume: drive };
   const spawn: BodyLauncher = async (launch) => {
     launches.push(launch);
-    const body = driveAkumaBody(launch, adapter, { spawn, world });
+    const body = driveAkumaBody(launch, adapter);
     bodies.push(body);
     return {
       completed: body.then((result) => ({ diagnostic: "fixture launch completed", held: result === "held" })),
@@ -154,23 +160,79 @@ test("the composed launcher also owns ordinary wake and authorized succession", 
   try {
     const api = akumasWithLauncher(world, spawn);
     const result = await api.spawn({ akumaName: "worker", body: "first", signal: context.signal });
+    assert.ok(result.tellId);
     await started.promise;
-    const next = await api.tell({ akuma: result.akumaId, body: "second", wait: true, signal: context.signal });
-    assert.equal(next.input?.kind, "answered");
-    if (next.input?.kind !== "answered") throw new Error("expected answer");
-    assert.equal(next.input.answer, "second");
+    const { paths } = launches[0]!;
+    const current = (await readHeart(paths)).latestBody!;
+    const next = await api.tell({ akuma: result.akumaId, body: "second", signal: context.signal });
+    assert.deepEqual((await readHeart(paths)).pending.map((tell) => tell.id), [next.tellId]);
+    assert.deepEqual(inputs, [["first"]]);
+    answer.resolve();
+    firstClosed = true;
+    closed.resolve();
     await Promise.all(bodies);
-    assert.deepEqual(inputs, ["first", "second"]);
-    const handoffs = launches.filter((launch) => launch.handoffFromBodySequence !== undefined);
-    assert.equal(handoffs.length, 1);
-    assert.equal(handoffs[0]!.handoffFromBodySequence, 2);
-    const heart = await readHeart(handoffs[0]!.paths);
+
+    assert.equal(aborts, 0);
+    assert.deepEqual(inputs, [["first"], ["second"]]);
+    const first = await readTell(paths, result.tellId);
+    const second = await readTell(paths, next.tellId);
+    assert.equal(first?.state, "told");
+    assert.equal(second?.state, "told");
+    assert.ok(first?.binding && second?.binding);
+    assert.ok(first.binding.turnSequence < second.binding.turnSequence);
+    const firstTurn = await readTurn(paths, first.binding.turnSequence);
+    const secondTurn = await readTurn(paths, second.binding.turnSequence);
+    assert.equal(firstTurn?.bodySequence, current.sequence);
+    assert.equal(secondTurn?.bodySequence, current.sequence);
+    for (const [turn, answer] of [[firstTurn, "first"], [secondTurn, "second"]] as const) {
+      const outcome = turn?.end?.outcome;
+      assert.equal(outcome?.kind, "answered");
+      assert.equal(outcome.answer, answer);
+    }
+    const heart = await readHeart(paths);
+    assert.equal(heart.latestBody?.sequence, current.sequence);
     assert.equal(heart.latestBody?.end, "exited");
-    assert.equal(heart.pending.length, 0);
+    assert.deepEqual(heart.pending, []);
   } finally {
-    retired.resolve();
+    answer.resolve();
+    firstClosed = true;
+    closed.resolve();
     await Promise.all(bodies);
   }
+});
+
+test("queued schema Tells occupy dedicated Turns in admission order", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-launch-schema-queue-");
+  const { allocated } = await bornWorld(root, "b0000002");
+  const at = "2026-08-08T00:00:00.000Z";
+  const schema = '{"type":"object"}';
+  for (const [id, schemaJson] of [["first", undefined], ["schema", schema], ["last", undefined]] as const) {
+    await recordTell(allocated.paths, {
+      kind: "tell",
+      id,
+      body: id,
+      recordedAt: at,
+      ...(schemaJson === undefined ? {} : { schemaJson }),
+    });
+  }
+  const inputs: [readonly string[], string | undefined][] = [];
+  const drive = (input: DriveInput) => createProviderAttempt(input.signal, async (custody) => {
+    const ids = input.launchTells.map((tell) => tell.id);
+    inputs.push([ids, input.schemaJson]);
+    custody.own({ closed: Promise.resolve(), async abort() {}, async forceDispose() {} });
+    return {
+      admission: { fence: ids.join("-") },
+      events: {
+        async *[Symbol.asyncIterator]() {
+          yield { type: "session" as const, coordinate: { sessionId: "schema-session" } };
+        },
+      },
+      completion: Promise.resolve({ kind: "answered" as const, answer: '{}' }),
+    };
+  });
+  await driveAkumaBody({ paths: allocated.paths }, { ...fixtureAdapter(drive), resume: drive });
+  assert.deepEqual(inputs, [[["first"], undefined], [["schema"], schema], [["last"], undefined]]);
+  assert.deepEqual((await readHeart(allocated.paths)).pending, []);
 });
 
 // No OS coordinate or native-exit-shaped fixture: completion is not Heart evidence.

@@ -10,12 +10,10 @@ import { Akuma, AkumaProviderError, type AkumaIdleResult } from "../src/akuma/in
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { driveAkumaBody, tellWakeRuntime, type TellWakeRuntime } from "../src/akuma/body.js";
 import {
-  appendActivity,
   beginTurn,
   bindTellsToTurn,
   breakBody,
   cancelBodyTurns,
-  decidePendingTellDisposition,
   endTurn,
   finishBodyIfIdle,
   HeldAkumaLeash,
@@ -25,7 +23,6 @@ import {
   recordTell,
   recordTellDeliveries,
   recordTellReceipt,
-  resolvePendingTellDisposition,
 } from "../src/akuma/heart/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { createLiveStatusReader } from "../src/akuma/akuma-observe.js";
@@ -590,7 +587,6 @@ test("idle after kill names the killed life", async () => {
       recordedAt: "2026-08-10T00:00:01.000Z",
     });
     body = driveAkumaBody({ paths: allocated.paths }, hanging, {
-      spawn: noBodyLaunch,
       now: () => "2026-08-10T00:00:02.000Z",
     });
     await waitForSeedBinding(allocated.paths, body);
@@ -920,52 +916,6 @@ test("live reads refresh life across Body end, free-seat races, and succession",
   assert.equal((await reader.read()).status.life, "stranded");
   const final = await executeWaitAkuma({ path: root, ids: [member.id], completion: "all", timeoutMs: 0 });
   assert.equal(final.reason, "completed", "completion precedes a passed deadline");
-});
-
-test("releasing retention protection removes evidence without timeline growth", async (context) => {
-  const {
-    members: [member],
-  } = await liveWaitFixture(context);
-  assert.ok(member);
-  await recordTell(member.paths, { kind: "tell", id: "retired", body: "protected", recordedAt: LIVE_WAIT_AT });
-  await decidePendingTellDisposition(member.paths, {
-    bodySequence: member.body.sequence,
-    at: LIVE_WAIT_AT,
-    handoff: true,
-  });
-  await recordTellDeliveries(member.paths, [
-    {
-      tellId: "retired",
-      route: "launch",
-      turnSequence: member.turn.sequence,
-      fence: "retained-launch",
-      deliveredAt: LIVE_WAIT_AT,
-    },
-  ]);
-  seedWaitNarration(member, 5_501);
-  await appendActivity(member.paths, {
-    turnSequence: member.turn.sequence,
-    event: { type: "note", text: "compact" },
-    at: LIVE_WAIT_AT,
-  });
-  const reader = createLiveStatusReader(member.paths, member.id);
-  context.after(reader.clear);
-  const protectedView = await reader.read();
-  assert.ok(protectedView.rows.some((row) => row.kind === "tell" && row.tellId === "retired"));
-  const database = new DatabaseSync(member.paths.heart);
-  const highest = database.prepare("SELECT MAX(sequence) AS value FROM timeline").get()?.value;
-  database.close();
-  assert.equal(await resolvePendingTellDisposition(member.paths, member.body.sequence, LIVE_WAIT_AT), true);
-  const released = await reader.read();
-  assert.notDeepEqual(released.rows, protectedView.rows);
-  assert.equal(
-    released.rows.some((row) => row.kind === "tell" && row.tellId === "retired"),
-    false,
-  );
-  assert.equal(await readTell(member.paths, "retired"), null);
-  const after = new DatabaseSync(member.paths.heart);
-  assert.equal(after.prepare("SELECT MAX(sequence) AS value FROM timeline").get()?.value, highest);
-  after.close();
 });
 
 test("plural wait keeps an unreadable member local and reads it anew when it recovers", async (context) => {

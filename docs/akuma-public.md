@@ -152,10 +152,29 @@ receipt identifies the resolved Akuma and admitted input once, omitting routine
 successful wake and interruption mechanics. It retains pending or unavailable
 interruption only when that evidence changes whether the admitted input can
 advance, including the known hung or untidy cause, without exposing Body identity.
-`ask` admits a Tell under a required JSON Schema document and observes its parsed JSON answer. Only Ask distinguishes invalid output from execution failure; a text observer of invalid schema output sees the same failure diagnostic as the timeline. Both observations distinguish an answer, failure, absence of an answer, and a deadline. Observation is unbounded by default; a deadline or caller signal stops observation without retracting an admitted Tell. `wait` instead observes Akuma-wide idle work. A spawn composes prompt-free birth with optional first ordinary Tell admission; bounded spawn observation awaits that first text answer without changing admission. Schema belongs only to ask. Interrupt is a flag on tell and ask: it atomically admits the Tell with a request for the current Body to yield, then observes completion before waking a successor. If completion is not proven, the Tell stays admitted and recoverable; cancellation after admission stops observation only. Kill is the pure stop. These forms retain the same busy and recovery semantics.
-Wait observes status until its Akuma-owned completion judgment or a caller
-deadline. Running execution keeps observation open. Normally sleeping execution
-completes only without pending Tell, preserving ordinary successor handoff.
+`ask` admits a Tell under a required JSON Schema document and observes its parsed
+JSON answer. Only Ask distinguishes invalid output from execution failure; a
+text observer of invalid schema output sees the same failure diagnostic as the
+timeline. Both observations distinguish an answer, failure, absence of an answer,
+and a deadline. Observation is unbounded by default; a deadline or caller signal
+stops observation without retracting an admitted Tell. A spawn composes
+prompt-free birth with optional first ordinary Tell admission; bounded spawn
+observation awaits that first text answer without changing admission. Schema
+belongs only to ask.
+
+Ordinary Tell uses native live submission when available; otherwise it waits for
+natural Turn completion and another Turn under the same Body. Failed execution
+leaves unrelated admitted input pending for a later ordinary wake. Interrupt is
+a flag on tell and ask: it atomically admits the Tell with a request for the
+current Body to yield, then observes completion before waking a successor. If
+completion is not proven, the Tell stays admitted and recoverable; cancellation
+after admission stops observation only. Kill is the pure stop and launches no
+successor.
+
+`wait` observes Akuma-wide idle work until its Akuma-owned completion judgment or
+a caller deadline. Running execution keeps observation open. Normally sleeping execution
+completes only without pending Tell; without witnessed invocation-owned launch
+failure, pending input keeps the conservative wait judgment.
 Stranded, killed, hung, or untidy execution ends observation even with pending
 Tell: unsubmitted input remains retained, but is not evidence of execution that
 can advance it. Completion names the end of observation, not successful work;
@@ -197,7 +216,7 @@ ends waiting when no execution is running and retains its admission diagnostic.
 Unexpected wake rejection remains an exceptional failure, not a fabricated
 provider outcome. Observation neither retries nor changes Tell facts. Without
 invocation-owned wake evidence, sleeping execution with pending input retains
-the conservative handoff wait rather than guessing that launch has failed.
+the conservative pending-input wait rather than guessing that launch has failed.
 
 Schema on an ask carries a provider answer contract as a JSON Schema document.
 Admission canonicalizes and bounds the document before provider work. Ask parses

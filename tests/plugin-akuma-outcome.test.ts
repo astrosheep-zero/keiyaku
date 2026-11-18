@@ -1,6 +1,5 @@
 import { akumaWithLauncher } from "../src/akuma/akuma-instance.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -122,7 +121,7 @@ test(
         },
       };
     }));
-    const runtime = { spawn: noBodyLaunch, now: () => AT };
+    const runtime = { now: () => AT };
     const opening = harnessOwner({ channel: "pi", session: "opening" });
     const steering = harnessOwner({ channel: "codex", session: "steering" });
     const body = driveAkumaBody(
@@ -547,7 +546,6 @@ test("CLI native Owners survive coalesced Tell admission into direct Body ledger
     { paths: target.allocated.paths, initiator: "unrelated-launch-owner" },
     answering("coalesced result"),
     {
-      spawn: noBodyLaunch,
       now: () => AT,
     },
   );
@@ -747,7 +745,7 @@ test("the isolated user home reaches an executed Body as user-scope plugin setti
     await driveAkumaBody(
       { paths: target.allocated.paths, initialBody: "user scope" },
       answering("from the user home"),
-      { spawn: noBodyLaunch, now: () => AT },
+      { now: () => AT },
     );
   } finally {
     rmSync(settingsDirectory, { recursive: true, force: true });

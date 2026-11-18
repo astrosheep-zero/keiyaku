@@ -154,7 +154,7 @@ class AkumasHandle {
   }
 
   kill(input: AkumaKillInput): Promise<AkumaKillResult> {
-    return killAkuma(this.withWorld(input, "Akumas.kill input"), this.#spawn);
+    return killAkuma(this.withWorld(input, "Akumas.kill input"));
   }
 
   history(input: AkumaHistoryInput): Promise<AkumaHistoryResult> {

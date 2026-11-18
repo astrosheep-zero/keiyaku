@@ -272,10 +272,7 @@ export async function waitAkuma(
   );
 }
 
-export async function killAkuma(
-  input: AkumaKillInput & Readonly<{ path: WorldRoot }>,
-  spawn: BodyLauncher,
-): Promise<AkumaKillResult> {
+export async function killAkuma(input: AkumaKillInput & Readonly<{ path: WorldRoot }>): Promise<AkumaKillResult> {
   const values = requireInput(input, "Akumas.kill input", ["path", "akuma", "repo", "signal"]);
   if (typeof values.akuma !== "string" || values.akuma.trim().length === 0)
     throw new KeiyakuError("invalid-input", "akuma must be a nonblank string");
@@ -286,7 +283,6 @@ export async function killAkuma(
     ...(values.repo === undefined ? {} : { repo: values.repo }),
   });
   return await executeKillAkuma({
-    spawn,
     path: addressed.path,
     ids: addressed.orderedIds,
     ...(callerSignal === undefined ? {} : { signal: callerSignal }),

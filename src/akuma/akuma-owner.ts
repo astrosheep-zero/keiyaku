@@ -18,7 +18,7 @@ import {
 import { executeWaitAkuma } from "./akuma-wait.js";
 import { createAkumaStream, type AkumaStreamSnapshot } from "./akuma-stream.js";
 import type { BodyLauncher } from "./body-launch.js";
-import { handoffPendingTells, wakeRecordedTell, type TellResult, type TellWakeRuntime } from "./body.js";
+import { wakeRecordedTell, type TellResult, type TellWakeRuntime } from "./body.js";
 import { admitCallInitialTell, type CallInitialTell, type CallInitialTellAdmission } from "./call-initial-tell.js";
 import { acquireLeash } from "./control.js";
 import {
@@ -150,10 +150,8 @@ export async function settleAkumaKill(
   paths: AkumaPaths,
   signal?: AbortSignal,
   retainLeash = false,
-  admitted?: () => void,
 ): Promise<Readonly<{ evidence: KillEvidence; leash?: HeldAkumaLeash }>> {
   const request = await requestStop(paths, new Date().toISOString(), signal);
-  admitted?.();
   if (request.kind !== "requested") {
     // A witnessed Body was already settled: the kill witness Heart recorded is
     // the kill evidence, not a stop outcome.
@@ -187,23 +185,6 @@ export async function settleAkumaKill(
     return retainLeash ? { evidence: "killed", leash } : { evidence: "killed" };
   } finally {
     if (!retain) leash.release();
-  }
-}
-
-export async function killAkumaWithRecovery(
-  paths: AkumaPaths,
-  recover?: (paths: AkumaPaths) => Promise<void>,
-  signal?: AbortSignal,
-): Promise<KillEvidence> {
-  let admitted = false;
-  try {
-    return (
-      await settleAkumaKill(paths, signal, false, () => {
-        admitted = true;
-      })
-    ).evidence;
-  } finally {
-    if (admitted && recover !== undefined) void recover(paths).catch(() => undefined);
   }
 }
 
@@ -563,8 +544,8 @@ export class AkumaOwner {
     }
   }
 
-  async kill(spawn: BodyLauncher, options: Readonly<{ signal?: AbortSignal }> = {}): Promise<KillEvidence> {
-    return await killAkumaWithRecovery(this.paths, (paths) => handoffPendingTells(paths, spawn), options.signal);
+  async kill(options: Readonly<{ signal?: AbortSignal }> = {}): Promise<KillEvidence> {
+    return (await settleAkumaKill(this.paths, options.signal)).evidence;
   }
 
   async lastAnswer(): Promise<LastAnswer> {

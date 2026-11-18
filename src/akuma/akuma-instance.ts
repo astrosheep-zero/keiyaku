@@ -245,7 +245,7 @@ class AkumaHandle {
     const signal = signalOption(options.signal);
     signal?.throwIfAborted();
     return await abortable(
-      this.owner().kill(this.spawn, signal === undefined ? {} : { signal }),
+      this.owner().kill(signal === undefined ? {} : { signal }),
       signal ?? new AbortController().signal,
     );
   }

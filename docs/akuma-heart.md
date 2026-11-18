@@ -64,21 +64,20 @@ durable order. The observed result text and per-file patch content an adapter
 admitted when a call finished are retained under that same bound: a value
 observed empty stays distinct from one never observed, and a record written
 before those observations still decodes and still projects in its former shape,
-without migration or rewriting. Compaction retains open work, pending tells, and
-required structure, while old closed groups can become permanently unavailable. An open
-pending-Tell disposition retains its frozen Tell identities and the delivery
-structure needed to prove them, including Tells already witnessed as told.
-Proof consumption and release of those dependencies are one Heart mutation.
-Control can instead supersede an automatic disposition without settling or
-discarding its Tell identities. Successor admission judges that exact decision
-against current control and kill evidence under Heart mutation custody; an old
-automatic launch cannot cross a witnessed kill. The resolved decision remains
-evidence of that Body's one decision; duplicate resolution does not reread
-retired members or capture later Tells. A protected backlog is not itself a new
-reason to compact: maintenance is amortized over new history and runs when
-protected work is released. Maintenance progress can only
-avoid repeated work; it cannot decide a fact's liveness or replace the retained
-history window. The public timeline derives one semantic row from each retained
+without migration or rewriting. Compaction retains open work, pending Tells,
+their required binding and delivery structure, and the interrupt frontier, while
+old closed groups can become permanently unavailable. Obsolete automatic pending-input decisions are inert
+historical evidence: execution and eligibility never interpret, resolve, or
+remove them. Retention preserves references from that closed historical set
+solely for storage integrity, without judging the obsolete decisions. A retained
+Tell keeps the delivery evidence required to preserve its settled meaning;
+historical retention never makes delivered input pending again. Existing
+terminal receipts remain terminal.
+
+A protected backlog is not itself a new reason to compact: maintenance is
+amortized over new history and runs when protected work is released. Maintenance
+progress can only avoid repeated work; it cannot decide a fact's liveness or
+replace the retained history window. The public timeline derives one semantic row from each retained
 fact in durable sequence order. Tool starts and completions remain independent
 observations correlated by their native invocation identity within a Turn;
 narration and an equal final answer remain independent observations too. No
@@ -165,8 +164,11 @@ falls back to an earlier Turn or runtime context.
 
 Tell facts retain admission and only named delivery/terminal-receipt witnesses.
 They fold to `pending` or `told`; these are read models, not durable stages.
-Pending selection is governed by the absence of a terminal receipt, not by
-historical Turn binding or an unresolved disposition. Binding is Turn-side
+Pending selection is governed by the absence of a terminal receipt, independently
+of historical Turn binding. Admitted Tell and that absence are the ordinary
+queue; no second durable pending-input record is needed. A successful Turn can
+be followed by another under the same Body after provider closure; failed
+execution leaves unrelated input pending for an ordinary wake. Binding is Turn-side
 evidence: a Tell may retain bindings for multiple historical Turns, and a
 successor may bind and deliver the same stable Tell identity after a crash
 between binding and delivery. A binding on an open Turn of the currently

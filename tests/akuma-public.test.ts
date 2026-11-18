@@ -21,7 +21,6 @@ import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { AkumaNotBornError } from "../src/akuma/akuma-errors.js";
 import type { AkumaCaller } from "../src/akuma/caller.js";
-import { killAkumaWithRecovery } from "../src/akuma/akuma-owner.js";
 import { projectFact, activityHistorySchema, type ActivityHistory } from "../src/akuma/projection.js";
 import { frontierRows, selectHistory, summarizeFrontier } from "../src/akuma/projection-read.js";
 import { loadPreparedArchetype } from "../src/akuma/archetype.js";
@@ -520,7 +519,6 @@ test("turn owner folds a rejected completion while the event stream remains open
     const world = await World.at(root);
     const allocated = await allocatedHeart(world, "claude", "deadbeef");
     driving = driveAkumaBody(claudeBodyLaunch(allocated, world, "work"), rejecting, {
-      spawn: noBodyLaunch,
       now: () => "2026-08-24T00:00:00.000Z",
     });
     void driving.catch(() => undefined);
@@ -548,7 +546,7 @@ async function answeredSource(root: string, suffix: string, bare?: boolean) {
       options: { model: "fixture-model" },
     }),
     provider,
-    { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
+    { now: () => "2026-08-08T00:00:00.000Z" },
   );
   return allocated;
 }
@@ -1077,7 +1075,7 @@ test("an answered Turn without a fork point remains visible and keeps its answer
       options: { model: "fixture-model" },
     }),
     noPointProvider,
-    { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
+    { now: () => "2026-08-08T00:00:00.000Z" },
   );
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
@@ -1163,7 +1161,7 @@ test("SDK fork records its invoking caller independently of source lineage and e
     const bodies: Promise<unknown>[] = [];
     const spawn: BodyLauncher = async (launch) => {
       launches.push(launch);
-      const body = driveAkumaBody(launch, provider, { spawn, world });
+      const body = driveAkumaBody(launch, provider, { world });
       bodies.push(body);
       return { completed: body.then(() => ({ diagnostic: "fork launch completed" })), async cancel() {}, release() {} };
     };
@@ -1263,7 +1261,7 @@ test("public Akuma handles separate compact list rows from full status and wait"
   const launch = claudeBodyLaunch(allocated, root, "work", {}, {
     description: "Fixture akuma",
   });
-  await driveAkumaBody(launch, provider, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
+  await driveAkumaBody(launch, provider, { now: () => "2026-08-08T00:00:00.000Z" });
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
   assert.equal((await world.list()).rows, undefined, "asleep instances leave the default active catalogue");
@@ -1298,11 +1296,11 @@ test("public Akuma handles separate compact list rows from full status and wait"
   const waited = await handle.wait();
   assert.equal(waited.life, "asleep");
   assert.deepEqual(waited.outcome, { kind: "answered", historyId: "turn/1", answer: "public answer" });
-  assert.equal(await handle.kill(noBodyLaunch), "already-stopped");
+  assert.equal(await handle.kill(), "already-stopped");
   assert.equal((await handle.status()).life, "asleep");
   const finalStatus = await handle.status();
   assert.equal(finalStatus.work.outcome?.verdict, "answered");
-  assert.equal(await handle.kill(noBodyLaunch), "already-stopped");
+  assert.equal(await handle.kill(), "already-stopped");
   assert.equal((await readHeart(allocated.paths)).pause, null);
   assert.deepEqual((await timeline(allocated.paths)).find((fact) => fact.kind === "turn-end")?.outcome, {
     kind: "answered",
@@ -1440,7 +1438,7 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
       caller,
     }),
     provider,
-    { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
+    { now: () => "2026-08-08T00:00:00.000Z" },
   );
   const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
   await waitForFile(cache);
@@ -1646,53 +1644,26 @@ test("an unreadable lineage cache recovers after complete Soul evidence, not an 
   spy.mock.restore();
 });
 
-test("kill returns before its successor recovery settles", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-kill-recovery-fire-and-forget-");
-  const { allocated, holder, body } = await bornBody(root, "1d1e0010", "2026-08-10T00:00:00.000Z");
-  await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-10T00:00:01.000Z" });
-  await recordTell(allocated.paths, {
-    kind: "tell",
-    id: "kill-recovery-pending",
-    body: "continue",
-    recordedAt: "2026-08-10T00:00:02.000Z",
-  });
+test("public kill witnesses its exact stopped Body without launching or settling queued input", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-akuma-kill-retains-queue-"));
+  const at = "2026-08-10T00:00:00.000Z";
+  const { allocated, holder, body } = await bornBody(root, "1d1e0010", at);
+  await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at });
+  await recordTell(allocated.paths, { kind: "tell", id: "queued", body: "continue", recordedAt: at });
   holder.release();
 
-  let recoveryReleased!: () => void;
-  let recoverySettled = false;
-  const recovery = new Promise<void>((resolve) => {
-    recoveryReleased = () => {
-      recoverySettled = true;
-      resolve();
-    };
+  let launches = 0;
+  const api = akumasWithLauncher(root, async () => {
+    launches++;
+    throw new Error("kill must not launch a Body");
   });
-  assert.equal(await killAkumaWithRecovery(allocated.paths, async () => await recovery), "killed");
-  assert.equal(recoverySettled, false);
-  recoveryReleased();
-  await recovery;
-});
-
-test("failed kill recovery leaves its pending Tell unchanged", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-kill-recovery-failure-");
-  const { allocated, holder, body } = await bornBody(root, "1d1e0011", "2026-08-10T00:00:00.000Z");
-  await breakBody(allocated.paths, { sequence: body.sequence, end: "put-down", at: "2026-08-10T00:00:01.000Z" });
-  await recordTell(allocated.paths, {
-    kind: "tell",
-    id: "kill-recovery-failure",
-    body: "continue",
-    recordedAt: "2026-08-10T00:00:02.000Z",
-  });
-  holder.release();
-  assert.equal(
-    await killAkumaWithRecovery(allocated.paths, async () => {
-      throw new Error("spawn denied");
-    }),
-    "killed",
-  );
-  assert.deepEqual(
-    (await readHeart(allocated.paths)).pending.map((tell) => tell.id),
-    ["kill-recovery-failure"],
-  );
+  const stopped = await api.kill({ akuma: allocated.id });
+  assert.deepEqual(stopped.results, [{ id: allocated.id, outcome: "killed" }]);
+  const heart = await readHeart(allocated.paths);
+  assert.equal(heart.latestKill?.bodySequence, body.sequence);
+  assert.equal(heart.latestBody?.sequence, body.sequence);
+  assert.deepEqual(heart.pending.map((tell) => tell.id), ["queued"]);
+  assert.equal(launches, 0);
 });
 
 test("kill settles a stranded dead Body and later observation presents the killed life", async (context) => {
@@ -1704,14 +1675,14 @@ test("kill settles a stranded dead Body and later observation presents the kille
   const world = Akumas.of(await World.at(root));
   const handle = new AkumaOwner(allocated.id, await World.at(root));
   assert.equal((await handle.status()).life, "stranded");
-  assert.equal(await handle.kill(noBodyLaunch), "killed");
+  assert.equal(await handle.kill(), "killed");
   const status = await handle.status();
   assert.equal(status.life, "killed");
   assert.equal("strandedReason" in status, false);
   assert.equal((await world.list()).rows, undefined, "killed instances are settled");
   const listed = (await world.list({ selection: "settled" })).rows?.find((row) => row.id === allocated.id);
   assert.equal(listed !== undefined && "life" in listed && listed.life, "killed");
-  assert.equal(await handle.kill(noBodyLaunch), "already-killed");
+  assert.equal(await handle.kill(), "already-killed");
 });
 
 test("interrupt atomically admits its Tell and frontier before predecessor completion", async (context) => {
@@ -1722,7 +1693,7 @@ test("interrupt atomically admits its Tell and frontier before predecessor compl
   await driveAkumaBody(
     claudeBodyLaunch(allocated, seat, "first"),
     provider,
-    { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" },
+    { now: () => "2026-08-08T00:00:00.000Z" },
   );
   rmSync(seat, { recursive: true, force: true });
 
@@ -1958,7 +1929,7 @@ test("kill returns unavailable when an unsettled Body keeps the leash", async ()
   const value = await bornHistoryHandle(root, "1d1e0008");
   try {
     const started = performance.now();
-    assert.equal(await value.handle.kill(noBodyLaunch), "unavailable");
+    assert.equal(await value.handle.kill(), "unavailable");
     assert.ok(performance.now() - started < 3_000);
   } finally {
     value.holder.release();
@@ -2106,12 +2077,12 @@ test("kill gives the Body a grace window to abort its owned provider session", a
     };
   }));
   const launch = claudeBodyLaunch(allocated, root, "keep working");
-  const body = driveAkumaBody(launch, running, { spawn: noBodyLaunch, now: () => "2026-08-08T00:00:00.000Z" });
+  const body = driveAkumaBody(launch, running, { now: () => "2026-08-08T00:00:00.000Z" });
   await started;
 
   const handle = new AkumaOwner(allocated.id, await World.at(root));
   const waited = handle.wait();
-  assert.equal(await handle.kill(noBodyLaunch), "killed");
+  assert.equal(await handle.kill(), "killed");
   await body;
   assert.notEqual((await waited).life, "running");
   assert.equal(aborted, true);

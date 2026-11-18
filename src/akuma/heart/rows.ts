@@ -373,14 +373,6 @@ export function pauseFact(database: DatabaseSync): PauseFact | null {
   };
 }
 
-export function hasBodyHandoffControl(database: DatabaseSync, bodySequence: number): boolean {
-  return (
-    killFactForBody(database, bodySequence) !== null ||
-    stopFact(database)?.bodySequence === bodySequence ||
-    pauseFact(database)?.bodySequence === bodySequence
-  );
-}
-
 export function bodyFact(database: DatabaseSync, sequence: number): BodyFact | null {
   const row = database
     .prepare(`SELECT sequence, leash_taken_at, hung_diagnostic, hung_at, end, ended_at FROM bodies WHERE sequence = ?`)

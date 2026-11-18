@@ -50,22 +50,21 @@ function inProcessLauncher(
   scopeSignal?: AbortSignal,
   enroll?: (launch: Promise<LiveBodyLaunch>) => void,
 ): BodyLauncher {
-  const spawn: BodyLauncher = (launch) => {
+  return (launch) => {
     scopeSignal?.throwIfAborted();
     const pending = launchInProcessBody(
       launch,
       async (signal) => {
         signal.throwIfAborted();
-        return { ...(await bodyExecutionContext(launch)), spawn };
+        return await bodyExecutionContext(launch);
       },
       undefined,
       scopeSignal,
     );
-    // Every launch, including automatic succession, enrols before yielding.
+    // Every launch enrols before yielding.
     enroll?.(pending);
     return pending;
   };
-  return spawn;
 }
 
 const inProcessBody = inProcessLauncher();

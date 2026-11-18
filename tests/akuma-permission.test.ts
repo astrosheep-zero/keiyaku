@@ -12,7 +12,7 @@ import { AgentEventChannel, AGENT_EVENT_QUEUE_LIMIT, decodeAgentEvent, encodeAge
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import { currentWorkLines } from "../src/cli/render/akuma-activity.js";
 import { World } from "../src/world.js";
-import { allocatedHeart, bornDirectAkuma, noBodyLaunch } from "./support/akuma-fixtures.js";
+import { allocatedHeart, bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { opencodeFixture } from "./support/opencode-v2.js";
 import { temporaryDirectory, waitForCondition } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
@@ -34,7 +34,7 @@ test("native permission waits reach public status, clear on reply, and end with 
     seed: { id: allocated.id, akumaName: "opencode", provider: { name: "opencode", kind: "opencode-sdk" },
       options: {}, cwd: root, origin: { kind: "direct" } },
     initialBody: "read outside the working directory",
-  }, createOpencodeProvider({ loader: native.loader }), { spawn: noBodyLaunch, world, signal: controller.signal });
+  }, createOpencodeProvider({ loader: native.loader }), { world, signal: controller.signal });
   const handle = Akuma.select(world, allocated.id);
   const path = "/outside/work/secret.txt";
   try {

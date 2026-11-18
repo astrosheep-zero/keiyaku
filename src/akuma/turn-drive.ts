@@ -125,11 +125,7 @@ type StartTurnResult =
   | Readonly<{ kind: "hung" }>
   | Readonly<{ kind: "resume-unsupported" }>
   | (Extract<DrivenTurn, { kind: "failed" }> & Readonly<{ turnSequence: number }>);
-type TurnDriveResult =
-  | DrivenTurn
-  | Readonly<{ kind: "stopped" }>
-  | Readonly<{ kind: "hung" }>
-  | Readonly<{ kind: "handoff" }>;
+type TurnDriveResult = DrivenTurn | Readonly<{ kind: "stopped" }> | Readonly<{ kind: "hung" }>;
 
 /**
  * The runtime model one attempt has already observed. Equal observations
@@ -243,13 +239,18 @@ async function establishTurnDrive(
     }>,
 ): Promise<StartTurnResult> {
   const { cwd, options, session, boundTells, schemaJson, runtimeInstructions } = recipe;
-  const attempt = startProviderAttempt(input, {
-    recipe,
-    tells: boundTells,
-    signal: input.supervisor.signal,
-    schemaJson,
-    runtimeInstructions,
-  });
+  let attempt: ProviderAttempt<Session>;
+  try {
+    attempt = startProviderAttempt(input, {
+      recipe,
+      tells: boundTells,
+      signal: input.supervisor.signal,
+      schemaJson,
+      runtimeInstructions,
+    });
+  } catch (error) {
+    return { kind: "failed", turnSequence, diagnostic: error instanceof Error ? error.message : String(error) };
+  }
   const custodyFailure = observeFailure(attempt.closed);
   try {
     const selected = await abortable(Promise.race([attempt.result, custodyFailure]), input.supervisor.signal);
@@ -393,17 +394,6 @@ async function submitPendingLiveTells(
   return "live";
 }
 
-function hasUnattemptedTell(
-  liveTells: boolean,
-  tellPump: Promise<"live" | "turn-ended"> | null,
-  pending: readonly TellFact[],
-  attempted: ReadonlySet<string>,
-): boolean {
-  return (
-    liveTells && tellPump === null && pending.some((tell) => !attempted.has(tell.id) && tell.schemaJson === undefined)
-  );
-}
-
 type TurnWakeup =
   | Readonly<{ kind: "event"; event: IteratorResult<AgentEvent> }>
   | Readonly<{ kind: "heart"; observation: BodyControlSnapshot }>
@@ -506,7 +496,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   const receiptFailure = observeFailure(pumpReceipts(writers));
   const iterator = drive.events[Symbol.asyncIterator]();
   const witness: ModelWitness = { written: false, model: undefined };
-  let liveTells = true;
+  let tellLive = input.schemaJson === undefined ? drive.tell : undefined;
   let tellPump: Promise<"live" | "turn-ended"> | null = null;
   let eventsEnded = false;
   let result: TurnResult | undefined;
@@ -530,11 +520,11 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
         return;
       case "tell":
         tellPump = null;
-        liveTells = next.result === "live";
+        if (next.result === "turn-ended") tellLive = undefined;
         return;
       case "completion":
         result = next.result;
-        liveTells = false;
+        tellLive = undefined;
         return;
       case "closed":
         attemptClosed = true;
@@ -558,13 +548,10 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   /** Completion waits for ended events, an outcome, a closed attempt, and no live Tell pump. */
   const ready = (): boolean => eventsEnded && result !== undefined && attemptClosed && tellPump === null;
 
-  /** Retirement decides the ending: only a provider that could not retire replaces the requested one. */
-  const stopAndReturn = async (
-    outcome: Readonly<{ kind: "stopped" }> | Readonly<{ kind: "handoff" }>,
-  ): Promise<TurnDriveResult> => {
+  /** Controlled stop settles only after provider custody retires. */
+  const stopAndReturn = async (): Promise<TurnDriveResult> => {
     const retirement = await retireProviderCustody(input, turnSequence, active.attempt);
-    if (retirement.kind === "hung") return retirement;
-    return input.supervisor.signal.aborted ? { kind: "stopped" } : outcome;
+    return retirement.kind === "hung" ? retirement : { kind: "stopped" };
   };
 
   wakeups.event(iterator.next());
@@ -576,15 +563,14 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
     for (;;) {
       if (input.supervisor.signal.aborted) {
         writesOpen = false;
-        return await stopAndReturn({ kind: "stopped" });
+        return await stopAndReturn();
       }
-      if (result === undefined && hasUnattemptedTell(liveTells, tellPump, heart.pending, attempted)) {
-        if (drive.tell === undefined) {
-          writesOpen = false;
-          return await stopAndReturn({ kind: "handoff" });
+      if (tellLive !== undefined && tellPump === null) {
+        const pending = drainPendingTells(heart.pending);
+        if (pending.some((tell) => !attempted.has(tell.id) && tell.schemaJson === undefined)) {
+          tellPump = submitPendingLiveTells(writers, pending, attempted, tellLive);
+          wakeups.tell(tellPump);
         }
-        tellPump = submitPendingLiveTells(writers, heart.pending, attempted, drive.tell);
-        wakeups.tell(tellPump);
       }
       await reduceWakeup(await wakeups.next());
       if (ready() && !drainArmed) {
@@ -602,7 +588,7 @@ async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Prom
   } catch (error) {
     writesOpen = false;
     if (error instanceof BodyControlledError) input.supervisor.cancel("control");
-    if (input.supervisor.signal.aborted) return await stopAndReturn({ kind: "stopped" });
+    if (input.supervisor.signal.aborted) return await stopAndReturn();
     const retirement = await retireProviderCustody(input, turnSequence, active.attempt);
     if (retirement.kind === "hung") return retirement;
     return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) };
@@ -617,7 +603,6 @@ export async function driveTurn(
   | (DrivenTurn & Readonly<{ turnSequence: number }>)
   | Readonly<{ kind: "stopped" }>
   | Readonly<{ kind: "hung" }>
-  | Readonly<{ kind: "handoff" }>
   | Readonly<{ kind: "resume-unsupported" }>
 > {
   let active: ActiveTurn;
@@ -634,7 +619,7 @@ export async function driveTurn(
   }
   try {
     const result = await consumeTurnDrive(input, active);
-    return result.kind === "stopped" || result.kind === "hung" || result.kind === "handoff"
+    return result.kind === "stopped" || result.kind === "hung"
       ? result
       : { ...result, turnSequence: active.turnSequence };
   } catch (error) {

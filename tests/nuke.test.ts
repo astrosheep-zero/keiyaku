@@ -1,4 +1,3 @@
-import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -130,7 +129,7 @@ async function runningAkuma(world: Awaited<ReturnType<typeof testWorld>>) {
     },
     initialBody: "keep working",
   };
-  const body = driveAkumaBody(launch, provider, { spawn: noBodyLaunch, now: () => "2026-08-19T00:00:00.000Z" });
+  const body = driveAkumaBody(launch, provider, { now: () => "2026-08-19T00:00:00.000Z" });
   await waitForCondition(
     "the first Body recorded in Heart",
     async () => (await readHeart(allocated.paths)).latestBody !== null,
