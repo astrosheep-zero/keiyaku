@@ -34,6 +34,17 @@ function waitOutcome(row: OutcomeRow): AkumaWaitOutcome {
   return { ...row.outcome, historyId: `turn/${row.turnSequence}` };
 }
 
+function reportPreview(id: AkumaId, report: Readonly<{ sequence: number; text: string }>): WaitReport {
+  const { sequence, text } = report;
+  return {
+    akumaId: id,
+    reportId: `report/${sequence}`,
+    ...(text.length <= REPORT_PREVIEW_LIMIT
+      ? { text }
+      : { text: text.slice(0, REPORT_PREVIEW_LIMIT).replace(/[\uD800-\uDBFF]$/u, ""), clipped: true }),
+  };
+}
+
 function completionItem(snapshot: WaitStatusObservation): AkumaWaitItem {
   const end = snapshot.outcome;
   const row = end === undefined ? undefined : (projectFact(end) as OutcomeRow);
@@ -55,6 +66,29 @@ function completionItem(snapshot: WaitStatusObservation): AkumaWaitItem {
   };
 }
 
+async function probeCompletion(
+  ids: readonly AkumaId[],
+  readerFor: (id: AkumaId) => ReturnType<typeof createLiveStatusReader>,
+  completion: "any" | "all",
+  signal: AbortSignal | undefined,
+): Promise<boolean> {
+  let completed = 0;
+  for (const id of ids) {
+    signal?.throwIfAborted();
+    let ready = false;
+    try {
+      ready = await readerFor(id).complete(signal);
+    } catch (error) {
+      signal?.throwIfAborted();
+      ready = error instanceof AkumaNotBornError;
+    }
+    if (!ready) continue;
+    if (completion === "any") return true;
+    completed += 1;
+  }
+  return ids.length > 0 && completed === ids.length;
+}
+
 /** One compact native observer supplies every set-wait caller; only invocation tracks reports. */
 export function createAkumaWaitObserver(path: WorldRoot, selected: readonly AkumaId[], trackReports = false) {
   const ids = [...new Set(selected)];
@@ -67,15 +101,7 @@ export function createAkumaWaitObserver(path: WorldRoot, selected: readonly Akum
   const observeReport = (id: AkumaId, frontier: WaitReportFrontier): void => {
     if (watermarks === undefined || frontier === undefined) return;
     if (!watermarks.has(id)) watermarks.set(id, frontier.sequence);
-    if (frontier.report === undefined) return;
-    const { sequence, text } = frontier.report;
-    report = {
-      akumaId: id,
-      reportId: `report/${sequence}`,
-      ...(text.length <= REPORT_PREVIEW_LIMIT
-        ? { text }
-        : { text: text.slice(0, REPORT_PREVIEW_LIMIT).replace(/[\uD800-\uDBFF]$/u, ""), clipped: true }),
-    };
+    if (frontier.report !== undefined) report = reportPreview(id, frontier.report);
   };
   const readerFor = (id: AkumaStatus["id"]) => {
     let reader = readers.get(id);
@@ -121,23 +147,7 @@ export function createAkumaWaitObserver(path: WorldRoot, selected: readonly Akum
           items.set(id, { ...item, eventsUnavailable: diagnostic(message) });
       }
     },
-    async probe(completion: "any" | "all", signal?: AbortSignal): Promise<boolean> {
-      let completed = 0;
-      for (const id of ids) {
-        signal?.throwIfAborted();
-        let ready = false;
-        try {
-          ready = await readerFor(id).complete(signal);
-        } catch (error) {
-          signal?.throwIfAborted();
-          ready = error instanceof AkumaNotBornError;
-        }
-        if (!ready) continue;
-        if (completion === "any") return true;
-        completed += 1;
-      }
-      return ids.length > 0 && completed === ids.length;
-    },
+    probe: (completion: "any" | "all", signal?: AbortSignal) => probeCompletion(ids, readerFor, completion, signal),
     async notify(observer?: OutcomeObserver): Promise<void> {
       await Promise.all(
         [...items.values()].map(async (item) => {
