@@ -262,6 +262,7 @@ export const CONTRACT_COMMAND_SPECS = {
       "Asleep, killed, and stillborn Akumas are settled; running, unborn, stranded, hung, and untidy Akumas remain active.",
       "ls aku/ lists the spawnable Akuma-name catalog; ls aku/<name> lists recent retained Akuma instances under one name.",
       'ls "aku/<name>/*" is the same roster in glob form; ls "aku/*/*" lists recent retained Akuma instances across names.',
+      "--limit bounds the rows returned and accepts an integer from 1 to 500.",
       "--mine selects the caller identity of this process and lists that caller's direct and transitive descendants in this World.",
       "Caller scoping is World-local, composes with lifecycle selection, and refuses for Contract, Debt, or Akuma-name catalogues. Lifecycle selection also refuses for Akuma-name catalogues.",
       "Descendant rows name their immediate calling Akuma beside the row.",

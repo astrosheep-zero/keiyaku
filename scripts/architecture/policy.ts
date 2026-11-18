@@ -395,7 +395,7 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
       source: "library/keiyaku-verbs.ts",
       allow: [
         ...libraryOwner.allow.filter((rule) => rule.target !== "library/**"),
-        runtime("bounded-list.ts", ["lifecycleSelectionSchema"]),
+        runtime("bounded-list.ts", ["lifecycleSelectionSchema", "boundedListLimitSchema"]),
         any("library/keiyaku-classify.ts"),
         any("library/input.ts", ["amendInputSchema"]),
         any("library/contract-outcomes.ts"),

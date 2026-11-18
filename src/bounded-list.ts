@@ -34,6 +34,14 @@ export function lifecycleSelection(value: unknown = undefined): LifecycleSelecti
 export const DEFAULT_BOUNDED_LIST_LIMIT = 50;
 export const MAX_BOUNDED_LIST_LIMIT = 500;
 
+/** The explicit limit accepted by every bounded catalogue, described where callers discover it. */
+export const boundedListLimitSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(MAX_BOUNDED_LIST_LIMIT)
+  .describe(`Maximum rows to return (1..${MAX_BOUNDED_LIST_LIMIT}).`);
+
 export type BoundedList<Row> = Readonly<{
   rows: readonly Row[];
   hasMore: boolean;
@@ -41,10 +49,11 @@ export type BoundedList<Row> = Readonly<{
 
 export function boundedListLimit(value: unknown = undefined): number {
   if (value === undefined) return DEFAULT_BOUNDED_LIST_LIMIT;
-  if (!Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > MAX_BOUNDED_LIST_LIMIT) {
+  const parsed = boundedListLimitSchema.safeParse(value);
+  if (!parsed.success) {
     throw new KeiyakuError("invalid-input", `limit must be an integer from 1 to ${MAX_BOUNDED_LIST_LIMIT}`);
   }
-  return value as number;
+  return parsed.data;
 }
 
 export function projectBoundedList<Row>(rows: readonly Row[], limit: number): BoundedList<Row> {

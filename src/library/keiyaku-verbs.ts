@@ -1,6 +1,6 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
-import { lifecycleSelectionSchema } from "../bounded-list.js";
+import { boundedListLimitSchema, lifecycleSelectionSchema } from "../bounded-list.js";
 export { classifyVerb, type VerbCompletion, type VerbDisposition } from "./keiyaku-classify.js";
 
 import { parseDuration } from "../duration.js";
@@ -118,7 +118,7 @@ const lsInputSchema = z
     selector: text
       .regex(/^(?:kei|debt)(?:\/\*?)?$|^aku\/?$|^aku\/(?:\*(?:\/\*)?|[^/*]+(?:\/\*|\/)?)$/u)
       .describe(catalogueSelector),
-    limit: positive.exactOptional().describe("Maximum rows to return (positive integer)."),
+    limit: boundedListLimitSchema.exactOptional(),
     lifecycle: catalogueSelection,
     mine: optBool.describe("Only Akumas you started, directly or through your Akumas; valid only for instances."),
   })

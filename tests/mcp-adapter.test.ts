@@ -355,6 +355,13 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
     "body", "cwd", "id", "needs", "note", "priority", "state", "title",
   ]);
   assert.deepEqual(publishedProperties("ls"), ["cwd", "lifecycle", "limit", "mine", "repo", "selector"]);
+  const lsLimit = (tools.find((tool) => tool.name === "ls")!.inputSchema.properties as Record<
+    string,
+    { type?: string; minimum?: number; maximum?: number }
+  >).limit!;
+  assert.equal(lsLimit.type, "integer");
+  assert.equal(lsLimit.minimum, 1);
+  assert.equal(lsLimit.maximum, 500);
   assert.deepEqual(tools.find((tool) => tool.name === "ls")!.inputSchema.required, ["selector"]);
   assert.deepEqual(publishedProperties("region"), ["contract", "cwd", "paths", "repo"]);
   assert.equal(tools.find((tool) => tool.name === "region")!.inputSchema.required, undefined);
@@ -457,6 +464,10 @@ test("SDK discovery and real invocation share the verb table and renderer", asyn
   const listed = await client.callTool({ name: "ls", arguments: { selector: "debt/" } });
   assert.equal(listed.isError, false);
   assert.deepEqual(listed.structuredContent, JSON.parse(JSON.stringify(await facet.ls({ selector: "debt/" }))));
+  const excessive = await client.callTool({ name: "ls", arguments: { selector: "debt/", limit: 501 } });
+  assert.equal(excessive.isError, true);
+  assert.equal(excessive._meta?.["keiyaku/disposition"], "usage");
+  assert.equal(excessive.structuredContent, undefined);
 
   const first = mkdtempSync(join(tmpdir(), "kei-mcp-first-"));
   const second = mkdtempSync(join(tmpdir(), "kei-mcp-second-"));
