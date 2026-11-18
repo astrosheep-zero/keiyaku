@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { createServer } from "node:http";
 import { execFileSync } from "node:child_process";
 import test, { type TestContext } from "node:test";
-import { DeliveryLedger, harnessOwner, isCardPresentation } from "@astrosheep/square";
+import { DeliveryLedger, deliveryKeyEqual, harnessOwner, isCardPresentation } from "@astrosheep/square";
 import "./support/local-public-package.js";
 import { World } from "../src/world.js";
 import { moveAlias } from "../src/alias/index.js";
@@ -82,7 +82,7 @@ async function fixture(t: TestContext, artifact = true) {
   };
   return { root, path, ledger, plugin, alice, bob, activate, cards, turn, observe };
 }
-const key = (id: string, ref: string) => `keiyaku/${id}/${ref}`;
+const key = (id: string, ref: string) => ["keiyaku", id, ...ref.split("/")];
 
 test("Square loads the public composition only for an addressed notice, using Node's module cache", async (t) => {
   const f = await fixture(t);
@@ -177,7 +177,7 @@ test("direct cards preserve exact full content, frozen Owners and generic presen
       kind: "presentation",
       origin: "Keiyaku",
       author: "aku/forms/1234abcd",
-      ref: row.key.split("/").slice(-2).join("/"),
+      ref: row.key.slice(2).join("/"),
       at,
       ...presentations[index],
     });
@@ -188,7 +188,7 @@ test("direct cards preserve exact full content, frozen Owners and generic presen
   );
   await f.turn("aku/repeat/1234abcd", 1);
   await f.turn("aku/repeat/1234abcd", 1);
-  assert.equal((await f.cards()).filter((card) => card.key === key("aku/repeat/1234abcd", "turn/1")).length, 1);
+  assert.equal((await f.cards()).filter((card) => deliveryKeyEqual(card.key, key("aku/repeat/1234abcd", "turn/1"))).length, 1);
 });
 
 test("alias-first card snapshots keep identity keys and do not follow later alias moves", async (t) => {
@@ -226,8 +226,8 @@ test("alias-first card snapshots keep identity keys and do not follow later alia
   assert.ok(after[3]?.text.startsWith(`\`${id}\``));
   assert.ok(after[4]?.text.startsWith("`@audit, @reviewer`"));
   await f.observe(id, 1);
-  assert.equal((await f.cards()).some(card => card.key === key(id, "turn/1")), false);
-  assert.equal((await f.cards(f.bob))[0]?.key, key(id, "turn/1"), "alias moves do not change exact Owner suppression");
+  assert.equal((await f.cards()).some(card => deliveryKeyEqual(card.key, key(id, "turn/1"))), false);
+  assert.deepEqual((await f.cards(f.bob))[0]?.key, key(id, "turn/1"), "alias moves do not change exact Owner suppression");
 });
 
 test("alias corruption diagnoses only addressed notices and still posts a bare identity card", async (t) => {
@@ -243,7 +243,7 @@ test("alias corruption diagnoses only addressed notices and still posts a bare i
   assert.match(String(warnings.mock.calls[0]?.arguments[0]), /notice alias lookup failed/u);
   const [card] = await f.cards();
   assert.ok(card && isCardPresentation(card.details));
-  assert.equal(card.key, key(id, "turn/2"));
+  assert.deepEqual(card.key, key(id, "turn/2"));
   assert.equal(card.details.author, id);
   assert.ok(card.text.startsWith(`\`${id}\``));
 });
@@ -274,7 +274,7 @@ test("early and late exact suppression survive producer restart and remain Owner
     at: "2026-11-04T00:00:00Z",
     initiator: f.alice,
   });
-  const reportCard = (await f.cards()).find((card) => card.key === key("aku/early/1234abcd", "report/1"));
+  const reportCard = (await f.cards()).find((card) => deliveryKeyEqual(card.key, key("aku/early/1234abcd", "report/1")));
   assert.ok(reportCard);
   assert.equal(reportCard.text, `\`aku/early/1234abcd\` ▸ update\n${report}\n\n---\n\n\`report/1\``);
   const at = (reportCard.details as { at?: number }).at;
@@ -287,7 +287,7 @@ test("early and late exact suppression survive producer restart and remain Owner
     at,
     label: "update", body: report,
   });
-  assert.equal((await f.cards(f.bob)).some((card) => card.key === reportCard.key), false);
+  assert.equal((await f.cards(f.bob)).some((card) => deliveryKeyEqual(card.key, reportCard.key)), false);
   assert.equal((await f.cards()).length, 2);
   await f.observe("aku/early/1234abcd", 2);
   assert.deepEqual(
@@ -450,7 +450,7 @@ test("partial acquisition cleans late allocated suppression when its peer fails"
 
 test("cancellation after late acquisition releases only its own suppression", async (t) => {
   const f = await fixture(t);
-  const external = await f.ledger.suppress({ owner: f.alice, key: key("aku/external/1234abcd", "turn/"), scope: "prefix" });
+  const external = await f.ledger.suppress({ owner: f.alice, key: key("aku/external/1234abcd", "turn"), scope: "prefix" });
   const suppress = DeliveryLedger.prototype.suppress;
   const entered = deferred<void>();
   const late = deferred<void>();
@@ -535,7 +535,7 @@ test("Body dedup tracks committed recipients independently and reports retain ex
     DeliveryLedger.prototype,
     "post",
     async function (this: DeliveryLedger, input: Parameters<DeliveryLedger["post"]>[0]) {
-      if (input.owner === f.bob && input.key.endsWith("turn/1")) throw new Error("post failed");
+      if (input.owner === f.bob && input.key.slice(2).join("/") === "turn/1") throw new Error("post failed");
       return await post.call(this, input);
     },
   );
@@ -646,11 +646,11 @@ test("native non-Codex push honors prefix release and accepted custody cannot be
   const f = await fixture(t);
   const session = await f.ledger.session(f.alice);
   assert.ok(session);
-  const delivered: string[] = [];
+  const delivered: (readonly string[])[] = [];
   const receiver = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
-    delivered.push((JSON.parse(Buffer.concat(chunks).toString()) as { key: string }).key);
+    delivered.push((JSON.parse(Buffer.concat(chunks).toString()) as { key: readonly string[] }).key);
     response.writeHead(202).end();
   });
   await new Promise<void>((resolve) => receiver.listen(0, "127.0.0.1", resolve));
@@ -747,7 +747,7 @@ test("a native receiver claims full text and receipts prevent idempotent replay"
   const claim = await f.ledger.claimPresentation(f.alice, { generation: session.generation, budgetChars: 100_000 });
   assert.ok(claim);
   assert.equal(await claim.current(), true);
-  assert.equal(claim.cards[0]?.key, key("aku/receiver/1234abcd", "turn/1"));
+  assert.deepEqual(claim.cards[0]?.key, key("aku/receiver/1234abcd", "turn/1"));
   assert.ok(claim.cards[0]?.text.includes("answer aku/receiver/1234abcd 1"));
   assert.equal(await claim.settle("presented"), true);
   assert.deepEqual(

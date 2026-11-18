@@ -139,7 +139,8 @@ const plugin: KeiyakuPlugin = {
     };
     const sendNotice = async (
       akumaId: string,
-      ref: string,
+      kind: "report" | "turn" | "body",
+      sequence: number,
       renderNotice: (label: string) => Readonly<{ text: string; label: string; body: string; at?: number }>,
       recipients: readonly string[] | undefined,
       cancellation?: AbortSignal,
@@ -156,6 +157,7 @@ const plugin: KeiyakuPlugin = {
         console.warn(`Keiyaku notice alias lookup failed: ${error instanceof Error ? error.message : String(error)}`);
       }
       cancellation?.throwIfAborted();
+      const ref = `${kind}/${sequence}`;
       const { text, ...presentation } = renderNotice(label);
       const ledger = await DeliveryLedger.open({ location, ...(cancellation === undefined ? {} : { signal: cancellation }) });
       const lifetime = ledgerLifetime(ledger);
@@ -170,7 +172,7 @@ const plugin: KeiyakuPlugin = {
               ledger,
               {
                 owner: requireOwner(recipient),
-                key: `keiyaku/${akumaId}/${ref}`,
+                key: ["keiyaku", akumaId, kind, String(sequence)],
                 text,
                 details,
               },
@@ -249,7 +251,7 @@ const plugin: KeiyakuPlugin = {
                 cancellation?.throwIfAborted();
                 const result = await ledger.suppress({
                   owner,
-                  key: `keiyaku/${id}/turn/`,
+                  key: ["keiyaku", id, "turn"],
                   scope: "prefix",
                   expiresAt: Date.now() + WAIT_TTL_MS,
                 });
@@ -303,7 +305,8 @@ const plugin: KeiyakuPlugin = {
           if (signal.initiator === undefined) return;
           await sendNotice(
             signal.akumaId,
-            `report/${signal.reportSequence}`,
+            "report",
+            signal.reportSequence,
             (label) => ({
               text: `\`${label}\` ▸ update\n${signal.text}\n\n---\n\n${label === signal.akumaId ? "" : `\`${signal.akumaId}\` · `}\`report/${signal.reportSequence}\``,
               label: "update", body: signal.text,
@@ -321,7 +324,11 @@ const plugin: KeiyakuPlugin = {
           const ledger = await DeliveryLedger.open({ location, ...(cancellation === undefined ? {} : { signal: cancellation }) });
           try {
             cancellation?.throwIfAborted();
-            await ledger.suppress({ owner, key: `keiyaku/${signal.akumaId}/${signal.historyId}`, scope: "exact" });
+            await ledger.suppress({
+              owner,
+              key: ["keiyaku", signal.akumaId, "turn", signal.historyId.slice("turn/".length)],
+              scope: "exact",
+            });
           } finally {
             await ledger.close();
           }
@@ -330,7 +337,8 @@ const plugin: KeiyakuPlugin = {
           await serialize(signal, async (state) => {
             await sendNotice(
               signal.akumaId,
-              `turn/${signal.turnSequence}`,
+              "turn",
+              signal.turnSequence,
               (label) => ({ text: turnOutcomeBody(signal, label), label: signal.outcome.kind === "answered" ? "done" : signal.outcome.kind, body: turnOutcomeResult(signal),
                 ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }),
               signal.participants,
@@ -347,7 +355,8 @@ const plugin: KeiyakuPlugin = {
               if (signal.end === "exited" || signal.end === "put-down") return;
               await sendNotice(
                 signal.akumaId,
-                `body/${signal.bodySequence}`,
+                "body",
+                signal.bodySequence,
                 (label) => ({ text: bodyEndExpression(signal, label), label: signal.end, body: signal.diagnostic ?? "",
                   ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }),
                 signal.participants?.filter((recipient) => !state.terminalRecipients.has(recipient)),

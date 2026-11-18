@@ -4,7 +4,7 @@ import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
+import { DeliveryLedger, deliveryKeyPrefix, harnessOwner } from "@astrosheep/square";
 import squarePlugin from "../plugins/square/index.js";
 import test, { type TestContext } from "node:test";
 import { Akuma, Akumas, KeiyakuError, World, type WorldRoot, type AkumaTellResult } from "../src/index.js";
@@ -636,7 +636,7 @@ for (const route of ["ask", "standalone-ask"] as const) {
       DeliveryLedger.prototype,
       "post",
       async function (this: DeliveryLedger, ...args: Parameters<typeof post>) {
-        if (args[0].key.startsWith(`keiyaku/${source.allocated.id}/turn/`)) {
+        if (deliveryKeyPrefix(["keiyaku", source.allocated.id, "turn"], args[0].key)) {
           entered();
           await released;
         }

@@ -120,7 +120,7 @@ const plugin = {
             state.tail = result.catch(() => { });
             return result;
         };
-        const sendNotice = async (akumaId, ref, renderNotice, recipients, cancellation, committed) => {
+        const sendNotice = async (akumaId, kind, sequence, renderNotice, recipients, cancellation, committed) => {
             cancellation?.throwIfAborted();
             if (!recipients?.length)
                 return;
@@ -135,6 +135,7 @@ const plugin = {
                 console.warn(`Keiyaku notice alias lookup failed: ${error instanceof Error ? error.message : String(error)}`);
             }
             cancellation?.throwIfAborted();
+            const ref = `${kind}/${sequence}`;
             const { text, ...presentation } = renderNotice(label);
             const ledger = await DeliveryLedger.open({ location, ...(cancellation === undefined ? {} : { signal: cancellation }) });
             const lifetime = ledgerLifetime(ledger);
@@ -146,7 +147,7 @@ const plugin = {
                     cancellation?.throwIfAborted();
                     const result = await postAndDispatch(ledger, {
                         owner: requireOwner(recipient),
-                        key: `keiyaku/${akumaId}/${ref}`,
+                        key: ["keiyaku", akumaId, kind, String(sequence)],
                         text,
                         details,
                     }, {
@@ -226,7 +227,7 @@ const plugin = {
                     cancellation?.throwIfAborted();
                     const result = await ledger.suppress({
                         owner,
-                        key: `keiyaku/${id}/turn/`,
+                        key: ["keiyaku", id, "turn"],
                         scope: "prefix",
                         expiresAt: Date.now() + WAIT_TTL_MS,
                     });
@@ -273,7 +274,7 @@ const plugin = {
                 async "akuma.reported"(signal, cancellation) {
                     if (signal.initiator === undefined)
                         return;
-                    await sendNotice(signal.akumaId, `report/${signal.reportSequence}`, (label) => ({
+                    await sendNotice(signal.akumaId, "report", signal.reportSequence, (label) => ({
                         text: `\`${label}\` ▸ update\n${signal.text}\n\n---\n\n${label === signal.akumaId ? "" : `\`${signal.akumaId}\` · `}\`report/${signal.reportSequence}\``,
                         label: "update", body: signal.text,
                         at: Date.parse(signal.at),
@@ -289,7 +290,11 @@ const plugin = {
                     const ledger = await DeliveryLedger.open({ location, ...(cancellation === undefined ? {} : { signal: cancellation }) });
                     try {
                         cancellation?.throwIfAborted();
-                        await ledger.suppress({ owner, key: `keiyaku/${signal.akumaId}/${signal.historyId}`, scope: "exact" });
+                        await ledger.suppress({
+                            owner,
+                            key: ["keiyaku", signal.akumaId, "turn", signal.historyId.slice("turn/".length)],
+                            scope: "exact",
+                        });
                     }
                     finally {
                         await ledger.close();
@@ -297,7 +302,7 @@ const plugin = {
                 },
                 async "akuma.turn-outcome"(signal, cancellation) {
                     await serialize(signal, async (state) => {
-                        await sendNotice(signal.akumaId, `turn/${signal.turnSequence}`, (label) => ({ text: turnOutcomeBody(signal, label), label: signal.outcome.kind === "answered" ? "done" : signal.outcome.kind, body: turnOutcomeResult(signal),
+                        await sendNotice(signal.akumaId, "turn", signal.turnSequence, (label) => ({ text: turnOutcomeBody(signal, label), label: signal.outcome.kind === "answered" ? "done" : signal.outcome.kind, body: turnOutcomeResult(signal),
                             ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }), signal.participants, cancellation, (recipient) => {
                             if (signal.outcome.kind !== "answered")
                                 state.terminalRecipients.add(recipient);
@@ -309,7 +314,7 @@ const plugin = {
                         try {
                             if (signal.end === "exited" || signal.end === "put-down")
                                 return;
-                            await sendNotice(signal.akumaId, `body/${signal.bodySequence}`, (label) => ({ text: bodyEndExpression(signal, label), label: signal.end, body: signal.diagnostic ?? "",
+                            await sendNotice(signal.akumaId, "body", signal.bodySequence, (label) => ({ text: bodyEndExpression(signal, label), label: signal.end, body: signal.diagnostic ?? "",
                                 ...(signal.at === undefined ? {} : { at: Date.parse(signal.at) }) }), signal.participants?.filter((recipient) => !state.terminalRecipients.has(recipient)), cancellation);
                         }
                         finally {

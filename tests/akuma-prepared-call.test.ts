@@ -455,7 +455,7 @@ for (const corruptInitialization of [false, true]) {
       "suppress",
       async function (this: DeliveryLedger, input: Parameters<DeliveryLedger["suppress"]>[0]) {
         const result = await suppress.call(this, input);
-        child = input.key.slice("keiyaku/".length, -"/turn/".length) as AkumaId;
+        child = input.key[1] as AkumaId;
         if (corruptInitialization) mkdirSync(pathsForAkumaId(world, child).heart);
         controller.abort(reason);
         return result;
