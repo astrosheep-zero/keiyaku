@@ -1,17 +1,17 @@
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
-import { errorCategory } from "../errors.js";
-import { HeldAkumaLeash, initializeHeart, readHeart, readSeal, readSoul, type Soul } from "./heart/index.js";
+import { errorCategory, KeiyakuError } from "../errors.js";
+import { HeldAkumaLeash, initializeHeart, readHeart, readSoul, type Soul } from "./heart/index.js";
 import { acquireLeash } from "./control.js";
 import { allocateAkumaDirectory, type AllocatedAkuma, type AkumaPaths } from "./identity.js";
 import { abortableDelay } from "./abort.js";
-import type { BodyLaunchEnd, ChildBodyLaunch, LiveBodyLaunch } from "./body-launch.js";
-import type {
-  CallInitialTell,
-  CallInitialTellAdmission,
-  InitialTellAdmissionInput,
-  TellResult,
+import type { ChildBodyLaunch, LiveBodyLaunch } from "./body-launch.js";
+import {
+  pendingTellReceipt,
+  type CallInitialTell,
+  type CallInitialTellAdmission,
+  type InitialTellAdmissionInput,
+  type TellResult,
 } from "./call-initial-tell.js";
-import { pendingTellReceipt } from "./call-initial-tell.js";
 import { resolveProviderExecution } from "./providers/index.js";
 import type { WorldRoot } from "../world.js";
 
@@ -19,200 +19,27 @@ const BIRTH_TIMEOUT_MS = 30_000;
 const POLL_MS = 100;
 const CUSTODY_HANDOFF_MS = 1_000;
 
-class LaunchCompletedError extends Error {}
-
-export type BirthInput = Readonly<{ worldPath: string; akumaName: string; signal?: AbortSignal }>;
-export type LaunchInput = Readonly<{
-  allocated: AllocatedAkuma;
-  awaitAsleep?: boolean;
-  launch(allocated: AllocatedAkuma): Promise<LiveBodyLaunch | void>;
-  signal?: AbortSignal;
-}>;
-
 function diagnostic(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function settleTimedOutBirth(paths: AkumaPaths): Promise<Soul | null> {
-  const leash = await HeldAkumaLeash.try(paths);
-  if (leash === null) return null;
-  let result: "born" | "sealed";
-  try {
-    result = await leash.sealIfUnborn(paths, {
-      evidence: "call-timeout",
-      at: new Date().toISOString(),
-    });
-  } finally {
-    leash.release();
-  }
-  if (result === "sealed") {
-    const seal = await readSeal(paths);
-    throw new Error(
-      seal?.evidence === "call-timeout" || seal === null ? "Akuma body failed before birth" : seal.evidence,
+class PublicationError extends KeiyakuError {
+  readonly allocated: Readonly<{ id: AllocatedAkuma["id"]; directory: string }>;
+
+  constructor(
+    child: AllocatedAkuma,
+    readonly verdict: "sealed" | "unresolved",
+    cause: unknown,
+    signal?: AbortSignal,
+  ) {
+    super(
+      errorCategory(cause, signal),
+      `Akuma birth ${verdict}: allocated ${child.id} at ${child.paths.directory}: ${diagnostic(cause)}`,
+      { cause },
     );
+    this.allocated = Object.freeze({ id: child.id, directory: child.paths.directory });
+    Object.freeze(this);
   }
-  const soul = await readSoul(paths);
-  if (soul === null) throw new Error("Akuma birth settled without a soul");
-  return soul;
-}
-
-async function observedBirthFailure(paths: AkumaPaths): Promise<string | null> {
-  const leash = await HeldAkumaLeash.try(paths);
-  if (leash === null) return null;
-  try {
-    return leash.readSeal()?.evidence ?? null;
-  } finally {
-    leash.release();
-  }
-}
-
-async function observeSettledExit(
-  owned: LiveBodyLaunch | undefined,
-): Promise<{ kind: "pending" } | { kind: "exited"; exit: BodyLaunchEnd } | { kind: "exit-error"; error: unknown }> {
-  if (owned === undefined) return { kind: "pending" };
-  const pending = Symbol("pending");
-  try {
-    const exit = await Promise.race([owned.completed, Promise.resolve(pending)]);
-    return exit === pending ? { kind: "pending" } : { kind: "exited", exit };
-  } catch (error) {
-    return { kind: "exit-error", error };
-  }
-}
-
-async function observeExitWithin(
-  owned: LiveBodyLaunch,
-  milliseconds: number,
-): Promise<{ kind: "timeout" } | { kind: "exited"; exit: BodyLaunchEnd } | { kind: "exit-error"; error: unknown }> {
-  return await Promise.race([
-    owned.completed.then(
-      (exit) => ({ kind: "exited" as const, exit }),
-      (error) => ({ kind: "exit-error" as const, error }),
-    ),
-    abortableDelay(milliseconds).then(() => ({ kind: "timeout" as const })),
-  ]);
-}
-
-async function attemptTermination(owned: LiveBodyLaunch, force = false): Promise<unknown | undefined> {
-  const outcome = await Promise.race([
-    Promise.resolve()
-      .then(() => owned.cancel(force))
-      .then(
-        () => ({ kind: "terminated" as const }),
-        (error) => ({ kind: "error" as const, error }),
-      ),
-    abortableDelay(CUSTODY_HANDOFF_MS).then(() => ({ kind: "timeout" as const })),
-  ]);
-  return outcome.kind === "error" ? outcome.error : undefined;
-}
-
-async function awaitBirth(paths: AkumaPaths, owned: LiveBodyLaunch | undefined, signal?: AbortSignal): Promise<Soul> {
-  const deadline = performance.now() + BIRTH_TIMEOUT_MS;
-  for (;;) {
-    signal?.throwIfAborted();
-    const soul = await readSoul(paths);
-    if (soul !== null) return soul;
-    const failure = await observedBirthFailure(paths);
-    if (failure !== null) {
-      const settled = await observeSettledExit(owned);
-      if (settled.kind === "exited") throw new LaunchCompletedError(settled.exit.diagnostic);
-      if (settled.kind === "exit-error") throw new Error(diagnostic(settled.error));
-      throw new Error(failure);
-    }
-    if (performance.now() >= deadline) {
-      const settled = await settleTimedOutBirth(paths);
-      if (settled !== null) return settled;
-      if (owned !== undefined) await attemptTermination(owned, true);
-      throw new Error("Akuma birth timed out before Soul admission");
-    }
-    if (owned === undefined) {
-      await abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())), signal);
-      continue;
-    }
-    const outcome = await Promise.race([
-      abortableDelay(Math.min(POLL_MS, Math.max(0, deadline - performance.now())), signal).then(() => "poll" as const),
-      owned.completed.then(
-        (exit) => ({ kind: "exited" as const, exit }),
-        (error) => ({ kind: "exit-error" as const, error }),
-      ),
-    ]);
-    if (outcome === "poll") continue;
-    if (outcome.kind === "exited") {
-      const settledSoul = await readSoul(paths);
-      if (settledSoul !== null) return settledSoul;
-      throw new LaunchCompletedError(outcome.exit.diagnostic);
-    }
-    throw new Error(diagnostic(outcome.error));
-  }
-}
-
-async function allocatedSoul(allocated: AllocatedAkuma): Promise<Soul> {
-  const soul = await readSoul(allocated.paths);
-  if (soul === null) throw new Error("Akuma birth settled without a soul");
-  if (soul.id !== allocated.id) throw new Error("Akuma birth returned a different identity");
-  return soul;
-}
-
-function settlementEvidence(primary: unknown, terminationError: unknown, exitError: unknown): string {
-  const reason = primary === undefined || primary === null ? "" : diagnostic(primary).trim();
-  if (reason.length > 0) return reason;
-  const details = [terminationError, exitError]
-    .filter((error): error is unknown => error !== undefined)
-    .map((error) => diagnostic(error).trim())
-    .filter((detail) => detail.length > 0);
-  return details[0] ?? "Akuma publication failed";
-}
-
-async function settleLaunch(
-  allocated: AllocatedAkuma,
-  owned: LiveBodyLaunch,
-  failure: unknown,
-): Promise<"born" | "sealed" | "handoff"> {
-  if ((await readSoul(allocated.paths)) !== null) {
-    await allocatedSoul(allocated);
-    const settled = await observeExitWithin(owned, CUSTODY_HANDOFF_MS);
-    if (settled.kind === "timeout") {
-      const leash = await HeldAkumaLeash.try(allocated.paths);
-      if (leash === null) return "handoff";
-      leash.release();
-    }
-    if (settled.kind === "exit-error") throw failure;
-    return "born";
-  }
-
-  let terminationError: unknown;
-  let exitError: unknown;
-  let outcome: "born" | "sealed";
-  const settled =
-    failure instanceof LaunchCompletedError ? await observeSettledExit(owned) : { kind: "pending" as const };
-  if (settled.kind !== "exited") {
-    terminationError = await attemptTermination(owned);
-    const exit = await observeSettledExit(owned);
-    if (exit.kind === "exit-error") exitError = exit.error;
-  } else {
-    /* An already-observed launch completion needs no second cancellation request. */
-  }
-
-  if ((await readSoul(allocated.paths)) !== null) {
-    await allocatedSoul(allocated);
-    return "born";
-  }
-
-  const leash = await HeldAkumaLeash.try(allocated.paths);
-  if (leash === null) return "handoff";
-  try {
-    outcome = await leash.sealIfUnborn(allocated.paths, {
-      evidence: settlementEvidence(failure, terminationError, exitError),
-      at: new Date().toISOString(),
-    });
-  } finally {
-    leash.release();
-  }
-  if (outcome === "born") {
-    await allocatedSoul(allocated);
-    return "born";
-  }
-  if ((await readSeal(allocated.paths)) === null) throw new Error("Akuma birth settled without a seal");
-  return "sealed";
 }
 
 async function awaitAsleepBirth(paths: AkumaPaths, signal?: AbortSignal): Promise<void> {
@@ -226,79 +53,119 @@ async function awaitAsleepBirth(paths: AkumaPaths, signal?: AbortSignal): Promis
     if (body?.end !== "exited" || body.hung !== undefined) {
       throw new Error("Akuma birth body did not exit cleanly");
     }
+    signal?.throwIfAborted();
   } finally {
     leash.release();
   }
 }
 
-async function sealLocalFailure(allocated: AllocatedAkuma, error: unknown): Promise<void> {
+async function cancelUnbornLaunch(owned: LiveBodyLaunch): Promise<void> {
+  const timer = new AbortController();
   try {
-    const leash = await HeldAkumaLeash.try(allocated.paths);
-    if (leash === null) return;
+    await Promise.race([owned.cancel(), abortableDelay(CUSTODY_HANDOFF_MS, timer.signal)]);
+  } catch {
+    // Neither cancellation failure nor completion decides durable birth.
+  } finally {
+    timer.abort();
+  }
+}
+
+type Launch = (allocated: AllocatedAkuma) => Promise<LiveBodyLaunch>;
+type ConfirmedBirth = Readonly<{ child: AllocatedAkuma; failure?: unknown; failureStage?: "birth" }>;
+
+async function publishAllocated(
+  child: AllocatedAkuma,
+  launch: Launch | Readonly<{ stopped: unknown }>,
+  signal?: AbortSignal,
+  awaitAsleep = false,
+): Promise<ConfirmedBirth> {
+  const { id, paths } = child;
+  let owned: LiveBodyLaunch | undefined;
+  const completion: { exit?: { cause: unknown } } = {};
+  let failure: { cause: unknown } | undefined;
+  let confirmed = false;
+  let verdict: PublicationError["verdict"] = "unresolved";
+  const observeSoul = async (): Promise<boolean> => {
+    const soul = await readSoul(paths);
+    if (soul !== null && soul.id !== id)
+      throw new KeiyakuError("authority-corruption", `Akuma birth found a different Soul: ${soul.id}`);
+    return (confirmed = soul !== null);
+  };
+  const watchBirth = async () => {
+    const deadline = performance.now() + BIRTH_TIMEOUT_MS;
+    for (;;) {
+      signal?.throwIfAborted();
+      if (await observeSoul()) return;
+      const leash = await HeldAkumaLeash.try(paths);
+      try {
+        const seal = leash?.readSeal();
+        if (seal != null) throw new Error(seal.evidence);
+      } finally {
+        leash?.release();
+      }
+      if (completion.exit !== undefined) throw completion.exit.cause;
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) throw new Error("Akuma birth timed out before Soul admission");
+      await abortableDelay(Math.min(POLL_MS, remaining), signal);
+    }
+  };
+  const settleUnborn = async (cause: unknown) => {
+    if (await observeSoul()) return;
+    if (owned !== undefined && completion.exit === undefined) await cancelUnbornLaunch(owned);
+    const leash = await HeldAkumaLeash.try(paths);
     try {
-      await leash.sealIfUnborn(allocated.paths, {
-        evidence: diagnostic(error),
+      const judged = await leash?.sealIfUnborn(paths, {
+        evidence: diagnostic(cause),
         at: new Date().toISOString(),
       });
+      if (judged === "sealed") verdict = "sealed";
+      else await observeSoul();
     } finally {
-      leash.release();
+      leash?.release();
     }
-  } catch {
-    /* the original local publication failure remains authoritative */
-  }
-}
-
-async function initializeAllocatedAkuma(allocated: AllocatedAkuma, signal?: AbortSignal): Promise<AllocatedAkuma> {
+  };
   try {
-    await initializeHeart(allocated.paths);
+    await initializeHeart(paths);
     signal?.throwIfAborted();
-    return allocated;
+    if (typeof launch !== "function") throw launch.stopped;
+    owned = await launch(child);
+    const noteExit = (cause: unknown) => {
+      completion.exit = { cause };
+    };
+    void owned.completed.then((end) => noteExit(new Error(end.diagnostic)), noteExit);
+    await watchBirth();
+    if (awaitAsleep) await awaitAsleepBirth(paths, signal);
   } catch (error) {
-    await sealLocalFailure(allocated, error);
-    throw error;
-  }
-}
-
-async function birthAkuma(input: BirthInput): Promise<AllocatedAkuma> {
-  input.signal?.throwIfAborted();
-  const allocated = await allocateAkumaDirectory({ worldRoot: input.worldPath, akumaName: input.akumaName });
-  return await initializeAllocatedAkuma(allocated, input.signal);
-}
-
-async function launchAkuma(input: LaunchInput): Promise<AllocatedAkuma> {
-  const { allocated } = input;
-  let owned: LiveBodyLaunch | void = undefined;
-  try {
-    input.signal?.throwIfAborted();
-    owned = await input.launch(allocated);
-    input.signal?.throwIfAborted();
-    const soul = await awaitBirth(allocated.paths, owned ?? undefined, input.signal);
-    if (soul.id !== allocated.id) throw new Error("Akuma birth returned a different identity");
-    if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths, input.signal);
-    owned?.release();
-    return allocated;
-  } catch (error) {
-    if (owned !== undefined) {
-      let outcome: "born" | "sealed" | "handoff";
-      try {
-        outcome = await settleLaunch(allocated, owned, error);
-      } finally {
-        owned.release();
-      }
-      if (outcome === "born" && input.signal?.aborted && error === input.signal.reason) {
-        if (input.awaitAsleep === true) await awaitAsleepBirth(allocated.paths, input.signal);
-        return allocated;
-      }
-      throw error;
+    const cause = signal?.aborted === true ? signal.reason : typeof launch === "function" ? error : launch.stopped;
+    failure = { cause };
+    if (!confirmed)
+      await settleUnborn(cause).catch(() => {
+        // An unavailable judgment cannot replace the first failure or prove a seal.
+      });
+  } finally {
+    try {
+      owned?.release();
+    } catch (cause) {
+      failure ??= { cause };
     }
-    await sealLocalFailure(allocated, error);
-    throw error;
   }
+  if (failure === undefined) return { child };
+  if (!confirmed) throw new PublicationError(child, verdict, failure.cause, signal);
+  if (!awaitAsleep && signal?.aborted === true && failure.cause === signal.reason) return { child };
+  return { child, failure: failure.cause, failureStage: "birth" };
 }
 
-export async function publishAkuma(input: BirthInput & Omit<LaunchInput, "allocated">): Promise<AllocatedAkuma> {
-  const allocated = await birthAkuma(input);
-  return await launchAkuma({ ...input, allocated });
+export async function publishAkuma(
+  input: Readonly<{
+    worldPath: string;
+    akumaName: string;
+    signal?: AbortSignal;
+    launch: Launch;
+  }>,
+): Promise<ConfirmedBirth> {
+  input.signal?.throwIfAborted();
+  const child = await allocateAkumaDirectory({ worldRoot: input.worldPath, akumaName: input.akumaName });
+  return await publishAllocated(child, input.launch, input.signal);
 }
 
 /** The caller's prepared recipe; provider admission happens before allocation. */
@@ -322,9 +189,7 @@ export class PreparedCallAdmissionError extends Error {
 
 type PreparedCallResult = Readonly<{
   child: AllocatedAkuma;
-  /** The exact initial TellResult, present only when its admission completed. */
   tell?: TellResult;
-  /** The native launch or initial-Tell failure that stopped after a confirmed birth. */
   failure?: unknown;
   failureStage?: "birth" | "tell" | "wake";
 }>;
@@ -337,38 +202,23 @@ type PreparedCallInput = Readonly<{
   signal?: AbortSignal;
   world: WorldRoot;
   recipe: PreparedCallRecipe;
-  /** Spawn one already-allocated child; publication already owns the allocated directory. */
-  spawn(launch: ChildBodyLaunch): Promise<LiveBodyLaunch | void>;
-  /** Admit the optional initial Tell against the just-confirmed child. */
+  spawn(launch: ChildBodyLaunch): Promise<LiveBodyLaunch>;
   admitInitialTell(input: InitialTellAdmissionInput): Promise<CallInitialTellAdmission>;
 }>;
 
-/** Admit the provider recipe once before allocating any child. */
 async function admittedRecipe(recipe: PreparedCallRecipe): Promise<PreparedCallRecipe> {
   let selected: Awaited<ReturnType<typeof resolveProviderExecution>>;
   try {
     selected = await resolveProviderExecution(recipe.provider);
   } catch (error) {
-    if (errorCategory(error) === "invalid-input")
-      throw new PreparedCallAdmissionError("resolve", error instanceof Error ? error.message : String(error));
+    if (errorCategory(error) === "invalid-input") throw new PreparedCallAdmissionError("resolve", diagnostic(error));
     throw error;
   }
   const admission = selected.adapter.admitOptions(recipe.options);
   if (admission.kind === "refused") {
     throw new PreparedCallAdmissionError("options", admission.diagnostic);
   }
-  return Object.freeze({
-    ...recipe,
-    provider: selected.execution,
-    options: admission.options,
-    ...(recipe.bare === undefined ? {} : { bare: recipe.bare }),
-  });
-}
-
-/** Judge durable birth from the allocated child's own evidence, never from the caught error. */
-async function durablyBorn(allocated: AllocatedAkuma): Promise<boolean> {
-  const soul = await readSoul(allocated.paths);
-  return soul !== null && soul.id === allocated.id;
+  return Object.freeze({ ...recipe, provider: selected.execution, options: admission.options });
 }
 
 export type PreparedCall = Readonly<{
@@ -387,44 +237,32 @@ export async function prepareCall(input: PreparedCallInput): Promise<PreparedCal
   return { allocated, input, recipe, caller };
 }
 
-/** A canceled observer still owes its allocated coordinate the ordinary seal judgment. */
+/** A canceled observer still owes its allocated coordinate the ordinary birth judgment. */
 export async function discardPreparedCall(prepared: PreparedCall, reason: unknown): Promise<void> {
-  await initializeAllocatedAkuma(prepared.allocated);
-  await sealLocalFailure(prepared.allocated, reason);
+  await publishAllocated(prepared.allocated, { stopped: reason }, prepared.input.signal);
 }
 
-/** Publish the same prepared allocation, retaining a confirmed child on later failure. */
 export async function publishPreparedCall(prepared: PreparedCall): Promise<PreparedCallResult> {
   const { allocated, input, recipe, caller } = prepared;
-  await initializeAllocatedAkuma(allocated, input.signal);
-  let child = allocated;
-  try {
-    child = await launchAkuma({
-      allocated,
-      awaitAsleep: true,
-      ...(input.signal === undefined ? {} : { signal: input.signal }),
-      launch: async (ready) => {
-        return await input.spawn({
-          paths: ready.paths,
-          seed: {
-            id: ready.id,
-            akumaName: ready.akumaName,
-            ...(recipe.description === undefined ? {} : { description: recipe.description }),
-            provider: recipe.provider,
-            options: recipe.options,
-            ...(recipe.bare === undefined ? {} : { bare: recipe.bare }),
-            cwd: input.cwd,
-            origin: { kind: "direct" },
-            ...(caller === undefined ? {} : { caller }),
-          },
-        });
-      },
-    });
-  } catch (error) {
-    if (!(await durablyBorn(allocated))) throw error;
-    return { child: allocated, failure: error, failureStage: "birth" };
-  }
-  if (input.initialTell === undefined) return { child };
+  const birth = await publishAllocated(
+    allocated,
+    ({ id, paths, akumaName }) =>
+      input.spawn({
+        paths,
+        seed: {
+          ...recipe,
+          id,
+          akumaName,
+          cwd: input.cwd,
+          origin: { kind: "direct" },
+          ...(caller === undefined ? {} : { caller }),
+        },
+      }),
+    input.signal,
+    true,
+  );
+  if (birth.failureStage !== undefined || input.initialTell === undefined) return birth;
+  const { child } = birth;
   let told: TellResult | undefined;
   try {
     const admitted = await input.admitInitialTell({
@@ -434,8 +272,7 @@ export async function publishPreparedCall(prepared: PreparedCall): Promise<Prepa
     });
     if (admitted.kind === "not-born") throw new Error(`Akuma ${child.id} was not born for its initial Tell`);
     told = pendingTellReceipt(admitted.tell);
-    told = await admitted.wake;
-    return { child, tell: told };
+    return { child, tell: await admitted.wake };
   } catch (error) {
     return {
       child,

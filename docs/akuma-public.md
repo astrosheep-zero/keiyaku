@@ -127,6 +127,13 @@ observation.
 
 ## Handles And Lifecycle Evidence
 
+Birth observation distinguishes an allocated coordinate from a confirmed child.
+Only matching durable birth evidence supports a child result. An unborn stop
+names the retained allocation and distinguishes a proven seal from unresolved
+custody; neither is a born handle. Waiting for a prepared birth Body to settle
+is a separate observation. Cancellation of that wait keeps the confirmed child
+and stops before first input admission; it does not stop the Body.
+
 Native selection or birth captures its launch hosting for the resulting handle.
 Detached execution is the default; an explicit in-process choice runs future
 locally launched Bodies in that calling Node runtime. This does not select an observation bound, persist in Soul, or relocate existing

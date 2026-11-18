@@ -38,23 +38,21 @@ facts. Live process custody is a handle held by the spawning Body or adapter,
 never a persisted process description. No successor reconstructs its
 predecessor's process authority.
 
-Birth becomes visible only when the child proves Soul under the leash. Failure
-before Soul seals the coordinate with durable birth evidence. An uncertain or
-crashed birth remains unborn until a contender pays the same leash judgment; age
-never decides it. A present Heart that cannot be read is a hard observation
-failure, not evidence that the Akuma is unborn. A seal is permanent: stillborn
-cannot be reborn. Caller
-cancellation asks the publication owner to close only its retained unborn child;
-it cannot invent a third birth result. No blind cleaner adjudicates abandoned
-births.
+Birth is proved by a readable Soul matching the allocated identity. A different
+identity or unreadable authority is a hard failure, not evidence of absence.
+Direct, prepared, and fork births use the same publication judgment. Observation
+is bounded; launch completion and elapsed time are not birth or closure proof.
+When observation stops, publication rechecks durable evidence before asking only
+its still-live unborn launch to retire. It bounds that wait and releases its
+handle without claiming provider closure or stopping a shared host. Once birth
+is confirmed, stopping observation does not cancel the child.
 
-Publication ends process custody by writing a durable verdict — Soul proves birth, a Seal under the leash proves failure — or by leaving the unborn child to leash judgment when the leash is unavailable; proven exit is welcome evidence but never a custody precondition, and a termination or exit error by itself changes nothing durable.
-
-Provider input is admitted once before any child exists, so a refused recipe
-leaves no child. Confirmed birth is never replaced by a later stage's failure: a
-spawn or first-Tell failure after Soul carries the born child together with its
-native failure, and caller cancellation never discards a confirmed child or an
-exact admitted Tell. Only a birth that never proved Soul is a failed birth.
+Only a Seal under the leash proves fenced unborn failure. Publication can seal
+only under the ordinary absent-Soul judgment. When custody or authority cannot
+establish a verdict, the allocation remains unresolved at its original
+coordinate for a later ordinary judgment. Neither exit nor age can seal it,
+and no blind cleaner adopts, retries, or removes it. A sealed coordinate can
+never be born.
 
 Filesystem policy belongs to the selected provider's native configuration.
 Explicit provider configuration remains part of the frozen birth recipe across

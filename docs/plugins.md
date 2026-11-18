@@ -225,8 +225,10 @@ all release only that invocation's suppressions after stopping renewal.
 A bounded spawn validates its complete native recipe before allocating one child
 coordinate. Observation acquires suppression for that coordinate before the same
 allocation is initialized, published, and given its first ordinary Tell. No
-input-correlation substitute or public allocation hook exists. Detached and
-prompt-free spawns acquire no answer resource. Wait and idle establish only final
+input-correlation substitute or public allocation hook exists. Suppression does
+not prove birth, and cancellation around acquisition leaves judgment of that
+same allocation to the ordinary birth owner. Detached and prompt-free spawns
+acquire no answer resource. Wait and idle establish only final
 snapshot outcomes; ask and bounded spawn establish only the exact admitted input's
 outcome, before answer decoding.
 

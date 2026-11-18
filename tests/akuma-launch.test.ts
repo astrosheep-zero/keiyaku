@@ -392,7 +392,7 @@ test(
     mkdirSync(barrier);
     installAkumaBodyEmptyPublicationBarrier(barrier);
     let launch;
-    const child = await publishAkuma({ worldPath: world, akumaName: "worker", launch: async (allocated) => {
+    const { child, failureStage } = await publishAkuma({ worldPath: world, akumaName: "worker", launch: async (allocated) => {
       launch = await spawnAkumaBody({ paths: allocated.paths, seed: {
         id: allocated.id, akumaName: "worker", provider: { name: "claude", kind: "claude-agent-sdk" },
         options: {}, cwd: world, origin: { kind: "direct" },
@@ -400,6 +400,7 @@ test(
       await waitForFixtureFile(join(barrier, "ready"));
       return launch;
     } });
+    assert.equal(failureStage, undefined);
     assert.equal((await readSoul(child.paths)).id, child.id);
     const { pid } = JSON.parse(readFileSync(join(barrier, "ready"), "utf8"));
     unlinkSync(child.paths.log);

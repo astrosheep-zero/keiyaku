@@ -11,7 +11,7 @@ import { akumasWithLauncher } from "../src/library/akumas.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { createProviderAttempt } from "../src/akuma/provider.js";
-import { readSoul, readTell } from "../src/akuma/heart/index.js";
+import { HeldAkumaLeash, readSoul, readTell } from "../src/akuma/heart/index.js";
 import { pathsForAkumaId } from "../src/akuma/identity.js";
 import { readAliases, moveAlias } from "../src/alias/index.js";
 import { parseAkumaAlias } from "../src/identity/selector.js";
@@ -96,13 +96,36 @@ test("creation keeps birth, Tell and ordered association/observation failures", 
   const turn = history.events.find(row => row.kind === "outcome");
   assert.ok(turn);
   const child = await api.fork({ akuma: parent.akumaId, at: `turn/${turn.turnSequence}`, repo });
-  Reflect.set(claudeProvider, "fork", originalFork);
   assert.equal(child.kind, "failed");
   if (child.kind !== "failed") assert.fail("fork association must stop after birth");
   assert.equal(child.failure.stage, "dispatch");
   assert.equal((await readSoul(pathsForAkumaId(world, child.childAkumaId)))?.id, child.childAkumaId);
   assertWireRoundTrip(forkResultSchema, child);
   assert.equal(classifyVerb("fork", { akuma: parent.akumaId, at: `turn/${turn.turnSequence}` }, { kind: "returned", value: child }), "failed");
+
+  const forkFailure = new Error("launcher failed after fork Soul");
+  let forkedChild: typeof child.childAkumaId | undefined;
+  const failedFork = akumasWithLauncher(world, async ({ paths, seed, birthSession }) => {
+    assert.ok(seed && birthSession);
+    const leash = await HeldAkumaLeash.try(paths);
+    assert.ok(leash);
+    try {
+      await leash.birth(paths, { ...seed, createdAt: "2026-11-11T00:00:00.000Z" }, birthSession);
+      forkedChild = seed.id;
+    } finally {
+      leash.release();
+    }
+    throw forkFailure;
+  });
+  await assert.rejects(failedFork.fork({ akuma: parent.akumaId, at: `turn/${turn.turnSequence}` }), (error: unknown) => {
+    assert.ok(error instanceof KeiyakuError);
+    assert.equal(error.cause, forkFailure);
+    assert.ok(forkedChild && error.message.includes(forkedChild));
+    return true;
+  });
+  assert.ok(forkedChild);
+  assert.equal((await readSoul(pathsForAkumaId(world, forkedChild)))?.id, forkedChild);
+  Reflect.set(claudeProvider, "fork", originalFork);
 
   const brokenAlias = join(world, ".keiyaku", "akuma", "alias.json");
   writeFileSync(brokenAlias, "unavailable Alias authority\n");

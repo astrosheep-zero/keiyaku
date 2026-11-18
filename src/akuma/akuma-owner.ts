@@ -1,4 +1,4 @@
-import { KeiyakuError } from "../errors.js";
+import { errorCategory, KeiyakuError } from "../errors.js";
 import { bareOption, durationSchema, validateAkumaInput } from "./call-input.js";
 import { decodeAkumaCaller, type AkumaCaller } from "./caller.js";
 import { randomUUID } from "node:crypto";
@@ -490,11 +490,11 @@ export class AkumaOwner {
       options: point.options,
       admittedAt,
     };
+    let birth: Awaited<ReturnType<typeof publishAkuma>>;
     try {
-      const child = await publishAkuma({
+      birth = await publishAkuma({
         worldPath: this.worldPath,
         akumaName: source.akumaName,
-        awaitAsleep: true,
         launch: async (allocated) =>
           await spawn({
             paths: allocated.paths,
@@ -513,7 +513,6 @@ export class AkumaOwner {
             ...(input.initiator === undefined ? {} : { birthInitiator: input.initiator }),
           }),
       });
-      return { kind: "forked", childAkumaId: child.id };
     } catch (error) {
       return {
         kind: "provider-forked-local-birth-failed",
@@ -521,6 +520,13 @@ export class AkumaOwner {
         diagnostic: diagnostic(error),
       };
     }
+    if (birth.failureStage !== undefined)
+      throw new KeiyakuError(
+        errorCategory(birth.failure),
+        `Forked child ${birth.child.id}: ${diagnostic(birth.failure)}`,
+        { cause: birth.failure },
+      );
+    return { kind: "forked", childAkumaId: birth.child.id };
   }
 
   async kill(options: Readonly<{ signal?: AbortSignal }> = {}): Promise<KillEvidence> {

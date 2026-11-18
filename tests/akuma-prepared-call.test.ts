@@ -3,7 +3,7 @@ import { readdir } from "node:fs/promises";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { driveAkumaBody } from "../src/akuma/body.js";
-import type { BodyLauncher, ChildBodyLaunch } from "../src/akuma/body-launch.js";
+import type { BodyLaunchEnd, BodyLauncher, ChildBodyLaunch, LiveBodyLaunch } from "../src/akuma/body-launch.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
 import { AkumaNameError, KeiyakuError, type SpawnResult } from "../src/index.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
@@ -23,7 +23,7 @@ import type {
 import { prepareCall, publishPreparedCall, type PreparedCallRecipe } from "../src/akuma/publication.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { World } from "../src/world.js";
-import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
+import { deferred, restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
 
 isolateUserHome();
@@ -39,7 +39,7 @@ function rawRecipe(overrides: Partial<PreparedCallRecipe> = {}): PreparedCallRec
 }
 
 /** Birth one already-allocated child through its own leash, the way a real spawn body would. */
-async function birth(launch: ChildBodyLaunch, createdAt = AT): Promise<void> {
+async function birth(launch: ChildBodyLaunch, createdAt = AT): Promise<LiveBodyLaunch> {
   const leash = await HeldAkumaLeash.try(launch.paths);
   if (leash === null) throw new Error("expected a free child leash");
   try {
@@ -49,6 +49,11 @@ async function birth(launch: ChildBodyLaunch, createdAt = AT): Promise<void> {
   } finally {
     leash.release();
   }
+  return {
+    completed: Promise.resolve({ diagnostic: "birth Body finished cleanly" }),
+    cancel: async () => assert.fail("a completed birth does not need cancellation"),
+    release() {},
+  };
 }
 
 function tellResult(tellId: string): TellResult {
@@ -408,25 +413,55 @@ test("native spawn failure after Soul durability retains TypeError cause and dir
   assert.ok((await api.list({ selection: "all" })).rows?.some(row => row.id === confirmedBirth.akumaId && row.life !== "unborn" && row.life !== "stillborn"));
 });
 
-test("an abort after confirmed birth keeps the child and its native reason", async (context) => {
-  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-abort-"));
+test("canceling prepared readiness keeps the live born child without admitting input", { timeout: 5_000 }, async (t) => {
+  const root = await World.at(temporaryDirectory(t, "keiyaku-prepared-abort-"));
   const controller = new AbortController();
   const reason = new Error("stop after birth");
+  const started = deferred<void>();
+  const finished = deferred<BodyLaunchEnd>();
+  let cancellations = 0;
+  let releases = 0;
+  let settleBody: (() => Promise<void>) | undefined;
   const prepared = await prepareCall({
     akumaName: "worker",
     cwd: root,
     signal: controller.signal,
+    initialTell: { tellId: "2f1c4b6a-0000-4000-8000-000000000003", body: "begin" },
     world: root,
     recipe: rawRecipe(),
-    spawn: async (launch) => {
-      await birth(launch);
-      controller.abort(reason);
+    spawn: async ({ paths, seed }) => {
+      const leash = (await HeldAkumaLeash.try(paths))!;
+      t.after(() => leash.release());
+      await leash.birth(paths, { ...seed, createdAt: AT });
+      const body = await leash.recordBody(paths, { leashTakenAt: AT });
+      settleBody = async () => {
+        await finishBodyIfIdle(paths, { sequence: body.sequence, at: AT });
+        leash.release();
+        finished.resolve({ diagnostic: "birth Body finished cleanly" });
+      };
+      started.resolve();
+      return {
+        completed: finished.promise,
+        cancel: async () => { cancellations += 1; },
+        release: () => { releases += 1; },
+      };
     },
     admitInitialTell: rejectedTell,
   });
-  const result = await publishPreparedCall(prepared);
-  assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
-  assert.equal(result.failure, reason);
+  try {
+    const publication = publishPreparedCall(prepared);
+    await started.promise;
+    controller.abort(reason);
+    const result = await publication;
+    assert.equal(result.child.id, (await readSoul(result.child.paths))?.id);
+    assert.equal(result.failure, reason);
+    assert.equal(result.failureStage, "birth");
+    assert.equal(result.tell, undefined);
+    assert.equal(cancellations, 0);
+    assert.equal(releases, 1);
+  } finally {
+    await settleBody?.();
+  }
 });
 
 test("the exact admitted initial Tell is preserved and a missing admission never invents one", async (context) => {
@@ -531,7 +566,17 @@ for (const corruptInitialization of [false, true]) {
     const api = akumasWithLauncher(world, async () => assert.fail("canceled observation cannot launch a Body"));
     await assert.rejects(
       api.spawn({ akumaName: "worker", body: "begin", mode: "wait", settings: selected, signal: controller.signal }),
-      (error) => error === reason,
+      (error: unknown) => {
+        assert.ok(error instanceof KeiyakuError);
+        assert.equal(error.category, "aborted");
+        assert.equal(error.cause, reason);
+        assert.equal(error.spawn, undefined, "an allocation is not a born-child receipt");
+        assert.ok(child);
+        assert.ok(error.message.includes(child));
+        assert.ok(error.message.includes(pathsForAkumaId(world, child).directory));
+        assert.match(error.message, corruptInitialization ? /birth unresolved/u : /birth sealed/u);
+        return true;
+      },
     );
     assert.ok(child);
     assert.equal((await childRuns(world)).length, 1, "the allocated coordinate remains owned and is never reused");

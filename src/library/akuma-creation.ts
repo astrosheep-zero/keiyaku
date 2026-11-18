@@ -535,7 +535,7 @@ export async function callAkumas(
         )
       : await run();
   } catch (error) {
-    if (!publishing) await discardPreparedCall(prepared.publication, error).catch(() => {});
+    if (!publishing) await discardPreparedCall(prepared.publication, error);
     throw error;
   }
 }

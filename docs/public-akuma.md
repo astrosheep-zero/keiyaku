@@ -37,18 +37,23 @@ as its own integration stage and never rolls back the Akuma. A Dispatch failure
 prevents the requested Alias move; an Alias failure preserves Dispatch. A
 contract-free birth is complete and writes no Dispatch. Fork may carry an
 existing Dispatch relation to its child but never inherits an Alias or invents a
-provider fork capability. The submitting process writes spawn wiring after the
-birth and first-Tell attempt, before optional answer observation. Dispatch and
-Alias remain independent cross-product authority, not child identity. Creation completes only when its requested association work
-completes. Later stops retain all independently observed stage failures in their
-operation order, including an observation failure after failed association; none
-can replace earlier evidence. A first Tell precedes Dispatch, requested Alias
-follows successful Dispatch, and requested answer observation follows association.
-Bounded-spawn
-observation starts only after native validation and child allocation, with that
-exact coordinate's notification suppression established before publication and
-first input. The same allocated child is published by the ordinary birth owner;
-no public caller-selected identity or alternate admission path is introduced.
+provider fork capability. A fork confirms its child at durable birth without
+waiting for the Body to sleep. A later launch stop preserves that confirmed
+identity and cause instead of reporting an unborn fork. The submitting process
+writes spawn wiring after the birth and first-Tell attempt, before optional
+answer observation. Dispatch and Alias remain independent cross-product
+authority, not child identity. Creation completes only when its requested
+association work completes. Later stops retain all independently observed stage
+failures in their operation order, including an observation failure after
+failed association; none can replace earlier evidence. A first Tell precedes
+Dispatch, requested Alias follows successful Dispatch, and requested answer
+observation follows association.
+Bounded-spawn observation starts only after native validation and child
+allocation, with notification suppression for that exact coordinate before
+publication and first input. If observation stops there, the ordinary birth
+owner still judges that allocation; an unborn diagnostic does not authorize
+Dispatch or Alias publication for it. There is no public caller-selected
+identity or alternate admission path.
 
 Caller-selected World, Contract, and execution directory are validated before
 birth. World proof happens once at the outer boundary. Cwd selection is explicit

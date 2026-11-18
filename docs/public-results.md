@@ -57,7 +57,11 @@ Thrown errors are not ordinary results. Distinguished SDK failures share
 KeiyakuError; native failures and cancellation reasons may still escape lower
 boundaries unchanged when no confirmed evidence needs attaching. Exceptional
 evidence is readable directly from the thrown error rather than through an
-adapter projection or hidden receipt store. Schemas describe the JSON wire form:
+adapter projection or hidden receipt store. An unborn Akuma publication
+preserves its allocation, custody verdict, and leading cause as failure
+evidence, not as a child receipt. Once birth or input admission is confirmed,
+later failure retains those known effects; cleanup does not replace the leading
+cause. Schemas describe the JSON wire form:
 round-tripping a native result through JSON and its owner schema preserves that
 form. Native Contract capabilities retain their process-local custody
 without serializing it or reconstructing capabilities from JSON. Schema parity
