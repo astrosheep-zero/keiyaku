@@ -2,7 +2,7 @@ import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, readdirSync, lstatSync, readlinkSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import test from "node:test";
 import { Keis, Keiyaku, KeiyakuError, Repo, Settings, World, type ExecutionObservation } from "../src/index.js";
 import { classifyVerb } from "../src/library/keiyaku-verbs.js";
@@ -19,7 +19,7 @@ import { decideDeliver } from "../src/core/verbs/deliver.js";
 import { scopeOperation } from "../src/protocol/operations.js";
 import { observeContractAt } from "../src/git/observe.js";
 import { prepareVerificationDeclaration } from "../src/verification/declaration.js";
-import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import { changeId, snapshotId } from "../src/core/facts/types.js";
 import type { DeliveryPreviewOutcome } from "../src/index.js";
 import { withGitShim, type TestGitRepository } from "./support/git.js";
@@ -161,12 +161,15 @@ test("preview target lag is absent at zero and counted when the target moved", (
     },
   });
 
-  const unmoved = renderDeliveryPreview(report(0), { columns: 120, color: false });
-  assert.match(unmoved, /main @ aaaaaaa/u);
+  const unmoved = renderVerb("deliver", { contract: "kei/audit-lag", dryRun: true },
+    { kind: "returned", value: report(0) }, { columns: 120, color: false });
+  assert.match(unmoved, /^  reference {2}refs\/heads\/main$/mu);
+  assert.match(unmoved, /^  head {2}a{40}$/mu);
   assert.doesNotMatch(unmoved, /behind 0/u, "zero lag is an absent fact, not a printed zero");
 
-  const moved = renderDeliveryPreview(report(5), { columns: 120, color: false });
-  assert.match(moved, /behind 5/u, "a moved target still names its lag");
+  const moved = renderVerb("deliver", { contract: "kei/audit-lag", dryRun: true },
+    { kind: "returned", value: report(5) }, { columns: 120, color: false });
+  assert.match(moved, /^  behind {2}5$/mu, "a moved target still names its lag");
 });
 
 function workspaceBytes(directory: string): unknown {
@@ -234,6 +237,21 @@ test("native, invocation and CLI preview preserve authority, refs, real indexes 
   const history = await native.history();
   const blocked = await native.previewDelivery();
   assert.ok(blocked.kind === "blocked" && blocked.reason.kind === "dirty-workspace");
+  const otherRepo = repositoryWithMain();
+  const repoOption = relative(otherRepo.path, repository.path);
+  const blockedCli = await runCli(
+    ["-C", otherRepo.path, "--repo", repoOption, "deliver", bound.contractId, "--dry-run", "--show-diff"],
+    { environment: {} },
+  );
+  assert.equal(blockedCli.exit, 0, blockedCli.stderr);
+  assert.equal(blockedCli.stdout.split("\n")[0], `deliver --dry-run accepted  ${bound.contractId}`);
+  const recoveryPrefix = "  available  keiyaku ";
+  const recovery = blockedCli.stdout.split("\n").find((line) => line.startsWith(recoveryPrefix));
+  assert.equal(recovery,
+    `${recoveryPrefix}-C ${otherRepo.path} --repo ${repoOption} deliver ${bound.contractId} --dry-run --show-diff --include-dirty`);
+  const replay = await runCli(recovery.slice(recoveryPrefix.length).split(" "), { environment: {} });
+  assert.equal(replay.exit, 0, replay.stderr);
+  assert.match(replay.stdout, /^\s*\+final unstaged version$/mu);
   const preview = await native.previewDelivery({ includeDirty: true, showDiff: true });
   assert.ok(preview.kind === "ready");
   assert.ok(preview.diff?.kind === "present");
@@ -296,11 +314,13 @@ test("preview reports prerequisite and gate judgments without claiming acceptanc
   assert.deepEqual(result.unmetPrerequisites, [{ contractId: prerequisite.contractId, state: "active" }]);
   assert.deepEqual(result.unmetGates?.map(({ gate, state }) => [gate, state]),
     [["reviewed", "missing"], ["verified", "missing"]]);
-  const text = renderDeliveryPreview(result, { columns: 160, color: false });
-  assert.match(text, /deliver --dry-run/u);
-  assert.match(text, /candidate  prepared/u);
+  const text = renderVerb("deliver", { contract: dependent.contractId, dryRun: true },
+    { kind: "returned", value: result }, { columns: 160, color: false });
+  assert.match(text, /^deliver --dry-run accepted {2}kei\//mu);
+  assert.match(text, /^  candidate {2}[a-f0-9]{40}$/mu);
   assert.ok(text.includes(prerequisite.contractId));
-  assert.doesNotMatch(text, /candidate  ready|accepted|delivered/u);
+  assert.match(text, /^  prerequisite {2}kei\/\S+\n  state {2}active$/mu);
+  assert.doesNotMatch(text, /candidate {2}(?:ready|prepared)|accepted\.|delivered/u);
   assert.deepEqual(await dependent.kei.history(), before);
 });
 
@@ -419,11 +439,12 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   const checkout = preview.target.checkouts![0]!;
   assert.equal(checkout.path, repository.path);
   assert.match(checkout.diagnostic, /delivered\.txt.*not uptodate|not uptodate.*delivered\.txt/su);
-  const text = renderDeliveryPreview(preview, { columns: 200, color: false });
+  const text = renderVerb("deliver", { contract: bound.contractId, dryRun: true },
+    { kind: "returned", value: preview }, { columns: 200, color: false });
   // The receipt hard-wraps a long payload at the column boundary, even mid-word, so the human-facing text is judged
   // without display whitespace while the whole rendering stays in the failure evidence.
   const displayed = text.replace(/\s+/gu, "");
-  assert.match(text, /target  placeable/u);
+  assert.match(text, /target {2}placeable/u);
   assert.ok(text.includes(`checkout cannot follow  ${repository.path}`));
   assert.ok(displayed.includes("notuptodate"), `preview must render the checkout diagnostic; got:\n${text}`);
 

@@ -86,7 +86,7 @@ test("CLI binds mixed gate selections and amends or binds an explicit empty sele
       throw new Error("gate-only amend must not read stdin");
     },
   });
-  assert.match(amendText.stdout, /✓ amended[\s\S]*gates  changed/u);
+  assert.match(amendText.stdout, /amend accepted[\s\S]*gates  changed/u);
   assert.doesNotMatch(amendText.stdout, /terms unchanged/u);
   assert.deepEqual(await gates(mixed), []);
   assert.deepEqual(await gates(await bind("")), []);

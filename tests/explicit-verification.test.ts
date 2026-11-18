@@ -10,8 +10,7 @@ import { contractObservationSchema } from "../src/protocol/read/status.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project } from "../src/library/outcome.js";
 import { gateReports } from "../src/core/facts/gate.js";
-import { renderAccepted } from "../src/cli/render/contract.js";
-import { executionFailureLines } from "../src/cli/render/receipt.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import { appointedWorktreePath, cachedRepositoryAt } from "./support/git.js";
 import { accepted, commitCandidate, document, present, repositoryWithMain } from "./support/library-verbs.js";
 
@@ -125,9 +124,9 @@ test("a later setup stop preserves an earlier red admission and outranks its ver
   assert.equal(stopped.stop.name, "prepare-once");
   assert.equal(stopped.index, 2);
   assert.ok(result.checks.every((check) => check.retainedPath !== undefined && existsSync(check.retainedPath)));
-  const text = renderAccepted("verify", result, { columns: 400, color: false });
-  assert.match(text, /× check 1\s+unsatisfied · recorded/u);
-  assert.match(text, /! check 2\s+execution stopped/u);
+  const text = renderVerb("verify", {}, { kind: "returned", value: result }, { columns: 400, color: false });
+  assert.match(text, /^  check {2}1\n  requirement {2}[^\n]+\n  verdict {2}unsatisfied\n  admission {2}admitted$/mu);
+  assert.match(text, /^  check {2}2\n  requirement {2}[^\n]+\n  execution {2}stopped$/mu);
   assert.ok(text.includes("prepare-once"));
   assert.ok(result.checks.every((check) => text.includes(check.retainedPath!)));
   const testimony = present(await contract.state()).attestations;
@@ -217,8 +216,11 @@ test("strict currency keeps prior checks tied to their tested snapshot after tar
   const reason = { kind: "snapshot-changed", previousSnapshot: original.snapshot, currentSnapshot };
   assert.ok(original.checks.every((check) => check.kind === "terminal" && check.verdict === "satisfied"));
   assert.deepEqual(reviewed.placement.unmet.map((problem) => problem.state === "stale" ? problem.reason : undefined), [reason, reason]);
-  const receipt = renderAccepted("review", reviewed, { columns: 400, color: false }, { verdict: "satisfied" });
-  assert.ok(receipt.includes(`stale  snapshot changed ${original.snapshot.slice(0, 7)} -> ${currentSnapshot.slice(0, 7)}`));
+  const receipt = renderVerb("review", { contract: reviewed.contractId, verdict: "satisfied",
+    summary: "Verification review passed" }, { kind: "returned", value: reviewed }, { columns: 400, color: false });
+  assert.ok(receipt.includes("stale reason  snapshot changed"));
+  assert.ok(receipt.includes(`previous snapshot  ${original.snapshot}`));
+  assert.ok(receipt.includes(`current snapshot  ${currentSnapshot}`));
   const detail = await Keis.of(await Repo.at({ path: repository.path })).observe({ id: reviewed.contractId });
   assertWireRoundTrip(contractObservationSchema, detail);
   assert.ok(detail.kind === "present");
@@ -317,6 +319,7 @@ test("cancellation after terminal execution retains the check and stops its admi
   const controller = new AbortController();
   let thirdExecuted = false;
   let result;
+  let failure: KeiyakuError | undefined;
   try {
     result = await contract.verify({ signal: controller.signal }, { observe: (event) => {
       if (event.kind !== "verification" || event.observation.kind !== "phase") return;
@@ -328,6 +331,7 @@ test("cancellation after terminal execution retains the check and stops its admi
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "aborted");
     assert.ok(error.outcome?.kind === "contract");
+    failure = error;
     result = error.outcome;
   }
   assert.ok(result && "checks" in result && result.checks);
@@ -335,11 +339,11 @@ test("cancellation after terminal execution retains the check and stops its admi
     ? [check.index, check.verdict, check.admission] : [check.index, check.kind]),
   [[1, "satisfied", "admitted"], [2, "satisfied", { kind: "cancelled" }]]);
   const text = result.kind === "contract"
-    ? executionFailureLines("verify", result, { category: "aborted", diagnostic: "cancel after terminal execution" }, 400).join("\n")
-    : renderAccepted("verify", result, { columns: 400, color: false });
-  assert.match(text, /✓ check 1\s+satisfied · recorded/u);
-  assert.match(text, /✓ check 2\s+satisfied · admission stopped/u);
-  assert.match(text, /cancelled/u);
+    ? renderVerb("verify", {}, { kind: "threw", error: failure }, { columns: 400, color: false })
+    : renderVerb("verify", {}, { kind: "returned", value: result }, { columns: 400, color: false });
+  assert.match(text, /^  check {2}1\n  requirement {2}[^\n]+\n  verdict {2}satisfied\n  admission {2}admitted$/mu);
+  assert.match(text, /^  check {2}2\n  requirement {2}[^\n]+\n  verdict {2}satisfied\n  admission {2}stopped$/mu);
+  assert.match(text, /^  reason {2}cancelled$/mu);
   assert.equal(present(await contract.state()).attestations.length, 1);
   assert.equal(thirdExecuted, false);
   assertWireConformance(verifyNormalOutcomeSchema, result, false);

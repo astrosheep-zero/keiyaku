@@ -816,9 +816,9 @@ test("SDK deliver selects native preview or placement with one text-only tool", 
   assert.equal(dirty._meta?.["keiyaku/disposition"], "refused");
   assert.equal(dirty.structuredContent, undefined);
   const dirtyText = (dirty.content as { text: string }[]).map((block) => block.text).join("\n");
-  assert.ok(dirtyText.includes('option  deliver {"includeDirty":true}'));
-  assert.match(dirtyText, /captures complete non-ignored worktree bytes/u);
-  assert.doesNotMatch(dirtyText, /keiyaku |--/u);
+  assert.match(dirtyText, /reason  dirty workspace/u);
+  assert.ok(dirtyText.includes(bound.contractId));
+  assert.doesNotMatch(dirtyText, /^  available  /mu);
   const delivered = await client.callTool({ name: "deliver", arguments: {
     repo: repository.path, contract: bound.contractId, includeDirty: true,
   } });

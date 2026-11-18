@@ -1,691 +1,230 @@
 import type {
-  KeiyakuRetryReason,
+  InvocationIssue,
+  KeiyakuRefusal,
   PartialOutcomeEnvelope,
   Placement,
   RequirementProblem,
   VerificationCheck,
 } from "../../index.js";
-import { contractOperationName, requirementDisplayName, staleReasonFact } from "./contract-observation.js";
-import { renderRefusalFacts } from "./refusal.js";
-import {
-  DEFAULT_CLI_COLUMNS,
-  displayColumns,
-  kindWords,
-  orderRefusalFacts,
-  quotedText,
-  renderOpaqueBlock,
-  safeText,
-  type TextRenderContext,
-} from "./terminal.js";
-import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
+import type { FailureProjection } from "../../library/outcome.js";
+import type { MeaningfulEffect } from "../../library/reconcile.js";
+import { DEFAULT_CLI_COLUMNS, kindWords, quotedText, renderOpaqueBlock, safeText } from "./terminal.js";
 
-export type ReceiptSegment = Readonly<{ text: string; opaque?: boolean }>;
+/** Coordinates are copyable facts, independent of terminal width. */
+export function fact(lines: string[], label: string, value: string | number | null | undefined): void {
+  if (value !== undefined) lines.push(`  ${label}  ${value === null ? "absent" : safeText(String(value))}`);
+}
 
-export function receiptRow(
-  lines: string[],
-  mark: string,
-  label: string,
-  segments: readonly ReceiptSegment[],
-  columns: number,
-): void {
-  const prefix = mark.trim().length === 0 ? "  " : `${mark} `;
-  let current = `${prefix}${label}`;
-  for (const segment of segments) {
-    const text = segment.opaque === true ? safeText(segment.text) : segment.text;
-    const candidate = `${current}  ${text}`;
-    if (displayColumns(candidate) <= columns) {
-      current = candidate;
-      continue;
-    }
-    if (current === `${prefix}${label}` && segment.opaque === true) {
-      lines.push(current);
-      current = `  ${text}`;
-      continue;
-    }
-    lines.push(current);
-    current = `  ${text}`;
+export function payload(lines: string[], label: string, value: string | undefined): void {
+  if (value !== undefined) lines.push(`  ${label}`, ...renderOpaqueBlock(value, "  ", DEFAULT_CLI_COLUMNS));
+}
+
+type PartialContract = Extract<PartialOutcomeEnvelope, { kind: "contract" }>;
+type CheckStop = Extract<VerificationCheck, { kind: "stopped" }>["stop"];
+type AdmissionStop = Exclude<Extract<VerificationCheck, { kind: "terminal" }>["admission"], string>;
+type Evidence =
+  | KeiyakuRefusal
+  | Placement
+  | CheckStop
+  | AdmissionStop
+  | InvocationIssue
+  | Readonly<{ kind: "invalid-document"; diagnostic: string }>;
+
+function ownerCoordinateLines(value: Evidence): string[] {
+  const lines: string[] = [];
+  if ("contractId" in value) fact(lines, "contract", value.contractId);
+  if ("targetContractId" in value) fact(lines, "target Contract", value.targetContractId);
+  if ("target" in value) fact(lines, "target", value.target);
+  if ("targetHead" in value) fact(lines, "target head", value.targetHead);
+  if ("worktreePath" in value) fact(lines, "workspace", value.worktreePath);
+  if ("path" in value) fact(lines, "path", value.path);
+  if ("snapshot" in value) fact(lines, "snapshot", value.snapshot);
+  if ("requirement" in value) fact(lines, "requirement", value.requirement);
+  if ("index" in value) fact(lines, "check", value.index);
+  return lines;
+}
+
+function resultCoordinateLines(value: Evidence): string[] {
+  const lines: string[] = [];
+  if ("total" in value) fact(lines, "declarations", value.total);
+  if ("expected" in value) fact(lines, "expected", value.expected);
+  if ("observed" in value) fact(lines, "observed", value.observed);
+  if ("integration" in value) fact(lines, "integration result", value.integration);
+  if ("name" in value && value.name !== undefined) fact(lines, "name", quotedText(value.name));
+  if ("phase" in value) fact(lines, "phase", value.phase);
+  if ("debtId" in value) fact(lines, "debt", value.debtId);
+  return lines;
+}
+
+/** Fixed native coordinates, never an object walker or another stop classifier. */
+export function evidenceLines(value: Evidence, label = "reason"): string[] {
+  const lines: string[] = [];
+  fact(lines, label, kindWords(value.kind));
+  lines.push(...ownerCoordinateLines(value), ...resultCoordinateLines(value));
+  if ("reason" in value) {
+    if (typeof value.reason === "string") fact(lines, "detail", kindWords(value.reason));
+    else lines.push(...evidenceLines(value.reason));
   }
-  lines.push(current);
+  if ("paths" in value) {
+    for (const path of value.paths ?? []) fact(lines, "path", path);
+  }
+  if ("submodules" in value) {
+    for (const path of value.submodules ?? []) fact(lines, "submodule", path);
+  }
+  if ("conflictPaths" in value) {
+    for (const path of value.conflictPaths) fact(lines, "conflict", path);
+  }
+  if (value.kind === "gates-unsatisfied") lines.push(...requirementLines(value.unmet));
+  if (value.kind === "prerequisites-unsatisfied") lines.push(...prerequisiteLines(value.unmet));
+  if ("diagnostic" in value) payload(lines, "diagnostic", value.diagnostic);
+  return lines;
 }
 
-export function receiptPayload(lines: string[], label: string, payload: string): void {
-  lines.push(`  ${label.trim()}`, ...renderOpaqueBlock(payload, "  ", DEFAULT_CLI_COLUMNS), "");
+export function requirementLines(problems: readonly RequirementProblem[]): string[] {
+  const lines: string[] = [];
+  for (const problem of problems) {
+    fact(lines, "gate", problem.gate);
+    fact(lines, "requirement", problem.requirement);
+    fact(lines, "state", problem.state);
+    if (problem.state === "stale") {
+      if (problem.reason !== undefined) {
+        fact(lines, "stale reason", kindWords(problem.reason.kind));
+        fact(lines, "previous snapshot", problem.reason.previousSnapshot);
+        fact(lines, "current snapshot", problem.reason.currentSnapshot);
+      }
+      fact(lines, "previous content identity", problem.previousContentId);
+      fact(lines, "current content identity", problem.currentContentId);
+    }
+    if (problem.state === "unsatisfied") payload(lines, "summary", problem.summary);
+  }
+  return lines;
 }
 
-export function outcomeLines(
-  mark: "✓" | "×" | "!" | "?",
-  verb: string,
-  word: "accepted" | "refused" | "retry",
-  contract: string | undefined,
-  columns = DEFAULT_CLI_COLUMNS,
+export function prerequisiteLines(
+  prerequisites: Extract<Placement, { kind: "prerequisites-unsatisfied" }>["unmet"],
 ): string[] {
-  const base = `${mark} ${contractOperationName(verb)} ${word}`;
-  if (contract === undefined) return [base];
-  const inline = `${base}  ${contract}`;
-  return displayColumns(inline) <= columns ? [inline] : [base, `  contract  ${safeText(contract)}`];
-}
-
-export function refusalLines(
-  verb: string,
-  facts: readonly string[],
-  columns = DEFAULT_CLI_COLUMNS,
-  trailingFacts: readonly string[] = [],
-): string[] {
-  return [
-    ...outcomeLines("×", verb, "refused", undefined, columns),
-    ...orderRefusalFacts(facts).map((fact) => `  ${fact}`),
-    ...trailingFacts,
-  ];
-}
-
-export function titleLines(mark: string, title: string, contract: string, columns = DEFAULT_CLI_COLUMNS): string[] {
-  const base = `${mark} ${title}`;
-  const inline = `${base}  ${contract}`;
-  return displayColumns(inline) <= columns ? [inline] : [base, `  contract  ${safeText(contract)}`];
-}
-
-type PlacementStop = Exclude<Placement, { kind: "placed" }>;
-type TerminalCheck = Extract<VerificationCheck, { kind: "terminal" }>;
-type CheckAdmissionStop = Exclude<NonNullable<TerminalCheck["admission"]>, string>;
-type RuntimeCheck = Extract<VerificationCheck, { kind: "stopped" }>["stop"];
-type ReceiptStop = PlacementStop | CheckAdmissionStop | RuntimeCheck;
-
-function unmetRequirementLines(unmet: readonly RequirementProblem[], columns: number): readonly string[] {
   const lines: string[] = [];
-  const ids = abbreviateGitIds(
-    unmet.flatMap((problem) =>
-      problem.state === "stale" ? [problem.previousContentId ?? "", problem.currentContentId ?? ""] : [],
-    ),
-  );
-  for (const problem of unmet) {
-    const mark = problem.state === "missing" ? "○" : problem.state === "stale" ? "!" : "×";
-    const detail =
-      problem.state === "stale"
-        ? [
-            { text: "stale" },
-            ...(problem.reason === undefined ? [] : [{ text: staleReasonFact(problem.reason) }]),
-            ...(problem.previousContentId === undefined || problem.currentContentId === undefined
-              ? []
-              : [
-                  {
-                    text: `${displayGitId(problem.previousContentId, ids)} -> ${displayGitId(problem.currentContentId, ids)}`,
-                    opaque: true,
-                  },
-                ]),
-          ]
-        : [{ text: problem.state === "unsatisfied" ? "recorded unsatisfied" : problem.state }];
-    receiptRow(lines, mark, requirementDisplayName(problem.gate, problem), detail, columns);
-    if (problem.state === "unsatisfied" && problem.summary !== undefined)
-      receiptPayload(lines, "summary", problem.summary);
+  for (const prerequisite of prerequisites) {
+    fact(lines, "prerequisite", prerequisite.contractId);
+    fact(lines, "state", prerequisite.state);
   }
   return lines;
 }
 
-export { unmetRequirementLines };
-
-function retryRows(reason: KeiyakuRetryReason, columns: number, dependent?: string): readonly string[] {
+export function issueLines(issues: readonly InvocationIssue[] | undefined): string[] {
   const lines: string[] = [];
-  receiptRow(
-    lines,
-    "?",
-    "retry",
-    [
-      { text: kindWords(reason.reason) },
-      ...(dependent === undefined ? [] : [{ text: "·" }, { text: dependent, opaque: true }]),
-    ],
-    columns,
-  );
-  if (reason.reason === "publication-failed") receiptPayload(lines, "reason", reason.diagnostic);
-  return lines;
-}
-
-function dependentRow(lines: string[], dependent: string | undefined, label: string, columns: number): void {
-  if (dependent === undefined) receiptRow(lines, "!", label, [], columns);
-  else receiptRow(lines, "!", "dependent", [{ text: dependent, opaque: true }, { text: `· ${label}` }], columns);
-}
-
-function prerequisiteLines(
-  unmet: NonNullable<Extract<PlacementStop, { kind: "prerequisites-unsatisfied" }>["unmet"]>,
-  columns: number,
-): readonly string[] {
-  const lines: string[] = [];
-  for (const prerequisite of unmet)
-    receiptRow(
-      lines,
-      " ",
-      "prerequisite",
-      [{ text: prerequisite.contractId, opaque: true }, { text: "·" }, { text: prerequisite.state }],
-      columns,
-    );
-  return lines;
-}
-
-function runtimeStopLines(
-  stop: RuntimeCheck | Readonly<{ kind: "cancelled" }>,
-  columns: number,
-  dependent?: string,
-): readonly string[] {
-  const lines: string[] = [];
-  const segments: ReceiptSegment[] = dependent === undefined ? [] : [{ text: "·" }, { text: dependent, opaque: true }];
-  if (stop.kind === "environment-hook-failure") segments.push({ text: `name ${quotedText(stop.name)}` });
-  receiptRow(lines, "!", dependent ?? kindWords(stop.kind), segments, columns);
-  const diagnostic = "diagnostic" in stop ? stop.diagnostic : undefined;
-  if (diagnostic !== undefined && diagnostic.length > 0) receiptPayload(lines, "reason", diagnostic);
-  return lines;
-}
-
-type SemanticPlacementStop = Exclude<
-  PlacementStop,
-  { kind: "retry" | "checkout-not-followable" | "execution-stopped" | "physical-lag" }
->;
-
-function requirementStopRows(
-  stop: Extract<SemanticPlacementStop, { kind: "gates-unsatisfied" | "prerequisites-unsatisfied" }>,
-  columns: number,
-  dependent: string | undefined,
-): readonly string[] {
-  const lines: string[] = [];
-  if (stop.kind === "prerequisites-unsatisfied") {
-    dependentRow(lines, dependent, "prerequisites unsatisfied", columns);
-    lines.push(...prerequisiteLines(stop.unmet, columns));
-    return lines;
-  }
-  if (dependent !== undefined) {
-    const awaiting = stop.unmet
-      .filter((problem) => problem.state !== "unsatisfied")
-      .map((problem) => requirementDisplayName(problem.gate, problem));
-    if (awaiting.length === 0) receiptRow(lines, " ", "dependent", [{ text: dependent, opaque: true }], columns);
-    else receiptRow(lines, "⧗", dependent, [{ text: "·" }, { text: `awaiting ${awaiting.join(", ")}` }], columns);
-  }
-  lines.push(...unmetRequirementLines(stop.unmet, columns));
-  return lines;
-}
-
-type AvailabilityStop = Extract<
-  SemanticPlacementStop,
-  {
-    kind:
-      | "delivery-missing"
-      | "target-missing"
-      | "contract-missing"
-      | "terminal"
-      | "target-contract-missing"
-      | "target-contract-terminal"
-      | "target-workspace-unavailable";
-  }
->;
-
-function availabilityStopRows(
-  stop: AvailabilityStop,
-  columns: number,
-  dependent: string | undefined,
-): readonly string[] {
-  const lines: string[] = [];
-  if (stop.kind !== "target-workspace-unavailable") {
-    dependentRow(lines, dependent, kindWords(stop.kind), columns);
-    return lines;
-  }
-  receiptRow(
-    lines,
-    "!",
-    "target workspace unavailable",
-    [{ text: stop.targetContractId, opaque: true }, { text: kindWords(stop.reason) }],
-    columns,
-  );
-  return lines;
-}
-
-type OutcomeStop = Extract<
-  SemanticPlacementStop,
-  {
-    kind: "not-based-on-target" | "unrelated-histories" | "integration-conflict" | "integration-unsupported" | "failed";
-  }
->;
-
-function outcomeStopRows(
-  stop: OutcomeStop,
-  columns: number,
-  addressed: string,
-  dependent: string | undefined,
-  surface: TextRenderContext["surface"],
-): readonly string[] {
-  if (stop.kind !== "failed") return renderRefusalFacts(stop, "  ", columns, addressed, surface);
-  const lines: string[] = [];
-  receiptRow(lines, "×", "not accepted", dependent === undefined ? [] : [{ text: dependent, opaque: true }], columns);
-  receiptPayload(lines, "reason", stop.diagnostic);
-  return lines;
-}
-
-function targetMovementStopRows(
-  stop: Extract<SemanticPlacementStop, { kind: "target-content-identical" | "target-moved" }>,
-  columns: number,
-  related: string | undefined,
-): readonly string[] {
-  const lines: string[] = [];
-  if (stop.kind === "target-content-identical") {
-    const ids = abbreviateGitIds([stop.expected, stop.observed]);
-    receiptRow(
-      lines,
-      "!",
-      related ?? "target content identical",
-      [
-        { text: stop.target, opaque: true },
-        { text: `${displayGitId(stop.expected, ids)} -> ${displayGitId(stop.observed, ids)}`, opaque: true },
-        { text: "content identical" },
-      ],
-      columns,
-    );
-    return lines;
-  }
-  const ids = abbreviateGitIds([stop.integration, stop.observed ?? ""]);
-  receiptRow(
-    lines,
-    "!",
-    related ?? "target moved",
-    [
-      { text: stop.target, opaque: true },
-      {
-        text: `${displayGitId(stop.integration, ids)} -> ${stop.observed === null ? "absent" : displayGitId(stop.observed, ids)}`,
-        opaque: true,
-      },
-    ],
-    columns,
-  );
-  return lines;
-}
-
-function placementStopRows(
-  stop: SemanticPlacementStop,
-  columns: number,
-  addressed: string,
-  dependent: string | undefined,
-  surface: TextRenderContext["surface"],
-): readonly string[] {
-  switch (stop.kind) {
-    case "gates-unsatisfied":
-    case "prerequisites-unsatisfied":
-      return requirementStopRows(stop, columns, dependent);
-    case "delivery-missing":
-    case "target-missing":
-    case "contract-missing":
-    case "terminal":
-    case "target-contract-missing":
-    case "target-contract-terminal":
-    case "target-workspace-unavailable":
-      return availabilityStopRows(stop, columns, dependent);
-    case "not-based-on-target":
-    case "unrelated-histories":
-    case "integration-conflict":
-    case "integration-unsupported":
-    case "failed":
-      return outcomeStopRows(stop, columns, addressed, dependent, surface);
-    case "target-content-identical":
-    case "target-moved":
-      return targetMovementStopRows(stop, columns, dependent);
-  }
-}
-
-/**
- * One flat stop vocabulary for placement, test admission, and dependent continuation. The native
- * stop supplies every distinction; rendering never reconstructs a wrapper or a second conclusion.
- */
-export function stopLines(
-  stop: ReceiptStop,
-  columns: number,
-  addressed: string,
-  dependent?: string,
-  surface?: TextRenderContext["surface"],
-): readonly string[] {
-  const related = dependent;
-  switch (stop.kind) {
-    case "execution-stopped": {
-      const lines: string[] = [];
-      receiptRow(
-        lines,
-        "!",
-        "execution",
-        [{ text: stop.reason }, ...(related === undefined ? [] : [{ text: related, opaque: true }])],
-        columns,
-      );
-      receiptPayload(lines, "reason", stop.diagnostic);
-      return lines;
+  for (const issue of issues ?? []) {
+    if (
+      issue.severity === "required" ||
+      "path" in issue ||
+      "diagnostic" in issue ||
+      "snapshot" in issue ||
+      "targetContractId" in issue ||
+      "requirement" in issue
+    ) {
+      lines.push(...evidenceLines(issue, "issue"));
     }
-    case "physical-lag": {
-      const lines: string[] = [];
-      dependentRow(lines, dependent, "physical follow stopped", columns);
-      return lines;
-    }
-    case "retry":
-      return retryRows(stop, columns, dependent);
-    case "refused":
-      return renderRefusalFacts(stop.reason, "  ", columns, addressed, surface);
-    case "cancelled":
-    case "unknown-exit":
-    case "candidate-unavailable":
-    case "spawn-error":
-    case "environment-failure":
-    case "environment-hook-failure":
-      return runtimeStopLines(stop, columns, dependent);
-    case "checkout-not-followable": {
-      const lines: string[] = [];
-      if (dependent !== undefined) receiptRow(lines, "!", "dependent", [{ text: dependent, opaque: true }], columns);
-      lines.push(...renderRefusalFacts(stop, "", columns, addressed, surface));
-      return lines;
-    }
-    default:
-      return placementStopRows(stop, columns, addressed, dependent, surface);
   }
+  return lines;
 }
 
-export function deliveryIdentityRows(
-  lines: string[],
-  identity: Readonly<{ candidate: string; integration: string; contentId: string | undefined }>,
-  columns: number,
-): void {
-  for (const [label, value] of [
-    ["candidate", identity.candidate],
-    ["integration result", identity.integration],
-    ["content identity", identity.contentId],
-  ] as const)
-    if (value !== undefined) receiptRow(lines, " ", label, [{ text: value, opaque: true }], columns);
-}
-
-export function targetMovementRows(
-  lines: string[],
-  placement: Readonly<{ target?: string; predecessor?: string; integration: string }>,
-  columns: number,
-): void {
-  const ids = abbreviateGitIds([placement.predecessor ?? "", placement.integration]);
-  const movement =
-    placement.predecessor === undefined
-      ? displayGitId(placement.integration, ids)
-      : `${displayGitId(placement.predecessor, ids)}..${displayGitId(placement.integration, ids)}`;
-  receiptRow(
-    lines,
-    " ",
-    "target",
-    [{ text: movement }, ...(placement.target === undefined ? [] : [{ text: placement.target, opaque: true }])],
-    columns,
-  );
-}
-
-export function gatesAwaitLines(placement: PlacementStop | undefined): readonly string[] {
-  if (placement?.kind !== "gates-unsatisfied") return [];
-  const events = placement.unmet
-    .filter((problem) => problem.state !== "unsatisfied")
-    .map((problem) => requirementDisplayName(problem.gate, problem));
-  return events.length === 0 ? [] : [`⧗ awaiting ${events.join(", ")}`];
-}
-
-/** The performed work and its admission conclusion, with no aggregate gate testimony. */
-export function verificationCheckLines(
-  checks: readonly VerificationCheck[],
-  columns: number,
-  addressed: string,
-  surface?: TextRenderContext["surface"],
-): readonly string[] {
+export function checkLines(checks: readonly VerificationCheck[]): string[] {
   const lines: string[] = [];
   for (const check of checks) {
+    fact(lines, "check", check.index);
+    fact(lines, "requirement", check.requirement);
     if (check.kind === "stopped") {
-      receiptRow(lines, "!", `check ${check.index}`, [{ text: "execution stopped" }], columns);
-      lines.push(...stopLines(check.stop, columns, addressed, undefined, surface));
+      fact(lines, "execution", "stopped");
+      lines.push(...evidenceLines(check.stop));
     } else {
-      const admission = check.admission;
-      const recording =
-        typeof admission !== "string"
-          ? "admission stopped"
-          : admission === "unrecorded"
-            ? "not recorded"
-            : admission === "admitted"
-              ? "recorded"
-              : "reused";
-      receiptRow(
-        lines,
-        check.verdict === "satisfied" ? "✓" : "×",
-        `check ${check.index}`,
-        [{ text: `${check.verdict} · ${recording}` }],
-        columns,
-      );
-      if (check.verdict === "unsatisfied") receiptPayload(lines, "summary", check.summary);
-      if (typeof admission !== "string") lines.push(...stopLines(admission, columns, addressed, undefined, surface));
+      fact(lines, "verdict", check.verdict);
+      fact(lines, "admission", typeof check.admission === "string" ? check.admission : "stopped");
+      if (check.verdict === "unsatisfied") payload(lines, "summary", check.summary);
+      if (typeof check.admission !== "string") lines.push(...evidenceLines(check.admission));
     }
-    if (check.retainedPath !== undefined)
-      receiptRow(lines, " ", "scratch retained", [{ text: check.retainedPath, opaque: true }], columns);
+    fact(lines, "scratch retained", check.retainedPath);
   }
   return lines;
 }
 
-type RecoverySnapshot = string | Readonly<{ snapshot: string; contractId?: string }>;
+export function placementLines(
+  placement: Placement | Omit<Extract<Placement, { kind: "placed" }>, "integration">,
+  integration?: string,
+): string[] {
+  if (placement.kind !== "placed") return evidenceLines(placement);
+  const lines: string[] = [];
+  fact(lines, "destination", placement.target);
+  fact(lines, "before", placement.predecessor);
+  fact(lines, "after", "integration" in placement ? placement.integration : integration);
+  fact(lines, "placement", placement.kind);
+  return lines;
+}
 
-export function recoverySnapshotLines(
-  recoveries: readonly RecoverySnapshot[] | undefined,
-  columns: number,
-  primary: string | undefined,
-): readonly string[] {
+type Effect = MeaningfulEffect | NonNullable<PartialContract["effects"]>[number];
+export function effectLines(effect: Effect): string[] {
+  const lines: string[] = [];
+  fact(lines, "effect", kindWords(effect.kind));
+  if ("contractId" in effect) fact(lines, "contract", effect.contractId);
+  if (effect.kind === "placed") lines.push(...placementLines(effect));
+  if ("name" in effect) fact(lines, "reference", effect.name);
+  if ("before" in effect) fact(lines, "before", effect.before);
+  if ("after" in effect) fact(lines, "after", effect.after);
+  if ("path" in effect) fact(lines, "path", effect.path);
+  if ("target" in effect && effect.kind !== "placed") fact(lines, "target", effect.target);
+  if ("snapshot" in effect) fact(lines, "recovery snapshot", effect.snapshot);
+  if ("debtId" in effect) fact(lines, "debt", effect.debtId);
+  return lines;
+}
+
+export function admissionLines(admission: NonNullable<PartialContract["admitted"]>[number]): string[] {
+  const lines: string[] = [];
+  fact(lines, "admitted", admission.kind);
+  fact(lines, "contract", admission.contractId);
+  if ("candidate" in admission) fact(lines, "candidate", admission.candidate);
+  if ("integration" in admission) fact(lines, "integration result", admission.integration);
+  if ("contentId" in admission) fact(lines, "content identity", admission.contentId);
+  if ("predecessor" in admission) fact(lines, "before", admission.predecessor);
+  if ("requirement" in admission) fact(lines, "requirement", admission.requirement);
+  if ("verdict" in admission) fact(lines, "verdict", admission.verdict);
+  if ("chapter" in admission) fact(lines, "chapter", admission.chapter);
+  return lines;
+}
+
+export function recoveryLines(
+  recoveries: readonly (string | Readonly<{ snapshot: string; contractId?: string }>)[] | undefined,
+): string[] {
   const lines: string[] = [];
   for (const recovery of recoveries ?? []) {
-    const snapshot = typeof recovery === "string" ? recovery : recovery.snapshot;
-    const owner = typeof recovery === "string" ? undefined : recovery.contractId;
-    if (owner !== undefined && owner !== primary)
-      receiptRow(lines, " ", "recovery owner", [{ text: owner, opaque: true }], columns);
-    receiptRow(
-      lines,
-      " ",
-      "recovery snapshot",
-      [{ text: displayGitId(snapshot, abbreviateGitIds([snapshot])), opaque: true }],
-      columns,
-    );
+    if (typeof recovery === "string") fact(lines, "recovery snapshot", recovery);
+    else {
+      fact(lines, "contract", recovery.contractId);
+      fact(lines, "recovery snapshot", recovery.snapshot);
+    }
   }
   return lines;
 }
 
-function admittedLines(
-  admission: NonNullable<Extract<PartialOutcomeEnvelope, { kind: "contract" }>["admitted"]>[number],
-  columns: number,
-  primary?: string,
-): readonly string[] {
-  const lines: string[] = [];
-  const owner = admission.contractId;
-  const owned = owner === undefined || owner === primary ? [] : [{ text: owner, opaque: true }];
-  switch (admission.kind) {
-    case "deliver": {
-      receiptRow(lines, " ", "admitted", [{ text: "deliver" }, ...owned], columns);
-      const ids = abbreviateGitIds([admission.candidate, admission.integration, admission.contentId]);
-      deliveryIdentityRows(
-        lines,
-        {
-          candidate: displayGitId(admission.candidate, ids),
-          integration: displayGitId(admission.integration, ids),
-          contentId: displayGitId(admission.contentId, ids),
-        },
-        columns,
-      );
-      return lines;
-    }
-    case "reintegrated": {
-      const ids = abbreviateGitIds([admission.predecessor, admission.integration]);
-      receiptRow(
-        lines,
-        " ",
-        "re-integrated",
-        [
-          { text: `${displayGitId(admission.predecessor, ids)}..${displayGitId(admission.integration, ids)}` },
-          ...owned,
-        ],
-        columns,
-      );
-      return lines;
-    }
-    case "attestation": {
-      const mark = admission.verdict === "satisfied" ? "✓" : "×";
-      receiptRow(
-        lines,
-        mark,
-        "attestation",
-        [
-          ...(admission.requirement === undefined ? [] : [{ text: admission.requirement, opaque: true }]),
-          ...(admission.verdict === undefined ? [] : [{ text: admission.verdict }]),
-          ...owned,
-        ],
-        columns,
-      );
-      return lines;
-    }
-    case "arc":
-      receiptRow(lines, " ", `chapter ${admission.chapter}`, owned, columns);
-      return lines;
-    default:
-      receiptRow(lines, " ", "admitted", [{ text: admission.kind }, ...owned], columns);
-      return lines;
-  }
-}
-
-type ExceptionalEffect = NonNullable<Extract<PartialOutcomeEnvelope, { kind: "contract" }>["effects"]>[number];
-
-function effectLines(effect: ExceptionalEffect, columns: number, primary?: string): readonly string[] {
-  const lines: string[] = [];
-  const owner = effect.contractId;
-  if (owner !== undefined && owner !== primary)
-    receiptRow(lines, " ", "effect owner", [{ text: owner, opaque: true }], columns);
-  switch (effect.kind) {
-    case "ref": {
-      const ids = abbreviateGitIds([effect.before ?? "", effect.after ?? ""]);
-      const before = effect.before === null ? "absent" : displayGitId(effect.before, ids);
-      const after = effect.after === null ? "absent" : displayGitId(effect.after, ids);
-      receiptRow(lines, " ", "ref", [{ text: `${before} → ${after}` }, { text: effect.name, opaque: true }], columns);
-      return lines;
-    }
-    case "worktree-followed": {
-      const ids = abbreviateGitIds([effect.before, effect.after]);
-      receiptRow(
-        lines,
-        " ",
-        "worktree followed",
-        [
-          { text: `${displayGitId(effect.before, ids)} → ${displayGitId(effect.after, ids)}` },
-          { text: effect.path, opaque: true },
-        ],
-        columns,
-      );
-      return lines;
-    }
-    case "recovery-snapshot":
-      receiptRow(
-        lines,
-        " ",
-        "recovery snapshot",
-        [{ text: displayGitId(effect.snapshot, abbreviateGitIds([effect.snapshot])), opaque: true }],
-        columns,
-      );
-      return lines;
-    case "target-checkout":
-      receiptRow(
-        lines,
-        " ",
-        "target checkout",
-        [
-          { text: effect.target, opaque: true },
-          { text: effect.path, opaque: true },
-        ],
-        columns,
-      );
-      return lines;
-    case "debt-settled":
-      receiptRow(lines, " ", "settled", [{ text: effect.debtId, opaque: true }], columns);
-      return lines;
-    case "placed":
-      targetMovementRows(lines, effect, columns);
-      return lines;
-    case "worktree-created":
-    case "worktree-removed":
-      receiptRow(lines, " ", kindWords(effect.kind), [{ text: effect.path, opaque: true }], columns);
-      return lines;
-  }
-}
-
-function placementEvidenceLines(
-  placement: Placement,
-  columns: number,
-  addressed: string,
-  surface: TextRenderContext["surface"],
-): readonly string[] {
-  if (placement.kind !== "placed") return stopLines(placement, columns, addressed, undefined, surface);
-  if (placement.target === undefined) return [];
-  const lines: string[] = [];
-  targetMovementRows(lines, placement, columns);
-  return lines;
-}
-
-/** Confirmed admissions and irreversible movement survive a trailing failure without a journal reread. */
-export function executionEvidenceLines(
-  receipt: Extract<PartialOutcomeEnvelope, { kind: "contract" }>,
-  columns: number,
-  surface?: TextRenderContext["surface"],
-): readonly string[] {
-  const lines: string[] = [];
-  if (receipt.snapshot !== undefined)
-    receiptRow(
-      lines,
-      " ",
-      "snapshot",
-      [{ text: displayGitId(receipt.snapshot, abbreviateGitIds([receipt.snapshot])) }],
-      columns,
-    );
-  if (receipt.checks !== undefined)
-    lines.push(...verificationCheckLines(receipt.checks, columns, receipt.contractId ?? "", surface));
-  for (const admission of receipt.admitted ?? []) {
-    const shownByCheck =
-      admission.kind === "attestation" &&
-      (admission.contractId === undefined || admission.contractId === receipt.contractId) &&
-      receipt.checks?.some(
-        (check) =>
-          check.kind === "terminal" && check.admission === "admitted" && check.requirement === admission.requirement,
-      );
-    if (!shownByCheck) lines.push(...admittedLines(admission, columns, receipt.contractId));
-  }
-  if (receipt.placement !== undefined)
-    lines.push(...placementEvidenceLines(receipt.placement, columns, receipt.contractId ?? "", surface));
-  for (const effect of receipt.effects ?? []) lines.push(...effectLines(effect, columns, receipt.contractId));
-  return lines;
-}
-
-export function executionFailureLines(
+export function resetFailureLines(
   operation: string,
-  receipt: PartialOutcomeEnvelope,
-  failure: Readonly<{ category: string; diagnostic: string; causeClass?: string; causeDiagnostic?: string }>,
-  columns: number,
-  surface?: TextRenderContext["surface"],
-): readonly string[] {
-  const lines: string[] = [];
-  const identity = receipt.kind === "contract" ? receipt.contractId : receipt.world;
-  receiptRow(
-    lines,
-    "!",
-    `${contractOperationName(operation)} failed`,
-    [{ text: failure.category }, ...(identity === undefined ? [] : [{ text: identity, opaque: true }])],
-    columns,
-  );
-  receiptPayload(lines, "reason", failure.diagnostic);
-  if (failure.causeClass !== undefined || failure.causeDiagnostic !== undefined)
-    receiptPayload(
-      lines,
-      "cause",
-      [failure.causeClass, failure.causeDiagnostic].filter((part) => part !== undefined).join(": "),
-    );
-  if (receipt.kind === "contract") lines.push(...executionEvidenceLines(receipt, columns, surface));
-  else {
-    for (const [owner, count] of Object.entries(receipt.removed ?? {}))
-      receiptRow(lines, " ", `${owner} removed`, [{ text: String(count) }], columns);
-    for (const issue of receipt.issues ?? []) {
-      receiptRow(
-        lines,
-        "!",
-        kindWords(issue.kind),
-        issue.kind === "reset-owner-stopped" ? [{ text: issue.owner }] : [],
-        columns,
-      );
-      receiptPayload(lines, "reason", issue.diagnostic);
-    }
+  receipt: Extract<PartialOutcomeEnvelope, { kind: "world" }>,
+  failure: FailureProjection,
+): string[] {
+  const lines = [`! ${operation} failed`, ...failureLines(failure)];
+  fact(lines, "world", receipt.world);
+  for (const [owner, count] of Object.entries(receipt.removed ?? {})) fact(lines, `${owner} removed`, count);
+  for (const issue of receipt.issues ?? []) {
+    fact(lines, "issue", kindWords(issue.kind));
+    if (issue.kind === "reset-owner-stopped") fact(lines, "owner", issue.owner);
+    payload(lines, "diagnostic", issue.diagnostic);
   }
+  return lines;
+}
+
+export function failureLines(failure: FailureProjection): string[] {
+  const lines: string[] = [];
+  fact(lines, "category", failure.category);
+  payload(lines, "diagnostic", failure.diagnostic);
+  fact(lines, "cause", failure.causeClass);
+  payload(lines, "cause diagnostic", failure.causeDiagnostic);
   return lines;
 }

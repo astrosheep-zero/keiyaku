@@ -103,8 +103,8 @@ test("an ordinary non-retiring operation keeps its receipt, exit, and worktree",
   const delivered = await deliveredText(fixture);
   assert.equal(delivered.exit, 0, delivered.stderr);
   assert.equal(delivered.stderr, "");
-  assert.match(delivered.stdout, /^✓ delivered  kei\//mu);
-  assert.equal((delivered.stdout.match(/^✓ delivered /gmu) ?? []).length, 1, "one final receipt");
+  assert.match(delivered.stdout, /^deliver accepted  kei\//mu);
+  assert.equal((delivered.stdout.match(/^deliver accepted /gmu) ?? []).length, 1, "one final receipt");
   assert.equal(existsSync(fixture.worktree), true);
 
   const history = await runFixtureCli(fixture.cli, fixture.worktree, ["history", fixture.contract, "--id", "2"]);
@@ -127,9 +127,9 @@ test("a worktree-local compiled CLI reports its accepted self-retirement in text
   ]);
   assert.equal(reviewed.exit, 0, reviewed.stderr);
   assert.equal(reviewed.stderr, "");
-  assert.match(reviewed.stdout, /^✓ review satisfied  kei\//mu);
-  assert.equal((reviewed.stdout.match(/^✓ review satisfied /gmu) ?? []).length, 1, "one truthful final receipt");
-  assert.match(reviewed.stdout, /^✓ accepted$/mu);
+  assert.match(reviewed.stdout, /^review accepted  kei\/\S+ · satisfied$/mu);
+  assert.equal((reviewed.stdout.match(/^review accepted /gmu) ?? []).length, 1, "one truthful final receipt");
+  assert.match(reviewed.stdout, /^  placement  placed$/mu);
   assert.equal(existsSync(fixture.worktree), false, "terminal cleanup retired the executing worktree");
 
   const history = await runFixtureCli(repositoryCli, fixture.world, ["history", fixture.contract, "--id", "3"]);
@@ -183,7 +183,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [worktree, world, contract] = process.argv.slice(2);
+const [worktree, world, contract, output] = process.argv.slice(2);
 const source = (path) => pathToFileURL(join(worktree, "build/src", path)).href;
 // Every ability this child needs is acquired before mutable product work can retire the tree.
 const { parseArgv } = await import(source("cli/parse.js"));
@@ -224,7 +224,7 @@ process.stdout.write = (chunk, ...rest) => {
 };
 let exit;
 try {
-  exit = await runCliCommand(executable(["-C", world, "review", contract, "--satisfied", "--summary", "x", "--json"]));
+  exit = await runCliCommand(executable(["-C", world, "review", contract, "--satisfied", "--summary", "x", ...(output === "text" ? [] : ["--json"])]));
 } finally {
   process.stdout.write = nativeWrite;
 }
@@ -279,5 +279,24 @@ test("a known-admission failure after retirement keeps its receipt and classific
     ["deliver"],
   );
   assert.equal(body.outcome.admitted[0]!.candidate, body.outcome.candidate);
+  assert.equal(existsSync(fixture.worktree), false);
+});
+
+test("text failure after self-retirement retains the admitted candidate and native cause", async (context) => {
+  const fixture = selfRetirementFixture(context);
+  const harness = join(fixture.root, "failure-projection-text-harness.mjs");
+  writeFileSync(harness, FAILURE_PROJECTION_HARNESS);
+  const result = await runFixtureCli(harness, fixture.world, [
+    fixture.worktree, fixture.world, fixture.contract, "text",
+  ]);
+  assert.equal(result.exit, 0, result.stderr);
+  assert.match(result.stderr, /^\/exit 3$/mu);
+  assert.match(result.stderr, /^\/worktree retired$/mu);
+  assert.match(result.stdout, new RegExp(`^review failed  ${fixture.contract} · satisfied$`, "mu"));
+  assert.match(result.stdout, /^  admitted  deliver$/mu);
+  assert.match(result.stdout, /^  candidate  [a-f0-9]{40}$/mu);
+  assert.match(result.stdout, /^  integration result  [a-f0-9]{40}$/mu);
+  assert.match(result.stdout, /^  cause  TypeError$/mu);
+  assert.match(result.stdout, /representative failure after known admission/u);
   assert.equal(existsSync(fixture.worktree), false);
 });

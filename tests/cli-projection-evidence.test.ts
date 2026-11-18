@@ -16,14 +16,14 @@ import { namedValueLines } from "../src/cli/render/value.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import { renderContractCatalogue } from "../src/cli/render/catalog.js";
 import { gateRequirementFacts } from "../src/cli/render/contract-observation.js";
-import { unmetRequirementLines } from "../src/cli/render/receipt.js";
+import { requirementLines } from "../src/cli/render/receipt.js";
 import { modelOutputSchemas as mcpOutputSchemas } from "../src/library/model-tools.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { akumaObservationSchema } from "../src/akuma/selection-observation.js";
-import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
-import { renderBindDraftReceipt, renderRefusalFacts } from "../src/cli/render/refusal.js";
+import { renderBindDraftReceipt } from "../src/cli/render/refusal.js";
 import {
   changeId,
   contractId,
@@ -217,39 +217,54 @@ test("selected Contract status preserves every supplied requirement and workspac
   }
 });
 
-test("dirty refusal describes available capture without asserting a current unmerged index", () => {
-  const refusal = { kind: "dirty-workspace" as const, paths: ["file.txt"] };
-  const next = { verb: "deliver", input: { includeDirty: true } } as const;
-  const output = renderRefusalFacts({ ...refusal, option: { next, available: true } }, "  ", 120);
-  assert.deepEqual(output.slice(-3), [
-    "  option  keiyaku deliver --include-dirty · captures complete non-ignored worktree bytes",
-    "  capture index  private · real index unchanged, including any unmerged entries",
-    "  staging  not required for worktree capture",
-  ]);
-  assert.doesNotMatch(output.join("\n"), /index  unmerged entries remain/u);
-  const review = renderRefusalFacts({ kind: "dirty-submodules", paths: ["vendor"] }, "  ", 120);
-  assert.ok(review.includes("  reason  submodule changes cannot be captured for review"));
-  assert.ok(review.includes("    vendor"));
-  const blocked = renderRefusalFacts({ ...refusal, option: { next, available: false } }, "  ", 120);
-  assert.equal(blocked.at(-1), "  option  keiyaku deliver --include-dirty · unavailable with submodule changes");
-  assert.doesNotMatch(blocked.join("\n"), /captures complete/u);
+const recoveryContext = { columns: 120, color: false, recoveryCoordinates: { cwd: "/repo", repo: "../selected repo" } };
+
+test("dirty refusal names its native cause and the available capture call without tutorials", () => {
+  const contract = contractId("kei/dirty-refusal");
+  const output = renderVerb("deliver", { contract: "@dirty-refusal" }, { kind: "returned", value: {
+    kind: "refused", contractId: contract, reason: { kind: "dirty-workspace", paths: ["file.txt"] },
+  } }, recoveryContext);
+  assert.match(output, /^deliver refused {2}kei\/dirty-refusal$/mu);
+  assert.match(output, /^  reason {2}dirty workspace$/mu);
+  assert.match(output, /^  path {2}file\.txt$/mu);
+  assert.ok(output.split("\n").includes(
+    "  available  keiyaku -C /repo --repo '../selected repo' deliver kei/dirty-refusal --include-dirty",
+  ));
+  assert.doesNotMatch(output, /capture index|staging|unmerged entries remain|captures complete/u);
+  const review = renderVerb("review", { contract, verdict: "satisfied", summary: "review" },
+    { kind: "returned", value: {
+      kind: "refused", contractId: contract, reason: { kind: "dirty-submodules", paths: ["vendor"] },
+    } }, { columns: 120, color: false });
+  assert.match(review, /^  reason {2}dirty submodules$/mu);
+  assert.match(review, /^  path {2}vendor$/mu);
+  assert.doesNotMatch(review, /include-dirty|captures complete/u);
+  const blocked = renderVerb("deliver", { contract }, { kind: "returned", value: {
+    kind: "refused", contractId: contract,
+    reason: { kind: "dirty-workspace", paths: ["file.txt"], submodules: ["vendor"] },
+  } }, { columns: 120, color: false });
+  assert.match(blocked, /^  capture {2}unavailable with submodule changes$/mu);
+  assert.doesNotMatch(blocked, /captures complete|--include-dirty/u);
 });
 
 test("integration refusal keeps its reason distinct from the target coordinate", () => {
   const target = snapshotId("c".repeat(40));
-  const lines = renderRefusalFacts(
-    { kind: "integration-conflict", targetHead: target, conflictPaths: ["file.txt"] },
-    "  ",
-    120,
-  );
-  assert.deepEqual(lines, [
-    "  reason  integration conflict",
-    `  target  ${target}`,
-    "  conflicts",
-    "    file.txt",
-    "  option  materialize  keiyaku deliver --materialize-conflict --include-dirty",
-    "  option  deliver  keiyaku deliver --include-dirty",
+  const contract = contractId("kei/integration-refusal");
+  const text = renderVerb("deliver", { contract }, { kind: "returned", value: {
+    kind: "refused", contractId: contract,
+    reason: { kind: "integration-conflict", targetHead: target, conflictPaths: ["file.txt"] },
+  } }, recoveryContext);
+  assert.match(text, /^  reason {2}integration conflict$/mu);
+  assert.match(text, new RegExp(`^  target head {2}${target}$`, "mu"));
+  assert.match(text, /^  conflict {2}file\.txt$/mu);
+  assert.deepEqual(text.split("\n").filter((line) => line.startsWith("  available  ")), [
+    `  available  keiyaku -C /repo --repo '../selected repo' deliver ${contract} --materialize-conflict --include-dirty`,
   ]);
+  const preview = renderVerb("deliver", { contract, dryRun: true }, { kind: "returned", value: {
+    kind: "blocked", contractId: contract,
+    reason: { kind: "integration-conflict", targetHead: target, conflictPaths: ["file.txt"] },
+  } }, recoveryContext);
+  assert.match(preview, /^  reason {2}integration conflict$/mu);
+  assert.doesNotMatch(preview, /^  available  /mu);
 });
 
 test("bind draft facts preserve optional evidence without a separate text dialect", () => {
@@ -418,9 +433,13 @@ test("stale snapshot evidence keeps native identities across observations, recei
     gate: "verified", satisfied: false, current, requirements: [{ requirement, index: 2, current }],
   }), ["verification 2 · stale · snapshot changed abcdef01 -> abcdef02"]);
   const problem = { gate: "verified", requirement, state: "stale" as const, reason };
-  const receipt = unmetRequirementLines([problem], 400).join("\n");
-  assert.ok(receipt.includes(`verification ${requirement}`), "unmapped historical requirements keep a stable coordinate");
-  assert.ok(receipt.includes("stale  snapshot changed abcdef01 -> abcdef02"));
+  const receipt = requirementLines([problem]).join("\n");
+  assert.ok(receipt.includes(`requirement  verification:sha256:historical-check`), "unmapped historical requirements keep a stable coordinate");
+  assert.match(receipt, /^  gate {2}verified$/mu);
+  assert.match(receipt, /^  state {2}stale$/mu);
+  assert.match(receipt, /^  stale reason {2}snapshot changed$/mu);
+  assert.ok(receipt.includes(`previous snapshot  ${reason.previousSnapshot}`));
+  assert.ok(receipt.includes(`current snapshot  ${reason.currentSnapshot}`));
   const value = {
     kind: "accepted" as const, contractId: contractId("kei/snapshot-reason"),
     snapshot: reason.previousSnapshot, checks: [],
@@ -441,17 +460,18 @@ test("audit separates its observation outcome from complete candidate coordinate
     contentId: changeId("d".repeat(40)),
     scope: { filesChanged: 1, insertions: 2, deletions: 3, paths: [path] },
   });
-  const output = renderDeliveryPreview(auditOutcome, { columns: 80, color: false });
+  const output = renderVerb("deliver", { contract: "kei/audit", dryRun: true },
+    { kind: "returned", value: auditOutcome }, { columns: 80, color: false });
   assert.equal(
     output,
     [
-      "✓ deliver --dry-run  kei/audit",
-      `  candidate  prepared  ${"a".repeat(7)}`,
-      `  integration result  ${"c".repeat(7)}`,
-      `  content identity  ${"d".repeat(7)}`,
-      "  1 file changed, 2 insertions(+), 3 deletions(-)",
-      `  ${path}`,
+      "deliver --dry-run accepted  kei/audit",
+      `  candidate  ${auditOutcome.candidate}`,
+      `  integration result  ${auditOutcome.integration}`,
+      `  content identity  ${auditOutcome.contentId}`,
+      "  scope  1 file changed, 2 insertions(+), 3 deletions(-)",
+      `  path  ${path}`,
     ].join("\n"),
   );
-  assert.doesNotMatch(output, /private-head|^[{[]|^✓ (?:candidate|verification|target)|next|then|please|key=/mu);
+  assert.doesNotMatch(output, /private-head|^[{[]|next|then|please|key=/mu);
 });

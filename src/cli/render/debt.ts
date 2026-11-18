@@ -15,7 +15,7 @@ import type {
 import type { DebtKanshiRow } from "../../kanshi/report.js";
 import { associationFact } from "./kanshi-akuma.js";
 import { debtMark } from "./marks.js";
-import { outcomeLines, receiptRow, refusalLines } from "./receipt.js";
+import { renderStructuredRefusal } from "./refusal.js";
 import {
   DEFAULT_CLI_COLUMNS,
   displayColumns,
@@ -63,14 +63,14 @@ function projectRefusal(refusal: DebtRefusal): RefusalProjection {
   return { diagnostic, facts: [`detail  ${refusal.diagnostic}`] };
 }
 
-function renderFailure(verb: string, result: DebtFailure, columns: number, id?: string): string {
-  if (result.kind === "retry") return [...outcomeLines("?", verb, "retry", id, columns), result.reason].join("\n");
+function renderFailure(verb: string, result: DebtFailure, id?: string): string {
+  if (result.kind === "retry")
+    return [`? ${verb} retry${id === undefined ? "" : `  ${safeText(id)}`}`, result.reason].join("\n");
   const facts = projectRefusal(result);
-  return refusalLines(
-    verb,
-    [...(id === undefined ? [] : [`debt  ${id}`]), `reason  ${facts.diagnostic}`, ...(facts.facts ?? [])],
-    columns,
-  ).join("\n");
+  return renderStructuredRefusal(verb, facts.diagnostic, [
+    ...(id === undefined ? [] : [`debt  ${id}`]),
+    ...(facts.facts ?? []),
+  ]);
 }
 
 /** A cleanup problem cannot reverse the confirmed write. */
@@ -133,7 +133,7 @@ export function renderDebtShow(
     .map((item) =>
       item.kind === "found"
         ? renderShowDetail(item.id, item, context.columns)
-        : refusalLines("show", ["reason  debt missing", `debt  ${item.id}`], context.columns).join("\n"),
+        : renderStructuredRefusal("show", "debt missing", [`debt  ${item.id}`]),
     )
     .join("\n\n");
 }
@@ -159,9 +159,8 @@ export function renderDebtUpdate(
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
   const columns = context.columns;
-  if (result.kind !== "accepted") return renderFailure("update", result, columns, id);
-  const lines: string[] = [];
-  receiptRow(lines, "✓", PAST_VERBS.update!, id === undefined ? [] : [{ text: id, opaque: true }], columns);
+  if (result.kind !== "accepted") return renderFailure("update", result, id);
+  const lines = [`✓ ${PAST_VERBS.update!}${id === undefined ? "" : `  ${safeText(id)}`}`];
   for (const field of result.changes ?? []) lines.push(`  ${field}  changed`);
   if (result.warning !== undefined) lines.push(...warningLines(result.warning, columns));
   return lines.join("\n");
@@ -173,9 +172,8 @@ export function renderDebtMutation(
   result: DebtMutationResult,
   context: TextRenderContext = DEFAULT_CONTEXT,
 ): string {
-  if (result.kind !== "accepted") return renderFailure(verb, result, context.columns);
-  const lines: string[] = [];
-  receiptRow(lines, "✓", PAST_VERBS[verb] ?? verb, [{ text: result.id, opaque: true }], context.columns);
+  if (result.kind !== "accepted") return renderFailure(verb, result);
+  const lines = [`✓ ${PAST_VERBS[verb] ?? verb}  ${safeText(result.id)}`];
   if (result.warning !== undefined) lines.push(...warningLines(result.warning, context.columns));
   return lines.join("\n");
 }

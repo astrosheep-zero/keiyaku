@@ -21,64 +21,52 @@ distinct from a failure to complete the operation.
 The CLI owns its numeric exit projection; changing either the classification or
 its exit mapping is a product change, and ordinary receipt text never carries
 the numeric map. Final text rendering is shared, pure projection of native
-answers and explicitly supplied presentation context. Known recovery calls are
-transient native facts, independent of caller syntax. Shared rendering formats
-each call for the caller's surface; native diagnostics remain surface-neutral.
+answers and supplied presentation context. Native recovery facts and diagnostics
+are syntax-neutral. Render a recovery call only when the surface can preserve
+the repository context, addressed subject, and intent; otherwise show the evidence alone.
 
-Substantive refusals use one text grammar: a denied-verdict title naming the
-verb, a labeled reason with machine kinds rendered as words, and
-labeled entity/state facts where present. Usage refusals retain their compact
-usage grammar. Operation and recovery handles do not prescribe a working
-directory; any workspace coordinate is a separate fact for the caller to use.
+Contract-family receipts lead with the requested operation, the invocation owner's
+six-way disposition, and the complete addressed identity when known. Review keeps
+the supplied verdict; preview names its dry-run intent and conflict handoff names
+its distinct conclusion. Leading admission and final placement remain independent:
+a failed invocation can still retain admitted work and landed movement. Rendering
+never judges eligibility, currentness, severity, or completion again.
 
-Text is the primary readable projection and JSON is the complete typed
-projection of the same result. Rendering retains the meaningful distinctions
-between success, substantive refusal, retryable conflict, absent authority,
-and operational failure. Text labels name a candidate and its integration result,
-and a content identity is distinguished from a commit by its kind name alone —
-the teaching that a content identity is never Git-addressable lives in leaf
-help, not on receipt rows. Journal blobs, entry ids, and record-field
-enumeration stay out of ordinary text. Historical attestation subject text
-presents the recorded subject as its labeled semantic facts, not its stored
-encoding; an unrecognized representation stays literal terminal-safe evidence
-rather than gaining an invented reading. Ordinary JSON receipts likewise omit
-raw journal records and internal custody; Contract history retains the same
-semantic record in page and exact JSON without duplicating storage envelopes.
-Verification receipts name the captured snapshot once and each check's verdict or
-stop, declaration position, and recording conclusion compactly. Full identities remain
-in JSON; unmapped requirements keep stable coordinates. Reuse, unrecorded execution,
-and admission stops stay distinct. Delivery and review consume standing evidence
-without claiming a producer run. When a
-verified snapshot lands, the landing names that same identity and its destination
-movement. Successful internal retirement is not an ordinary receipt inventory;
-failed removal retains its diagnostic path.
-A landed placement is never vetoed by uncommitted checkout state: the
-receipt names each target checkout this command's own follow could not carry as
-one `checkout behind` lag row with its path and target, leaving earlier
-retention to the typed result.
+One sparse composition selects workspace and target, semantic term changes,
+chapter, candidate and integration and content identities, checks, placement,
+attempted dependents, overlap observations, issues, and recovery coordinates in
+that order, omitting absent collections. Contract-family identities and paths stay
+complete regardless of terminal width. Candidate commits, integration results,
+content identities, and captured snapshots retain distinct labels. Placement
+names its destination and before/after movement before its native conclusion;
+an unplaced result never claims Contract acceptance or invents an awaiting event.
+Requirement evidence retains the gate, stable identity and supplied current
+position, native missing, stale or unsatisfied state, stale reason, and summary.
+Prerequisites retain identity and native state. Checks retain declaration
+position, verdict or execution stop, and admission conclusion. Execution without
+recording, admitted testimony, reused testimony, and stopped recording remain
+distinct; delivery and review never imply a check ran.
 
-A completed placement names a Contract destination by its complete identity,
-not by its private Git reference or another branch, and reads like Git movement
-identically for review, delivery, and verify: the title states the outcome and
-Contract, the movement names its reference, and the final lifecycle state reads
-`accepted`. Receipt Git identities are abbreviated in text by the shared
-collision-aware display rule and remain full in JSON; absent content identity
-has no row. Amend receipts use a verb-past title, name gate and prerequisite
-changes independently, reserve an unchanged-terms fact for a genuinely unchanged
-amendment, and summarize actually changed sections instead of printing a full
-terms diff. Debt mutation receipts use verb-past titles and field-level changes, never
-projection-file diffs; Debt show timestamps omit millisecond precision in text
-and retain full precision in JSON. A placement receipt has three registers:
-landed states the reference movement and closes on `accepted`; pending states
-the target's non-movement and closes on `⧗ awaiting <events>` (omitted when
-every unmet requirement already holds a recorded verdict, which alarms on its
-own row); and failed keeps its stop rows. Placement names its final integration
-after any necessary reintegration. Requirement states are met or unmet
-while recorded verdicts are satisfied or unsatisfied. Native stale reasons retain
-abbreviated before/after identities, never an inferred cause or failed execution.
-A dependent stop on unmet
-requirements speaks the same pending vocabulary. Internal refusal kinds never
-print on receipts.
+Stops and issues share native kinds as words and present labeled coordinates,
+reasons and bounded diagnostics. Every required issue and each optional issue
+carrying a path, recovery coordinate or diagnostic remains visible across ordinary,
+preview, terminal and exceptional receipts. Optional residue never changes the
+invocation disposition. Evidence stays in producer order, including repeats;
+rendering adds no cross-evidence suppression or deduplication. Reconciliation
+and exceptional receipts share physical effect presentation. Known admissions,
+attempted dependent outcomes, reference and worktree movement, retained scratch,
+recovery snapshots and underlying causes survive trailing errors or cancellation.
+Concrete recovery calls and bind draft preservation remain visible without
+capture or staging tutorials, which belong to leaf help.
+
+Text is the primary readable projection and JSON remains the complete typed
+projection of the same result. Journal blobs, entry ids, and storage envelopes
+stay out of ordinary text. Historical attestation subjects retain their labeled
+semantic facts; unrecognized representations remain literal terminal-safe
+evidence. Contract history retains the same semantic record in page and exact
+JSON without duplicating storage envelopes. Debt mutation receipts use
+verb-past titles and field-level changes; Debt show timestamps omit millisecond
+precision in text and retain full precision in JSON.
 
 A birth or admission receipt takes the admitted fact's native grammar and stops
 at that fact: a timeline admission uses a row, and Git movement uses a reference
@@ -90,8 +78,8 @@ claiming a world-wide transaction.
 ## Shared rendering
 
 Domain-state marks and refusal receipt assembly each have one definition site.
-State surfaces show requirement fill against the current candidate; event
-surfaces use bare verdict marks. A settled successful action spends no mark;
+State surfaces report current requirement evidence; historical testimony uses
+bare verdict marks. A settled successful action spends no mark;
 failure, unresolved activity, and witnessed motion remain distinct. Only a
 redrawable live frame may assert continuing liveness. Voice and input carry
 their own marks. History never asserts current motion.
@@ -103,8 +91,9 @@ shared renderer: it distinguishes presence, temporal waiting, structural
 waiting on a dependency, affirmed and denied verdicts, attention, and the
 unknown — waiting is not absence, and an unsatisfied gate is not generic
 attention. Facts are labeled human facts, joined with one separator; key-value
-notation, banners, and bracket state alphabets are not text vocabulary. Git
-identities are short in text and full in JSON. Paths stay absolute and
+notation, banners, and bracket state alphabets are not text vocabulary. Outside
+the Contract result family, Git identities use the shared short display in text
+and remain full in JSON. Paths stay absolute and
 copyable where they are the answer, and stay out of board and catalogue rows
 where they are not. An empty standalone catalogue names its surface once.
 Diagnostic-free empty World sections omit their header; a wholly empty World retains its shared
@@ -163,11 +152,11 @@ summary with its retained coordinate and visible clipping; renderers never
 reconstruct tool state or expand omitted activity. Native history
 keeps observed result diagnostics, expanding a cut inline diagnostic into a
 bounded continuation block. Diagnostics that fit are shown whole; longer
-captures name their omission. Gate evidence stays beside each gate and
-requirement's identity. Status and catalogue rows state it in words; history,
-preview, and receipts retain their compact marks. JSON retains native evidence.
-Current declarations may be labeled by current one-based position while removed
-historical requirements retain stable identity. A raw
+captures name their omission. Status and catalogue rows state gate evidence in
+words beside the gate and requirement identity. Contract receipts and previews
+retain the native requirement evidence described above; JSON retains native
+values. Current declarations may be labeled by current one-based position while
+removed historical requirements retain stable identity. A raw
 caller answer remains raw when that operation promises answer bytes and has no
 meaningful failure, control, or recovery evidence. Otherwise the shared receipt
 presents the answer together with confirmed admission, association, wake,
@@ -287,10 +276,9 @@ outcome and timing facts. Replacing or closing an unfinished phase flushes its
 captured output without inventing a finish. Closing erases the live line and
 retires its clock, never leaving a synthesized verification summary. Off a
 terminal phase starts, stage transitions, and admitted facts produce no
-progress output. Admitted facts are named
-exactly once, in the receipt: a failure receipt names the facts admitted before
-the failure and then names the failure in outcome vocabulary with its reason,
-and internal phase names never appear in receipt text. A stop on a retryable
+progress output. The final receipt retains facts admitted before a failure
+alongside the invocation's disposition and cause, without internal phase names.
+A stop on a retryable
 conflict names its retry class in that same outcome vocabulary, never a
 terminal or substantive mark for a stop that concluded nothing. For delivery,
 review, verify, and delivery preview, witnessed progress lives on the
@@ -298,7 +286,7 @@ progress channel while one complete final result remains on stdout; on a
 terminal the only liveness evidence is a ticking status line, and a quiet
 interval never claims that a command is hung or alive. Terminal cancellation
 asks the owned operation to stop and waits for its truthful final receipt
-rather than replacing it with an early exit. Verification text names declaration
+rather than replacing it with an early exit. Verification progress names declaration
 position and useful phase, timing, hook, or failure facts, not repeated opaque
 identities. Native observations retain complete identities without becoming a
 second result model. Its final receipt preserves partial admissions, retained
@@ -338,13 +326,10 @@ Unobserved peers remain unknown, and running peers remain running.
 Single-target aliases supplement identity. Summary text is bounded, never identity
 or the full outcome payload.
 
-Region overlap in bind and amend receipts remains supporting evidence, not a
-warning or a separate report; it groups by related Contract and renders
-identity, containment, and partial intersection relations without asserting a
-code conflict. When an exceptional Contract execution already confirmed
-admissions, the CLI reports the failure together with those receipts instead
-of projecting a usage error or a no-effect refusal. Text and JSON preserve the
-same confirmed admission, consequential movement, and failure boundary without
-copying entire journal records. Resource issues keep enough ownership coordinates
-to distinguish problems from different candidates or dependents; successful
-internal mechanics and no-op inventories are not ordinary receipt content.
+Region overlap in bind and amend receipts is advisory evidence in native order:
+each supplied relation keeps the related Contract and both patterns. An absent
+relation means identical for equal patterns and intersection otherwise. Observation
+unavailability remains distinct from known absence; neither asserts a code conflict.
+Exceptional Contract execution preserves confirmed admissions, consequential
+movement, resource ownership coordinates and the native failure boundary without
+rereading authority or copying journal records.

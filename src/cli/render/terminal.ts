@@ -1,4 +1,5 @@
 import type { NextCall } from "../../errors.js";
+import type { VerbInput } from "../../library/keiyaku-verbs.js";
 
 export const DEFAULT_CLI_COLUMNS = 100;
 
@@ -6,12 +7,7 @@ export function emptyCatalogue(surface: string): string {
   return `${surface}  none`;
 }
 
-export function orderRefusalFacts(facts: readonly string[]): readonly string[] {
-  return [
-    ...facts.filter((fact) => !fact.startsWith("detail  ")),
-    ...facts.filter((fact) => fact.startsWith("detail  ")),
-  ];
-}
+export type RecoveryCoordinates = Readonly<{ cwd: string; repo?: string }>;
 
 export type TextRenderContext = Readonly<{
   columns: number;
@@ -19,20 +15,45 @@ export type TextRenderContext = Readonly<{
   actor?: string;
   now?: number;
   surface?: "cli" | "mcp";
+  recoveryCoordinates?: RecoveryCoordinates;
 }>;
 
-export function formatNextCall(call: NextCall, surface: TextRenderContext["surface"] = "cli"): string {
-  if (surface === "mcp") return `${call.verb} ${JSON.stringify(call.input)}`;
-  switch (call.verb) {
-    case "ls":
-      return `keiyaku ls ${call.input.selector}`;
-    case "deliver":
-      return `keiyaku deliver${call.input.materializeConflict === true ? " --materialize-conflict" : ""} --include-dirty`;
-    case "verify":
-      return "keiyaku verify --include-dirty";
-    default:
-      throw new TypeError("Unsupported recovery call");
+export type RecoveryCall =
+  | Extract<NextCall, { verb: "ls" }>
+  | Readonly<{ verb: "deliver"; input: VerbInput<"deliver"> }>
+  | Readonly<{ verb: "verify"; input: VerbInput<"verify"> }>;
+
+function shellWord(value: string): string {
+  return /^[a-zA-Z0-9_./:@-]+$/u.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
+}
+
+export function formatNextCall(
+  call: RecoveryCall,
+  { surface, recoveryCoordinates }: Pick<TextRenderContext, "surface" | "recoveryCoordinates"> = {},
+): string | undefined {
+  if (call.verb === "ls") {
+    return surface === "mcp" ? `${call.verb} ${JSON.stringify(call.input)}` : `keiyaku ls ${call.input.selector}`;
   }
+  const { input } = call;
+  if (surface === "mcp" || recoveryCoordinates === undefined || input.contract === undefined) return undefined;
+  const { cwd, repo } = recoveryCoordinates;
+  const words = ["keiyaku", "-C", shellWord(cwd)];
+  if (repo !== undefined) words.push("--repo", shellWord(repo));
+  words.push(call.verb, shellWord(input.contract));
+  if (call.verb === "deliver") {
+    const { dryRun, showDiff, materializeConflict, overwrite, message } = call.input;
+    if (dryRun === true) words.push("--dry-run");
+    if (showDiff === true) words.push("--show-diff");
+    if (materializeConflict === true) words.push("--materialize-conflict");
+    if (overwrite === true) words.push("--overwrite");
+    if (message !== undefined) {
+      if (message === "-" || message.startsWith("--") || message.trim() === "") return undefined;
+      words.push("--message", shellWord(message));
+    }
+  } else if (call.input.index !== undefined) words.push("--index", String(call.input.index));
+  if (input.includeDirty === true) words.push("--include-dirty");
+  const text = words.join(" ");
+  return safeText(text) === text ? text : undefined;
 }
 
 type GitShortStat = Readonly<{

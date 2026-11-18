@@ -1,508 +1,297 @@
-import type {
-  AbandonOutcome,
-  AmendOutcome,
-  ArcOutcome,
-  BindOutcome as NativeBindOutcome,
-  DeliverOutcome,
-  ReviewOutcome,
-  VerifyOutcome,
-  ContractId,
-  InvocationIssue,
-  RegionOverlap,
-} from "../../index.js";
+import type { PartialOutcomeEnvelope } from "../../index.js";
+import type { VerbCompletion, VerbDisposition, VerbInput, VerbOutput } from "../../library/keiyaku-verbs.js";
+import { projectFailure } from "../../library/outcome.js";
+import type { RepoReconcileReport } from "../../library/reconcile.js";
+import { KeiyakuArcDocumentError } from "../../library/keiyaku-coordinates.js";
 import {
-  deliveryIdentityRows,
-  gatesAwaitLines,
-  targetMovementRows,
-  receiptPayload,
-  receiptRow,
-  recoverySnapshotLines,
-  stopLines,
-  titleLines,
-  verificationCheckLines,
-  outcomeLines,
+  admissionLines,
+  checkLines,
+  effectLines,
+  evidenceLines,
+  fact,
+  failureLines,
+  issueLines,
+  payload,
+  placementLines,
+  prerequisiteLines,
+  recoveryLines,
+  requirementLines,
 } from "./receipt.js";
-import { abbreviateGitIds, displayGitId } from "./contract-observation.js";
-import {
-  DEFAULT_CLI_COLUMNS,
-  kindWords,
-  quotedText,
-  renderOpaqueBlock,
-  safeText,
-  tone,
-  type TextRenderContext,
-} from "./terminal.js";
+import { callLines, refusalRecoveryLines } from "./refusal.js";
+import { gitShortStat, kindWords, safeText, type TextRenderContext } from "./terminal.js";
 
-type BindOutcome =
-  | Exclude<NativeBindOutcome, { kind: "accepted" }>
-  | Omit<Extract<NativeBindOutcome, { kind: "accepted" }>, "kei">;
+export type ContractResultName = "bind" | "amend" | "arc" | "abandon" | "deliver" | "review" | "verify" | "reconcile";
+type Answer = VerbOutput<ContractResultName>;
+type PartialContract = Extract<PartialOutcomeEnvelope, { kind: "contract" }>;
+type PreparedPreview = Extract<VerbOutput<"deliver">, { kind: "ready" }>;
+type ContractEvidence = Answer | PartialContract | NonNullable<PartialContract["preview"]>;
 
-type ContractAnswers = {
-  bind: BindOutcome;
-  amend: AmendOutcome;
-  arc: ArcOutcome;
-  abandon: AbandonOutcome;
-  deliver: DeliverOutcome;
-  review: ReviewOutcome;
-  verify: VerifyOutcome;
-};
-export type ContractMutationName = "bind" | "amend" | "deliver" | "verify" | "review" | "arc" | "abandon";
-export type ContractOutcome = ContractAnswers[ContractMutationName];
-export type AcceptedContractOutcome = Extract<ContractOutcome, { kind: "accepted" }>;
-type AcceptedOf<K extends ContractMutationName> = Extract<ContractAnswers[K], { kind: "accepted" }>;
-type PresentationInput = Readonly<{ verdict?: "satisfied" | "unsatisfied"; note?: string; message?: string }>;
-type ContractReceipt = Readonly<{ contractId?: ContractId; issues?: readonly InvocationIssue[] }>;
-
-function checkoutBehindRows(path: string, target: string, columns: number): readonly string[] {
+function previewTargetLines(target: PreparedPreview["target"]): string[] {
+  if (target === undefined) return [];
   const lines: string[] = [];
-  receiptRow(
-    lines,
-    "!",
-    "lag",
-    [{ text: "checkout behind" }, { text: path, opaque: true }, { text: `· ${target}`, opaque: true }],
-    columns,
-  );
-  return lines;
-}
-
-function cleanupResourceRows(issue: InvocationIssue, columns: number): readonly string[] {
-  const lines: string[] = [];
-  if ("snapshot" in issue && issue.snapshot !== undefined)
-    receiptRow(lines, " ", "cleanup snapshot", [{ text: issue.snapshot, opaque: true }], columns);
-  if ("requirement" in issue && issue.requirement !== undefined)
-    receiptRow(lines, " ", "cleanup requirement", [{ text: issue.requirement, opaque: true }], columns);
-  if ("index" in issue && issue.index !== undefined)
-    receiptRow(lines, " ", "cleanup check", [{ text: String(issue.index) }], columns);
-  return lines;
-}
-
-type RetainedIssue = Extract<
-  InvocationIssue,
-  {
-    kind:
-      | "worktree-retained"
-      | "worktree-follow-retained"
-      | "unsealed-bytes"
-      | "target-checkout-retained"
-      | "target-workspace-retained"
-      | "worktree-hook-failed"
-      | "reconcile-failed"
-      | "contract-file-failed";
-  }
->;
-
-function retainedIssueRows(issue: RetainedIssue, columns: number): readonly string[] {
-  const lines: string[] = [];
-  switch (issue.kind) {
-    case "worktree-retained":
-      receiptRow(lines, "!", "lag", [{ text: "worktree retained" }, { text: issue.path, opaque: true }], columns);
-      if (issue.diagnostic !== undefined) receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-    case "worktree-follow-retained":
-      receiptRow(
-        lines,
-        " ",
-        "worktree follow kept at",
-        [{ text: issue.path, opaque: true }, { text: `· ${kindWords(issue.reason)}` }],
-        columns,
-      );
-      return lines;
-    case "unsealed-bytes":
-      receiptRow(lines, " ", "unsealed bytes kept at", [{ text: issue.path, opaque: true }], columns);
-      return lines;
-    case "target-checkout-retained":
-      lines.push(...checkoutBehindRows(issue.path, issue.target, columns));
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-    case "target-workspace-retained":
-      receiptRow(
-        lines,
-        "!",
-        "target workspace unavailable",
-        [{ text: issue.targetContractId, opaque: true }, { text: kindWords(issue.reason) }],
-        columns,
-      );
-      return lines;
-    case "worktree-hook-failed":
-      receiptRow(
-        lines,
-        "!",
-        "lag",
-        [{ text: `worktree-hook-failed ${issue.phase} ${issue.path} name ${issue.name}`, opaque: true }],
-        columns,
-      );
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-    case "reconcile-failed":
-      receiptRow(lines, "!", "lag", [{ text: "reconcile-failed", opaque: true }], columns);
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-    case "contract-file-failed":
-      receiptRow(lines, "!", "lag", [{ text: `contract-file-failed ${issue.path}`, opaque: true }], columns);
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-  }
-}
-
-type ResidualIssue = Extract<
-  InvocationIssue,
-  {
-    kind: "diagnostic" | "execution-stopped" | "settlement-failed";
-  }
->;
-
-function residualIssueRows(issue: ResidualIssue, columns: number): readonly string[] {
-  const lines: string[] = [];
-  switch (issue.kind) {
-    case "diagnostic":
-      lines.push(...cleanupResourceRows(issue, columns));
-      receiptRow(
-        lines,
-        issue.severity === "required" ? "!" : " ",
-        issue.severity === "required" ? "stopped" : "residue",
-        [
-          ...(issue.name === undefined ? [] : [{ text: `name ${quotedText(issue.name)}` }]),
-          ...(issue.path === undefined ? [] : [{ text: issue.path, opaque: true }]),
-        ],
-        columns,
-      );
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-    case "execution-stopped":
-      receiptRow(
-        lines,
-        "!",
-        "execution",
-        [{ text: issue.reason }, ...(issue.contractId === undefined ? [] : [{ text: issue.contractId, opaque: true }])],
-        columns,
-      );
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-    case "settlement-failed":
-      receiptRow(
-        lines,
-        "!",
-        "settlement",
-        issue.debtId === undefined ? [] : [{ text: issue.debtId, opaque: true }],
-        columns,
-      );
-      receiptPayload(lines, "reason", issue.diagnostic);
-      return lines;
-  }
-}
-
-function issueRows(issue: InvocationIssue, columns: number): readonly string[] {
-  switch (issue.kind) {
-    case "worktree-retained":
-    case "worktree-follow-retained":
-    case "unsealed-bytes":
-    case "target-checkout-retained":
-    case "target-workspace-retained":
-    case "worktree-hook-failed":
-    case "reconcile-failed":
-    case "contract-file-failed":
-      return retainedIssueRows(issue, columns);
-    default:
-      return residualIssueRows(issue, columns);
-  }
-}
-
-type IssuePresentation = Readonly<{ mode?: "receipt" | "terminal" | "exception"; follow?: boolean }>;
-
-/** Successful retention stays typed-only unless the operation is terminal or removal failed. */
-function issueIsPresented(issue: InvocationIssue, presentation: IssuePresentation): boolean {
-  const mode = presentation.mode ?? "exception";
-  if (mode === "exception") return true;
-  if (issue.kind === "worktree-follow-retained" || issue.kind === "unsealed-bytes") return false;
-  if (issue.kind === "target-checkout-retained") return presentation.follow === true;
-  if (issue.kind === "worktree-retained") return mode === "terminal" || issue.diagnostic !== undefined;
-  return true;
-}
-
-/** Flat issues inherit the primary owner; a distinct owner is named once before its issue. */
-export function contractIssueLines(
-  result: ContractReceipt,
-  columns: number,
-  presentation: IssuePresentation = {},
-): readonly string[] {
-  const lines: string[] = [];
-  for (const issue of result.issues ?? []) {
-    if (!issueIsPresented(issue, presentation)) continue;
-    if (issue.contractId !== undefined && issue.contractId !== result.contractId)
-      receiptRow(lines, "!", "issue owner", [{ text: issue.contractId, opaque: true }], columns);
-    lines.push(...issueRows(issue, columns));
-  }
-  return lines;
-}
-
-type OverlapPattern = RegionOverlap["patterns"][number];
-function groupPatterns(patterns: readonly OverlapPattern[]) {
-  const identical = new Set<string>();
-  const contained = new Map<string, Set<string>>();
-  const intersections = new Map<string, OverlapPattern>();
-  for (const pattern of patterns) {
-    if (pattern.relation === undefined && pattern.mine === pattern.theirs) identical.add(pattern.mine);
-    else if (pattern.relation === "mine-within-theirs" || pattern.relation === "theirs-within-mine") {
-      const container = pattern.relation === "mine-within-theirs" ? pattern.theirs : pattern.mine;
-      const leaf = pattern.relation === "mine-within-theirs" ? pattern.mine : pattern.theirs;
-      const leaves = contained.get(container) ?? new Set<string>();
-      leaves.add(leaf);
-      contained.set(container, leaves);
-    } else intersections.set(`${pattern.mine}\u0000${pattern.theirs}`, pattern);
-  }
-  return { identical, contained, intersections };
-}
-
-function overlapRows(overlaps: readonly RegionOverlap[], color: boolean): readonly string[] {
-  const groups = new Map<string, OverlapPattern[]>();
-  for (const overlap of overlaps)
-    groups.set(overlap.contractId, [...(groups.get(overlap.contractId) ?? []), ...overlap.patterns]);
-  if (groups.size === 0) return [];
-  const lines = [""];
-  let index = 0;
-  for (const [contract, patterns] of groups) {
-    if (index++ > 0) lines.push("");
-    const identity = safeText(contract);
-    lines.push(`  overlap  ${color ? `\u001b[1m${identity}\u001b[0m` : identity}`);
-    const { identical, contained, intersections } = groupPatterns(patterns);
-    const relation = (symbol: string) => tone(symbol, "dim", color);
-    for (const pattern of [...identical].slice(0, 6)) lines.push(`    ${relation("≡")}  ${safeText(pattern)}`);
-    if (identical.size > 6) lines.push(`    ${relation("≡")}  … (${identical.size - 6} more)`);
-    for (const [container, leaves] of contained) {
-      for (const leaf of [...leaves].slice(0, 6))
-        lines.push(`    ${safeText(leaf)}  ${relation("⊂")}  ${safeText(container)}`);
-      if (leaves.size > 6) lines.push(`    … (${leaves.size - 6} more)  ${relation("⊂")}  ${safeText(container)}`);
+  fact(lines, "target", target.kind);
+  if (target.kind === "placeable") {
+    fact(lines, "reference", target.ref);
+    fact(lines, "head", target.head);
+    fact(lines, "behind", target.behind);
+    for (const checkout of target.checkouts ?? []) {
+      fact(lines, "checkout cannot follow", checkout.path);
+      payload(lines, "diagnostic", checkout.diagnostic);
     }
-    for (const { mine, theirs } of intersections.values())
-      lines.push(`    ${relation("∩")}  ${safeText(mine)} · ${safeText(theirs)}`);
+  } else if (target.kind === "moved") {
+    fact(lines, "reference", target.ref);
+    fact(lines, "expected", target.expected);
+    fact(lines, "observed", target.observed);
+  } else if (target.kind === "failed") payload(lines, "diagnostic", target.diagnostic);
+  else lines.push(...evidenceLines(target.reason));
+  return lines;
+}
+
+function workspaceLines(value: ContractEvidence): string[] {
+  const lines: string[] = [];
+  if ("worktreePath" in value) fact(lines, "workspace", value.worktreePath);
+  if ("target" in value) {
+    if (typeof value.target === "object") lines.push(...previewTargetLines(value.target));
+    else fact(lines, "target", value.target);
+  }
+  if ("targetHead" in value) fact(lines, "target head", value.targetHead);
+  return lines;
+}
+
+function termLines(value: ContractEvidence, operation: ContractResultName): string[] {
+  const lines: string[] = [];
+  if ("changedSections" in value) {
+    for (const section of value.changedSections ?? []) fact(lines, "changed section", section);
+  }
+  if ("gatesChanged" in value && value.gatesChanged) fact(lines, "gates", "changed");
+  if ("afterChanged" in value && value.afterChanged) fact(lines, "after", "changed");
+  if (operation === "amend" && value.kind === "accepted") {
+    const changed =
+      "changedSections" in value || "gatesChanged" in value || "afterChanged" in value || "target" in value;
+    if (changed) fact(lines, "admitted", operation);
+    else fact(lines, "terms", "unchanged");
   }
   return lines;
 }
 
-function deviations(
-  result: Readonly<{ overlaps?: readonly RegionOverlap[]; overlapError?: string }>,
-  columns: number,
-  color: boolean,
-): readonly string[] {
+function identityLines(value: ContractEvidence): string[] {
   const lines: string[] = [];
-  if (result.overlaps !== undefined) lines.push(...overlapRows(result.overlaps, color));
-  if (result.overlapError !== undefined) {
-    receiptRow(lines, "!", "overlap", [{ text: "unavailable" }], columns);
-    receiptPayload(lines, "reason", result.overlapError);
+  if ("chapter" in value) fact(lines, "chapter", value.chapter);
+  if ("candidate" in value) fact(lines, "candidate", value.candidate);
+  if ("integration" in value) fact(lines, "integration result", value.integration);
+  if ("contentId" in value) fact(lines, "content identity", value.contentId);
+  if ("previousContentId" in value) fact(lines, "previous content identity", value.previousContentId);
+  if ("snapshot" in value) fact(lines, "snapshot", value.snapshot);
+  if ("admission" in value) fact(lines, "admission", value.admission);
+  return lines;
+}
+
+function leadingLines(
+  value: ContractEvidence,
+  operation: ContractResultName,
+  input: VerbInput<ContractResultName>,
+): string[] {
+  const lines: string[] = [];
+  if (value.kind === "accepted" && operation !== "verify" && operation !== "amend" && !("admission" in value))
+    fact(lines, "admitted", operation);
+  if (operation === "deliver" && value.kind === "accepted" && !("admission" in value) && "message" in input)
+    payload(lines, "note", input.message);
+  if (operation === "abandon" && "note" in input) payload(lines, "note", input.note);
+  if ("admitted" in value) {
+    for (const admission of value.admitted ?? []) lines.push(...admissionLines(admission));
   }
   return lines;
 }
 
-function bind(result: AcceptedOf<"bind">, columns: number, color: boolean): string {
-  const lines = titleLines("✓", "bound", result.contractId, columns);
-  if (result.worktreePath !== undefined)
-    receiptRow(lines, " ", "worktree", [{ text: result.worktreePath, opaque: true }], columns);
-  if (result.target === undefined) receiptRow(lines, " ", "no target", [], columns);
-  else receiptRow(lines, " ", "target", [{ text: result.target, opaque: true }], columns);
-  lines.push(
-    ...deviations(result, columns, color),
-    ...contractIssueLines(result, columns, { mode: "receipt" }),
-    ...recoverySnapshotLines(result.recoverySnapshots, columns, result.contractId),
-  );
-  return lines.join("\n");
-}
-
-function amend(result: AcceptedOf<"amend">, columns: number, color: boolean): string {
-  const lines = titleLines("✓", "amended", result.contractId, columns);
-  if (
-    result.changedSections === undefined &&
-    result.gatesChanged === undefined &&
-    result.afterChanged === undefined &&
-    result.target === undefined
-  )
-    receiptRow(lines, " ", "terms", [{ text: "unchanged" }], columns);
-  if (result.changedSections !== undefined)
-    receiptRow(lines, " ", "changed sections", [{ text: result.changedSections.join(" · ") }], columns);
-  if (result.gatesChanged === true) receiptRow(lines, " ", "gates", [{ text: "changed" }], columns);
-  if (result.afterChanged === true) receiptRow(lines, " ", "after", [{ text: "changed" }], columns);
-  if (result.target !== undefined) receiptRow(lines, " ", "target", [{ text: result.target }], columns);
-  lines.push(
-    ...deviations(result, columns, color),
-    ...contractIssueLines(result, columns, { mode: "receipt" }),
-    ...recoverySnapshotLines(result.recoverySnapshots, columns, result.contractId),
-  );
-  return lines.join("\n");
-}
-
-type CompletionAccepted = AcceptedOf<"deliver"> | AcceptedOf<"review"> | AcceptedOf<"verify">;
-
-function continuationLines(
-  continuation: CompletionAccepted["continuation"],
-  columns: number,
-  surface: TextRenderContext["surface"],
-): readonly string[] {
-  if (continuation === undefined) return [];
+function checkEvidenceLines(value: ContractEvidence): string[] {
   const lines: string[] = [];
-  for (const contractId of continuation.claimed ?? [])
-    receiptRow(lines, "✓", "dependent", [{ text: "complete" }, { text: contractId, opaque: true }], columns);
-  for (const { contractId, stop } of continuation.stopped ?? [])
-    lines.push(...stopLines(stop, columns, contractId, contractId, surface));
+  if ("worktreeChanges" in value) {
+    for (const field of ["staged", "unstaged", "untracked", "unmergedPaths"] as const) {
+      for (const path of value.worktreeChanges?.[field] ?? [])
+        fact(lines, field === "unmergedPaths" ? "unmerged" : field, path);
+    }
+  }
+  if ("checks" in value) lines.push(...checkLines(value.checks ?? []));
+  if ("unmetGates" in value) lines.push(...requirementLines(value.unmetGates ?? []));
+  if ("unmetPrerequisites" in value) lines.push(...prerequisiteLines(value.unmetPrerequisites ?? []));
   return lines;
 }
 
-function completionPlacementLines(
-  result: CompletionAccepted,
-  columns: number,
-  surface: TextRenderContext["surface"],
-): readonly string[] {
-  const placement = result.placement;
-  if (placement === undefined) return [];
-  if (placement.kind !== "placed") return stopLines(placement, columns, result.contractId, undefined, surface);
-  const fallback = "integration" in result ? result.integration : undefined;
-  const integration = ("integration" in placement ? placement.integration : undefined) ?? fallback;
-  if (integration === undefined || placement.target === undefined) return [];
+function placementEvidenceLines(value: ContractEvidence): string[] {
   const lines: string[] = [];
-  targetMovementRows(lines, { ...placement, integration }, columns);
-  receiptRow(lines, "✓", "accepted", [], columns);
+  if ("placement" in value && value.placement !== undefined) {
+    lines.push(...placementLines(value.placement, "integration" in value ? value.integration : undefined));
+  }
+  if ("effects" in value) {
+    for (const effect of value.effects ?? []) lines.push(...effectLines(effect));
+  }
+  if ("continuation" in value) {
+    for (const contract of value.continuation?.claimed ?? []) fact(lines, "dependent placed", contract);
+    for (const dependent of value.continuation?.stopped ?? []) {
+      fact(lines, "dependent", dependent.contractId);
+      lines.push(...evidenceLines(dependent.stop));
+    }
+  }
   return lines;
 }
 
-function trailingPlacementLines(
-  result: CompletionAccepted,
-  columns: number,
-  surface: TextRenderContext["surface"],
-): readonly string[] {
-  const placement = result.placement;
-  return [
-    ...completionPlacementLines(result, columns, surface),
-    ...continuationLines(result.continuation, columns, surface),
-    ...recoverySnapshotLines(result.recoverySnapshots, columns, result.contractId),
-    ...contractIssueLines(result, columns, { mode: "receipt", follow: placement !== undefined }),
-    ...gatesAwaitLines(placement?.kind === "placed" ? undefined : placement),
-  ];
+function overlapLines(value: ContractEvidence): string[] {
+  const lines: string[] = [];
+  if ("overlaps" in value) {
+    for (const overlap of value.overlaps ?? []) {
+      for (const pattern of overlap.patterns) {
+        const relation = pattern.relation ?? (pattern.mine === pattern.theirs ? "identical" : "intersection");
+        fact(lines, "overlap", `${overlap.contractId} · ${pattern.mine} · ${kindWords(relation)} · ${pattern.theirs}`);
+      }
+    }
+  }
+  if ("overlapError" in value && value.overlapError !== undefined) {
+    fact(lines, "overlap", "unavailable");
+    payload(lines, "diagnostic", value.overlapError);
+  }
+  return lines;
 }
 
-function deliver(
-  result: AcceptedOf<"deliver">,
-  columns: number,
-  input: PresentationInput,
-  surface: TextRenderContext["surface"],
-): string {
-  const lines = titleLines("✓", "delivered", result.contractId, columns);
-  const placement: Readonly<{ kind: string; predecessor?: string; integration?: string }> | undefined =
-    result.placement;
-  const ids = abbreviateGitIds([
-    result.candidate,
-    result.integration,
-    result.contentId,
-    result.previousContentId ?? "",
-    placement?.kind === "placed" ? (placement.predecessor ?? "") : "",
-    placement?.kind === "placed" ? (placement.integration ?? result.integration) : "",
-  ]);
-  if (result.admission === "reused") receiptRow(lines, " ", "admission", [{ text: "reused" }], columns);
-  deliveryIdentityRows(
-    lines,
-    {
-      candidate: `${displayGitId(result.candidate, ids)}${placement?.kind === "placed" ? "" : " · kept"}`,
-      integration: displayGitId(result.integration, ids),
-      contentId: /^0{40}$/u.test(result.contentId) ? undefined : displayGitId(result.contentId, ids),
-    },
-    columns,
-  );
-  if (result.previousContentId !== undefined)
-    receiptRow(
+function diffLines(value: ContractEvidence): string[] {
+  const lines: string[] = [];
+  if ("scope" in value && value.scope !== undefined) {
+    fact(
       lines,
-      " ",
-      "candidate content changed",
-      [{ text: `previous ${displayGitId(result.previousContentId, ids)}`, opaque: true }],
-      columns,
+      "scope",
+      gitShortStat({
+        filesChanged: value.scope.filesChanged ?? 0,
+        insertions: value.scope.insertions ?? 0,
+        deletions: value.scope.deletions ?? 0,
+      }),
     );
-  if (input.message !== undefined && result.admission !== "reused") receiptPayload(lines, "note", input.message);
-  lines.push(...trailingPlacementLines(result, columns, surface));
-  return lines.join("\n");
-}
-
-function worktreeChangeLines(result: AcceptedOf<"review">, columns: number): readonly string[] {
-  const lines: string[] = [];
-  for (const field of ["staged", "unstaged", "untracked", "unmergedPaths"] as const)
-    for (const path of result.worktreeChanges?.[field] ?? [])
-      receiptRow(lines, " ", field === "unmergedPaths" ? "unmerged" : field, [{ text: path, opaque: true }], columns);
+    for (const path of value.scope.paths ?? []) fact(lines, "path", path);
+  }
+  if ("diff" in value && value.diff !== undefined) {
+    if (value.diff.kind === "unavailable") fact(lines, "diff", "unavailable");
+    else if (value.diff.text.length === 0) fact(lines, "diff", "empty");
+    else payload(lines, "diff", value.diff.text);
+  }
   return lines;
 }
 
-function review(
-  result: AcceptedOf<"review">,
-  columns: number,
-  input: PresentationInput,
-  surface: TextRenderContext["surface"],
-): string {
-  if (input.verdict === undefined) throw new Error("review renderer requires its invocation verdict");
-  const lines = titleLines("✓", `review ${input.verdict}`, result.contractId, columns);
-  lines.push(...worktreeChangeLines(result, columns), ...trailingPlacementLines(result, columns, surface));
-  return lines.join("\n");
-}
-
-function verify(result: AcceptedOf<"verify">, columns: number, surface: TextRenderContext["surface"]): string {
-  const lines = titleLines("✓", "verify", result.contractId, columns);
-  receiptRow(
-    lines,
-    " ",
-    "snapshot",
-    [{ text: displayGitId(result.snapshot, abbreviateGitIds([result.snapshot])) }],
-    columns,
-  );
-  lines.push(
-    ...verificationCheckLines(result.checks, columns, result.contractId, surface),
-    ...trailingPlacementLines(result, columns, surface),
-  );
-  return lines.join("\n");
-}
-
-/** The operation and supplied input stay renderer context, never fields manufactured on the native result. */
-export function renderAccepted<K extends ContractMutationName>(
-  operation: K,
-  result: AcceptedOf<K>,
-  context?: TextRenderContext,
-  input: PresentationInput = {},
-): string {
-  const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
-  switch (operation) {
-    case "bind":
-      return bind(result as AcceptedOf<"bind">, columns, context?.color === true);
-    case "amend":
-      return amend(result as AcceptedOf<"amend">, columns, context?.color === true);
-    case "deliver":
-      return deliver(result as AcceptedOf<"deliver">, columns, input, context?.surface);
-    case "review":
-      return review(result as AcceptedOf<"review">, columns, input, context?.surface);
-    case "verify":
-      return verify(result as AcceptedOf<"verify">, columns, context?.surface);
-    case "arc": {
-      const arc = result as AcceptedOf<"arc">;
-      return [
-        ...titleLines("✓", `chapter ${arc.chapter} opened`, arc.contractId, columns),
-        ...contractIssueLines(arc, columns, { mode: "receipt" }),
-        ...recoverySnapshotLines(arc.recoverySnapshots, columns, arc.contractId),
-      ].join("\n");
-    }
-    case "abandon": {
-      const abandoned = result as AcceptedOf<"abandon">;
-      const lines = titleLines("✓", "abandoned", abandoned.contractId, columns);
-      if (input.note !== undefined) receiptRow(lines, " ", "note", [{ text: input.note }], columns);
-      lines.push(
-        ...contractIssueLines(abandoned, columns, { mode: "terminal" }),
-        ...recoverySnapshotLines(abandoned.recoverySnapshots, columns, abandoned.contractId),
-      );
-      return lines.join("\n");
-    }
+function stopEvidenceLines(value: ContractEvidence): string[] {
+  const lines: string[] = [];
+  if ("reason" in value) {
+    if (value.kind === "retry") lines.push(...evidenceLines(value));
+    else if (typeof value.reason === "object") lines.push(...evidenceLines(value.reason));
   }
+  if (value.kind === "missing") lines.push(...evidenceLines({ kind: "contract-missing" }));
+  if (value.kind === "world-observation-failed") payload(lines, "diagnostic", value.diagnostic);
+  if (value.kind === "handoff") {
+    fact(lines, "delivery", "none");
+    for (const path of value.conflictPaths) fact(lines, "conflict", path);
+    fact(lines, "handoff base", value.handoffBase);
+  }
+  return lines;
 }
 
-export function renderRetry(
-  operation: ContractMutationName | "deliver --dry-run",
-  result: Extract<ContractOutcome, { kind: "retry" }>,
-  context?: TextRenderContext,
+function contractRecoveryLines(
+  value: ContractEvidence,
+  operation: ContractResultName,
+  input: VerbInput<ContractResultName>,
+  context: TextRenderContext,
+): string[] {
+  const contract = "contractId" in value ? value.contractId : undefined;
+  if (contract === undefined) return [];
+  // Only the addressed operation carries replay intent. A dependent stop has its own subject and tender.
+  const reason =
+    "reason" in value && typeof value.reason === "object"
+      ? value.reason
+      : "placement" in value
+        ? value.placement
+        : undefined;
+  const addressed = { ...input, contract };
+  if (operation === "deliver") {
+    const delivery = addressed as VerbInput<"deliver">;
+    if (value.kind === "handoff") {
+      const { materializeConflict: _, ...resolvedDelivery } = delivery;
+      return callLines({ verb: operation, input: { ...resolvedDelivery, includeDirty: true } }, context);
+    }
+    if (reason !== undefined) return refusalRecoveryLines(reason, { verb: operation, input: delivery }, context);
+  }
+  if (operation === "verify" && reason !== undefined)
+    return refusalRecoveryLines(reason, { verb: operation, input: addressed as VerbInput<"verify"> }, context);
+  return [];
+}
+
+/** One ordered selection of native concepts, also used for retained exceptional evidence. */
+function contractLines(
+  value: ContractEvidence,
+  operation: ContractResultName,
+  input: VerbInput<ContractResultName>,
+  context: TextRenderContext,
+): string[] {
+  const lines = [
+    ...workspaceLines(value),
+    ...termLines(value, operation),
+    ...identityLines(value),
+    ...leadingLines(value, operation, input),
+    ...checkEvidenceLines(value),
+    ...placementEvidenceLines(value),
+    ...overlapLines(value),
+    ...diffLines(value),
+    ...stopEvidenceLines(value),
+  ];
+  if ("preview" in value && value.preview !== undefined)
+    lines.push(...contractLines(value.preview, "deliver", { ...input, dryRun: true }, context));
+  if ("issues" in value) lines.push(...issueLines(value.issues));
+  if ("recoverySnapshots" in value) lines.push(...recoveryLines(value.recoverySnapshots));
+  return [...lines, ...contractRecoveryLines(value, operation, input, context)];
+}
+
+function addressedIdentity(
+  value: Answer | PartialOutcomeEnvelope | undefined,
+  input: VerbInput<ContractResultName>,
+  error: unknown,
+): string | undefined {
+  if (value !== undefined && "contractId" in value && value.contractId !== undefined) return value.contractId;
+  if (error instanceof KeiyakuArcDocumentError) return error.contract;
+  return "contract" in input ? input.contract : undefined;
+}
+
+function reconciliationLines(
+  value: Extract<RepoReconcileReport | PartialOutcomeEnvelope, { kind: "world" }>,
+): string[] {
+  const lines: string[] = [];
+  if ("world" in value) fact(lines, "world", value.world);
+  for (const report of value.contracts ?? []) {
+    fact(lines, "contract", report.contractId);
+    for (const effect of report.effects ?? []) lines.push(...effectLines(effect));
+    lines.push(...issueLines(report.issues));
+  }
+  return lines;
+}
+
+/** renderVerb supplies the sole invocation verdict, including reconciliation. */
+export function renderContractResult(
+  operation: ContractResultName,
+  input: VerbInput<ContractResultName>,
+  completion: VerbCompletion<Answer>,
+  disposition: VerbDisposition,
+  context: TextRenderContext,
 ): string {
-  const columns = context?.columns ?? DEFAULT_CLI_COLUMNS;
-  const lines = outcomeLines("?", operation, "retry", "contractId" in result ? result.contractId : undefined, columns);
-  lines.push(...renderOpaqueBlock(kindWords(result.reason), "  ", columns));
-  if (result.reason === "publication-failed") receiptPayload(lines, "reason", result.diagnostic);
+  const error = completion.kind === "threw" ? completion.error : undefined;
+  const failure = completion.kind === "threw" ? projectFailure(error) : undefined;
+  const value = completion.kind === "returned" ? completion.value : failure?.outcome;
+  const identity = addressedIdentity(value, input, error);
+  const name = operation === "deliver" && "dryRun" in input && input.dryRun ? "deliver --dry-run" : operation;
+  const handoff = value?.kind === "handoff" ? " · conflict handoff" : "";
+  const verdict = operation === "review" && "verdict" in input ? ` · ${input.verdict}` : "";
+  const lines = [
+    `${name} ${disposition}${identity === undefined ? "" : `  ${safeText(identity)}`}${verdict}${handoff}`,
+  ];
+  if (error instanceof KeiyakuArcDocumentError)
+    lines.push(...evidenceLines({ kind: "invalid-document", diagnostic: error.message }));
+  else if (failure !== undefined) lines.push(...failureLines(failure));
+  if (value !== undefined) {
+    if (value.kind === "world") lines.push(...reconciliationLines(value));
+    else lines.push(...contractLines(value, operation, input, context));
+  }
+  if (failure !== undefined) lines.push(...callLines(failure.next, context));
   return lines.join("\n");
 }
-
-export { renderContractHistory } from "./contract-history.js";

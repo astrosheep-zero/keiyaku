@@ -83,6 +83,7 @@ async function invokeAndFinish(request: VerbRequest, runtime: CliRuntime): Promi
     () =>
       renderVerb(request.name, request.input, completion, {
         ...displayContext(),
+        recoveryCoordinates: runtime.recoveryCoordinates,
         ...(request.name === "ls" &&
         "mine" in request.input &&
         request.input.mine === true &&

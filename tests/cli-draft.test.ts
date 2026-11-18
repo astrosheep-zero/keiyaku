@@ -10,7 +10,8 @@ import { parseArgv } from "../src/cli/parse.js";
 import { writeExecutionProgress, type CliRuntime } from "../src/cli/runtime.js";
 import { cliExitCode } from "../src/cli/streams.js";
 import { captureOutput, runCli } from "./support/cli-fixtures.js";
-import { renderBindDraftReceipt, renderRefusal } from "../src/cli/render/refusal.js";
+import { renderBindDraftReceipt } from "../src/cli/render/refusal.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import { World, type WorldRoot } from "../src/world.js";
 import { Keiyaku } from "../src/index.js";
 import { document, repositoryWithMain } from "./support/library-verbs.js";
@@ -106,6 +107,7 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
     const runtime: CliRuntime = {
       environment: {},
       facet,
+      recoveryCoordinates: { cwd: repository.path },
       readStdin: async () => markdown,
       draftWorld: async () =>
         (await resolveInvocationCoordinates({ processCwd: root, command }, { KEIYAKU_GIT_PATH: " " })).establishWorld(),
@@ -119,9 +121,12 @@ test("BindDraftError keeps the original failure when draft custody is a warning"
     if (output === "json") {
       assert.deepEqual(JSON.parse(result.stdout), refusal);
     } else {
-      const original = renderRefusal({ operation: "bind", refusal: refusal.reason });
-      assert.ok(result.stdout.startsWith(`${original}\n`));
-      assert.equal(result.stdout.split(original).length - 1, 1);
+      const originalText: string = renderVerb(
+        "bind", { terms: markdown, target: "missing-target" },
+        { kind: "returned", value: refusal }, { columns: 100, color: false },
+      );
+      assert.ok(result.stdout.startsWith(`${originalText}\n`));
+      assert.equal(result.stdout.split(originalText).length - 1, 1);
       assert.match(result.stdout, /draft warning/u);
       assert.equal((result.stdout.match(/KEIYAKU_GIT_PATH requires a nonblank value/gu) ?? []).length, 1);
       assert.doesNotMatch(result.stdout, /draft  \.keiyaku\/draft\//u);

@@ -410,8 +410,10 @@ test("malformed arc document is a substantive refusal", () => {
     const text = runCli(repository.path, ["arc", id, "-"], document);
     assert.equal(text.status, 1, text.stdout + text.stderr);
     assert.equal(text.stderr, "");
-    assert.match(text.stdout, /^× arc refused$/mu);
+    assert.match(text.stdout, /^arc refused  kei\//mu);
     assert.match(text.stdout, /reason  invalid document/u);
+    assert.equal(text.stdout.split("\n").filter((line) => line === "  diagnostic").length, 1);
+    assert.doesNotMatch(text.stdout, /^  cause diagnostic$/mu);
   }
   const json = runCli(repository.path, ["arc", id, "--json", "-"], "# \n");
   assert.equal(json.status, 1);
@@ -423,7 +425,7 @@ test("malformed bind is a substantive refusal on stdout with its draft", async (
   const cwd = mkdtempSync(join(tmpdir(), "keiyaku-bind-refusal-"));
   const result = runCli(cwd, ["bind", "-"], "not valid bind markdown\n");
   assert.equal(result.status, 1);
-  assert.match(result.stdout, /^× bind refused$/mu);
+  assert.match(result.stdout, /^bind refused$/mu);
   assert.match(result.stdout, /^  reason  invalid document$/mu);
   assert.equal(result.stderr, "");
   rmSync(cwd, { recursive: true, force: true });

@@ -16,8 +16,7 @@ import {
   type KanshiReport,
   type VerifyOutcome,
 } from "../src/index.js";
-import { renderAccepted } from "../src/cli/render/contract.js";
-import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import { repositoryAt } from "../src/git/repository.js";
 import { appointedWorktreePath, makeGitRepository, observeContract } from "./support/git.js";
 import { cliJson, runCli } from "./support/cli-fixtures.js";
@@ -77,9 +76,10 @@ test("contextual verify accumulates selected checks and completes an already del
     value.placement.unmet.map((item) => item.state),
     ["missing"],
   );
-  const text = renderAccepted("verify", value, { columns: 400, color: false });
-  assert.match(text, /✓ check 1\s+satisfied · recorded/u);
-  assert.match(text, /awaiting verification/u);
+  const text = renderVerb("verify", { contract: id }, { kind: "returned", value }, { columns: 400, color: false });
+  assert.match(text, /^  check {2}1\n  requirement {2}[^\n]+\n  verdict {2}satisfied\n  admission {2}admitted$/mu);
+  assert.match(text, /^  gate {2}verified$/mu);
+  assert.match(text, /^  state {2}missing$/mu);
   const status = await runCli(["-C", raw.path, "status", id], { environment: {} });
   assert.match(status.stdout, /verification 1 · current · satisfied/u);
   assert.match(status.stdout, /verification 2 · missing/u);
@@ -113,8 +113,8 @@ test("pre-delivery verify always executes and distinguishes admission reuse from
   if (check.kind !== "terminal") assert.fail("verification did not finish");
   assert.equal(check.admission, "reused");
   assert.match(
-    renderAccepted("verify", second, { columns: 400, color: false }),
-    /✓ check 1\s+satisfied · reused/u,
+    renderVerb("verify", { contract: id }, { kind: "returned", value: second }, { columns: 400, color: false }),
+    /^  check {2}1\n  requirement {2}[^\n]+\n  verdict {2}satisfied\n  admission {2}reused$/mu,
   );
   const delivered = accepted(
     (await cliJson<DeliverOutcome>(["-C", raw.path, "deliver", id], { environment: {} })).value,
@@ -209,9 +209,9 @@ test("full verify exposes mixed verdicts, independent scratches, and requirement
   const failed = result.checks[0]!;
   assert.ok(failed.retainedPath);
   assert.equal(readFileSync(resolve(failed.retainedPath, "own-file"), "utf8"), "owned\n");
-  const text = renderAccepted("verify", result, { columns: 400, color: false });
-  assert.match(text, /× check 1\s+unsatisfied · recorded/u);
-  assert.match(text, /✓ check 2\s+satisfied · recorded/u);
+  const text = renderVerb("verify", { contract: id }, { kind: "returned", value: result }, { columns: 400, color: false });
+  assert.match(text, /^  check {2}1\n  requirement {2}[^\n]+\n  verdict {2}unsatisfied\n  admission {2}admitted$/mu);
+  assert.match(text, /^  check {2}2\n  requirement {2}[^\n]+\n  verdict {2}satisfied\n  admission {2}admitted$/mu);
   assert.equal(text.split("\n").filter((line) => line.trimStart().startsWith("snapshot ")).length, 1);
   const wire = JSON.parse(JSON.stringify(result));
   assert.deepEqual(wire.checks.map((check: { requirement: string }) => check.requirement), result.checks.map((check) => check.requirement));
@@ -239,8 +239,8 @@ test("verify refuses out-of-range checks before execution or admission", async (
     total: 1,
   });
   const text = await runCli(["-C", raw.path, "verify", id, "--index", "2"], { environment: {} });
-  assert.match(text.stdout, /reason\s+Verification declaration index is out of range/u);
-  assert.match(text.stdout, /declarations\s+1/u);
+  assert.match(text.stdout, /reason {2}verification index out of range/u);
+  assert.match(text.stdout, /declarations {2}1/u);
   assert.equal(existsSync(marker), false);
   assert.deepEqual(await observeContract(repository, id), before);
 });
@@ -268,9 +268,12 @@ test("review-only verify executes selected and full checks without recording tes
   assert.equal(readFileSync(runs, "utf8"), "second\nfirst\nsecond\n");
   assert.deepEqual(await observeContract(repository, id), before);
   assert.equal(full.placement, undefined);
-  const unrecorded = renderAccepted("verify", full, { columns: 400, color: false });
-  assert.match(unrecorded, /× check 1\s+unsatisfied · not recorded/u);
-  assert.match(unrecorded, /✓ check 2\s+satisfied · not recorded/u);
+  const unrecorded = renderVerb("verify", { contract: id }, { kind: "returned", value: full },
+    { columns: 400, color: false });
+  assert.match(unrecorded,
+    /^  check {2}1\n  requirement {2}[^\n]+\n  verdict {2}unsatisfied\n  admission {2}unrecorded$/mu);
+  assert.match(unrecorded,
+    /^  check {2}2\n  requirement {2}[^\n]+\n  verdict {2}satisfied\n  admission {2}unrecorded$/mu);
   const delivered = accepted((await cliJson<DeliverOutcome>(
     ["-C", raw.path, "deliver", id], { environment: {} },
   )).value);
@@ -294,13 +297,13 @@ test("review-only verify executes selected and full checks without recording tes
 test("verify captures dirty bytes only with explicit authorization and streams per-check progress", async () => {
   const { raw, id, worktree, repository } = await bindCandidate(["cat candidate.txt; grep -q dirty candidate.txt"]);
   writeFileSync(resolve(worktree, "candidate.txt"), "dirty\n");
-  const refused = await runCli(["-C", worktree, "verify"], { environment: {} });
+  const refused = await runCli(["-C", worktree, "verify", "--index", "1"], { environment: {} });
   assert.equal(refused.exit, 1);
-  assert.match(refused.stdout, /--include-dirty/u);
+  assert.ok(refused.stdout.split("\n").includes(`  available  keiyaku -C ${worktree} verify ${id} --index 1 --include-dirty`));
   const index = raw.run(["-C", worktree, "ls-files", "--stage"]);
-  const result = await runCli(["-C", worktree, "verify", "--include-dirty"], { environment: {} });
+  const result = await runCli(["-C", worktree, "verify", id, "--index", "1", "--include-dirty"], { environment: {} });
   assert.equal(result.exit, 0, result.stderr);
-  assert.match(result.stdout, /✓ check 1\s+satisfied · recorded/u);
+  assert.match(result.stdout, /^  check {2}1\n  requirement {2}[^\n]+\n  verdict {2}satisfied\n  admission {2}admitted$/mu);
   assert.match(result.stderr, /dirty/u);
   assert.match(result.stderr, /✓ declaration 1\/1 · \d+s/u);
   assert.equal(raw.run(["-C", worktree, "ls-files", "--stage"]), index);
@@ -330,8 +333,9 @@ test("delivery, review and preview consume standing requirement evidence without
     verification?.map((problem) => problem.state),
     ["unsatisfied"],
   );
-  const text = renderDeliveryPreview(preview, { columns: 400, color: false });
-  assert.match(text, /verification[\s\S]*unsatisfied/u);
+  const text = renderVerb("deliver", { contract: id, dryRun: true }, { kind: "returned", value: preview },
+    { columns: 400, color: false });
+  assert.match(text, /^  gate {2}verified\n  requirement {2}[^\n]+\n  state {2}unsatisfied$/mu);
   await cliJson(["-C", raw.path, "review", id, "--satisfied", "--summary", "reviewed"], { environment: {} });
   assert.equal(readFileSync(runs, "utf8"), beforeRuns);
   const after = (await observeContract(repository, id)).state!;

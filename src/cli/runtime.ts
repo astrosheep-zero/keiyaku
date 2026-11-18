@@ -26,7 +26,7 @@ import {
 import { createExecutionProgressRenderer } from "./render/execution-progress.js";
 import { renderVerb } from "./render/verbs.js";
 import { renderRefusal } from "./render/refusal.js";
-import { DEFAULT_CLI_COLUMNS, formatNextCall, safeText } from "./render/terminal.js";
+import { DEFAULT_CLI_COLUMNS, formatNextCall, safeText, type RecoveryCoordinates } from "./render/terminal.js";
 import { cliExitCode, displayContext, emit, writeJson, writeStderr, writeStdout, type CliOutcome } from "./streams.js";
 import { renderUsageMessage, usageAcceptanceLines } from "./usage.js";
 
@@ -38,6 +38,7 @@ type ExecutionProgressDriver = Readonly<{ observe: ExecutionObserver; finish: ()
 export type CliRuntime = Readonly<{
   environment: NodeJS.ProcessEnv;
   facet: Keiyaku;
+  recoveryCoordinates: RecoveryCoordinates;
   readStdin: () => Promise<string>;
   draftWorld: () => Promise<string>;
   signal: AbortSignal;
@@ -120,7 +121,7 @@ function writeBindDraftFailure(error: BindDraftError, command: ParsedCommand): C
     diagnostic: error.original instanceof Error ? error.original.message : String(error.original),
   };
   if (command.output === "json") writeJson({ kind: "refused", reason: refusal, draft: error.draft });
-  else writeStdout(renderRefusal({ operation: "bind", refusal }, error.draft, displayContext()));
+  else writeStdout(renderRefusal({ operation: "bind", refusal }, error.draft));
   return error.original instanceof CliUsageError ? "usage" : "refused";
 }
 
@@ -216,14 +217,14 @@ async function runCommand(invocation: ParsedCommandInvocation, input: CliRuntime
   let progress: Promise<ExecutionProgressDriver> | undefined;
   try {
     assertExplicitRepoUse(command, invocation.repo);
+    const recoveryCoordinates = {
+      cwd: resolve(input.cwd ?? process.cwd(), invocation.cwd ?? "."),
+      ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
+    };
     const runtime: CliRuntime = {
       environment,
-      facet: Keiyaku.for({
-        cwd: resolve(input.cwd ?? process.cwd(), invocation.cwd ?? "."),
-        environment,
-        ...(home === undefined ? {} : { home }),
-        ...(invocation.repo === undefined ? {} : { repo: invocation.repo }),
-      }),
+      facet: Keiyaku.for({ ...recoveryCoordinates, environment, ...(home === undefined ? {} : { home }) }),
+      recoveryCoordinates,
       readStdin: memoized(input.readStdin ?? processStdin),
       draftWorld: async () => (await invocationCoordinates(invocation, input, environment)).establishWorld(),
       signal: cancellation.signal,

@@ -467,9 +467,11 @@ test("Ask replaces one TTY observation and closes on return, failure and cancell
     try {
       const captured = await captureOutput(async () => {
         Object.assign(process.stderr, { isTTY: mode !== "non-TTY", columns: 200 });
+        const coordinates = { cwd: process.cwd() };
         const runtime = {
           environment: {},
-          facet: Keiyaku.for({ cwd: process.cwd(), environment: {} }),
+          facet: Keiyaku.for({ ...coordinates, environment: {} }),
+          recoveryCoordinates: coordinates,
           signal: controller.signal,
           readStdin: async () => "",
           draftWorld: async () => "",

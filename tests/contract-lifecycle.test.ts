@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keis, Repo } from "../src/index.js";
 import type { ReviewOutcome, VerifyOutcome } from "../src/index.js";
-import { renderAccepted } from "../src/cli/render/contract.js";
+import { renderVerb } from "../src/cli/render/verbs.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { contractJournalPath } from "../src/git/identity.js";
@@ -16,7 +16,6 @@ import {
   writeBlob,
   writeCommit,
 } from "../src/git/repository.js";
-import { renderReconcile } from "../src/cli/render/reconcile.js";
 import type { ReconcileCompletion, RepoReconcileReport } from "../src/library/reconcile.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { appointedWorktreePath, cachedRepositoryAt, withGitShim } from "./support/git.js";
@@ -412,21 +411,20 @@ describe("dirty target checkout placement", () => {
     ).value;
     assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
     if (reviewed.kind !== "accepted") throw new Error("review was refused");
-    const text = renderAccepted("review", reviewed, { columns: repository.path.length + 100, color: false }, { verdict: "satisfied" });
-    assert.match(text, /^✓ review satisfied  /mu);
-    assert.match(text, /^✓ accepted$/mu);
+    const text = renderVerb("review", { contract: state.id, verdict: "satisfied", summary: "ok" },
+      { kind: "returned", value: reviewed }, { columns: repository.path.length + 100, color: false });
+    assert.match(text, /^review failed {2}kei\/\S+ · satisfied$/mu);
+    assert.match(text, /^  destination {2}refs\/heads\/main$/mu);
+    assert.match(text, /^  placement {2}placed$/mu);
     assert.equal(existsSync(worktree), false);
-    assert.doesNotMatch(text, /target-checkout-retained/u);
-    assert.ok(text.split("\n").includes(`! lag  checkout behind  ${repository.path}  · refs/heads/main`), text);
-    // Force wrapping independently of the host's temporary-directory length.
-    const lines = renderAccepted("review", reviewed, { columns: 25, color: false }, { verdict: "satisfied" }).split("\n");
-    const lagStart = lines.indexOf("! lag  checkout behind");
-    assert.notEqual(lagStart, -1, text);
-    assert.deepEqual(lines.slice(lagStart, lagStart + 3), [
-      "! lag  checkout behind",
-      `  ${repository.path}`,
-      "  · refs/heads/main",
-    ]);
+    assert.match(text, /^  issue {2}target checkout retained$/mu);
+    assert.ok(text.includes(`  path  ${repository.path}`), text);
+    assert.match(text, /^  target {2}refs\/heads\/main$/mu);
+    // Facts never wrap: a narrow width still shows the complete copyable path.
+    const lines = renderVerb("review", { contract: state.id, verdict: "satisfied", summary: "ok" },
+      { kind: "returned", value: reviewed }, { columns: 25, color: false }).split("\n");
+    assert.ok(lines.includes(`  path  ${repository.path}`), lines.join("\n"));
+    assert.ok(lines.includes("  target  refs/heads/main"));
     const landed = repository.run(["rev-parse", "refs/heads/main"]).trim();
     assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "local work in progress\n");
 
@@ -436,9 +434,11 @@ describe("dirty target checkout placement", () => {
     assert.ok(reconciled.kind === "world");
     assert.ok(reconciled.contracts?.some((contract) => contract.effects?.some((effect) =>
       effect.kind === "target-checkout" && effect.path === repository.path && effect.target === "refs/heads/main")));
-    const reconcileText = renderReconcile(reconciled, { columns: 40, color: false });
-    assert.match(reconcileText.replace(/\s+/gu, " "), /target checkout/u);
-    assert.ok(reconcileText.includes(repository.path));
+    const reconcileText = renderVerb("reconcile", {}, { kind: "returned", value: reconciled },
+      { columns: 40, color: false });
+    assert.match(reconcileText, /^  effect {2}target checkout$/mu);
+    assert.ok(reconcileText.includes(repository.path), reconcileText);
+    assert.match(reconcileText, /^  target {2}refs\/heads\/main$/mu);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), landed);
     assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
   });
@@ -459,7 +459,8 @@ describe("dirty target checkout placement", () => {
       reviewed.issues?.some((issue) => issue.kind === "target-checkout-retained") ?? false,
       false,
     );
-    assert.doesNotMatch(renderAccepted("review", reviewed, { columns: 100, color: false }, { verdict: "satisfied" }), /checkout behind/u);
+    assert.doesNotMatch(renderVerb("review", { contract: state.id, verdict: "satisfied", summary: "ok" },
+      { kind: "returned", value: reviewed }, { columns: 100, color: false }), /target checkout retained|checkout behind/u);
     assert.equal(readFileSync(join(repository.path, "other.txt"), "utf8"), "unrelated local work\n");
     assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
   });

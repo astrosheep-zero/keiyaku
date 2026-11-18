@@ -2,34 +2,27 @@ import { AkumaNotBornError, AkumaObservationError } from "../../akuma/akuma-erro
 import { AkumaNameError } from "../../akuma/archetype.js";
 import type { ContractId } from "../../index.js";
 import { AkumaAddressError, AkumaWorldScopeError } from "../../library/address.js";
-import type { VerbCompletion, VerbInput, VerbName, VerbOutput } from "../../library/keiyaku-verbs.js";
-import { KeiyakuArcDocumentError, KeiyakuUsageError } from "../../library/keiyaku-coordinates.js";
+import {
+  classifyVerb,
+  type VerbCompletion,
+  type VerbInput,
+  type VerbName,
+  type VerbOutput,
+} from "../../library/keiyaku-verbs.js";
+import { KeiyakuUsageError } from "../../library/keiyaku-coordinates.js";
 import { KeiyakuError, projectFailure, type FailureProjection } from "../../library/outcome.js";
 import { historyRawAnswer, historyText, killResultText, snapshotText, tellText, waitText } from "./akuma-activity.js";
 import { renderCallText, renderForkText, renderKillText, renderSpawnFailure, renderAskText } from "./akuma.js";
 import { renderAkumaNameCatalogue, renderContractCatalogue } from "./catalog.js";
 import { renderAkumaBoard } from "./kanshi-akuma.js";
-import {
-  contractIssueLines,
-  renderAccepted,
-  renderContractHistory,
-  renderRetry,
-  type ContractOutcome,
-  type ContractMutationName,
-} from "./contract.js";
-import { renderDeliveryPreview } from "./delivery-preview.js";
+import { renderContractResult, type ContractResultName } from "./contract.js";
+import { renderContractHistory } from "./contract-history.js";
 import { contractWaitMemberText } from "./contract-wait.js";
 import { renderDebtList, renderDebtMutation, renderDebtShow, renderDebtUpdate, renderDoctor } from "./debt.js";
 import { renderKanshiText, renderStatusSummary } from "./kanshi.js";
 import { renderNukeText } from "./nuke.js";
-import { executionFailureLines } from "./receipt.js";
-import { renderReconcile } from "./reconcile.js";
-import {
-  renderConflictMaterialized,
-  renderRefusal,
-  renderStructuredRefusal,
-  type RenderableRefusal,
-} from "./refusal.js";
+import { resetFailureLines } from "./receipt.js";
+import { renderRefusal, renderStructuredRefusal } from "./refusal.js";
 import { renderRegionText } from "./region.js";
 import { renderSettingsText } from "./settings.js";
 import { formatNextCall, renderBoundedPayload, safeText, type TextRenderContext } from "./terminal.js";
@@ -39,52 +32,10 @@ export function aliasSelector(selector: string | undefined): string | undefined 
   return selector?.startsWith("@") === true ? selector : undefined;
 }
 
-function missing(operation: string, contract: string | undefined, context: TextRenderContext): string {
+function missing(operation: string, contract: string | undefined): string {
   if (contract === undefined) return renderStructuredRefusal(operation, "contract missing");
   const id = contract as ContractId;
-  return renderRefusal({ operation, contract: id, refusal: { kind: "contract-missing" } }, undefined, context);
-}
-
-function contractAnswer(
-  name: ContractMutationName,
-  input: VerbInput<ContractMutationName>,
-  answer: ContractOutcome | VerbOutput<"deliver">,
-  context: TextRenderContext,
-): string {
-  const operation = name === "deliver" && "dryRun" in input && input.dryRun ? "deliver --dry-run" : name;
-  switch (answer.kind) {
-    case "ready":
-    case "blocked":
-      return renderDeliveryPreview(answer, context);
-    case "handoff":
-      return renderConflictMaterialized(answer, context);
-    case "retry":
-      return renderRetry(operation, answer, context);
-    case "accepted": {
-      return renderAccepted(name, answer, context, {
-        ...("verdict" in input ? { verdict: input.verdict } : {}),
-        ...("note" in input && input.note !== undefined ? { note: input.note } : {}),
-        ...("message" in input && input.message !== undefined ? { message: input.message } : {}),
-      });
-    }
-    case "refused": {
-      let refusal: RenderableRefusal = answer.reason;
-      if ((name === "deliver" || name === "verify") && refusal.kind === "dirty-workspace") {
-        refusal = {
-          ...refusal,
-          option: {
-            next: { verb: name, input: { includeDirty: true } },
-            available: (refusal.submodules?.length ?? 0) === 0,
-          },
-        };
-      }
-      return renderRefusal(
-        { operation, ...("contractId" in answer ? { contract: answer.contractId } : {}), refusal },
-        undefined,
-        context,
-      );
-    }
-  }
+  return renderRefusal({ operation, contract: id, refusal: { kind: "contract-missing" } });
 }
 
 function actionFailure(
@@ -128,13 +79,6 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
   const failure = projectFailure(error);
   const action = actionFailure(name, failure, context, input);
   if (action !== undefined) return action;
-  if (error instanceof KeiyakuArcDocumentError) {
-    return renderRefusal(
-      { operation: "arc", contract: error.contract, refusal: { kind: "invalid-document", diagnostic: error.message } },
-      undefined,
-      context,
-    );
-  }
   if (error instanceof AkumaNotBornError)
     return renderStructuredRefusal(name, "Akuma not found", [`id  ${safeText(error.id)}`]);
   if (error instanceof AkumaAddressError) {
@@ -152,28 +96,22 @@ function thrown(name: string, error: unknown, context: TextRenderContext, input:
   if (error instanceof AkumaObservationError)
     return `× Akuma observation failed  ${safeText(error.id)} — ${safeText(error.diagnostic)}`;
   if (name === "spawn" && error instanceof AkumaNameError) {
+    const available = error.next === undefined ? undefined : formatNextCall(error.next, context);
     return renderStructuredRefusal("spawn", `${error.absent ? "Akuma not found" : error.reason} · ${error.akumaName}`, [
       ...error.searched.map((path) => `searched  ${path}`),
-      ...(error.next === undefined ? [] : [`available  ${formatNextCall(error.next, context.surface)}`]),
+      ...(available === undefined ? [] : [`available  ${available}`]),
     ]);
   }
   if (error instanceof KeiyakuUsageError) return failure.diagnostic;
-  if (error instanceof KeiyakuError && error.outcome !== undefined)
-    return [
-      ...executionFailureLines(name, error.outcome, failure, context.columns, context.surface),
-      ...(error.outcome.kind === "contract" ? contractIssueLines(error.outcome, context.columns) : []),
-    ].join("\n");
+  if (error instanceof KeiyakuError && error.outcome?.kind === "world")
+    return resetFailureLines(name, error.outcome, failure).join("\n");
   return `× ${name} failed\n  reason  ${safeText(failure.diagnostic)}`;
 }
 
-function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">, context: TextRenderContext): string {
-  if (result.kind === "contract-missing") return missing("region", result.id, context);
+function renderRegion(input: VerbInput<"region">, result: VerbOutput<"region">): string {
+  if (result.kind === "contract-missing") return missing("region", result.id);
   if (result.kind === "contract-terminal")
-    return renderRefusal(
-      { operation: "region", contract: result.id, refusal: { kind: "terminal" } },
-      undefined,
-      context,
-    );
+    return renderRefusal({ operation: "region", contract: result.id, refusal: { kind: "terminal" } });
   return renderRegionText(result, input);
 }
 
@@ -209,7 +147,7 @@ function renderWait(input: VerbInput<"wait">, result: VerbOutput<"wait">, contex
 
 function renderHistory(query: VerbInput<"history">, result: VerbOutput<"history">, context: TextRenderContext): string {
   if (query.selector.startsWith("kei/")) {
-    if (result.kind === "contract-missing") return missing("history", result.contractId, context);
+    if (result.kind === "contract-missing") return missing("history", result.contractId);
     if (result.kind === "contract-unknown-history")
       return `${result.contractId} has no matching history at ${"item" in query ? query.item : ""}`;
     if (result.kind !== "contract" && result.kind !== "contract-exact")
@@ -299,7 +237,7 @@ function renderReport(result: VerbOutput<"report">, context: TextRenderContext):
 
 function renderShow(input: VerbInput<"show">, result: VerbOutput<"show">, context: TextRenderContext): string {
   if (result.kind === "present") return result.guidance;
-  if (result.kind === "missing") return missing("show", input.selector, context);
+  if (result.kind === "missing") return missing("show", input.selector);
   return renderDebtShow(result, context);
 }
 
@@ -310,8 +248,6 @@ export function renderVerb<K extends VerbName>(
   completion: VerbCompletion<VerbOutput<K>>,
   context: TextRenderContext & Readonly<{ alias?: string }>,
 ): string {
-  if (completion.kind === "threw") return thrown(name, completion.error, context, input);
-  const value = completion.value;
   switch (name) {
     case "bind":
     case "amend":
@@ -320,12 +256,18 @@ export function renderVerb<K extends VerbName>(
     case "verify":
     case "review":
     case "abandon":
-      return contractAnswer(
+    case "reconcile":
+      return renderContractResult(
         name,
-        input as VerbInput<ContractMutationName>,
-        value as ContractOutcome | VerbOutput<"deliver">,
+        input as VerbInput<ContractResultName>,
+        completion as VerbCompletion<VerbOutput<ContractResultName>>,
+        classifyVerb(name, input, completion),
         context,
       );
+  }
+  if (completion.kind === "threw") return thrown(name, completion.error, context, input);
+  const value = completion.value;
+  switch (name) {
     case "show":
       return renderShow(input as VerbInput<"show">, value as VerbOutput<"show">, context);
     case "settings":
@@ -334,14 +276,8 @@ export function renderVerb<K extends VerbName>(
       return renderWhoami(value as VerbOutput<"whoami">);
     case "nuke":
       return renderNukeText(value as VerbOutput<"nuke">, input as VerbInput<"nuke">);
-    case "reconcile": {
-      const result = value as VerbOutput<"reconcile">;
-      return result.kind === "missing"
-        ? missing("reconcile", result.contractId, context)
-        : renderReconcile(result, context);
-    }
     case "region":
-      return renderRegion(input as VerbInput<"region">, value as VerbOutput<"region">, context);
+      return renderRegion(input as VerbInput<"region">, value as VerbOutput<"region">);
     case "ls": {
       const result = value as VerbOutput<"ls">;
       if (result.kind === "contract-catalogue") return renderContractCatalogue(result);
@@ -362,7 +298,7 @@ export function renderVerb<K extends VerbName>(
       return result.kind === "akuma"
         ? snapshotText(result, context, alias === undefined ? {} : { alias })
         : result.kind === "contract-missing"
-          ? missing("status", result.id, context)
+          ? missing("status", result.id)
           : renderKanshiText(result, context);
     }
     case "spawn":

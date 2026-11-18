@@ -19,7 +19,6 @@ import {
   gate,
   requirementId,
   snapshotId,
-  type ContractId,
 } from "../src/core/facts/types.js";
 import { dependencyKeySet } from "../src/core/subject.js";
 import type { ReconcileCompletion } from "../src/library/reconcile.js";
@@ -35,22 +34,18 @@ import { renderVerb } from "../src/cli/render/verbs.js";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
 import { type ActivityRow, type OutcomeRow, type ToolRow } from "../src/akuma/projection.js";
-import type { AkumaObservation, ContractGateCurrent, DeliverOutcome, Placement, Placed, RequirementProblem } from "../src/index.js";
+import type { AkumaObservation, ContractGateCurrent, DeliverOutcome, Placement, Placed } from "../src/index.js";
 import { renderAkumaBoard } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import {
   diagnosticLines,
   displayColumns,
-  orderRefusalFacts,
   renderOpaqueBlock,
   takeDisplayColumns,
   truncateDisplayText,
 } from "../src/cli/render/terminal.js";
-import { stopLines } from "../src/cli/render/receipt.js";
-import { renderAccepted } from "../src/cli/render/contract.js";
-import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
-import { renderConflictMaterialized, renderRefusal } from "../src/cli/render/refusal.js";
-import { renderReconcile } from "../src/cli/render/reconcile.js";
+import { evidenceLines } from "../src/cli/render/receipt.js";
+import { renderRefusal } from "../src/cli/render/refusal.js";
 import {
   activityAkumaRow,
   akumaWorldReport,
@@ -123,6 +118,9 @@ function observation(status: LiveStatusObservation["status"]): AkumaObservation 
     ...(status.strandedReason === undefined ? {} : { strandedReason: status.strandedReason }),
   };
 }
+
+/** Shared text projection context for the native Contract result family. */
+const RECEIPT_CONTEXT = { columns: 120, color: false } as const;
 
 /** Delivery identity is already the published wire shape, not a journal projection. */
 function deliveryIdentity(candidate: SnapshotId = snapshotId("tender")) {
@@ -874,18 +872,57 @@ test("a terminal Contract keeps its retained or unavailable target checkout issu
 
 test("verb receipts render native conclusions with explicit invocation context", () => {
   const id = contractId("kei/receipt-vocabulary");
-  const arc = acceptedReceipt("arc", { contractId: id, chapter: 2 });
   const texts = [
-    renderAccepted("bind", acceptedReceipt("bind", { contractId: id })),
-    renderAccepted("amend", acceptedReceipt("amend", { contractId: id })),
-    renderAccepted("arc", arc),
-    renderAccepted("abandon", acceptedReceipt("abandon", { contractId: id }), undefined, { note: "Scope retired" }),
-    renderAccepted("deliver", acceptedReceipt("deliver", { contractId: id, ...deliveryIdentity() })),
-    renderAccepted("review", acceptedReceipt("review", { contractId: id }), undefined, { verdict: "satisfied" }),
+    renderVerb(
+      "bind",
+      { terms: "# Bound" },
+      { kind: "returned", value: acceptedReceipt("bind", { contractId: id }) },
+      RECEIPT_CONTEXT,
+    ),
+    renderVerb(
+      "amend",
+      { contract: id },
+      { kind: "returned", value: acceptedReceipt("amend", { contractId: id }) },
+      RECEIPT_CONTEXT,
+    ),
+    renderVerb(
+      "arc",
+      { contract: id, body: "# Two" },
+      { kind: "returned", value: acceptedReceipt("arc", { contractId: id, chapter: 2 }) },
+      RECEIPT_CONTEXT,
+    ),
+    renderVerb(
+      "abandon",
+      { contract: id, note: "Scope retired" },
+      { kind: "returned", value: acceptedReceipt("abandon", { contractId: id }) },
+      RECEIPT_CONTEXT,
+    ),
+    renderVerb(
+      "deliver",
+      { contract: id },
+      { kind: "returned", value: acceptedReceipt("deliver", { contractId: id, ...deliveryIdentity() }) },
+      RECEIPT_CONTEXT,
+    ),
+    renderVerb(
+      "review",
+      { contract: id, verdict: "satisfied", summary: "looks right" },
+      { kind: "returned", value: acceptedReceipt("review", { contractId: id }) },
+      RECEIPT_CONTEXT,
+    ),
   ];
-  assert.equal(texts[2], "✓ chapter 2 opened  kei/receipt-vocabulary");
-  assert.match(texts[3]!, /note  Scope retired/u);
-  assert.match(texts[5]!, /✓ review satisfied/u);
+  assert.deepEqual(
+    texts.map((text) => text.split("\n")[0]),
+    [
+      `bind accepted  ${id}`,
+      `amend accepted  ${id}`,
+      `arc accepted  ${id}`,
+      `abandon accepted  ${id}`,
+      `deliver accepted  ${id}`,
+      `review accepted  ${id} · satisfied`,
+    ],
+  );
+  assert.match(texts[2]!, /^ {2}chapter {2}2$/mu);
+  assert.match(texts[3]!, /^ {2}note\n {2}Scope retired$/mu);
   for (const text of texts) assert.ok(text.includes(id));
 });
 
@@ -928,12 +965,16 @@ test("reconcile reports retained workspace and failed cleanup in human words", (
       },
     ],
   });
-  const text = renderReconcile(result);
-  assert.match(text, /^! lag  worktree retained  \/tmp\/wt$/mu);
-  assert.match(text, /^  reason\n  scratch removal failed$/mu);
-  assert.match(text, /! lag  worktree-hook-failed destroy \/tmp\/wt name cleanup/u);
-  assert.match(text, /reason\n  exit 7/u);
-  assert.doesNotMatch(text, /!.*worktree-retained/u);
+  const text = renderVerb("reconcile", { contract: reconcileId }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+  assert.equal(text.split("\n")[0], `reconcile failed  ${reconcileId}`);
+  assert.match(text, /^ {2}issue {2}worktree retained$/mu);
+  assert.match(text, /^ {2}path {2}\/tmp\/wt$/mu);
+  assert.match(text, /^ {2}diagnostic\n {2}scratch removal failed$/mu);
+  assert.match(text, /^ {2}issue {2}worktree hook failed$/mu);
+  assert.match(text, /^ {2}name {2}"cleanup"$/mu);
+  assert.match(text, /^ {2}phase {2}destroy$/mu);
+  assert.match(text, /^ {2}diagnostic\n {2}exit 7$/mu);
+  assert.doesNotMatch(text, /worktree-retained/u);
 });
 
 test("Verification receipts expose retained scratch and its cleanup diagnostic", () => {
@@ -943,9 +984,10 @@ test("Verification receipts expose retained scratch and its cleanup diagnostic",
     checks: [],
     issues: [{ kind: "diagnostic", severity: "optional", path: "/tmp/scratch", diagnostic: "cleanup failed" }],
   });
-  const text = renderAccepted("verify", result);
-  assert.match(text, /residue\s+\/tmp\/scratch/u);
-  assert.match(text, /cleanup failed/u);
+  const text = renderVerb("verify", { contract: contractId("kei/residue") }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+  assert.match(text, /^ {2}issue {2}diagnostic$/mu);
+  assert.match(text, /^ {2}path {2}\/tmp\/scratch$/mu);
+  assert.match(text, /^ {2}diagnostic\n {2}cleanup failed$/mu);
 });
 
 test("preview keeps each requirement's verdict and summary without parsing output", () => {
@@ -963,8 +1005,16 @@ test("preview keeps each requirement's verdict and summary without parsing outpu
       },
     ],
   });
-  const text = renderDeliveryPreview(result);
-  assert.match(text, /verification historical-check\s+recorded unsatisfied/u);
+  const text = renderVerb(
+    "deliver",
+    { contract: contractId("kei/preview"), dryRun: true },
+    { kind: "returned", value: result },
+    RECEIPT_CONTEXT,
+  );
+  assert.equal(text.split("\n")[0], "deliver --dry-run accepted  kei/preview");
+  assert.match(text, /^ {2}gate {2}verified$/mu);
+  assert.match(text, /^ {2}requirement {2}historical-check$/mu);
+  assert.match(text, /^ {2}state {2}unsatisfied$/mu);
   assert.ok(text.includes(summary));
   assert.match(text, /deliver --dry-run/u);
 });
@@ -998,33 +1048,53 @@ test("Debt listing displays dropped while the native disposition remains drop", 
 test("amend receipt names gate and prerequisite changes even without document diff", () => {
   const contract = contractId("kei/gate-only");
   const base = acceptedReceipt("amend", { contractId: contract });
-  assert.match(renderAccepted("amend", base), /✓ amended  kei\/gate-only\n  terms  unchanged/u);
-  const gates = renderAccepted("amend", acceptedReceipt("amend", { contractId: contract, gatesChanged: true }));
-  assert.match(gates, /✓ amended[\s\S]*gates  changed/u);
-  assert.doesNotMatch(gates, /terms  unchanged/u);
   assert.match(
-    renderAccepted("amend", acceptedReceipt("amend", { contractId: contract, afterChanged: true })),
-    /after  changed/u,
+    renderVerb("amend", { contract }, { kind: "returned", value: base }, RECEIPT_CONTEXT),
+    /^amend accepted {2}kei\/gate-only\n {2}terms {2}unchanged$/u,
+  );
+  const gates = renderVerb(
+    "amend",
+    { contract },
+    { kind: "returned", value: acceptedReceipt("amend", { contractId: contract, gatesChanged: true }) },
+    RECEIPT_CONTEXT,
+  );
+  assert.match(gates, /^amend accepted  kei\/gate-only\n  gates  changed\n  admitted  amend$/u);
+  assert.doesNotMatch(gates, /terms {2}unchanged/u);
+  assert.match(
+    renderVerb(
+      "amend",
+      { contract },
+      { kind: "returned", value: acceptedReceipt("amend", { contractId: contract, afterChanged: true }) },
+      RECEIPT_CONTEXT,
+    ),
+    /^ {2}after {2}changed$/mu,
   );
 });
 
 test("amend summarizes changed sections and independently changed obligations", () => {
-  const text = renderAccepted(
+  const text = renderVerb(
     "amend",
-    acceptedReceipt("amend", {
-      contractId: contractId("kei/changed-terms"),
-      changedSections: ["Design", "Criteria"],
-      gatesChanged: true,
-      afterChanged: true,
-    }),
+    { contract: contractId("kei/changed-terms") },
+    {
+      kind: "returned",
+      value: acceptedReceipt("amend", {
+        contractId: contractId("kei/changed-terms"),
+        changedSections: ["Design", "Criteria"],
+        gatesChanged: true,
+        afterChanged: true,
+      }),
+    },
+    RECEIPT_CONTEXT,
   );
-  assert.match(text, /changed sections  Design · Criteria/u);
-  assert.match(text, /gates  changed/u);
-  assert.match(text, /after  changed/u);
-  assert.doesNotMatch(text, /terms  unchanged/u);
+  assert.match(text, /^ {2}changed section {2}Design$/mu);
+  assert.match(text, /^ {2}changed section {2}Criteria$/mu);
+  assert.match(text, /^ {2}gates {2}changed$/mu);
+  assert.match(text, /^ {2}after {2}changed$/mu);
+  assert.match(text, /^ {2}admitted {2}amend$/mu);
+  assert.doesNotMatch(text, /terms {2}unchanged/u);
 });
 
-test("receipt ids abbreviate in text, omit empty content, and remain full in JSON", () => {
+test("receipt identities stay complete and distinct in text and in JSON", () => {
   const contract = contractId("kei/identity");
   const tender = snapshotId("a".repeat(40));
   const integration = snapshotId("b".repeat(40));
@@ -1033,11 +1103,14 @@ test("receipt ids abbreviate in text, omit empty content, and remain full in JSO
     ...deliveryIdentity(tender),
     ...placedDelivery(integration, tender),
   });
-  const text = renderAccepted("deliver", result);
-  assert.match(text, /candidate  aaaaaaa/u);
-  assert.match(text, /target  aaaaaaa\.\.bbbbbbb/u);
-  assert.match(text, /✓ accepted/u);
-  assert.doesNotMatch(text, /a{40}|b{40}|0{40}|content identity/u);
+  const text = renderVerb("deliver", { contract }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+  assert.match(text, new RegExp(`^ {2}candidate {2}${tender}$`, "mu"));
+  assert.match(text, new RegExp(`^ {2}integration result {2}${integration}$`, "mu"));
+  assert.match(text, /^ {2}content identity {2}0{40}$/mu);
+  assert.match(text, /^ {2}destination {2}refs\/heads\/main$/mu);
+  assert.match(text, new RegExp(`^ {2}before {2}${tender}$`, "mu"));
+  assert.match(text, new RegExp(`^ {2}after {2}${integration}$`, "mu"));
+  assert.doesNotMatch(text, /[.]{2,}/u, "no abbreviated identity pair survives in text");
   assert.equal(JSON.parse(JSON.stringify(result)).candidate, tender);
 });
 
@@ -1053,59 +1126,89 @@ test("preview names target lag without inventing absent requirement evidence", (
     scope: {},
     target: { kind: "placeable", ref: "refs/heads/main", head, behind: 3 },
   });
-  const counted = renderDeliveryPreview(base);
-  assert.match(counted, /^  target  placeable  main @ aaaaaaa · behind 3$/mu);
-  const unknown = renderDeliveryPreview({
-    ...base,
-    target: { kind: "placeable", ref: "refs/heads/main", head, behind: "unknown" },
-  });
-  assert.match(unknown, /^  target  placeable  main @ aaaaaaa · behind unknown$/mu);
+  const counted = renderVerb("deliver", { contract, dryRun: true }, { kind: "returned", value: base }, RECEIPT_CONTEXT);
+  assert.match(counted, /^ {2}target {2}placeable$/mu);
+  assert.match(counted, /^ {2}reference {2}refs\/heads\/main$/mu);
+  assert.match(counted, new RegExp(`^ {2}head {2}${head}$`, "mu"));
+  assert.match(counted, /^ {2}behind {2}3$/mu);
+  const unknown = renderVerb(
+    "deliver",
+    { contract, dryRun: true },
+    {
+      kind: "returned",
+      value: { ...base, target: { kind: "placeable", ref: "refs/heads/main", head, behind: "unknown" } },
+    },
+    RECEIPT_CONTEXT,
+  );
+  assert.match(unknown, /^ {2}behind {2}unknown$/mu);
   assert.doesNotMatch(unknown, /behind 3|not.run|undeclared/u);
 });
 
-test("receipt hashes extend their prefixes when IDs collide within one receipt", () => {
+test("receipt hashes keep colliding identities whole instead of extending prefixes", () => {
+  const contract = contractId("kei/hash-collision");
   const tender = snapshotId(`${"a".repeat(7)}0${"0".repeat(32)}`);
   const integration = snapshotId(`${"a".repeat(7)}1${"0".repeat(32)}`);
-  const text = renderAccepted(
+  const text = renderVerb(
     "deliver",
-    acceptedReceipt("deliver", {
-      contractId: contractId("kei/hash-collision"),
-      ...deliveryIdentity(tender),
-      ...placedDelivery(integration, tender),
-    }),
+    { contract },
+    {
+      kind: "returned",
+      value: acceptedReceipt("deliver", {
+        contractId: contract,
+        ...deliveryIdentity(tender),
+        ...placedDelivery(integration, tender),
+      }),
+    },
+    RECEIPT_CONTEXT,
   );
-  assert.match(text, /candidate  aaaaaaa0/u);
-  assert.match(text, /target  aaaaaaa0\.\.aaaaaaa1/u);
+  assert.match(text, new RegExp(`^ {2}candidate {2}aaaaaaa0${"0".repeat(32)}$`, "mu"));
+  assert.match(text, new RegExp(`^ {2}after {2}aaaaaaa1${"0".repeat(32)}$`, "mu"));
 });
 
-test("reconcile lists changed effects once with path last and no null sentinels", () => {
+test("reconcile preserves repeated native effects without null sentinels", () => {
   const ref = {
     kind: "ref" as const,
     name: "refs/keiyaku/delivery/example",
     before: "a".repeat(40),
     after: null,
   };
-  const text = renderReconcile(reconcile({ effects: [ref, ref] }));
-  assert.equal(text, "✓ reconcile\n  effect  ref  aaaaaaa → absent  refs/keiyaku/delivery/example");
+  const text = renderVerb(
+    "reconcile",
+    { contract: reconcileId },
+    { kind: "returned", value: reconcile({ effects: [ref, ref] }) },
+    RECEIPT_CONTEXT,
+  );
+  const effect = [
+    "  effect  ref",
+    "  reference  refs/keiyaku/delivery/example",
+    `  before  ${"a".repeat(40)}`,
+    "  after  absent",
+  ];
+  assert.deepEqual(text.split("\n"), [`reconcile accepted  ${reconcileId}`, ...effect, ...effect]);
   assert.doesNotMatch(text, /null/u);
 });
 
-test("reconcile recovery snapshots use receipt-length Git identities", () => {
-  const text = renderReconcile(
-    reconcile({
-      effects: [{ kind: "recovery-snapshot", snapshot: snapshotId("f".repeat(40)) }],
-    }),
+test("reconcile recovery snapshots keep their complete Git identity", () => {
+  const snapshot = snapshotId("f".repeat(40));
+  const text = renderVerb(
+    "reconcile",
+    { contract: reconcileId },
+    { kind: "returned", value: reconcile({ effects: [{ kind: "recovery-snapshot", snapshot }] }) },
+    RECEIPT_CONTEXT,
   );
-  assert.match(text, /effect  recovery snapshot  fffffff/u);
-  assert.doesNotMatch(text, /f{40}/u);
+  assert.match(text, /^ {2}effect {2}recovery snapshot$/mu);
+  assert.match(text, new RegExp(`^ {2}recovery snapshot {2}${snapshot}$`, "mu"));
 });
 
-test("reconcile renders a healthy no-op compactly", () => {
+test("reconcile renders a healthy no-op as its native conclusion alone", () => {
   const result = reconcile({});
-  assert.equal(renderReconcile(result), "✓ reconcile\n  already consistent");
+  assert.equal(
+    renderVerb("reconcile", { contract: reconcileId }, { kind: "returned", value: result }, RECEIPT_CONTEXT),
+    `reconcile accepted  ${reconcileId}`,
+  );
 });
 
-test("reconcile failure renders mark and facts", () => {
+test("reconcile failure keeps its native issue and diagnostic", () => {
   const result = reconcile({
     issues: [
       {
@@ -1115,7 +1218,10 @@ test("reconcile failure renders mark and facts", () => {
       },
     ],
   });
-  assert.equal(renderReconcile(result), "! reconcile incomplete\n! lag  reconcile-failed\n  reason\n  git failed\n");
+  assert.deepEqual(
+    renderVerb("reconcile", { contract: reconcileId }, { kind: "returned", value: result }, RECEIPT_CONTEXT).split("\n"),
+    [`reconcile failed  ${reconcileId}`, "  issue  reconcile failed", "  diagnostic", "  git failed"],
+  );
 });
 
 test("reconcile renders worktree hook failure as attention", () => {
@@ -1131,9 +1237,12 @@ test("reconcile renders worktree hook failure as attention", () => {
       },
     ],
   });
-  const text = renderReconcile(result);
-  assert.match(text, /! lag  worktree-hook-failed create \/tmp\/wt name prepare/u);
-  assert.match(text, /reason\n  exit 7\n  hook failed/u);
+  const text = renderVerb("reconcile", { contract: reconcileId }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+  assert.match(text, /^ {2}issue {2}worktree hook failed$/mu);
+  assert.match(text, /^ {2}path {2}\/tmp\/wt$/mu);
+  assert.match(text, /^ {2}name {2}"prepare"$/mu);
+  assert.match(text, /^ {2}phase {2}create$/mu);
+  assert.match(text, /^ {2}diagnostic\n {2}exit 7\n {2}hook failed$/mu);
 });
 
 test("reconcile renders target checkout retention as attention", () => {
@@ -1148,9 +1257,11 @@ test("reconcile renders target checkout retention as attention", () => {
       },
     ],
   });
-  const text = renderReconcile(result);
-  assert.match(text, /! lag  checkout behind  \/repo\/file  · refs\/heads\/main/u);
-  assert.match(text, /  reason\n  checkout failed/u);
+  const text = renderVerb("reconcile", { contract: reconcileId }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+  assert.match(text, /^ {2}issue {2}target checkout retained$/mu);
+  assert.match(text, /^ {2}target {2}refs\/heads\/main$/mu);
+  assert.match(text, /^ {2}path {2}\/repo\/file$/mu);
+  assert.match(text, /^ {2}diagnostic\n {2}checkout failed$/mu);
 });
 
 test("reconcile renders private-state seat-close failure and diagnostic", () => {
@@ -1163,9 +1274,10 @@ test("reconcile renders private-state seat-close failure and diagnostic", () => 
       },
     ],
   });
-  const text = renderReconcile(result);
-  assert.match(text, /! stopped/u);
-  assert.match(text, /  reason\n  could not close publication seat/u);
+  const text = renderVerb("reconcile", { contract: reconcileId }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+  assert.match(text, /^reconcile failed {2}kei\/reconciled$/mu);
+  assert.match(text, /^ {2}issue {2}diagnostic$/mu);
+  assert.match(text, /^ {2}diagnostic\n {2}could not close publication seat$/mu);
 });
 
 test("reconcile hook payloads preserve lines and remain bounded", () => {
@@ -1181,15 +1293,18 @@ test("reconcile hook payloads preserve lines and remain bounded", () => {
       },
     ],
   });
-  const lines = renderReconcile(result).split("\n");
-  assert.equal(lines.filter((line) => line.startsWith("  ")).length <= 101, true);
-  assert.equal(lines.includes("  line"), true);
-  assert.equal(lines.includes("  tail"), false);
-  assert.match(lines.at(-2) ?? "", /omitted/u);
-  assert.equal(
-    lines.some((line) => line === "  line  line"),
-    false,
-  );
+  const lines = renderVerb(
+    "reconcile",
+    { contract: reconcileId },
+    { kind: "returned", value: result },
+    RECEIPT_CONTEXT,
+  ).split("\n");
+  const block = lines.slice(lines.indexOf("  diagnostic") + 1);
+  assert.equal(block.length, 100);
+  assert.equal(block[0], "  exit 9");
+  assert.equal(block.includes("  tail"), false);
+  assert.equal(block.includes("  line  line"), false);
+  assert.equal(block.at(-1), "  … (2 lines omitted)");
 });
 
 test("reconcile renders contract-file and settlement failures", () => {
@@ -1204,39 +1319,42 @@ test("reconcile renders contract-file and settlement failures", () => {
       { kind: "settlement-failed", severity: "required", diagnostic: "debt failed" },
     ],
   });
-  const text = renderReconcile(result);
-  assert.match(text, /! lag  contract-file-failed \.keiyaku\/KEIYAKU\.md/u);
-  assert.match(text, /reason\n  write failed/u);
-  assert.match(text, /! settlement/u);
-  assert.match(text, /reason\n  debt failed/u);
+  const text = renderVerb("reconcile", { contract: reconcileId }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+  assert.match(text, /^ {2}issue {2}contract file failed$/mu);
+  assert.match(text, /^ {2}path {2}\.keiyaku\/KEIYAKU\.md$/mu);
+  assert.match(text, /^ {2}diagnostic\n {2}write failed$/mu);
+  assert.match(text, /^ {2}issue {2}settlement failed$/mu);
+  assert.match(text, /^ {2}diagnostic\n {2}debt failed$/mu);
 });
 
 test("world reconcile failure renders its diagnostic", () => {
   const result = { kind: "world-observation-failed", diagnostic: "git failed" } as const;
-  assert.equal(renderReconcile(result), "! reconcile failed\n! reconcile  git failed");
+  assert.deepEqual(
+    renderVerb("reconcile", {}, { kind: "returned", value: result }, RECEIPT_CONTEXT).split("\n"),
+    ["reconcile failed", "  diagnostic", "  git failed"],
+  );
 });
 
-test("Verification create action names are safe in text receipts", () => {
-  const name = "prepare\nINJECT\u001b[31m";
-  const result = acceptedReceipt("verify", {
-    contractId: contractId("kei/hostile-create-name"),
-    snapshot: snapshotId("snapshot"),
-    checks: [
-      {
+test("Verification create action names stay exact and distinct in text receipts", () => {
+  const contract = contractId("kei/hostile-create-name");
+  for (const name of ["prepare\nphase\u001b[31m", "prepare phase\u001b[31m"]) {
+    const result = acceptedReceipt("verify", {
+      contractId: contract,
+      snapshot: snapshotId("snapshot"),
+      checks: [{
         kind: "stopped",
         index: 1,
         requirement: "check-one",
         stop: { kind: "environment-hook-failure", name, diagnostic: "exit 17" },
-      },
-    ],
-  });
-
-  const text = renderAccepted("verify", result, { columns: 200, color: false });
-  assert.equal(text.includes('name "prepare\\nINJECT\\u001b[31m"'), true);
-  assert.doesNotMatch(text, /\nINJECT/u);
-  assert.doesNotMatch(text, /\u001b/u);
-  const check = result.checks[0];
-  assert.equal(check?.kind === "stopped" && check.stop.kind === "environment-hook-failure" ? check.stop.name : undefined, name);
+      }],
+    });
+    const text = renderVerb("verify", { contract }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+    const prefix = "  name  ";
+    const nameLine = text.split("\n").find((line) => line.startsWith(prefix));
+    assert.ok(nameLine);
+    assert.equal(JSON.parse(nameLine.slice(prefix.length)), name);
+    assert.doesNotMatch(text, /\u001b/u);
+  }
 });
 
 test("Verification cleanup action names are safe in text receipts", () => {
@@ -1256,12 +1374,12 @@ test("Verification cleanup action names are safe in text receipts", () => {
     ],
   });
 
-  const text = renderAccepted("verify", result, { columns: 200, color: false });
-  assert.equal(text.includes('name "destroy\\rINJECT\\u001b[2J"'), true);
-  assert.doesNotMatch(text, /\rINJECT/u);
-  assert.doesNotMatch(text, /\u001b/u);
-  const cleanup = result.issues?.find((issue) => issue.kind === "diagnostic");
-  assert.equal(cleanup?.kind === "diagnostic" ? cleanup.name : undefined, name);
+  const text = renderVerb("verify", { contract }, { kind: "returned", value: result }, RECEIPT_CONTEXT);
+  const prefix = "  name  ";
+  const nameLine = text.split("\n").find((line) => line.startsWith(prefix));
+  assert.ok(nameLine);
+  assert.equal(JSON.parse(nameLine.slice(prefix.length)), name);
+  assert.doesNotMatch(text, /[\r\u001b]/u);
 });
 
 test("accepted results preserve reconciliation lag without telemetry", () => {
@@ -1272,11 +1390,26 @@ test("accepted results preserve reconciliation lag without telemetry", () => {
     path: "/tmp/wt",
     reason: "head-moved" as const,
   };
-  const issues = [lag];
-  assert.equal(
-    renderAccepted("deliver", acceptedReceipt("deliver", { contractId: contract, issues, ...deliveryIdentity() })),
-    ["✓ delivered  kei/followed", "  candidate  tender · kept", "  integration result  integration"].join("\n"),
+  const text = renderVerb(
+    "deliver",
+    { contract },
+    {
+      kind: "returned",
+      value: acceptedReceipt("deliver", { contractId: contract, issues: [lag], ...deliveryIdentity() }),
+    },
+    RECEIPT_CONTEXT,
   );
+  assert.deepEqual(text.split("\n"), [
+    "deliver accepted  kei/followed",
+    "  candidate  tender",
+    "  integration result  integration",
+    "  content identity  0000000000000000000000000000000000000000",
+    "  admitted  deliver",
+    "  issue  worktree follow retained",
+    "  path  /tmp/wt",
+    "  detail  head moved",
+  ]);
+  assert.doesNotMatch(text, /elapsed|duration|milliseconds/u);
 });
 
 test("accepted bind receipts expose confirmed private-state seat close lag", () => {
@@ -1292,17 +1425,16 @@ test("accepted bind receipts expose confirmed private-state seat close lag", () 
       },
     ],
   });
-  assert.equal(
-    renderAccepted("bind", result),
+  assert.deepEqual(
+    renderVerb("bind", { terms: "# Bound" }, { kind: "returned", value: result }, RECEIPT_CONTEXT).split("\n"),
     [
-      "✓ bound  kei/bound",
-      "  worktree  /tmp/wt",
-      "  no target",
-      "! stopped",
-      "  reason",
+      "bind failed  kei/bound",
+      "  workspace  /tmp/wt",
+      "  admitted  bind",
+      "  issue  diagnostic",
+      "  diagnostic",
       "  seat close failed after publication",
-      "",
-    ].join("\n"),
+    ],
   );
 });
 
@@ -1313,14 +1445,25 @@ test("delivery distinguishes reused admission and keeps fresh input notes in con
     ...deliveryIdentity(snapshotId("tender-commit")),
     contentId: changeId("content-id"),
   };
-  const fresh = renderAccepted("deliver", acceptedReceipt("deliver", fields), undefined, { message: "fresh delivery" });
-  assert.match(fresh, /candidate  tender-commit[\s\S]*content identity  content-id/u);
-  assert.match(fresh, /note\n  fresh delivery/u);
-  const reused = renderAccepted("deliver", acceptedReceipt("deliver", { ...fields, admission: "reused" }), undefined, {
-    message: "not newly admitted",
-  });
-  assert.match(reused, /admission  reused/u);
+  const fresh = renderVerb(
+    "deliver",
+    { contract, message: "fresh delivery" },
+    { kind: "returned", value: acceptedReceipt("deliver", fields) },
+    RECEIPT_CONTEXT,
+  );
+  assert.match(fresh, /^ {2}candidate {2}tender-commit$/mu);
+  assert.match(fresh, /^ {2}content identity {2}content-id$/mu);
+  assert.match(fresh, /^ {2}admitted {2}deliver$/mu);
+  assert.match(fresh, /^ {2}note\n {2}fresh delivery$/mu);
+  const reused = renderVerb(
+    "deliver",
+    { contract, message: "not newly admitted" },
+    { kind: "returned", value: acceptedReceipt("deliver", { ...fields, admission: "reused" }) },
+    RECEIPT_CONTEXT,
+  );
+  assert.match(reused, /^ {2}admission {2}reused$/mu);
   assert.doesNotMatch(reused, /not newly admitted/u);
+  assert.doesNotMatch(reused, /admitted {2}deliver/u, "a reused admission is not a fresh one");
 });
 
 test("direct placement stops render the public unmet prerequisites in order", () => {
@@ -1334,488 +1477,369 @@ test("direct placement stops render the public unmet prerequisites in order", ()
     kind: "prerequisites-unsatisfied",
     unmet,
   };
-  assert.equal(
-    renderAccepted("deliver", acceptedReceipt("deliver", { contractId: contract, ...deliveryIdentity(), placement })),
-    [
-      "✓ delivered  kei/waiting-on-prerequisites",
-      "  candidate  tender · kept",
-      "  integration result  integration",
-      "! prerequisites unsatisfied",
-      "  prerequisite  kei/active-prerequisite  ·  active",
-      "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
-      "  prerequisite  kei/missing-prerequisite  ·  missing",
-    ].join("\n"),
-  );
+  const listed: readonly string[] = [
+    "  reason  prerequisites unsatisfied",
+    "  prerequisite  kei/active-prerequisite",
+    "  state  active",
+    "  prerequisite  kei/abandoned-prerequisite",
+    "  state  abandoned",
+    "  prerequisite  kei/missing-prerequisite",
+    "  state  missing",
+  ];
+  const delivered = renderVerb(
+    "deliver",
+    { contract },
+    { kind: "returned", value: acceptedReceipt("deliver", { contractId: contract, ...deliveryIdentity(), placement }) },
+    RECEIPT_CONTEXT,
+  ).split("\n");
+  assert.equal(delivered[0], "deliver accepted  kei/waiting-on-prerequisites");
+  assert.deepEqual(delivered.slice(-7), listed);
 
-  assert.equal(
-    renderAccepted("review", acceptedReceipt("review", { contractId: contract, placement }), undefined, {
-      verdict: "satisfied",
-    }),
-    [
-      "✓ review satisfied  kei/waiting-on-prerequisites",
-      "! prerequisites unsatisfied",
-      "  prerequisite  kei/active-prerequisite  ·  active",
-      "  prerequisite  kei/abandoned-prerequisite  ·  abandoned",
-      "  prerequisite  kei/missing-prerequisite  ·  missing",
-    ].join("\n"),
-  );
+  const reviewed = renderVerb(
+    "review",
+    { contract, verdict: "satisfied", summary: "reviewed" },
+    { kind: "returned", value: acceptedReceipt("review", { contractId: contract, placement }) },
+    RECEIPT_CONTEXT,
+  ).split("\n");
+  assert.equal(reviewed[0], "review accepted  kei/waiting-on-prerequisites · satisfied");
+  assert.deepEqual(reviewed.slice(-7), listed);
 });
 
 test("a satisfied review whose placement fails names the satisfied fact once and refuses in outcome words", () => {
   const contract = contractId("kei/review-refused-f911");
-  const text = renderAccepted(
+  const text = renderVerb(
     "review",
-    acceptedReceipt("review", {
-      contractId: contract,
-      placement: {
-        kind: "failed",
-        diagnostic: "fatal: could not read from remote repository",
-      },
-    }),
-    undefined,
-    { verdict: "satisfied" },
+    { contract, verdict: "satisfied", summary: "reviewed the diff" },
+    {
+      kind: "returned",
+      value: acceptedReceipt("review", {
+        contractId: contract,
+        placement: {
+          kind: "failed",
+          diagnostic: "fatal: could not read from remote repository",
+        },
+      }),
+    },
+    RECEIPT_CONTEXT,
   );
-  assert.equal(
-    text,
-    [
-      "✓ review satisfied  kei/review-refused-f911",
-      "× not accepted",
-      "  reason",
-      "  fatal: could not read from remote repository",
-      "",
-    ].join("\n"),
-  );
-  assert.equal((text.match(/✓ review satisfied/gu) ?? []).length, 1, "the satisfied fact prints once");
+  assert.deepEqual(text.split("\n"), [
+    "review failed  kei/review-refused-f911 · satisfied",
+    "  admitted  review",
+    "  reason  failed",
+    "  diagnostic",
+    "  fatal: could not read from remote repository",
+  ]);
+  assert.equal((text.match(/satisfied/gu) ?? []).length, 1, "the satisfied fact prints once");
   assert.doesNotMatch(text, /placement|continuation|reconciliation/u, "no internal phase name appears");
 });
 
-/** Shared text scenarios take native wire fields directly. */
-function reviewText(
-  contractId: ContractId,
-  fields: Omit<ReturnType<typeof acceptedReceipt<"review">>, "kind" | "contractId"> = {},
-): string {
-  return renderAccepted("review", acceptedReceipt("review", { contractId, ...fields }), undefined, {
-    verdict: "satisfied",
+test("a gates-refused placement keeps each requirement's evidence and native state", () => {
+  const contract = contractId("kei/blocked-review");
+  const text = renderVerb(
+    "deliver",
+    { contract },
+    {
+      kind: "returned",
+      value: acceptedReceipt("deliver", {
+        contractId: contract,
+        ...deliveryIdentity(),
+        placement: {
+          kind: "gates-unsatisfied",
+          unmet: [
+            {
+              gate: gate("verified"),
+              requirement: requirementId("check-one"),
+              state: "unsatisfied",
+              summary: "[1 bash exit 1]",
+            },
+            {
+              gate: gate("reviewed"),
+              requirement: requirementId("gate:reviewed"),
+              state: "stale",
+            },
+            {
+              gate: gate("manual"),
+              requirement: requirementId("gate:manual"),
+              state: "missing",
+            },
+          ],
+        },
+      }),
+    },
+    RECEIPT_CONTEXT,
+  );
+  assert.deepEqual(text.split("\n").slice(-12), [
+    "  reason  gates unsatisfied",
+    "  gate  verified",
+    "  requirement  check-one",
+    "  state  unsatisfied",
+    "  summary",
+    "  [1 bash exit 1]",
+    "  gate  reviewed",
+    "  requirement  gate:reviewed",
+    "  state  stale",
+    "  gate  manual",
+    "  requirement  gate:manual",
+    "  state  missing",
+  ]);
+  assert.doesNotMatch(text, /awaiting/u, "no await tail is synthesized from native state");
+  assert.doesNotMatch(text, /gates-unsatisfied/u, "no refusal kind prints");
+});
+
+test("a stale requirement keeps its native state without an invented await", () => {
+  const contract = contractId("kei/two-missing");
+  const text = renderVerb(
+    "deliver",
+    { contract },
+    {
+      kind: "returned",
+      value: acceptedReceipt("deliver", {
+        contractId: contract,
+        ...deliveryIdentity(),
+        placement: {
+          kind: "gates-unsatisfied",
+          unmet: [
+            { gate: gate("reviewed"), requirement: requirementId("gate:reviewed"), state: "missing" },
+            { gate: gate("verified"), requirement: requirementId("check-one"), state: "stale" },
+          ],
+        },
+      }),
+    },
+    RECEIPT_CONTEXT,
+  );
+  assert.deepEqual(text.split("\n").slice(-6), [
+    "  gate  reviewed",
+    "  requirement  gate:reviewed",
+    "  state  missing",
+    "  gate  verified",
+    "  requirement  check-one",
+    "  state  stale",
+  ]);
+  assert.doesNotMatch(text, /awaiting/u, "a stale requirement is evidence, not a waiting event");
+});
+
+test("four or more unmet requirements still name every one", () => {
+  const contract = contractId("kei/many-missing");
+  const names = ["a", "b", "c", "d"];
+  const text = renderVerb(
+    "deliver",
+    { contract },
+    {
+      kind: "returned",
+      value: acceptedReceipt("deliver", {
+        contractId: contract,
+        ...deliveryIdentity(),
+        placement: {
+          kind: "gates-unsatisfied",
+          unmet: names.map((name) => ({
+            gate: gate(name),
+            requirement: requirementId(`gate:${name}`),
+            state: "missing" as const,
+          })),
+        },
+      }),
+    },
+    RECEIPT_CONTEXT,
+  );
+  assert.deepEqual(
+    text.split("\n").filter((line) => line.startsWith("  requirement  ")),
+    names.map((name) => `  requirement  gate:${name}`),
+  );
+  assert.doesNotMatch(text, /awaiting|omitted/u, "every native requirement stays visible");
+});
+
+test("an admitted delivery retains the native unsatisfied gate state", () => {
+  const contract = contractId("kei/recorded-only");
+  const value = acceptedReceipt("deliver", {
+    contractId: contract, ...deliveryIdentity(),
+    placement: { kind: "gates-unsatisfied", unmet: [
+      { gate: gate("verified"), requirement: requirementId("check-one"), state: "unsatisfied" },
+    ] },
   });
-}
-function deliverText(
-  contractId: ContractId,
-  fields: Partial<Omit<ReturnType<typeof acceptedReceipt<"deliver">>, "kind" | "contractId">> = {},
-): string {
-  return renderAccepted("deliver", acceptedReceipt("deliver", { contractId, ...deliveryIdentity(), ...fields }));
-}
-function abandonText(
-  contractId: ContractId,
-  fields: Omit<ReturnType<typeof acceptedReceipt<"abandon">>, "kind" | "contractId"> = {},
-): string {
-  return renderAccepted("abandon", acceptedReceipt("abandon", { contractId, ...fields }));
-}
-function blockedText(slug: string, unmet: readonly RequirementProblem[]) {
-  const contract = contractId(slug);
-  return deliverText(contract, {
-    placement: {
-      kind: "gates-unsatisfied",
-      unmet,
-    },
-  });
-}
-
-test("a gates-refused placement keeps each requirement's evidence and pending state", () => {
-  const text = blockedText("kei/blocked-review", [
-    {
-      gate: gate("verified"),
-      requirement: requirementId("check-one"),
-      state: "unsatisfied",
-      summary: "[1 bash exit 1]",
-    },
-    {
-      gate: gate("reviewed"),
-      requirement: requirementId("gate:reviewed"),
-      state: "stale",
-    },
-    {
-      gate: gate("manual"),
-      requirement: requirementId("gate:manual"),
-      state: "missing",
-    },
-  ]);
-  assert.equal(
-    text,
-    [
-      "✓ delivered  kei/blocked-review",
-      "  candidate  tender · kept",
-      "  integration result  integration",
-      "× verification check-one  recorded unsatisfied",
-      "  summary",
-      "  [1 bash exit 1]",
-      "",
-      "! review  stale",
-      "○ manual  missing",
-      "⧗ awaiting review, manual",
-    ].join("\n"),
-  );
-  assert.doesNotMatch(text, /gate/u, "the gate class word leaves the receipt");
-  assert.doesNotMatch(text, /gates unsatisfied|gates-unsatisfied/u, "no refusal kind prints");
+  const text = renderVerb("deliver", { contract }, { kind: "returned", value }, RECEIPT_CONTEXT);
+  assert.match(text, /^deliver accepted  kei\/recorded-only$/mu);
+  assert.match(text, /reason  gates unsatisfied\n  gate  verified\n  requirement  check-one\n  state  unsatisfied$/u);
 });
 
-test("a gates-refused placement awaits each not-yet-happened requirement as a plain noun", () => {
-  const text = blockedText("kei/two-missing", [
-    { gate: gate("reviewed"), requirement: requirementId("gate:reviewed"), state: "missing" },
-    {
-      gate: gate("verified"),
-      requirement: requirementId("check-one"),
-      state: "stale",
-    },
-  ]);
-  assert.equal(
-    text.split("\n").at(-1),
-    "⧗ awaiting review, verification check-one",
-    "a stale requirement folds into the same await",
-  );
-});
-
-test("four or more awaited requirements still name every event", () => {
-  const text = blockedText(
-    "kei/many-missing",
-    ["a", "b", "c", "d"].map((name) => ({
-      gate: gate(name),
-      requirement: requirementId(`gate:${name}`),
-      state: "missing" as const,
-    })),
-  );
-  assert.equal(text.split("\n").at(-1), "⧗ awaiting a, b, c, d");
-});
-
-test("a gates-refused placement whose unmet requirements all hold verdicts omits the await line", () => {
-  const text = blockedText("kei/recorded-only", [
-    {
-      gate: gate("verified"),
-      requirement: requirementId("check-one"),
-      state: "unsatisfied",
-    },
-  ]);
-  assert.equal(
-    text,
-    [
-      "✓ delivered  kei/recorded-only",
-      "  candidate  tender · kept",
-      "  integration result  integration",
-      "× verification check-one  recorded unsatisfied",
-    ].join("\n"),
-  );
-  assert.doesNotMatch(text, /awaiting/u, "nothing is pending when every unmet requirement holds a verdict");
-});
-
-test("an unsatisfied review attempts no placement and carries no target row", () => {
+test("an unsatisfied review records its supplied verdict without claiming placement", () => {
   const contract = contractId("kei/review-unsatisfied");
-  const text = renderAccepted("review", acceptedReceipt("review", { contractId: contract }), undefined, {
-    verdict: "unsatisfied",
-  });
-  assert.doesNotMatch(text, /target/u);
+  const text = renderVerb("review", { contract, verdict: "unsatisfied", summary: "Review found a defect" }, {
+    kind: "returned", value: acceptedReceipt("review", { contractId: contract }),
+  }, RECEIPT_CONTEXT);
+  assert.equal(text, `review accepted  ${contract} · unsatisfied\n  admitted  review`);
 });
 
 test("completion stops project an ignored-checkout refusal fact", () => {
   const contract = contractId("kei/checkout-followability");
-  const text = [
-    "reason  checkout not followable",
-    "target  refs/heads/main",
-    "checkout  /repo/checkout",
-    "paths",
-    "  ignored.tmp",
-    '  quote"path.tmp',
-  ];
-  const rendered = deliverText(contract, {
+  const value = acceptedReceipt("deliver", {
+    contractId: contract, ...deliveryIdentity(),
     placement: {
-      kind: "checkout-not-followable",
-      target: "refs/heads/main",
-      path: "/repo/checkout",
-      paths: ["ignored.tmp", 'quote"path.tmp'],
+      kind: "checkout-not-followable", target: "refs/heads/main",
+      path: "/repo/checkout", paths: ["ignored.tmp", 'quote"path.tmp'],
     },
   });
-  const renderedLines = rendered.split("\n");
-  const start = renderedLines.indexOf("reason  checkout not followable");
-  assert.notEqual(start, -1);
-  assert.deepEqual(renderedLines.slice(start, start + text.length), text);
+  const rendered = renderVerb("deliver", { contract }, { kind: "returned", value }, RECEIPT_CONTEXT);
+  assert.match(rendered, /^deliver failed  kei\/checkout-followability$/mu);
+  assert.deepEqual(rendered.split("\n").slice(-5), [
+    "  reason  checkout not followable", "  target  refs/heads/main", "  path  /repo/checkout",
+    "  path  ignored.tmp", '  path  quote"path.tmp',
+  ]);
 });
 
 test("continuation checkout stop keeps its exact block after the dependent context", () => {
   const contract = contractId("kei/prerequisite-checkout");
   const dependent = contractId("kei/stopped-checkout-dependent");
-  assert.equal(
-    deliverText(contract, {
-      ...placedDelivery(snapshotId("2".repeat(40)), snapshotId("1".repeat(40))),
-      continuation: {
-        stopped: [
-          {
-            contractId: dependent,
-            stop: {
-              kind: "checkout-not-followable",
-              target: "refs/heads/main",
-              path: "/repo/checkout",
-              paths: ['quote"path.ts'],
-            },
-          },
-        ],
-      },
-    }),
-    [
-      "✓ delivered  kei/prerequisite-checkout",
-      "  candidate  tender",
-      "  integration result  2222222",
-      "  target  1111111..2222222  refs/heads/main",
-      "✓ accepted",
-      "! dependent  kei/stopped-checkout-dependent",
-      "reason  checkout not followable",
-      "target  refs/heads/main",
-      "checkout  /repo/checkout",
-      "paths",
-      '  quote"path.ts',
-    ].join("\n"),
-  );
+  const value = acceptedReceipt("deliver", {
+    contractId: contract, ...deliveryIdentity(),
+    ...placedDelivery(snapshotId("2".repeat(40)), snapshotId("1".repeat(40))),
+    continuation: { stopped: [{ contractId: dependent, stop: {
+      kind: "checkout-not-followable", target: "refs/heads/main",
+      path: "/repo/checkout", paths: ['quote"path.ts'],
+    } }] },
+  });
+  const text = renderVerb("deliver", { contract }, { kind: "returned", value }, RECEIPT_CONTEXT);
+  assert.deepEqual(text.split("\n").slice(-6), [
+    "  placement  placed", `  dependent  ${dependent}`, "  reason  checkout not followable",
+    "  target  refs/heads/main", "  path  /repo/checkout", '  path  quote"path.ts',
+  ]);
 });
 
-test("retry stops name their retry class in outcome vocabulary", () => {
-  const addressed = contractId("kei/retry-stop");
-  const dependent = contractId("kei/retry-dependent");
-  assert.deepEqual(
-    stopLines(
-      {
-        kind: "retry",
-        reason: "exhausted",
-      },
-      100,
-      addressed,
-    ),
-    ["? retry  exhausted"],
-  );
-  assert.deepEqual(
-    stopLines(
-      {
-        kind: "retry",
-        reason: "collision",
-      },
-      100,
-      addressed,
-    ),
-    ["? retry  collision"],
-  );
-  assert.deepEqual(
-    stopLines(
-      {
-        kind: "retry",
-        reason: "publication-failed",
-        diagnostic: "fatal: unable to create lock",
-      },
-      100,
-      addressed,
-    ),
-    ["? retry  publication failed", "  reason", "  fatal: unable to create lock", ""],
-  );
-  assert.deepEqual(
-    stopLines(
-      {
-        kind: "retry",
-        reason: "collision",
-      },
-      100,
-      addressed,
-      dependent,
-    ),
-    [`? retry  collision  ·  ${dependent}`],
-  );
+test("retry stops keep their distinct native reasons and publication diagnostic", () => {
+  assert.deepEqual(evidenceLines({ kind: "retry", reason: "exhausted" }), ["  reason  retry", "  detail  exhausted"]);
+  assert.deepEqual(evidenceLines({ kind: "retry", reason: "collision" }), ["  reason  retry", "  detail  collision"]);
+  assert.deepEqual(evidenceLines({ kind: "retry", reason: "publication-failed", diagnostic: "fatal: unable to create lock" }), [
+    "  reason  retry", "  detail  publication failed", "  diagnostic", "  fatal: unable to create lock",
+  ]);
+});
 
-  for (const stop of [
-    { kind: "retry", reason: "exhausted" },
-    { kind: "retry", reason: "collision" },
-    { kind: "retry", reason: "publication-failed", diagnostic: "fatal: unable to create lock" },
-  ] as const) {
-    const text = stopLines(stop, 100, addressed, dependent).join("\n");
-    assert.match(text, /^\? retry  /u);
-    assert.doesNotMatch(text, /!/u);
+test("a retry placement stop keeps the leading delivery admission", () => {
+  const contract = contractId("kei/retry-stops-receipt");
+  const value = acceptedReceipt("deliver", {
+    contractId: contract, ...deliveryIdentity(),
+    placement: { kind: "retry", reason: "publication-failed", diagnostic: "fatal: unable to create lock" },
+  });
+  const text = renderVerb("deliver", { contract }, { kind: "returned", value }, RECEIPT_CONTEXT);
+  assert.match(text, /^deliver retryable  kei\/retry-stops-receipt$/mu);
+  assert.match(text, /admitted  deliver\n  reason  retry\n  detail  publication failed\n  diagnostic\n  fatal: unable to create lock$/u);
+});
+
+test("a dependent conflict retains the child subject without a parent or fresh-tender recovery call", () => {
+  const contract = contractId("kei/completed-parent");
+  const dependent = contractId("kei/conflicted-dependent");
+  const targetHead = snapshotId("b".repeat(40));
+  const value = acceptedReceipt("deliver", {
+    contractId: contract, ...deliveryIdentity(), ...placedDelivery(),
+    continuation: { stopped: [{ contractId: dependent, stop: {
+      kind: "integration-conflict", targetHead, conflictPaths: ["candidate.txt"],
+    } }] },
+  });
+  const text = renderVerb("deliver", { contract }, { kind: "returned", value }, {
+    ...RECEIPT_CONTEXT, recoveryCoordinates: { cwd: "/repo" },
+  });
+  assert.match(text, /dependent  kei\/conflicted-dependent\n  reason  integration conflict/u);
+  assert.ok(text.includes(`  target head  ${targetHead}\n  conflict  candidate.txt`));
+  assert.doesNotMatch(text, /^  available  /mu);
+});
+
+test("delivery and review share confirmed placement evidence without claiming check execution", () => {
+  const delivery = contractId("kei/completion");
+  const review = contractId("kei/placement-reuse");
+  const delivered = renderVerb("deliver", { contract: delivery }, {
+    kind: "returned", value: acceptedReceipt("deliver", { contractId: delivery, ...deliveryIdentity(), ...placedDelivery() }),
+  }, RECEIPT_CONTEXT);
+  const reviewed = renderVerb("review", { contract: review, verdict: "satisfied", summary: "Confirmed" }, {
+    kind: "returned", value: acceptedReceipt("review", { contractId: review, placement: movement() }),
+  }, RECEIPT_CONTEXT);
+  const expected = [
+    "  destination  refs/heads/main", `  before  ${"3".repeat(40)}`, `  after  ${"4".repeat(40)}`, "  placement  placed",
+  ];
+  for (const text of [delivered, reviewed]) {
+    assert.deepEqual(text.split("\n").slice(-4), expected);
+    assert.doesNotMatch(text, /^  check  /mu);
   }
 });
 
-test("a retry placement stop renders through the delivered receipt without the failure mark", () => {
-  const contract = contractId("kei/retry-stops-receipt");
-  assert.equal(
-    deliverText(contract, {
-      placement: {
-        kind: "retry",
-        reason: "publication-failed",
-        diagnostic: "fatal: unable to create lock",
-      },
-    }),
-    [
-      "✓ delivered  kei/retry-stops-receipt",
-      "  candidate  tender · kept",
-      "  integration result  integration",
-      "? retry  publication failed",
-      "  reason",
-      "  fatal: unable to create lock",
-      "",
-    ].join("\n"),
-  );
-});
-
-test("detail facts sink behind ordered refusal facts", () => {
-  assert.deepEqual(orderRefusalFacts(["reason  first", "detail  alpha", "path  /repo", "detail  beta", "debt  t"]), [
-    "reason  first",
-    "path  /repo",
-    "debt  t",
-    "detail  alpha",
-    "detail  beta",
-  ]);
-  assert.deepEqual(orderRefusalFacts(["detail  only", "reason  kept"]), ["reason  kept", "detail  only"]);
-});
-
-test("delivery and review report confirmed placement without claiming check execution", () => {
-  const delivered = deliverText(contractId("kei/completion"), placedDelivery());
-  assert.equal(
-    delivered,
-    [
-      "✓ delivered  kei/completion",
-      "  candidate  tender",
-      "  integration result  4444444",
-      "  target  3333333..4444444  refs/heads/main",
-      "✓ accepted",
-    ].join("\n"),
-  );
-  const reviewed = reviewText(contractId("kei/placement-reuse"), { placement: movement() });
-  assert.equal(
-    reviewed,
-    ["✓ review satisfied  kei/placement-reuse", "  target  3333333..4444444  refs/heads/main", "✓ accepted"].join("\n"),
-  );
-  assert.doesNotMatch(`${delivered}\n${reviewed}`, /check \d+  executed/u);
-});
-
 test("a deliver receipt keeps candidate, integration and content identities distinct", () => {
-  const text = deliverText(contractId("kei/standalone-subject"), {
-    candidate: snapshotId("b".repeat(40)),
-    integration: snapshotId("d".repeat(40)),
-    contentId: changeId("c".repeat(40)),
+  const contract = contractId("kei/standalone-subject");
+  const value = acceptedReceipt("deliver", {
+    contractId: contract, candidate: snapshotId("b".repeat(40)),
+    integration: snapshotId("d".repeat(40)), contentId: changeId("c".repeat(40)),
   });
-  assert.equal(
-    text,
-    [
-      "✓ delivered  kei/standalone-subject",
-      "  candidate  bbbbbbb · kept",
-      "  integration result  ddddddd",
-      "  content identity  ccccccc",
-    ].join("\n"),
-  );
+  const text = renderVerb("deliver", { contract }, { kind: "returned", value }, RECEIPT_CONTEXT);
+  assert.deepEqual(text.split("\n").slice(1, 4), [
+    `  candidate  ${value.candidate}`, `  integration result  ${value.integration}`, `  content identity  ${value.contentId}`,
+  ]);
 });
 
-test("a terminal receipt names a retained worktree in place of the obituary", () => {
-  const retainedAbandon = contractId("kei/retained-abandon");
-  const retained = abandonText(retainedAbandon, {
-    issues: [{ kind: "worktree-retained", severity: "optional", path: "/repo/.keiyaku/wt/fridge" }],
-  });
-  assert.match(retained, /^! lag  worktree retained  \/repo\/\.keiyaku\/wt\/fridge$/mu);
-  assert.doesNotMatch(retained, /retired/u);
-  const residueContract = contractId("kei/preexisting-residue");
-  const preexisting = reviewText(residueContract, {
-    issues: [
-      {
-        kind: "worktree-retained",
-        severity: "optional",
-        path: "/tmp/wt",
-      },
-    ],
-  });
-  assert.doesNotMatch(preexisting, /lag  worktree|\/tmp\//u, "pre-existing residue stays typed-only");
+test("a retained worktree path stays visible in terminal and nonterminal receipts", () => {
+  const contract = contractId("kei/retained-worktree");
+  const issues = [{ kind: "worktree-retained" as const, severity: "optional" as const, path: "/tmp/wt" }];
+  const terminal = renderVerb("abandon", { contract }, {
+    kind: "returned", value: acceptedReceipt("abandon", { contractId: contract, issues }),
+  }, RECEIPT_CONTEXT);
+  const nonterminal = renderVerb("review", { contract, verdict: "satisfied", summary: "Confirmed" }, {
+    kind: "returned", value: acceptedReceipt("review", { contractId: contract, issues }),
+  }, RECEIPT_CONTEXT);
+  for (const text of [terminal, nonterminal]) {
+    assert.match(text, /accepted  kei\/retained-worktree/u);
+    assert.match(text, /^  issue  worktree retained\n  path  \/tmp\/wt$/mu);
+  }
 });
 
-test("a terminal receipt names each checkout its own follow left behind", () => {
-  const checkoutContract = contractId("kei/retained-checkout");
-  const text = reviewText(checkoutContract, {
-    placement: movement(),
-    issues: ["/repo", "/repo/.keiyaku/wt/fridge"].map((path) => ({
-      kind: "target-checkout-retained" as const,
-      severity: "required" as const,
-      path,
-      target: "refs/heads/main",
-      diagnostic: "kept",
-    })),
-  });
-  assert.match(text, /^✓ accepted$/mu);
-  assert.match(text, /^! lag  checkout behind  \/repo  · refs\/heads\/main$/mu);
-  assert.match(text, /^! lag  checkout behind  \/repo\/\.keiyaku\/wt\/fridge  · refs\/heads\/main$/mu);
-  assert.doesNotMatch(text, /target-checkout-retained/u, "the raw kind never prints");
-  const checkoutResidue = contractId("kei/preexisting-checkout-residue");
-  const preexisting = reviewText(checkoutResidue, {
-    issues: [
-      {
-        kind: "target-checkout-retained",
-        severity: "required",
-        path: "/repo",
-        target: "refs/heads/main",
-        diagnostic: "kept",
-      },
-    ],
-  });
-  assert.doesNotMatch(preexisting, /checkout behind|\/repo/u, "pre-existing checkout residue stays typed-only");
+test("every supplied checkout lag remains visible even without placement", () => {
+  const contract = contractId("kei/retained-checkout");
+  const issues = ["/repo", "/repo/.keiyaku/wt/fridge"].map((path) => ({
+    kind: "target-checkout-retained" as const, severity: "required" as const,
+    path, target: "refs/heads/main", diagnostic: "kept",
+  }));
+  for (const placement of [movement(), undefined]) {
+    const value = acceptedReceipt("review", { contractId: contract, issues, ...(placement === undefined ? {} : { placement }) });
+    const text = renderVerb("review", { contract, verdict: "satisfied", summary: "Confirmed" }, {
+      kind: "returned", value,
+    }, RECEIPT_CONTEXT);
+    assert.match(text, /^review failed  kei\/retained-checkout · satisfied$/mu);
+    assert.equal(text.includes("  placement  placed"), placement !== undefined);
+    assert.deepEqual(text.split("\n").filter((line) => line.startsWith("  path  ")), [
+      "  path  /repo", "  path  /repo/.keiyaku/wt/fridge",
+    ]);
+    assert.equal(text.split("  issue  target checkout retained").length - 1, 2);
+  }
 });
 
 test("deliver renders accepted and stopped continuations from the accepted result", () => {
   const contract = contractId("kei/prerequisite");
   const claimed = contractId("kei/claimed-dependent");
   const stopped = contractId("kei/stopped-dependent");
-  assert.equal(
-    deliverText(contract, {
-      ...placedDelivery(snapshotId("6".repeat(40)), snapshotId("5".repeat(40))),
-      continuation: {
-        claimed: [claimed],
-        stopped: [
-          {
-            contractId: stopped,
-            stop: {
-              kind: "gates-unsatisfied",
-              unmet: [{ gate: gate("reviewed"), requirement: requirementId("gate:reviewed"), state: "missing" }],
-            },
-          },
-        ],
-      },
-    }),
-    [
-      "✓ delivered  kei/prerequisite",
-      "  candidate  tender",
-      "  integration result  6666666",
-      "  target  5555555..6666666  refs/heads/main",
-      "✓ accepted",
-      "✓ dependent  complete  kei/claimed-dependent",
-      "⧗ kei/stopped-dependent  ·  awaiting review",
-      "○ review  missing",
-    ].join("\n"),
-  );
+  const value = acceptedReceipt("deliver", {
+    contractId: contract, ...deliveryIdentity(), ...placedDelivery(),
+    continuation: { claimed: [claimed], stopped: [{ contractId: stopped, stop: {
+      kind: "gates-unsatisfied", unmet: [{ gate: gate("reviewed"), requirement: requirementId("gate:reviewed"), state: "missing" }],
+    } }] },
+  });
+  const text = renderVerb("deliver", { contract }, { kind: "returned", value }, RECEIPT_CONTEXT);
+  assert.deepEqual(text.split("\n").slice(-7), [
+    "  placement  placed", `  dependent placed  ${claimed}`, `  dependent  ${stopped}`,
+    "  reason  gates unsatisfied", "  gate  reviewed", "  requirement  gate:reviewed", "  state  missing",
+  ]);
 });
 
 test("movement preserves final placement and an exhausted target-movement stop", () => {
   const contract = contractId("kei/reintegrated");
-  assert.equal(
-    deliverText(contract, {
-      ...placedDelivery(snapshotId("integration-4"), snapshotId("target-3")),
-    }),
-    [
-      "✓ delivered  kei/reintegrated",
-      "  candidate  tender",
-      "  integration result  integration-4",
-      "  target  target-3..integration-4  refs/heads/main",
-      "✓ accepted",
-    ].join("\n"),
-  );
-  const stopped = deliverText(contract, {
-    placement: {
-      kind: "target-moved",
-      target: "refs/heads/main",
-      integration: snapshotId("integration-2"),
-      observed: null,
-    },
+  const placed = acceptedReceipt("deliver", {
+    contractId: contract, ...deliveryIdentity(), ...placedDelivery(snapshotId("integration-4"), snapshotId("target-3")),
   });
-  assert.match(stopped, /candidate  tender · kept/u);
-  assert.match(stopped, /! target moved  refs\/heads\/main  integration-2 -> absent/u);
+  const complete = renderVerb("deliver", { contract }, { kind: "returned", value: placed }, RECEIPT_CONTEXT);
+  assert.match(complete, /before  target-3\n  after  integration-4\n  placement  placed$/u);
+  const value = acceptedReceipt("deliver", {
+    contractId: contract, ...deliveryIdentity(),
+    placement: { kind: "target-moved", target: "refs/heads/main", integration: snapshotId("integration-2"), observed: null },
+  });
+  const stopped = renderVerb("deliver", { contract }, { kind: "returned", value }, RECEIPT_CONTEXT);
+  assert.match(stopped, /^deliver failed  kei\/reintegrated$/mu);
+  assert.match(stopped, /admitted  deliver\n  reason  target moved\n  target  refs\/heads\/main\n  observed  absent\n  integration result  integration-2$/u);
 });
 
-test("a multi-line invalid-document diagnostic keeps one detail row per diagnostic", () => {
+test("a multi-line invalid-document diagnostic preserves both causes", () => {
   const text = renderRefusal({
     operation: "bind",
     refusal: {
@@ -1826,10 +1850,11 @@ test("a multi-line invalid-document diagnostic keeps one detail row per diagnost
   assert.equal(
     text,
     [
-      "× bind refused",
+      "bind refused",
       "  reason  invalid document",
-      "  detail  contract document is missing ## Design",
-      "  detail  contract document is missing ## Region",
+      "  diagnostic",
+      "  contract document is missing ## Design",
+      "  contract document is missing ## Region",
     ].join("\n"),
   );
 });
@@ -1843,24 +1868,14 @@ test("materialized conflict text keeps the exact recovery projection", () => {
     worktreePath: "/repo/.keiyaku/wt/x",
     handoffBase: snapshotId("a".repeat(40)),
   };
-  assert.equal(
-    renderConflictMaterialized(result),
-    [
-      "! integration-conflict-materialized",
-      "  target  bbbbbbb",
-      "  delivery  none",
-      "  index  unmerged",
-      "  saved  worktree bytes before projection",
-      "  handoff base  aaaaaaa",
-      "  conflicts",
-      "    a.txt",
-      "    b.txt",
-      "  workspace  /repo/.keiyaku/wt/x",
-      "  option  deliver  keiyaku deliver --include-dirty · reads worktree bytes, not index",
-    ].join("\n"),
-  );
+  const text = renderVerb("deliver", { contract: result.contractId, materializeConflict: true },
+    { kind: "returned", value: result }, { ...RECEIPT_CONTEXT, recoveryCoordinates: { cwd: "/repo" } });
+  assert.deepEqual(text.split("\n"), [
+    `deliver accepted  ${result.contractId} · conflict handoff`, `  workspace  ${result.worktreePath}`,
+    `  target head  ${result.targetHead}`, "  delivery  none", "  conflict  a.txt", "  conflict  b.txt",
+    `  handoff base  ${result.handoffBase}`, `  available  keiyaku -C /repo deliver ${result.contractId} --include-dirty`,
+  ]);
   assert.equal(JSON.parse(JSON.stringify(result)).handoffBase, result.handoffBase);
-  assert.doesNotMatch(renderConflictMaterialized(result), /staging|not-required|UU|please|next|then/u);
 });
 
 test("World roster keeps the latest concrete tool work", () => {
