@@ -1,196 +1,112 @@
 import type { SessionUpdate, ToolCallLocation } from "@agentclientprotocol/sdk";
 import { otherToolCall, type AgentEvent, type ToolCall } from "../../provider.js";
-import { nonblank, object, positiveLine, stringValue } from "../decode.js";
+import {
+  nonblank,
+  object,
+  observedTextBlocks,
+  readToolCall,
+  searchToolCall,
+  stringValue,
+  toolResult,
+} from "../decode.js";
+import { ToolObservations } from "../tool-observations.js";
 
-type OpenBlock = Readonly<{ type: "assistant" | "thought"; text: string }> | null;
-
-export type AcpToolObservation = Readonly<{ name: string; call: ToolCall }>;
+type Emit = (event: AgentEvent) => void;
+type OpenBlock = { type: "assistant" | "thought"; text: string };
 export type AcpToolUpdate = Extract<SessionUpdate, { sessionUpdate: "tool_call" | "tool_call_update" }>;
 export type AcpToolInterpreter = (update: AcpToolUpdate) => ToolCall | undefined;
-
-export type AcpEventState = Readonly<{
+export type AcpEventState = {
   answer: string;
   assistantMessageId: string | null;
-  open: OpenBlock;
-  tools: ReadonlyMap<string, AcpToolObservation>;
-}>;
-type AcpEventMapping = Readonly<{ events: readonly AgentEvent[]; state: AcpEventState }>;
+  open: OpenBlock | null;
+  tools: ToolObservations;
+};
 
-export const EMPTY_ACP_EVENT_STATE: AcpEventState = Object.freeze({
-  answer: "",
-  assistantMessageId: null,
-  open: null,
-  tools: new Map(),
-});
+export function createAcpEventState(emit: Emit): AcpEventState {
+  return { answer: "", assistantMessageId: null, open: null, tools: new ToolObservations(emit) };
+}
 
-export function flushAcpEvents(state: AcpEventState, boundary: readonly AgentEvent[] = []): AcpEventMapping {
-  const events = state.open === null ? boundary : [{ type: state.open.type, text: state.open.text }, ...boundary];
-  return {
-    events,
-    state: state.open === null ? state : { ...state, open: null },
-  };
+export function flushAcpEvents(state: AcpEventState, emit: Emit): void {
+  const block = state.open;
+  state.open = null;
+  if (block !== null) emit(block);
 }
 
 function appendBlock(
   state: AcpEventState,
-  type: "assistant" | "thought",
+  type: OpenBlock["type"],
   text: string,
+  emit: Emit,
   messageId?: string,
-): AcpEventMapping {
-  const newAssistantMessage = type === "assistant" && messageId !== undefined && state.assistantMessageId !== messageId;
-  const flushed =
-    state.open === null || (state.open.type === type && !newAssistantMessage)
-      ? { events: [], state }
-      : flushAcpEvents(state);
-  return {
-    events: flushed.events,
-    state: {
-      ...flushed.state,
-      answer: type === "assistant" ? `${newAssistantMessage ? "" : flushed.state.answer}${text}` : flushed.state.answer,
-      assistantMessageId:
-        type === "assistant" && messageId !== undefined ? messageId : flushed.state.assistantMessageId,
-      open: { type, text: `${flushed.state.open?.text ?? ""}${text}` },
-    },
-  };
-}
-
-function locationFact(locations: readonly ToolCallLocation[] | null | undefined): {
-  path?: string;
-  offset?: number;
-} {
-  if (locations === null || locations === undefined) return {};
-  for (const location of locations) {
-    const path = nonblank(location.path);
-    if (path === undefined) continue;
-    const offset = positiveLine(location.line);
-    return offset === undefined ? { path } : { path, offset };
+): void {
+  const newMessage = type === "assistant" && messageId !== undefined && state.assistantMessageId !== messageId;
+  if (state.open !== null && (state.open.type !== type || newMessage)) flushAcpEvents(state, emit);
+  if (type === "assistant") {
+    state.answer = `${newMessage ? "" : state.answer}${text}`;
+    if (messageId !== undefined) state.assistantMessageId = messageId;
   }
-  return {};
+  if (state.open === null) state.open = { type, text };
+  else state.open.text += text;
 }
 
-/**
- * The observed result text of one ACP tool update: its text content blocks in
- * native order, otherwise a raw output that is itself a string. A raw output of
- * any other shape is left absent rather than stringified.
- */
+function locationCall(locations: readonly ToolCallLocation[] | null | undefined): ToolCall | undefined {
+  for (const location of locations ?? []) {
+    const call = readToolCall(location.path, location.line);
+    if (call !== undefined) return call;
+  }
+  return undefined;
+}
+
+/** Only native text blocks or a raw string are observed output. */
 function verifiedToolOutput(update: AcpToolUpdate): string | undefined {
-  if (Array.isArray(update.content)) {
-    const blocks = update.content.flatMap((entry) => {
-      const value = object(entry);
-      if (value?.type !== "content") return [];
-      const content = object(value.content);
-      return content?.type === "text" && typeof content.text === "string" ? [content.text] : [];
-    });
-    if (blocks.length > 0) return blocks.join("");
-  }
-  return stringValue(update.rawOutput);
+  const blocks = update.content?.flatMap((entry) => (entry.type === "content" ? [entry.content] : []));
+  return observedTextBlocks(blocks, "") ?? stringValue(update.rawOutput);
 }
 
-function standardCall(update: AcpToolUpdate, name: string): ToolCall {
-  const location = locationFact(update.locations);
-  if (update.kind === "read") {
-    return location.path === undefined
-      ? otherToolCall(name, update.rawInput)
-      : {
-          kind: "read",
-          path: location.path,
-          ...(location.offset === undefined ? {} : { offset: location.offset }),
-        };
-  }
+function standardCall(update: AcpToolUpdate): ToolCall | undefined {
+  if (update.kind === "read") return locationCall(update.locations);
   const input = object(update.rawInput);
-  if (update.kind === "execute") {
-    const command = nonblank(input?.command);
-    return command === undefined ? otherToolCall(name, update.rawInput) : { kind: "run", command };
-  }
   if (update.kind === "search") {
-    const query = nonblank(input?.query);
-    if (query === undefined) return otherToolCall(name, update.rawInput);
-    const path = nonblank(input?.path);
-    const glob = nonblank(input?.glob);
-    const scope = input?.scope;
-    const searchScope = scope === "content" || scope === "files" || scope === "web" ? scope : undefined;
-    return {
-      kind: "search",
-      query,
-      ...(searchScope === undefined ? {} : { scope: searchScope }),
-      ...(path === undefined ? {} : { path }),
-      ...(glob === undefined ? {} : { glob }),
-    };
+    return searchToolCall(input?.query, input?.scope, { path: input?.path, glob: input?.glob });
   }
-  return otherToolCall(name, update.rawInput);
+  const command = update.kind === "execute" ? nonblank(input?.command) : undefined;
+  return command === undefined ? undefined : { kind: "run", command };
 }
 
-function strongest(previous: ToolCall | undefined, next: ToolCall): ToolCall {
-  if (previous === undefined || previous.kind === "other") return next;
-  return next.kind === "other" ? previous : next;
-}
-
-function observeTool(
-  update: AcpToolUpdate,
-  previous: AcpToolObservation | undefined,
-  interpret?: AcpToolInterpreter,
-): AcpToolObservation {
-  const name = nonblank(update.name) ?? nonblank(update.title) ?? previous?.name ?? "ACP tool";
-  const standard = standardCall(update, name);
-  const dialect = standard.kind === "other" ? interpret?.(update) : undefined;
-  const call = strongest(previous?.call, dialect ?? standard);
-  if (call.kind !== "other") return { name, call };
-  // The correlated start's admitted preview is authority: a later update never
-  // overwrites it, empty or not, while a start without one adopts first supplied evidence.
-  const started = previous?.call.kind === "other" ? previous.call.input : undefined;
-  const supplied = standard.kind === "other" ? standard.input : undefined;
-  const input = started ?? supplied;
-  return { name, call: input === undefined ? call : { kind: "other", display: call.display, input } };
-}
-
-export function mapAcpUpdate(
+export function emitAcpUpdate(
   update: SessionUpdate,
-  previous: AcpEventState,
+  state: AcpEventState,
+  emit: Emit,
   interpret?: AcpToolInterpreter,
-): AcpEventMapping {
+): void {
   switch (update.sessionUpdate) {
     case "agent_message_chunk":
-    case "agent_thought_chunk": {
-      const text = update.content.type === "text" ? update.content.text : undefined;
-      if (text === undefined) return { events: [], state: previous };
-      return appendBlock(
-        previous,
-        update.sessionUpdate === "agent_message_chunk" ? "assistant" : "thought",
-        text,
-        update.sessionUpdate === "agent_message_chunk" && update.messageId !== null ? update.messageId : undefined,
-      );
-    }
-    case "user_message_chunk":
-      return flushAcpEvents(previous);
+      if (update.content.type === "text")
+        appendBlock(state, "assistant", update.content.text, emit, update.messageId ?? undefined);
+      return;
+    case "agent_thought_chunk":
+      if (update.content.type === "text") appendBlock(state, "thought", update.content.text, emit);
+      return;
     case "tool_call":
     case "tool_call_update": {
-      const observed = observeTool(update, previous.tools.get(update.toolCallId), interpret);
-      const tools = new Map(previous.tools);
-      if (update.status === "completed" || update.status === "failed") {
-        const output = verifiedToolOutput(update);
-        tools.delete(update.toolCallId);
-        return flushAcpEvents({ ...previous, tools }, [
-          {
-            type: "tool",
-            phase: "completed",
-            id: update.toolCallId,
-            ...observed,
-            result: {
-              status: update.status === "completed" ? "ok" : "error",
-              ...(output === undefined ? {} : { output }),
-            },
-          },
-        ]);
+      const previous = state.tools.get(update.toolCallId);
+      if (previous?.phase === "completed") return;
+      const finished = update.status === "completed" || update.status === "failed";
+      if (!finished && previous === undefined && update.sessionUpdate === "tool_call_update") return;
+      const name = nonblank(update.name) ?? nonblank(update.title) ?? previous?.name ?? "ACP tool";
+      const call = standardCall(update) ?? interpret?.(update) ?? otherToolCall(name, update.rawInput);
+      const observed = { name, call };
+      if (finished || previous?.phase !== "started") flushAcpEvents(state, emit);
+      if (finished) {
+        const result = toolResult(update.status === "completed" ? "ok" : "error", verifiedToolOutput(update));
+        state.tools.finish(update.toolCallId, observed, result);
+      } else {
+        state.tools.start(update.toolCallId, observed);
       }
-      const started = tools.has(update.toolCallId);
-      tools.set(update.toolCallId, observed);
-      return started
-        ? flushAcpEvents({ ...previous, tools })
-        : flushAcpEvents({ ...previous, tools }, [
-            { type: "tool", phase: "started", id: update.toolCallId, ...observed },
-          ]);
+      return;
     }
-    default:
-      return { events: [], state: previous };
+    case "user_message_chunk":
+      flushAcpEvents(state, emit);
+      return;
   }
 }

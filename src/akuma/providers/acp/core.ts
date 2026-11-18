@@ -13,9 +13,9 @@ import {
 import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { providerTurn } from "../turn.js";
 import {
-  EMPTY_ACP_EVENT_STATE,
+  createAcpEventState,
+  emitAcpUpdate,
   flushAcpEvents,
-  mapAcpUpdate,
   type AcpToolInterpreter,
   type AcpToolUpdate,
 } from "./events.js";
@@ -201,23 +201,6 @@ function ownAcpTransport(
   };
 }
 
-function acpNarration(events: AgentEventChannel, interpretTool?: AcpToolInterpreter) {
-  let state = EMPTY_ACP_EVENT_STATE;
-  return {
-    get answer() {
-      return state.answer;
-    },
-    update(notification: AcpSdk.SessionNotification) {
-      const mapped = mapAcpUpdate(notification.update, state, interpretTool);
-      state = mapped.state;
-      for (const event of mapped.events) events.emit(event);
-    },
-    flush() {
-      for (const event of flushAcpEvents(state).events) events.emit(event);
-    },
-  };
-}
-
 export async function startAcpSession(
   launch: AcpLaunch,
   input: AcpStartInput,
@@ -228,10 +211,11 @@ export async function startAcpSession(
   const { signal } = custody;
   signal.throwIfAborted();
   const events = new AgentEventChannel();
-  const narration = acpNarration(events, dependencies.interpretTool);
+  const emit = events.emit.bind(events);
+  const narration = createAcpEventState(emit);
   const turn = providerTurn(events, () => {
     dependencies.onTerminal?.();
-    narration.flush();
+    flushAcpEvents(narration, emit);
   });
   const child = (dependencies.spawnProcess ?? spawnStdioProcess)({
     argv: launch.argv,
@@ -252,7 +236,7 @@ export async function startAcpSession(
     agent = transport.connect((notification) => {
       if (turn.terminal || notification.sessionId !== sessionId) return;
       try {
-        narration.update(notification);
+        emitAcpUpdate(notification.update, narration, emit, dependencies.interpretTool);
       } catch (error) {
         if (turn.fail(error)) void transport.close(false);
       }

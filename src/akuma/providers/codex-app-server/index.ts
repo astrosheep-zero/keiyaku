@@ -9,11 +9,13 @@ import {
   type ProviderAdapter,
   type TurnResult,
 } from "../../provider.js";
+import { nonblank, object } from "../decode.js";
 import { akumaActorEnvironment, akumaExecutionEnvironment } from "../execution-environment.js";
 import { providerLifecycle } from "../lifecycle.js";
+import { ToolObservations } from "../tool-observations.js";
 import { providerTurn } from "../turn.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
-import { codexNotificationResult, codexObject, codexText, type CodexTurnState } from "./events.js";
+import { codexNotificationResult, type CodexTurnState } from "./events.js";
 
 type StartInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 type ForkInput = Parameters<NonNullable<ProviderAdapter["fork"]>>[0];
@@ -31,24 +33,24 @@ function diagnostic(error: unknown): string {
 }
 
 function threadId(result: unknown, fallback?: string): string {
-  const value = codexObject(result);
-  const thread = codexObject(value?.thread) ?? value;
-  const id = codexText(thread?.id) ?? fallback;
+  const value = object(result);
+  const thread = object(value?.thread) ?? value;
+  const id = nonblank(thread?.id) ?? fallback;
   if (id === undefined) throw new Error("codex app-server did not return a thread id");
   return id;
 }
 
 function turnId(result: unknown): string {
-  const value = codexObject(result);
-  const turn = codexObject(value?.turn) ?? value;
-  const id = codexText(turn?.id);
+  const value = object(result);
+  const turn = object(value?.turn) ?? value;
+  const id = nonblank(turn?.id);
   if (id === undefined) throw new Error("codex app-server did not return a turn id");
   return id;
 }
 
 /** Thread admission answers with the model the server actually loaded. */
 function emitAdmittedModel(result: unknown, events: AgentEventChannel): void {
-  const model = codexText(codexObject(result)?.model);
+  const model = nonblank(object(result)?.model);
   if (model !== undefined) events.emit(modelEvent(model));
 }
 
@@ -65,8 +67,8 @@ async function steerTurn(
     input: [{ type: "text", text: tell.text }],
     clientUserMessageId: tell.id,
   });
-  const response = codexObject(await request);
-  const accepted = codexText(response?.turnId);
+  const response = object(await request);
+  const accepted = nonblank(response?.turnId);
   if (accepted === undefined) throw new Error("codex app-server steer did not return a turn id");
   if (accepted !== state.turnId) throw new Error("codex app-server steer acknowledged a different turn");
   return { kind: "accepted", fence: `${accepted}:${tell.id}` };
@@ -92,7 +94,7 @@ function forwardedEnvVars(
   const names = new Set(
     (vars ?? []).flatMap((entry) => {
       if (typeof entry === "string") return [entry];
-      const name = codexObject(entry)?.name;
+      const name = object(entry)?.name;
       return typeof name === "string" ? [name] : [];
     }),
   );
@@ -106,17 +108,17 @@ async function codexThreadConfig(
   config?: Readonly<Record<string, unknown>>,
 ): Promise<Readonly<Record<string, unknown>> | undefined> {
   if (input.execution === undefined) return config;
-  const authored = codexObject(config?.mcp_servers);
+  const authored = object(config?.mcp_servers);
   if (config?.mcp_servers !== undefined && authored === undefined) return config;
-  const resolved = codexObject(codexObject(await server.request("config/read", { cwd: input.cwd }))?.config);
-  const existing = codexObject(resolved?.mcp_servers);
+  const resolved = object(object(await server.request("config/read", { cwd: input.cwd }))?.config);
+  const existing = object(resolved?.mcp_servers);
   const overlays = new Map(Object.entries(authored ?? {}));
   const identity = akumaActorEnvironment(input.execution);
   for (const name of Object.keys({ ...existing, ...authored })) {
-    const declared = codexObject(overlays.get(name));
+    const declared = object(overlays.get(name));
     if (overlays.has(name) && declared === undefined) continue;
-    if (!isLocalMcpServer({ ...codexObject(existing?.[name]), ...declared })) continue;
-    const envVars = forwardedEnvVars(declared, codexObject(existing?.[name]), identity);
+    if (!isLocalMcpServer({ ...object(existing?.[name]), ...declared })) continue;
+    const envVars = forwardedEnvVars(declared, object(existing?.[name]), identity);
     if (envVars === undefined) continue;
     overlays.set(name, { ...declared, env_vars: envVars });
   }
@@ -231,7 +233,7 @@ async function startCodex(execution: ProviderExecution, input: StartInput, custo
     get settled() {
       return turn.terminal;
     },
-    tools: new Map(),
+    tools: new ToolObservations((event) => turn.events.emit(event)),
   };
   const finish = (result: TurnResult): void => {
     if (turn.finish(result)) retainRetirement(server.endInputAndDrain());

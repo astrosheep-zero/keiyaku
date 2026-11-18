@@ -1,103 +1,49 @@
 import type { SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { AgentEventChannel, modelEvent, noteEvent, otherToolCall, type ToolCall } from "../../provider.js";
 import {
+  diffCounts,
+  fileChangeToolCall,
   finiteNumber,
+  nonblank,
   object,
+  observedChange,
   observedTextContent,
-  positiveLine,
+  readToolCall,
   searchToolCall,
   stringValue,
+  toolResult,
   trimmed,
 } from "../decode.js";
+import { ToolObservations } from "../tool-observations.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
 
-export type ClaudeObservationState = { tools: Map<string, Readonly<{ name: string; call: ToolCall }>> };
-
-function readRange(value: Readonly<Record<string, unknown>>): Readonly<{ offset?: number; limit?: number }> {
-  const offset = positiveLine(value.offset);
-  const limit = positiveLine(value.limit);
-  return {
-    ...(offset === undefined ? {} : { offset }),
-    ...(limit === undefined ? {} : { limit }),
-  };
-}
-
-function runCall(name: string, value: Readonly<Record<string, unknown>>, input: unknown): ToolCall | undefined {
-  if (name !== "Bash") return undefined;
-  const command = trimmed(value.command);
-  return command === undefined ? otherToolCall(name, input) : { kind: "run", command };
-}
-
-function readCall(
-  name: string,
-  path: string | undefined,
-  value: Readonly<Record<string, unknown>>,
-): ToolCall | undefined {
-  return name === "Read" && path !== undefined ? { kind: "read", path, ...readRange(value) } : undefined;
-}
-
-function searchCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name === "Grep") {
-    const query = trimmed(value.pattern) ?? trimmed(value.query);
-    return query === undefined
-      ? undefined
-      : searchToolCall(query, "content", { path: trimmed(value.path), glob: trimmed(value.glob) });
+function structuredToolCall(name: string, input: unknown): ToolCall | undefined {
+  const value = object(input);
+  if (value === undefined) return undefined;
+  switch (name) {
+    case "Bash": {
+      const command = trimmed(value.command);
+      return command === undefined ? undefined : { kind: "run", command };
+    }
+    case "Read": {
+      const path = nonblank(value.file_path) ?? nonblank(value.path);
+      return readToolCall(path, value.offset, value.limit);
+    }
+    case "Grep":
+      return searchToolCall(nonblank(value.pattern) ?? value.query, "content", { path: value.path, glob: value.glob });
+    case "Glob":
+      return searchToolCall(value.pattern, "files", { path: value.path });
+    case "WebSearch":
+      return searchToolCall(value.query, "web");
+    case "Write":
+      return fileChangeToolCall("add", trimmed(value.file_path));
+    case "Edit":
+      return fileChangeToolCall("update", trimmed(value.file_path));
+    case "NotebookEdit":
+      return fileChangeToolCall("update", trimmed(value.notebook_path));
+    default:
+      return undefined;
   }
-  if (name === "Glob") {
-    const query = trimmed(value.pattern);
-    return query === undefined ? undefined : searchToolCall(query, "files", { path: trimmed(value.path) });
-  }
-  if (name === "WebSearch") {
-    const query = trimmed(value.query);
-    return query === undefined ? undefined : searchToolCall(query, "web");
-  }
-  return undefined;
-}
-
-function fileChangeCall(name: string, path: string | undefined): ToolCall | undefined {
-  if (path === undefined) return undefined;
-  if (name === "Write") return { kind: "fileChange", changes: [{ op: "add", path }] };
-  if (name === "Edit" || name === "NotebookEdit") {
-    return { kind: "fileChange", changes: [{ op: "update", path }] };
-  }
-  return undefined;
-}
-
-function startedPath(name: string, value: Readonly<Record<string, unknown>>): string | undefined {
-  if (name === "NotebookEdit") return trimmed(value.notebook_path);
-  return trimmed(value.file_path) ?? (name === "Read" ? trimmed(value.path) : undefined);
-}
-
-function nonnegativeInt(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : undefined;
-}
-
-function fileChange(
-  op: "add" | "update",
-  path: string,
-  result: Readonly<Record<string, unknown>>,
-): Extract<ToolCall, { kind: "fileChange" }> {
-  const diff = object(result.gitDiff);
-  const added = nonnegativeInt(diff?.additions);
-  const removed = nonnegativeInt(diff?.deletions);
-  const patch = stringValue(diff?.patch) ?? structuredPatchText(path, result.structuredPatch);
-  const diffstat =
-    added === undefined || removed === undefined
-      ? patch === undefined
-        ? undefined
-        : diffstatFromUnifiedPatch(patch)
-      : { added, removed };
-  return {
-    kind: "fileChange",
-    changes: [
-      {
-        op,
-        path,
-        ...(diffstat === undefined ? {} : { diffstat }),
-        ...(patch === undefined ? {} : { patch }),
-      },
-    ],
-  };
 }
 
 /**
@@ -130,48 +76,26 @@ function structuredPatchText(path: string, value: unknown): string | undefined {
   return [`--- a/${path}`, `+++ b/${path}`, ...hunks].join("\n");
 }
 
-function writeResult(result: unknown): ToolCall | undefined {
-  const value = object(result);
-  if (value === undefined || (value.type !== "create" && value.type !== "update")) return undefined;
-  const path = trimmed(value.filePath);
-  if (path === undefined) return undefined;
-  return fileChange(value.type === "create" ? "add" : "update", path, value);
-}
-
-function editResult(result: unknown): ToolCall | undefined {
-  const value = object(result);
-  if (value === undefined || value.type === "create" || value.type === "update") return undefined;
-  const path = trimmed(value.filePath);
-  if (path === undefined) return undefined;
-  const status = object(value.gitDiff)?.status;
-  return fileChange(status === "added" ? "add" : "update", path, value);
-}
-
-function notebookResult(result: unknown): ToolCall | undefined {
-  const path = trimmed(object(result)?.notebook_path);
-  return path === undefined ? undefined : { kind: "fileChange", changes: [{ op: "update", path }] };
-}
-
 function structuredFileChange(name: string, result: unknown): ToolCall | undefined {
-  if (name === "Write") return writeResult(result);
-  if (name === "Edit") return editResult(result);
-  return name === "NotebookEdit" ? notebookResult(result) : undefined;
-}
-
-function toolCall(name: string, input: unknown): ToolCall {
-  const value = object(input) ?? {};
-  const run = runCall(name, value, input);
-  if (run !== undefined) return run;
-  const path = startedPath(name, value);
-  return (
-    readCall(name, path, value) ?? searchCall(name, value) ?? fileChangeCall(name, path) ?? otherToolCall(name, input)
-  );
+  const value = object(result);
+  if (value === undefined) return undefined;
+  if (name === "NotebookEdit") return fileChangeToolCall("update", trimmed(value.notebook_path));
+  if (name !== "Edit" && name !== "Write") return undefined;
+  const writeShape = value.type === "create" || value.type === "update";
+  const path = trimmed(value.filePath);
+  if (path === undefined || (name === "Write") !== writeShape) return undefined;
+  const diff = object(value.gitDiff);
+  const op = (writeShape ? value.type === "create" : diff?.status === "added") ? "add" : "update";
+  const patch = stringValue(diff?.patch) ?? structuredPatchText(path, value.structuredPatch);
+  const diffstat =
+    diffCounts(diff?.additions, diff?.deletions) ?? (patch === undefined ? undefined : diffstatFromUnifiedPatch(patch));
+  return { kind: "fileChange", changes: [observedChange(op, path, patch, diffstat)] };
 }
 
 function assistantEvents(
   message: Extract<SDKMessage, { type: "assistant" }>,
   events: AgentEventChannel,
-  state: ClaudeObservationState,
+  tools: ToolObservations,
 ): void {
   // Every complete response names the model that produced it; the native model
   // identity is reported as-is.
@@ -194,41 +118,28 @@ function assistantEvents(
       continue;
     }
     if (block.type !== "tool_use") continue;
-    const call = toolCall(block.name, block.input);
-    state.tools.set(block.id, { name: block.name, call });
-    events.emit({ type: "tool", phase: "started", id: block.id, name: block.name, call });
+    const call = structuredToolCall(block.name, block.input) ?? otherToolCall(block.name, block.input);
+    tools.start(block.id, { name: block.name, call });
   }
 }
 
-function toolResultEvents(
-  message: Extract<SDKMessage, { type: "user" }>,
-  events: AgentEventChannel,
-  state: ClaudeObservationState,
-): void {
+function toolResultEvents(message: Extract<SDKMessage, { type: "user" }>, tools: ToolObservations): void {
   const content = object(message.message)?.content;
   if (!Array.isArray(content)) return;
   for (const block of content) {
     const value = object(block);
     if (value?.type !== "tool_result") continue;
-    const id = trimmed(value.tool_use_id);
+    const id = nonblank(value.tool_use_id);
     if (id === undefined) continue;
-    const observed = state.tools.get(id);
-    if (observed === undefined) continue;
-    state.tools.delete(id);
+    const observed = tools.get(id);
+    if (observed === undefined || observed.phase === "completed") continue;
     const failed = value.is_error === true;
     const structured = failed ? undefined : structuredFileChange(observed.name, message.tool_use_result);
-    const output = observedTextContent(value.content);
-    events.emit({
-      type: "tool",
-      phase: "completed",
+    tools.finish(
       id,
-      name: observed.name,
-      call: structured ?? observed.call,
-      result: {
-        status: failed ? "error" : "ok",
-        ...(output === undefined ? {} : { output }),
-      },
-    });
+      structured === undefined ? undefined : { name: observed.name, call: structured },
+      toolResult(failed ? "error" : "ok", observedTextContent(value.content)),
+    );
   }
 }
 
@@ -262,13 +173,13 @@ function emitSystemMessage(value: Readonly<Record<string, unknown>>, events: Age
   }
 }
 
-export function emitClaudeMessage(message: SDKMessage, events: AgentEventChannel, state: ClaudeObservationState): void {
+export function emitClaudeMessage(message: SDKMessage, events: AgentEventChannel, tools: ToolObservations): void {
   switch (message.type) {
     case "assistant":
-      assistantEvents(message, events, state);
+      assistantEvents(message, events, tools);
       return;
     case "user":
-      toolResultEvents(message, events, state);
+      toolResultEvents(message, tools);
       return;
     case "auth_status": {
       const diagnostic = trimmed(message.error);

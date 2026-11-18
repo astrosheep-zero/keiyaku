@@ -30,6 +30,13 @@ import {
 import { insertTellFact } from "../src/akuma/heart/tells.js";
 import { pruneActivityFacts } from "../src/akuma/heart/timeline.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
+import { ToolObservations } from "../src/akuma/providers/tool-observations.js";
+import type { AgentEvent } from "../src/akuma/provider.js";
+
+/** One attempt-local Pi tool book narrating into the collector the caller reads. */
+function piState(emitted: AgentEvent[]): PiEventState {
+  return { answer: "", assistantSeen: false, tools: new ToolObservations((event) => void emitted.push(event)) };
+}
 
 async function fixture() {
   return await soulFixture("keiyaku-akuma-observation-");
@@ -443,10 +450,13 @@ test("reported changes retain native Pi writes and aggregate a write-then-edit p
     await leash.birth(paths, value.soul);
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
     const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
-    const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+    const emitted: AgentEvent[] = [];
+    const state = piState(emitted);
+    const emit = (event: AgentEvent): void => void emitted.push(event);
     let ticks = 0;
     const observe = async (event: AgentSessionEvent): Promise<void> => {
-      for (const translated of translatePiEvent(event, state))
+      translatePiEvent(event, state, emit);
+      for (const translated of emitted.splice(0))
         await appendActivity(paths, {
           turnSequence: turn.sequence,
           at: new Date(Date.parse(value.soul.createdAt) + (ticks += 1) * 1_000).toISOString(),
@@ -528,14 +538,13 @@ test("a retained unknown tool call keeps its bounded argument preview through pr
     await leash.birth(paths, value.soul);
     const body = await leash.recordBody(paths, { leashTakenAt: value.soul.createdAt });
     const turn = await beginTurn(paths, { bodySequence: body.sequence, startedAt: value.soul.createdAt });
-    const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+    const emitted: AgentEvent[] = [];
+    const state = piState(emitted);
     const at = (tick: number) => new Date(Date.parse(value.soul.createdAt) + tick * 1_000).toISOString();
     const args = { alpha: 1, nested: { ok: true } };
-    const started = translatePiEvent(
-      { type: "tool_execution_start", toolCallId: "future-1", toolName: "future_tool", args },
-      state,
-    );
-    const completed = translatePiEvent(
+    const emit = (event: AgentEvent): void => void emitted.push(event);
+    translatePiEvent({ type: "tool_execution_start", toolCallId: "future-1", toolName: "future_tool", args }, state, emit);
+    translatePiEvent(
       {
         type: "tool_execution_end",
         toolCallId: "future-1",
@@ -544,9 +553,11 @@ test("a retained unknown tool call keeps its bounded argument preview through pr
         result: { content: [{ type: "text", text: "secret output" }] },
       },
       state,
+      emit,
     );
-    await appendActivity(paths, { turnSequence: turn.sequence, at: at(1), event: started[0]! });
-    await appendActivity(paths, { turnSequence: turn.sequence, at: at(2), event: completed[0]! });
+    for (const [index, event] of emitted.entries()) {
+      await appendActivity(paths, { turnSequence: turn.sequence, at: at(index + 1), event });
+    }
 
     const calls = (await activitySlice(paths)).rows.map(projectFact).flatMap(row => row.kind === "tool" ? [row.call] : []);
     assert.deepEqual(calls, Array.from({ length: 2 }, () => ({

@@ -249,6 +249,18 @@ remains unknown and never borrows another model. Old persisted placeholders are
 not retroactively repaired, and later observation makes no promise of live
 model-change refresh.
 
+A native attempt correlates observed tool work by its native identity: each tool
+has at most one start and one completion, repeated starts may enrich evidence,
+and traffic after completion adds nothing. Pending identity alone is not a
+complete invocation. Each adapter explicitly decides whether native completion
+without an observed start supplies enough evidence to narrate that tool; the
+common correlation never invents a missing invocation. These identities expire
+with the attempt and confer no execution, session, or terminal authority.
+
+Meaningful read and search strings are nonblank and remain exactly as supplied.
+Missing or invalid optional bounds, counts, and scopes remain absent rather than
+acquiring defaults. Native output composition remains the adapter's concern.
+
 A generic native tool invocation may contribute one bounded compact preview of
 the structured arguments it actually supplied. That preview is narration, not
 execution authority: it never carries tool output, results, deltas, or a raw
@@ -256,18 +268,24 @@ native envelope, and it preserves the supplied values, types, and order without
 fabricating defaults. Supplied arguments that exceed the narration bound keep an
 explicit truncation fact cut at a complete code-point boundary. Missing
 arguments stay absent, and explicitly empty arguments remain distinguishable
-from absence rather than collapsing into it. An acknowledging or completion
-event reuses the preview its correlated start admitted; an adapter whose native
-protocol supplies no structured invocation arguments keeps a name-only
-fallback. Existing known structural tool normalization is unchanged, and old
-name-only narration keeps its former presentation.
+from absence rather than collapsing into it. The first supplied preview wins,
+including a supplied null or scalar; missing input may adopt the first later
+supplied invocation input. Acknowledgement and completion reuse that evidence,
+and result bodies never become invocation previews. Structural evidence can
+replace a generic fallback, and a later generic fallback cannot erase it. An
+adapter whose native protocol supplies no structured invocation arguments keeps
+a name-only fallback. Old name-only narration keeps its former presentation.
 
 Known structural tool normalization additionally preserves what the native
 surface actually observed when a call finished: its result text and the patch
-content of each file change it reported. That observation is narration, never
-execution authority. It carries no raw native envelope and no delta stream, and
-nothing reconstructs it from the working tree, from Git, or from proposed old and
-new text; a native field without verified producer evidence stays absent and is
+content of each file change it reported. Verified native completion evidence may
+refine the correlated paths, operation, change counts, and supplied patch. A
+refinement does not pair a newly observed patch with counts from an earlier
+observation. A display title, result prose, or an ambiguous native projection
+cannot establish a file path or patch. This is narration, never execution
+authority. It carries no raw native envelope or delta stream. Nothing
+reconstructs it from the working tree, from Git, or from proposed old and new
+text; a native field without verified producer evidence stays absent and is
 never synthesized. Observed content that exceeds the narration bound keeps an
 explicit visible truncation fact cut at a complete code-point boundary, so a cut
 diff cannot render as a complete one, and a value that was observed empty remains

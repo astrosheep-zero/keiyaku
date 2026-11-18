@@ -1,8 +1,8 @@
 import { KeiyakuError } from "../../../errors.js";
 import { tellRegistry, type TellRegistry } from "../../provider.js";
-import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission, Session, ToolCall } from "../../provider.js";
+import type { AttemptCustody, ProviderAdapter, ProviderOptionAdmission, Session } from "../../provider.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
-import { nonblank, object, searchToolCall } from "../decode.js";
+import { fileChangeToolCall, nonblank, object, readToolCall, searchToolCall } from "../decode.js";
 import { providerLifecycle } from "../lifecycle.js";
 import {
   startAcpSession,
@@ -27,51 +27,28 @@ function nativeName(update: AcpToolUpdate): string | undefined {
   return nonblank(update.name) ?? nonblank(update.title) ?? nonblank(wire.toolName);
 }
 
-function readCall(name: string, input: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name !== "read_file" && name !== "hashline_read") return undefined;
-  const sourcePath = nonblank(input.target_file);
-  const capturedPath = name === "read_file" ? nonblank(input.path) : undefined;
-  const path = sourcePath ?? capturedPath;
-  return path === undefined ? undefined : { kind: "read", path };
-}
-
-function contentSearchCall(name: string, input: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name !== "grep" && name !== "hashline_grep") return undefined;
-  const query = nonblank(input.pattern);
-  return query === undefined
-    ? undefined
-    : searchToolCall(query, "content", { path: nonblank(input.path), glob: nonblank(input.glob) });
-}
-
-function runCall(name: string, input: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name !== "run_terminal_cmd") return undefined;
-  const command = nonblank(input.command);
-  return command === undefined ? undefined : { kind: "run", command };
-}
-
-function webSearchCall(name: string, input: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name !== "web_search") return undefined;
-  const query = nonblank(input.query);
-  return query === undefined ? undefined : { kind: "search", query, scope: "web" };
-}
-
-function fileChangeCall(name: string, input: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name !== "search_replace") return undefined;
-  const path = nonblank(input.file_path);
-  return path === undefined ? undefined : { kind: "fileChange", changes: [{ op: "unspecified", path }] };
-}
-
 export const interpretGrokTool: AcpToolInterpreter = (update) => {
   const name = nativeName(update);
   const input = object(update.rawInput);
-  if (name === undefined || input === undefined) return undefined;
-  return (
-    readCall(name, input) ??
-    contentSearchCall(name, input) ??
-    runCall(name, input) ??
-    webSearchCall(name, input) ??
-    fileChangeCall(name, input)
-  );
+  if (input === undefined) return undefined;
+  switch (name) {
+    case "read_file":
+    case "hashline_read":
+      return readToolCall(nonblank(input.target_file) ?? (name === "read_file" ? input.path : undefined));
+    case "grep":
+    case "hashline_grep":
+      return searchToolCall(input.pattern, "content", { path: input.path, glob: input.glob });
+    case "run_terminal_cmd": {
+      const command = nonblank(input.command);
+      return command === undefined ? undefined : { kind: "run", command };
+    }
+    case "web_search":
+      return searchToolCall(input.query, "web");
+    case "search_replace":
+      return fileChangeToolCall("unspecified", nonblank(input.file_path));
+    default:
+      return undefined;
+  }
 };
 
 function optionAdmission(options: ProviderOptions): ProviderOptionAdmission {

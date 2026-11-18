@@ -31,6 +31,7 @@ import {
   type TurnResult,
 } from "../../provider.js";
 import { providerLifecycle } from "../lifecycle.js";
+import { ToolObservations } from "../tool-observations.js";
 import { providerTurn } from "../turn.js";
 import { piSessionModel, piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
 
@@ -197,7 +198,8 @@ async function drivePi(
   const { session: native } = created;
   const { agent } = native;
   const events = new AgentEventChannel();
-  const eventState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  const emit = events.emit.bind(events);
+  const eventState: PiEventState = { answer: "", assistantSeen: false, tools: new ToolObservations(emit) };
   const tells = tellRegistry<PiNativeMessage>((id) => `${native.sessionId}:${id}`);
   const subscriptions: Array<() => void> = [];
   let terminalFailure: string | null = null;
@@ -266,7 +268,7 @@ async function drivePi(
       native.subscribe((event) => {
         if (turn.terminal) return;
         if (event.type === "agent_end" && !event.willRetry) terminalFailure = piTerminalFailure(event.messages);
-        for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
+        translatePiEvent(event, eventState, emit);
       }),
     );
     signal.throwIfAborted();

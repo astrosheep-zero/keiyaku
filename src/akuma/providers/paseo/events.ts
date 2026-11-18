@@ -1,7 +1,16 @@
 import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
 import type { AgentRuntimeInfo, AgentTimelineItem } from "@getpaseo/protocol/agent-types";
 import { AgentEventChannel, otherToolCall, type AgentEvent, type ToolCall } from "../../provider.js";
-import { stringValue } from "../decode.js";
+import {
+  fileChangeToolCall,
+  nonblank,
+  observedChange,
+  readToolCall,
+  searchToolCall,
+  stringValue,
+  toolResult,
+} from "../decode.js";
+import { ToolObservations } from "../tool-observations.js";
 import { providerTurn } from "../turn.js";
 
 /**
@@ -11,12 +20,12 @@ import { providerTurn } from "../turn.js";
  * observable here and is never invented.
  */
 export function paseoRuntimeModel(info: AgentRuntimeInfo | undefined): string | undefined {
-  const model = info?.model;
-  return typeof model === "string" && model.trim().length > 0 ? model : undefined;
+  return nonblank(info?.model);
 }
 
 type ToolCallItem = Extract<AgentTimelineItem, { type: "tool_call" }>;
 type ToolCallDetail = ToolCallItem["detail"];
+type Emit = (event: AgentEvent) => void;
 
 /**
  * The observed result text one native detail carries. A detail that observes no
@@ -36,36 +45,20 @@ function detailOutput(detail: ToolCallDetail): string | undefined {
   }
 }
 
-/** The verified unified patch a completed edit detail observed, when it supplied one. */
-function detailPatch(detail: ToolCallDetail): string | undefined {
-  return detail.type === "edit" ? stringValue(detail.unifiedDiff) : undefined;
-}
-
-/** Attach the observed patch to the one change its correlated path already named. */
-function withObservedPatch(call: ToolCall, patch: string | undefined): ToolCall {
-  if (call.kind !== "fileChange") return call;
-  const change = call.changes[0];
-  if (patch === undefined || change === undefined || call.changes.length !== 1) return call;
-  return { kind: "fileChange", changes: [{ ...change, patch }] };
-}
-
 function toolCall(item: ToolCallItem): ToolCall {
   const detail = item.detail;
   switch (detail.type) {
     case "shell":
       return { kind: "run", command: detail.command };
     case "read":
-      return {
-        kind: "read",
-        path: detail.filePath,
-        ...(detail.offset === undefined ? {} : { offset: detail.offset }),
-        ...(detail.limit === undefined ? {} : { limit: detail.limit }),
-      };
+      return readToolCall(detail.filePath, detail.offset, detail.limit) ?? otherToolCall(item.name);
     case "edit":
     case "write":
-      return { kind: "fileChange", changes: [{ op: "unspecified", path: detail.filePath }] };
+      return fileChangeToolCall("unspecified", detail.filePath) ?? otherToolCall(item.name);
     case "search":
-      return { kind: "search", query: detail.query, scope: detail.toolName === "web_search" ? "web" : "content" };
+      return (
+        searchToolCall(detail.query, detail.toolName === "web_search" ? "web" : "content") ?? otherToolCall(item.name)
+      );
     case "unknown":
       return otherToolCall(item.name, detail.input);
     default:
@@ -73,34 +66,43 @@ function toolCall(item: ToolCallItem): ToolCall {
   }
 }
 
-function timelineNarration(item: AgentTimelineItem, calls: Map<string, ToolCall>): AgentEvent | undefined {
+function timelineNarration(item: AgentTimelineItem, tools: ToolObservations, emit: Emit): void {
   switch (item.type) {
     case "tool_call": {
-      const base = calls.get(item.callId) ?? (item.status === "running" ? toolCall(item) : otherToolCall(item.name));
-      const call = item.status === "running" ? base : withObservedPatch(base, detailPatch(item.detail));
-      calls.set(item.callId, call);
+      const { detail } = item;
+      // The ACP mapper's edit/delete projection substitutes its display title
+      // for a missing path and puts ordinary result text in the patch field.
+      const ambiguousEdit = detail.type === "edit" && (item.metadata?.kind === "edit" || item.metadata?.kind === "delete");
       if (item.status === "running") {
-        return { type: "tool", phase: "started", id: item.callId, name: item.name, call };
+        tools.start(item.callId, { name: item.name, call: ambiguousEdit ? otherToolCall(item.name) : toolCall(item) });
+        return;
       }
-      const output = detailOutput(item.detail);
-      return {
-        type: "tool",
-        phase: "completed",
-        id: item.callId,
-        name: item.name,
-        call,
-        result: {
-          status: item.status === "completed" ? "ok" : "error",
-          ...(output === undefined ? {} : { output }),
-        },
-      };
+      const observed = tools.get(item.callId);
+      if (observed?.phase === "completed") return;
+      const previousCall = observed?.call;
+      const change = previousCall?.kind === "fileChange" ? previousCall.changes[0] : undefined;
+      let call = previousCall ?? otherToolCall(item.name);
+      if (observed !== undefined && detail.type === "unknown") {
+        call = otherToolCall(item.name, detail.input);
+      } else if (!ambiguousEdit && detail.type === "edit" && change?.path === detail.filePath) {
+        const patch = stringValue(detail.unifiedDiff);
+        if (patch !== undefined) call = { kind: "fileChange", changes: [observedChange(change.op, change.path, patch)] };
+      }
+      tools.finish(
+        item.callId,
+        { name: item.name, call },
+        toolResult(item.status === "completed" ? "ok" : "error", detailOutput(detail)),
+      );
+      return;
     }
     case "error":
-      return { type: "note", text: item.message };
+      emit({ type: "note", text: item.message });
+      return;
     case "compaction":
-      return item.status === "completed" ? { type: "note", text: "Context compacted" } : undefined;
+      if (item.status === "completed") emit({ type: "note", text: "Context compacted" });
+      return;
     default:
-      return undefined;
+      return;
   }
 }
 
@@ -113,7 +115,7 @@ export class PaseoTurn {
   private turnId: string | undefined;
   private readonly messages: Array<{ id?: string; text: string }> = [];
   private readonly messagesById = new Map<string, { text: string }>();
-  private readonly calls = new Map<string, ToolCall>();
+  private readonly tools = new ToolObservations((event) => this.outcome.events.emit(event));
   private answer = "";
   private assistantContiguous = false;
 
@@ -146,8 +148,7 @@ export class PaseoTurn {
       if (event.item.type === "assistant_message") this.appendAssistant(event.item);
       else {
         this.assistantContiguous = false;
-        const narration = timelineNarration(event.item, this.calls);
-        if (narration !== undefined) this.outcome.events.emit(narration);
+        timelineNarration(event.item, this.tools, (narration) => this.outcome.events.emit(narration));
       }
     } else if (event.type === "turn_completed" || event.type === "turn_failed" || event.type === "turn_canceled") {
       for (const message of this.messages) this.outcome.events.emit({ type: "assistant", text: message.text });

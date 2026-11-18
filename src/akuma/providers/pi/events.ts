@@ -1,21 +1,18 @@
 import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { modelEvent, noteEvent, otherToolCall, type AgentEvent, type ToolCall } from "../../provider.js";
-import { nonblank, observedTextContent, positiveLine, searchToolCall } from "../decode.js";
+import {
+  attachObservedPatch,
+  fileChangeToolCall,
+  nonblank,
+  object as record,
+  observedTextContent,
+  readToolCall,
+  searchToolCall,
+  stringValue,
+  toolResult,
+} from "../decode.js";
+import { ToolObservations } from "../tool-observations.js";
 import { diffstatFromUnifiedPatch } from "../unified-patch.js";
-
-function record(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function textContent(content: unknown): string {
-  return observedTextContent(content) ?? "";
-}
-
-function hasTextContent(content: unknown): boolean {
-  return observedTextContent(content) !== undefined;
-}
 
 /**
  * Pi identifies a model as `<provider>/<id>`, the same convention its model
@@ -34,158 +31,99 @@ export function piSessionModel(selected: unknown): string | undefined {
   return piModel(value?.provider, value?.id);
 }
 
-function runCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  return name === "bash" && typeof value.command === "string" ? { kind: "run", command: value.command } : undefined;
-}
-
-function readCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name !== "read" || typeof value.path !== "string") return undefined;
-  const offset = positiveLine(value.offset);
-  const limit = positiveLine(value.limit);
-  return {
-    kind: "read",
-    path: value.path,
-    ...(offset === undefined ? {} : { offset }),
-    ...(limit === undefined ? {} : { limit }),
-  };
-}
-
-function searchCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  if (name !== "grep" && name !== "find") return undefined;
-  const query = value.pattern ?? value.query;
-  if (typeof query !== "string") return undefined;
-  return searchToolCall(query, name === "find" ? "files" : "content", {
-    path: nonblank(value.path),
-    glob: name === "grep" ? nonblank(value.glob) : undefined,
-  });
-}
-
-function fileChangeCall(name: string, value: Readonly<Record<string, unknown>>): ToolCall | undefined {
-  // Native write cannot prove creation versus overwrite and reports no patch, so
-  // it joins the conservative update operation with unknown diffstat.
-  if ((name !== "edit" && name !== "write") || typeof value.path !== "string") return undefined;
-  return { kind: "fileChange", changes: [{ op: "update", path: value.path }] };
-}
-
-function refineEditCall(call: ToolCall, result: unknown): ToolCall {
-  if (call.kind !== "fileChange") return call;
-  const details = record(record(result)?.details);
-  const patch = typeof details?.patch === "string" ? details.patch : undefined;
-  if (patch === undefined) return call;
-  const diffstat = diffstatFromUnifiedPatch(patch);
-  const change = call.changes[0];
-  if (change === undefined) return call;
-  return { kind: "fileChange", changes: [{ ...change, ...(diffstat === undefined ? {} : { diffstat }), patch }] };
-}
-
-function toolCall(name: string, args: unknown): ToolCall {
+function structuralCall(name: string, args: unknown): ToolCall | undefined {
   const value = record(args) ?? {};
-  return (
-    runCall(name, value) ??
-    readCall(name, value) ??
-    searchCall(name, value) ??
-    fileChangeCall(name, value) ??
-    otherToolCall(name, args)
-  );
+  switch (name) {
+    case "bash":
+      return typeof value.command === "string" ? { kind: "run", command: value.command } : undefined;
+    case "read":
+      return readToolCall(value.path, value.offset, value.limit);
+    case "grep":
+    case "find":
+      return searchToolCall(value.pattern ?? value.query, name === "find" ? "files" : "content", {
+        path: value.path,
+        glob: name === "grep" ? value.glob : undefined,
+      });
+    case "edit":
+    case "write":
+      // Native write does not prove creation versus overwrite.
+      return fileChangeToolCall("update", stringValue(value.path));
+    default:
+      return undefined;
+  }
 }
 
 export type PiEventState = {
   answer: string;
   assistantSeen: boolean;
-  tools: Map<string, Readonly<{ name: string; call: ToolCall }>>;
+  tools: ToolObservations;
 };
 
-function translateToolStart(
-  event: Extract<AgentSessionEvent, { type: "tool_execution_start" }>,
+export function translatePiEvent(
+  event: AgentSessionEvent,
   state: PiEventState,
-): readonly AgentEvent[] {
-  const call = toolCall(event.toolName, event.args);
-  state.tools.set(event.toolCallId, { name: event.toolName, call });
-  return [{ type: "tool", phase: "started", id: event.toolCallId, name: event.toolName, call }];
-}
-
-function translateToolEnd(
-  event: Extract<AgentSessionEvent, { type: "tool_execution_end" }>,
-  state: PiEventState,
-): readonly AgentEvent[] {
-  const started = state.tools.get(event.toolCallId);
-  state.tools.delete(event.toolCallId);
-  const name = started?.name ?? event.toolName;
-  const call = started?.call ?? otherToolCall(name);
-  const output = observedTextContent(record(event.result)?.content);
-  return [
-    {
-      type: "tool",
-      phase: "completed",
-      id: event.toolCallId,
-      name,
-      call: event.isError ? call : refineEditCall(call, event.result),
-      result: {
-        status: event.isError ? "error" : "ok",
-        ...(output === undefined ? {} : { output }),
-      },
-    },
-  ];
-}
-
-function translateMessage(
-  event: Extract<AgentSessionEvent, { type: "message_end" }>,
-  state: PiEventState,
-): readonly AgentEvent[] {
-  const message = record(event.message);
-  if (message?.role !== "assistant") return [];
-  const translated: AgentEvent[] = [];
-  const model = piModel(message.provider, message.model);
-  if (model !== undefined) translated.push(modelEvent(model));
-  const error = message.stopReason === "error" ? nonblank(message.errorMessage) : undefined;
-  if (error !== undefined) translated.push(noteEvent(error));
-  if (Array.isArray(message.content)) {
-    for (const block of message.content) {
-      const value = record(block);
-      if (
-        value?.type === "thinking" &&
-        value.redacted !== true &&
-        typeof value.thinking === "string" &&
-        value.thinking.trim().length > 0
-      ) {
-        translated.push({ type: "thought", text: value.thinking });
-      }
-    }
-  }
-  const text = textContent(message.content);
-  const terminal = message.stopReason !== "toolUse";
-  if (terminal) {
-    state.assistantSeen = true;
-    state.answer = text;
-  }
-  // Some providers emit a blank text block alongside every tool-use message:
-  // empty from Gemini, whitespace from openai-responses-style proxies. It is
-  // transport scaffolding, not narration; an ordinary terminal empty answer
-  // remains public evidence.
-  if (hasTextContent(message.content) && !(message.stopReason === "toolUse" && text.trim().length === 0)) {
-    translated.push({ type: "assistant", text });
-  }
-  return translated;
-}
-
-export function translatePiEvent(event: AgentSessionEvent, state: PiEventState): readonly AgentEvent[] {
+  emit: (event: AgentEvent) => void,
+): void {
   switch (event.type) {
     case "compaction_end":
-      if (event.errorMessage !== undefined) return [noteEvent(event.errorMessage)];
-      return event.result !== undefined && !event.aborted ? [noteEvent("Context compacted")] : [];
+      if (event.errorMessage !== undefined) emit(noteEvent(event.errorMessage));
+      else if (event.result !== undefined && !event.aborted) emit(noteEvent("Context compacted"));
+      return;
     case "auto_retry_start":
     case "summarization_retry_scheduled":
-      return [noteEvent(event.errorMessage)];
+      emit(noteEvent(event.errorMessage));
+      return;
     case "auto_retry_end":
-      return !event.success && event.finalError !== undefined ? [noteEvent(event.finalError)] : [];
-    case "tool_execution_start":
-      return translateToolStart(event, state);
-    case "tool_execution_end":
-      return translateToolEnd(event, state);
-    case "message_end":
-      return translateMessage(event, state);
+      if (!event.success && event.finalError !== undefined) emit(noteEvent(event.finalError));
+      return;
+    case "tool_execution_start": {
+      const { toolName: name, args } = event;
+      const call = structuralCall(name, args) ?? otherToolCall(name, args);
+      state.tools.start(event.toolCallId, { name, call });
+      return;
+    }
+    case "tool_execution_end": {
+      const started = state.tools.get(event.toolCallId);
+      const name = started?.name ?? event.toolName;
+      const call = started?.call ?? otherToolCall(name);
+      const result = record(event.result);
+      const patch =
+        call.kind === "fileChange" && !event.isError ? stringValue(record(result?.details)?.patch) : undefined;
+      const refined = patch === undefined ? call : attachObservedPatch(call, patch, diffstatFromUnifiedPatch(patch));
+      state.tools.finish(
+        event.toolCallId,
+        { name, call: refined },
+        toolResult(event.isError ? "error" : "ok", observedTextContent(result?.content)),
+      );
+      return;
+    }
+    case "message_end": {
+      const message = event.message;
+      if (message.role !== "assistant") return;
+      const model = piModel(message.provider, message.model);
+      if (model !== undefined) emit(modelEvent(model));
+      const error = message.stopReason === "error" ? nonblank(message.errorMessage) : undefined;
+      if (error !== undefined) emit(noteEvent(error));
+      for (const block of message.content) {
+        if (block.type === "thinking" && block.redacted !== true && nonblank(block.thinking) !== undefined) {
+          emit({ type: "thought", text: block.thinking });
+        }
+      }
+      const observed = observedTextContent(message.content);
+      const text = observed ?? "";
+      if (message.stopReason !== "toolUse") {
+        state.assistantSeen = true;
+        state.answer = text;
+      }
+      // A blank tool-use text block is transport scaffolding. A terminal empty
+      // answer remains public evidence.
+      if (observed !== undefined && !(message.stopReason === "toolUse" && text.trim().length === 0)) {
+        emit({ type: "assistant", text });
+      }
+      return;
+    }
     default:
-      return [];
+      return;
   }
 }
 

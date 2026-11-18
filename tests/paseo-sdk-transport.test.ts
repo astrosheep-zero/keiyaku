@@ -9,6 +9,8 @@ import type { AgentSessionEvent } from "@earendil-works/pi-coding-agent";
 import { appendActivity, beginTurn, bindTellsToTurn, endTurn, HeldAkumaLeash, readHeart, recordReport, recordTellDeliveries } from "../src/akuma/heart/index.js";
 import { waitForCondition } from "./support/process.js";
 import { translatePiEvent, type PiEventState } from "../src/akuma/providers/pi/events.js";
+import { ToolObservations } from "../src/akuma/providers/tool-observations.js";
+import type { AgentEvent } from "../src/akuma/provider.js";
 import { soulFixture } from "./support/akuma-fixtures.js";
 import { historySchema, tellSchema, type History, type Row } from "../plugins/paseo/plugin/server/keiyaku.js";
 import { createMirror } from "../plugins/paseo/plugin/server/mirror.js";
@@ -202,10 +204,13 @@ test("a native Pi completion reaches a Paseo edit detail through the public proj
   await leash.birth(value.allocated.paths, value.soul);
   const body = await leash.recordBody(value.allocated.paths, { leashTakenAt: at });
   const started = await beginTurn(value.allocated.paths, { bodySequence: body.sequence, startedAt: at, call: "work" });
-  const pi: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  const narrated: AgentEvent[] = [];
+  const emit = (event: AgentEvent): void => void narrated.push(event);
+  const pi: PiEventState = { answer: "", assistantSeen: false, tools: new ToolObservations(emit) };
   let tick = 0;
   const observe = async (event: AgentSessionEvent): Promise<void> => {
-    for (const translated of translatePiEvent(event, pi)) {
+    translatePiEvent(event, pi, emit);
+    for (const translated of narrated.splice(0)) {
       await appendActivity(value.allocated.paths, { turnSequence: started.sequence,
         at: new Date(Date.parse(at) + (tick += 1) * 1_000).toISOString(), event: translated });
     }

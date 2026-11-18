@@ -3,9 +3,13 @@ import test, { type TestContext } from "node:test";
 import { createHash } from "node:crypto";
 import { getEventListeners, once } from "node:events";
 import { createServer } from "node:http";
+import { createRequire } from "node:module";
 import type { Duplex } from "node:stream";
+import { pathToFileURL } from "node:url";
+import type { SessionUpdate } from "@agentclientprotocol/sdk";
 import { DaemonClient, type ConnectionState, type DaemonClientConfig } from "@getpaseo/client/internal/daemon-client";
 import {
+  AgentStreamEventPayloadSchema,
   SessionInboundMessageSchema,
   SessionOutboundMessageSchema,
   type SessionInboundMessage,
@@ -20,7 +24,7 @@ import { decodeProviderRecipe } from "../src/akuma/provider-recipe.js";
 import { encodeAgentEvent, type DriveInput, type AgentEvent } from "../src/akuma/provider.js";
 import { deferred, settlementProbe, temporaryDirectory, expectBodySettles, waitForCondition } from "./support/process.js";
 import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { World } from "../src/world.js";
 import { allocatedHeart } from "./support/akuma-fixtures.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
@@ -729,6 +733,106 @@ test("Paseo carries a completed edit's unified patch and never treats write cont
     ],
   );
   assert.equal(JSON.stringify(events).includes("written file body"), false, "a write body is not a patch");
+});
+
+test("Paseo correlates tool timeline traffic by the admitted Turn and native call ID", async () => {
+  const fake = new NativeFixture();
+  const attempt = provider(fake).start({ ...drive(), session: { kind: "fresh" } });
+  const session = await attempt.result;
+  const edit = { type: "tool_call", callId: "edit-1", name: "edit", error: null } as const;
+  type Tool = Extract<Extract<AgentStreamEventPayload, { type: "timeline" }>["item"], { type: "tool_call" }>;
+  let seq = 10;
+  const observe = (turnId: string, item: Tool) => fake.event({ type: "timeline", provider: "claude", turnId, item }, seq++);
+  const start = { ...edit, status: "running", detail: { type: "edit", filePath: " src/own.ts " } } as const;
+  const done = { ...edit, status: "completed", detail: { ...start.detail, unifiedDiff: "" } } as const;
+  observe("other-turn", { ...start, callId: "unmatched" });
+  observe(fake.turnId, start);
+  observe(fake.turnId, start);
+  observe(fake.turnId, done);
+  observe(fake.turnId, done);
+  observe(fake.turnId, start);
+  observe(fake.turnId, { ...done, callId: "unmatched", detail: { ...done.detail, unifiedDiff: "foreign patch" } });
+  observe(fake.turnId, { ...start, callId: "different-path" });
+  observe(fake.turnId, {
+    ...done,
+    callId: "different-path",
+    detail: { type: "edit", filePath: "src/summary.ts", unifiedDiff: "unattributed patch" },
+  });
+  for (const [callId, input] of [["late-empty", {}], ["late-scalar", 0]] as const) {
+    const call = { ...edit, callId, name: "custom" };
+    observe(fake.turnId, { ...call, status: "running", detail: { type: "plain_text", text: "working" } });
+    observe(fake.turnId, { ...call, status: "completed", detail: { type: "unknown", input, output: "result body" } });
+  }
+  assistant(fake, "done", "answer", fake.turnId, seq);
+  complete(fake);
+  assert.deepEqual(await session.completion, { kind: "answered", answer: "done", historyId: "own-turn" });
+  await attempt.closed;
+  const startedEdit = { kind: "fileChange", changes: [{ op: "unspecified", path: " src/own.ts " }] };
+  assert.deepEqual((await narration(session.events)).filter((event) => event.type === "tool"), [
+    { type: "tool", phase: "started", id: "edit-1", name: "edit", call: startedEdit },
+    {
+      type: "tool", phase: "completed", id: "edit-1", name: "edit",
+      call: { kind: "fileChange", changes: [{ op: "unspecified", path: " src/own.ts ", patch: "" }] },
+      result: { status: "ok" },
+    },
+    { type: "tool", phase: "completed", id: "unmatched", name: "edit", call: { kind: "other", display: "edit" }, result: { status: "ok" } },
+    { type: "tool", phase: "started", id: "different-path", name: "edit", call: startedEdit },
+    { type: "tool", phase: "completed", id: "different-path", name: "edit", call: startedEdit, result: { status: "ok" } },
+    ...[["late-empty", "{}"], ["late-scalar", "0"]].flatMap(([id, json]) => [
+      { type: "tool", phase: "started", id, name: "custom", call: { kind: "other", display: "custom" } },
+      {
+        type: "tool", phase: "completed", id, name: "custom",
+        call: { kind: "other", display: "custom", input: { json, truncated: false } },
+        result: { status: "ok" },
+      },
+    ]),
+  ]);
+});
+
+test("Paseo keeps the installed ACP mapper's ambiguous edits generic", async () => {
+  const server = dirname(createRequire(import.meta.url).resolve("@getpaseo/server"));
+  const { ACPAgentSession } = await import(pathToFileURL(join(server, "agent/providers/acp-agent.js")).href);
+  const title = "src/looks-real.ts";
+  function capture(located: boolean, initiallyEdit = false): AgentStreamEventPayload[] {
+    // Use the producer's real mapper without initializing a process or connection.
+    const logger = { child: () => logger };
+    const producer = new ACPAgentSession({ cwd: drive().cwd }, { provider: "acp", logger, defaultModes: [] });
+    const toolCallId = initiallyEdit ? "edit-from-start" : "late-edit";
+    const updates: SessionUpdate[] = [
+      { sessionUpdate: "tool_call", toolCallId, title, ...(initiallyEdit ? { kind: "edit" } : { rawInput: {} }) },
+      {
+        sessionUpdate: "tool_call_update", toolCallId, kind: "edit", status: "completed",
+        ...(located ? { locations: [{ path: title }] } : {}),
+        content: [{ type: "content", content: { type: "text", text: "Done" } }],
+      },
+    ];
+    return updates.flatMap((update) => producer.translateSessionUpdate(update).map((event: unknown) =>
+      AgentStreamEventPayloadSchema.parse(JSON.parse(JSON.stringify(event))),
+    ));
+  }
+  const projected = capture(false);
+  assert.deepEqual(projected, capture(true), "the ACP wire does not distinguish a title from a witnessed path");
+  const completion = projected[1];
+  assert(completion?.type === "timeline" && completion.item.type === "tool_call");
+  assert.deepEqual(completion.item.detail, { type: "edit", filePath: title, unifiedDiff: "Done" });
+
+  const fake = new NativeFixture();
+  const attempt = provider(fake).start({ ...drive(), session: { kind: "fresh" } });
+  const session = await attempt.result;
+  for (const [index, event] of [...projected, ...capture(false, true)].entries()) {
+    assert.equal(event.type, "timeline");
+    fake.event({ ...event, turnId: fake.turnId }, 10 + index);
+  }
+  complete(fake);
+  await attempt.closed;
+  const generic = { kind: "other", display: title, input: { json: "{}", truncated: false } };
+  const edit = { kind: "other", display: "edit" };
+  assert.deepEqual((await narration(session.events)).filter((event) => event.type === "tool"), [
+    { type: "tool", phase: "started", id: "late-edit", name: title, call: generic },
+    { type: "tool", phase: "completed", id: "late-edit", name: title, call: generic, result: { status: "ok" } },
+    { type: "tool", phase: "started", id: "edit-from-start", name: "edit", call: edit },
+    { type: "tool", phase: "completed", id: "edit-from-start", name: "edit", call: edit, result: { status: "ok" } },
+  ]);
 });
 
 test("Paseo registration stays local and refuses unsupported execution shapes", async () => {

@@ -14,9 +14,10 @@ import {
 } from "../../provider.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { providerLifecycle } from "../lifecycle.js";
+import { ToolObservations } from "../tool-observations.js";
 import { providerTurn } from "../turn.js";
 import type { ProviderOptions } from "../../provider-recipe.js";
-import { emitClaudeMessage, type ClaudeObservationState } from "./events.js";
+import { emitClaudeMessage } from "./events.js";
 import { claudeUserMessage, createClaudeInput, isClaudeTurnEnded, type ClaudeInput } from "./input.js";
 
 type ClaudeExecution = Readonly<{
@@ -191,7 +192,7 @@ async function consumeClaudeQuery(
   admit: () => void,
   finish: (result?: TurnResult) => void,
 ): Promise<void> {
-  const observation: ClaudeObservationState = { tools: new Map() };
+  const observation = new ToolObservations((event) => turn.events.emit(event));
   let admitted = false;
   let historyId: string | undefined;
   for await (const message of query) {

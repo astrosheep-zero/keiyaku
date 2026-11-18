@@ -45,8 +45,8 @@ import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js
 import { createAcpProvider, decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider, interpretGrokTool } from "../src/akuma/providers/grok-build/index.js";
 import { decodeProviderExecution, resolveProviderExecution } from "../src/akuma/providers/index.js";
-import { EMPTY_ACP_EVENT_STATE, flushAcpEvents, mapAcpUpdate } from "../src/akuma/providers/acp/events.js";
-import { emitClaudeMessage, type ClaudeObservationState } from "../src/akuma/providers/claude/events.js";
+import { createAcpEventState, emitAcpUpdate, flushAcpEvents } from "../src/akuma/providers/acp/events.js";
+import { emitClaudeMessage } from "../src/akuma/providers/claude/events.js";
 import {
   codexNotificationResult,
   type CodexTurnState,
@@ -54,8 +54,9 @@ import {
 import type { LineRpcNotification } from "../src/runtime/proc/line-rpc.js";
 import { translatePiEvent, piSessionModel, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
-import { spawnStdioProcess, type StdioProcess } from "../src/runtime/proc/stdio.js";
+import { ToolObservations } from "../src/akuma/providers/tool-observations.js";
 import { providerTurn } from "../src/akuma/providers/turn.js";
+import { spawnStdioProcess, type StdioProcess } from "../src/runtime/proc/stdio.js";
 import { processExists, waitForCondition, waitForFixtureFile } from "./support/process.js";
 
 const DRIVE_DEFAULTS = {
@@ -72,6 +73,20 @@ function freshInput(
 
 function attemptResult<Result>(attempt: ProviderAttempt<Result>): Promise<Result> {
   return attempt.result;
+}
+
+function piSink() {
+  const events: AgentEvent[] = [];
+  const emit = (event: AgentEvent): void => void events.push(event);
+  const state: PiEventState = { answer: "", assistantSeen: false, tools: new ToolObservations(emit) };
+  return { events, observe: (event: Parameters<typeof translatePiEvent>[0]) => translatePiEvent(event, state, emit) };
+}
+
+function acpSink() {
+  const events: AgentEvent[] = [];
+  const emit = (event: AgentEvent): void => void events.push(event);
+  const state = createAcpEventState(emit);
+  return { events, emit, state, observe: (update: acp.SessionUpdate) => emitAcpUpdate(update, state, emit) };
 }
 
 test("generic tool input admission and event codecs preserve bounded evidence", () => {
@@ -241,7 +256,7 @@ function mapOpencodeTool(status: string, input: unknown, emitter: Parameters<typ
   if (status === "running") {
     mapEvent({ type: "session.tool.input.started", data: { ...data, name: "future_tool" } }, emitter, state);
     if (input !== undefined) mapEvent({ type: "session.tool.called", data: { ...data, input, executed: false } }, emitter, state);
-  } else mapEvent({ type: "session.tool.success", data: { ...data, content: [{ type: "text", text: "" }], executed: false } }, emitter, state);
+  } else mapEvent({ type: "session.tool.success", data: { ...data, ...(input === undefined ? {} : { input }), content: [{ type: "text", text: "" }], executed: false } }, emitter, state);
 }
 
 function toolPreview(events: readonly AgentEvent[]) {
@@ -250,8 +265,8 @@ function toolPreview(events: readonly AgentEvent[]) {
 }
 
 async function claudeToolCall(input: unknown) {
-  const state: ClaudeObservationState = { tools: new Map() };
   const channel = new AgentEventChannel();
+  const state = new ToolObservations((event) => channel.emit(event));
   const block =
     input === undefined
       ? { type: "tool_use", id: "bash-1", name: "Bash" }
@@ -272,42 +287,44 @@ async function claudeToolCall(input: unknown) {
 }
 
 test("native adapters admit structured unknown arguments into one bounded generic call", async () => {
-  const piState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  const pi = piSink();
   const piArgs = { alpha: 1, nested: { ok: true } };
-  const [piStart] = translatePiEvent(
-    { type: "tool_execution_start", toolCallId: "pi-1", toolName: "future_tool", args: piArgs },
-    piState,
-  );
+  pi.observe({
+    type: "tool_execution_start",
+    toolCallId: "pi-1",
+    toolName: "future_tool",
+    args: piArgs,
+  });
   const piCall = { kind: "other", display: "future_tool", input: { json: JSON.stringify(piArgs), truncated: false } };
-  assert.deepEqual(piStart, { type: "tool", phase: "started", id: "pi-1", name: "future_tool", call: piCall });
-  const [piEnd] = translatePiEvent(
-    {
-      type: "tool_execution_end",
-      toolCallId: "pi-1",
-      toolName: "future_tool",
-      isError: false,
-      result: { secret: true },
-    },
-    piState,
-  );
+  assert.deepEqual(pi.events[0], { type: "tool", phase: "started", id: "pi-1", name: "future_tool", call: piCall });
+  pi.observe({
+    type: "tool_execution_end",
+    toolCallId: "pi-1",
+    toolName: "future_tool",
+    isError: false,
+    result: { secret: true },
+  });
   assert.deepEqual(
-    piEnd,
+    pi.events[1],
     { type: "tool", phase: "completed", id: "pi-1", name: "future_tool", call: piCall, result: { status: "ok" } },
     "a completion reuses its correlated start and never carries result bytes",
   );
 
   const call = { kind: "other", display: "future_tool", input: { json: '{"alpha":1}', truncated: false } };
-  const acpStart = mapAcpUpdate(acpToolUpdate("tool_call", "acp-1", { alpha: 1 }), EMPTY_ACP_EVENT_STATE);
-  assert.deepEqual(acpStart.events, [{ type: "tool", phase: "started", id: "acp-1", name: "future_tool", call }]);
-  const acpEnd = mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-1"), acpStart.state);
+  const acp = acpSink();
+  acp.observe(acpToolUpdate("tool_call", "acp-1", { alpha: 1 }));
+  acp.observe(acpToolUpdate("tool_call_update", "acp-1"));
   assert.deepEqual(
-    acpEnd.events,
-    [{ type: "tool", phase: "completed", id: "acp-1", name: "future_tool", call, result: { status: "ok" } }],
+    acp.events,
+    [
+      { type: "tool", phase: "started", id: "acp-1", name: "future_tool", call },
+      { type: "tool", phase: "completed", id: "acp-1", name: "future_tool", call, result: { status: "ok" } },
+    ],
     "an acknowledging update without arguments inherits its correlated start",
   );
 
-  const claudeState: ClaudeObservationState = { tools: new Map() };
   const claudeChannel = new AgentEventChannel();
+  const claudeState = new ToolObservations((event) => claudeChannel.emit(event));
   emitClaudeMessage(
     {
       type: "assistant",
@@ -347,10 +364,81 @@ test("native adapters admit structured unknown arguments into one bounded generi
   );
 });
 
+test("native tool replay cannot replace the observed invocation or emit a second completion", async () => {
+  const pi = piSink();
+  const start = { type: "tool_execution_start", toolCallId: "pi-replay", toolName: "future", args: undefined } as const;
+  const end = { type: "tool_execution_end", toolCallId: "pi-replay", toolName: "future", isError: false, result: { content: "" } } as const;
+  pi.observe(start);
+  pi.observe({ ...start, args: null });
+  pi.observe({ ...start, args: {} });
+  pi.observe(end);
+  pi.observe(end);
+  pi.observe(start);
+  pi.observe({ ...end, toolCallId: "pi-unmatched", toolName: "edit", result: { details: { patch: "not correlated" } } });
+  assert.deepEqual(pi.events, [
+    { type: "tool", phase: "started", id: "pi-replay", name: "future", call: { kind: "other", display: "future" } },
+    { type: "tool", phase: "completed", id: "pi-replay", name: "future", call: otherToolCall("future", null), result: { status: "ok", output: "" } },
+    { type: "tool", phase: "completed", id: "pi-unmatched", name: "edit", call: { kind: "other", display: "edit" }, result: { status: "ok" } },
+  ]);
+
+  const channel = new AgentEventChannel();
+  const tools = new ToolObservations((event) => channel.emit(event));
+  const claude = (type: "assistant" | "user", content: unknown[]) =>
+    emitClaudeMessage({ type, message: { content } } as SDKMessage, channel, tools);
+  const invocation = { type: "tool_use", id: "claude-replay", name: "Read", input: { file_path: " a.ts ", offset: 2, limit: 0 } };
+  const result = { type: "tool_result", tool_use_id: "claude-replay", content: "" };
+  claude("user", [{ ...result, tool_use_id: "claude-unmatched" }]);
+  claude("assistant", [invocation, invocation]);
+  claude("user", [result, result]);
+  claude("assistant", [invocation]);
+  const call = { kind: "read", path: " a.ts ", offset: 2 };
+  assert.deepEqual(await drainChannel(channel), [
+    { type: "tool", phase: "started", id: "claude-replay", name: "Read", call },
+    { type: "tool", phase: "completed", id: "claude-replay", name: "Read", call, result: { status: "ok", output: "" } },
+  ]);
+});
+
+test("ACP refines a generic invocation using native evidence and does not infer output as input", () => {
+  const acp = acpSink();
+  acp.observe({ sessionUpdate: "tool_call_update", toolCallId: "acp-read", status: "in_progress" });
+  acp.observe({ sessionUpdate: "tool_call", toolCallId: "acp-read", title: "Read" });
+  acp.observe({ sessionUpdate: "tool_call_update", toolCallId: "acp-read", kind: "read", locations: [{ path: " a.ts ", line: 0 }] });
+  const completion = { sessionUpdate: "tool_call_update", toolCallId: "acp-read", status: "completed", rawInput: { ignored: true }, rawOutput: "" } as const;
+  acp.observe(completion);
+  acp.observe(completion);
+  acp.observe({ sessionUpdate: "tool_call", toolCallId: "acp-read", title: "Replay" });
+  acp.observe({ ...completion, toolCallId: "acp-unmatched", name: "search", kind: "search", rawInput: { query: " needle ", scope: "invalid" } });
+  assert.deepEqual(acp.events, [
+    { type: "tool", phase: "started", id: "acp-read", name: "Read", call: { kind: "other", display: "Read" } },
+    { type: "tool", phase: "completed", id: "acp-read", name: "Read", call: { kind: "read", path: " a.ts " }, result: { status: "ok", output: "" } },
+    { type: "tool", phase: "completed", id: "acp-unmatched", name: "search", call: { kind: "search", query: " needle " }, result: { status: "ok", output: "" } },
+  ]);
+});
+
+test("OpenCode requires the native input start and never treats a terminal payload as an invocation", () => {
+  const state = createEventState("session-1");
+  const events: AgentEvent[] = [];
+  const emitter = { emit: (event: AgentEvent): void => void events.push(event) };
+  const data = { sessionID: "session-1", assistantMessageID: "msg_assistant", id: "call-1" };
+  const pending = { type: "session.tool.input.started", data: { ...data, name: "future" } };
+  const done = { type: "session.tool.success", data: { ...data, executed: true, content: [{ type: "text", text: "one " }, { type: "text", text: "" }], input: { notInvocation: true } } };
+  mapEvent(done, emitter, state);
+  assert.deepEqual(events, []);
+  mapEvent(pending, emitter, state);
+  assert.deepEqual(events, []);
+  mapEvent(done, emitter, state);
+  mapEvent(done, emitter, state);
+  mapEvent(pending, emitter, state);
+  mapEvent({ type: "session.tool.called", data: { ...data, input: {}, executed: true } }, emitter, state);
+  assert.deepEqual(events, [
+    { type: "tool", phase: "completed", id: "call-1", name: "future", call: { kind: "other", display: "future" }, result: { status: "ok", output: "one \n\n" } },
+  ]);
+});
+
 test("shared search construction keeps each adapter's predicate and omitted metadata", async () => {
   const claudeCall = async (name: string, input: unknown) => {
-    const state: ClaudeObservationState = { tools: new Map() };
     const channel = new AgentEventChannel();
+    const state = new ToolObservations((event) => channel.emit(event));
     emitClaudeMessage(
       {
         type: "assistant",
@@ -366,11 +454,9 @@ test("shared search construction keeps each adapter's predicate and omitted meta
     return event?.type === "tool" ? event.call : undefined;
   };
   const piCall = (toolName: string, args: unknown) => {
-    const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
-    const [event] = translatePiEvent(
-      { type: "tool_execution_start", toolCallId: "pi-1", toolName, args } as never,
-      state,
-    );
+    const pi = piSink();
+    pi.observe({ type: "tool_execution_start", toolCallId: "pi-1", toolName, args });
+    const [event] = pi.events;
     return event?.type === "tool" ? event.call : undefined;
   };
   const grokCall = (name: string, rawInput: unknown) =>
@@ -383,18 +469,17 @@ test("shared search construction keeps each adapter's predicate and omitted meta
       rawInput,
     } as never);
   const acpCall = (rawInput: unknown) => {
-    const mapped = mapAcpUpdate(
-      {
-        sessionUpdate: "tool_call",
-        toolCallId: "acp-1",
-        name: "search",
-        kind: "search",
-        status: "in_progress",
-        rawInput,
-      } as unknown as acp.SessionUpdate,
-      EMPTY_ACP_EVENT_STATE,
-    );
-    const [event] = mapped.events;
+    const sink = acpSink();
+    sink.observe({
+      sessionUpdate: "tool_call",
+      toolCallId: "acp-1",
+      title: "Search",
+      name: "search",
+      kind: "search",
+      status: "in_progress",
+      rawInput,
+    });
+    const [event] = sink.events;
     return event?.type === "tool" ? event.call : undefined;
   };
 
@@ -408,28 +493,28 @@ test("shared search construction keeps each adapter's predicate and omitted meta
   });
   assert.deepEqual(acpCall({ query: "only", scope: "dialect" }), { kind: "search", query: "only" });
 
-  // Claude trims every search scalar; Glob carries no glob and WebSearch carries no bounds.
+  // Claude preserves every search scalar as supplied; Glob carries no glob and WebSearch carries no bounds.
   assert.deepEqual(await claudeCall("Grep", { pattern: "  needle  ", path: " src ", glob: " *.ts " }), {
     kind: "search",
-    query: "needle",
+    query: "  needle  ",
     scope: "content",
-    path: "src",
-    glob: "*.ts",
+    path: " src ",
+    glob: " *.ts ",
   });
   assert.deepEqual(await claudeCall("Grep", { pattern: "  only  " }), {
     kind: "search",
-    query: "only",
+    query: "  only  ",
     scope: "content",
   });
   assert.deepEqual(await claudeCall("Glob", { pattern: " *.ts ", path: " src " }), {
     kind: "search",
-    query: "*.ts",
+    query: " *.ts ",
     scope: "files",
-    path: "src",
+    path: " src ",
   });
   assert.deepEqual(await claudeCall("WebSearch", { query: " how " }), {
     kind: "search",
-    query: "how",
+    query: " how ",
     scope: "web",
   });
 
@@ -490,8 +575,8 @@ test("Claude keeps supplied scalar, null, empty-object, and absent Bash input di
 test("Claude retains observed result text, a supplied patch, and a native hunk record", async () => {
   const patch = ["@@ -1 +1 @@", "-before", "+after"].join("\n");
   const run = async (toolUseResult: unknown, content: unknown) => {
-    const state: ClaudeObservationState = { tools: new Map() };
     const channel = new AgentEventChannel();
+    const state = new ToolObservations((event) => channel.emit(event));
     emitClaudeMessage(
       {
         type: "assistant",
@@ -569,25 +654,20 @@ test("Claude retains observed result text, a supplied patch, and a native hunk r
 });
 
 test("a correlated start's admitted preview survives empty and conflicting completion input", () => {
-  const acpStart = mapAcpUpdate(acpToolUpdate("tool_call", "acp-1", { alpha: 1 }), EMPTY_ACP_EVENT_STATE);
   const started = { json: '{"alpha":1}', truncated: false };
-  for (const rawInput of [{}, { beta: 2 }, null])
-    assert.deepEqual(
-      toolPreview(mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-1", rawInput), acpStart.state).events),
-      started,
-      "ACP keeps the start preview for " + JSON.stringify(rawInput),
-    );
-  assert.deepEqual(
-    toolPreview(mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-1"), acpStart.state).events),
-    started,
-    "ACP keeps the start preview when the update omits input",
-  );
-  const acpBare = mapAcpUpdate(acpToolUpdate("tool_call", "acp-2"), EMPTY_ACP_EVENT_STATE);
-  assert.deepEqual(
-    toolPreview(mapAcpUpdate(acpToolUpdate("tool_call_update", "acp-2", { gamma: 3 }), acpBare.state).events),
-    { json: '{"gamma":3}', truncated: false },
-    "ACP adopts the first supplied evidence",
-  );
+  for (const [first, later, expected] of [
+    [{ alpha: 1 }, {}, started],
+    [null, { beta: 2 }, { json: "null", truncated: false }],
+    [42, { beta: 2 }, { json: "42", truncated: false }],
+    [{}, { beta: 2 }, { json: "{}", truncated: false }],
+    [{ alpha: 1 }, undefined, started],
+    [undefined, { gamma: 3 }, { json: '{"gamma":3}', truncated: false }],
+  ] as const) {
+    const sink = acpSink();
+    sink.observe(acpToolUpdate("tool_call", "acp-1", first));
+    sink.observe(acpToolUpdate("tool_call_update", "acp-1", later));
+    assert.deepEqual(toolPreview(sink.events), expected);
+  }
 
   const opencodePreview = (startInput: unknown, completionInput: unknown) => {
     const state = createEventState("session-1");
@@ -1663,33 +1743,29 @@ test("ACP ignores assistant updates after terminal prompt evidence", async () =>
   ]);
 });
 
-test("ACP ignores unknown, administrative and unsupported content without splitting buffered text", () => {
-  const initial = mapAcpUpdate({
-    sessionUpdate: "agent_message_chunk",
-    messageId: "answer-1",
-    content: { type: "text", text: "complete " },
-  }, EMPTY_ACP_EVENT_STATE);
+test("ACP ignores administrative traffic, flushes real boundaries, and resets the answer at a new message", () => {
+  const { state, emit, events } = acpSink();
+  emitAcpUpdate({ sessionUpdate: "agent_message_chunk", messageId: "answer-1", content: { type: "text", text: "complete " } }, state, emit);
   for (const update of [
     { sessionUpdate: "future_update", secret: "hidden" },
     { sessionUpdate: "plan", entries: [{ content: "hidden", priority: "high", status: "pending" }] },
     { sessionUpdate: "config_option_update", configOptions: [] },
     { sessionUpdate: "usage_update", used: 1, size: 10 },
     { sessionUpdate: "agent_message_chunk", content: { type: "image", data: "hidden", mimeType: "image/png" } },
-  ]) {
-    const mapped = mapAcpUpdate(update as acp.SessionUpdate, initial.state);
-    assert.deepEqual(mapped.events, []);
-    assert.equal(mapped.state, initial.state);
-  }
-  const appended = mapAcpUpdate({
-    sessionUpdate: "agent_message_chunk",
-    messageId: "answer-1",
-    content: { type: "text", text: "answer" },
-  }, initial.state);
-  assert.deepEqual(appended.events, []);
-  assert.equal(appended.state.answer, "complete answer");
-  assert.deepEqual(flushAcpEvents(appended.state).events, [{ type: "assistant", text: "complete answer" }]);
-  assert.deepEqual(mapAcpUpdate({ sessionUpdate: "user_message_chunk", content: { type: "text", text: "next" } },
-    appended.state).events, [{ type: "assistant", text: "complete answer" }]);
+  ]) emitAcpUpdate(update as acp.SessionUpdate, state, emit);
+  emitAcpUpdate({ sessionUpdate: "agent_message_chunk", messageId: "answer-1", content: { type: "text", text: "answer" } }, state, emit);
+  assert.deepEqual(events, []);
+  emitAcpUpdate({ sessionUpdate: "user_message_chunk", content: { type: "text", text: "next" } }, state, emit);
+  emitAcpUpdate({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "thought" } }, state, emit);
+  emitAcpUpdate({ sessionUpdate: "agent_message_chunk", messageId: "answer-2", content: { type: "text", text: "latest" } }, state, emit);
+  flushAcpEvents(state, emit);
+  flushAcpEvents(state, emit);
+  assert.deepEqual(events, [
+    { type: "assistant", text: "complete answer" },
+    { type: "thought", text: "thought" },
+    { type: "assistant", text: "latest" },
+  ]);
+  assert.equal(state.answer, "latest");
 });
 
 type FakePiObservation = {
@@ -2612,14 +2688,14 @@ test("Pi retains retry diagnostics and completed compaction without progress pro
 });
 
 test("Pi narrates native execution errors without selecting the terminal outcome", () => {
-  const state: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
-  assert.deepEqual(translatePiEvent({
-    type: "message_end",
-    message: { role: "assistant", stopReason: "error", errorMessage: "native request failed", content: [] },
-  } as never, state), [{ type: "note", text: "native request failed" }]);
-  assert.deepEqual(translatePiEvent({ type: "auto_retry_end", success: false, attempt: 3,
-    finalError: "retry budget exhausted" }, state), [{ type: "note", text: "retry budget exhausted" }]);
-  assert.deepEqual(translatePiEvent({ type: "auto_retry_end", success: true, attempt: 2 }, state), []);
+  const pi = piSink();
+  pi.observe({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "native request failed", content: [] } } as never);
+  pi.observe({ type: "auto_retry_end", success: false, attempt: 3, finalError: "retry budget exhausted" });
+  pi.observe({ type: "auto_retry_end", success: true, attempt: 2 });
+  assert.deepEqual(pi.events, [
+    { type: "note", text: "native request failed" },
+    { type: "note", text: "retry budget exhausted" },
+  ]);
 });
 
 test("Pi appends JSON Schema text when native structured output is unavailable", async () => {
@@ -3247,7 +3323,7 @@ test("Claude maps narration, drops native streams, and contains runtime skew", a
 
 test("Claude keeps observed hook and execution causes while administrative traffic stays silent", async () => {
   const channel = new AgentEventChannel();
-  const state: ClaudeObservationState = { tools: new Map() };
+  const state = new ToolObservations((event) => channel.emit(event));
   for (const message of [
     { type: "system", subtype: "task_progress", description: "private task status" },
     { type: "system", subtype: "notification", message: "private notification" },
@@ -3569,21 +3645,22 @@ test("Codex app-server maps admitted options, native session, answer, and exact 
 });
 
 test("native adapters report only the runtime model their own payloads name", { timeout: 30_000 }, async (context) => {
-  const piState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
+  const pi = piSink();
+  pi.observe({
+    type: "message_end",
+    message: {
+      role: "assistant",
+      provider: "anthropic",
+      model: "claude-x",
+      api: "anthropic-messages",
+      content: [],
+      stopReason: "stop",
+      timestamp: 0,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    },
+  });
   assert.deepEqual(
-    translatePiEvent(
-      {
-        type: "message_end",
-        message: {
-          role: "assistant",
-          provider: "anthropic",
-          model: "claude-x",
-          content: [],
-          stopReason: "endTurn",
-        },
-      } as never,
-      piState,
-    ).filter((event) => event.type === "model"),
+    pi.events.filter((event) => event.type === "model"),
     [{ type: "model", model: "anthropic/claude-x" }],
   );
   assert.equal(piSessionModel({ provider: "anthropic", id: "claude-x" }), "anthropic/claude-x");
@@ -3591,10 +3668,10 @@ test("native adapters report only the runtime model their own payloads name", { 
 
   // Each message is observed through its own channel: the channel keeps one
   // unconsumed model observation, so adapter evidence is what one message emits.
-  const claudeState: ClaudeObservationState = { tools: new Map() };
   const claudeModels = async (message: unknown): Promise<readonly AgentEvent[]> => {
     const channel = new AgentEventChannel();
-    emitClaudeMessage(message as never, channel, claudeState);
+    const state = new ToolObservations((event) => channel.emit(event));
+    emitClaudeMessage(message as never, channel, state);
     return (await drainChannel(channel)).filter((event) => event.type === "model");
   };
   assert.deepEqual(await claudeModels({ type: "system", subtype: "init", model: "claude-startup" }), [
@@ -3657,7 +3734,7 @@ test("native adapters report only the runtime model their own payloads name", { 
   );
 
   const codexChannel = new AgentEventChannel();
-  const codexState: CodexTurnState = { settled: false, tools: new Map() };
+  const codexState: CodexTurnState = { settled: false, tools: new ToolObservations((event) => codexChannel.emit(event)) };
   codexNotificationResult(
     {
       method: "model/rerouted",
@@ -3877,7 +3954,9 @@ test("Codex maps observations preserving aggregated output without leaking delta
 
 test("Codex selects completed compaction and native hook diagnostics without administrative notes", async () => {
   const channel = new AgentEventChannel();
-  const state: CodexTurnState = { threadId: "thread-own", turnId: "turn-own", settled: false, tools: new Map() };
+  const state: CodexTurnState = {
+    threadId: "thread-own", turnId: "turn-own", settled: false, tools: new ToolObservations((event) => channel.emit(event)),
+  };
   for (const notification of [
     { method: "configWarning", params: { message: "private configuration" } },
     { method: "item/completed", params: { item: { type: "plan", text: "private plan" } } },
@@ -3900,7 +3979,7 @@ test("Codex selects completed compaction and native hook diagnostics without adm
 
 test("Codex retains a command's aggregated output and every file change's patch", async () => {
   const events = new AgentEventChannel();
-  const state: CodexTurnState = { settled: false, tools: new Map() };
+  const state: CodexTurnState = { settled: false, tools: new ToolObservations((event) => events.emit(event)) };
   const completed = (item: unknown) =>
     ({
       method: "item/completed",
@@ -3921,6 +4000,12 @@ test("Codex retains a command's aggregated output and every file change's patch"
     state,
     events,
   );
+  const filesStarted = {
+    method: "item/started",
+    params: { item: { id: "files-1", type: "fileChange", changes: [] } },
+  };
+  codexNotificationResult(filesStarted, state, events);
+  codexNotificationResult(filesStarted, state, events);
   codexNotificationResult(
     completed({
       id: "files-1",
@@ -3934,6 +4019,8 @@ test("Codex retains a command's aggregated output and every file change's patch"
     events,
   );
 
+  codexNotificationResult(completed({ id: "files-1", type: "fileChange", changes: [] }), state, events);
+  codexNotificationResult(filesStarted, state, events);
   assert.deepEqual(await drainChannel(events), [
     {
       type: "tool",
@@ -3943,6 +4030,7 @@ test("Codex retains a command's aggregated output and every file change's patch"
       call: { kind: "run", command: "npm test" },
       result: { status: "error", output: "1 failing", exitCode: 1 },
     },
+    { type: "tool", phase: "started", id: "files-1", name: "fileChange", call: { kind: "other", display: "fileChange" } },
     {
       type: "tool",
       phase: "completed",
@@ -3957,6 +4045,55 @@ test("Codex retains a command's aggregated output and every file change's patch"
       },
       result: { status: "ok" },
     },
+  ]);
+});
+
+test("Codex replaces a file observation atomically when completion supplies an empty patch", async () => {
+  const events = new AgentEventChannel();
+  const state: CodexTurnState = { settled: false, tools: new ToolObservations((event) => events.emit(event)) };
+  const patch = "@@ -1 +1 @@\n-old\n+new";
+  const item = { id: "file-1", type: "fileChange" };
+  for (const [method, diff] of [["item/started", patch], ["item/completed", ""]] as const) {
+    codexNotificationResult({
+      method,
+      params: { item: { ...item, changes: [{ path: "a.ts", kind: { type: "update" }, diff }] } },
+    }, state, events);
+  }
+  assert.deepEqual(await drainChannel(events), [
+    {
+      type: "tool", phase: "started", id: "file-1", name: "fileChange",
+      call: { kind: "fileChange", changes: [{ op: "update", path: "a.ts", patch, diffstat: { added: 1, removed: 1 } }] },
+    },
+    {
+      type: "tool", phase: "completed", id: "file-1", name: "fileChange",
+      call: { kind: "fileChange", changes: [{ op: "update", path: "a.ts", patch: "" }] },
+      result: { status: "ok" },
+    },
+  ]);
+});
+
+test("Codex MCP argument previews come from the invocation, not the result", async () => {
+  const events = new AgentEventChannel();
+  const state: CodexTurnState = { settled: false, tools: new ToolObservations((event) => events.emit(event)) };
+  const item = { id: "call-1", type: "mcpToolCall", server: "files", tool: "metadata" };
+  codexNotificationResult({ method: "item/started", params: { item: { ...item, arguments: null } } }, state, events);
+  codexNotificationResult({ method: "item/completed", params: { item: {
+    ...item, status: "completed", arguments: { path: "conflicting" }, result: { content: [{ type: "text", text: "result body" }] },
+  } } }, state, events);
+  codexNotificationResult({ method: "item/completed", params: { item: {
+    ...item, id: "call-2", status: "completed", result: { content: [{ type: "text", text: "not an invocation" }] },
+  } } }, state, events);
+  codexNotificationResult({ method: "item/completed", params: { item: {
+    id: "call-3", type: "dynamicToolCall", namespace: "files", tool: "list", arguments: {}, status: "completed",
+  } } }, state, events);
+  const call = { kind: "other", display: "files/metadata", input: { json: "null", truncated: false } };
+  assert.deepEqual(await drainChannel(events), [
+    { type: "tool", phase: "started", id: "call-1", name: "files/metadata", call },
+    { type: "tool", phase: "completed", id: "call-1", name: "files/metadata", call, result: { status: "ok" } },
+    { type: "tool", phase: "completed", id: "call-2", name: "files/metadata",
+      call: { kind: "other", display: "files/metadata" }, result: { status: "ok" } },
+    { type: "tool", phase: "completed", id: "call-3", name: "files/list",
+      call: { kind: "other", display: "files/list", input: { json: "{}", truncated: false } }, result: { status: "ok" } },
   ]);
 });
 
@@ -4009,15 +4146,20 @@ test("OpenCode v2 records only producer-verified completed file patches", () => 
 });
 
 test("ACP retains verified text output and leaves an unverified raw output absent", async () => {
-  const start = mapAcpUpdate(acpToolUpdate("tool_call", "acp-1"), EMPTY_ACP_EVENT_STATE);
-  const completed = (update: Partial<acp.ToolCallUpdate>) =>
-    mapAcpUpdate(
-      { sessionUpdate: "tool_call_update", toolCallId: "acp-1", status: "completed", ...update } as acp.SessionUpdate,
-      start.state,
-    ).events.at(-1);
+  const completed = (id: string, update: Partial<acp.ToolCallUpdate>) => {
+    const sink = acpSink();
+    sink.observe(acpToolUpdate("tool_call", id));
+    sink.observe({
+      sessionUpdate: "tool_call_update",
+      toolCallId: id,
+      status: "completed",
+      ...update,
+    } as acp.SessionUpdate);
+    return sink.events.at(-1);
+  };
 
   assert.deepEqual(
-    completed({
+    completed("verified-text", {
       content: [
         { type: "content", content: { type: "text", text: "line one " } },
         { type: "diff", path: "src/a.ts", newText: "proposed" },
@@ -4027,25 +4169,25 @@ test("ACP retains verified text output and leaves an unverified raw output absen
     {
       type: "tool",
       phase: "completed",
-      id: "acp-1",
+      id: "verified-text",
       name: "future_tool",
       call: { kind: "other", display: "future_tool" },
       result: { status: "ok", output: "line one line two" },
     },
     "the verified text blocks join in native order and a proposed diff is never an applied patch",
   );
-  assert.deepEqual(completed({ rawOutput: "raw text" }), {
+  assert.deepEqual(completed("raw-string", { rawOutput: "raw text" }), {
     type: "tool",
     phase: "completed",
-    id: "acp-1",
+    id: "raw-string",
     name: "future_tool",
     call: { kind: "other", display: "future_tool" },
     result: { status: "ok", output: "raw text" },
   });
-  assert.deepEqual(completed({ rawOutput: { text: "must not be stringified" } }), {
+  assert.deepEqual(completed("raw-object", { rawOutput: { text: "must not be stringified" } }), {
     type: "tool",
     phase: "completed",
-    id: "acp-1",
+    id: "raw-object",
     name: "future_tool",
     call: { kind: "other", display: "future_tool" },
     result: { status: "ok" },
