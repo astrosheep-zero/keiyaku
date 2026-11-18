@@ -48,6 +48,8 @@ test("semantic Contract history renders native identities without raw journal ca
         at: "2026-11-09T13:00:00Z",
         start: snapshotId("a".repeat(40)),
         gates: [gate("reviewed")],
+        after: [],
+        document: "# Contract terms\n",
       },
       {
         kind: "attestation",

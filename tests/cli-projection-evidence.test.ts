@@ -272,6 +272,8 @@ test("Contract history renders semantic evidence and explicitly requested histor
         at,
         start: snapshotId("start"),
         target: "refs/heads/main",
+        gates: [],
+        after: [],
         document: "exact historical terms",
       },
       {

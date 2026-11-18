@@ -42,10 +42,10 @@ enumeration stay out of ordinary text. Historical attestation subject text
 presents the recorded subject as its labeled semantic facts, not its stored
 encoding; an unrecognized representation stays literal terminal-safe evidence
 rather than gaining an invented reading. Ordinary JSON receipts likewise omit
-raw journal records and internal custody; explicitly requested exact history
-retains historical content without duplicating storage envelopes. Verification
-receipts name the captured snapshot once and each check's verdict or stop,
-declaration position, and recording conclusion compactly. Full identities remain
+raw journal records and internal custody; Contract history retains the same
+semantic record in page and exact JSON without duplicating storage envelopes.
+Verification receipts name the captured snapshot once and each check's verdict or
+stop, declaration position, and recording conclusion compactly. Full identities remain
 in JSON; unmapped requirements keep stable coordinates. Reuse, unrecorded execution,
 and admission stops stay distinct. Delivery and review consume standing evidence
 without claiming a producer run. When a
@@ -224,11 +224,12 @@ and recovery together. A timeline conclusion is not repeated.
 History is immutable: it neither fabricates current state nor reads extra state
 to fill its panel. Contract pages expose copyable journal addresses in append
 order; optional Dispatch follows its owning record with its recorded time and
-Akuma detail address. A bounded page names its omissions and never implies
-current lifecycle from the slice. An exact Contract read presents the complete
-retained historical record, including authored payloads, without terminal clipping
-or substitution by current guidance. Unavailable Dispatch enrichment stays beside
-readable page rows.
+Akuma detail address. Page text stays compact, names its omissions, and never
+implies current lifecycle from the slice. An amendment row names the event and
+any retained retarget, not inferred changes to the terms. An exact Contract
+read presents the complete retained historical record, including amended terms
+and authored payloads, without terminal clipping or substitution by current
+guidance. Unavailable Dispatch enrichment stays beside readable page rows.
 Status consumes the same completion judgment as wait,
 including outstanding input on a sleeping Akuma. Only an observed input wait
 justifies elapsed-duration text; unknown change size never implies additions or

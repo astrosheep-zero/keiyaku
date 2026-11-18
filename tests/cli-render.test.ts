@@ -265,6 +265,7 @@ test("history pages keep individual requirements and exact records retain subjec
     predecessor,
     integration,
     contentId: changeId(integration),
+    requireBranchesToBeUpToDate: false,
   });
   const verification = (snapshot: SnapshotId, verdict: "satisfied" | "unsatisfied", target?: EntryUlid) => ({
     gate: gate("verified"),
@@ -286,6 +287,8 @@ test("history pages keep individual requirements and exact records retain subjec
       start,
       target: "refs/heads/main",
       gates: [gate("reviewed"), gate("verified")],
+      after: [],
+      document: "# Original terms\n",
     },
     { kind: "dispatch", at: "2026-09-28T15:20:00.000Z", akumaId: parseAkumaId("aku/intern/33dd4670").id },
     { kind: "deliver", id: nextEntry(), at: "2026-09-28T16:00:00.000Z", ...delivery(candidateA, start, integrationA) },
@@ -295,7 +298,15 @@ test("history pages keep individual requirements and exact records retain subjec
       at: "2026-09-28T16:01:00.000Z",
       ...verification(integrationA, "unsatisfied"),
     },
-    { kind: "amend", id: nextEntry(), at: "2026-09-28T16:11:00.000Z", gates: [gate("reviewed"), gate("verified")] },
+    {
+      kind: "amend",
+      id: nextEntry(),
+      at: "2026-09-28T16:11:00.000Z",
+      target: "refs/heads/release",
+      gates: [gate("reviewed"), gate("verified")],
+      after: [],
+      document: "# Replacement terms\n",
+    },
     { kind: "deliver", id: nextEntry(), at: "2026-09-28T16:18:00.000Z", ...delivery(candidateB, start, integrationB) },
     {
       kind: "attestation",
@@ -353,7 +364,7 @@ test("history pages keep individual requirements and exact records retain subjec
   assert.match(text, /^15:20 dispatch · aku\/intern\/33dd4670$/mu);
   assert.match(text, /^16:00 2 delivered bbbbbbb$/mu);
   assert.match(text, /^16:01 3 × verification verification:sha256:original-check · subject snapshot ccccccc · \d+ lines$/mu);
-  assert.match(text, /^16:11 4 amended · gates$/mu, "amend names its facets");
+  assert.match(text, /^16:11 4 amended · target release$/mu, "history names the retained retarget, not term deltas");
   assert.match(text, /^16:18 5 delivered ddddddd$/mu);
   assert.match(
     text,
@@ -383,6 +394,7 @@ test("history pages keep individual requirements and exact records retain subjec
   const full = events.flatMap((event) => event.kind === "dispatch" ? [] : [renderContractHistory({ kind: "contract-exact", contractId: watch, event })]).join("\n");
   assert.match(full, /2026-09-28T15:18:31\.946Z bind · 1/u, "exact keeps ISO stamps");
   assert.match(full, /candidate  bbbbbbb/u, "full keeps complete fields");
+  assert.match(full, /amend · 4\n  target  release\n  gates  reviewed · verified\n  after  none\n  document\n  # Replacement terms/u);
   assert.match(full, /subject  snapshot ccccccc/u, "full history lays out the recorded subject parts");
   assert.match(full, /subject  snapshot eeeeeee · target revision 01ARZ3NDEKTSV4RRFFQ69G5FA0/u);
   assert.match(

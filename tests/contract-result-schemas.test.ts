@@ -70,6 +70,7 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
   assert.ok(fullHistory.kind === "contract-exact");
   assert.ok(fullHistory.event.kind === "bind");
   assert.equal(fullHistory.event.document, state.terms.document.bytes);
+  assert.deepEqual(history.events.find((event) => event.kind === "bind"), fullHistory.event);
   assertWireRoundTrip(contractHistorySchema, fullHistory);
   assertWireRoundTrip(contractResolutionSchema, await contracts.resolve({ selector: state.id }));
   assertWireRoundTrip(contractResolutionSchema, await contracts.resolve({ selector: "not-found" }));
@@ -140,10 +141,15 @@ test("delivery, verification, review and preview carry their native wire results
   const claimed = history.events.find(event => event.kind === "claimed");
   assert.ok(delivered?.kind === "deliver" && claimed?.kind === "claimed");
   assert.equal(claimed.deliveryId, delivered.id);
+  const historicalClaim = await kei.history({ item: claimed.id });
+  assert.ok(historicalClaim.kind === "contract-exact");
+  assert.deepEqual(historicalClaim.event, claimed);
   const historicalDelivery = await kei.history({ item: delivered.id });
   assert.ok(historicalDelivery.kind === "contract-exact" && historicalDelivery.event.kind === "deliver");
   assert.equal(historicalDelivery.event.note, "retained delivery intent");
   assert.equal(historicalDelivery.event.requireBranchesToBeUpToDate, false);
+  assert.deepEqual(historicalDelivery.event, delivered);
+  assertWireRoundTrip(contractHistorySchema, history);
   assertWireRoundTrip(contractHistorySchema, historicalDelivery);
   assertWireRoundTrip(deliverySchema, await kei.delivery());
   assert.ok(events.length > 0);

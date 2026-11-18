@@ -2,8 +2,7 @@
 import { z } from "zod";
 import { renderContractGuidance } from "../contract-guidance.js";
 import { type ContractId, type ContractState, type ContractTerms, type JournalEntry } from "../core/facts/types.js";
-import { parseToAST } from "../markdown/parse.js";
-import { indexDocument, indexedHeadings, sectionContent, normalizeTitle } from "../markdown/query.js";
+import { normalizeTitle } from "../markdown/query.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
 import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
 import {
@@ -187,10 +186,15 @@ export class Kei {
             addresses: new Map(record.entries.map((entry, index) => [entry.entry, String(index + 1)])),
           };
           if ("item" in request) {
-            const [event] = projectJournal(journal, new Set([Number(request.item)]), true);
-            return event === undefined
+            const position = Number(request.item);
+            const entry = journal.entries[position - 1];
+            return entry === undefined
               ? { kind: "contract-unknown-history", contractId: this.id }
-              : { kind: "contract-exact", contractId: this.id, event };
+              : {
+                  kind: "contract-exact",
+                  contractId: this.id,
+                  event: journalRecord(entry, position, journal.addresses),
+                };
           }
           return await journalPage(observation, this.scope, this.id, journal, request);
         }),
@@ -646,33 +650,6 @@ export class Kei {
   }
 }
 
-function changedHistoryTerms(before: ContractTerms | undefined, after: ContractTerms, complete: boolean) {
-  const sections = (terms: ContractTerms): ReadonlyMap<string, string> => {
-    const document = parseToAST(terms.document.bytes);
-    return new Map(
-      indexedHeadings(indexDocument(document), { level: 2 })
-        .filter((section) => section.type === "section")
-        .map((section) => [section.title, sectionContent(document, section)]),
-    );
-  };
-  const source = before === undefined ? new Map<string, string>() : sections(before);
-  const amended = sections(after);
-  const changedSections = [...new Set([...source.keys(), ...amended.keys()])].filter(
-    (name) => source.get(name) !== amended.get(name),
-  );
-  const equal = (left: readonly string[] | undefined, right: readonly string[]): boolean =>
-    left !== undefined && left.length === right.length && left.every((value, index) => value === right[index]);
-  return {
-    ...(changedSections.length === 0 ? {} : { changedSections }),
-    ...(complete
-      ? { gates: after.gates, after: after.after }
-      : {
-          ...(equal(before?.gates, after.gates) ? {} : { gates: after.gates }),
-          ...(equal(before?.after, after.after) ? {} : { after: after.after }),
-        }),
-  };
-}
-
 function attestationHistory(entry: Extract<JournalEntry, { kind: "attestation" }>) {
   const { gate, requirement, subject, verdict, summary } = entry.data;
   return {
@@ -685,13 +662,13 @@ function attestationHistory(entry: Extract<JournalEntry, { kind: "attestation" }
   };
 }
 
-function historyTarget(target: ContractState["coordinates"]["target"], complete: boolean) {
-  return target === undefined
-    ? {}
-    : {
-        target: typeof target === "string" ? target : { kind: "contract" as const, contractId: target.contractId },
-        ...(complete && typeof target === "object" ? { targetIncarnation: target.worktree } : {}),
-      };
+function historyTarget(target: ContractState["coordinates"]["target"]) {
+  if (target === undefined) return {};
+  if (typeof target === "string") return { target };
+  return {
+    target: { kind: "contract" as const, contractId: target.contractId },
+    targetIncarnation: target.worktree,
+  };
 }
 
 type ObservedJournal = Readonly<{
@@ -708,33 +685,10 @@ function historyRequest(input: ContractHistoryInput | undefined) {
   return parsed.data;
 }
 
-/**
- * Project selected one-based append positions from one complete observed journal,
- * computing each amendment's summary against its real preceding terms. Sequence
- * stays authoritative: rows keep append order even under equal or nonmonotonic clocks.
- */
-function projectJournal(
-  journal: ObservedJournal,
-  selected: ReadonlySet<number>,
-  complete: boolean,
-): readonly ContractJournalRow[] {
-  const rows: ContractJournalRow[] = [];
-  let terms: ContractTerms | undefined;
-  journal.entries.forEach((entry, index) => {
-    const position = index + 1;
-    if (selected.has(position)) rows.push(journalRecord(journal, entry, position, terms, complete));
-    if (entry.kind === "bind") terms = entry.data.terms;
-    else if (entry.kind === "amend") terms = entry.data;
-  });
-  return rows;
-}
-
 function journalRecord(
-  journal: ObservedJournal,
   entry: JournalEntry,
   position: number,
-  terms: ContractTerms | undefined,
-  complete: boolean,
+  addresses: ObservedJournal["addresses"],
 ): ContractJournalRow {
   const common = { id: String(position), at: entry.at };
   switch (entry.kind) {
@@ -744,25 +698,23 @@ function journalRecord(
         ...common,
         kind: "bind",
         start: coordinates.start,
-        ...historyTarget(coordinates.target, complete),
-        ...(complete
-          ? { document: bound.document.bytes, gates: bound.gates, after: bound.after }
-          : {
-              ...(bound.gates.length === 0 ? {} : { gates: bound.gates }),
-              ...(bound.after.length === 0 ? {} : { after: bound.after }),
-            }),
+        ...historyTarget(coordinates.target),
+        document: bound.document.bytes,
+        gates: bound.gates,
+        after: bound.after,
       };
     }
     case "amend":
       return {
         ...common,
         kind: "amend",
-        ...historyTarget(entry.data.target, complete),
-        ...changedHistoryTerms(terms, entry.data, complete),
-        ...(complete ? { document: entry.data.document.bytes } : {}),
+        ...historyTarget(entry.data.target),
+        document: entry.data.document.bytes,
+        gates: entry.data.gates,
+        after: entry.data.after,
       };
     case "deliver": {
-      const { tenderSnapshot, integration, note } = entry.data;
+      const { tenderSnapshot, integration, note, policy } = entry.data;
       return {
         ...common,
         kind: "deliver",
@@ -771,7 +723,7 @@ function journalRecord(
         contentId: integration.changeId,
         predecessor: integration.predecessor,
         ...(note === undefined ? {} : { note }),
-        ...(complete ? { requireBranchesToBeUpToDate: entry.data.policy.requireBranchesToBeUpToDate } : {}),
+        requireBranchesToBeUpToDate: policy.requireBranchesToBeUpToDate,
       };
     }
     case "reintegrated":
@@ -784,7 +736,7 @@ function journalRecord(
     case "attestation":
       return { ...common, ...attestationHistory(entry) };
     case "claimed": {
-      const delivery = journal.addresses.get(entry.data.delivery);
+      const delivery = addresses.get(entry.data.delivery);
       if (delivery === undefined)
         throw new KeiyakuError(
           "authority-corruption",
@@ -798,7 +750,7 @@ function journalRecord(
         kind: "arc",
         chapter: entry.data.seq,
         title: entry.data.title,
-        ...(entry.data.body.length === 0 && !complete ? {} : { body: entry.data.body }),
+        body: entry.data.body,
       };
     case "abandoned":
       return {
@@ -875,8 +827,9 @@ async function journalPage(
     };
   }
   const events: ContractHistoryEvent[] = [];
-  for (const row of projectJournal(journal, new Set(page.rows), false)) {
-    events.push(row, ...(associations.get(Number(row.id)) ?? []));
+  for (const position of page.rows) {
+    const row = journalRecord(journal.entries[position - 1]!, position, journal.addresses);
+    events.push(row, ...(associations.get(position) ?? []));
   }
   return {
     kind: "contract",

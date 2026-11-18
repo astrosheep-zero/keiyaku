@@ -24,28 +24,26 @@ const historyTarget = z.union([
   z.strictObject({ kind: z.literal("contract"), contractId: contractIdSchema }).readonly(),
 ]);
 const historyIncarnation = z.strictObject({ id: z.string(), identity: z.string() }).readonly();
-const historyGates = z.array(gateSchema).readonly().exactOptional();
-const historyAfter = z.array(contractIdSchema).readonly().exactOptional();
+const historyTerms = {
+  gates: z.array(gateSchema).readonly(),
+  after: z.array(contractIdSchema).readonly(),
+  document: z.string(),
+};
 function historyEvent<Kind extends string, Fields extends z.ZodRawShape>(kind: Kind, fields: Fields) {
   return z.strictObject({ ...historyCommon, kind: z.literal(kind), ...fields }).readonly();
 }
-/** A page row keeps the semantic fact; an exact read adds that record's complete retained terms. */
+/** Each journal address has one complete semantic record, shared by pages and exact reads. */
 export const contractJournalRowSchema = z.union([
   historyEvent("bind", {
     start: snapshotIdSchema,
     target: historyTarget.exactOptional(),
-    gates: historyGates,
-    after: historyAfter,
-    document: z.string().exactOptional(),
     targetIncarnation: historyIncarnation.exactOptional(),
+    ...historyTerms,
   }),
   historyEvent("amend", {
     target: historyTarget.exactOptional(),
     targetIncarnation: historyIncarnation.exactOptional(),
-    changedSections: z.array(z.string()).readonly().exactOptional(),
-    gates: historyGates,
-    after: historyAfter,
-    document: z.string().exactOptional(),
+    ...historyTerms,
   }),
   historyEvent("deliver", {
     candidate: snapshotIdSchema,
@@ -53,7 +51,7 @@ export const contractJournalRowSchema = z.union([
     contentId: z.string(),
     predecessor: snapshotIdSchema,
     note: z.string().exactOptional(),
-    requireBranchesToBeUpToDate: z.boolean().exactOptional(),
+    requireBranchesToBeUpToDate: z.boolean(),
   }),
   historyEvent("reintegrated", { predecessor: snapshotIdSchema, integration: snapshotIdSchema }),
   historyEvent("attestation", {
@@ -64,7 +62,7 @@ export const contractJournalRowSchema = z.union([
     summary: z.string().exactOptional(),
   }),
   historyEvent("claimed", { deliveryId: canonicalDecimalSchema }),
-  historyEvent("arc", { chapter: z.number().int().positive(), title: z.string(), body: z.string().exactOptional() }),
+  historyEvent("arc", { chapter: z.number().int().positive(), title: z.string(), body: z.string() }),
   historyEvent("abandoned", { note: z.string().exactOptional() }),
 ]);
 /** One available Dispatch association, presented after the journal row it enriches. */

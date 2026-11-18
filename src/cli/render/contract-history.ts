@@ -69,15 +69,8 @@ function eventLine(event: ContractHistoryEvent): string {
       const gateFact = gates.length === 0 ? "" : ` · ${gates.length === 1 ? "gate" : "gates"} ${gates.join(" · ")}`;
       return `bound to ${targetName(event.target)} @ ${shortGitId(event.start)}${gateFact}`;
     }
-    case "amend": {
-      const changed = [
-        ...(event.changedSections ?? []),
-        ...(event.gates === undefined ? [] : ["gates"]),
-        ...(event.after === undefined ? [] : ["after"]),
-        ...(event.target === undefined ? [] : [`target ${targetName(event.target)}`]),
-      ];
-      return `amended${changed.length === 0 ? "" : ` · ${changed.join(" · ")}`}`;
-    }
+    case "amend":
+      return event.target === undefined ? "amended" : `amended · target ${targetName(event.target)}`;
     case "deliver":
       return `delivered ${shortGitId(event.candidate)}`;
     case "reintegrated":
@@ -109,7 +102,6 @@ function semanticBody(event: ContractHistoryEvent): readonly string[] {
       ];
     case "amend":
       return [
-        ...listFact("changed sections", event.changedSections),
         ...(event.target === undefined ? [] : [`  target  ${targetName(event.target)}`]),
         ...listFact("gates", event.gates),
         ...listFact("after", event.after),

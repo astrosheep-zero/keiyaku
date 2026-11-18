@@ -197,12 +197,14 @@ reading has one caller model: a bounded page of semantic journal records, or one
 exact record opened by a copyable address from that page. A page reports the
 journal's retained range and the records it omits, and never infers current
 lifecycle from its own slice; its addresses are stable append positions that
-later facts and optional associations cannot renumber or reorder. An exact read
-recovers that record's complete retained content, including the historical terms
-that made it meaningful, and never substitutes current guidance or invents a
-snapshot the journal never kept. An unknown address is a normal unknown-history
-answer naming the addressed Contract, distinct from absent authority; corruption
-and required observation failures remain exceptional. Optional Dispatch
+later facts and optional associations cannot renumber or reorder. Page and exact
+reads expose the same complete retained record at an address, including the
+historical terms that made it meaningful. An amendment reports its admitted
+replacement terms, not an inferred comparison with earlier terms. History never
+substitutes current guidance or invents a snapshot the journal never kept. An
+unknown address is a normal unknown-history answer naming the addressed Contract,
+distinct from absent authority; corruption and required observation failures
+remain exceptional. Optional Dispatch
 enrichment follows [Dispatch's isolation law](dispatch.md): it never supplies a
 journal address, its source failure remains visible alongside readable journal
 history, while the addressed Contract's own corrupt authority remains exceptional.

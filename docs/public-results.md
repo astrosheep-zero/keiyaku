@@ -93,7 +93,10 @@ discriminants, associations, and nested observations through JSON serialization.
 Process-local capabilities remain outside that wire form. Addressed status,
 thin catalogues, and waiting retain their producing owners' different detail.
 Transport schema reuse must remain locally resolvable by the actual consumer
-and describe the structured answer it receives.
+and describe the structured answer it receives. A Contract journal record keeps
+its complete retained semantic content in both page and exact results. Historical
+amendment records carry replacement terms; the change summary belongs only to the
+amendment invocation answer.
 
 The caller already knows the operation and supplied context. A renderer may
 receive that context explicitly; it never scrapes stored facts to recover an

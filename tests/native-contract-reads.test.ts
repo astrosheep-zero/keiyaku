@@ -55,16 +55,24 @@ function dispatchPath(akumaId: string): string {
 
 test("Contract history pages journal addresses, and an exact address recovers its own record", async () => {
   const repository = repositoryWithMain();
+  const contracts = Keis.of(await Repo.at({ path: repository.path }));
+  const parent = accepted(await contracts.bind({ terms: document(), target: null }));
   const bound = accepted(
-    await Keis.of(await Repo.at({ path: repository.path })).bind({
+    await contracts.bind({
       terms: document().replace("Call only the package-root API.", "Historical terms. ".repeat(8)),
       target: null,
       gates: ["reviewed"],
     }),
   );
   const original = present(await bound.kei.state()).terms.document.bytes;
-  accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nThe amended objective.\n" }));
-  const amended = present(await bound.kei.state()).terms.document.bytes;
+  accepted(await bound.kei.amend({
+    edits: "## Replace: Objective\n\nThe amended objective.\n",
+    after: [parent.contractId],
+    target: parent.contractId,
+  }));
+  const state = present(await bound.kei.state());
+  const target = state.coordinates.target;
+  assert.ok(typeof target === "object");
   accepted(await bound.kei.arc({ body: "# A historical chapter\n\nExact narrative body.\n" }));
 
   const page = await bound.kei.history();
@@ -74,16 +82,8 @@ test("Contract history pages journal addresses, and an exact address recovers it
   assert.equal(page.highestSequence, 3);
   assert.equal(page.omitted, undefined);
   assert.equal(page.dispatches, undefined);
-  assert.equal(
-    page.events.every((event) => !("document" in event) || event.document === undefined),
-    true,
-  );
-  const pageAmendment = page.events[1];
-  assert.ok(pageAmendment?.kind === "amend");
-  assert.deepEqual(pageAmendment.changedSections, ["Objective"]);
   assertWireRoundTrip(contractHistorySchema, page);
 
-  const state = present(await bound.kei.state());
   const binding = await bound.kei.history({ item: "1" });
   assert.ok(binding.kind === "contract-exact");
   assert.ok(binding.event.kind === "bind");
@@ -98,10 +98,16 @@ test("Contract history pages journal addresses, and an exact address recovers it
   const amendment = await bound.kei.history({ item: "2" });
   assert.ok(amendment.kind === "contract-exact");
   assert.ok(amendment.event.kind === "amend");
-  assert.equal(amendment.event.document, amended);
-  assert.deepEqual(amendment.event.changedSections, ["Objective"]);
-  assert.deepEqual(amendment.event.gates, ["reviewed"]);
-  assert.deepEqual(amendment.event.after, []);
+  assert.deepEqual(amendment.event, {
+    kind: "amend",
+    id: "2",
+    at: amendment.event.at,
+    document: state.terms.document.bytes,
+    gates: ["reviewed"],
+    after: [parent.contractId],
+    target: { kind: "contract", contractId: parent.contractId },
+    targetIncarnation: target.worktree,
+  });
   assertWireRoundTrip(contractHistorySchema, amendment);
 
   const chapter = await bound.kei.history({ item: "3" });
@@ -111,6 +117,7 @@ test("Contract history pages journal addresses, and an exact address recovers it
   assert.equal(chapter.event.title, "A historical chapter");
   assert.equal(chapter.event.body, "\nExact narrative body.\n");
   assertWireRoundTrip(contractHistorySchema, chapter);
+  assert.deepEqual(page.events, [binding.event, amendment.event, chapter.event]);
 
   assert.deepEqual(await bound.kei.history({ item: "4" }), {
     kind: "contract-unknown-history",
@@ -125,9 +132,7 @@ test("Contract history pages journal addresses, and an exact address recovers it
   assert.deepEqual(rowLabels(boundedAmendment), ["amend 2"]);
   assert.ok(boundedAmendment.kind === "contract");
   assert.equal(boundedAmendment.omitted, 1);
-  const boundedRecord = boundedAmendment.events[0];
-  assert.ok(boundedRecord?.kind === "amend");
-  assert.deepEqual(boundedRecord.changedSections, ["Objective"]);
+  assert.deepEqual(boundedAmendment.events, [amendment.event]);
   const latest = await bound.kei.history({ limit: 1 });
   assert.deepEqual(rowLabels(latest), ["arc 3"]);
   assert.ok(latest.kind === "contract");
@@ -165,12 +170,18 @@ test("Contract history pages journal addresses, and an exact address recovers it
       });
     },
   );
-  for (let chapter = 2; chapter <= 12; chapter += 1) accepted(await bound.kei.arc({ body: `# Chapter ${chapter}\n\nRetained chapter ${chapter}.\n` }));
+  for (let chapter = 2; chapter < 12; chapter += 1)
+    accepted(await bound.kei.arc({ body: `# Chapter ${chapter}\n\nRetained chapter ${chapter}.\n` }));
+  accepted(await bound.kei.arc({ body: "# Empty chapter\n" }));
   const tail = await bound.kei.history();
   assert.ok(tail.kind === "contract");
   assert.equal(tail.highestSequence, 14);
   assert.equal(tail.omitted, 2);
   assert.deepEqual(tail.events.map(event => event.kind === "dispatch" ? undefined : event.id), Array.from({ length: 12 }, (_, index) => String(index + 3)));
+  const emptyChapter = await bound.kei.history({ item: "14" });
+  assert.ok(emptyChapter.kind === "contract-exact" && emptyChapter.event.kind === "arc");
+  assert.equal(emptyChapter.event.body, "");
+  assert.deepEqual(tail.events.at(-1), emptyChapter.event);
   const traversed: string[] = [];
   let since = 1;
   for (;;) {
@@ -183,8 +194,8 @@ test("Contract history pages journal addresses, and an exact address recovers it
   }
   assert.deepEqual(traversed, Array.from({ length: 13 }, (_, index) => String(index + 2)));
   const old = await bound.kei.history({ before: 3, limit: 1 });
-  assert.ok(old.kind === "contract" && old.events[0]?.kind === "amend");
-  assert.deepEqual(old.events[0].changedSections, ["Objective"]);
+  assert.ok(old.kind === "contract");
+  assert.deepEqual(old.events, [amendment.event]);
 });
 
 async function overwriteAuthority(path: string, changes: ReadonlyMap<string, string>): Promise<void> {
@@ -204,19 +215,14 @@ async function overwriteAuthority(path: string, changes: ReadonlyMap<string, str
 test("Dispatch enrichment anchors to the preceding journal row without touching journal addresses", async () => {
   const raw = repositoryWithMain();
   const bound = accepted(await Keis.of(await Repo.at({ path: raw.path })).bind({ terms: document(), target: null }));
-  // Distinct admission clocks keep the anchoring cases unambiguous.
-  await new Promise((resolve) => setTimeout(resolve, 5));
   accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nThe amended objective.\n" }));
-  const pages = await bound.kei.history();
-  assert.ok(pages.kind === "contract");
-  const bindingAt = pages.events[0]!.at;
-  const amendmentAt = pages.events[1]!.at;
-  assert.ok(bindingAt < amendmentAt);
+  accepted(await bound.kei.arc({ body: "# Tied chapter\n" }));
+  const early = "2026-09-01T01:00:00.000Z";
+  const late = "2026-09-01T02:00:00.000Z";
   const journalPath = contractJournalPath(bound.contractId);
   const journal = decodeJournal(raw.run(["show", `${GIT_REF}:${journalPath}`]));
-  // Nonmonotonic clocks: the first appended row now carries the later timestamp.
-  const swapped = journal.map((entry, index) => ({ ...entry, at: journal[journal.length - 1 - index]!.at }));
-  await overwriteAuthority(raw.path, new Map([[journalPath, swapped.map(encodeEntry).join("")]]));
+  const records = journal.map((entry) => encodeEntry({ ...entry, at: entry.kind === "amend" ? early : late }));
+  await overwriteAuthority(raw.path, new Map([[journalPath, records.join("")]]));
   const git = await repositoryAt(raw.path);
   const fallback = parseAkumaId("aku/worker/00000001").id;
   const firstTie = parseAkumaId("aku/worker/00000002").id;
@@ -233,9 +239,9 @@ test("Dispatch enrichment anchors to the preceding journal row without touching 
     new Map([
       // Earlier than every journal timestamp still belongs to the first appended row.
       [dispatchPath(fallback), dispatchBytes(fallback, bound.contractId, "2000-01-01T00:00:00.000Z")],
-      [dispatchPath(firstTie), dispatchBytes(firstTie, bound.contractId, amendmentAt)],
-      [dispatchPath(secondTie), dispatchBytes(secondTie, bound.contractId, amendmentAt)],
-      [dispatchPath(earlier), dispatchBytes(earlier, bound.contractId, bindingAt)],
+      [dispatchPath(firstTie), dispatchBytes(firstTie, bound.contractId, late)],
+      [dispatchPath(secondTie), dispatchBytes(secondTie, bound.contractId, late)],
+      [dispatchPath(earlier), dispatchBytes(earlier, bound.contractId, early)],
     ]),
   );
 
@@ -246,28 +252,25 @@ test("Dispatch enrichment anchors to the preceding journal row without touching 
   assert.deepEqual(
     journalRows.map((row) => [row.id, row.at]),
     [
-      ["1", amendmentAt],
-      ["2", bindingAt],
+      ["1", late],
+      ["2", early],
+      ["3", late],
     ],
   );
   assert.deepEqual(rowLabels(page), [
     "bind 1",
     `dispatch ${fallback}`,
-    `dispatch ${firstTie}`,
-    `dispatch ${secondTie}`,
     "amend 2",
     `dispatch ${earlier}`,
-  ]);
-  assert.deepEqual(rowLabels(await bound.kei.history({ before: 2 })), [
-    "bind 1",
-    `dispatch ${fallback}`,
+    "arc 3",
     `dispatch ${firstTie}`,
     `dispatch ${secondTie}`,
   ]);
+  assert.deepEqual(rowLabels(await bound.kei.history({ before: 2 })), ["bind 1", `dispatch ${fallback}`]);
   const latestPage = await bound.kei.history({ limit: 1 });
-  assert.deepEqual(rowLabels(latestPage), ["amend 2", `dispatch ${earlier}`]);
+  assert.deepEqual(rowLabels(latestPage), ["arc 3", `dispatch ${firstTie}`, `dispatch ${secondTie}`]);
   assert.ok(latestPage.kind === "contract");
-  assert.equal(latestPage.omitted, 1);
+  assert.equal(latestPage.omitted, 2);
   const binding = await bound.kei.history({ item: "1" });
   assert.ok(binding.kind === "contract-exact");
   assert.equal(binding.event.kind, "bind");

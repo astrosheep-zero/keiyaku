@@ -71,6 +71,8 @@ test("Contract page addresses open exact historical records through invocation, 
   accepted(await bound.kei.amend({ edits: "## Replace: Objective\n\nHistorical amendment.\n" }));
   accepted(await bound.kei.arc({ body: "# Later chapter\n\nA later fact.\n" }));
   const { client } = await mcpFixture(t, { cwd: repository.path, environment: {}, version: "test" });
+  const exact = await bound.kei.history({ item: "2" });
+  assert.ok(exact.kind === "contract-exact" && exact.event.kind === "amend");
   for (const [selection, args] of [
     [{ before: 3, limit: 1 }, ["--before", "3", "--limit", "1"]],
     [{ item: "2" }, ["--id", "2"]],
@@ -88,6 +90,11 @@ test("Contract page addresses open exact historical records through invocation, 
     const rendered = renderVerb("history", input, { kind: "returned", value: native }, { columns: DEFAULT_CLI_COLUMNS, color: false });
     assert.ok((response.content as { text: string }[])[0]?.text.includes(rendered));
     if (native.kind === "contract-exact") assert.match(rendered, /Historical amendment\./u);
+    if (native.kind === "contract") {
+      assert.deepEqual(native.events, [exact.event]);
+      assert.match(rendered, / 2 amended$/mu);
+      assert.doesNotMatch(rendered, /Historical amendment\./u);
+    }
   }
 });
 
