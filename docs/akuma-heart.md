@@ -21,13 +21,21 @@ implementation boundaries do not create synchronous public APIs, a daemon,
 a queue, or a persistent cache. Existing Heart custody is opened without
 creating it; only a true absence becomes absence. Corruption and unsupported
 schema are hard failures, never partial reading, silent repair, or compatibility
-decoding. The explicitly supported historical formats upgrade automatically
-at ordinary open, including first observation. Their fixed structural conversion and
-version publication are atomic, preserve all retained facts and relationships
-and the timeline's allocation high-water mark,
-and serialize concurrent openers under Heart's existing mutation custody. A
-failed conversion leaves the old authority intact and fails the open. Other
-versions remain unsupported; current-format observation stays read-only.
+decoding. Schema versions 29 and 30 remain retained historical authority, but
+ordinary access refuses them before acquiring a Heart writer. Wait surfaces that
+permanent refusal without retrying it. Read-only SQLite bookkeeping can leave
+empty transaction companions or update its coordination cache; it never
+checkpoints or changes retained history. This build has no converter for those
+versions. Current-format observation stays read-only.
+
+To recover history, first stop all writers through their owning build. Once
+quiescent, copy the entire Akuma custody directory, including the Heart's
+transaction companions if present, the leash, and the execution log. Keep the
+original untouched. Open only that copy in a separate World with a previously
+installed compatible build, preserving its recognized identity and directory
+layout. That build may upgrade the copy. If writers cannot be quiesced or no
+compatible build is available, leave the original intact; it cannot be read by
+this build.
 
 Contended mutation admission waits without blocking unrelated observations or
 control handling, within a bounded acquisition interval. Cancellation may stop

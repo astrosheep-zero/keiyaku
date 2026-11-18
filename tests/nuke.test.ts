@@ -234,16 +234,14 @@ test("confirmed nuke cleans a legacy Heart schema and continues independent owne
     assert.equal((await debts.add({ title: "Remove me" })).kind, "accepted");
     const allocated = await allocateAkumaDirectory({ worldRoot: world, akumaName: "claude", draw: () => "14000000" });
     const heart = new DatabaseSync(allocated.paths.heart);
-    heart.exec(
-      "CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO akuma_schema VALUES (1, 14)",
-    );
+    heart.exec(readFileSync("tests/fixtures/heart-v29.sql", "utf8"));
     heart.close();
     const leash = new DatabaseSync(allocated.paths.leash);
     leash.exec(
       "CREATE TABLE leash_schema(singleton INTEGER PRIMARY KEY, version INTEGER NOT NULL); INSERT INTO leash_schema VALUES (1, 2)",
     );
     leash.close();
-    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 31/u);
+    await assert.rejects(readHeart(allocated.paths), /heart schema version must be 31; found 29/u);
     await assert.rejects(HeldAkumaLeash.try(allocated.paths), /leash schema version must be 4/u);
     writeFileSync(allocated.paths.log, "stdio\n");
     writeFileSync(`${allocated.paths.heart}-wal`, "wal\n");

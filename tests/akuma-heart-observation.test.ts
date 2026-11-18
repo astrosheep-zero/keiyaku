@@ -6,7 +6,7 @@ import { bornDirectAkuma, heartFixture } from "./support/akuma-fixtures.js";
 import { temporaryDirectory } from "./support/process.js";
 import { BodySupervisor } from "../src/akuma/body-supervisor.js";
 import { observeAdmittedTellAkuma } from "../src/akuma/akuma-selection-execution.js";
-import { recordTell, beginTurn, bindTellsToTurn, endTurn, breakBody, readTell } from "../src/akuma/heart/index.js";
+import { recordTell, beginTurn, bindTellsToTurn, endTurn, breakBody, readHeart, readTell } from "../src/akuma/heart/index.js";
 import { AkumaOwner } from "../src/akuma/akuma-owner.js";
 import { World } from "../src/world.js";
 import { createHeartReader, HeartAbsentError } from "../src/akuma/heart/storage.js";
@@ -63,6 +63,25 @@ test("observer reuses its connection without retaining a transaction and detects
     );
   } finally {
     reader.clear();
+    fixture.close();
+  }
+});
+
+test("malformed and future Heart versions fail distinctly instead of becoming absence", async () => {
+  const fixture = await heartFixture("kei-heart-format-");
+  const { paths } = fixture.allocated;
+  try {
+    const database = new DatabaseSync(paths.heart);
+    try {
+      database.exec("DROP TABLE akuma_schema; CREATE TABLE akuma_schema(singleton INTEGER PRIMARY KEY, version)");
+      database.exec("INSERT INTO akuma_schema VALUES (1, '29')");
+      await assert.rejects(readHeart(paths), { category: "authority-corruption" });
+      database.exec("UPDATE akuma_schema SET version = 2147483648");
+      await assert.rejects(readHeart(paths), /heart schema version must be 31; found 2147483648/u);
+    } finally {
+      database.close();
+    }
+  } finally {
     fixture.close();
   }
 });

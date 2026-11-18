@@ -11,6 +11,7 @@ import {
 } from "./akuma-observe.js";
 import { akumaIdSchema, pathsForAkumaId, reportHistoryIdSchema, type AkumaId } from "./identity.js";
 import type { WaitReportFrontier } from "./heart/index.js";
+import { UnsupportedHistoricalHeartError } from "./heart/schema.js";
 import type { AkumaStatus } from "./akuma.js";
 import type { AkumaWaitItem, AkumaWaitOutcome } from "./selection-observation.js";
 import { projectFact, type OutcomeRow } from "./projection.js";
@@ -80,6 +81,7 @@ async function probeCompletion(
       ready = await readerFor(id).complete(signal);
     } catch (error) {
       signal?.throwIfAborted();
+      if (error instanceof UnsupportedHistoricalHeartError) throw error;
       ready = error instanceof AkumaNotBornError;
     }
     if (!ready) continue;
@@ -126,6 +128,7 @@ export function createAkumaWaitObserver(path: WorldRoot, selected: readonly Akum
         if (snapshot.outcomeRead) items.set(id, completionItem(snapshot));
       } catch (error) {
         signal?.throwIfAborted();
+        if (error instanceof UnsupportedHistoricalHeartError) throw error;
         items.set(
           id,
           error instanceof AkumaNotBornError

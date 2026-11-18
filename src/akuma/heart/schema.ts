@@ -1,28 +1,36 @@
 import type { DatabaseSync } from "node:sqlite";
+import { HeartAuthorityCorruptionError } from "./facts.js";
 
-const HEART_SCHEMA_VERSION = 31;
+const HEART_SCHEMA_VERSION = 31n;
 const LEASH_SCHEMA_VERSION = 4;
 
-function assertSchemaVersion(database: DatabaseSync, table: "akuma_schema" | "leash_schema", expected: number): void {
-  const row = database.prepare(`SELECT version FROM ${table} WHERE singleton = 1`).get() as
-    | { version: number }
-    | undefined;
-  if (row?.version !== expected)
-    throw new Error(`Akuma ${table === "akuma_schema" ? "heart" : "leash"} schema version must be ${expected}`);
+export class UnsupportedHistoricalHeartError extends Error {}
+
+function heartSchemaVersion(database: DatabaseSync): bigint | undefined {
+  const query = database.prepare("SELECT version FROM akuma_schema WHERE singleton = 1");
+  query.setReadBigInts(true);
+  const version = query.get()?.version;
+  return typeof version === "bigint" ? version : undefined;
 }
 
-export function assertHeartSchemaVersion(database: DatabaseSync): void {
-  assertSchemaVersion(database, "akuma_schema", HEART_SCHEMA_VERSION);
+export function assertHeartSchemaVersion(database: DatabaseSync, path: string): void {
+  const version = heartSchemaVersion(database);
+  if (version === HEART_SCHEMA_VERSION) return;
+  if (version === undefined || version < 1n)
+    throw new HeartAuthorityCorruptionError(`Akuma heart schema version is corrupt: ${path}`);
+  const diagnostic = `Akuma heart schema version must be ${HEART_SCHEMA_VERSION}; found ${version}: ${path}`;
+  if (version !== 29n && version !== 30n) throw new Error(diagnostic);
+  throw new UnsupportedHistoricalHeartError(
+    `${diagnostic}. No converter in this build. Stop all writers via their owning build before copying the entire ` +
+      `custody directory (heart.db, any heart.db-wal/heart.db-shm, leash.db, stdio.log). Leave the original untouched. ` +
+      `Read history only on the copy, in a separate World with a previously installed compatible build and the same ` +
+      `Akuma identity/layout. It may upgrade the copy. No quiescence or compatible build: leave custody alone.`,
+  );
 }
 
 export function assertLeashSchemaVersion(database: DatabaseSync): void {
-  assertSchemaVersion(database, "leash_schema", LEASH_SCHEMA_VERSION);
-}
-
-export function heartSchemaVersion(database: DatabaseSync): number | undefined {
-  return (
-    database.prepare("SELECT version FROM akuma_schema WHERE singleton = 1").get() as { version: number } | undefined
-  )?.version;
+  if (database.prepare("SELECT version FROM leash_schema WHERE singleton = 1").get()?.version !== LEASH_SCHEMA_VERSION)
+    throw new Error(`Akuma leash schema version must be ${LEASH_SCHEMA_VERSION}`);
 }
 
 export function heartSchemaIsCurrent(database: DatabaseSync): boolean {
@@ -41,9 +49,8 @@ const VERSION_SCHEMA = `
   INSERT OR IGNORE INTO akuma_schema(singleton, version) VALUES (1, ${HEART_SCHEMA_VERSION});
 `;
 
-function turnSchema(table: "turns" | "turns_upgrade"): string {
-  return `
-  CREATE TABLE ${table === "turns" ? "IF NOT EXISTS " : ""}${table} (
+const TURN_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS turns (
     sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
     body_sequence INTEGER NOT NULL REFERENCES bodies(sequence),
     started_at TEXT NOT NULL,
@@ -70,51 +77,6 @@ function turnSchema(table: "turns" | "turns_upgrade"): string {
         AND answer IS NULL AND answer_json IS NULL AND diagnostic IS NULL AND completed_at IS NULL)
     )
   ) STRICT;`;
-}
-
-/** Called only under the open boundary's write transaction, with foreign keys disabled. */
-export function upgradeHeartSchema(database: DatabaseSync): void {
-  const version = heartSchemaVersion(database);
-  // Another opener may have completed the fixed conversion while this one waited.
-  if (version !== 29 && version !== 30) {
-    assertHeartSchemaVersion(database);
-    return;
-  }
-  if (version === 29) {
-    database.exec(turnSchema("turns_upgrade"));
-    database.exec(`
-      INSERT INTO turns_upgrade (sequence, body_sequence, started_at, initiator, end_sequence,
-        outcome, history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at)
-      SELECT sequence, body_sequence, started_at, initiator, end_sequence,
-        outcome, history_id, session_json, answer, answer_json, schema_json, diagnostic, completed_at FROM turns;
-      DROP TABLE turns;
-      ALTER TABLE turns_upgrade RENAME TO turns;
-    `);
-  }
-  const highWater = database.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'timeline'").get() as
-    | { seq: number }
-    | undefined;
-  database.exec(timelineSchema("timeline_upgrade"));
-  database.exec(`
-    INSERT INTO timeline_upgrade SELECT sequence, kind FROM timeline;
-    DROP TABLE timeline;
-    ALTER TABLE timeline_upgrade RENAME TO timeline;
-    ${REPORT_SCHEMA}
-    DROP TABLE akuma_schema;
-    ${VERSION_SCHEMA}
-  `);
-  if (highWater !== undefined)
-    database.prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = 'timeline'").run(highWater.seq);
-  if (database.prepare("PRAGMA foreign_key_check").get() !== undefined)
-    throw new Error("Akuma Heart upgrade found broken foreign key relationships");
-}
-
-function timelineSchema(table: "timeline" | "timeline_upgrade"): string {
-  return `CREATE TABLE ${table === "timeline" ? "IF NOT EXISTS " : ""}${table} (
-    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind TEXT NOT NULL CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end', 'report'))
-  ) STRICT;`;
-}
 
 const REPORT_SCHEMA = `CREATE TABLE IF NOT EXISTS reports (
   sequence INTEGER PRIMARY KEY REFERENCES timeline(sequence) ON DELETE CASCADE,
@@ -149,8 +111,11 @@ export const HEART_SCHEMA = `
     options_json TEXT NOT NULL CHECK (json_valid(options_json)),
     admitted_at TEXT NOT NULL
   ) STRICT;
-  ${turnSchema("turns")}
-  ${timelineSchema("timeline")}
+  ${TURN_SCHEMA}
+  CREATE TABLE IF NOT EXISTS timeline (
+    sequence INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK (kind IN ('turn-start', 'call', 'activity', 'tell', 'turn-end', 'report'))
+  ) STRICT;
   ${REPORT_SCHEMA}
   CREATE TABLE IF NOT EXISTS activity_retention (
     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),

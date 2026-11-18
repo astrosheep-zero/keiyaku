@@ -20,8 +20,6 @@ import {
   assertHeartSchemaVersion,
   assertLeashSchemaVersion,
   heartSchemaIsCurrent,
-  heartSchemaVersion,
-  upgradeHeartSchema,
 } from "./schema.js";
 import {
   deleteStopControl,
@@ -84,40 +82,6 @@ async function openExistingDatabase(path: string, timeout?: number, mode: "rw" |
   }
 }
 
-async function openHeart(path: string, mode: "rw" | "ro", signal?: AbortSignal): Promise<DatabaseSync> {
-  const database = await openExistingDatabase(path, 0, mode);
-  try {
-    database.exec("PRAGMA foreign_keys=ON; PRAGMA busy_timeout=0");
-    const version = await acquire(() => {
-      const version = heartSchemaVersion(database);
-      if (version !== 29 && version !== 30) assertHeartSchemaVersion(database);
-      return version;
-    }, signal);
-    if (version !== 29 && version !== 30) return database;
-  } catch (error) {
-    database.close();
-    throw error;
-  }
-  database.close();
-  // Current-format reads never acquire a writer. Only the known predecessors
-  // need one, and no read transaction survives across the conversion.
-  const writer = await openExistingDatabase(path, 0);
-  try {
-    // Dropping turns with FK enforcement enabled would cascade into its children.
-    // SQLite requires this switch outside the transaction; check before commit.
-    writer.exec("PRAGMA foreign_keys=OFF; PRAGMA busy_timeout=0");
-    await beginTransaction(writer, "write", signal, heartSchemaVersion);
-    finishTransaction(writer, () => upgradeHeartSchema(writer));
-  } finally {
-    try {
-      writer.exec("PRAGMA foreign_keys=ON");
-    } finally {
-      writer.close();
-    }
-  }
-  return await openHeart(path, mode, signal);
-}
-
 export async function classifyHeartSchema(paths: AkumaPaths): Promise<"current" | "unsupported"> {
   let database: DatabaseSync;
   try {
@@ -156,15 +120,15 @@ async function acquire<T>(operation: () => T, signal?: AbortSignal): Promise<T> 
 
 async function beginTransaction(
   database: DatabaseSync,
+  path: string,
   mode: "read" | "write",
   signal?: AbortSignal,
-  validate: (database: DatabaseSync) => unknown = assertHeartSchemaVersion,
 ): Promise<void> {
   await acquire(() => {
     try {
       database.exec(mode === "write" ? "BEGIN IMMEDIATE" : "BEGIN DEFERRED");
       // DEFERRED acquires its snapshot on the first read, not on BEGIN.
-      validate(database);
+      assertHeartSchemaVersion(database, path);
     } catch (error) {
       rollbackTransaction(database);
       throw error;
@@ -178,9 +142,9 @@ export async function withReadOnlyHeart<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   signal?.throwIfAborted();
-  const database = await openHeart(paths.heart, "ro", signal);
+  const database = await openExistingDatabase(paths.heart, 0, "ro");
   try {
-    await beginTransaction(database, "read", signal);
+    await beginTransaction(database, paths.heart, "read", signal);
     return finishTransaction(database, body);
   } finally {
     database.close();
@@ -231,11 +195,11 @@ export function createHeartReader(paths: AkumaPaths): HeartReader {
         });
         if (identity?.dev !== current.dev || identity?.ino !== current.ino) release();
         if (database === undefined) {
-          database = await openHeart(paths.heart, "ro", signal);
+          database = await openExistingDatabase(paths.heart, 0, "ro");
           identity = current;
           opened += 1;
         }
-        await beginTransaction(database, "read", signal);
+        await beginTransaction(database, paths.heart, "read", signal);
         return finishTransaction(database, body);
       } catch (error) {
         release();
@@ -254,9 +218,16 @@ export async function withHeartTransaction<T>(
   signal?: AbortSignal,
 ): Promise<T> {
   signal?.throwIfAborted();
-  const database = await openHeart(paths.heart, "rw", signal);
+  const reader = await openExistingDatabase(paths.heart, 0, "ro");
   try {
-    await beginTransaction(database, "write", signal);
+    await acquire(() => assertHeartSchemaVersion(reader, paths.heart), signal);
+  } finally {
+    reader.close();
+  }
+  signal?.throwIfAborted();
+  const database = await openExistingDatabase(paths.heart, 0);
+  try {
+    await beginTransaction(database, paths.heart, "write", signal);
     return finishTransaction(database, body);
   } finally {
     database.close();
@@ -297,7 +268,7 @@ export async function initializeHeart(paths: AkumaPaths): Promise<void> {
   try {
     heart.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL");
     heart.exec(HEART_SCHEMA);
-    assertHeartSchemaVersion(heart);
+    assertHeartSchemaVersion(heart, paths.heart);
   } finally {
     heart.close();
   }
