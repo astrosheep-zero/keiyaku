@@ -7,7 +7,7 @@ import { decideAttestation, type AttestationInput } from "../core/verbs/attestat
 import { materializeScratchCandidate } from "../git/scratch.js";
 import { projectSettings } from "../settings.js";
 import { executeVerification } from "../verification/execution.js";
-import { observeGitForAdmissionAt } from "../git/observe.js";
+import { contractJournal, observeContractsAt } from "../git/observe.js";
 import { VERIFIED, verificationRequirement, type VerificationDefinition } from "../verification/declaration.js";
 import { prepareDelivery, deliveryIntegrationSnapshots } from "./deliver.js";
 import { admitIntent } from "./intent.js";
@@ -134,7 +134,7 @@ async function prepareVerification(
   input: VerifyOperationInput,
 ): Promise<PreparedVerification | Extract<VerifyOperationResult, { kind: "refused" }>> {
   input.signal?.throwIfAborted();
-  const observed = await observeGitForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const observed = await observeContractsAt(input.scope, input.channel, [input.contractId], { after: true });
   const state = activeContract(observed.decision, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
   const targetRefusal = targetContractRefusal(observed.decision, state.coordinates.target);
@@ -150,8 +150,7 @@ async function prepareVerification(
         total: definition.declarations.length,
       },
     };
-  const journal = observed.journals.get(state.id)?.entries;
-  if (journal === undefined) throw new Error("verification requires the captured Contract journal");
+  const journal = contractJournal(observed.journals, state.id).entries;
   const prepared = await prepareDelivery(
     input.scope,
     {

@@ -1,5 +1,5 @@
 import type { ProtocolProgress } from "./progress.js";
-import type { GitDecisionObservation } from "../git/observe.js";
+import type { ContractReadView } from "../git/observe.js";
 import type { GitDecodeChannel, GitTreeSelection } from "../git/read-observation.js";
 import type { GitRepository } from "../git/process.js";
 import type { DecideInput, OfferDecision } from "../core/decide.js";
@@ -14,9 +14,9 @@ type CommonIntentAdmissionOptions<Refusal> = Readonly<{
     repository: GitRepository,
     channel: GitDecodeChannel,
     contracts: readonly ContractId[],
-  ) => Promise<GitDecisionObservation>;
+  ) => Promise<ContractReadView>;
   decorateOffer?: CompanionDecorator;
-  validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
+  validateAdmission?: (observation: ContractReadView) => Refusal | undefined | Promise<Refusal | undefined>;
   observationSelection?: GitTreeSelection;
 }>;
 

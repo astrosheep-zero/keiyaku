@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { worktreeChangeId } from "../git/integration.js";
 import { captureTender, type TenderCapture } from "../git/tender.js";
-import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { observeContractsAt, type ContractReadView } from "../git/observe.js";
 import { unmergedWorkspacePaths, worktreePath } from "../git/workspace.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
@@ -190,7 +190,7 @@ async function prepareExternalReview(input: ReviewOperationInput): Promise<Exter
 /** Assemble the in-custody attestation input from the fresh Contract and validated artifacts. */
 async function assembleReviewAttempt(
   input: ReviewOperationInput,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   external: ExternalReviewPreparation,
 ): Promise<AssembledReview> {
   const state = contractState(observation.decision, input.contractId);
@@ -216,7 +216,7 @@ async function decideAndAdmitReview(
   input: ReviewOperationInput,
   attempt: AttemptContext,
   seat: PrivateStatePublicationSeat,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   assembled: Extract<AssembledReview, { kind: "assembled" }>,
 ): Promise<AttemptDecision<PreparedReview, ReviewRefusal>> {
   const decision = decideAttestation({
@@ -251,7 +251,7 @@ async function reviewAttempt(
   return await privateStateSeatAttempt(
     input.scope,
     async (seat) => {
-      const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+      const observation = await observeContractsAt(input.scope, input.channel, [input.contractId]);
       const assembled = await assembleReviewAttempt(input, observation, external);
       if (assembled.kind === "stale") return STALE_PRIVATE_STATE_PREPARATION;
       return await decideAndAdmitReview(input, attempt, seat, observation, assembled);

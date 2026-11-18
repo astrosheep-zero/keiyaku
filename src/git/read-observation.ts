@@ -16,6 +16,7 @@ export type GitReadObservation = Readonly<{
   readonly [gitReadObservationBrand]: true;
   repository: GitRepository;
   snapshot: GitSnapshot;
+  selectPaths(paths: readonly string[]): Promise<GitSnapshot["paths"]>;
   readBlobs(oids: readonly GitOid[]): Promise<ReadonlyMap<GitOid, GitBlobResult>>;
   resolveRef(ref: string): Promise<GitOid | null>;
 }>;
@@ -264,11 +265,7 @@ function commitTree(result: GitObjectResult, commit: GitOid): GitOid {
   return gitObjectId(firstLine.slice("tree ".length), "Git state tree");
 }
 
-type TreeObservation = Readonly<{
-  paths: ReadonlyMap<string, TreeEntry>;
-}>;
-
-async function completeTree(channel: GitDecodeChannel, root: GitOid): Promise<TreeObservation> {
+async function completeTree(channel: GitDecodeChannel, root: GitOid): Promise<GitSnapshot["paths"]> {
   const paths = new Map<string, TreeEntry>();
   let level = [{ path: "", oid: root }];
   while (level.length > 0) {
@@ -287,7 +284,7 @@ async function completeTree(channel: GitDecodeChannel, root: GitOid): Promise<Tr
     }
     level = next;
   }
-  return { paths };
+  return paths;
 }
 
 type TreeSelectionNode = {
@@ -322,11 +319,11 @@ function selectionTree(selection: GitTreeSelection): TreeSelectionNode {
   return root;
 }
 
-export async function readGitTreeSelection(
+async function readGitTreeSelection(
   channel: GitDecodeChannel,
   root: GitOid,
   selection: GitTreeSelection,
-): Promise<TreeObservation> {
+): Promise<GitSnapshot["paths"]> {
   const paths = new Map<string, TreeEntry>();
   const readDirectory = async (oid: GitOid): Promise<ReadonlyMap<string, TreeEntry>> => {
     const object = (await channel.readObjects([oid])).get(oid);
@@ -356,17 +353,13 @@ export async function readGitTreeSelection(
           return;
         }
         if (child.exact || child.subtree) paths.set(childPath, entry);
-        if (child.exact && child.children.size === 0 && !child.subtree) {
-          paths.set(childPath, entry);
-          return;
-        }
         if (child.subtree) await enumerate(childPath, entry.oid);
         else if (child.children.size > 0) await visit(childPath, entry.oid, child);
       }),
     );
   };
   await visit("", root, selectionTree(selection));
-  return { paths };
+  return paths;
 }
 
 async function readFormat(observation: GitReadObservation): Promise<void> {
@@ -466,14 +459,21 @@ async function observeEpoch<Value>(
       const commitObject = (await channel.readObjects([commit])).get(commit);
       if (commitObject === undefined) throw new Error(`missing state commit result: ${commit}`);
       const tree = await commitTree(commitObject, commit);
-      const observed =
+      const paths =
         selection === null ? await completeTree(channel, tree) : await readGitTreeSelection(channel, tree, selection);
-      snapshot = { commit, tree, paths: observed.paths };
+      snapshot = { commit, tree, paths };
     }
+    const exactPaths = new Set(selection?.paths);
     const observation = {
       [gitReadObservationBrand]: true,
       repository,
       snapshot,
+      selectPaths: async (paths) => {
+        assertActive();
+        return snapshot.tree === null || paths.every((path) => exactPaths.has(path))
+          ? snapshot.paths
+          : await readGitTreeSelection(channel, snapshot.tree, { paths });
+      },
       readBlobs: async (oids) => {
         assertActive();
         return await readBlobResults(channel, oids);

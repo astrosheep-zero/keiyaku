@@ -11,9 +11,8 @@ export type ContractDocumentProjection = Readonly<{
 export async function readDocuments(observation: GitReadObservation): Promise<readonly ContractDocumentProjection[]> {
   const observed = await observeActiveContractWorld(observation);
   const documents: ContractDocumentProjection[] = [];
-  for (const [contract, observation] of observed.contracts) {
-    const state = observation.state;
-    if (state === null) continue;
+  for (const [contract, { state }] of observed.journals) {
+    if (state === null || state.terminal !== null) continue;
     documents.push({
       contract,
       documentBytes: state.terms.document.bytes,

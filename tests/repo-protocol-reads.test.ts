@@ -191,8 +191,12 @@ test("public Contract rows select the source entry for every phase", async () =>
     assert.equal(observed.row.phase, phase);
   }
   const detailed = await withGitDecodeChannel(scope, (channel) =>
+    contractObservationOperation({ scope, channel, contractId: ids.bound }),
+  );
+  const fromWorld = await withGitDecodeChannel(scope, (channel) =>
     withGitReadObservation(scope, channel, (observation) => readContractObservation(observation, ids.bound)),
   );
+  assert.deepEqual(detailed, fromWorld);
   assert.equal(detailed.kind, "present");
   if (detailed.kind === "present")
     assert.deepEqual(detailed.row.after, [

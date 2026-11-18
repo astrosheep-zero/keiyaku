@@ -71,7 +71,9 @@ async function debtState(path: string, id: string) {
 
 async function holders(world: ReturnType<typeof repository>) {
   const git = await cachedRepositoryAt(world.path);
-  return withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, readDebtHoldersAt));
+  return withGitDecodeChannel(git, (channel) =>
+    withGitReadObservation(git, channel, (read) => readDebtHoldersAt(read.snapshot, read.readBlobs)),
+  );
 }
 
 function commitDebts(world: ReturnType<typeof repository>, message = "track Debt authority"): void {

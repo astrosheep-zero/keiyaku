@@ -23,8 +23,10 @@ Every product read receives one call-scoped, frozen Git observation. Product
 owners select and decode only their own data; Git supplies object custody but
 does not interpret product codecs. Targeted reads remain proportional to the
 requested authority, while only a deliberate world read enumerates the whole
-world. Observations and object reuse end with the call: there is no cross-call
-cache, second index, or independently updated current-state snapshot.
+world. Extending a selection reads only from the captured root, never from the
+live state ref. The frozen Git evidence can outlive its read scope as plain data;
+further object reads need the invocation's live Git capability. Object reuse
+ends with the call, and a new semantic attempt captures fresh authority.
 
 Private-state publication deliberately spends work proportional to the whole
 private tree, using the exact immutable base captured by its decision observation.

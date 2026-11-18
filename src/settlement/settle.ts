@@ -2,7 +2,7 @@ import { contractIdSchema } from "../git/identity.js";
 import { z } from "zod";
 import { debtIdSchema } from "../debt/identity.js";
 import { type ContractId, type ContractState } from "../core/facts/types.js";
-import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { contractJournal, observeContractsAt } from "../git/observe.js";
 import {
   appendPrivateStateSeatClose,
   withPrivateStatePublicationSeat,
@@ -18,7 +18,7 @@ import { settleDebt, type SettledDebtResult } from "../debt/operations.js";
 import { type DebtId } from "../debt/identity.js";
 import {
   publishDebtHolderRelease,
-  readDebtHolderProjectionFromDecision,
+  readDebtHolderProjection,
   debtHolderObservationSelection,
   type DebtHolder,
 } from "./holder.js";
@@ -129,17 +129,10 @@ async function observeApplicableHolder(
   input: Pick<SettleDebtsInput, "repository" | "channel" | "candidate" | "lags" | "progress">,
 ): Promise<DebtHolder | null> {
   const { repository, channel, candidate } = input;
-  let observation: GitDecisionObservation;
   try {
-    observation = await observeContractsForAdmissionAt(
-      repository,
-      channel,
-      [candidate.id],
-      debtHolderObservationSelection(),
-    );
-    const state = observation.journals.get(candidate.id)?.state ?? null;
-    if (state === null || state.terminal?.kind !== "claimed") return null;
-    const holder = (await readDebtHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
+    const observation = await observeContractsAt(repository, channel, [candidate.id], debtHolderObservationSelection());
+    if (contractJournal(observation.journals, candidate.id).state?.terminal?.kind !== "claimed") return null;
+    const holder = (await readDebtHolderProjection(channel, observation.epoch)).get(candidate.id);
     return holder?.disposition === "held" ? holder : null;
   } catch (error) {
     if (!operational(error)) throw error;
@@ -185,17 +178,17 @@ async function releaseHeldDebtHolder(
   const { repository, channel, candidate, seatClose, debtId } = input;
   try {
     const outcome = await withPrivateStatePublicationSeat(repository, async (seat) => {
-      const observation = await observeContractsForAdmissionAt(
+      const observation = await observeContractsAt(
         repository,
         channel,
         [candidate.id],
         debtHolderObservationSelection(),
       );
-      const state = observation.journals.get(candidate.id)?.state ?? null;
-      if (state === null || state.terminal?.kind !== "claimed") return "inert" as const;
-      const holder = (await readDebtHolderProjectionFromDecision(channel, observation)).get(candidate.id) ?? null;
-      if (holder === null || holder.disposition !== "held" || holder.debtId !== debtId) return "inert" as const;
-      const publication = await publishDebtHolderRelease(repository, channel, observation, candidate.id, seat);
+      if (contractJournal(observation.journals, candidate.id).state?.terminal?.kind !== "claimed")
+        return "inert" as const;
+      const holder = (await readDebtHolderProjection(channel, observation.epoch)).get(candidate.id);
+      if (holder?.disposition !== "held" || holder.debtId !== debtId) return "inert" as const;
+      const publication = await publishDebtHolderRelease(repository, channel, observation.epoch, holder, seat);
       if (publication.kind === "non-published") {
         recordLag(
           input,
@@ -208,7 +201,7 @@ async function releaseHeldDebtHolder(
         );
         return "held" as const;
       }
-      return publication.kind === "released" ? ("released" as const) : ("inert" as const);
+      return "released" as const;
     });
     if (outcome.closeLag !== undefined) {
       seatClose.push(...appendPrivateStateSeatClose(undefined, outcome.closeLag));

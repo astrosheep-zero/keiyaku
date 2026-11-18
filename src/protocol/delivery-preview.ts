@@ -10,7 +10,7 @@ import {
 } from "./result-reasons.js";
 import { previewTargetAnswerSchema, adjudicatePreviewTarget } from "../git/target-placement.js";
 import { readDeliveryDiff, readDeliveryScope } from "../git/integration.js";
-import { observeGitForAdmissionAt } from "../git/observe.js";
+import { contractJournal, observeContractsAt } from "../git/observe.js";
 import { activeContract, targetContractRefusal } from "../core/facts/observation.js";
 import { gateReports } from "../core/facts/gate.js";
 import { unmetPrerequisites } from "../core/verbs/placement.js";
@@ -203,7 +203,7 @@ export async function previewDeliveryOperation(
   input: DeliveryPreviewOperationInput,
 ): Promise<Exclude<IntentOutcome<DeliveryPreviewReport, PreviewRefusal>, { kind: "retry" }>> {
   input.signal?.throwIfAborted();
-  const observed = await observeGitForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const observed = await observeContractsAt(input.scope, input.channel, [input.contractId], { after: true });
   const state = activeContract(observed.decision, input.contractId);
   if ("kind" in state) return { kind: "refused", refusal: state };
   const targetRefusal = targetContractRefusal(observed.decision, state.coordinates.target);
@@ -220,7 +220,7 @@ export async function previewDeliveryOperation(
     {
       contractId: state.id,
       coordinates: state.coordinates,
-      recordedIntegrations: deliveryIntegrationSnapshots(observed.journals.get(state.id)?.entries ?? []),
+      recordedIntegrations: deliveryIntegrationSnapshots(contractJournal(observed.journals, state.id).entries),
       appointment,
     },
     {

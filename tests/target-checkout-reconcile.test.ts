@@ -11,7 +11,7 @@ import { singletonRequirement } from "../src/verification/declaration.js";
 import { gate, type ContractId } from "../src/core/facts/types.js";
 import { admitDecidedOffer, mintAttempts } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
-import { observeContractsForAdmissionAt } from "../src/git/observe.js";
+import { observeContractsAt } from "../src/git/observe.js";
 import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 
 import { mintSnapshotId } from "../src/git/identity.js";
@@ -137,7 +137,7 @@ async function admitClaimWithoutFollow(
 
     const admitted = (
       await withPrivateStatePublicationSeat(git, async (seat) => {
-        const observation = await observeContractsForAdmissionAt(git, channel, [contractId]);
+        const observation = await observeContractsAt(git, channel, [contractId]);
         const attempt = mintAttempts({ entryCount: 2 })[0]!;
         const decision = decidePlacement({
           input: { contractId, at: new Date().toISOString() },

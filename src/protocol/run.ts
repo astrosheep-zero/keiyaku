@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { publicationFailedSchema } from "../git/admission.js";
 import type { ProtocolProgress } from "./progress.js";
-import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { observeContractsAt, type ContractReadView } from "../git/observe.js";
 import {
   appendPrivateStateSeatClose,
   isPrivateStateSeatContention,
@@ -65,7 +65,7 @@ export async function runBoundedAttempts<Accepted extends Readonly<{ kind: "acce
 export type CompanionDecorator = (
   input: Readonly<{
     repository: GitRepository;
-    observation: GitDecisionObservation;
+    observation: ContractReadView;
     contractId: ContractId;
     offer: Offer;
   }>,
@@ -94,7 +94,7 @@ export type ProtocolPreparation<Input, Refusal, Seed, Prepared> = Readonly<{
     seed: Seed,
   ) => ExternalProtocolPreparation<Prepared, Refusal> | Promise<ExternalProtocolPreparation<Prepared, Refusal>>;
   assemble: (
-    observation: GitDecisionObservation,
+    observation: ContractReadView,
     seed: Seed,
     prepared: Prepared,
   ) => InCustodyProtocolPreparation<Input, Refusal> | Promise<InCustodyProtocolPreparation<Input, Refusal>>;
@@ -112,12 +112,12 @@ type ProtocolAdmission<Input extends Readonly<{ contractId: ContractId }>, Refus
     repository: GitRepository,
     channel: GitDecodeChannel,
     contracts: readonly ContractId[],
-  ) => Promise<GitDecisionObservation>;
+  ) => Promise<ContractReadView>;
   /** Mint verb-owned entries from the exact size of this attempt's observation. */
   extendAttempt?: (attempt: AttemptContext, observedContractCount: number) => AttemptContext;
   /** Add opaque companions from the exact immutable observation for this attempt. */
   decorateOffer?: CompanionDecorator;
-  validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
+  validateAdmission?: (observation: ContractReadView) => Refusal | undefined | Promise<Refusal | undefined>;
   observationSelection?: GitTreeSelection;
 }>;
 
@@ -149,7 +149,7 @@ type PreparedProtocolAttempt<Refusal> =
   | Readonly<{ kind: "refused"; refusal: Refusal }>
   | Readonly<{
       kind: "offered";
-      observation: GitDecisionObservation;
+      observation: ContractReadView;
       attempt: AttemptContext;
       offer: Offer;
       assertions: readonly GitRefAssertion[];
@@ -219,12 +219,12 @@ function publicationFailedFromSeatError(error: unknown): AttemptTerminal {
  */
 export async function externalPreparation<Artifacts>(
   input: Readonly<{ scope: GitRepository; channel: GitDecodeChannel; contractId: ContractId }>,
-  artifacts: (observation: GitDecisionObservation, state: ContractState) => Promise<Artifacts>,
+  artifacts: (observation: ContractReadView, state: ContractState) => Promise<Artifacts>,
 ): Promise<
   | Readonly<{ kind: "unavailable" }>
   | Readonly<{ kind: "artifacts"; witness: ContractStateWitness; artifacts: Artifacts }>
 > {
-  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const observation = await observeContractsAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(observation.decision, input.contractId);
   if (state === null) return { kind: "unavailable" };
   return { kind: "artifacts", witness: { head: state.head }, artifacts: await artifacts(observation, state) };
@@ -247,9 +247,9 @@ async function observeProtocolDecision<
   Refusal,
   Seed extends Readonly<{ contractId: ContractId }>,
   Prepared,
->(input: RunProtocolInput<Input, Refusal, Seed, Prepared>): Promise<GitDecisionObservation> {
+>(input: RunProtocolInput<Input, Refusal, Seed, Prepared>): Promise<ContractReadView> {
   return input.observe === undefined
-    ? await observeContractsForAdmissionAt(input.repository, input.channel, input.contracts, input.observationSelection)
+    ? await observeContractsAt(input.repository, input.channel, input.contracts, input.observationSelection)
     : await input.observe(input.repository, input.channel, input.contracts);
 }
 
@@ -258,7 +258,7 @@ type DecidedProtocolOffer<Refusal> = Exclude<PreparedProtocolAttempt<Refusal>, R
 async function decideDecoratedProtocolOffer<Input extends Readonly<{ contractId: ContractId }>, Refusal>(
   admission: ProtocolAdmission<Input, Refusal>,
   primaryContract: ContractId,
-  decisionObservation: GitDecisionObservation,
+  decisionObservation: ContractReadView,
   prepared: PreparedProtocolInput<Input>,
 ): Promise<DecidedProtocolOffer<Refusal>> {
   const attempt =
@@ -297,7 +297,7 @@ async function admitDecidedProtocolOffer<Input extends Readonly<{ contractId: Co
   admission: ProtocolAdmission<Input, Refusal>,
   primaryContract: ContractId,
   seat: PrivateStatePublicationSeat,
-  decisionObservation: GitDecisionObservation,
+  decisionObservation: ContractReadView,
   prepared: PreparedProtocolInput<Input>,
 ): Promise<DecidedOfferResult<Refusal>> {
   const decided = await decideDecoratedProtocolOffer(admission, primaryContract, decisionObservation, prepared);

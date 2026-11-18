@@ -9,7 +9,7 @@ import {
 import { contractPhysicalName, gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { withGitReadObservation, type GitDecodeChannel } from "./read-observation.js";
-import { observeContractWorld } from "./observe.js";
+import { observeContractJournals } from "./observe.js";
 import { resolveContractTarget } from "./target.js";
 import { runDestroyHooks, type WorktreeHooks } from "./hooks.js";
 import {
@@ -177,8 +177,8 @@ async function hasIncomingLanding(
   state: ContractState,
   head: SnapshotId,
 ): Promise<boolean> {
-  const world = await withGitReadObservation(repository, channel, async (read) => await observeContractWorld(read));
-  for (const { state: child } of world.contracts.values()) {
+  const journals = await withGitReadObservation(repository, channel, observeContractJournals);
+  for (const { state: child } of journals.values()) {
     const target = child?.coordinates.target;
     const integration = child?.currentIntegration?.snapshot;
     if (

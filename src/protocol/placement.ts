@@ -5,7 +5,7 @@ import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { contractState } from "../core/facts/observation.js";
 import { sameTarget, targetName, type ContractId, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
 import { decidePlacement, type PlacementRefusal } from "../core/verbs/placement.js";
-import { observeContractsForAdmissionAt, observeGitForAdmissionAt } from "../git/observe.js";
+import { observeContractsAt } from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileEffectFailure, type ReconcileResult } from "../git/reconcile.js";
@@ -103,7 +103,7 @@ async function placementChangesHint(
   channel: GitDecodeChannel,
   contractId: ContractId,
 ): Promise<RefOperation | undefined> {
-  const observation = await observeContractsForAdmissionAt(repository, channel, [contractId]);
+  const observation = await observeContractsAt(repository, channel, [contractId]);
   const state = contractState(observation.decision, contractId);
   const integration = state?.currentIntegration;
   const target = state?.coordinates.target;
@@ -267,7 +267,7 @@ export async function admitPlacement<ExtraRefusal = never>(
     },
     ...(admission.progress === undefined ? {} : { progress: admission.progress }),
     observe: (observedRepository, observedChannel, contracts) =>
-      observeGitForAdmissionAt(observedRepository, observedChannel, contracts),
+      observeContractsAt(observedRepository, observedChannel, contracts, { after: true }),
   };
   if (target === undefined) return await runProtocol(protocol);
   return await runUnderTargetPlacementFence(

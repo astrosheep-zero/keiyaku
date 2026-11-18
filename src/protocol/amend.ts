@@ -1,8 +1,10 @@
 import {
-  extendContractsForAdmissionAt,
-  observeContractsForAdmissionAt,
+  contractJournal,
+  observeContractsAt,
   selectExplicitTarget,
   type BindTargetSelection,
+  type CollectContracts,
+  type ContractReadView,
 } from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import { contractState } from "../core/facts/observation.js";
@@ -19,8 +21,6 @@ import {
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import { admitted } from "./outcome.js";
 import { protocolSeatClose } from "./run.js";
-import type { GitDecisionObservation } from "../git/observe.js";
-import type { GitDecodeChannel } from "../git/read-observation.js";
 import type { MutationOperationInput, IntentOutcome } from "./operations.js";
 import { timestamp } from "./operations.js";
 
@@ -49,7 +49,7 @@ export type AmendAdmission = IntentOutcome<Amendment, AmendmentRefusal> | Readon
 
 /** Empty intent keeps the owner's existence and terminal judgment and admits nothing. */
 async function unchangedAmend(input: AmendOperationInput): Promise<AmendAdmission> {
-  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const observation = await observeContractsAt(input.scope, input.channel, [input.contractId]);
   const decision = decideAmend<never>({
     input: { contractId: input.contractId, at: timestamp() },
     attempt: { entryUlids: [] },
@@ -62,22 +62,24 @@ async function prepareAmendmentAt(
   input: AmendOperationInput,
   selection: Extract<BindTargetSelection, { kind: "explicit" | "contract" }> | undefined,
   amendment: Amendment,
-  observation: GitDecisionObservation,
 ): Promise<
   Readonly<{
-    observation: GitDecisionObservation;
+    observation: ContractReadView;
     target?: ContractTarget;
     preparation: AmendEdit<AmendmentRefusal>["preparation"];
   }>
 > {
+  const observation = await observeContractsAt(input.scope, input.channel, [input.contractId], {
+    expand: async (journals, collect) => {
+      const current = contractJournal(journals, input.contractId).state;
+      await extendPrerequisiteClosure(collect, [...(current?.terms.after ?? []), ...amendment.terms.after]);
+      if (selection?.kind === "contract") await extendTargetClosure(collect, selection.contractId);
+    },
+  });
   const state = contractState(observation.decision, input.contractId);
-  observation = await extendPrerequisiteClosureAt(input.channel, observation, [
-    ...new Set([...(state?.terms.after ?? []), ...amendment.terms.after]),
-  ]);
   let target: ContractTarget | undefined;
   let refusal: TargetInputRefusal | undefined;
   if (selection?.kind === "contract") {
-    observation = await extendTargetClosureAt(input.channel, observation, selection.contractId);
     const resolved = await resolveContractTarget(input.scope, selection.contractId);
     if (resolved.kind === "refused") refusal = resolved.refusal;
     else target = resolved.target;
@@ -99,43 +101,29 @@ async function prepareAmendmentAt(
   };
 }
 
-async function extendTargetClosureAt(
-  channel: GitDecodeChannel,
-  observation: GitDecisionObservation,
-  seed: ContractId,
-): Promise<GitDecisionObservation> {
-  let current = observation;
+async function extendTargetClosure(collect: CollectContracts, seed: ContractId): Promise<void> {
   const visited = new Set<ContractId>();
   let id: ContractId | undefined = seed;
   while (id !== undefined && !visited.has(id)) {
     visited.add(id);
-    current = await extendContractsForAdmissionAt(channel, current, [id]);
-    const target: ContractTarget | undefined = contractState(current.decision, id)?.coordinates.target;
+    const target: ContractTarget | undefined = contractJournal(await collect([id]), id).state?.coordinates.target;
     id = typeof target === "object" ? target.contractId : undefined;
   }
-  return current;
 }
 
-async function extendPrerequisiteClosureAt(
-  channel: GitDecodeChannel,
-  observation: GitDecisionObservation,
-  seeds: readonly ContractId[],
-): Promise<GitDecisionObservation> {
-  let current = observation;
+async function extendPrerequisiteClosure(collect: CollectContracts, seeds: readonly ContractId[]): Promise<void> {
   const visited = new Set<ContractId>();
   let pending = [...seeds];
   while (pending.length > 0) {
     const batch = [...new Set(pending.filter((id) => !visited.has(id)))];
     pending = [];
     if (batch.length === 0) break;
-    current = await extendContractsForAdmissionAt(channel, current, batch);
+    const journals = await collect(batch);
     for (const id of batch) {
       visited.add(id);
-      const state = contractState(current.decision, id);
-      if (state !== null) pending.push(...state.terms.after);
+      pending.push(...(contractJournal(journals, id).state?.terms.after ?? []));
     }
   }
-  return current;
 }
 
 export async function amendOperation(input: AmendOperationInput): Promise<AmendAdmission> {
@@ -144,7 +132,7 @@ export async function amendOperation(input: AmendOperationInput): Promise<AmendA
   if (selection === null) return { kind: "refused", refusal: { kind: "invalid-target" } };
   let source = input.source;
   if (source === undefined) {
-    const initial = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+    const initial = await observeContractsAt(input.scope, input.channel, [input.contractId]);
     source = contractState(initial.decision, input.contractId)?.terms;
   }
   // Deriving the caller-stamped document is pure: it never depends on the latest Contract.
@@ -161,12 +149,7 @@ export async function amendOperation(input: AmendOperationInput): Promise<AmendA
       await withPrivateStatePublicationSeat<AmendAdmission>(input.scope, async (seat) => {
         const attempts = mintAttempts({ entryCount: 1 });
         for (let index = 0; index < attempts.length; index += 1) {
-          const { observation, target, preparation } = await prepareAmendmentAt(
-            input,
-            selection,
-            amendment,
-            await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]),
-          );
+          const { observation, target, preparation } = await prepareAmendmentAt(input, selection, amendment);
           const decision = decideAmend({
             input: {
               contractId: input.contractId,

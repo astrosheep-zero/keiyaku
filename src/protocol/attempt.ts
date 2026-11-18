@@ -3,7 +3,7 @@ import type { ProtocolProgress } from "./progress.js";
 import { randomBytes } from "node:crypto";
 import { encodeEntry } from "../core/facts/codec.js";
 import { admit, type PublicationFailed } from "../git/admission.js";
-import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { contractJournal, observeContractsAt, type ContractReadView } from "../git/observe.js";
 import {
   confirmPrivateStatePublication,
   type PrivateStatePublicationSeat,
@@ -53,18 +53,6 @@ export function mintAttempts(input: Readonly<{ entryCount: number }>): readonly 
   }));
 }
 
-type UnknownAttemptClassification =
-  | Readonly<{ kind: "accepted" }>
-  | Readonly<{ kind: "redecide" }>
-  | Readonly<{
-      kind: "collision";
-      contractId: ContractId;
-      planned: JournalEntry;
-      observed: JournalEntry;
-      plannedBytes: string;
-      observedBytes: string;
-    }>;
-
 export type AcceptedAdmission = Readonly<{
   kind: "accepted";
   facts: readonly JournalEntry[];
@@ -105,35 +93,9 @@ function validateOffer(offer: Offer, attempt: AttemptContext): void {
   if (actualEntries.size === 0) throw new Error("offer requires at least one current-attempt ULID");
 }
 
-function journalFor(
-  append: ContractJournalAppend,
-  journals: GitDecisionObservation["journals"],
-): readonly JournalEntry[] {
-  const record = journals.get(append.contractId);
-  if (record === undefined) throw new Error("accepted offer contract is missing from its observation");
-  return [...record.entries, ...append.entries];
-}
-
-function recoveredAcceptance(
-  observation: Readonly<{ contracts: GitDecisionObservation["journals"] }>,
-  offer: Offer,
-  primaryContract: ContractId,
-): AcceptedAdmission {
-  const record = observation.contracts.get(primaryContract);
-  if (record?.state === null || record?.state === undefined) {
-    throw new Error(`recovered offer is missing its primary contract: ${primaryContract}`);
-  }
-  return {
-    kind: "accepted",
-    facts: offerEntries(offer),
-    state: record.state,
-    journal: record.entries,
-  };
-}
-
 async function publicationPremiseMoved(
   repository: GitRepository,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   offer: Offer,
   assertions: readonly GitRefAssertion[],
 ): Promise<boolean> {
@@ -146,7 +108,7 @@ async function publicationPremiseMoved(
     ...assertions.map((assertion) => assertion.ref),
     ...(offer.target === undefined ? [] : [targetRef(offer.target.target)]),
   ]);
-  if (refs.get(GIT_REF) !== observation.admission.snapshot.commit) return true;
+  if (refs.get(GIT_REF) !== observation.epoch.commit) return true;
   for (const assertion of assertions) if (refs.get(assertion.ref) !== assertion.oid) return true;
   return offer.target !== undefined && refs.get(targetRef(offer.target.target)) !== offer.target.expectedOid;
 }
@@ -158,11 +120,11 @@ export async function admitDecidedOffer<Refusal = never>(
     channel: GitDecodeChannel;
     contractId: ContractId;
     seat: PrivateStatePublicationSeat;
-    observation: GitDecisionObservation;
+    observation: ContractReadView;
     attempt: AttemptContext;
     offer: Offer;
     assertions?: readonly GitRefAssertion[];
-    validateAdmission?: (observation: GitDecisionObservation) => Refusal | undefined | Promise<Refusal | undefined>;
+    validateAdmission?: (observation: ContractReadView) => Refusal | undefined | Promise<Refusal | undefined>;
     progress?: ProtocolProgress;
   }>,
 ): Promise<DecidedOfferResult<Refusal>> {
@@ -175,11 +137,11 @@ export async function admitDecidedOffer<Refusal = never>(
     const refusal = await input.validateAdmission(decisionObservation);
     if (refusal !== undefined) return { kind: "refused", refusal };
   }
-  const admission = await admit(repository, offer, decisionObservation.admission, assertions);
+  const admission = await admit(repository, offer, decisionObservation, assertions);
   if (admission.kind === "accepted") {
     confirmPrivateStatePublication(seat);
     input.progress?.recordPublication(primaryContract, admission.heads[primary.contractId]!, offerEntries(offer));
-    const journal = journalFor(primary, decisionObservation.journals);
+    const journal = [...contractJournal(decisionObservation.journals, primaryContract).entries, ...primary.entries];
     const accepted: AcceptedAdmission = {
       kind: "accepted",
       facts: offerEntries(offer),
@@ -196,67 +158,43 @@ export async function admitDecidedOffer<Refusal = never>(
   }
   const recoveryRepository = { ...repository, signal: AbortSignal.timeout(5_000) };
   const recovered = await withGitDecodeChannel(recoveryRepository, async (recoveryChannel) =>
-    observeContractsForAdmissionAt(
+    observeContractsAt(
       recoveryRepository,
       recoveryChannel,
       offer.facts.map((append) => append.contractId),
     ),
   );
-  const classification = classifyUnknownAttempt({ contracts: recovered.journals }, offer);
-  if (classification.kind === "accepted") {
-    const accepted = confirmRecoveredAcceptance(seat, { contracts: recovered.journals }, offer, primaryContract);
-    input.progress?.recordAdmission(accepted);
-    return accepted;
-  }
-  return classification.kind === "collision" ? { kind: "collision" } : { kind: "redecide" };
-}
-
-function confirmRecoveredAcceptance(
-  seat: PrivateStatePublicationSeat,
-  observation: Readonly<{ contracts: GitDecisionObservation["journals"] }>,
-  offer: Offer,
-  primaryContract: ContractId,
-): AcceptedAdmission {
-  const recovered = recoveredAcceptance(observation, offer, primaryContract);
+  const recoveredKind = classifyUnknownAttempt(recovered.journals, offer);
+  if (recoveredKind !== "accepted") return { kind: recoveredKind };
+  const { state, entries } = contractJournal(recovered.journals, primaryContract);
+  if (state === null) throw new Error(`recovered offer is missing its primary contract: ${primaryContract}`);
   confirmPrivateStatePublication(seat);
-  return recovered;
+  const accepted: AcceptedAdmission = { kind: "accepted", facts: offerEntries(offer), state, journal: entries };
+  input.progress?.recordAdmission(accepted);
+  return accepted;
 }
 
 /** Classify an unknown atomic-publication outcome using only a captured Git observation. */
 function classifyUnknownAttempt(
-  observation: Readonly<{ contracts: GitDecisionObservation["journals"] }>,
+  journals: ContractReadView["journals"],
   offer: Offer,
-): UnknownAttemptClassification {
+): "accepted" | "collision" | "redecide" {
   let exact = 0;
   let missing = 0;
 
   for (const append of offer.facts) {
-    const record = observation.contracts.get(append.contractId);
-    if (record === undefined) throw new Error(`missing contract observation: ${append.contractId}`);
-    const entries = new Map(record.entries.map((entry) => [entry.entry, entry]));
+    const record = contractJournal(journals, append.contractId);
+    const lines = record.state === null ? [] : record.bytes.toString("utf8").split("\n");
+    const entries = new Map(record.entries.map(({ entry }, index) => [entry, lines[index]!]));
     for (const planned of append.entries) {
-      const plannedBytes = encodeEntry(planned);
       const observed = entries.get(planned.entry);
-      if (observed === undefined) {
-        missing += 1;
-        continue;
-      }
-      const observedBytes = encodeEntry(observed);
-      if (plannedBytes !== observedBytes) {
-        return {
-          kind: "collision",
-          contractId: append.contractId,
-          planned,
-          observed,
-          plannedBytes,
-          observedBytes,
-        };
-      }
-      exact += 1;
+      if (observed === undefined) missing += 1;
+      else if (`${observed}\n` !== encodeEntry(planned)) return "collision";
+      else exact += 1;
     }
   }
 
-  if (missing === 0) return { kind: "accepted" };
+  if (missing === 0) return "accepted";
   if (exact !== 0) throw new AuthorityCorruptionError("partial unknown attempt match is corrupted authority");
-  return { kind: "redecide" };
+  return "redecide";
 }

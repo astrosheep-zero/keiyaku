@@ -3,7 +3,7 @@ import { z } from "zod";
 import { contractIdSchema } from "../git/identity.js";
 import { type ContractId, type ContractState } from "../core/facts/types.js";
 import { KeiyakuError } from "../errors.js";
-import { observeContractsForAdmissionAt } from "../git/observe.js";
+import { contractJournal, observeContractsAt } from "../git/observe.js";
 import { withGitDecodeChannel } from "../git/read-observation.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import { callerContractId, optionalSignal, requireInput } from "./input.js";
@@ -161,10 +161,9 @@ export function createContractWaitObserver(scope: RepositoryScope, ids: readonly
       const reading = { ...scope, ...(signal === undefined ? {} : { signal }) };
       const states = await readContractValue(() =>
         withGitDecodeChannel(reading, async (channel) => {
-          const observed = await observeContractsForAdmissionAt(reading, channel, ids);
+          const observed = await observeContractsAt(reading, channel, ids);
           return ids.map((id) => {
-            const record = observed.journals.get(id);
-            if (record === undefined) throw new Error(`missing requested contract observation: ${id}`);
+            const record = contractJournal(observed.journals, id);
             return {
               state: record.state,
               ...(record.state === null

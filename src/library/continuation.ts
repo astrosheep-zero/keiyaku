@@ -1,5 +1,6 @@
+import { contractState } from "../core/facts/observation.js";
 import type { ContractId, ContractState, SnapshotId } from "../core/facts/types.js";
-import { observeActiveContractWorld } from "../git/observe.js";
+import { observeActiveContractWorld, observeContractAt } from "../git/observe.js";
 import { withGitReadObservation, type GitDecodeChannel } from "../git/read-observation.js";
 import { reconcileDependentWorktree } from "../git/reconcile.js";
 import { worktreePath } from "../git/workspace.js";
@@ -11,7 +12,6 @@ import {
   type Placement,
 } from "../protocol/completion.js";
 import { executionIssue, isOperationalStop, type ProtocolProgress } from "../protocol/progress.js";
-import { observeContractAt } from "../git/observe.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import { contractIdSchema } from "../protocol/operations.js";
 import { readPlaceRegister } from "../workspace-place.js";
@@ -35,9 +35,8 @@ export type ContinuationReport = z.infer<typeof continuationReportSchema>;
 
 function reverseDependents(world: Awaited<ReturnType<typeof observeActiveContractWorld>>) {
   const index = new Map<ContractId, ContractState[]>();
-  for (const record of world.contracts.values()) {
-    const state = record.state;
-    if (state === null || state.delivery === null) continue;
+  for (const { state } of world.journals.values()) {
+    if (state === null || state.terminal !== null || state.delivery === null) continue;
     for (const prerequisite of state.terms.after) {
       const dependents = index.get(prerequisite) ?? [];
       dependents.push(state);
@@ -111,7 +110,7 @@ export async function continueDeliveredDependents(input: ContinuationInput): Pro
           attempted.has(id) ||
           !candidate.terms.after.every(
             (dependency) =>
-              newlyClaimed.has(dependency) || world.eligibility.get(dependency)?.terminal?.kind === "claimed",
+              newlyClaimed.has(dependency) || contractState(world.decision, dependency)?.terminal?.kind === "claimed",
           )
         )
           continue;

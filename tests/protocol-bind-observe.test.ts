@@ -19,7 +19,13 @@ import {
   writeBlob,
   writeCommit,
 } from "../src/git/repository.js";
-import { observeBindCoordinates, observeContractWorld, observeContractsForAdmissionAt } from "../src/git/observe.js";
+import {
+  contractJournal,
+  observeActiveContractWorld,
+  observeBindCoordinates,
+  observeContractJournals,
+  observeContractsAt,
+} from "../src/git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { executeGit } from "../src/git/process.js";
 import { contractJournalPath } from "../src/git/identity.js";
@@ -261,13 +267,70 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     );
   });
 
+  test("target and prerequisite expansion keeps the initial Git epoch after the state ref moves", async () => {
+    const repository = repositoryWithHead();
+    const contracts = Keis.of(await Repo.at({ path: repository.path }));
+    const target = accepted(await contracts.bind({ terms: contractBody(), target: null }));
+    const prerequisite = accepted(await contracts.bind({ terms: contractBody(), target: null }));
+    const child = accepted(await contracts.bind({
+      terms: contractBody(), target: target.contractId, after: [prerequisite.contractId],
+    }));
+    const git = await repositoryAt(repository.path);
+    const ids = [child.contractId, target.contractId, prerequisite.contractId];
+    const before = await readGitPaths(git, ids.map((id) => contractJournalPath(id)));
+    const childOid = before.paths.get(contractJournalPath(child.contractId))!.oid;
+    const { frozen, fresh } = await withGitDecodeChannel(git, async (channel) => {
+      let moved = false;
+      const racing = {
+        ...channel,
+        readObjects: async (oids: readonly string[]) => {
+          const objects = await channel.readObjects(oids);
+          if (!moved && oids.includes(childOid)) {
+            moved = true;
+            accepted(await target.kei.arc({ body: "# A new target chapter\n" }));
+            accepted(await prerequisite.kei.abandon());
+          }
+          return objects;
+        },
+      };
+      const frozen = await observeContractsAt(git, racing, [child.contractId], { after: true });
+      assert.ok(moved);
+      const fresh = await observeContractsAt(git, channel, [child.contractId], { after: true });
+      return { frozen, fresh };
+    });
+    assert.equal(frozen.epoch.commit, before.commit);
+    assert.notEqual(fresh.epoch.commit, frozen.epoch.commit);
+    for (const id of ids) {
+      const record = contractJournal(frozen.journals, id);
+      assert.ok(record.state !== null);
+      assert.equal(record.path, contractJournalPath(id));
+      assert.equal(record.oid, before.paths.get(record.path)?.oid);
+      assert.deepEqual(record.bytes, await readBlob(git, record.oid));
+      assert.equal(frozen.decision.get(id), record.state);
+    }
+    assert.equal(frozen.decision.get(target.contractId)?.currentArc, undefined);
+    assert.equal(fresh.decision.get(target.contractId)?.currentArc?.data.title, "A new target chapter");
+    const retired = contractJournal(fresh.journals, prerequisite.contractId);
+    assert.ok(retired.state !== null);
+    assert.equal(retired.path, contractJournalPath(prerequisite.contractId, "terminal"));
+    assert.equal(retired.state.terminal?.kind, "abandoned");
+  });
+
   test("admission publishes a journal append and opaque companion in one Git snapshot", async () => {
     const repository = repositoryWithHead();
     const { id, git } = await boundObservedContract(repository);
+    const activePath = contractJournalPath(id);
+    const original = await readGitPaths(git, [activePath]);
+    const originalBytes = await readBlob(git, original.paths.get(activePath)!.oid);
+    // The journal codec ignores unrecognized content, but admission must preserve its exact bytes.
+    const extended = await writeBlob(git, originalBytes.toString("utf8").replace(/\}\n$/u, ',"zz":true}\n'));
+    const tree = await updateGitTree(git, original.tree, new Map([[activePath, { oid: extended }]]));
+    const commit = await writeCommit({ repository: git, tree, parent: original.commit });
+    repository.run(["update-ref", GIT_REF, commit, original.commit!]);
     const { before, result } = await withGitDecodeChannel(git, async (channel) => {
-      const observation = await observeContractsForAdmissionAt(git, channel, [id]);
-      const before = observation.admission.snapshot.paths.get(contractJournalPath(id));
-      assert.ok(before);
+      const observation = await observeContractsAt(git, channel, [id]);
+      const before = contractJournal(observation.journals, id);
+      assert.ok(before.state !== null);
       const decision = decideArc({
         input: {
           contractId: id,
@@ -288,7 +351,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
               ...decision.offer,
               companions: [{ path: foreignJournal, bytes: Buffer.from("not a journal\n") }],
             },
-            observation.admission,
+            observation,
           ),
         (error: unknown) =>
           error instanceof Error &&
@@ -303,7 +366,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
             ...decision.offer,
             companions: [{ path: "test/companion.txt", bytes: Buffer.from("companion\n") }],
           },
-          observation.admission,
+          observation,
         ),
       };
     });
@@ -311,17 +374,20 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(result.kind, "accepted");
     const after = await readGitPaths(git, ["test/companion.txt", contractJournalPath(id)]);
     assert.equal(after.paths.has("test/companion.txt"), true);
-    assert.notEqual(after.paths.get(contractJournalPath(id))?.oid, before.oid);
+    const appended = after.paths.get(contractJournalPath(id));
+    assert.ok(appended);
+    assert.notEqual(appended.oid, before.oid);
+    assert.deepEqual((await readBlob(git, appended.oid)).subarray(0, before.bytes.length), before.bytes);
   });
 
   test("a failed Git CAS publishes neither its journal append nor its companion", async () => {
     const repository = repositoryWithHead();
     const { id, git } = await boundObservedContract(repository);
     const observation = await withGitDecodeChannel(git, (channel) =>
-      observeContractsForAdmissionAt(git, channel, [id]),
+      observeContractsAt(git, channel, [id]),
     );
-    const before = observation.admission.snapshot.paths.get(contractJournalPath(id));
-    assert.ok(before);
+    const before = contractJournal(observation.journals, id);
+    assert.ok(before.state !== null);
     const decision = decideArc({
       input: {
         contractId: id,
@@ -336,13 +402,13 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const winnerBlob = await writeBlob(git, "winner\n");
     const winnerTree = await updateGitTree(
       git,
-      observation.admission.snapshot.tree,
+      observation.epoch.tree,
       new Map([["test/winner.txt", { oid: winnerBlob }]]),
     );
     const winnerCommit = await writeCommit({
       repository: git,
       tree: winnerTree,
-      parent: observation.admission.snapshot.commit,
+      parent: observation.epoch.commit,
     });
     assert.equal(
       (
@@ -350,7 +416,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
           {
             ref: GIT_REF,
             newOid: winnerCommit,
-            expectedOid: observation.admission.snapshot.commit,
+            expectedOid: observation.epoch.commit,
           },
         ])
       ).kind,
@@ -363,7 +429,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
         ...decision.offer,
         companions: [{ path: "test/loser.txt", bytes: Buffer.from("loser\n") }],
       },
-      observation.admission,
+      observation,
     );
 
     assert.equal(result.kind, "publication-failed");
@@ -373,12 +439,12 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(after.paths.get(contractJournalPath(id))?.oid, before.oid);
   });
 
-  test("rejects a foreign-contract journal entry before publication", async () => {
+  test("admission rejects broken observations and invalid candidates before publication", async () => {
     const repository = repositoryWithHead();
     const { id, git } = await boundObservedContract(repository);
     const foreign = contractId("kei/foreign-admission-entry");
     const observation = await withGitDecodeChannel(git, (channel) =>
-      observeContractsForAdmissionAt(git, channel, [id]),
+      observeContractsAt(git, channel, [id]),
     );
     const decision = decideAbandon({
       input: { contractId: id, at: "2026-08-06T00:00:00Z" },
@@ -391,11 +457,18 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const before = await readGitPaths(git, [contractJournalPath(id), contractJournalPath(id, "terminal")]);
 
     await assert.rejects(
-      () => admit(git, { ...decision.offer, facts: [{ ...append, entries: [foreignEntry] }] }, observation.admission),
+      () => admit(git, { ...decision.offer, facts: [{ ...append, entries: [foreignEntry] }] }, observation),
       (error: unknown) =>
         error instanceof AuthorityCorruptionError &&
         error.message === `candidate journal entry belongs to ${foreign}, not ${id}`,
     );
+
+    const unselected = await withGitDecodeChannel(git, (channel) => observeContractsAt(git, channel, []));
+    await assert.rejects(admit(git, decision.offer, unselected), /missing requested Contract observation/u);
+    await assert.rejects(admit(git, {
+      ...decision.offer,
+      facts: [{ ...append, entries: [append.entries[0]!, append.entries[0]!] }],
+    }, observation), /duplicate entry/u);
 
     const after = await readGitPaths(git, [contractJournalPath(id), contractJournalPath(id, "terminal")]);
     assert.equal(after.commit, before.commit);
@@ -403,12 +476,77 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(after.paths.has(contractJournalPath(id, "terminal")), false);
   });
 
+  test("targeted and complete collection refuse mislabeled, duplicate and wrong-type journals", async () => {
+    const repository = repositoryWithHead();
+    const { id, git } = await boundObservedContract(repository);
+    const active = contractJournalPath(id);
+    const terminal = contractJournalPath(id, "terminal");
+    const before = await readGitPaths(git, [active]);
+    const blob = { oid: before.paths.get(active)!.oid };
+    const misplaced = contractJournalPath(contractId("kei/foreign-journal-path"));
+    let expected = before.commit!;
+    for (const { changes, error, selected } of [
+      { changes: new Map([[active, null], [terminal, blob]]), error: /journal path class/u, selected: id },
+      { changes: new Map([[terminal, blob]]), error: /duplicate contract journal identity/u, selected: id },
+      { changes: new Map([[misplaced, blob]]), error: /canonical contract identity/u, selected: contractId("kei/foreign-journal-path") },
+      { changes: new Map([[active, { oid: repository.run(["rev-parse", "HEAD"]).trim(), mode: "160000" }]]),
+        error: /journal path is not a blob/u, selected: id },
+    ]) {
+      const tree = await updateGitTree(git, before.tree, changes);
+      const commit = await writeCommit({ repository: git, tree, parent: before.commit });
+      repository.run(["update-ref", GIT_REF, commit, expected]);
+      expected = commit;
+      await withGitDecodeChannel(git, async (channel) => {
+        await assert.rejects(observeContractsAt(git, channel, [selected]), error);
+        await assert.rejects(withGitReadObservation(git, channel, observeContractJournals), error);
+      });
+    }
+  });
+
+  test("active world rejects a duplicate terminal path for an already observed prerequisite", async () => {
+    const repository = repositoryWithHead();
+    const { id, git } = await boundObservedContract(repository);
+    const dependent = await bindOperation({ scope: git, terms: terms([id]) });
+    assert.ok(dependent.kind === "accepted");
+    const active = contractJournalPath(id);
+    const terminal = contractJournalPath(id, "terminal");
+    const before = await readGitPaths(git, [active]);
+    const oid = before.paths.get(active)!.oid;
+    const observe = (reads: string[]) =>
+      withGitDecodeChannel(git, (channel) =>
+        withGitReadObservation(git, channel, (read) =>
+          observeActiveContractWorld({
+            ...read,
+            readBlobs: (oids) => {
+              reads.push(...oids);
+              return read.readBlobs(oids);
+            },
+          }),
+        ),
+      );
+
+    const reads: string[] = [];
+    const healthy = await observe(reads);
+    assert.equal(healthy.decision.get(id)?.id, id);
+    assert.equal(reads.filter((read) => read === oid).length, 1);
+
+    const tree = await updateGitTree(git, before.tree, new Map([[terminal, { oid }]]));
+    const commit = await writeCommit({ repository: git, tree, parent: before.commit });
+    repository.run(["update-ref", GIT_REF, commit, before.commit!]);
+    const corruptReads: string[] = [];
+    await assert.rejects(observe(corruptReads), {
+      name: "AuthorityCorruptionError",
+      message: `duplicate contract journal identity: ${id}`,
+    });
+    assert.deepEqual(corruptReads, reads, "path validation does not read the duplicate journal blob");
+  });
+
   test("classifies the candidate journal from its folded terminal state", async () => {
     const repository = repositoryWithHead();
     const { id, git } = await boundObservedContract(repository);
 
     const activeObservation = await withGitDecodeChannel(git, (channel) =>
-      observeContractsForAdmissionAt(git, channel, [id]),
+      observeContractsAt(git, channel, [id]),
     );
     const activeDecision = decideArc({
       input: {
@@ -420,7 +558,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       observation: activeObservation.decision,
     });
     assert.ok(activeDecision.kind === "offer", 'expected activeDecision.kind = "offer"');
-    assert.equal((await admit(git, activeDecision.offer, activeObservation.admission)).kind, "accepted");
+    assert.equal((await admit(git, activeDecision.offer, activeObservation)).kind, "accepted");
     const afterActive = await readGitPaths(git, [
       contractJournalPath(id, "active"),
       contractJournalPath(id, "terminal"),
@@ -429,7 +567,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(afterActive.paths.has(contractJournalPath(id, "terminal")), false);
 
     const terminalObservation = await withGitDecodeChannel(git, (channel) =>
-      observeContractsForAdmissionAt(git, channel, [id]),
+      observeContractsAt(git, channel, [id]),
     );
     const terminalDecision = decideAbandon({
       input: { contractId: id, at: "2026-08-06T00:00:01Z" },
@@ -437,7 +575,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
       observation: terminalObservation.decision,
     });
     assert.ok(terminalDecision.kind === "offer", 'expected terminalDecision.kind = "offer"');
-    assert.equal((await admit(git, terminalDecision.offer, terminalObservation.admission)).kind, "accepted");
+    assert.equal((await admit(git, terminalDecision.offer, terminalObservation)).kind, "accepted");
     const afterTerminal = await readGitPaths(git, [
       contractJournalPath(id, "active"),
       contractJournalPath(id, "terminal"),
@@ -564,7 +702,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     );
 
     await assert.rejects(
-      () => withGitDecodeChannel(git, (channel) => observeContractsForAdmissionAt(git, channel, [id])),
+      () => withGitDecodeChannel(git, (channel) => observeContractsAt(git, channel, [id])),
       (error: unknown) =>
         error instanceof AuthorityCorruptionError && /journal entry is not canonical/.test(error.message),
     );
@@ -628,8 +766,8 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     assert.ok(claimedDependency.kind === "accepted", 'expected claimedDependency.kind = "accepted"');
     const git = await repositoryAt(repository.path);
     const state = (
-      await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, observeContractWorld))
-    ).contracts.get(claimedDependency.value.contractId)?.state;
+      await withGitDecodeChannel(git, (channel) => withGitReadObservation(git, channel, observeContractJournals))
+    ).get(claimedDependency.value.contractId)?.state;
     if (state === undefined || state === null) throw new Error("claimable dependency state was not observed");
     const delivery = await prepareDelivery(git, await preparationCoordinates(git, state), {
       title: "Targeted",

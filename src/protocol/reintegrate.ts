@@ -18,7 +18,7 @@ import {
   reusableIntegrationSnapshot,
   type IntegrationPreparationRefusal,
 } from "../git/integration.js";
-import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { contractJournal, observeContractsAt, type ContractReadView } from "../git/observe.js";
 import { withPrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
@@ -77,7 +77,7 @@ async function prepareExternalReintegration(input: ReintegrationInput): Promise<
     planReintegrationArtifacts(
       input,
       state,
-      deliveryIntegrationSnapshots(observation.journals.get(state.id)?.entries ?? []),
+      deliveryIntegrationSnapshots(contractJournal(observation.journals, state.id).entries),
     ),
   );
 }
@@ -123,7 +123,7 @@ type AssembledReintegration =
 /** Assemble the decision input from the fresh Contract; spent artifacts restart the whole cycle. */
 function assembleReintegrationAttempt(
   input: ReintegrationInput,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   external: ExternalReintegrationPreparation,
 ): AssembledReintegration {
   const state = contractState(observation.decision, input.contractId);
@@ -150,7 +150,7 @@ async function runReintegration(
     const external = await prepareExternalReintegration(input);
     const result = protocolSeatClose<ReintegrationAttempt>(
       await withPrivateStatePublicationSeat<ReintegrationAttempt>(input.repository, async (seat) => {
-        const observation = await observeContractsForAdmissionAt(input.repository, input.channel, [input.contractId]);
+        const observation = await observeContractsAt(input.repository, input.channel, [input.contractId]);
         const assembled = assembleReintegrationAttempt(input, observation, external);
         if (assembled.kind === "stale") return assembled;
         const state = contractState(observation.decision, input.contractId);

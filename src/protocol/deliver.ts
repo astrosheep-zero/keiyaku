@@ -24,7 +24,7 @@ import {
   worktreePath,
   conflictRecovery,
 } from "../git/workspace.js";
-import { observeContractsForAdmissionAt, type GitDecisionObservation } from "../git/observe.js";
+import { contractJournal, observeContractsAt, type ContractReadView } from "../git/observe.js";
 import { type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import {
   externalPreparation,
@@ -378,7 +378,7 @@ async function prepareExternalDelivery(input: DeliverOperationInput): Promise<Ex
 
 async function prepareDeliveryArtifacts(
   input: DeliverOperationInput,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   state: ContractState,
 ): Promise<DeliveryArtifacts> {
   const derivation = input.deriveDocument(state);
@@ -401,7 +401,7 @@ async function prepareDeliveryArtifacts(
     input,
     state,
     derivation,
-    observation.journals.get(state.id)?.entries ?? [],
+    contractJournal(observation.journals, state.id).entries,
     captured.data,
   );
   return prepared.kind === "prepared"
@@ -419,7 +419,7 @@ async function prepareDeliveryArtifacts(
  */
 async function assembleDeliveryAttempt(
   input: DeliverOperationInput,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   external: ExternalDeliveryPreparation,
 ): Promise<AssembledDelivery> {
   const state = contractState(observation.decision, input.contractId);
@@ -441,7 +441,12 @@ async function assembleDeliveryAttempt(
   }
   const artifacts = external.artifacts;
   if (artifacts.kind === "defer")
-    return await completeDeferredDelivery(input, state, derivation, observation.journals.get(state.id)?.entries ?? []);
+    return await completeDeferredDelivery(
+      input,
+      state,
+      derivation,
+      contractJournal(observation.journals, state.id).entries,
+    );
   if (artifacts.kind === "refused") {
     return {
       kind: "assembled",
@@ -515,14 +520,14 @@ function reusesCurrentCandidate(input: DeliverOperationInput, state: ContractSta
 /** Accept a delivery whose current candidate is already admitted, without admitting it again. */
 function currentCandidateDeliveryDecision(
   input: DeliverOperationInput,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
 ): AttemptDecision<DeliverValue, DeliverOperationRefusal> | undefined {
   const state = assembled.state;
   if (state === null || assembled.derivation === undefined || assembled.reuse !== true) return undefined;
-  const record = observation.journals.get(input.contractId);
-  const delivery = record?.entries.findLast((entry) => entry.kind === "deliver");
-  if (record === undefined || delivery === undefined) throw new Error("current delivery is missing its journal fact");
+  const record = contractJournal(observation.journals, input.contractId);
+  const delivery = record.entries.findLast((entry) => entry.kind === "deliver");
+  if (delivery === undefined) throw new Error("current delivery is missing its journal fact");
   input.progress?.recordAdmission({ kind: "accepted", facts: [], state, journal: record.entries });
   const leading: DeliverLeading = { kind: "already-admitted", fact: delivery.entry };
   const value = compactDelivery(
@@ -535,7 +540,7 @@ function currentCandidateDeliveryDecision(
 
 async function validateDeliveryTarget(
   input: DeliverOperationInput,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
 ): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal> | undefined> {
   const target = assembled.state?.coordinates.target;
@@ -556,7 +561,7 @@ async function decideAndAdmitDelivery(
   input: DeliverOperationInput,
   attempt: AttemptContext,
   seat: PrivateStatePublicationSeat,
-  observation: GitDecisionObservation,
+  observation: ContractReadView,
   assembled: Extract<AssembledDelivery, { kind: "assembled" }>,
 ): Promise<AttemptDecision<DeliverValue, DeliverOperationRefusal>> {
   const targetCheck = await validateDeliveryTarget(input, observation, assembled);
@@ -607,7 +612,7 @@ async function deliverAttempt(
   return await privateStateSeatAttempt(
     input.scope,
     async (seat) => {
-      const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+      const observation = await observeContractsAt(input.scope, input.channel, [input.contractId]);
       const assembled = await assembleDeliveryAttempt(input, observation, external);
       if (assembled.kind === "stale") return STALE_PRIVATE_STATE_PREPARATION;
       return await decideAndAdmitDelivery(input, attempt, seat, observation, assembled);
@@ -636,7 +641,7 @@ async function appointedDeliverWorkspace(
   | Readonly<{ workspace: AppointedWorkspace; coordinates: ContractState["coordinates"]; state: ContractState }>
   | { kind: "refused"; refusal: DeliveryPreparationRefusal }
 > {
-  const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
+  const observation = await observeContractsAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(observation.decision, input.contractId);
   if (state === null) return { kind: "refused", refusal: { kind: "worktree-missing" } };
   const place = (await readPlaceRegister(input.scope)).get(input.contractId);

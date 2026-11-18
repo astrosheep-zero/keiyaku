@@ -36,9 +36,13 @@ the new delivery's intent. A delivery recorded without a note remains complete
 authority and requires no migration. Notes never participate in candidate
 identity, testimony currentness, or placement eligibility.
 
-A journal fold is a current read model, not stored authority. It exposes one
-coherent Contract state or explicit absence; a missing observation entry is a
-broken observation, not another representation of absence. A Contract has at
+Contract observation interprets each selected journal once against one frozen
+Git authority. Its exact source bytes stay with the decoded history and folded
+state, so admission consumes the same evidence that informed the decision. These
+records are read models, not stored authority. The pure decision sees only their
+completed, capability-free state projection. A requested Contract has a coherent
+state or explicit absence; a missing observation entry is a broken observation,
+not another representation of absence. A Contract has at
 most one terminal outcome. An impossible fold, malformed durable authority, or
 partial admission is corruption, surfaced exceptionally at the package boundary
 with its native corruption cause, rather than a normal refusal or retry.

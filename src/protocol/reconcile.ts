@@ -1,6 +1,6 @@
 import { reconcile, reconcileObservationFailure, type ReconcileResult } from "../git/reconcile.js";
 import type { ProtocolProgress } from "./progress.js";
-import { observeContractWorld } from "../git/observe.js";
+import { observeContractJournals } from "../git/observe.js";
 import { withGitReadObservation } from "../git/read-observation.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { ContractId, ContractState } from "../core/facts/types.js";
@@ -48,12 +48,8 @@ type RepoReconcileReport = Readonly<{ contracts: readonly RepoReconcileItem[] }>
 export async function worldContractStates(
   input: Readonly<{ scope: RepositoryScope; channel: GitDecodeChannel }>,
 ): Promise<readonly ContractState[]> {
-  const observation = await withGitReadObservation(
-    input.scope,
-    input.channel,
-    async (read) => await observeContractWorld(read),
-  );
-  return [...observation.contracts.values()].flatMap((value) => (value.state === null ? [] : [value.state]));
+  const journals = await withGitReadObservation(input.scope, input.channel, observeContractJournals);
+  return [...journals.values()].flatMap(({ state }) => (state === null ? [] : [state]));
 }
 
 export async function reconcileAllOperation(

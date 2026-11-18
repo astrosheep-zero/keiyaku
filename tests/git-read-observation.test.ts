@@ -27,6 +27,7 @@ test("Git read observation returns typed missing objects and closes its batch", 
 
   assert.deepEqual(result, { kind: "missing" });
   assert.notEqual(retained, null);
+  await assert.rejects(retained!.selectPaths([]), /Git read observation is closed/u);
   await assert.rejects(retained!.readBlobs([]), /Git read observation is closed/u);
   await assert.rejects(retained!.resolveRef("refs/heads/main"), /Git read observation is closed/u);
 });

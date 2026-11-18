@@ -2,11 +2,18 @@ import { createHash } from "node:crypto";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import type { TreeUpdate } from "../core/facts/offer.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
-import type { GitDecisionObservation } from "../git/observe.js";
-import { GIT_REF, updateGitTree, updateRefsAtomically, writeBlob, writeStateCommit } from "../git/repository.js";
+import {
+  GIT_REF,
+  updateGitTree,
+  updateRefsAtomically,
+  writeBlob,
+  writeStateCommit,
+  type GitSnapshot,
+} from "../git/repository.js";
 import { confirmPrivateStatePublication, type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
 import type { GitRepository } from "../git/process.js";
 import {
+  readBlobResults,
   withGitTargetedReadObservation,
   type GitDecodeChannel,
   type GitReadObservation,
@@ -163,16 +170,15 @@ export async function admitWithDebtHolderFence<T extends AdmissionOutcome>(
 
 export async function releaseDebtHolder(
   channel: GitDecodeChannel,
-  observation: GitDecisionObservation,
+  epoch: GitSnapshot,
   owner: ContractId,
 ): Promise<TreeUpdate | null> {
-  const current = (await readDebtHolderProjectionFromDecision(channel, observation)).get(owner) ?? null;
+  const current = (await readDebtHolderProjection(channel, epoch)).get(owner) ?? null;
   return current === null || current.disposition !== "held" ? null : update({ ...current, disposition: "released" });
 }
 
 type DebtHolderReleasePublication =
   | Readonly<{ kind: "released" }>
-  | Readonly<{ kind: "not-held" }>
   | Readonly<{ kind: "non-published"; diagnostic: string }>;
 
 async function releasedHolderIsCurrent(
@@ -189,35 +195,37 @@ async function releasedHolderIsCurrent(
 export async function publishDebtHolderRelease(
   repository: GitRepository,
   channel: GitDecodeChannel,
-  observation: GitDecisionObservation,
-  owner: ContractId,
+  epoch: GitSnapshot,
+  holder: DebtHolder,
   seat: PrivateStatePublicationSeat,
 ): Promise<DebtHolderReleasePublication> {
-  const release = await releaseDebtHolder(channel, observation, owner);
-  if (release === null) return { kind: "not-held" };
+  const release = update({ ...holder, disposition: "released" });
   const tree = await updateGitTree(
     repository,
-    observation.admission.snapshot.tree,
+    epoch.tree,
     new Map([[release.path, { oid: await writeBlob(repository, release.bytes) }]]),
   );
   const commit = await writeStateCommit({
     repository,
     tree,
-    parent: observation.admission.snapshot.commit,
-    message: `release held Debt completion: ${owner}`,
+    parent: epoch.commit,
+    message: `release held Debt completion: ${holder.contractId}`,
   });
   const publication = await updateRefsAtomically(repository, [
     {
       ref: GIT_REF,
       newOid: commit,
-      expectedOid: observation.admission.snapshot.commit,
+      expectedOid: epoch.commit,
     },
   ]);
   if (publication.kind === "published") {
     confirmPrivateStatePublication(seat);
     return { kind: "released" };
   }
-  if (publication.kind === "unknown" && (await releasedHolderIsCurrent(repository, channel, owner, release.bytes))) {
+  if (
+    publication.kind === "unknown" &&
+    (await releasedHolderIsCurrent(repository, channel, holder.contractId, release.bytes))
+  ) {
     confirmPrivateStatePublication(seat);
     return { kind: "released" };
   }
@@ -230,26 +238,11 @@ export async function publishDebtHolderRelease(
   };
 }
 
-export async function readDebtHolderProjectionFromDecision(
+export async function readDebtHolderProjection(
   channel: GitDecodeChannel,
-  observation: GitDecisionObservation,
+  epoch: GitSnapshot,
 ): Promise<DebtHolderProjection> {
-  const read = {
-    snapshot: observation.admission.snapshot,
-    readBlobs: async (oids: readonly string[]) => {
-      const objects = await channel.readObjects(oids);
-      const blobs = new Map();
-      for (const [oid, object] of objects) {
-        if (object.kind === "missing") blobs.set(oid, object);
-        else {
-          if (object.type !== "blob") corruption(`DebtHolder Git object is not a blob: ${oid}`);
-          blobs.set(oid, { kind: "present", bytes: object.bytes });
-        }
-      }
-      return blobs;
-    },
-  } satisfies Pick<GitReadObservation, "snapshot" | "readBlobs">;
-  return projectDebtHolders(await readDebtHoldersAt(read));
+  return projectDebtHolders(await readDebtHoldersAt(epoch, (oids) => readBlobResults(channel, oids)));
 }
 
 function observeDebtHolderProjection(
@@ -286,15 +279,14 @@ export async function releaseDebtHolderWithFence<T extends AdmissionOutcome>(
 }
 
 export async function readDebtHoldersAt(
-  observation: Pick<GitReadObservation, "snapshot" | "readBlobs">,
+  epoch: GitSnapshot,
+  readBlobs: GitReadObservation["readBlobs"],
 ): Promise<readonly DebtHolder[]> {
-  const entries = [...observation.snapshot.paths].filter(
-    ([path, entry]) => path.startsWith(HOLDER_PREFIX) && entry.type === "blob",
-  );
-  const blobs = await observation.readBlobs(entries.map(([, entry]) => entry.oid));
+  const entries = [...epoch.paths].filter(([path, entry]) => path.startsWith(HOLDER_PREFIX) && entry.type === "blob");
+  const blobs = await readBlobs(entries.map(([, entry]) => entry.oid));
   const holders: DebtHolder[] = [];
   const seen = new Set<DebtId>();
-  for (const [path, entry] of observation.snapshot.paths) {
+  for (const [path, entry] of epoch.paths) {
     if (path === HOLDER_ROOT) {
       if (entry.type !== "tree") corruption(`DebtHolder authority root is not a tree: ${path}`);
       continue;
@@ -313,5 +305,5 @@ export async function readDebtHoldersAt(
 }
 
 export async function readDebtHolderProjectionAt(observation: GitReadObservation): Promise<DebtHolderProjection> {
-  return projectDebtHolders(await readDebtHoldersAt(observation));
+  return projectDebtHolders(await readDebtHoldersAt(observation.snapshot, observation.readBlobs));
 }

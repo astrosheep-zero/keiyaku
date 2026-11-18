@@ -7,12 +7,14 @@ import { prepareAmendDocument } from "../src/body/amend.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { entryUlid, type ContractTerms } from "../src/core/facts/types.js";
 import { decideArc } from "../src/core/verbs/arc.js";
-import { observeContractsForAdmissionAt } from "../src/git/observe.js";
+import { contractJournalPath } from "../src/git/identity.js";
+import { observeContractsAt } from "../src/git/observe.js";
 import { withGitDecodeChannel, type GitDecodeChannel } from "../src/git/read-observation.js";
+import { GIT_REF, readBlob, readGitPaths, updateGitTree, writeBlob, writeCommit } from "../src/git/repository.js";
 import { contractTerms, documentDerivation } from "../src/library/input.js";
 import { amendOperation } from "../src/protocol/amend.js";
 import { runProtocol } from "../src/protocol/run.js";
-import { cachedRepositoryAt, withGitShim } from "./support/git.js";
+import { cachedRepositoryAt, waitForFile, withGitShim } from "./support/git.js";
 import { bind, document, repositoryWithMain } from "./support/library-verbs.js";
 
 test("two concurrent private-state binds both publish distinct accepted contracts", async () => {
@@ -40,7 +42,7 @@ test("a preparation spent by a concurrent publication restarts with a fresh atte
   const id = (present(await bound.state())).id;
   const capability = await cachedRepositoryAt(repository.path);
   const headOf = async (channel: GitDecodeChannel) =>
-    (await observeContractsForAdmissionAt(capability, channel, [id])).decision.get(id)?.head ?? null;
+    (await observeContractsAt(capability, channel, [id])).decision.get(id)?.head ?? null;
   // The spent artifact is a real private-state witness read before a concurrent publication.
   const spent = await withGitDecodeChannel(capability, headOf);
   await bound.amend({ edits: "## Replace: Context\nConcurrent publication of the same contract.\n" });
@@ -63,7 +65,7 @@ test("a preparation spent by a concurrent publication restarts with a fresh atte
       attempts: [{ entryUlids: [spentAttempt] }, { entryUlids: [freshAttempt] }],
       observe: async (repository_, decode, contracts) => {
         observations += 1;
-        return await observeContractsForAdmissionAt(repository_, decode, contracts);
+        return await observeContractsAt(repository_, decode, contracts);
       },
       preparation: {
         external: async () => {
@@ -159,6 +161,51 @@ test("an injected Git publication error still returns publication-failed", async
   assert.ok(outcome.kind === "retry" && outcome.reason === "publication-failed");
   assert.match(outcome.diagnostic, /forced hard publication failure/u);
   assert.deepEqual(readFileSync(attempts, "utf8").trim().split("\n"), ["attempt"]);
+});
+
+test("unknown publication never confirms an entry whose persisted bytes differ", async () => {
+  const repository = repositoryWithMain();
+  const id = (await bind(repository)).id;
+  const path = contractJournalPath(id);
+  const capability = await cachedRepositoryAt(repository.path);
+  const published = `${repository.path}/publication-confirmed`;
+  const release = `${repository.path}/publication-release`;
+  const result = await withGitShim(
+    [
+      'if [ "$1" = "update-ref" ]; then',
+      '  "$KEIYAKU_REAL_GIT" "$@" || exit "$?"',
+      '  touch "$KEIYAKU_PUBLISHED"',
+      '  i=0; while [ ! -e "$KEIYAKU_RELEASE" ]; do i=$((i + 1)); [ "$i" -lt 300 ] || exit 1; sleep 0.1; done',
+      '  kill -TERM "$$"',
+      'fi',
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    { KEIYAKU_PUBLISHED: published, KEIYAKU_RELEASE: release },
+    async (gitPath) => {
+      const scope = await cachedRepositoryAt(repository.path, gitPath);
+      const pending = withGitDecodeChannel(scope, (channel) => runProtocol({
+        repository: scope,
+        channel,
+        input: { contractId: id, at: "2026-08-06T00:00:03Z", data: { title: "Publication", body: "Arc body" } },
+        contracts: [id],
+        attempts: [{ entryUlids: [entryUlid("01ARZ3NDEKTSV4RRFFQ69G5FA3")] }],
+        decide: decideArc,
+      }));
+      try {
+        await waitForFile(published);
+        const current = await readGitPaths(capability, [path]);
+        const bytes = (await readBlob(capability, current.paths.get(path)!.oid)).toString("utf8");
+        const oid = await writeBlob(capability, bytes.replace(/\}\n$/u, ',"zz":true}\n'));
+        const tree = await updateGitTree(capability, current.tree, new Map([[path, { oid }]]));
+        const commit = await writeCommit({ repository: capability, tree, parent: current.commit });
+        repository.run(["update-ref", GIT_REF, commit, current.commit!]);
+      } finally {
+        writeFileSync(release, "release\n");
+      }
+      return await pending;
+    },
+  );
+  assert.deepEqual(result, { kind: "collision" });
 });
 
 test("conflicting concurrent amends keep their typed business refusals", async () => {

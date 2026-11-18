@@ -1,3 +1,4 @@
+import { isUtf8 } from "node:buffer";
 import { decodeJournal } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { foldJournal } from "../core/facts/fold.js";
@@ -20,9 +21,8 @@ import {
 } from "./identity.js";
 import { currentBranch, isKeiyakuOwnedRef, type GitSnapshot, type GitOid } from "./repository.js";
 import { GitPlumbingError, executeGit, type GitRepository } from "./process.js";
+import type { TreeEntry } from "./tree.js";
 import {
-  readBlobResults,
-  readGitTreeSelection,
   withGitTargetedReadObservation,
   type GitDecodeChannel,
   type GitReadObservation,
@@ -62,35 +62,16 @@ export function deliveryTargetObserver(
   };
 }
 
-type GitJournalRecord = Readonly<{
-  entries: readonly JournalEntry[];
-  state: ContractState | null;
-}>;
+type GitJournalRecord =
+  | Readonly<{ entries: readonly []; state: null }>
+  | Readonly<{ path: string; oid: GitOid; bytes: Buffer; entries: readonly JournalEntry[]; state: ContractState }>;
 
-type ContractWorldObservation = Readonly<{
-  snapshot: SnapshotId | null;
-  contracts: ReadonlyMap<ContractId, GitJournalRecord>;
-}>;
+type ContractJournals = ReadonlyMap<ContractId, GitJournalRecord>;
 
-type ActiveContractWorldObservation = ContractWorldObservation &
-  Readonly<{
-    eligibility: ContractsObservation;
-  }>;
-
-type FrozenGitObservation = Readonly<{
-  contracts: ReadonlyMap<ContractId, GitJournalRecord>;
-  frozenJournalBytes: ReadonlyMap<GitOid, Buffer>;
-}>;
-
-export type GitAdmissionSnapshot = Readonly<{
-  snapshot: GitSnapshot;
-  frozenJournalBytes: ReadonlyMap<GitOid, Buffer>;
-}>;
-
-export type GitDecisionObservation = Readonly<{
-  admission: GitAdmissionSnapshot;
+export type ContractReadView = Readonly<{
+  epoch: GitSnapshot;
+  journals: ContractJournals;
   decision: ContractsObservation;
-  journals: ReadonlyMap<ContractId, GitJournalRecord>;
 }>;
 
 export type BindCoordinatesObservation = Readonly<{
@@ -213,216 +194,140 @@ export async function observeBindCoordinates(
   return observed;
 }
 
-type DecodedJournal = Readonly<{
-  id: ContractId;
-  entries: ReturnType<typeof decodeJournal>;
-  oid: string;
+const CONTRACT_JOURNAL_PATH = /^contracts\/(active|terminal)\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/u;
+type JournalSelection = ContractJournalClass | readonly ContractId[];
+
+function journalSources(paths: GitSnapshot["paths"], journalClass?: ContractJournalClass) {
+  return [...paths].filter(([path]) => {
+    const matched = CONTRACT_JOURNAL_PATH.exec(path)?.[1];
+    return matched !== undefined && (journalClass === undefined || matched === journalClass);
+  });
+}
+
+function journalOid(path: string, entry: TreeEntry): GitOid {
+  if (entry.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
+  return entry.oid;
+}
+
+export function countActiveContractJournals(observation: GitReadObservation): number {
+  const sources = journalSources(observation.snapshot.paths, "active");
+  for (const [path, entry] of sources) journalOid(path, entry);
+  return sources.length;
+}
+
+export function contractJournal(journals: ContractJournals, id: ContractId): GitJournalRecord {
+  const record = journals.get(id);
+  if (record === undefined) throw new Error(`missing requested Contract observation: ${id}`);
+  return record;
+}
+
+async function collectJournals(
+  read: GitReadObservation,
+  journals: Map<ContractId, GitJournalRecord>,
+  selection?: JournalSelection,
+): Promise<ContractJournals> {
+  const requested = typeof selection === "object" ? [...new Set(selection)] : undefined;
+  if (requested?.length === 0) return journals;
+  const paths =
+    requested === undefined ? read.snapshot.paths : await read.selectPaths(requested.flatMap(contractJournalPaths));
+  const sources =
+    requested === undefined
+      ? journalSources(paths, typeof selection === "string" ? selection : undefined)
+      : requested.flatMap((id) => {
+          const matches = contractJournalPaths(id).flatMap((path) => {
+            const entry = paths.get(path);
+            return entry === undefined ? [] : [[path, entry] as const];
+          });
+          if (matches.length > 1) throw new AuthorityCorruptionError(`duplicate contract journal identity: ${id}`);
+          // A class-selected record proves its own path, not absence from the other class.
+          return journals.has(id) ? [] : matches;
+        });
+  const selected = sources.map(([path, entry]) => [path, journalOid(path, entry)] as const);
+  const blobs = await read.readBlobs(selected.map(([, oid]) => oid));
+  for (const [path, oid] of selected) {
+    const blob = blobs.get(oid);
+    if (blob === undefined) throw new Error(`missing batched journal result: ${path}`);
+    if (blob.kind === "missing") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
+    if (!isUtf8(blob.bytes)) throw new AuthorityCorruptionError(`journal is not UTF-8: ${path}`);
+    const entries = decodeJournal(blob.bytes.toString("utf8"));
+    const id = entries[0]?.contract;
+    if (id === undefined || !contractJournalPaths(id).includes(path)) {
+      throw new AuthorityCorruptionError(`journal path does not match canonical contract identity: ${path}`);
+    }
+    if (journals.has(id)) throw new AuthorityCorruptionError(`duplicate contract journal identity: ${id}`);
+    const state = foldJournal(id, entries, mintContractHead(oid));
+    if (path !== contractJournalPath(id, state.terminal === null ? "active" : "terminal")) {
+      throw new AuthorityCorruptionError(`journal path class does not match folded state: ${path}`);
+    }
+    journals.set(id, { path, oid, bytes: blob.bytes, entries, state });
+  }
+  for (const id of requested ?? []) if (!journals.has(id)) journals.set(id, { entries: [], state: null });
+  return journals;
+}
+
+export function observeContractJournals(
+  read: GitReadObservation,
+  selection?: JournalSelection,
+): Promise<ContractJournals> {
+  return collectJournals(read, new Map(), selection);
+}
+
+function sealView(epoch: GitSnapshot, journals: ContractJournals): ContractReadView {
+  return { epoch, journals, decision: new Map([...journals].map(([id, record]) => [id, record.state])) };
+}
+
+export async function observeActiveContractWorld(read: GitReadObservation): Promise<ContractReadView> {
+  const journals = new Map<ContractId, GitJournalRecord>();
+  await collectJournals(read, journals, "active");
+  await collectJournals(
+    read,
+    journals,
+    [...journals.values()].flatMap(({ state }) => state?.terms.after ?? []),
+  );
+  return sealView(read.snapshot, journals);
+}
+
+export type CollectContracts = (ids: readonly ContractId[]) => Promise<ContractJournals>;
+type Expansion = Readonly<{
+  targets?: boolean;
+  after?: boolean;
+  expand?: (journals: ContractJournals, collect: CollectContracts) => Promise<void>;
 }>;
 
-function decodeGitJournal(path: string, git: GitSnapshot, bytes: Buffer, expectedId?: ContractId): DecodedJournal {
-  const journal = git.paths.get(path);
-  if (journal === undefined) throw new AuthorityCorruptionError(`missing Git journal: ${path}`);
-  if (journal.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
-
-  const entries = decodeJournal(bytes.toString("utf8"));
-  const first = entries[0];
-  if (
-    first === undefined ||
-    (expectedId !== undefined && first.contract !== expectedId) ||
-    entries.some((entry) => entry.contract !== (expectedId ?? first.contract))
-  ) {
-    if (expectedId !== undefined) {
-      throw new AuthorityCorruptionError(`journal content does not canonically identify ${expectedId}: ${path}`);
-    }
-    throw new AuthorityCorruptionError(`journal content does not canonically identify ${path}`);
-  }
-  const id = first.contract;
-  if (!contractJournalPaths(id).includes(path)) {
-    throw new AuthorityCorruptionError(`journal path does not match canonical contract identity: ${path}`);
-  }
-  return { id, entries, oid: journal.oid };
-}
-
-function journalClass(state: ContractState): ContractJournalClass {
-  return state.terminal === null ? "active" : "terminal";
-}
-
-function observeDecodedJournal(id: ContractId, decoded: DecodedJournal, path?: string): GitJournalRecord {
-  const state = foldJournal(id, decoded.entries, mintContractHead(decoded.oid));
-  if (path !== undefined && contractJournalPath(id, journalClass(state)) !== path) {
-    throw new AuthorityCorruptionError(`journal path class does not match folded state: ${path}`);
-  }
-  return {
-    entries: decoded.entries,
-    state,
-  };
-}
-
-function observeFromGit(git: GitSnapshot, id: ContractId, blobs: ReadonlyMap<GitOid, Buffer>): GitJournalRecord {
-  const matches = contractJournalPaths(id).flatMap((path) => (git.paths.has(path) ? [path] : []));
-  if (matches.length > 1) throw new AuthorityCorruptionError(`duplicate contract journal identity: ${id}`);
-  const path = matches[0];
-  if (path === undefined) return { entries: [], state: null };
-  const journal = git.paths.get(path)!;
-  if (journal.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
-  const bytes = blobs.get(journal.oid);
-  if (bytes === undefined) throw new Error(`missing batched journal bytes: ${path}`);
-  const decoded = decodeGitJournal(path, git, bytes, id);
-  return observeDecodedJournal(id, decoded, path);
-}
-
-const CONTRACT_JOURNAL_PATH = /^contracts\/(active|terminal)\/[0-9a-f]{2}\/[0-9a-f]{2}\/[0-9a-f]{60}\.jsonl$/u;
-
-function enumerateContractObservations(
-  git: GitSnapshot,
-  blobs: ReadonlyMap<GitOid, Buffer>,
-  journalClass?: ContractJournalClass,
-): ReadonlyMap<ContractId, GitJournalRecord> {
-  const observations = new Map<ContractId, GitJournalRecord>();
-  const seen = new Set<ContractId>();
-  for (const [path, journal] of git.paths) {
-    const match = CONTRACT_JOURNAL_PATH.exec(path);
-    if (match === null || (journalClass !== undefined && match[1] !== journalClass)) continue;
-    if (journal.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
-    const bytes = blobs.get(journal.oid);
-    if (bytes === undefined) throw new Error(`missing batched journal bytes: ${path}`);
-    const decoded = decodeGitJournal(path, git, bytes);
-    const id = decoded.id;
-    if (seen.has(id)) throw new AuthorityCorruptionError(`duplicate contract journal identity: ${id}`);
-    seen.add(id);
-    observations.set(id, observeDecodedJournal(id, decoded, path));
-  }
-  return observations;
-}
-
-export function observedContractJournalPaths(
-  observation: GitReadObservation,
-  journalClass?: ContractJournalClass,
-): readonly string[] {
-  return [...observation.snapshot.paths].flatMap(([path, entry]) => {
-    const matched = CONTRACT_JOURNAL_PATH.exec(path)?.[1];
-    if (matched === undefined || (journalClass !== undefined && matched !== journalClass)) return [];
-    if (entry.type !== "blob") throw new AuthorityCorruptionError(`journal path is not a blob: ${path}`);
-    return [path];
-  });
-}
-
-async function readJournalBlobs(
-  entries: readonly (readonly [string, { oid: GitOid }])[],
-  readBlobsAt: GitReadObservation["readBlobs"],
-): Promise<Map<GitOid, Buffer>> {
-  const results = await readBlobsAt(entries.map(([, entry]) => entry.oid));
-  const blobs = new Map<GitOid, Buffer>();
-  for (const [path, entry] of entries) {
-    const result = results.get(entry.oid);
-    if (result?.kind !== "present") throw new AuthorityCorruptionError(`missing Git journal object: ${path}`);
-    blobs.set(entry.oid, result.bytes);
-  }
-  return blobs;
-}
-
-/** Observe selected journal classes without following their prerequisite edges. */
-export async function observeContractJournals(
-  observation: GitReadObservation,
-  journalClass?: ContractJournalClass,
-): Promise<ReadonlyMap<ContractId, GitJournalRecord>> {
-  const git = observation.snapshot;
-  const journals = observedContractJournalPaths(observation, journalClass).map(
-    (path) => [path, git.paths.get(path)!] as const,
-  );
-  return enumerateContractObservations(git, await readJournalBlobs(journals, observation.readBlobs), journalClass);
-}
-
-export async function observeActiveContractWorld(
-  observation: GitReadObservation,
-): Promise<ActiveContractWorldObservation> {
-  const contracts = await observeContractJournals(observation, "active");
-  const prerequisites = [...new Set([...contracts.values()].flatMap((record) => record.state?.terms.after ?? []))];
-  const dependencyRecords = await observeTargetedContractsAt(observation, prerequisites);
-  return {
-    snapshot: observation.snapshot.commit === null ? null : mintSnapshotId(observation.snapshot.commit),
-    contracts,
-    eligibility: decisionProjection({
-      contracts: new Map([...contracts, ...dependencyRecords.contracts]),
-    }),
-  };
-}
-
-export async function observeContractWorld(
-  observation: GitReadObservation,
-  requested: readonly ContractId[] = [],
-): Promise<ContractWorldObservation> {
-  const git = observation.snapshot;
-  const journals = [...git.paths].filter(
-    ([path, entry]) =>
-      /^contracts\/(?:active|terminal)\//u.test(path) && path.endsWith(".jsonl") && entry.type === "blob",
-  );
-  const blobs = await readJournalBlobs(journals, observation.readBlobs);
-  const contracts = new Map(enumerateContractObservations(git, blobs));
-  for (const id of requested) {
-    if (!contracts.has(id)) contracts.set(id, observeFromGit(git, id, blobs));
-  }
-  return {
-    snapshot: git.commit === null ? null : mintSnapshotId(git.commit),
-    contracts,
-  };
-}
-
-async function observeTargetedContractsAt(
-  observation: GitReadObservation,
+export async function observeContractView(
+  read: GitReadObservation,
   ids: readonly ContractId[],
-): Promise<FrozenGitObservation> {
-  return await observeTargetedContractsFromSnapshotAt(observation.snapshot, observation.readBlobs, ids);
+  { targets, after, expand }: Expansion,
+): Promise<ContractReadView> {
+  const journals = new Map<ContractId, GitJournalRecord>();
+  const collect: CollectContracts = (selected) => collectJournals(read, journals, selected);
+  await collect(ids);
+  const roots = ids.map((id) => contractJournal(journals, id).state);
+  if (targets) {
+    await collect(
+      roots.flatMap((state) => {
+        const target = state?.coordinates.target;
+        return typeof target === "object" ? [target.contractId] : [];
+      }),
+    );
+  }
+  if (after) await collect(roots.flatMap((state) => state?.terms.after ?? []));
+  await expand?.(journals, collect);
+  return sealView(read.snapshot, journals);
 }
 
-async function observeTargetedContractsFromSnapshotAt(
-  snapshot: GitSnapshot,
-  readBlobsAt: GitReadObservation["readBlobs"],
-  ids: readonly ContractId[],
-): Promise<FrozenGitObservation> {
-  const paths = ids.flatMap(contractJournalPaths);
-  const entries = paths.flatMap((path) => {
-    const journal = snapshot.paths.get(path);
-    return journal?.type === "blob" ? [[path, journal] as const] : [];
-  });
-  const blobs = await readJournalBlobs(entries, readBlobsAt);
-  const contracts = new Map<ContractId, GitJournalRecord>();
-  for (const id of ids) contracts.set(id, observeFromGit(snapshot, id, blobs));
-  return { contracts, frozenJournalBytes: blobs };
-}
-
-export async function observeContractsForAdmissionAt(
+export function observeContractsAt(
   repository: GitRepository,
   channel: GitDecodeChannel,
   ids: readonly ContractId[],
-  selection: GitTreeSelection = {},
-): Promise<GitDecisionObservation> {
-  const observed = await withGitTargetedReadObservation(
+  options: GitTreeSelection & Omit<Expansion, "targets"> = {},
+): Promise<ContractReadView> {
+  return withGitTargetedReadObservation(
     repository,
     channel,
-    {
-      paths: [...ids.flatMap(contractJournalPaths), ...(selection.paths ?? [])],
-      ...(selection.subtrees === undefined ? {} : { subtrees: selection.subtrees }),
-    },
-    async (observation) => await observeContractsForAdmissionInObservationAt(observation, ids),
+    { ...options, paths: [...ids.flatMap(contractJournalPaths), ...(options.paths ?? [])] },
+    (read) => observeContractView(read, ids, { ...options, targets: true }),
   );
-  const targets = ids.flatMap((id) => {
-    const target = observed.decision.get(id)?.coordinates.target;
-    return target !== undefined && typeof target !== "string" ? [target.contractId] : [];
-  });
-  return await extendContractsForAdmissionAt(channel, observed, targets);
-}
-
-/** Observe selected Contract journals and their current direct prerequisites in one Git epoch. */
-export async function observeGitForAdmissionAt(
-  repository: GitRepository,
-  channel: GitDecodeChannel,
-  ids: readonly ContractId[],
-  selection: GitTreeSelection = {},
-): Promise<GitDecisionObservation> {
-  const observation = await observeContractsForAdmissionAt(repository, channel, ids, selection);
-  const prerequisites = [...new Set(ids.flatMap((id) => observation.decision.get(id)?.terms.after ?? []))];
-  return await extendContractsForAdmissionAt(channel, observation, prerequisites);
 }
 
 export function withContractReadObservationAt<Value>(
@@ -441,61 +346,10 @@ export function withContractReadObservationAt<Value>(
   );
 }
 
-/** Observe targeted Contract journals within an already frozen Git epoch. */
-export async function observeContractsForAdmissionInObservationAt(
-  observation: GitReadObservation,
-  ids: readonly ContractId[],
-): Promise<GitDecisionObservation> {
-  const contracts = await observeTargetedContractsAt(observation, ids);
-  return {
-    admission: {
-      snapshot: observation.snapshot,
-      frozenJournalBytes: contracts.frozenJournalBytes,
-    },
-    decision: decisionProjection(contracts),
-    journals: contracts.contracts,
-  };
-}
-
 export async function observeContractAt(
   repository: GitRepository,
   channel: GitDecodeChannel,
   id: ContractId,
 ): Promise<GitJournalRecord> {
-  const observation = await observeContractsForAdmissionAt(repository, channel, [id]);
-  const record = observation.journals.get(id);
-  if (record === undefined) throw new Error(`missing requested contract observation: ${id}`);
-  return record;
-}
-
-export async function extendContractsForAdmissionAt(
-  channel: GitDecodeChannel,
-  observation: GitDecisionObservation,
-  ids: readonly ContractId[],
-): Promise<GitDecisionObservation> {
-  const missing = ids.filter((id) => !observation.decision.has(id));
-  if (missing.length === 0) return observation;
-  const readBlobsAt: GitReadObservation["readBlobs"] = async (oids) => await readBlobResults(channel, oids);
-  const snapshot = observation.admission.snapshot;
-  if (snapshot.tree === null) return observation;
-  const selected = await readGitTreeSelection(channel, snapshot.tree, {
-    paths: missing.flatMap(contractJournalPaths),
-  });
-  const extendedSnapshot = {
-    ...snapshot,
-    paths: new Map([...snapshot.paths, ...selected.paths]),
-  };
-  const added = await observeTargetedContractsFromSnapshotAt(extendedSnapshot, readBlobsAt, missing);
-  return {
-    admission: {
-      snapshot: extendedSnapshot,
-      frozenJournalBytes: new Map([...observation.admission.frozenJournalBytes, ...added.frozenJournalBytes]),
-    },
-    decision: new Map([...observation.decision, ...decisionProjection(added)]),
-    journals: new Map([...observation.journals, ...added.contracts]),
-  };
-}
-
-function decisionProjection(observation: Pick<ContractWorldObservation, "contracts">): ContractsObservation {
-  return new Map([...observation.contracts].map(([id, record]) => [id, record.state]));
+  return contractJournal((await observeContractsAt(repository, channel, [id])).journals, id);
 }

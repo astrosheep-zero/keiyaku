@@ -4,7 +4,7 @@ import { renderContractGuidance } from "../contract-guidance.js";
 import { type ContractId, type ContractState, type ContractTerms, type JournalEntry } from "../core/facts/types.js";
 import { normalizeTitle } from "../markdown/query.js";
 import { readDispatchesAt, type Dispatch } from "../dispatch/index.js";
-import { observeContractsForAdmissionInObservationAt } from "../git/observe.js";
+import { contractJournal, observeContractJournals } from "../git/observe.js";
 import {
   withGitDecodeChannel,
   withGitReadObservation,
@@ -177,9 +177,7 @@ export class Kei {
     return await readContractValue(() =>
       withGitDecodeChannel(this.scope, (channel) =>
         withGitReadObservation(this.scope, channel, async (observation) => {
-          const journals = await observeContractsForAdmissionInObservationAt(observation, [this.id]);
-          const record = journals.journals.get(this.id);
-          if (record === undefined) throw new Error(`missing requested contract observation: ${this.id}`);
+          const record = contractJournal(await observeContractJournals(observation, [this.id]), this.id);
           if (record.state === null) return { kind: "contract-missing", contractId: this.id };
           const journal: ObservedJournal = {
             entries: record.entries,
@@ -507,7 +505,7 @@ export class Kei {
             observationSelection: debtHolderObservationSelection(),
             progress: accumulator,
             decorateOffer: async ({ observation, contractId: owner }) => {
-              const companion = await releaseDebtHolder(channel, observation, owner);
+              const companion = await releaseDebtHolder(channel, observation.epoch, owner);
               return companion === null ? [] : [companion];
             },
           }),

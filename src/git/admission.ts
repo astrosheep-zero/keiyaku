@@ -3,13 +3,14 @@ import { decodeJournal, encodeEntry } from "../core/facts/codec.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { foldJournal } from "../core/facts/fold.js";
 import type { ContractJournalAppend, Offer, RefOperation, TreeUpdate } from "../core/facts/offer.js";
-import type { GitAdmissionSnapshot } from "./observe.js";
+import { contractJournal, type ContractReadView } from "./observe.js";
 import {
   CANDIDATE_PIN_REF_NAMESPACE,
   GIT_FORMAT_BYTES,
   GIT_FORMAT_PATH,
   GIT_REF,
   type GitRefAssertion,
+  type GitSnapshot,
   type RefPublication,
   type TreeChange,
   readRef,
@@ -82,51 +83,35 @@ function assertCompanionStructure(
   return companions;
 }
 
-function readCanonicalJournal(
-  admission: GitAdmissionSnapshot,
-  id: ContractId,
-): Readonly<{ bytes: Buffer; path: string | null }> {
-  const snapshot = admission.snapshot;
-  const matches = contractJournalPaths(id).filter((path) => snapshot.paths.has(path));
-  if (matches.length > 1) throw new Error(`duplicate contract journal identity: ${id}`);
-  const path = matches[0];
-  if (path === undefined) return { bytes: Buffer.alloc(0), path: null };
-  const entry = snapshot.paths.get(path)!;
-  if (entry.type !== "blob") throw new Error(`journal path is not a blob: ${path}`);
-  const journal = admission.frozenJournalBytes.get(entry.oid);
-  if (journal === undefined) throw new Error(`missing frozen journal bytes: ${path}`);
-  return { bytes: journal, path };
-}
-
 async function buildOffer(
   repository: GitRepository,
-  admission: GitAdmissionSnapshot,
+  view: ContractReadView,
   appends: readonly ContractJournalAppend[],
   companions: readonly TreeUpdate[],
 ): Promise<{
   readonly changes: ReadonlyMap<string, TreeChange>;
   readonly heads: Readonly<Record<string, ContractHead>>;
 }> {
-  const snapshot = admission.snapshot;
   const changes = new Map<string, TreeChange>();
   const heads: Record<string, ContractHead> = {};
 
   const candidates = appends.map((append) => {
-    const current = readCanonicalJournal(admission, append.contractId);
-    let journal = current.bytes;
-    for (const entry of append.entries) journal = Buffer.concat([journal, Buffer.from(encodeEntry(entry))]);
-    const entries = decodeJournal(journal.toString("utf8"));
-    const foreign = entries.find((entry) => entry.contract !== append.contractId);
+    const current = contractJournal(view.journals, append.contractId);
+    const encoded = append.entries.map(encodeEntry).join("");
+    const appended = decodeJournal(encoded);
+    const foreign = appended.find((entry) => entry.contract !== append.contractId);
     if (foreign !== undefined) {
       throw new AuthorityCorruptionError(
         `candidate journal entry belongs to ${foreign.contract}, not ${append.contractId}`,
       );
     }
-    const state = foldJournal(append.contractId, entries);
+    const state = foldJournal(append.contractId, [...current.entries, ...appended]);
+    const bytes = Buffer.from(encoded);
+    const journal = current.state === null ? bytes : Buffer.concat([current.bytes, bytes]);
     return { append, current, journal, state };
   });
 
-  if (snapshot.commit === null) {
+  if (view.epoch.commit === null) {
     changes.set(GIT_FORMAT_PATH, { oid: await writeBlob(repository, GIT_FORMAT_BYTES), mode: "100644", type: "blob" });
   }
 
@@ -143,7 +128,7 @@ async function buildOffer(
     const blob = await writeBlob(repository, journal);
     const terminal = state.terminal !== null;
     const destination = contractJournalPath(append.contractId, terminal ? "terminal" : "active");
-    if (current.path !== null && current.path !== destination) changes.set(current.path, null);
+    if (current.state !== null && current.path !== destination) changes.set(current.path, null);
     changes.set(destination, { oid: blob, mode: "100644", type: "blob" });
     heads[append.contractId] = mintContractHead(blob);
   }
@@ -154,13 +139,12 @@ async function buildOffer(
 // eslint-disable-next-line max-params -- Publication keeps its seat-bound inputs explicit.
 async function publishOffer(
   repository: GitRepository,
-  admission: GitAdmissionSnapshot,
+  snapshot: GitSnapshot,
   target: RefOperation | null,
   changes: ReadonlyMap<string, TreeChange>,
   assertions: readonly GitRefAssertion[],
   owner: ContractId,
 ): Promise<RefPublication> {
-  const { snapshot } = admission;
   const gitTree = await updateGitTree(repository, snapshot.tree, changes);
   const gitCommit = mintSnapshotId(
     await writeStateCommit({
@@ -202,7 +186,7 @@ async function publishOffer(
 export async function admit(
   repository: GitRepository,
   offer: Offer,
-  admission: GitAdmissionSnapshot,
+  view: ContractReadView,
   assertions: readonly GitRefAssertion[] = [],
 ): Promise<Admission> {
   if (!Array.isArray(offer.facts) || offer.facts.length === 0) {
@@ -213,10 +197,10 @@ export async function admit(
   const companions = assertCompanionStructure(offer.companions ?? [], appends);
   const target = offer.target ?? null;
 
-  const attempt = await buildOffer(repository, admission, appends, companions);
+  const attempt = await buildOffer(repository, view, appends, companions);
   const publication = await publishOffer(
     repository,
-    admission,
+    view.epoch,
     target,
     attempt.changes,
     assertions,

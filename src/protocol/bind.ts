@@ -221,7 +221,7 @@ export async function bindOperation(
           ...(input.source === undefined
             ? {}
             : {
-                validateAdmission: (observation: import("../git/observe.js").GitDecisionObservation) => {
+                validateAdmission: (observation: import("../git/observe.js").ContractReadView) => {
                   const current = observation.decision.get(input.source!.contractId);
                   return current !== null &&
                     current !== undefined &&
