@@ -135,19 +135,22 @@ with the same canonical name; Home remains the fallback when the project has no
 definition. This precedence applies only to spawn-time definition configuration
 and never changes World runtime custody, Heart evidence, or leash ownership.
 
-An akumaName definition may name one `base` definition at load time. The base is resolved
-using the same project-over-Home precedence, then the child is merged into one
-complete snapshot before catalog presentation or birth. Provider, model,
-effort, network, and description are replaced only when present on the child;
-otherwise the base value remains. A nonempty child body replaces the base body,
-while an empty body inherits it. The resolved base relation is not part of
-AkuId, Soul, Heart, Dispatch, or any public spawn input, and later file edits
-affect only future loads.
+An akumaName definition may inherit from one base. A project definition looks
+for its base in the project first, then Home. A Home definition can only inherit
+from Home, even when a project definition reached it by fallback. Both listing
+and birth resolve this relation the same way. Explicit child selections override
+inherited values; an empty child body inherits both the personality and its
+prompt mode, while any nonempty body, including whitespace, supplies both anew.
+The base relation is not itself a durable fact of the Akuma or a public spawn
+input. Later file edits affect only future loads.
 
 An explicit base is never silently ignored. Missing or malformed bases,
-invalid inherited data, repeated or cyclic chains, and a final snapshot without
-a provider refuse before allocation. Refusals identify the reference chain
-and the paths searched.
+invalid inherited data, a repeated name anywhere in the chain even across
+scopes, and a resolved definition without a provider refuse before allocation.
+Definition failures distinguish absence from invalid or unreadable material,
+identifying the failing name, relevant paths, and full base chain when one is
+involved. Invalid authorship reports an actionable reason and preserves the
+underlying failure when available.
 
 All worktrees of one repository share one Akuma World, roster, Alias authority,
 and Heart storage. Soul cwd is execution input, not World identity. Contract

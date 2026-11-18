@@ -95,11 +95,16 @@ test("the public catalogue rejects malformed caller input before observing any d
   });
 
   for (const malformed of [null, "aku/", []]) {
-    await assert.rejects(Akumas.akumaNames(malformed as never), /Akuma catalogue input must be an object/u);
+    await assert.rejects(Akumas.akumaNames(malformed as never), (error: unknown) => {
+      assert.ok(error instanceof KeiyakuError);
+      assert.equal(error.category, "invalid-input");
+      assert.match(error.message, /catalogue .*object/u);
+      return true;
+    });
   }
   await assert.rejects(
     Akumas.akumaNames({ cwd: root, home, akumaName: "worker" } as never),
-    /Akuma catalogue input has unknown field: akumaName/u,
+    /Akuma catalogue .*unknown field: akumaName/u,
   );
   await assert.rejects(
     Akumas.akumaNames({ cwd: 7 } as never),
@@ -111,7 +116,7 @@ test("the public catalogue rejects malformed caller input before observing any d
   );
   await assert.rejects(
     Akumas.akumaNames({ home: "relative/home" } as never),
-    /Akuma catalogue home must be absolute: relative\/home/u,
+    /Akuma catalogue home must be absolute/u,
   );
   await assert.rejects(
     Akumas.akumaNames({ cwd: root, limit: 0 } as never),
@@ -122,7 +127,7 @@ test("the public catalogue rejects malformed caller input before observing any d
   await assert.rejects(Akumas.akumaNames({ cwd: root, home: 7 } as never), (error: unknown) => {
     assert.ok(error instanceof KeiyakuError);
     assert.equal(error.category, "invalid-input");
-    assert.equal(error.message, "Akuma catalogue home must be a nonblank string");
+    assert.match(error.message, /catalogue home .*nonblank string/u);
     return true;
   });
   await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
@@ -143,8 +148,97 @@ test("the native akumaName error keeps its class, kind, reason and searched path
     assert.equal(error.kind, "akuma-name");
     assert.equal(error.akumaName, "broken");
     assert.deepEqual(error.searched, [join(root, ".keiyaku", "akumas", "broken.md")]);
-    assert.equal(error.reason, "is invalid: Akuma hidden must be a boolean");
+    assert.equal(error.category, "internal");
+    assert.equal(error.absent, false);
+    assert.match(error.reason, /hidden .*boolean/u);
     assert.match(error.message, /`broken` is invalid/u);
+    assert.ok(error.cause instanceof Error);
+    return true;
+  });
+});
+
+test("definition admission refuses nonmapping YAML and a prompt mode without a body", async (context) => {
+  const { root, home } = catalogueFixture(context, { home: { broken: "" } });
+  const path = join(home, "akumas", "broken.md");
+  for (const [markdown, reason] of [
+    ["---\n[provider, claude]\n---\n", /frontmatter must be one mapping/u],
+    ["---\nprovider: claude\nsystemPromptMode: replace\n---\n", /systemPromptMode .*nonempty Markdown body/u],
+  ] as const) {
+    writeFileSync(path, markdown);
+    await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
+      assert.ok(error instanceof AkumaNameError);
+      assert.equal(error.akumaName, "broken");
+      assert.deepEqual(error.searched, [path]);
+      assert.match(error.reason, reason);
+      return true;
+    });
+  }
+});
+
+test("catalogue follows the source of each definition and reads shadowed Home files only as bases", async (context) => {
+  const valid = "---\nprovider: claude\n---\n";
+  const { root, home } = catalogueFixture(context, {
+    root: {
+      child: "---\nbase: bridge\n---\n",
+      shared: "---\nprovider: claude\nmodel: project-model\n---\n",
+      direct: "---\nbase: shared\n---\n",
+      unused: valid,
+    },
+    home: {
+      bridge: "---\nbase: shared\nhidden: true\n---\n",
+      shared: "---\nprovider: claude\nmodel: home-model\n---\n",
+      unused: "bad shadowed Markdown",
+    },
+  });
+  assert.deepEqual((await Akumas.akumaNames({ cwd: root, home })).rows, [
+    { name: "child", model: "home-model" },
+    { name: "direct", model: "project-model" },
+    { name: "shared", model: "project-model" },
+    { name: "unused" },
+  ]);
+
+  const shared = join(home, "akumas", "shared.md");
+  writeFileSync(shared, "---\nprovider: claude\nname: ignored\n---\n");
+  await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
+    assert.ok(error instanceof AkumaNameError);
+    assert.equal(error.akumaName, "shared");
+    assert.deepEqual(error.searched, [shared]);
+    assert.match(error.reason, /unknown field: name.*base chain: bridge -> shared/u);
+    return true;
+  });
+});
+
+test("a resolved catalogue base cannot hide a cross-scope repeated name", async (context) => {
+  const { root, home } = catalogueFixture(context, {
+    root: { last: "---\nbase: bridge\n---\n" },
+    home: {
+      bridge: "---\nbase: last\n---\n",
+      last: "---\nprovider: claude\n---\n",
+    },
+  });
+  await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
+    assert.ok(error instanceof AkumaNameError);
+    assert.equal(error.akumaName, "last");
+    assert.deepEqual(error.searched, [join(home, "akumas", "last.md")]);
+    assert.match(error.reason, /cyclic base reference.*last -> bridge -> last/u);
+    return true;
+  });
+});
+
+test("catalogue refuses the first invalid name by UTF-8 bytes, even hidden beyond the limit", async (context) => {
+  const { root, home } = catalogueFixture(context, {
+    home: {
+      "\u00e9": "---\nprovider: false\n---\n",
+      z: "---\nhidden: true\nprovider: claude\nprovider: pi\n---\n",
+      a: "---\nprovider: claude\n---\n",
+    },
+  });
+  await assert.rejects(Akumas.akumaNames({ cwd: root, home, limit: 1 }), (error: unknown) => {
+    assert.ok(error instanceof AkumaNameError);
+    assert.equal(error.akumaName, "z");
+    assert.deepEqual(error.searched, [join(home, "akumas", "z.md")]);
+    assert.match(error.reason, /keys must be unique/u);
+    assert.ok(error.cause instanceof Error);
     return true;
   });
 });

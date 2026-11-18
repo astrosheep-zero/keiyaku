@@ -5,10 +5,11 @@ import { join } from "node:path";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import type { BodyLauncher, ChildBodyLaunch } from "../src/akuma/body-launch.js";
 import { akumasWithLauncher } from "../src/library/akumas.js";
-import { KeiyakuError, type SpawnResult } from "../src/index.js";
+import { AkumaNameError, KeiyakuError, type SpawnResult } from "../src/index.js";
 import { renderVerb } from "../src/cli/render/verbs.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { Settings } from "../src/settings.js";
+import { noBodyLaunch } from "./support/akuma-fixtures.js";
 import { answering, settledInput } from "./support/akuma-tell.js";
 import { DeliveryLedger, harnessOwner } from "@astrosheep/square";
 import test from "node:test";
@@ -20,6 +21,7 @@ import type {
   TellResult,
 } from "../src/akuma/call-initial-tell.js";
 import { prepareCall, publishPreparedCall, type PreparedCallRecipe } from "../src/akuma/publication.js";
+import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { World } from "../src/world.js";
 import { restoreEnvironmentValues, temporaryDirectory } from "./support/process.js";
 import { isolateUserHome } from "./support/user-home.js";
@@ -250,6 +252,72 @@ test("the prepared executor admits local provider options itself and refuses uns
     /Claude provider does not support the network option/u,
   );
   assert.deepEqual(await childRuns(root), []);
+});
+
+test("targeted spawn freezes the scoped personality and admits options once per birth", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-inheritance-"));
+  const home = join(root, "home");
+  const projectDefs = join(root, ".keiyaku", "akumas");
+  const homeDefs = join(home, "akumas");
+  mkdirSync(projectDefs, { recursive: true });
+  mkdirSync(homeDefs, { recursive: true });
+  writeFileSync(join(projectDefs, "a-broken.md"), "Unrelated malformed definition");
+  writeFileSync(join(projectDefs, "shared.md"), "---\nprovider: claude\nmodel: project-model\n---\n");
+  writeFileSync(join(homeDefs, "bridge.md"), "---\nbase: shared\n---\n");
+  writeFileSync(
+    join(homeDefs, "shared.md"),
+    "---\nprovider: claude\nmodel: home-model\nsystemPromptMode: replace\n---\nHome personality.\n",
+  );
+  const worker = join(projectDefs, "worker.md");
+  writeFileSync(worker, "---\nbase: bridge\nhidden: true\n---\n");
+  const admit = context.mock.method(claudeProvider, "admitOptions");
+  const api = akumasWithLauncher(root, async ({ paths, seed }) => {
+    assert.ok(seed, "targeted spawn must launch with a birth seed");
+    await birth({ paths, seed });
+    return { completed: Promise.resolve({ diagnostic: "fixture finished" }), cancel: async () => {}, release() {} };
+  });
+  const spawn = async () => {
+    const result = await api.spawn({ akumaName: "worker", home });
+    return readSoul(pathsForAkumaId(root, result.akumaId));
+  };
+
+  assert.deepEqual((await spawn())?.options, {
+    model: "home-model",
+    systemPrompt: "Home personality.\n",
+    systemPromptMode: "replace",
+  });
+  assert.equal(admit.mock.callCount(), 1);
+
+  writeFileSync(worker, "---\r\nbase: bridge\r\n---\r\n \t\r\n");
+  assert.deepEqual((await spawn())?.options, {
+    model: "home-model",
+    systemPrompt: " \t\n",
+    systemPromptMode: "append",
+  });
+  assert.equal(admit.mock.callCount(), 2);
+});
+
+test("invalid configured provider recipes refuse before allocating a child, including builtin overrides", async (context) => {
+  const root = await World.at(temporaryDirectory(context, "keiyaku-prepared-invalid-provider-"));
+  const home = join(root, "home");
+  mkdirSync(join(root, ".keiyaku", "akumas"), { recursive: true });
+  writeFileSync(join(root, ".keiyaku", "akumas", "worker.md"), "---\nprovider: claude\n---\n");
+  const api = akumasWithLauncher(root, noBodyLaunch);
+  for (const [recipe, reason] of [
+    [{ kind: "claude-agent-sdk", extra: true }, /unknown field: extra/u],
+    [{ kind: "claude-agent-sdk", env: { TOKEN: false } }, /env\.TOKEN .*string/u],
+  ] as const) {
+    writeFileSync(join(root, ".keiyaku", "settings.json"), JSON.stringify({ providers: { claude: recipe } }));
+    await assert.rejects(api.spawn({ akumaName: "worker", home }), (error: unknown) => {
+      assert.ok(error instanceof AkumaNameError);
+      assert.equal(error.akumaName, "worker");
+      assert.equal(error.absent, false);
+      assert.match(error.reason, reason);
+      assert.ok(error.cause instanceof Error);
+      return true;
+    });
+    assert.deepEqual(await childRuns(root), []);
+  }
 });
 
 test("local custody carries a raw recipe the executor admits once and births with", async (context) => {

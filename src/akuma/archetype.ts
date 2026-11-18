@@ -1,37 +1,13 @@
-import { KeiyakuError, errorCategory } from "../errors.js";
-import { z } from "zod";
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { parseDocument } from "yaml";
+import { isMap, parseDocument } from "yaml";
+import { z } from "zod";
 import { boundedListLimit } from "../bounded-list.js";
-import type { Settings } from "../settings.js";
+import { KeiyakuError } from "../errors.js";
 import { validateAkumaName } from "../identity/normalize.js";
-import {
-  decodeProviderOptions,
-  decodeProviderRecipe,
-  type ProviderExecution,
-  type ProviderOptions,
-} from "./provider-recipe.js";
-
-type LocalArchetype = Readonly<{
-  name: string;
-  path: string;
-  base?: string;
-  provider?: string;
-  description?: string;
-  hidden?: boolean;
-  options: ProviderOptions;
-}>;
-
-type DecodedArchetype = Readonly<{
-  name: string;
-  path: string;
-  provider: string;
-  description?: string;
-  hidden?: boolean;
-  options: ProviderOptions;
-}>;
+import type { Settings } from "../settings.js";
+import { providerOptionsSchema, providerRecipeSchema, type ProviderExecution } from "./provider-recipe.js";
 
 export const akumaNameCatalogRowSchema = z
   .strictObject({ name: z.string(), model: z.string().exactOptional(), description: z.string().exactOptional() })
@@ -44,26 +20,15 @@ export const akumaNameCatalogSchema = z
   })
   .readonly();
 
-export type AkumaNameCatalogRow = Readonly<{
-  name: string;
-  model?: string;
-  description?: string;
-}>;
-
+export type AkumaNameCatalogRow = z.output<typeof akumaNameCatalogRowSchema>;
 export type AkumaNameCatalog = z.output<typeof akumaNameCatalogSchema>;
 
-/** One closed catalogue request: omitted cwd means no project scope, never ambient discovery. */
+/** Omitted cwd means no project scope, never ambient discovery. */
 export type AkumaNameCatalogInput = Readonly<{
   cwd?: string;
   home?: string;
   limit?: number;
 }>;
-
-/** One loaded akumaName whose provider owner has decoded its execution but not yet admitted its options. */
-type PreparedArchetype = Omit<DecodedArchetype, "provider"> &
-  Readonly<{
-    provider: ProviderExecution;
-  }>;
 
 export class AkumaNameError extends KeiyakuError {
   readonly kind = "akuma-name";
@@ -72,337 +37,263 @@ export class AkumaNameError extends KeiyakuError {
     readonly searched: readonly string[],
     readonly reason: string,
     readonly absent = false,
+    cause?: unknown,
   ) {
     super(absent ? "invalid-input" : "internal", `\`${akumaName}\` ${reason}`, {
       ...(absent ? { next: { verb: "ls", input: { selector: "aku/" } } as const } : {}),
+      ...(cause === undefined ? {} : { cause }),
     });
   }
 }
 
-type ArchetypeCoordinates = Pick<AkumaNameCatalogInput, "cwd" | "home">;
-
-function projectArchetypeDirectory(project?: string): string | undefined {
-  return project === undefined ? undefined : join(project, ".keiyaku", "akumas");
+function diagnostic(error: unknown): string {
+  if (!(error instanceof z.ZodError)) return error instanceof Error ? error.message : String(error);
+  const issue = error.issues[0]!;
+  if (issue.code === "unrecognized_keys") return `unknown field: ${[...issue.path, issue.keys[0]].join(".")}`;
+  const reason = issue.code === "invalid_value" ? `must be one of ${issue.values.join(", ")}` : issue.message;
+  return issue.path.length === 0 ? reason : `${issue.path.join(".")} ${reason}`;
 }
 
-function homeArchetypeDirectory(home?: string): string {
-  return join(home ?? join(homedir(), ".keiyaku"), "akumas");
-}
-
-function archetypeDirectories(input: ArchetypeCoordinates): readonly string[] {
-  return [projectArchetypeDirectory(input.cwd), homeArchetypeDirectory(input.home)].filter(
-    (directory): directory is string => directory !== undefined,
-  );
-}
-
-async function pathsInDirectory(directory: string): Promise<readonly Readonly<{ name: string; path: string }>[]> {
-  try {
-    return (await readdir(directory, { withFileTypes: true }))
-      .flatMap((entry) => {
-        if (!entry.isFile() || !entry.name.endsWith(".md")) return [];
-        const name = entry.name.slice(0, -3);
-        try {
-          return [{ name: validateAkumaName(name), path: join(directory, entry.name) }];
-        } catch {
-          return [];
-        }
-      })
-      .sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)));
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return [];
-    throw error;
-  }
-}
-
-async function archetypePaths(
-  input: ArchetypeCoordinates = {},
-): Promise<readonly Readonly<{ name: string; path: string }>[]> {
-  const scopes = await Promise.all(archetypeDirectories(input).map(pathsInDirectory));
-  const selected = new Map<string, Readonly<{ name: string; path: string }>>();
-  for (const scope of scopes) {
-    for (const entry of scope) if (!selected.has(entry.name)) selected.set(entry.name, entry);
-  }
-  return [...selected.values()].sort((left, right) => Buffer.compare(Buffer.from(left.name), Buffer.from(right.name)));
-}
-
-type ArchetypeSource = "project" | "home";
-type ArchetypeLookup = Readonly<{ path: string; source: ArchetypeSource }>;
-
-function sourceLookups(name: string, input: ArchetypeCoordinates, source: ArchetypeSource): readonly ArchetypeLookup[] {
-  if (source === "home" || input.cwd === undefined) {
-    return [{ path: join(homeArchetypeDirectory(input.home), `${name}.md`), source: "home" }];
-  }
-  return [
-    { path: join(projectArchetypeDirectory(input.cwd)!, `${name}.md`), source: "project" },
-    { path: join(homeArchetypeDirectory(input.home), `${name}.md`), source: "home" },
-  ];
-}
-
-function chainText(chain: readonly string[]): string {
-  return chain.join(" -> ");
-}
-
-function archetypeError(
+function definitionError(
   name: string,
   searched: readonly string[],
   reason: string,
-  chain: readonly string[],
-  absent = false,
+  chain: ReadonlySet<string>,
+  options: { absent?: boolean; cause?: unknown } = {},
 ): AkumaNameError {
-  const withChain = chain.length === 0 ? reason : `${reason} (base chain: ${chainText(chain)})`;
-  return new AkumaNameError(name, searched, withChain, absent);
-}
-
-function archetypeField(values: Readonly<Record<string, unknown>>, key: string, required = false): string | undefined {
-  const value = values[key];
-  if (value === undefined && !required) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new KeiyakuError("invalid-input", `Akuma ${key} must be a nonblank string`);
-  }
-  return value;
-}
-
-function archetypeEnum<T extends string>(
-  values: Readonly<Record<string, unknown>>,
-  key: string,
-  allowed: readonly T[],
-): T | undefined {
-  const value = archetypeField(values, key);
-  if (value === undefined) return undefined;
-  if (!allowed.includes(value as T))
-    throw new KeiyakuError("invalid-input", `Akuma ${key} must be one of ${allowed.join(", ")}`);
-  return value as T;
-}
-
-function archetypeBoolean(values: Readonly<Record<string, unknown>>, key: string): boolean | undefined {
-  const value = values[key];
-  if (value === undefined) return undefined;
-  if (typeof value !== "boolean") throw new KeiyakuError("invalid-input", `Akuma ${key} must be a boolean`);
-  return value;
-}
-
-type ArchetypeFrontmatter = Readonly<{
-  lines: readonly string[];
-  closing: number;
-  values: Readonly<Record<string, unknown>>;
-}>;
-
-function parseArchetypeFrontmatter(markdown: string): ArchetypeFrontmatter {
-  const lines = markdown.split(/\r?\n/u);
-  if (lines[0]?.trim() !== "---")
-    throw new KeiyakuError("invalid-input", "Akuma file must begin with YAML frontmatter");
-  const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
-  if (closing < 0) throw new KeiyakuError("invalid-input", "Akuma frontmatter is not closed");
-  const document = parseDocument(lines.slice(1, closing).join("\n"), { uniqueKeys: true });
-  if (document.errors.length > 0)
-    throw new KeiyakuError("invalid-input", `Akuma frontmatter is invalid: ${document.errors[0]!.message}`);
-  const decoded = document.toJS() as unknown;
-  if (decoded === null || typeof decoded !== "object" || Array.isArray(decoded)) {
-    throw new KeiyakuError("invalid-input", "Akuma frontmatter must be one mapping");
-  }
-  return { lines, closing, values: decoded as Readonly<Record<string, unknown>> };
-}
-
-type ArchetypeFields = Readonly<{
-  base?: string;
-  provider?: string;
-  model?: string;
-  effort?: string;
-  network?: "disabled" | "enabled";
-  description?: string;
-  hidden?: boolean;
-  systemPromptMode?: "append" | "replace";
-}>;
-
-function decodeArchetypeFields(values: Readonly<Record<string, unknown>>): ArchetypeFields {
-  const unknown = Object.keys(values).find(
-    (key) =>
-      !["base", "provider", "model", "effort", "network", "description", "hidden", "systemPromptMode"].includes(key),
+  return new AkumaNameError(
+    name,
+    searched,
+    chain.size === 0 ? reason : `${reason} (base chain: ${[...chain, name].join(" -> ")})`,
+    options.absent,
+    options.cause,
   );
-  if (unknown !== undefined) throw new KeiyakuError("invalid-input", `Akuma frontmatter has unknown field: ${unknown}`);
-  const provider = archetypeField(values, "provider");
-  const baseValue = archetypeField(values, "base");
-  const base = baseValue === undefined ? undefined : validateAkumaName(baseValue);
-  const model = archetypeField(values, "model");
-  const effort = archetypeField(values, "effort");
-  const network = archetypeEnum(values, "network", ["disabled", "enabled"] as const);
-  const description = archetypeField(values, "description");
-  const hidden = archetypeBoolean(values, "hidden");
-  const systemPromptMode = archetypeEnum(values, "systemPromptMode", ["append", "replace"] as const);
+}
+
+const nonblank = z
+  .string({ error: "must be a nonblank string" })
+  .refine((value) => value.trim() !== "", "must be a nonblank string");
+const absolute = nonblank.refine(isAbsolute, "must be absolute").optional();
+const catalogueInputSchema = z.strictObject({
+  cwd: absolute,
+  home: absolute,
+  limit: z
+    .unknown()
+    .transform((value, context) => {
+      try {
+        return boundedListLimit(value);
+      } catch (error) {
+        context.addIssue({ code: "custom", message: diagnostic(error).replace(/^limit /u, "") });
+        return z.NEVER;
+      }
+    })
+    .optional(),
+});
+
+const { model, effort, network, systemPromptMode } = providerOptionsSchema.in.shape;
+const frontmatterSchema = z.strictObject({
+  base: z
+    .string()
+    .transform((value, context) => {
+      try {
+        return validateAkumaName(value);
+      } catch (error) {
+        context.addIssue({ code: "custom", message: diagnostic(error) });
+        return z.NEVER;
+      }
+    })
+    .optional(),
+  provider: nonblank.optional(),
+  model,
+  effort,
+  network,
+  description: nonblank.optional(),
+  hidden: z.boolean().optional(),
+  systemPromptMode,
+});
+
+function decodeDefinition(markdown: string) {
+  const lines = markdown.split(/\r?\n/u);
+  if (lines[0]?.trim() !== "---") throw new Error("Akuma file must begin with YAML frontmatter");
+  const closing = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+  if (closing < 0) throw new Error("Akuma frontmatter is not closed");
+  const yaml = parseDocument(lines.slice(1, closing).join("\n"), { uniqueKeys: true });
+  if (yaml.errors[0] !== undefined) throw yaml.errors[0];
+  const mapping: unknown = yaml.toJS({ mapAsMap: true });
+  if (!isMap(yaml.contents) || !(mapping instanceof Map)) throw new Error("Akuma frontmatter must be one mapping");
+  if ([...mapping.keys()].some((key) => typeof key !== "string"))
+    throw new Error("Akuma frontmatter keys must be text");
+  const { base, provider, description, hidden, systemPromptMode, ...options } = frontmatterSchema.parse(
+    Object.fromEntries(mapping),
+  );
+  const body = lines.slice(closing + 1).join("\n");
+  if (body.length === 0 && systemPromptMode !== undefined)
+    throw new Error("Akuma systemPromptMode requires a nonempty Markdown body");
   return {
-    ...(base === undefined ? {} : { base }),
-    ...(provider === undefined ? {} : { provider }),
-    ...(model === undefined ? {} : { model }),
-    ...(effort === undefined ? {} : { effort }),
-    ...(network === undefined ? {} : { network }),
-    ...(description === undefined ? {} : { description }),
-    ...(hidden === undefined ? {} : { hidden }),
-    ...(systemPromptMode === undefined ? {} : { systemPromptMode }),
+    base,
+    provider,
+    description,
+    hidden,
+    options:
+      body.length === 0 ? options : { ...options, systemPrompt: body, systemPromptMode: systemPromptMode ?? "append" },
   };
 }
 
-function decodeArchetype(name: string, path: string, markdown: string): LocalArchetype {
-  const { lines, closing, values } = parseArchetypeFrontmatter(markdown);
-  const fields = decodeArchetypeFields(values);
-  const systemPrompt = lines.slice(closing + 1).join("\n");
-  if (fields.systemPromptMode !== undefined && systemPrompt.length === 0) {
-    throw new KeiyakuError("invalid-input", "Akuma systemPromptMode requires a nonempty Markdown body");
+type Coordinates = Readonly<{ cwd?: string | undefined; home?: string | undefined }>;
+type Scope = "project" | "home";
+type Location = Readonly<{ path: string; source: Scope }>;
+type CataloguePaths = Readonly<Record<Scope, ReadonlyMap<string, Location>>>;
+type Definition = Readonly<{
+  name: string;
+  path: string;
+  base: Definition | undefined;
+  provider: string;
+  description: string | undefined;
+  hidden: boolean;
+  options: z.input<typeof providerOptionsSchema>;
+}>;
+
+function definitionDirectories({ cwd, home }: Coordinates): readonly Location[] {
+  const user = { path: join(home ?? join(homedir(), ".keiyaku"), "akumas"), source: "home" } as const;
+  return cwd === undefined ? [user] : [{ path: join(cwd, ".keiyaku", "akumas"), source: "project" }, user];
+}
+
+function isMissing(error: unknown): boolean {
+  return error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT";
+}
+
+async function cataloguePaths(directories: readonly Location[]): Promise<CataloguePaths> {
+  const paths = { project: new Map<string, Location>(), home: new Map<string, Location>() };
+  for (const { path, source } of [...directories].reverse()) {
+    const entries = await readdir(path, { withFileTypes: true }).catch((error: unknown) => {
+      if (isMissing(error)) return [];
+      throw error;
+    });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".md")) continue;
+      let name: string;
+      try {
+        name = validateAkumaName(entry.name.slice(0, -3));
+      } catch {
+        continue;
+      }
+      const file = { path: join(path, entry.name), source };
+      if (source === "home") paths.home.set(name, file);
+      paths.project.set(name, file);
+    }
   }
-  return Object.freeze({
+  return paths;
+}
+
+function mergeDefinition(
+  name: string,
+  path: string,
+  local: ReturnType<typeof decodeDefinition>,
+  base: Definition | undefined,
+): Definition {
+  const provider = local.provider ?? base?.provider;
+  if (provider === undefined) throw new Error("Akuma provider must be a nonblank string");
+  return {
     name,
     path,
-    ...(fields.base === undefined ? {} : { base: fields.base }),
-    ...(fields.provider === undefined ? {} : { provider: fields.provider }),
-    ...(fields.description === undefined ? {} : { description: fields.description }),
-    ...(fields.hidden === undefined ? {} : { hidden: fields.hidden }),
-    options: decodeProviderOptions({
-      ...(fields.model === undefined ? {} : { model: fields.model }),
-      ...(fields.effort === undefined ? {} : { effort: fields.effort }),
-      ...(fields.network === undefined ? {} : { network: fields.network }),
-      ...(systemPrompt.length === 0
-        ? {}
-        : {
-            systemPrompt,
-            systemPromptMode: fields.systemPromptMode ?? "append",
-          }),
-    }),
-  });
-}
-
-function mergeArchetype(base: DecodedArchetype | undefined, local: LocalArchetype): DecodedArchetype {
-  const provider = local.provider ?? base?.provider;
-  if (provider === undefined) throw new KeiyakuError("invalid-input", "Akuma provider must be a nonblank string");
-  const options = decodeProviderOptions({ ...(base?.options ?? {}), ...local.options });
-  return Object.freeze({
-    name: local.name,
-    path: local.path,
+    base,
     provider,
-    ...(local.description === undefined
-      ? base?.description === undefined
-        ? {}
-        : { description: base.description }
-      : { description: local.description }),
-    // Hiddenness is the file's own catalogue visibility; it never flows through base.
-    ...(local.hidden === true ? { hidden: true } : {}),
-    options,
-  });
+    description: local.description ?? base?.description,
+    hidden: local.hidden === true,
+    options: { ...base?.options, ...local.options },
+  };
 }
 
-async function resolveArchetype(
-  name: string,
-  input: ArchetypeCoordinates,
-  source: ArchetypeSource | undefined,
-  chain: readonly string[] = [],
-): Promise<DecodedArchetype> {
-  const lookups = sourceLookups(name, input, source ?? "project");
-  if (chain.includes(name)) {
-    throw archetypeError(
+function fileFailure(name: string, path: string, chain: ReadonlySet<string>, cause: unknown): AkumaNameError {
+  if (cause instanceof AkumaNameError) return cause;
+  const detail = diagnostic(cause);
+  const prefix = cause instanceof z.ZodError && cause.issues[0]?.path.length ? "Akuma " : "";
+  const reason =
+    cause instanceof Error && "syscall" in cause ? `could not be read: ${detail}` : `is invalid: ${prefix}${detail}`;
+  return definitionError(name, [path], reason, chain, { cause });
+}
+
+function definitionResolver(directories: readonly Location[], paths?: CataloguePaths) {
+  const memo = { project: new Map<string, Definition>(), home: new Map<string, Definition>() };
+  const decoded = new Map<string, ReturnType<typeof decodeDefinition>>();
+
+  return async function resolve(
+    name: string,
+    scope: Scope = "project",
+    chain: ReadonlySet<string> = new Set(),
+  ): Promise<Definition> {
+    const lookups = directories
+      .filter(({ source }) => scope === "project" || source === "home")
+      .map(({ path, source }) => ({ path: join(path, `${name}.md`), source }));
+    if (chain.has(name))
+      throw definitionError(
+        name,
+        lookups.map(({ path }) => path),
+        "has a cyclic base reference",
+        chain,
+      );
+
+    const cached = memo[scope].get(name);
+    if (cached !== undefined) {
+      // A cached Home suffix may repeat a project ancestor. Rewalk it to report the full chain.
+      let base = chain.size === 0 ? undefined : cached.base;
+      while (base !== undefined && !chain.has(base.name)) base = base.base;
+      if (base === undefined) return cached;
+    }
+
+    const winner = paths?.[scope].get(name);
+    let missing: unknown;
+    for (const { path, source } of paths === undefined ? lookups : winner === undefined ? [] : [winner]) {
+      try {
+        let local = decoded.get(path);
+        if (local === undefined) {
+          local = decodeDefinition(await readFile(path, "utf8"));
+          decoded.set(path, local);
+        }
+        const base =
+          local.base === undefined ? undefined : await resolve(local.base, source, new Set([...chain, name]));
+        const result = mergeDefinition(name, path, local, base);
+        memo[scope].set(name, result);
+        return result;
+      } catch (cause) {
+        if (isMissing(cause) && paths === undefined) {
+          missing = cause;
+          continue;
+        }
+        throw fileFailure(name, path, chain, cause);
+      }
+    }
+    throw definitionError(
       name,
       lookups.map(({ path }) => path),
-      "has a cyclic base reference",
-      [...chain, name],
+      "was not found",
+      chain,
+      { absent: true, cause: missing },
     );
-  }
-  const searched = lookups.map(({ path }) => path);
-  for (const lookup of lookups) {
-    let markdown: string;
-    try {
-      markdown = await readFile(lookup.path, "utf8");
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw archetypeError(
-        name,
-        [lookup.path],
-        `could not be read: ${error instanceof Error ? error.message : String(error)}`,
-        chain,
-      );
-    }
-    let local: LocalArchetype;
-    try {
-      local = decodeArchetype(name, lookup.path, markdown);
-    } catch (error) {
-      throw archetypeError(
-        name,
-        [lookup.path],
-        `is invalid: ${error instanceof Error ? error.message : String(error)}`,
-        chain,
-      );
-    }
-    let inherited: DecodedArchetype | undefined;
-    if (local.base !== undefined) {
-      inherited = await resolveArchetype(local.base, input, lookup.source, [...chain, name]);
-    }
-    try {
-      return mergeArchetype(inherited, local);
-    } catch (error) {
-      throw archetypeError(
-        name,
-        [lookup.path],
-        `is invalid: ${error instanceof Error ? error.message : String(error)}`,
-        chain,
-      );
-    }
-  }
-  const missingChain = chain.length === 0 ? chain : [...chain, name];
-  throw archetypeError(name, searched, "was not found", missingChain, true);
-}
-
-function catalogueCoordinate(value: unknown, field: "cwd" | "home"): string | undefined {
-  if (value === undefined) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0) {
-    throw new KeiyakuError("invalid-input", `Akuma catalogue ${field} must be a nonblank string`);
-  }
-  if (!isAbsolute(value))
-    throw new KeiyakuError("invalid-input", `Akuma catalogue ${field} must be absolute: ${value}`);
-  return value;
-}
-
-/** Malformed caller input fails here, before any filesystem observation. */
-function catalogueInput(value: unknown): AkumaNameCatalogInput {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new KeiyakuError("invalid-input", "Akuma catalogue input must be an object");
-  }
-  const input = value as Readonly<Record<string, unknown>>;
-  const unknown = Object.keys(input).find((key) => !["cwd", "home", "limit"].includes(key));
-  if (unknown !== undefined)
-    throw new KeiyakuError("invalid-input", `Akuma catalogue input has unknown field: ${unknown}`);
-  const cwd = catalogueCoordinate(input.cwd, "cwd");
-  const home = catalogueCoordinate(input.home, "home");
-  return {
-    ...(cwd === undefined ? {} : { cwd }),
-    ...(home === undefined ? {} : { home }),
-    ...(input.limit === undefined ? {} : { limit: boundedListLimit(input.limit) }),
   };
 }
 
 export async function listAkumaNameDefinitions(input: AkumaNameCatalogInput = {}): Promise<AkumaNameCatalog> {
-  // Reads still run concurrently, but the reported failure is the first invalid
-  // definition in catalog byte order, not whichever read happened to finish first.
-  const { limit, ...coordinates } = catalogueInput(input);
-  const all = await archetypePaths(coordinates);
-  const settled = await Promise.allSettled(
-    all.map(async ({ name, path }) => {
-      try {
-        return await resolveArchetype(name, coordinates, undefined);
-      } catch (error) {
-        if (error instanceof AkumaNameError) throw error;
-        throw new AkumaNameError(name, [path], `is invalid: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }),
-  );
-  const firstInvalid = settled.find((result) => result.status === "rejected");
-  if (firstInvalid !== undefined) throw firstInvalid.reason;
-  const visible = settled
-    .map((result) => (result as PromiseFulfilledResult<DecodedArchetype>).value)
-    .filter((definition) => definition.hidden !== true)
-    .map((definition) =>
+  const parsed = catalogueInputSchema.safeParse(input);
+  if (!parsed.success)
+    throw new KeiyakuError("invalid-input", `Akuma catalogue ${diagnostic(parsed.error)}`, { cause: parsed.error });
+  const directories = definitionDirectories(parsed.data);
+  const paths = await cataloguePaths(directories);
+  const resolve = definitionResolver(directories, paths);
+  const names = [...paths.project.keys()].sort((a, b) => Buffer.compare(Buffer.from(a), Buffer.from(b)));
+  const definitions: Definition[] = [];
+  for (const name of names) definitions.push(await resolve(name));
+  const visible = definitions
+    .filter(({ hidden }) => !hidden)
+    .map(({ name, description, options }) =>
       Object.freeze({
-        name: definition.name,
-        ...(definition.options.model === undefined ? {} : { model: definition.options.model }),
-        ...(definition.description === undefined ? {} : { description: definition.description }),
+        name,
+        ...(options.model === undefined ? {} : { model: options.model }),
+        ...(description === undefined ? {} : { description }),
       }),
     );
-  const rows = limit === undefined ? visible : visible.slice(0, limit);
+  const { limit } = parsed.data;
+  const rows = visible.slice(0, limit);
   return {
     kind: "akuma-name-catalogue",
     ...(rows.length === 0 ? {} : { rows }),
@@ -410,41 +301,13 @@ export async function listAkumaNameDefinitions(input: AkumaNameCatalogInput = {}
   };
 }
 
-function record(value: unknown): Readonly<Record<string, unknown>> | null {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as Readonly<Record<string, unknown>>)
-    : null;
-}
-
-function optionalProviderText(
-  value: Readonly<Record<string, unknown>>,
-  name: string,
-  field: "description",
-): string | undefined {
-  const selected = value[field];
-  if (selected === undefined) return undefined;
-  if (typeof selected !== "string" || selected.trim().length === 0) {
-    throw new KeiyakuError("invalid-input", `provider ${name} ${field} must be a nonblank string`);
-  }
-  return selected;
-}
-
-function configuredProvider(name: string, selected: unknown): ProviderExecution {
-  const value = record(selected);
-  if (value === null) throw new KeiyakuError("invalid-input", `provider ${name} must be an object`);
-  const unknown = Object.keys(value).find(
-    (key) => !["kind", "description", "executable", "config", "env"].includes(key),
-  );
-  if (unknown !== undefined) throw new KeiyakuError("invalid-input", `provider ${name} has unknown field ${unknown}`);
-  optionalProviderText(value, name, "description");
-  return decodeProviderRecipe({
-    name,
-    kind: value.kind,
-    ...(value.executable === undefined ? {} : { executable: value.executable }),
-    ...(value.config === undefined ? {} : { config: value.config }),
-    ...(value.env === undefined ? {} : { env: value.env }),
-  });
-}
+const configuredProviderSchema = z.strictObject({
+  kind: z.unknown(),
+  description: nonblank.optional(),
+  executable: z.unknown().optional(),
+  config: z.unknown().optional(),
+  env: z.unknown().optional(),
+});
 
 const BUILTIN_EXECUTIONS = {
   claude: { kind: "claude-agent-sdk" },
@@ -476,29 +339,30 @@ function providerExecution(settings: Settings, name: string): ProviderExecution 
         .join("; "),
     );
   const selected = view.entries?.[name]?.value;
-  if (selected !== undefined) return configuredProvider(name, selected);
-  const builtin = BUILTIN_EXECUTIONS[name as keyof typeof BUILTIN_EXECUTIONS];
-  if (builtin !== undefined) return decodeProviderRecipe({ name, ...builtin });
-  throw new KeiyakuError("invalid-input", `unknown provider ${name}`);
+  if (selected !== undefined) {
+    const { description: _description, ...recipe } = configuredProviderSchema.parse(selected);
+    return providerRecipeSchema.parse({ name, ...recipe });
+  }
+  if (!Object.hasOwn(BUILTIN_EXECUTIONS, name)) throw new Error(`unknown provider ${name}`);
+  return providerRecipeSchema.parse({ name, ...BUILTIN_EXECUTIONS[name as keyof typeof BUILTIN_EXECUTIONS] });
 }
 
 /** Resolve one akumaName and decode its provider execution, leaving option admission to the caller. */
-export async function loadPreparedArchetype(
-  input: Readonly<{ name: string; settings: Settings }> & ArchetypeCoordinates,
-): Promise<PreparedArchetype> {
+export async function loadPreparedArchetype(input: Readonly<{ name: string; settings: Settings }> & Coordinates) {
   const name = validateAkumaName(input.name);
-  const definition = await resolveArchetype(name, input, undefined);
-  let provider: ProviderExecution;
+  const resolve = definitionResolver(definitionDirectories(input));
+  const { path, description, hidden, provider, options } = await resolve(name);
   try {
-    provider = providerExecution(input.settings, definition.provider);
-  } catch (error) {
-    if (errorCategory(error) === "invalid-input")
-      throw new AkumaNameError(
-        definition.name,
-        [definition.path],
-        `uses ${error instanceof Error ? error.message : String(error)}`,
-      );
-    throw error;
+    return Object.freeze({
+      name,
+      path,
+      ...(description === undefined ? {} : { description }),
+      ...(hidden ? { hidden: true as const } : {}),
+      provider: providerExecution(input.settings, provider),
+      options: providerOptionsSchema.parse(options),
+    });
+  } catch (cause) {
+    if (cause instanceof AkumaNameError) throw cause;
+    throw definitionError(name, [path], `uses ${diagnostic(cause)}`, new Set(), { cause });
   }
-  return Object.freeze({ ...definition, provider });
 }

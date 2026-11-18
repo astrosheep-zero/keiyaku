@@ -2073,7 +2073,13 @@ test("hidden archetypes stay callable but leave the catalogue", async (context) 
   assert.equal(hidden.path, join(home, "akumas", "secret.md"));
 
   writeFileSync(join(home, "akumas", "broken.md"), '---\nprovider: claude\nhidden: "true"\n---\n');
-  await assert.rejects(Akumas.akumaNames({ cwd: root, home }), /hidden must be a boolean/u);
+  await assert.rejects(Akumas.akumaNames({ cwd: root, home }), (error: unknown) => {
+    assert.ok(error instanceof AkumaNameError);
+    assert.equal(error.akumaName, "broken");
+    assert.equal(error.absent, false);
+    assert.match(error.reason, /hidden .*boolean/u);
+    return true;
+  });
 });
 
 test("list omits unreadable Hearts instead of reporting unborn, while direct status fails", async (context) => {

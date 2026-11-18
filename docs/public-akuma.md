@@ -250,13 +250,14 @@ configuration coordinate; standalone catalogue access accepts an explicit
 resolved project directory and user configuration coordinate. Omission of the
 project coordinate means user configuration alone, never an ambient working
 directory or ancestor search. Both faces preserve the same shadowing, bounded
-catalogue, and owner-native failures. The native `AkumaNameError` that spawn
-admission already throws is reachable from the package root, so a root-only
-caller lists the same spawnable definitions the CLI shows and identifies that
-error without a private module. An akumaName definition may declare `hidden: true`: a hidden definition
-never appears in the akumaName catalogue, but it resolves and answers spawns by
-name exactly as a visible one, and hiddenness is the definition's own
-catalogue visibility, never inherited through `base`. The pillars and product
-compositions expose no cross-product catalogue or generic listing operation,
-and no public definition loader. The invocation facet routes each described
-catalogue operation directly to its producing owner.
+catalogue, and owner-native failures. The catalogue resolves the winning
+canonical names before applying visibility or the caller's bound. It reports
+the first invalid winner in byte order, even when that definition would have
+been hidden or beyond the bound. A shadowed Home definition is observed only
+when a Home-scoped base reference needs it. The native `AkumaNameError` is
+available to package-root callers on both listing and spawn, but targeted
+spawn resolves only the requested definition and its ancestors. A hidden
+definition remains callable by name, and its visibility is never inherited.
+The pillars and product compositions expose no cross-product catalogue or
+generic listing operation, and no public definition loader. The invocation
+facet routes each described catalogue operation directly to its producing owner.
