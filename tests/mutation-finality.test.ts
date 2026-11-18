@@ -7,6 +7,7 @@ import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project, KeiyakuError } from "../src/library/outcome.js";
 import { reconcileException } from "../src/library/reconcile.js";
 import { concatenatePrivateStateSeatClose } from "../src/git/private-state-seat.js";
+import { SqliteTransactionLockError } from "../src/coordination/sqlite-transaction-lock.js";
 import {
   contractId,
   documentKey,
@@ -186,7 +187,7 @@ test("mutation nuke confirmed seat-close failure remains a typed outcome", async
   try {
     const world = await World.at(raw.path);
     const close = () => {
-      throw new Error("nuke seat close failed after publication");
+      throw new SqliteTransactionLockError("nuke seat close failed after publication", "release-failed");
     };
     const outcome = await nukeGit(world, "git", { onPrivateStateSeatClose: close });
     assert.equal("value" in outcome, true);

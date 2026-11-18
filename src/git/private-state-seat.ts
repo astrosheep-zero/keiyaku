@@ -2,6 +2,7 @@ import { z } from "zod";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { join } from "node:path";
 import { acquireSqliteTransactionLock, SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
+import { errorCategory, KeiyakuError } from "../errors.js";
 import type { GitRepository } from "./process.js";
 
 const PRIVATE_STATE_SEAT = "private-state.sqlite";
@@ -80,10 +81,6 @@ export function isPrivateStateSeatContention(error: unknown): error is GitPrivat
   return error instanceof GitPrivateStateSeatContentionError;
 }
 
-function acquireTimeoutMs(timeoutMs: number | undefined): number {
-  return timeoutMs ?? PRIVATE_STATE_SEAT_ACQUIRE_TIMEOUT_MS;
-}
-
 async function acquirePrivateStateSeatLock(
   repository: GitRepository,
   path: string,
@@ -93,7 +90,7 @@ async function acquirePrivateStateSeatLock(
     return await acquireSqliteTransactionLock({
       path,
       mode: "immediate",
-      timeoutMs: acquireTimeoutMs(timeoutMs),
+      timeoutMs: timeoutMs ?? PRIVATE_STATE_SEAT_ACQUIRE_TIMEOUT_MS,
       ...(repository.signal === undefined ? {} : { signal: repository.signal }),
       ...(repository.onPrivateStateSeatContention === undefined
         ? {}
@@ -107,34 +104,74 @@ async function acquirePrivateStateSeatLock(
   }
 }
 
+type PrivateStateSeatOptions = Readonly<{
+  timeoutMs?: number;
+  onCloseLag?: (lag: PrivateStateSeatCloseLag) => void;
+}>;
+
 async function runPrivateStateSeatAction<T>(
   repository: GitRepository,
   held: Awaited<ReturnType<typeof acquireSqliteTransactionLock>>,
   action: (seat: PrivateStatePublicationSeat) => T | Promise<T>,
+  onCloseLag: PrivateStateSeatOptions["onCloseLag"],
 ): Promise<PrivateStateSeatOutcome<T>> {
   const seat: PrivateStatePublicationSeat = { [privateStateSeat]: true };
-  let completed = false;
-  let value: T | undefined;
+  let result: { value: T } | { error: unknown };
   try {
-    value = await action(seat);
-    completed = true;
-    return { value };
-  } finally {
-    try {
-      held.close();
-      repository.onPrivateStateSeatClose?.();
-    } catch (error) {
-      if (!(completed && confirmedPublications.has(seat))) throw error;
-      return { value: value!, closeLag: privateStateSeatCloseLag(error) };
-    }
+    result = { value: await action(seat) };
+  } catch (error) {
+    result = { error };
   }
+  try {
+    held.close();
+    repository.onPrivateStateSeatClose?.();
+  } catch (retirement) {
+    const lag = privateStateSeatCloseLag(retirement);
+    if ("value" in result) {
+      if (
+        confirmedPublications.has(seat) &&
+        retirement instanceof SqliteTransactionLockError &&
+        retirement.reason === "release-failed"
+      )
+        return { ...result, closeLag: lag };
+      throw retirement;
+    }
+    const { error } = result;
+    if (onCloseLag !== undefined) {
+      try {
+        onCloseLag(lag);
+      } catch {
+        throw privateStatePublicationRetirementFailure(error, retirement, "Publication seat", repository.signal);
+      }
+      throw error;
+    }
+    throw privateStatePublicationRetirementFailure(error, retirement, "Publication seat", repository.signal);
+  }
+  if ("error" in result) throw result.error;
+  return result;
+}
+
+export function privateStatePublicationRetirementFailure(
+  error: unknown,
+  retirement: unknown,
+  resource: string,
+  signal?: AbortSignal,
+): KeiyakuError {
+  const primary = error instanceof Error ? error.message : String(error);
+  const { diagnostic } = privateStateSeatCloseLag(retirement);
+  return Object.assign(
+    new KeiyakuError(errorCategory(error, signal), `${primary}\n${resource} close also failed: ${diagnostic}`, {
+      cause: error,
+    }),
+    { retirement },
+  );
 }
 
 /** Serialize cooperating writers of the one private Git state root. */
 export async function withPrivateStatePublicationSeat<T>(
   repository: GitRepository,
   action: (seat: PrivateStatePublicationSeat) => T | Promise<T>,
-  options?: Readonly<{ timeoutMs?: number }>,
+  options?: PrivateStateSeatOptions,
 ): Promise<PrivateStateSeatOutcome<T>> {
   const path = privateStatePublicationSeatPath(repository);
   const heldPaths = heldPrivateStateSeats.getStore();
@@ -144,5 +181,7 @@ export async function withPrivateStatePublicationSeat<T>(
   const held = await acquirePrivateStateSeatLock(repository, path, options?.timeoutMs);
   const nested = new Set(heldPaths);
   nested.add(path);
-  return await heldPrivateStateSeats.run(nested, () => runPrivateStateSeatAction(repository, held, action));
+  return await heldPrivateStateSeats.run(nested, () =>
+    runPrivateStateSeatAction(repository, held, action, options?.onCloseLag),
+  );
 }

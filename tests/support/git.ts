@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync, chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { after } from "node:test";
 import { Repo } from "../../src/index.js";
 import { readManagedWorktreeAppointment } from "../../src/workspace-place.js";
@@ -87,12 +88,30 @@ export function protocolContractId(title: string): ContractId {
   );
 }
 
-export async function waitForFile(path: string): Promise<void> {
-  for (let attempts = 0; attempts < 100; attempts += 1) {
+export async function waitForFile(path: string, timeoutMs = 1_000): Promise<void> {
+  for (let waited = 0; waited < timeoutMs; waited += 10) {
     if (existsSync(path)) return;
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   throw new Error(`timed out waiting for ${path}`);
+}
+
+export async function withSqliteCloseFailure<T>(
+  fault: (path: string | null) => Error | undefined,
+  action: () => Promise<T>,
+): Promise<T> {
+  const close = DatabaseSync.prototype.close;
+  DatabaseSync.prototype.close = function () {
+    const path = this.location();
+    close.call(this);
+    const error = fault(path);
+    if (error !== undefined) throw error;
+  };
+  try {
+    return await action();
+  } finally {
+    DatabaseSync.prototype.close = close;
+  }
 }
 
 export interface TestGitRepository {

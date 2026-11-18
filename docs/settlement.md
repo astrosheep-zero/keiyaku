@@ -33,8 +33,9 @@ When an accepted Contract remains a Debt's matching held holder, Settlement move
 that Debt to its settled completion state and releases the holder as its final
 action. An already settled Debt remains settled. A dropped Debt, missing Debt,
 Debt refusal, concurrent Debt movement, or failed holder publication is visible
-lag; the holder remains when release did not publish and a later replay
-re-evaluates it. A terminal Contract without its matching held holder is
+lag. Contention for publication custody is retryable lag for the addressed
+association and allows reconciliation of other Contracts to proceed. The holder
+remains when release did not publish and a later replay re-evaluates it. A terminal Contract without its matching held holder is
 strictly inert: it does not create, repair, or inspect unrelated Debt, World, or
 context state. Explicitly reopening a Debt does not restore a released holder or
 reverse Contract acceptance. A still-held matching accepted holder continues to
@@ -51,13 +52,13 @@ Settlement receives the authority repair observed, not a terminal conclusion
 inferred from later physical effects. Git, workspace, or Settlement lag cannot
 reject an accepted fact, manufacture abandonment, or hide the Contract.
 
-Settlement derives desired work anew from current Contract, holder, Debt, and
-Git observations on every invocation. It stores no completion bit, replay queue,
-or secondary receipt. The per-Debt holder boundary and Debt's own predecessor
-comparison preserve concurrent correctness; a failed Debt settlement or holder
-publication leaves the matching holder held for a later replay. Settlement
-reports completed actions and independent lags, without inventing a second
-lifecycle state or nested receipt.
+Settlement reuses the invocation's proof of irreversible Contract acceptance.
+It observes only holder authority to discover and revalidate the association,
+first under the Debt's holder fence and again under publication custody after
+Debt completion. The Debt store still judges its own current authority and
+predecessor. Settlement records completed actions before proceeding and reports
+independent failure and cleanup evidence without storing another lifecycle state,
+completion bit, replay queue, or receipt.
 
 ## Cross-owner replay review
 
@@ -69,18 +70,24 @@ second authority:
   erase that Contract fact.
 - **Durable replay token:** The current matching held DebtHolder is the sole
   durable token that says this accepted Contract still owes Debt settlement.
-- **Token consumption point:** Settlement consumes that token only when it
-  publishes the holder as released, after Debt completion has been attempted.
-- **Crash windows:** A crash after admission, during Git reconciliation, after
-  Debt completion but before holder release, or while holder release is being
-  published is resolved by re-observing current Contract, Debt, and Git facts.
-  A still-held matching holder means replay is owed; a released holder means
-  token consumption succeeded. A publication that remains held is observable
-  lag for a later replay.
-- **Cleanup requirement:** The holder release is the final Settlement action;
-  Debt-scoped coordination is closed, and terminal managed-worktree removal
-  waits until this invocation's settlement opportunity has ended. Failed
-  release publication retains the held token for replay.
+- **Token consumption point:** Only publication of the released holder consumes
+  the token, after confirmed Debt completion or a judgment that it is already
+  done. An uncertain publication is confirmed only by exact durable readback
+  of that release, under an independent bound even if the caller cancelled.
+  Recovery selects the original holder in one fresh private-state observation
+  and judges its canonical bytes only after the finite Git reads succeed. A
+  failed read supplies a diagnostic and no release proof. Failure to prove
+  release grants no permission to resubmit the old offer.
+- **Crash windows:** An interruption after admission, during Git reconciliation,
+  after Debt completion, or during release is recovered from the durable
+  acceptance and fresh holder authority. Only a still-held matching holder
+  permits replay, and the Debt's current state is judged again. A released
+  holder or a superseding owner grants no replay to the old Contract.
+- **Cleanup requirement:** Holder release is the final Settlement action.
+  Publication custody and Debt-scoped coordination are retired before terminal
+  managed-worktree removal. A Debt fence close failure remains observable
+  alongside a failed admission or settlement. Cleanup preserves the primary
+  cause and any completed work.
 - **Post-consumption failure:** Coordination cleanup, terminal cleanup, or
   result projection may still report invocation lag after release. Such a
   failure cannot recreate a holder or repeat the settled Debt effect; a

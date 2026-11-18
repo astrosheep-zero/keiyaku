@@ -1,29 +1,21 @@
 import { contractIdSchema } from "../git/identity.js";
 import { z } from "zod";
-import { debtIdSchema } from "../debt/identity.js";
-import { type ContractId, type ContractState } from "../core/facts/types.js";
-import { contractJournal, observeContractsAt } from "../git/observe.js";
+import { debtIdSchema, type DebtId } from "../debt/identity.js";
+import type { ContractId, ContractState } from "../core/facts/types.js";
 import {
-  appendPrivateStateSeatClose,
   withPrivateStatePublicationSeat,
+  isPrivateStateSeatContention,
   privateStateSeatCloseLagSchema,
   type PrivateStateSeatCloseLag,
 } from "../git/private-state-seat.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import type { Effect } from "../git/reconcile.js";
 import { GitPlumbingError, type GitRepository } from "../git/process.js";
-import { SqliteTransactionLockError } from "../coordination/sqlite-transaction-lock.js";
+import { SqliteTransactionLockError, type HeldSqliteTransactionLock } from "../coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { settleDebt, type SettledDebtResult } from "../debt/operations.js";
-import { type DebtId } from "../debt/identity.js";
-import {
-  publishDebtHolderRelease,
-  readDebtHolderProjection,
-  debtHolderObservationSelection,
-  type DebtHolder,
-} from "./holder.js";
+import { observeDebtHolder, publishDebtHolderRelease, type DebtHolder } from "./holder.js";
 import { acquireDebtSettlementFence } from "./fence.js";
-import { World, type WorldRoot } from "../world.js";
+import { World } from "../world.js";
 
 export const settlementActionSchema = z
   .object({ kind: z.literal("debt"), debtId: debtIdSchema, action: z.literal("done") })
@@ -58,257 +50,115 @@ type SettlementProgress = Readonly<{
   recordSettlement(contractId: ContractId, report: SettlementReport): void;
 }>;
 
-function operational(error: unknown): boolean {
+function operational(error: unknown): error is Error {
   return (
     error instanceof Error &&
-    !(error instanceof AuthorityCorruptionError) &&
+    !(
+      error instanceof AuthorityCorruptionError ||
+      error instanceof TypeError ||
+      error instanceof RangeError ||
+      error instanceof ReferenceError ||
+      error instanceof SyntaxError
+    ) &&
     (error instanceof GitPlumbingError ||
       error instanceof SqliteTransactionLockError ||
       ("code" in error && typeof error.code === "string" && /^E[A-Z0-9]+$/u.test(error.code)))
   );
 }
 
-export type SettlementInput = Readonly<{
-  repository: GitRepository;
-  channel: GitDecodeChannel;
-  state: ContractState | null;
-  effects: readonly Effect[];
-  progress?: SettlementProgress;
-}>;
-
-function diagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function debtFailure(
-  result: Exclude<Awaited<ReturnType<typeof settleDebt>>, { kind: "changed" | "unchanged" }>,
-): string {
+function debtFailure(result: Exclude<SettledDebtResult, { kind: "changed" | "unchanged" }>): string {
   return result.kind === "retry"
     ? `Debt settlement requires retry: ${result.reason}`
     : `Debt settlement refused: ${result.reason}${"state" in result ? ` (${result.state})` : ""}`;
 }
 
-type SettleDebtsInput = Readonly<{
-  repository: GitRepository;
-  channel: GitDecodeChannel;
-  candidate: ContractState;
+function isHeldFor(holder: DebtHolder | undefined, debtId: DebtId): holder is DebtHolder {
+  return holder?.disposition === "held" && holder.debtId === debtId;
+}
+
+type SettlementEvidence = {
   actions: SettlementAction[];
   lags: SettlementLag[];
-  seatClose: PrivateStateSeatCloseLag[];
-  progress?: SettlementProgress;
-}>;
+  seatClose?: readonly PrivateStateSeatCloseLag[];
+};
 
-function recordLag(input: Pick<SettleDebtsInput, "candidate" | "lags" | "progress">, lag: SettlementLag): void {
-  input.lags.push(lag);
-  input.progress?.recordSettlement(input.candidate.id, { actions: [], lags: [lag] });
-}
-function recordAction(
-  input: Pick<SettleDebtsInput, "candidate" | "actions" | "progress">,
-  action: SettlementAction,
-): void {
-  input.actions.push(action);
-  input.progress?.recordSettlement(input.candidate.id, { actions: [action], lags: [] });
-}
+export async function settle(
+  input: Readonly<{
+    repository: GitRepository;
+    channel: GitDecodeChannel;
+    state: ContractState | null;
+    progress?: SettlementProgress;
+  }>,
+): Promise<SettlementReport> {
+  const report: SettlementEvidence = { actions: [], lags: [] };
+  const { state, channel, progress } = input;
+  if (state?.terminal?.kind !== "claimed") return report;
 
-function settleFailure(
-  candidate: ContractState,
-  surface: SettlementLag["surface"],
-  diagnostic: string,
-  debtId?: DebtId,
-): SettlementLag {
-  return {
-    kind: "settlement-failed",
-    surface,
-    contractId: candidate.id,
-    ...(debtId === undefined ? {} : { debtId }),
-    diagnostic,
+  const contractId = state.id;
+  const repository = { ...input.repository, effectiveCwd: input.repository.primaryWorktree };
+  const observe = () => observeDebtHolder(repository, channel, contractId);
+  let coordinate: Pick<SettlementLag, "surface" | "debtId"> = { surface: "debt-holder" };
+  const recordLag = (diagnostic: string, at = coordinate): void => {
+    const lag: SettlementLag = { kind: "settlement-failed", contractId, ...at, diagnostic };
+    report.lags.push(lag);
+    progress?.recordSettlement(contractId, { actions: [], lags: [lag] });
   };
-}
 
-async function observeApplicableHolder(
-  input: Pick<SettleDebtsInput, "repository" | "channel" | "candidate" | "lags" | "progress">,
-): Promise<DebtHolder | null> {
-  const { repository, channel, candidate } = input;
+  let fence: HeldSqliteTransactionLock | undefined;
+  let closeCoordinate = coordinate;
+  let exceptional = false;
   try {
-    const observation = await observeContractsAt(repository, channel, [candidate.id], debtHolderObservationSelection());
-    if (contractJournal(observation.journals, candidate.id).state?.terminal?.kind !== "claimed") return null;
-    const holder = (await readDebtHolderProjection(channel, observation.epoch)).get(candidate.id);
-    return holder?.disposition === "held" ? holder : null;
-  } catch (error) {
-    if (!operational(error)) throw error;
-    recordLag(input, settleFailure(candidate, "debt-holder", diagnostic(error)));
-    return null;
-  }
-}
-
-async function completeHeldDebt(
-  input: Pick<SettleDebtsInput, "repository" | "candidate" | "actions" | "lags" | "progress"> & { debtId: DebtId },
-): Promise<boolean> {
-  const { repository, candidate, debtId } = input;
-  let world: WorldRoot;
-  try {
-    world = await World.at(repository.primaryWorktree);
-  } catch (error) {
-    if (!operational(error)) throw error;
-    recordLag(input, settleFailure(candidate, "debt", diagnostic(error), debtId));
-    return false;
-  }
-  let result: SettledDebtResult;
-  try {
-    result = await settleDebt(world, debtId);
-  } catch (error) {
-    if (!operational(error)) throw error;
-    recordLag(input, settleFailure(candidate, "debt", diagnostic(error), debtId));
-    return false;
-  }
-  if (result.kind === "changed") recordAction(input, { kind: "debt", debtId, action: "done" });
-  if (result.kind === "changed" && result.cleanup !== undefined) {
-    recordLag(input, settleFailure(candidate, "debt", result.cleanup, debtId));
-  }
-  if (result.kind === "changed" || result.kind === "unchanged") return true;
-  recordLag(input, settleFailure(candidate, "debt", debtFailure(result), debtId));
-  return false;
-}
-
-async function releaseHeldDebtHolder(
-  input: Pick<SettleDebtsInput, "repository" | "channel" | "candidate" | "lags" | "seatClose" | "progress"> & {
-    debtId: DebtId;
-  },
-): Promise<"released" | "held" | "inert"> {
-  const { repository, channel, candidate, seatClose, debtId } = input;
-  try {
-    const outcome = await withPrivateStatePublicationSeat(repository, async (seat) => {
-      const observation = await observeContractsAt(
-        repository,
-        channel,
-        [candidate.id],
-        debtHolderObservationSelection(),
-      );
-      if (contractJournal(observation.journals, candidate.id).state?.terminal?.kind !== "claimed")
-        return "inert" as const;
-      const holder = (await readDebtHolderProjection(channel, observation.epoch)).get(candidate.id);
-      if (holder?.disposition !== "held" || holder.debtId !== debtId) return "inert" as const;
-      const publication = await publishDebtHolderRelease(repository, channel, observation.epoch, holder, seat);
-      if (publication.kind === "non-published") {
-        recordLag(
-          input,
-          settleFailure(
-            candidate,
-            "debt-holder",
-            `Debt holder release requires retry: ${publication.diagnostic}`,
-            debtId,
-          ),
-        );
-        return "held" as const;
-      }
-      return "released" as const;
-    });
-    if (outcome.closeLag !== undefined) {
-      seatClose.push(...appendPrivateStateSeatClose(undefined, outcome.closeLag));
-      input.progress?.recordSettlement(candidate.id, { actions: [], lags: [], seatClose: [outcome.closeLag] });
-    }
-    return outcome.value;
-  } catch (error) {
-    if (!operational(error)) throw error;
-    recordLag(input, settleFailure(candidate, "debt-holder", diagnostic(error), debtId));
-    return "held";
-  }
-}
-
-async function settleDebts(input: SettleDebtsInput): Promise<boolean> {
-  const { repository, channel, candidate, lags, seatClose } = input;
-  const hint = await observeApplicableHolder(input);
-  if (hint === null) return false;
-  const debtId = hint.debtId;
-  let fence;
-  try {
+    const { holder: hint } = await observe();
+    if (hint?.disposition !== "held") return report;
+    const debtId = hint.debtId;
+    coordinate = { surface: "debt", debtId };
     fence = await acquireDebtSettlementFence(repository, debtId);
-  } catch (error) {
-    if (!operational(error)) throw error;
-    recordLag(input, settleFailure(candidate, "debt", diagnostic(error), debtId));
-    return true;
-  }
-  let failure: { error: unknown } | undefined;
-  let debtSettled = false;
-  let holderDisposition: "released" | "held" | "inert" | null = null;
-  try {
-    const holder = await observeApplicableHolder(input);
-    if (holder === null || holder.debtId !== debtId) return false;
-    debtSettled = await completeHeldDebt({ ...input, debtId });
-    if (!debtSettled) return true;
-    holderDisposition = await releaseHeldDebtHolder({
+    closeCoordinate = { surface: "debt-holder", debtId };
+    coordinate = { surface: "debt-holder" };
+    const { holder: current } = await observe();
+    if (!isHeldFor(current, debtId)) return report;
+    coordinate = { surface: "debt", debtId };
+    const result = await settleDebt(await World.at(repository.primaryWorktree), debtId);
+    if (result.kind === "changed") {
+      const action: SettlementAction = { kind: "debt", debtId, action: "done" };
+      report.actions.push(action);
+      progress?.recordSettlement(contractId, { actions: [action], lags: [] });
+      if (result.cleanup !== undefined) recordLag(result.cleanup);
+    } else if (result.kind !== "unchanged") {
+      recordLag(debtFailure(result));
+      return report;
+    }
+
+    coordinate = closeCoordinate;
+    const onCloseLag = (lag: PrivateStateSeatCloseLag): void => {
+      report.seatClose = [lag];
+      progress?.recordSettlement(contractId, { actions: [], lags: [], seatClose: report.seatClose });
+    };
+    const outcome = await withPrivateStatePublicationSeat(
       repository,
-      channel,
-      candidate,
-      debtId,
-      lags,
-      seatClose,
-      ...(input.progress === undefined ? {} : { progress: input.progress }),
-    });
-    return true;
+      async (seat) => {
+        const { snapshot, holder } = await observe();
+        if (!isHeldFor(holder, debtId)) return;
+        const failure = await publishDebtHolderRelease(repository, snapshot, holder, seat);
+        if (failure !== undefined) recordLag(`Debt holder release requires retry: ${failure}`);
+      },
+      { onCloseLag },
+    );
+    if (outcome.closeLag !== undefined) onCloseLag(outcome.closeLag);
   } catch (error) {
-    failure = { error };
-    throw error;
+    if (isPrivateStateSeatContention(error)) recordLag(`Debt holder release requires retry: ${error.message}`);
+    else if (operational(error)) recordLag(error.message);
+    else {
+      exceptional = true;
+      throw error;
+    }
   } finally {
     try {
-      await fence.close();
+      fence?.close();
     } catch (error) {
-      if (!operational(error)) {
-        if (failure === undefined) throw error;
-      } else if (!debtSettled && failure === undefined) throw error;
-      // Post-release fence teardown is custodial residue, not an owed holder publication.
-      if (holderDisposition !== "released") {
-        recordLag(input, settleFailure(candidate, "debt-holder", diagnostic(error), debtId));
-      }
+      if (operational(error)) recordLag(error.message, closeCoordinate);
+      else if (!exceptional) throw error;
     }
   }
-}
-
-function settlementReport(
-  actions: readonly SettlementAction[],
-  lags: readonly SettlementLag[],
-  seatClose: readonly PrivateStateSeatCloseLag[],
-): SettlementReport {
-  return {
-    actions,
-    lags,
-    ...(seatClose.length === 0 ? {} : { seatClose }),
-  };
-}
-
-async function settleObserved(input: SettlementInput): Promise<SettlementReport> {
-  if (input.state === null) return { actions: [], lags: [] };
-  const actions: SettlementAction[] = [],
-    lags: SettlementLag[] = [],
-    seatClose: PrivateStateSeatCloseLag[] = [];
-  const candidate = input.state;
-  if (candidate.terminal?.kind === "claimed") {
-    try {
-      await settleDebts({
-        repository: input.repository,
-        channel: input.channel,
-        candidate,
-        actions,
-        lags,
-        seatClose,
-        ...(input.progress === undefined ? {} : { progress: input.progress }),
-      });
-    } catch (error) {
-      if (!operational(error)) throw error;
-      recordLag(
-        { candidate, lags, ...(input.progress === undefined ? {} : { progress: input.progress }) },
-        settleFailure(candidate, "debt", diagnostic(error)),
-      );
-    }
-  }
-  return settlementReport(actions, lags, seatClose);
-}
-
-function onPrimaryWorktree(repository: GitRepository): GitRepository {
-  return { ...repository, effectiveCwd: repository.primaryWorktree };
-}
-
-export async function settle(input: SettlementInput): Promise<SettlementReport> {
-  const repository = onPrimaryWorktree(input.repository);
-  return await settleObserved({ ...input, repository });
+  return report;
 }

@@ -64,7 +64,12 @@ deadline; a timed-out wait is typed contention, not a broken lock. The seat is
 not reentrant: same-context reacquisition is an invariant failure, not a wait.
 The seat creates no queue, fairness promise, daemon, extra retry
 budget, per-Contract ref, or lock-derived success, and cannot protect against
-uncooperating external writers.
+uncooperating external writers. Seat retirement reports an independent close
+failure and preserves the primary category and full cause of failed work.
+The default failure carries both when the caller has no separate evidence sink.
+After confirmed publication, an operational lock-close failure is cleanup lag;
+programming failures and corrupt authority remain exceptional. None changes
+what was already durably published.
 
 Git admission publishes a complete decision offer atomically. Opaque companion
 updates may accompany a journal admission, but Git neither decodes them nor

@@ -4,14 +4,20 @@ import type { TreeUpdate } from "../core/facts/offer.js";
 import { contractId, type ContractId } from "../core/facts/types.js";
 import {
   GIT_REF,
+  readBlob,
+  readGitPaths,
   updateGitTree,
   updateRefsAtomically,
   writeBlob,
   writeStateCommit,
   type GitSnapshot,
 } from "../git/repository.js";
-import { confirmPrivateStatePublication, type PrivateStatePublicationSeat } from "../git/private-state-seat.js";
-import type { GitRepository } from "../git/process.js";
+import {
+  confirmPrivateStatePublication,
+  privateStatePublicationRetirementFailure,
+  type PrivateStatePublicationSeat,
+} from "../git/private-state-seat.js";
+import { GitPlumbingError, type GitRepository } from "../git/process.js";
 import {
   readBlobResults,
   withGitTargetedReadObservation,
@@ -100,9 +106,11 @@ function decodeHolder(path: string, bytes: Uint8Array): DebtHolder {
 
 export type DebtHolderProjection = ReadonlyMap<ContractId, DebtHolder>;
 
-function projectDebtHolders(holders: readonly DebtHolder[]): DebtHolderProjection {
+export async function readDebtHolderProjectionAt(
+  observation: Pick<GitReadObservation, "snapshot" | "readBlobs">,
+): Promise<DebtHolderProjection> {
   const projection = new Map<ContractId, DebtHolder>();
-  for (const holder of holders) {
+  for (const holder of await readDebtHoldersAt(observation.snapshot, observation.readBlobs)) {
     if (projection.has(holder.contractId)) {
       corruption(`Contract has multiple current DebtHolders: ${holder.contractId}`);
     }
@@ -134,38 +142,29 @@ function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function finishDebtHolderAdmission<T extends AdmissionOutcome>(
-  debtId: DebtId,
-  result: T,
-  close: () => void,
-): DebtHolderAdmission<T> {
-  try {
-    close();
-    return { kind: "completed", result };
-  } catch (error) {
-    if (result.kind !== "accepted") throw error;
-    return { kind: "accepted-release-failed", result, debtId, diagnostic: detail(error) };
-  }
-}
-
 export async function admitWithDebtHolderFence<T extends AdmissionOutcome>(
   repository: GitRepository,
   debtId: DebtId,
   action: () => T | Promise<T>,
 ): Promise<DebtHolderAdmission<T>> {
   const held = await acquireDebtSettlementFence(repository, debtId);
-  let result: T;
+  let outcome: { result: T } | { error: unknown };
   try {
-    result = await action();
+    outcome = { result: await action() };
   } catch (error) {
-    try {
-      held.close();
-    } catch {
-      /* The operation failure remains decisive before admission. */
-    }
-    throw error;
+    outcome = { error };
   }
-  return finishDebtHolderAdmission(debtId, result, () => held.close());
+  try {
+    held.close();
+  } catch (retirement) {
+    if ("error" in outcome) {
+      throw privateStatePublicationRetirementFailure(outcome.error, retirement, "Debt holder fence", repository.signal);
+    }
+    if (outcome.result.kind !== "accepted") throw retirement;
+    return { kind: "accepted-release-failed", result: outcome.result, debtId, diagnostic: detail(retirement) };
+  }
+  if ("error" in outcome) throw outcome.error;
+  return { kind: "completed", result: outcome.result };
 }
 
 export async function releaseDebtHolder(
@@ -173,97 +172,68 @@ export async function releaseDebtHolder(
   epoch: GitSnapshot,
   owner: ContractId,
 ): Promise<TreeUpdate | null> {
-  const current = (await readDebtHolderProjection(channel, epoch)).get(owner) ?? null;
-  return current === null || current.disposition !== "held" ? null : update({ ...current, disposition: "released" });
+  const projection = await readDebtHolderProjectionAt({
+    snapshot: epoch,
+    readBlobs: (oids) => readBlobResults(channel, oids),
+  });
+  const holder = projection.get(owner);
+  return holder?.disposition === "held" ? update({ ...holder, disposition: "released" }) : null;
 }
 
-type DebtHolderReleasePublication =
-  | Readonly<{ kind: "released" }>
-  | Readonly<{ kind: "non-published"; diagnostic: string }>;
+export function observeDebtHolder(repository: GitRepository, channel: GitDecodeChannel, owner: ContractId) {
+  return withGitTargetedReadObservation(repository, channel, debtHolderObservationSelection(), async (observation) => ({
+    snapshot: observation.snapshot,
+    holder: (await readDebtHolderProjectionAt(observation)).get(owner),
+  }));
+}
 
-async function releasedHolderIsCurrent(
+async function confirmRecoveredRelease(
   repository: GitRepository,
-  channel: GitDecodeChannel,
-  owner: ContractId,
-  expected: Uint8Array,
-): Promise<boolean> {
-  const current = (await observeDebtHolderProjection(repository, channel)).get(owner) ?? null;
-  return current?.disposition === "released" && Buffer.from(canonicalBytes(current)).equals(expected);
+  release: TreeUpdate,
+  seat: PrivateStatePublicationSeat,
+): Promise<string | undefined> {
+  const recovery = { ...repository, signal: AbortSignal.timeout(5_000) };
+  try {
+    const entry = (await readGitPaths(recovery, [release.path])).paths.get(release.path);
+    if (entry !== undefined) {
+      if (entry.type !== "blob") corruption(`DebtHolder path is not a blob: ${release.path}`);
+      const bytes = await readBlob(recovery, entry.oid);
+      decodeHolder(release.path, bytes);
+      if (entry.mode === "100644" && bytes.equals(release.bytes)) {
+        confirmPrivateStatePublication(seat);
+        return undefined;
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError)) throw error;
+    return error.status === null ? error.message : `${error.message.trimEnd()} (exit ${error.status})`;
+  }
+  return "Debt holder release publication state is unknown";
 }
 
-/** Publish the released holder against the same frozen observation that decided the release. */
+/** Publish exactly the held association proved in this seat's frozen epoch. */
 export async function publishDebtHolderRelease(
   repository: GitRepository,
-  channel: GitDecodeChannel,
-  epoch: GitSnapshot,
+  snapshot: GitSnapshot,
   holder: DebtHolder,
   seat: PrivateStatePublicationSeat,
-): Promise<DebtHolderReleasePublication> {
+): Promise<string | undefined> {
   const release = update({ ...holder, disposition: "released" });
-  const tree = await updateGitTree(
-    repository,
-    epoch.tree,
-    new Map([[release.path, { oid: await writeBlob(repository, release.bytes) }]]),
-  );
+  const oid = await writeBlob(repository, release.bytes);
+  const tree = await updateGitTree(repository, snapshot.tree, new Map([[release.path, { oid }]]));
   const commit = await writeStateCommit({
     repository,
     tree,
-    parent: epoch.commit,
+    parent: snapshot.commit,
     message: `release held Debt completion: ${holder.contractId}`,
   });
   const publication = await updateRefsAtomically(repository, [
-    {
-      ref: GIT_REF,
-      newOid: commit,
-      expectedOid: epoch.commit,
-    },
+    { ref: GIT_REF, newOid: commit, expectedOid: snapshot.commit },
   ]);
-  if (publication.kind === "published") {
-    confirmPrivateStatePublication(seat);
-    return { kind: "released" };
-  }
-  if (
-    publication.kind === "unknown" &&
-    (await releasedHolderIsCurrent(repository, channel, holder.contractId, release.bytes))
-  ) {
-    confirmPrivateStatePublication(seat);
-    return { kind: "released" };
-  }
-  return {
-    kind: "non-published",
-    diagnostic:
-      publication.kind === "non-published"
-        ? detail(publication.error)
-        : "Debt holder release publication state is unknown",
-  };
-}
-
-export async function readDebtHolderProjection(
-  channel: GitDecodeChannel,
-  epoch: GitSnapshot,
-): Promise<DebtHolderProjection> {
-  return projectDebtHolders(await readDebtHoldersAt(epoch, (oids) => readBlobResults(channel, oids)));
-}
-
-function observeDebtHolderProjection(
-  repository: GitRepository,
-  channel: GitDecodeChannel,
-): Promise<DebtHolderProjection> {
-  return withGitTargetedReadObservation(
-    repository,
-    channel,
-    debtHolderObservationSelection(),
-    readDebtHolderProjectionAt,
-  );
-}
-
-async function heldDebtForContract(
-  repository: GitRepository,
-  channel: GitDecodeChannel,
-  owner: ContractId,
-): Promise<DebtId | null> {
-  const holder = (await observeDebtHolderProjection(repository, channel)).get(owner) ?? null;
-  return holder?.disposition === "held" ? holder.debtId : null;
+  if (publication.kind === "non-published") return detail(publication.error);
+  if (publication.kind === "unknown") return confirmRecoveredRelease(repository, release, seat);
+  confirmPrivateStatePublication(seat);
+  return undefined;
 }
 
 export async function releaseDebtHolderWithFence<T extends AdmissionOutcome>(
@@ -272,10 +242,10 @@ export async function releaseDebtHolderWithFence<T extends AdmissionOutcome>(
   owner: ContractId,
   action: () => T | Promise<T>,
 ): Promise<DebtHolderAdmission<T>> {
-  const debtId = await heldDebtForContract(repository, channel, owner);
-  return debtId === null
-    ? { kind: "completed", result: await action() }
-    : admitWithDebtHolderFence(repository, debtId, action);
+  const { holder } = await observeDebtHolder(repository, channel, owner);
+  return holder?.disposition === "held"
+    ? admitWithDebtHolderFence(repository, holder.debtId, action)
+    : { kind: "completed", result: await action() };
 }
 
 export async function readDebtHoldersAt(
@@ -302,8 +272,4 @@ export async function readDebtHoldersAt(
     holders.push(holder);
   }
   return holders.sort((left, right) => Buffer.compare(Buffer.from(left.debtId), Buffer.from(right.debtId)));
-}
-
-export async function readDebtHolderProjectionAt(observation: GitReadObservation): Promise<DebtHolderProjection> {
-  return projectDebtHolders(await readDebtHoldersAt(observation.snapshot, observation.readBlobs));
 }

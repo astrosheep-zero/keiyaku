@@ -20,6 +20,7 @@ import { captureLocalContractComposition } from "../src/library/contract-setting
 import { scopeForRepo } from "../src/library/repo.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { executionStop } from "../src/protocol/progress.js";
+import { SqliteTransactionLockError } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractId } from "../src/core/facts/types.js";
 import { bind, commitCandidate, repositoryWithMain, present, accepted, document } from "./support/library-verbs.js";
 
@@ -76,7 +77,7 @@ test("accepted delivery preserves its identities and required retirement failure
     onPrivateStateSeatClose: () => {
       if (!first) return;
       first = false;
-      throw new Error("publication retirement failed");
+      throw new SqliteTransactionLockError("publication retirement failed", "release-failed");
     },
   }, captureLocalContractComposition());
   const result = accepted(await native.deliver());

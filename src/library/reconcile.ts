@@ -128,7 +128,6 @@ async function reconcileContractWork(input: ReconcileOptions & { contractId: Con
     repository: scope,
     channel,
     state: repair.state,
-    effects: repair.report.effects,
     progress: accumulator,
   });
   if (repair.state.terminal === null) return;

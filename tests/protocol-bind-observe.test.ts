@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { AuthorityCorruptionError, KeiyakuError, Keis, Repo } from "../src/index.js";
+import { SqliteTransactionLockError } from "../src/coordination/sqlite-transaction-lock.js";
 import { prepareDelivery } from "../src/protocol/deliver.js";
 import { admit } from "../src/git/admission.js";
 import {
@@ -28,6 +29,7 @@ import {
 } from "../src/git/observe.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { executeGit } from "../src/git/process.js";
+import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
 import { contractJournalPath } from "../src/git/identity.js";
 import { decideAbandon } from "../src/core/verbs/abandon.js";
 import { bindOperation as rawBindOperation } from "../src/protocol/bind.js";
@@ -55,6 +57,7 @@ import {
   snapshotGitRepository,
   type TestGitRepository,
   withGitShim,
+  withSqliteCloseFailure,
 } from "./support/git.js";
 
 const repositoryAt = cachedRepositoryAt;
@@ -160,7 +163,33 @@ async function boundObservedContract(repository: TestGitRepository) {
   return { bound, id, git };
 }
 
-// Each case owns its repository, fault injector and cleanup; no process-global mocks.
+test("ordinary protocol bind preserves both admission and SQLite retirement failures", async () => {
+  const git = await repositoryAt(repositoryWithHead().path);
+  const lock = privateStatePublicationSeatPath(git);
+  const primary = new AuthorityCorruptionError("cannot decode bind companion", {
+    cause: new SyntaxError("malformed companion bytes"),
+  });
+  const closeFailure = new Error("independent protocol seat close failure");
+  await withSqliteCloseFailure(
+    (path) => (path === lock ? closeFailure : undefined),
+    () => assert.rejects(
+      bindOperation({
+        scope: git,
+        terms: terms([]),
+        decorateOffer() { throw primary; },
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof KeiyakuError && error.category === primary.category);
+        assert.equal(error.cause, primary);
+        assert.ok("retirement" in error && error.retirement instanceof SqliteTransactionLockError);
+        assert.equal(error.retirement.cause, closeFailure);
+        return true;
+      },
+    ),
+  );
+});
+
+// Each concurrent case owns its repository, fault injector and cleanup.
 describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
   test("observes a targetless detached bind snapshot", async () => {
     const repository = repositoryWithHead();
@@ -190,7 +219,7 @@ describe("protocol-bind-observe isolated fixtures", { concurrency: 3 }, () => {
     const git = {
       ...(await repositoryAt(repository.path)),
       onPrivateStateSeatClose: () => {
-        throw new Error("seat close failed after publication");
+        throw new SqliteTransactionLockError("seat close failed after publication", "release-failed");
       },
     };
     const bound = await bindOperation({

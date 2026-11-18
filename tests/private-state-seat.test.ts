@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import {
+  confirmPrivateStatePublication,
   GitPrivateStateSeatContentionError,
   withPrivateStatePublicationSeat,
 } from "../src/git/private-state-seat.js";
@@ -39,6 +40,20 @@ test("private-state seat acquisition times out without breaking the holder", asy
   assert.ok(performance.now() - started < 1_000);
   releaseHolder?.();
   assert.equal((await holder).value, "held");
+});
+
+test("a close bug after confirmed publication stays exceptional", async () => {
+  const closeBug = new TypeError("broken seat retirement");
+  const repository = {
+    ...seatRepository(),
+    onPrivateStateSeatClose() {
+      throw closeBug;
+    },
+  };
+  await assert.rejects(
+    withPrivateStatePublicationSeat(repository, (seat) => confirmPrivateStatePublication(seat)),
+    (error) => error === closeBug,
+  );
 });
 
 test("same-context private-state seat reentry fails immediately", async () => {

@@ -7,7 +7,7 @@ import { performance } from "node:perf_hooks";
 import test from "node:test";
 import { moveAlias, readAliases } from "../src/alias/index.js";
 import { parseAkumaId, type AkumaId } from "../src/akuma/identity.js";
-import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
+import { acquireSqliteTransactionLock, SqliteTransactionLockError } from "../src/coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
 import { observeDispatchAssociations, publishDispatch, readDispatch, readDispatches } from "../src/dispatch/index.js";
@@ -80,7 +80,7 @@ test("confirmed private-state seat close failure remains lag on a dispatched ass
   const repository = {
     ...(await repositoryAt(raw.path)),
     onPrivateStateSeatClose: () => {
-      throw new Error("seat close failed after publication");
+      throw new SqliteTransactionLockError("seat close failed after publication", "release-failed");
     },
   };
   const akuma = parseAkumaId("aku/worker/1234abcd").id;
