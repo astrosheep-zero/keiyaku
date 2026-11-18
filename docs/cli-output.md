@@ -198,10 +198,16 @@ One Akuma action family covers spawns, forks, tells, and kills, including plural
 and partial outcomes. Receipts lead with the action verdict and complete Akuma
 identity; aliases supplement identity. Association, source, execution directory,
 submitted input, and diagnostics remain distinct supporting facts. No receipt
-claims success over a failed stage or pending confirmation. A submitted Tell
-names its exact Turn once and distinguishes start from steering without repeating
-the input or claiming consumption, an answer, or liveness. Failed or stopped
-actions preserve known admissions and their cause. Kill preserves
+claims success over a failed stage or pending confirmation. An ordinary confirmed
+Tell leads with the selector the caller addressed (its alias alone when supplied,
+otherwise the complete canonical identity) and names its settled start or
+steering action with its exact Turn once. It does not repeat the Tell verb, a
+second identity, or the submitted input. Additional interrupt evidence stays
+beneath. Pending, failed, and exceptional Tells remain evidence-bearing rather
+than compact: they keep their existing identity, outcome, cause, and whatever
+submitted input that receipt already shows. No Tell receipt claims consumption,
+an answer, or liveness. Failed or stopped actions preserve known admissions and
+their cause. Kill preserves
 each member's native outcome in frozen selection order instead of collapsing
 partial failures into one verdict.
 

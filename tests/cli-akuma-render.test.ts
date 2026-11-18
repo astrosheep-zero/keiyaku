@@ -715,34 +715,32 @@ test("every action receipt leads with a verdict and subject, then indented evide
 
 test("Tell and kill keep pending, failure, and plural evidence inside the action hierarchy", () => {
   const context = { columns: 100, color: false };
-  assert.deepEqual(
-    tellText(compactTell(), "go", undefined, context).split("\n"),
-    ["✓ told aku/worker/1234abcd — go"],
-    "the submitted payload appears once inline with its delivery verdict",
+  const started = compactTell({ action: { kind: "started", historyId: "turn/17" } });
+  const steering = compactTell({ action: { kind: "steering", historyId: "turn/17" } });
+  assert.equal(
+    tellText(started, "go", "@fleet-desk", context),
+    "✓ @fleet-desk started turn/17",
+    "a confirmed launch names the caller's alias and its exact Turn on one line",
   );
   assert.equal(
-    tellText(compactTell(), "  go  ", "@tired", context),
-    "✓ told aku/worker/1234abcd (@tired) — go",
-    "whitespace folds, the alias stays a parenthetical supplement, and no quote is added",
+    tellText(steering, "go", "@fleet-desk", context),
+    "✓ @fleet-desk steered turn/17",
+    "a confirmed live submission reads in past tense at the same selector position",
   );
   assert.equal(
-    tellText(compactTell(), '  he said "wait"\n', undefined, context),
-    '✓ told aku/worker/1234abcd — he said "wait"',
-    "literal source quotes survive and folding invents no others",
+    tellText(started, "go", undefined, context),
+    "✓ aku/worker/1234abcd started turn/17",
+    "without an alias the complete canonical identity occupies the same position",
   );
   assert.equal(
-    tellText(compactTell(), "   ", undefined, context),
-    "✓ told aku/worker/1234abcd",
-    "an empty input adds no invented text or trailing separator",
+    tellText(started, '  he said "wait"\n', "@fleet-desk", context),
+    "✓ @fleet-desk started turn/17",
+    "a confirmed Tell never echoes the submitted input or a second identity",
   );
-  const cramped = tellText(compactTell(), "go", undefined, {
-    columns: 12,
-    color: false,
-  });
   assert.equal(
-    cramped,
-    "✓ told aku/worker/1234abcd — …",
-    "a verdict and identity wider than the terminal stay whole and the input keeps its visible ellipsis",
+    tellText(started, "go", undefined, context, true),
+    "✓ tell aku/worker/1234abcd\n  started turn/17",
+    "the exceptional projection with an action keeps its old detail",
   );
   assert.deepEqual(
     tellText(compactTell({ wake: { kind: "pending" } }), "go", undefined, context).split("\n"),

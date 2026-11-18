@@ -556,6 +556,7 @@ export function tellControlLines(
 }
 
 /**
+ * A confirmed ordinary Tell leads with the selector the caller addressed and its settled action.
  * Only unresolved or failed Tell receipts need the submitted payload preview.
  */
 export function tellText(
@@ -563,7 +564,21 @@ export function tellText(
   prompt: string,
   alias: string | undefined,
   context: TextRenderContext,
+  exceptional = false,
 ): string {
+  const action =
+    !exceptional &&
+    result.kind === "admitted" &&
+    result.wake === undefined &&
+    result.input === undefined &&
+    result.interrupt === undefined
+      ? result.action
+      : undefined;
+  if (action !== undefined) {
+    const selector = alias ?? result.akumaId;
+    const settled = action.kind === "started" ? "started" : "steered";
+    return `✓ ${selector} ${settled} ${action.historyId}`;
+  }
   const wake = result.wake;
   const mark = result.kind === "failed" ? "!" : wake?.kind === "pending" ? "⧗" : "✓";
   const verb = result.kind === "failed" || wake?.kind === "pending" || result.action !== undefined ? "tell" : "told";

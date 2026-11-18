@@ -108,6 +108,7 @@ function actionFailure(
         "prompt" in input && typeof input.prompt === "string" ? input.prompt : "",
         undefined,
         context,
+        true,
       ),
       `  input ${failure.tell.tellId}`,
       `  reason ${safeText(failure.diagnostic)}`,

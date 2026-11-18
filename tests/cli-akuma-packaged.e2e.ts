@@ -269,7 +269,12 @@ test(
         /● aku\/worker\/[0-9a-f]{8}(?: \(@notes\))? — running/u,
         "the snapshot states the observed life",
       );
-      assert.doesNotMatch(single.stdout, /retry note|attempt \d+/u, "single waits omit narration and settled speech");
+      assert.match(single.stdout, /^deadline$/mu, "a running single wait reports its deadline");
+      assert.match(
+        single.stdout,
+        /retry note|attempt \d+/u,
+        "a running deadline retains bounded recent fixture activity",
+      );
       await runPackagedCli(["-C", world, "kill", "@notes"], { cwd: world, env });
 
       let detachedStarted = false;
@@ -313,8 +318,18 @@ test(
       assert.match(answerWait.stdout, /^completed$/mu, "the opening work completes");
       assert.match(
         answerWait.stdout,
-        /✓ aku\/finisher\/[0-9a-f]{8} — the answer/u,
-        "the wait snapshot carries the settled answer",
+        new RegExp(`^✓ ${finisherId!} — answered$`, "mu"),
+        "the wait snapshot carries the settled answered outcome",
+      );
+      assert.match(
+        answerWait.stdout,
+        /^[ \t]*turn\/[1-9][0-9]* · answered$/mu,
+        "the wait snapshot names its exact answered Turn",
+      );
+      assert.match(
+        answerWait.stdout,
+        /^[ \t]*the answer$/mu,
+        "the full answer bytes stay in their own block",
       );
       assert.equal(answerWait.stderr, "", "wait keeps its snapshot off the progress channel");
 
@@ -323,8 +338,7 @@ test(
         env,
       });
       assert.equal(tell.code, 0, tell.stderr);
-      assert.equal(tell.stdout.split("\n")[0], `✓ tell ${finisherId}`);
-      assert.match(tell.stdout, /^  started turn\/[1-9][0-9]*$/mu);
+      assert.match(tell.stdout, new RegExp(`^✓ ${finisherId} started turn/[1-9][0-9]*\\n$`, "u"));
       assert.doesNotMatch(tell.stdout, /the answer/u, "tell returns submission, not an answer");
       assert.equal(tell.stderr, "");
       const toldWait = await runPackagedCli(["-C", world, "wait", finisherId!, "--timeout", "20s"], {
@@ -333,7 +347,21 @@ test(
       });
       assert.equal(toldWait.code, 0, toldWait.stderr);
       assert.match(toldWait.stdout, /^completed$/mu, "the told Turn completes");
-      assert.match(toldWait.stdout, /✓ aku\/finisher\/[0-9a-f]{8} — the answer/u);
+      assert.match(
+        toldWait.stdout,
+        new RegExp(`^✓ ${finisherId!} — answered$`, "mu"),
+        "the told wait carries the settled answered outcome",
+      );
+      assert.match(
+        toldWait.stdout,
+        /^[ \t]*turn\/[1-9][0-9]* · answered$/mu,
+        "the told wait names its exact answered Turn",
+      );
+      assert.match(
+        toldWait.stdout,
+        /^[ \t]*the answer$/mu,
+        "the told answer stays whole in its own block",
+      );
 
       const silent = await runPackagedCli(
         ["-C", world, "spawn", "silent", "--bare", "--alias", "@silent", "prompt"],
@@ -407,7 +435,12 @@ test("packaged plural waits return each target's status snapshot", { timeout: 12
     assert.equal(all.stderr, "", "an --all snapshot wait writes no live progress");
     assert.match(all.stdout, /aku\/worker\/[0-9a-f]{8}/u, "--all includes the worker snapshot");
     assert.match(all.stdout, /aku\/finisher\/[0-9a-f]{8}/u, "--all includes the finisher snapshot");
-    assert.doesNotMatch(all.stdout, /retry note/u, "--all omits thought narration");
+    assert.match(all.stdout, /^deadline$/mu, "an --all wait that outlives its running target reports its deadline");
+    assert.match(
+      all.stdout,
+      /retry note|attempt \d+/u,
+      "a running deadline retains bounded recent fixture activity",
+    );
   } finally {
     let cleanupFailure: unknown;
     for (const alias of cleanupAliases) {

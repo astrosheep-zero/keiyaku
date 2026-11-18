@@ -162,7 +162,7 @@ test("CLI ask returns JSON and invalid-output while Tell confirms exact submissi
     const runtime = { environment: { KEIYAKU_HOME: home }, signal: t.signal, readStdin: async () => "answer this" };
     const text = await runCli(["-C", root, "tell", born.id, "-"], runtime);
     assert.equal(text.exit, 0, text.stderr);
-    assert.match(text.stdout, new RegExp(`^✓ tell ${born.id}\\n  started turn/[1-9][0-9]*`, "u"));
+    assert.match(text.stdout, new RegExp(`^✓ ${born.id} started turn/[1-9][0-9]*\\n$`, "u"));
     const waited = await runCli(["-C", root, "wait", born.id, "--timeout", "30s"], runtime);
     assert.equal(waited.exit, 0, waited.stderr);
     assert.ok(waited.stdout.includes(answer), waited.stdout);
@@ -238,7 +238,7 @@ test("an observer-held leash cannot strand the original Tell", async (t) => {
     assert.equal(result.exit, 0, result.stderr);
     assert.equal(denied, true, "the first wake probe met actual observation custody");
     await observation;
-    assert.match(result.stdout, /started turn\/[1-9][0-9]*/u);
+    assert.match(result.stdout, new RegExp(`^✓ ${born.id} started turn/[1-9][0-9]*\\n$`, "u"));
     const waited = await runCli(["-C", root, "wait", born.id, "--timeout", "60s"], {
       environment: { KEIYAKU_HOME: home }, signal: t.signal,
     });

@@ -1096,7 +1096,7 @@ test("SDK wire ask passes JSON Schema and returns identity-decoded answer", asyn
       name: "tell", arguments: { akuma: child.akumaId, prompt: "structured" },
     });
     assert.equal(told.isError, false, JSON.stringify(told));
-    assert.match(JSON.stringify(told.content), /started turn\/[1-9][0-9]*/u);
+    assert.match(JSON.stringify(told.content), new RegExp(`✓ ${child.akumaId} started turn/[1-9][0-9]*`, "u"));
     const toldWait = await client.callTool({ name: "wait", arguments: { selectors: [child.akumaId], timeout: "30s" } });
     assert.equal(toldWait.isError, false, JSON.stringify(toldWait));
     assert.equal(modelOutputSchemas.wait.parse(toldWait.structuredContent).reason, "completed");
