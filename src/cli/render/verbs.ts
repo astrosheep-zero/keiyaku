@@ -310,7 +310,7 @@ export function renderVerb<K extends VerbName>(
       const result = value as VerbOutput<"ls">;
       if (result.kind === "contract-catalogue") return renderContractCatalogue(result);
       if (result.kind === "akuma-name-catalogue") return renderAkumaNameCatalogue(result);
-      if (result.kind === "debt-catalogue") return renderDebtList(result, context);
+      if (result.kind === "debt-catalogue") return renderDebtList(result);
       const query = input as VerbInput<"ls">;
       return renderAkumaBoard({ ...result, kind: "present" }, result.observedAt, {
         ...context,

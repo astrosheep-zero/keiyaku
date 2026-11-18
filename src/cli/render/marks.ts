@@ -1,5 +1,4 @@
 import type { AkumaLife } from "../../akuma/heart/index.js";
-import type { ContractDetail, ContractGateReport, ContractSummary } from "../../protocol/read/status.js";
 import type { DebtDisposition } from "../../debt/board.js";
 import type { DebtState } from "../../debt/document.js";
 
@@ -28,36 +27,6 @@ export function akumaMark(life: AkumaLife | "unborn" | "stillborn"): string {
     default:
       return unreachable(life);
   }
-}
-
-/** Contract board marks weigh phase, gates, and target knowledge in one fixed order. */
-export function contractMark(row: ContractSummary): string {
-  if (row.title === undefined) return "?";
-  if ((row.gates ?? []).some((gate) => gate.verdict === "unsatisfied")) return "!";
-  if (row.attention !== undefined) return "!";
-  return "⧗";
-}
-
-/** A selected detail carries the same judgment from its owner currentness instead of summary verdicts. */
-export function contractDetailMark(row: {
-  phase: ContractDetail["phase"];
-  title?: string;
-  gates?: readonly ContractGateReport[];
-  targetLag?: Readonly<{ kind: string }>;
-}): string {
-  if (row.phase === "claimed") return "✓";
-  if (row.phase === "abandoned") return "×";
-  if (row.title === undefined) return "?";
-  if (
-    (row.gates ?? []).some((gate) =>
-      gate.requirements.some(
-        (requirement) => requirement.current.kind === "attested" && requirement.current.verdict === "unsatisfied",
-      ),
-    )
-  )
-    return "!";
-  if (row.targetLag?.kind === "unknown") return "?";
-  return "⧗";
 }
 
 /** The board's derived dispositions have their own exhaustive source lock. */

@@ -1,6 +1,7 @@
 import type {
   DebtAbsent,
   DebtCatalogue,
+  DebtSummary,
   DebtShowItem,
   DebtDoctorIssue,
   DebtDoctorReport,
@@ -11,6 +12,8 @@ import type {
   DebtUpdateResult,
   DebtWarning,
 } from "../../debt/index.js";
+import type { DebtKanshiRow } from "../../kanshi/report.js";
+import { associationFact } from "./kanshi-akuma.js";
 import { debtMark } from "./marks.js";
 import { outcomeLines, receiptRow, refusalLines } from "./receipt.js";
 import {
@@ -79,17 +82,23 @@ function edge(label: string, ref: DebtRef): string {
   return `  ${label} ${ref.id} · ${dispositionText(ref.state)}`;
 }
 
-export function renderDebtList(result: DebtCatalogue, context: TextRenderContext = DEFAULT_CONTEXT): string {
+export function debtRowLines(row: DebtSummary & Pick<DebtKanshiRow, "contract">): readonly string[] {
+  const facts = [
+    row.id,
+    dispositionText(row.disposition),
+    `P${row.priority}`,
+    row.title,
+    ...(row.contract === undefined ? [] : [associationFact(row.contract)]),
+  ];
+  return [`${debtMark(row.disposition)} ${safeText(facts.join(" · "))}`];
+}
+
+export function renderDebtList(result: DebtCatalogue): string {
   const page = result;
-  const columns = context.columns;
   if ("absent" in page) return "debt world absent";
   const rows = page.rows ?? [];
   if (rows.length === 0) return emptyCatalogue("debts");
-  return [
-    "DEBTS // world",
-    ...rows.flatMap((row) => entityLines({ ...row, mark: debtMark(row.disposition), word: row.disposition }, columns)),
-    ...(page.more === true ? ["…"] : []),
-  ].join("\n");
+  return ["DEBTS", "", ...rows.flatMap(debtRowLines), ...(page.more === true ? ["…"] : [])].join("\n");
 }
 
 function textTimestamp(timestamp: string): string {

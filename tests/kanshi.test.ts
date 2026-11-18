@@ -19,7 +19,6 @@ import { assertWireRoundTrip } from "./support/schema-parity.js";
 import { allocateAkumaDirectory } from "../src/akuma/identity.js";
 import { moveAlias } from "../src/alias/index.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
-import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
 import { contractId, type ContractId } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
 import {
@@ -320,7 +319,7 @@ test("selected Contract shows associated Akuma identity, alias, and life", async
   assert.equal(selected.id, contract.id);
   assert.deepEqual(selected.roster, [{ id: akumaId, aliases: ["@watch"] }]);
   assert.equal(selected.holder, debtId);
-  assert.match(renderKanshiText(selected, { columns: 100, color: false }), new RegExp(`debt  ${debtId}`, "u"));
+  assert.match(renderKanshiText(selected, { columns: 100, color: false }), new RegExp(`holder  ${debtId}`, "u"));
   assert.match(renderKanshiText(selected, { columns: 60, color: false }), new RegExp(debtId, "u"));
 });
 
@@ -423,7 +422,7 @@ test("DebtHolder failure preserves Debt rows and marks Contract links unavailabl
   assert.match(renderKanshiText(report, { columns: 100, color: false }), /contract association unavailable/u);
   const selected = contractReport(await Kanshi.of({ world: await World.at(repository.path), repo: await Repo.at({ path: repository.path }) }).contract(contract.id));
   assert.deepEqual(selected.holder, { kind: "unavailable" });
-  assert.match(renderKanshiText(selected, { columns: 100, color: false }), /debt association unavailable/u);
+  assert.match(renderKanshiText(selected, { columns: 100, color: false }), /holder  unavailable/u);
 });
 
 test("Dispatch failure preserves Akuma rows and explicitly marks both association views unavailable", async (t) => {
@@ -515,7 +514,7 @@ test("an empty Akuma roster retains a failed Alias observation as section eviden
   assert.equal(report.akumas.aliasesError === undefined, false);
   assert.equal(report.akumas.rows, undefined, "an empty roster omits rows");
   const text = renderKanshiText(report, { columns: 100, color: false });
-  assert.match(text, /akuma  none/u);
+  assert.match(text, /^AKUMA$/mu);
   assert.match(text, /aliases unavailable/u);
   assert.doesNotMatch(text, /AKUMA \/\/ unavailable|world empty/u);
 });
@@ -689,7 +688,7 @@ test("World running rows keep only one bounded latest activity line through the 
     ]),
   };
   for (const columns of [48, 100]) {
-    const board = renderAkuma(akumaWorldReport([row]), { columns, color: false });
+    const board = renderKanshiText(akumaWorldReport([row]), { columns, color: false }).split("\n");
     assert.ok(board.some((line) => line.includes(row.id)), "the board keeps the complete identity");
     assert.ok(board.some(line => line.includes("2 first paragraph")));
   }

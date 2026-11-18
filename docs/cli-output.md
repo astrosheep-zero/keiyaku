@@ -107,7 +107,7 @@ notation, banners, and bracket state alphabets are not text vocabulary. Git
 identities are short in text and full in JSON. Paths stay absolute and
 copyable where they are the answer, and stay out of board and catalogue rows
 where they are not. An empty standalone catalogue names its surface once.
-Empty World sections omit their header; a wholly empty World retains its shared
+Diagnostic-free empty World sections omit their header; a wholly empty World retains its shared
 empty state. Empty views print no observed timestamp, count, or container.
 The whoami identity observation leads with self and names requested
 absence and unknowns explicitly. Non-Akuma identity is marked as such and omits
@@ -129,12 +129,17 @@ the label is omitted without another observation or a new result envelope.
 Ordinary catalogue rows keep their shape.
 
 Kanshi owns what a composite report means; this chapter owns its terminal
-projection. The World board nests selected Akumas beneath their displayed
-Contract with native life, activity, and bounded current work. The shared
-Contract identity appears once; association inventories do not duplicate Akuma
-rows. Other selected Akumas retain their observed links separately. Section
-omission and failure evidence remain visible even when every displayed Akuma
-is nested. The board adds no age-based intervention judgment or chat preview.
+projection. World presents independent flat Contract, Akuma, and Debt sections
+in that order, preserving each owner's native row order and catalogue aperture.
+World and standalone catalogues share each family's thin row projection. An
+Akuma's supplied Contract association stays inline with its complete identity,
+including links outside the displayed Contract page. Availability and bounded
+omissions remain visible independently. Alias failure is stated once for the
+section, not for each member; addressed status retains local Alias evidence.
+A present empty section omits its header unless it carries a diagnostic; absent
+and unavailable sections remain explicit. Catalogue rows use one layout across
+terminal widths and state lifecycle, delivery, and native gate verdicts in words.
+They add no aggregate alarm or age-based tone judgment.
 Debt owns Debt facts and [cli-debt.md](cli-debt.md) owns their
 Debt-facing presentation. Contract, Git, and Akuma renderers receive their
 facts from their respective public results. Activity summaries retain the
@@ -154,10 +159,11 @@ summary with its retained coordinate and visible clipping; renderers never
 reconstruct tool state or expand omitted activity. Native history
 keeps observed result diagnostics, expanding a cut inline diagnostic into a
 bounded continuation block. Diagnostics that fit are shown whole; longer
-captures name their omission. Gate evidence keeps its compact visual
-state beside each gate and requirement's identity across status, board, history,
-preview, receipts, and JSON; current declarations may be labeled by current one-based
-position while removed historical requirements retain stable identity. A raw
+captures name their omission. Gate evidence stays beside each gate and
+requirement's identity. Status and catalogue rows state it in words; history,
+preview, and receipts retain their compact marks. JSON retains native evidence.
+Current declarations may be labeled by current one-based position while removed
+historical requirements retain stable identity. A raw
 caller answer remains raw when that operation promises answer bytes and has no
 meaningful failure, control, or recovery evidence. Otherwise the shared receipt
 presents the answer together with confirmed admission, association, wake,
@@ -166,8 +172,9 @@ hide its historical wake diagnostic. Recording
 review testimony and completing placement remain distinct facts; absence of
 completion does not establish a candidate.
 
-Roster, world-status, and debt rows state each fact once in words. A Contract
-association prints as the bare Contract id inline; a free row states no
+Roster, world-status, and debt rows state each fact once in words. Native pending
+input coordinates take precedence over a catalogue count of the same evidence.
+A Contract association prints as the bare Contract id inline; a free row states no
 association at all; the association carries a parenthetical only when the read
 established a reason a person can act on. A row prints its activity age only
 when it differs from the state age. Activity previews keep observed source
@@ -239,9 +246,15 @@ returns full retained authored content or neutral tool summary without framing o
 clipping; typed detail keeps the native row. Exact Akuma item and latest-answer
 text remains raw retained bytes. Capture and retention limits remain honest.
 
-Selected Contract status foregrounds current work or the terminal outcome,
-without repeating settled mechanics. A delivered integration observed before
-target movement is identified as such. Delivery preview identifies itself as a
+Selected Contract status uses the same ordered facts across active and terminal
+phases: complete identity, title and lifecycle; explicit holder observation;
+supplied delivery identities; each requirement's native currentness, verdict and
+stale reason; prerequisites; workspace appointment, availability and merge facts;
+retained physical issues; and attached Akumas. Supplied summaries and abandonment
+notes remain labeled bounded prose. Terminal state neither hides evidence nor
+selects a preferred review, and gate evidence never establishes placement.
+A delivered integration observed before target movement is identified as such.
+Delivery preview identifies itself as a
 dry-run observation, never delivery success. Candidate preparation, standing
 requirement evidence, and target followability stay distinct. Known checkout
 non-followability retains its path and cause without becoming a target-reference

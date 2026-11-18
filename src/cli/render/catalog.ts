@@ -1,22 +1,31 @@
-import type { AkumaNameCatalog, ContractCatalogue, ContractSummary } from "../../index.js";
+import type { AkumaNameCatalog, ContractCatalogue } from "../../index.js";
+import type { ContractKanshiBoard } from "../../kanshi/report.js";
 import { contractAttentionFacts, lifecycleWord, progressStrip } from "./contract-observation.js";
 import { ageText, emptyCatalogue, safeText } from "./terminal.js";
-import { contractMark } from "./marks.js";
 
-/** One summary row names identity, age, title, and a terminal outcome or the current candidate strip. */
-function contractCatalogueBlock(row: ContractSummary, observedAt: string): string {
-  const head = `${contractMark(row)} ${safeText(row.id)} · ${ageText(row.phaseAt, observedAt, "future")} · ${safeText(row.title ?? "title unavailable")}`;
-  const state = row.phase === "bound" ? progressStrip(row) : lifecycleWord(row.phase);
-  return [head, `  ${state}`, ...contractAttentionFacts(row).map((fact) => `  ${safeText(fact)}`)].join("\n");
+/** Native catalogue facts shared by standalone lists and World. */
+export function contractRowLines(
+  row: NonNullable<ContractKanshiBoard["rows"]>[number],
+  observedAt: string,
+): readonly string[] {
+  const associations = (row.associations ?? []).flatMap((association) => {
+    if (association.kind === "unavailable")
+      return [`${association.source} association unavailable · ${association.diagnostic}`];
+    return association.kind === "debt" ? [`debt  ${association.debtId}`] : [];
+  });
+  return [
+    `${safeText(row.id)} · ${lifecycleWord(row.phase)} · ${ageText(row.phaseAt, observedAt, "future")} · ${safeText(row.title ?? "title unavailable")}`,
+    ...[progressStrip(row), ...contractAttentionFacts(row), ...associations].map((fact) => `  ${safeText(fact)}`),
+  ];
 }
 
 export function renderContractCatalogue(list: ContractCatalogue): string {
   const rows = list.rows ?? [];
   if (rows.length === 0) return emptyCatalogue("contracts");
   return [
-    "CONTRACTS // recent",
+    "CONTRACTS",
     "",
-    ...rows.map((row) => contractCatalogueBlock(row, list.observedAt)),
+    ...rows.flatMap((row) => contractRowLines(row, list.observedAt)),
     ...(list.more === true ? ["…"] : []),
   ].join("\n");
 }

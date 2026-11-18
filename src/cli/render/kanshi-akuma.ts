@@ -1,162 +1,71 @@
-import type { AkumaKanshiRow, AkumaKanshiWorld, KanshiReport, BoardSection } from "../../kanshi/report.js";
+import type { AkumaKanshiRow, AkumaKanshiWorld, BoardSection } from "../../kanshi/report.js";
 import { currentWorkLines } from "./akuma-activity.js";
 import { akumaMark } from "./marks.js";
-import {
-  ageText,
-  elapsedMilliseconds,
-  emptyCatalogue,
-  entityLines,
-  identityLine,
-  RECENT_TONE_MS,
-  safeText,
-  tone,
-  type SemanticTone,
-  type TextRenderContext,
-} from "./terminal.js";
+import { ageText, emptyCatalogue, identityLine, safeText, type TextRenderContext } from "./terminal.js";
 
-const NARROW_COLUMNS = 72;
-const ACTIVITY_INDENT = "  ";
-
-function mostRecentTimestamp(...values: readonly (string | null | undefined)[]): string | null {
-  return values.reduce<string | null>((latest, value) => {
-    if (value === null || value === undefined) return latest;
-    return latest === null || value > latest ? value : latest;
-  }, null);
-}
-
-function akumaStatusTone(row: AkumaKanshiRow, observedAt: string): SemanticTone | null {
-  if (row.life === "stillborn" || row.life === "hung" || row.life === "stranded") return "alert";
-  if (row.life === "killed") return "dim";
-  const lifeAt = "lifeAt" in row ? row.lifeAt : undefined;
-  const lastActivityAt = "lastActivityAt" in row ? row.lastActivityAt : undefined;
-  const latestAge = elapsedMilliseconds(mostRecentTimestamp(lifeAt, lastActivityAt), observedAt);
-  if (row.life === "asleep") return latestAge !== null && latestAge <= RECENT_TONE_MS ? "recent" : "dim";
-  if (row.life === "running" && latestAge !== null && latestAge <= RECENT_TONE_MS) return "recent";
-  return null;
-}
-
-/** The native owner's current actionable row pair, rendered by the shared activity grammar. */
-function rowPreviewLines(row: AkumaKanshiRow, context: TextRenderContext): readonly string[] {
-  const bounded = { ...context, columns: Math.max(1, context.columns - ACTIVITY_INDENT.length) };
-  const work = row.work;
-  return (
-    work === undefined
-      ? []
-      : work.kind === "unavailable"
-        ? [`! work unavailable · ${work.diagnostic}`]
-        : currentWorkLines(work, bounded)
-  ).map((line) => `${ACTIVITY_INDENT}${line}`);
-}
-
-function akumaLabel(row: Pick<AkumaKanshiRow, "aliases">, aliasesUnavailable: boolean): string {
+export function akumaLabel(row: Pick<AkumaKanshiRow, "aliases">, aliasesUnavailable = false): string {
   const aliases = row.aliases ?? [];
   if (aliases.length > 0) return `(${aliases.join(" ")})`;
   return aliasesUnavailable ? "(aliases unavailable)" : "";
 }
 
-function associationFact(contract: NonNullable<AkumaKanshiRow["contract"]>): string {
+export function associationFact(contract: NonNullable<AkumaKanshiRow["contract"]>): string {
   if (contract.kind === "unavailable") return "contract association unavailable";
   return contract.contractId;
 }
 
 function akumaRowLines(
   row: AkumaKanshiRow,
-  aliasesUnavailable: boolean,
   observedAt: string,
   context: TextRenderContext,
   caller?: string,
 ): readonly string[] {
-  const statusTone = akumaStatusTone(row, observedAt);
-  const mark = statusTone === null ? akumaMark(row.life) : tone(akumaMark(row.life), statusTone, context.color);
-  const lifeAt = "lifeAt" in row ? row.lifeAt : undefined;
-  const lifeAge = lifeAt === undefined ? null : formatAge(lifeAt, observedAt);
-  const life = lifeAge === null ? row.life : `${row.life} · ${lifeAge}`;
-  const lastActivityAt = "lastActivityAt" in row ? row.lastActivityAt : undefined;
-  const activityAge = lastActivityAt === undefined ? null : formatAge(lastActivityAt, observedAt);
-  const activity = activityAge === null || activityAge === lifeAge ? [] : [`activity ${activityAge}`];
-  const key = [life, ...activity];
-  const relation = [
+  const lifeAge = row.lifeAt === undefined ? undefined : ageText(row.lifeAt, observedAt);
+  const activityAge = row.lastActivityAt === undefined ? undefined : ageText(row.lastActivityAt, observedAt);
+  const work = row.work;
+  const pending = work?.kind === "unavailable" ? undefined : work?.pending;
+  const facts = [
+    row.life,
+    ...(lifeAge === undefined ? [] : [lifeAge]),
+    ...(activityAge === undefined || activityAge === lifeAge ? [] : [`activity ${activityAge}`]),
+    ...(row.pending === undefined || pending !== undefined ? [] : [`pending input ${row.pending}`]),
+    ...(row.diagnostic === undefined ? [] : [`diagnostic ${row.diagnostic}`]),
     ...(row.contract === undefined ? [] : [associationFact(row.contract)]),
-    ...(caller !== undefined &&
-    "parentAkumaId" in row &&
-    row.parentAkumaId !== undefined &&
-    row.parentAkumaId !== caller
-      ? [`by ${safeText(row.parentAkumaId)}`]
+    ...(caller !== undefined && row.parentAkumaId !== undefined && row.parentAkumaId !== caller
+      ? [`by ${row.parentAkumaId}`]
       : []),
   ];
-  const aliases = akumaLabel(row, aliasesUnavailable);
-  const previewLines = rowPreviewLines(row, context);
-  if (context.columns > NARROW_COLUMNS) {
-    const lines = [identityLine(mark, row.id, `${aliases} · ${[...key, ...relation].join(" · ")}`.trim())];
-    return [...lines, ...previewLines];
-  }
-  const identity = aliases.length === 0 ? row.id : `${row.id} ${aliases}`;
+  const preview =
+    work === undefined
+      ? []
+      : work.kind === "unavailable"
+        ? [`! work unavailable · ${safeText(work.diagnostic)}`]
+        : currentWorkLines(work, { ...context, columns: Math.max(1, context.columns - 2) });
   return [
-    ...entityLines({
-      mark,
-      identity,
-      state: key[0]!,
-      title: "",
-      facts: [...key.slice(1), ...relation],
-      context,
-    }),
-    ...previewLines,
+    identityLine(akumaMark(row.life), row.id, `${akumaLabel(row)} · ${facts.join(" · ")}`.trim()),
+    ...preview.map((line) => `  ${line}`),
   ];
 }
 
-/**
- * One Akuma board section. The World board omits an empty section because its other
- * sections already say what the World holds; a standalone catalogue states its
- * own emptiness. A failed Alias observation belongs to the
- * section, so an empty roster still states its emptiness rather than dropping that
- * evidence. `rows` narrows a present section to one already-partitioned subset.
- */
-function renderAkumaBoard(
+/** World omits empty sections; standalone catalogues name their surface. */
+export function renderAkumaBoard(
   section: BoardSection<AkumaKanshiWorld>,
   observedAt: string,
   context: TextRenderContext & Readonly<{ caller?: string }>,
-  emptyRows: readonly string[] = [emptyCatalogue("akuma")],
-  rows: readonly AkumaKanshiRow[] | undefined = section.kind === "present" ? (section.rows ?? []) : [],
+  standalone = true,
 ): readonly string[] {
   if (section.kind === "absent") return ["AKUMA // absent"];
-  if (section.kind === "failed") {
-    return ["AKUMA // unavailable", "", tone(`! ${safeText(section.diagnostic)}`, "alert", context.color)];
-  }
-  const aliasesUnavailable = section.aliasesError !== undefined;
-  if (rows.length === 0) {
-    // A non-empty complete page narrowed to no rows has all its evidence nested elsewhere.
-    if ((section.rows ?? []).length > 0) {
-      const evidence = [
-        ...(section.aliasesError === undefined
-          ? []
-          : [tone(`! aliases unavailable · ${safeText(section.aliasesError)}`, "alert", context.color)]),
-        ...(section.more === true ? ["…"] : []),
-      ];
-      return evidence.length === 0 ? [] : ["AKUMA", "", ...evidence];
-    }
-    const empty = emptyRows.length === 0 && section.aliasesError !== undefined ? [emptyCatalogue("akuma")] : emptyRows;
-    return [
-      ...empty,
-      ...(section.aliasesError === undefined
-        ? []
-        : [tone(`! aliases unavailable · ${section.aliasesError}`, "alert", context.color)]),
-    ];
-  }
+  if (section.kind === "failed") return ["AKUMA // unavailable", "", `! ${safeText(section.diagnostic)}`];
+  const rows = section.rows ?? [];
+  const diagnostics =
+    section.aliasesError === undefined ? [] : [`! aliases unavailable · ${safeText(section.aliasesError)}`];
+  if (rows.length === 0 && diagnostics.length === 0 && section.more !== true)
+    return standalone ? [emptyCatalogue("akuma")] : [];
   return [
-    `AKUMA // ${rows.length} recent`,
+    "AKUMA",
     "",
-    ...rows.flatMap((row) => akumaRowLines(row, aliasesUnavailable, observedAt, context, context.caller)),
+    ...rows.flatMap((row) => akumaRowLines(row, observedAt, context, context.caller)),
+    ...diagnostics,
     ...(section.more === true ? ["…"] : []),
   ];
 }
-
-function renderAkuma(report: KanshiReport, context: TextRenderContext): readonly string[] {
-  return renderAkumaBoard(report.akumas, report.observedAt, context, []);
-}
-
-function formatAge(source: string | null | undefined, observedAt: string): string {
-  if (source === null || source === undefined) return "—";
-  return ageText(source, observedAt);
-}
-
-export { akumaLabel, akumaRowLines, associationFact, formatAge, NARROW_COLUMNS, renderAkuma, renderAkumaBoard };

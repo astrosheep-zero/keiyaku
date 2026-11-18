@@ -51,10 +51,11 @@ The bare World Contract section is likewise a bounded active catalogue using
 the Contract owner's selection before its display limit. A
 selected Contract retains its exact owner observation, so the convenience of a
 World aperture never weakens the detail that selection asks the Contract owner
-to explain. Its judgment is phase-driven: active Contracts foreground the
-outstanding hand and acceptance evidence, while terminal Contracts foreground
-the settled outcome. The World Contract section offers the same concise judgment
-at catalogue scale. Contract evidence retains the owner's per-requirement
+to explain. Selected status retains supplied holder, delivery, requirement,
+prerequisite, workspace, physical issue, and association facts across every
+phase; terminal lifecycle does not erase available evidence or establish
+placement from gate testimony. The World Contract section retains the owner's
+concise catalogue facts. Contract evidence retains the owner's per-requirement
 currentness and verdicts without a second copy of aggregate testimony,
 recomputing currentness, or inferring a producer run. An association outside
 that aperture is unavailable rather than missing; Kanshi uses missing only
@@ -62,17 +63,16 @@ when the Contract observation is complete enough to establish absence.
 
 The selector-free World report identifies its composite family and reuses the
 native thin catalogue rows. Each product owns which members are active; Kanshi
-consumes that selection without a second lifecycle classifier. The active
-Contract page is the board's centre: each selected Akuma associated with a
-displayed Contract appears once beneath it. Other selected Akumas remain
-visible separately with their observed association, including links to
-Contracts outside the page, terminal Contracts, and missing Contracts. Failed
-Contract or association observation never hides readable Akumas or establishes
-that their association is absent. Grouping preserves each owner's order within
-its displayed group and does not expand any catalogue aperture. Native rows,
-section availability, association evidence, and bounded omissions remain
-available independently of text grouping. No priority, responsibility, or need
-for intervention is inferred from age, grouping, or lack of motion.
+consumes that selection without a second lifecycle classifier. Contract, Akuma,
+and Debt sections remain independent and flat, preserving each owner's native
+order. Every selected Akuma stays in its own section with its supplied complete
+Contract association, including links outside the page, terminal Contracts,
+and missing Contracts. Failed Contract or association observation never hides
+readable Akumas or establishes that their association is absent. Composition
+does not expand any catalogue aperture. Native rows, section availability,
+association evidence, and bounded omissions remain independently visible. No
+priority, responsibility, or need for intervention is inferred from age or lack
+of motion.
 
 Contract catalogue rows retain physical attention and availability rather than
 expanded addressed detail. Akuma catalogue rows

@@ -36,7 +36,7 @@ import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execut
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
 import { type ActivityRow, type OutcomeRow, type ToolRow } from "../src/akuma/projection.js";
 import type { AkumaObservation, DeliverOutcome, Placement, Placed, RequirementProblem } from "../src/index.js";
-import { renderAkuma } from "../src/cli/render/kanshi-akuma.js";
+import { renderAkumaBoard } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import {
   diagnosticLines,
@@ -236,40 +236,15 @@ test("empty history carries its subject without inferring a lifecycle", () => {
   );
 });
 
-test("the progress strip renders the road to claim from current-candidate chips", () => {
-  type Verdict = "satisfied" | "unsatisfied" | "missing" | "stale";
-  const strip = (
-    delivery: "pending" | "delivered",
-    gates: readonly { name: ReturnType<typeof gate>; verdict: Verdict }[],
-  ): string => progressStrip({ ...(delivery === "delivered" ? { delivered: true } : {}), gates });
-
-  assert.equal(strip("pending", [{ name: gate("reviewed"), verdict: "missing" }]), "[ ] delivery  [ ] review", "bound");
-  assert.equal(strip("pending", []), "[ ] delivery", "a gate-less contract shows the delivery chip alone");
-  assert.equal(
-    strip("delivered", [{ name: gate("reviewed"), verdict: "missing" }]),
-    "[✓] delivery  [ ] review",
-    "a candidate without a review",
-  );
-  assert.equal(
-    strip("delivered", [{ name: gate("reviewed"), verdict: "unsatisfied" }]),
-    "[✓] delivery  [×] review",
-    "a denied review",
-  );
-  assert.equal(
-    strip("delivered", [{ name: gate("reviewed"), verdict: "satisfied" }]),
-    "[✓] delivery  [✓] review",
-    "a satisfied review",
-  );
-  assert.equal(
-    strip("delivered", [{ name: gate("reviewed"), verdict: "stale" }]),
-    "[✓] delivery  [ ] review",
-    "a satisfied review over a superseded candidate does not fill the box",
-  );
-  assert.equal(
-    strip("delivered", [{ name: gate("verified"), verdict: "satisfied" }]),
-    "[✓] delivery  [✓] verification",
-    "gate display names are nouns",
-  );
+test("delivery and supplied gate verdicts remain distinct native words", () => {
+  assert.equal(progressStrip({}), "delivery absent");
+  assert.equal(progressStrip({ delivered: true }), "delivery present");
+  assert.equal(progressStrip({ delivered: true, gates: [
+    { name: gate("reviewed"), verdict: "missing" },
+    { name: gate("verified"), verdict: "satisfied" },
+    { name: gate("security"), verdict: "unsatisfied" },
+    { name: gate("manual"), verdict: "stale" },
+  ] }), "delivery present · review missing · verification satisfied · security unsatisfied · manual stale");
 });
 
 test("history pages keep individual requirements and exact records retain subjects", () => {
@@ -461,20 +436,12 @@ test("exact Contract history renders complete historical terms", () => {
   assert.ok(rendered.includes("! Dispatch history unavailable · authority-corruption · Dispatch has invalid fields: dispatch/broken.json"));
 });
 
-test("a debt title wraps its em-dash and title as one unit", () => {
-  const context = { columns: 60, color: false } as const;
-  const text = renderDebtList(
-    debtPage([
-      debtSummary({
-        id: "debt/a-very-long-debt-title-that-cannot-fit-here",
-        title:
-          "a very long debt title that cannot fit inside one narrow rendered row and keeps going well past the terminal",
-      }),
-    ]),
-    context,
-  );
-  for (const line of text.split("\n")) assert.ok(!line.trimEnd().endsWith("—"), line);
-  assert.match(text, /^  — a very long/mu, "the em-dash moves with its title to the continuation line");
+test("Debt catalogue rows retain complete identity and title in one thin row", () => {
+  const row = debtSummary({
+    id: "debt/a-very-long-debt-title-that-cannot-fit-here",
+    title: "a very long debt title that cannot fit inside one narrow rendered row and keeps going past the terminal",
+  });
+  assert.equal(renderDebtList(debtPage([row])), `DEBTS\n\n○ ${row.id} · ready · P2 · ${row.title}`);
 });
 
 test("Debt receipts name identity, preserve exact content, and report field changes only", () => {
@@ -634,12 +601,12 @@ test("World roster names a bound Contract once without a bare unavailable parent
     ...activityAkumaRow("aku/worker/11110001", "asleep", snapshot),
     contract: { kind: "associated" as const, contractId: contractId("kei/bound-contract") },
   };
-  const boundText = renderAkuma(akumaWorldReport([bound]), { columns: 120, color: false }).join("\n");
+  const boundText = renderAkumaBoard(akumaWorldReport([bound]).akumas, "2026-01-01T10:00:05.000Z", { columns: 120, color: false }).join("\n");
   assert.match(boundText, /· kei\/bound-contract$/mu);
   assert.doesNotMatch(boundText, /bound to|unbound/u);
   assert.doesNotMatch(boundText, /->/u);
 
-  const free = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/22220002", "asleep", snapshot)]), {
+  const free = renderAkumaBoard(akumaWorldReport([activityAkumaRow("aku/worker/22220002", "asleep", snapshot)]).akumas, "2026-01-01T10:00:05.000Z", {
     columns: 120,
     color: false,
   }).join("\n");
@@ -648,16 +615,12 @@ test("World roster names a bound Contract once without a bare unavailable parent
   assert.doesNotMatch(free, /·\s*$/mu);
 });
 test("Debt listings retain empty and absent observations", () => {
-  const context = { columns: 120, color: false } as const;
   const empty = { kind: "debt-catalogue" as const };
-  assert.equal(renderDebtList(empty, context), "debts  none");
-  assert.equal(renderDebtList({ kind: "debt-catalogue", absent: true }, context), "debt world absent");
-  const text = renderDebtList(
-    debtPage([debtSummary({ id: "debt/one-row", title: "One row" })], true),
-    context,
-  );
-  assert.match(text, /^DEBTS \/\/ world$/mu);
-  assert.match(text, /^○ debt\/one-row · ready · P2 — One row$/mu);
+  assert.equal(renderDebtList(empty), "debts  none");
+  assert.equal(renderDebtList({ kind: "debt-catalogue", absent: true }), "debt world absent");
+  const text = renderDebtList(debtPage([debtSummary({ id: "debt/one-row", title: "One row" })], true));
+  assert.match(text, /^DEBTS$/mu);
+  assert.match(text, /^○ debt\/one-row · ready · P2 · One row$/mu);
   assert.ok(text.endsWith("\n…"));
 });
 
@@ -665,7 +628,7 @@ test("Debt catalogue rows render the compact native summary", () => {
   const text = renderDebtList(
     debtPage([debtSummary({ id: "debt/no-body", title: "No body", priority: 1 })]),
   );
-  assert.match(text, /^○ debt\/no-body · ready · P1 — No body$/mu);
+  assert.match(text, /^○ debt\/no-body · ready · P1 · No body$/mu);
   assert.doesNotMatch(text, /bodyPresent|^  (body|note)$/mu);
 });
 
@@ -691,11 +654,11 @@ test("World status debt rows state a Contract association only when one exists",
 test("World roster states the activity age only when it differs from the state age", () => {
   const snapshot = idleRows([]);
   const equal = activityAkumaRow("aku/worker/33330003", "asleep", snapshot);
-  const equalText = renderAkuma(akumaWorldReport([equal]), { columns: 120, color: false }).join("\n");
+  const equalText = renderAkumaBoard(akumaWorldReport([equal]).akumas, "2026-01-01T10:00:05.000Z", { columns: 120, color: false }).join("\n");
   assert.match(equalText, /asleep · 5s/u);
   assert.doesNotMatch(equalText, /activity/u);
   const distinct = { ...equal, lastActivityAt: "2026-01-01T09:59:00.000Z" };
-  const distinctText = renderAkuma(akumaWorldReport([distinct]), { columns: 120, color: false }).join("\n");
+  const distinctText = renderAkumaBoard(akumaWorldReport([distinct]).akumas, "2026-01-01T10:00:05.000Z", { columns: 120, color: false }).join("\n");
   assert.match(distinctText, /activity 1m/u);
 });
 
@@ -726,9 +689,9 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
   );
   const text = renderContractCatalogue(catalog);
 
-  assert.match(text, /! kei\/selected-contract · 0s · Selected Contract/u);
-  assert.match(text, /\[ \] delivery  \[✓\] review  \[×\] verification  \[ \] security  \[ \] manual/u);
-  assert.doesNotMatch(text, /bound|awaiting/u);
+  assert.match(text, /kei\/selected-contract · bound · 0s · Selected Contract/u);
+  assert.match(text, /delivery absent · review satisfied · verification unsatisfied · security stale · manual missing/u);
+  assert.doesNotMatch(text, /awaiting/u);
   assert.doesNotMatch(text, /candidate|predecessor|method|content identity|behind|workspace|target/u);
   assert.doesNotMatch(text, /not shown|full|next:|--all/u);
   assert.equal(text.endsWith("…"), true);
@@ -743,7 +706,7 @@ test("Contract catalog keeps domain IDs complete and makes every gate state legi
       ]),
     ]),
   );
-  assert.match(delivered, /\[✓\] delivery  \[✓\] review  \[×\] verification  \[ \] security  \[ \] manual/u);
+  assert.match(delivered, /delivery present · review satisfied · verification unsatisfied · security stale · manual missing/u);
   assert.doesNotMatch(delivered, /awaiting/u);
   assert.doesNotMatch(delivered, /candidate|predecessor|content identity|method|behind/u);
 });
@@ -759,9 +722,10 @@ test("selected Contract roster preserves terminal associations and unavailable o
   const text = renderKanshiText(report, { columns: 80, color: false });
   assert.match(text, /aku\/worker\/11110001 \(@lead\)/u);
   assert.match(text, /aku\/worker\/22220002 \(aliases unavailable\)/u);
-  assert.doesNotMatch(text, /activity|worktree|candidate/u);
+  assert.match(text, /worktree  \/tmp\/wt/u);
+  assert.doesNotMatch(text, /activity|candidate/u);
 });
-test("Contract status cards collapse terminal mechanics and bound testimony", () => {
+test("Contract status preserves ordered native facts and bounded testimony in every phase", () => {
   const integration = snapshotId("a".repeat(40));
   const tender = snapshotId("b".repeat(40));
   const long = "👩‍💻".repeat(120);
@@ -778,16 +742,16 @@ test("Contract status cards collapse terminal mechanics and bound testimony", ()
   const show = (detail: Parameters<typeof contractReport>[0]) =>
     renderKanshiText(contractReport(detail), { columns: 60, color: false });
   const bound = show(base);
-  assert.match(bound, /⧗ bound/u);
-  assert.match(bound, /○ review · missing/u);
-  assert.match(bound, /\[ \] delivery  \[ \] review/u);
+  assert.match(bound, /· bound · Verified commit/u);
+  assert.match(bound, /review · missing/u);
+  assert.match(bound, /holder  none/u);
   assert.doesNotMatch(bound, /awaiting delivery/u);
   assert.match(bound, /worktree  \/tmp\/wt/u);
   const delivered = show({
     ...base,
     delivery: { candidate: tender, integration },
   });
-  assert.match(delivered, /\[✓\] delivery  \[ \] review/u);
+  assert.match(delivered, /review · missing/u);
   assert.doesNotMatch(delivered, /awaiting gates/u);
   assert.match(delivered, /candidate  bbbbbbb/u);
   assert.match(delivered, /integration result  aaaaaaa/u);
@@ -811,8 +775,8 @@ test("Contract status cards collapse terminal mechanics and bound testimony", ()
       },
     ],
   });
-  assert.match(denied, /review  ×  “Fix missing coverage”/u);
-  assert.match(denied, /\[×\] review/u);
+  assert.match(denied, /review summary  “Fix missing coverage”/u);
+  assert.match(denied, /review · current · unsatisfied/u);
   assert.doesNotMatch(denied, /× reviewed/u);
   assert.equal((denied.match(/Fix missing coverage/gu) ?? []).length, 1);
   const stale = show({
@@ -825,15 +789,14 @@ test("Contract status cards collapse terminal mechanics and bound testimony", ()
       },
     ],
   });
-  assert.match(stale, /\[✓\] delivery  \[ \] review/u, "a superseded review does not fill the chip");
-  assert.match(stale, /! review · stale/u, "the card body keeps the stale review detail");
+  assert.match(stale, /review · stale/u);
   const blocked = show({
     ...base,
     delivery: { candidate: tender, integration },
     gates: [],
     after: [{ contractId: contractId("kei/other"), state: "active" }],
   });
-  assert.match(blocked, /\[✓\] delivery/u);
+  assert.match(blocked, /candidate  bbbbbbb/u);
   assert.match(blocked, /^  blocked by  kei\/other · active$/mu);
   const moved = show({
     ...base,
@@ -842,7 +805,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony", ()
     target: "refs/heads/main",
     targetObservation: { kind: "moved", before: integration, after: tender },
   });
-  assert.match(moved, /^  integration result  aaaaaaa · target moved since$/mu);
+  assert.match(moved, /^  integration result  aaaaaaa$/mu);
   assert.match(moved, /^  target moved  aaaaaaa -> bbbbbbb$/mu);
   assert.doesNotMatch(moved, /awaiting/u);
   const unwitnessed = show({
@@ -874,18 +837,22 @@ test("Contract status cards collapse terminal mechanics and bound testimony", ()
     ],
     targetLag: { kind: "counted", behind: 5 },
   });
-  assert.match(claimed, /landed  aaaaaaa/u);
+  assert.match(claimed, /integration result  aaaaaaa/u);
+  assert.match(claimed, /candidate  bbbbbbb/u);
+  assert.match(claimed, /review · current · satisfied/u);
+  assert.match(claimed, /target behind 5/u);
+  assert.match(claimed, /worktree  \/tmp\/wt/u);
   assert.doesNotMatch(claimed, /when  5s/u);
-  assert.match(claimed, /review  “/u);
+  assert.match(claimed, /review summary  “/u);
   assert.match(claimed, /│ /u);
   assert.match(claimed, /…”/u);
-  assert.doesNotMatch(claimed, /candidate|candidate|predecessor|method|content identity|target moved|behind|worktree/u);
+  assert.doesNotMatch(claimed, /landed|predecessor|method|content identity|target moved/u);
   const abandoned = show({ ...base, phase: "abandoned", abandonNote: long });
-  assert.match(abandoned, /× abandoned/u);
+  assert.match(abandoned, /· abandoned ·/u);
   assert.match(abandoned, /note  “/u);
   assert.match(abandoned, /…”/u);
-  assert.doesNotMatch(abandoned, /worktree|candidate|when  /u);
-  assert.equal((abandoned.match(/× abandoned/gu) ?? []).length, 1);
+  assert.match(abandoned, /worktree  \/tmp\/wt/u);
+  assert.match(abandoned, /review · missing/u);
   const world = renderKanshiText(
     kanshiReport({
       kind: "present",
@@ -893,7 +860,7 @@ test("Contract status cards collapse terminal mechanics and bound testimony", ()
     }),
     { columns: 60, color: false },
   );
-  assert.match(world, /\[✓\] delivery/u);
+  assert.match(world, /delivery present/u);
   assert.doesNotMatch(world, /awaiting gates/u);
   assert.doesNotMatch(world, /candidate|predecessor|method|content identity|behind/u);
 });
@@ -908,8 +875,9 @@ test("a terminal Contract keeps its retained or unavailable target checkout issu
     ),
     { columns: 80, color: false },
   );
-  assert.match(retained, /^ {2}! checkout behind  refs\/heads\/main$/mu);
-  assert.doesNotMatch(retained, /workspace|worktree|target moved|candidate/u);
+  assert.match(retained, /^ {2}checkout behind$/mu);
+  assert.match(retained, /^ {2}target  refs\/heads\/main$/mu);
+  assert.match(retained, /workspace  clean/u);
   const unavailable = renderKanshiText(
     contractReport(
       contractDetail({
@@ -919,8 +887,8 @@ test("a terminal Contract keeps its retained or unavailable target checkout issu
     ),
     { columns: 80, color: false },
   );
-  assert.match(unavailable, /^ {2}! checkout unavailable · status read failed$/mu);
-  assert.doesNotMatch(unavailable, /workspace|worktree|target moved|candidate/u);
+  assert.match(unavailable, /^ {2}checkout unavailable · status read failed$/mu);
+  assert.match(unavailable, /worktree  \/tmp\/wt/u);
 });
 
 test("verb receipts render native conclusions with explicit invocation context", () => {
@@ -1933,7 +1901,7 @@ test("World roster keeps the latest concrete tool work", () => {
   const snapshot = openRows(
     calls.map((member, index) => (startedTool(index + 1, member.name, member.call))),
   );
-  const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running", snapshot)]), {
+  const roster = renderAkumaBoard(akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "running", snapshot)]).akumas, "2026-01-01T10:00:05.000Z", {
     columns: 120,
     color: false,
   });
@@ -1944,8 +1912,9 @@ test("World roster keeps the latest concrete tool work", () => {
 test("World and addressed status retain the outcome's exact history coordinate and verdict", () => {
   const snapshot = idleRows([], answeredOutcome(1, "complete retained answer"));
   const context = { columns: 70, color: false };
-  const board = renderAkuma(
-    akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]),
+  const board = renderAkumaBoard(
+    akumaWorldReport([activityAkumaRow("aku/worker/aaaa0001", "asleep", snapshot)]).akumas,
+    "2026-01-01T10:00:05.000Z",
     context,
   ).join("\n");
   const status = liveStatusObservationSchema.unwrap().shape.status.parse({
@@ -1991,7 +1960,7 @@ test("World roster keeps the honest fallback for unknown tool calls", () => {
     (startedTool(1, "mystery", { kind: "other" })),
     (startedTool(2, "custom-tool", { kind: "other" })),
   ]);
-  const roster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/cccc0003", "running", snapshot)]), {
+  const roster = renderAkumaBoard(akumaWorldReport([activityAkumaRow("aku/worker/cccc0003", "running", snapshot)]).akumas, "2026-01-01T10:00:05.000Z", {
     columns: 120,
     color: false,
   }).join("\n");
@@ -2111,7 +2080,7 @@ test("World current work keeps concrete active work and visible clipping", () =>
   const active = openRows([
     (startedTool(1, "bash", { kind: "run", command: "keiyaku wait --all" })),
   ]);
-  const activeRoster = renderAkuma(akumaWorldReport([activityAkumaRow("aku/worker/aabb0006", "running", active)]), {
+  const activeRoster = renderAkumaBoard(akumaWorldReport([activityAkumaRow("aku/worker/aabb0006", "running", active)]).akumas, "2026-01-01T10:00:05.000Z", {
     columns: 120,
     color: false,
   }).join("\n");
@@ -2121,8 +2090,9 @@ test("World current work keeps concrete active work and visible clipping", () =>
   const truncated = openRows([
     ({ kind: "said", sequence: 3, turnSequence: 1, at: AKUMA_ACTIVITY_AT, text: "x".repeat(400) }),
   ]);
-  const truncatedRoster = renderAkuma(
-    akumaWorldReport([activityAkumaRow("aku/worker/eeff0008", "running", truncated)]),
+  const truncatedRoster = renderAkumaBoard(
+    akumaWorldReport([activityAkumaRow("aku/worker/eeff0008", "running", truncated)]).akumas,
+    "2026-01-01T10:00:05.000Z",
     { columns: 120, color: false },
   ).join("\n");
   assert.match(truncatedRoster, /…$/u);
@@ -2495,7 +2465,7 @@ test("a failed selected Contract retains its identity and failure", () => {
 
 test("a selected Contract renders its explicit held Debt and unavailable association", () => {
   const report = contractReport(contractDetail({ holder: "debt/held-work" }));
-  assert.match(renderKanshiText(report, { columns: 120, color: false }), /debt  debt\/held-work/u);
+  assert.match(renderKanshiText(report, { columns: 120, color: false }), /holder  debt\/held-work/u);
   const failed = contractReport(contractDetail({ holder: { kind: "unavailable" } }));
-  assert.match(renderKanshiText(failed, { columns: 120, color: false }), /debt association unavailable/u);
+  assert.match(renderKanshiText(failed, { columns: 120, color: false }), /holder  unavailable/u);
 });

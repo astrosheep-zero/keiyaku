@@ -31,29 +31,12 @@ export function lifecycleWord(phase: ContractDetail["phase"]): string {
   return phase === "claimed" ? "accepted" : phase;
 }
 
-function progressChip(mark: " " | "✓" | "×", label: string): string {
-  return `[${mark}] ${label}`;
-}
-
-type SummaryGate = NonNullable<ContractSummary["gates"]>[number];
-
-function verdictChip(gate: SummaryGate): " " | "✓" | "×" {
-  switch (gate.verdict) {
-    case "satisfied":
-      return "✓";
-    case "unsatisfied":
-      return "×";
-    case "missing":
-    case "stale":
-      return " ";
-  }
-}
-
-/** The one readable projection of delivery and gate progress against the current candidate. */
+/** Delivery presence and supplied gate verdicts, without another judgment. */
 export function progressStrip(row: Pick<ContractSummary, "delivered" | "gates">): string {
-  const delivery = progressChip(row.delivered === true ? "✓" : " ", "delivery");
-  const gates = (row.gates ?? []).map((gate) => progressChip(verdictChip(gate), gateDisplayName(gate.name)));
-  return [delivery, ...gates].join("  ");
+  return [
+    `delivery ${row.delivered === true ? "present" : "absent"}`,
+    ...(row.gates ?? []).map((gate) => `${gateDisplayName(gate.name)} ${gate.verdict}`),
+  ].join(" · ");
 }
 
 export function contractAttentionFacts(row: Pick<ContractSummary, "attention">): readonly string[] {
@@ -73,12 +56,6 @@ export function contractAttentionFacts(row: Pick<ContractSummary, "attention">):
         return "target lag unknown";
     }
   });
-}
-
-export function gateGlyph(report: Readonly<{ current: { kind: string; verdict?: string } }>): string {
-  if (report.current.kind === "stale") return "!";
-  if (report.current.kind === "missing") return "○";
-  return report.current.verdict === "satisfied" ? "✓" : "×";
 }
 
 export function requirementDisplayName(
@@ -113,13 +90,10 @@ export function staleReasonFact(reason: GateStaleReason): string {
 export function gateRequirementFacts(report: ContractGateReport): readonly string[] {
   return report.requirements.map((requirement) => {
     const current = requirement.current;
-    const detail =
-      current.kind === "stale"
-        ? ` · stale${current.reason === undefined ? "" : ` · ${staleReasonFact(current.reason)}`}`
-        : current.kind === "missing"
-          ? " · missing"
-          : "";
-    return `${gateGlyph(requirement)} ${requirementDisplayName(report.gate, requirement)}${detail}`;
+    const state = current.kind === "attested" ? `current · ${current.verdict}` : current.kind;
+    const reason =
+      current.kind === "stale" && current.reason !== undefined ? ` · ${staleReasonFact(current.reason)}` : "";
+    return `${requirementDisplayName(report.gate, requirement)} · ${state}${reason}`;
   });
 }
 
@@ -173,17 +147,21 @@ export function displayGitId(value: string, abbreviations: ReadonlyMap<string, s
  * The Contract owner witnesses target drift; a selected row names both observed identities only when
  * that owner supplied the moved-from identity, never by comparing a head against a current candidate.
  */
-export function targetMovementFacts(
-  row: Pick<ContractDetail, "targetObservation">,
+export function targetFacts(
+  row: Pick<ContractDetail, "target" | "targetObservation" | "targetLag">,
   abbreviations: ReadonlyMap<string, string>,
 ): readonly string[] {
   const observation = row.targetObservation;
-  if (observation?.kind !== "moved") return [];
+  const lag = row.targetLag;
   return [
-    `target moved  ${displayGitId(observation.before, abbreviations)} -> ${displayGitId(observation.after, abbreviations)}`,
+    ...(row.target === undefined ? [] : [`target  ${row.target}`]),
+    ...(observation?.kind === "moved"
+      ? [
+          `target moved  ${displayGitId(observation.before, abbreviations)} -> ${displayGitId(observation.after, abbreviations)}`,
+        ]
+      : observation?.kind === "unknown"
+        ? ["target observation unavailable"]
+        : []),
+    ...(lag === undefined ? [] : [lag.kind === "unknown" ? "target lag unknown" : `target behind ${lag.behind ?? 0}`]),
   ];
-}
-
-export function targetMoved(row: Pick<ContractDetail, "targetObservation">): boolean {
-  return row.targetObservation?.kind === "moved";
 }

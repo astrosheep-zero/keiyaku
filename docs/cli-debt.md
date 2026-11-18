@@ -40,8 +40,10 @@ public Debt value, not a reduced text-derived format. Addressed receipts use the
 caller's selection for identity. Update receipts identify actual semantic field
 changes, including a known unchanged result; they do not carry a projection-file
 difference.
-Catalogue presentation keeps work selection concise; exact activity testimony,
-complete body and current explanation belong to targeted detail together with
+Catalogue presentation shares one concise row between standalone lists and
+World: complete identity, disposition, priority, title, and any supplied
+association, each stated once without a width-dependent variant. Exact activity
+testimony, complete body and current explanation belong to targeted detail together with
 prerequisite availability from the same observation.
 
 Debt presentation exposes open, done, and dropped work. Ready and blocked are

@@ -424,17 +424,7 @@ export function renderOpaqueBlock(value: string, indent: string, columns: number
   return lines;
 }
 
-export type SemanticTone = "dim" | "recent" | "attention" | "alert";
-
-export const RECENT_TONE_MS = 5 * 60 * 1_000;
-
-export function elapsedMilliseconds(source: string | null | undefined, observedAt: string): number | null {
-  if (source === null || source === undefined) return null;
-  const sourceMs = Date.parse(source);
-  const observedMs = Date.parse(observedAt);
-  if (!Number.isFinite(sourceMs) || !Number.isFinite(observedMs)) return null;
-  return Math.max(0, observedMs - sourceMs);
-}
+export type SemanticTone = "dim" | "attention" | "alert";
 
 /**
  * Compact age wording shared by catalog and kanshi renderers. A source later than the
@@ -453,7 +443,7 @@ export function ageText(source: string, observedAt: string, future: "now" | "fut
 
 export function tone(value: string, kind: SemanticTone, color: boolean): string {
   if (!color) return value;
-  const code = kind === "dim" ? 2 : kind === "recent" ? 32 : kind === "attention" ? 33 : 31;
+  const code = kind === "dim" ? 2 : kind === "attention" ? 33 : 31;
   return `\u001b[${code}m${value}\u001b[0m`;
 }
 
@@ -462,59 +452,6 @@ export function kindWords(kind: string): string {
   return kind.replaceAll("-", " ");
 }
 
-export function plumbFacts(facts: readonly string[], columns: number): readonly string[] {
-  const lines: string[] = [];
-  let current = "  ";
-  for (const fact of facts.map(safeText).filter((value) => value.length > 0)) {
-    const candidate = current === "  " ? `  ${fact}` : `${current} · ${fact}`;
-    if (current !== "  " && displayColumns(candidate) > columns) {
-      lines.push(current);
-      current = `  ${fact}`;
-    } else current = candidate;
-  }
-  if (current !== "  ") lines.push(current);
-  return lines;
-}
-
 export function identityLine(mark: string, identity: string, extra = ""): string {
   return extra.length === 0 ? `${mark} ${safeText(identity)}` : `${mark} ${safeText(identity)} ${safeText(extra)}`;
-}
-
-export function entityLines(
-  entity: Readonly<{
-    mark: string;
-    identity: string;
-    state: string;
-    title: string;
-    facts: readonly string[];
-    context: TextRenderContext;
-  }>,
-): readonly string[] {
-  const { mark, identity, state, title, facts, context } = entity;
-  if (context.columns <= 72) {
-    return [
-      `${mark} ${safeText(state)}`,
-      `  ${safeText(identity)}`,
-      ...(title.length === 0 ? [] : renderTextBlock(title, "  ", context.columns)),
-      ...plumbFacts(facts, context.columns),
-    ];
-  }
-  return [
-    identityLine(mark, identity, `· ${state}${title.length === 0 ? "" : ` · ${title}`}`),
-    ...plumbFacts(facts, context.columns),
-  ];
-}
-
-export function renderSectionBlock({
-  name,
-  rows,
-  hasMore = false,
-}: Readonly<{
-  name: string;
-  rows: readonly (readonly string[])[];
-  hasMore?: boolean;
-}>): readonly string[] {
-  const lines = [`${name}`, "", ...rows.flat()];
-  if (hasMore) lines.push("…");
-  return lines;
 }

@@ -24,7 +24,6 @@ import { renderDeliveryPreview } from "../src/cli/render/delivery-preview.js";
 import { renderContractHistory } from "../src/cli/render/contract-history.js";
 import { renderSettingsText } from "../src/cli/render/settings.js";
 import { renderBindDraftReceipt, renderRefusalFacts } from "../src/cli/render/refusal.js";
-import { entityLines, plumbFacts } from "../src/cli/render/terminal.js";
 import {
   changeId,
   contractId,
@@ -169,23 +168,51 @@ test("settings text retains shadow provenance and exact configuration names", ()
   );
 });
 
-test("narrow entities retain deliberate layout and compact facts never split a path", () => {
-  assert.deepEqual(
-    entityLines({
-      mark: "●",
-      identity: "kei/long-complete-identity",
-      state: "bound · 1h",
-      title: "Example contract",
-      facts: ["candidate  none"],
-      context: { columns: 24, color: false },
-    }),
-    ["● bound · 1h", "  kei/long-complete-identity", "  Example contract", "  candidate  none"],
-  );
+test("selected Contract status preserves every supplied requirement and workspace fact across phases", () => {
   const path = `/repo/${"long-directory/".repeat(10)}`;
-  assert.deepEqual(plumbFacts(["candidate  none", "target  main", `worktree  ${path}`], 80), [
-    "  candidate  none · target  main",
-    `  worktree  ${path}`,
-  ]);
+  const report = contractDetail({
+    holder: { kind: "unavailable" },
+    delivery: { candidate: snapshotId("a".repeat(40)), integration: snapshotId("b".repeat(40)) },
+    gates: [{ gate: "verified", requirements: [
+      { index: 1, current: { kind: "attested", verdict: "satisfied", summary: "First check passed" } },
+      { index: 2, current: { kind: "attested", verdict: "unsatisfied", summary: "Second check failed" } },
+      { index: 3, current: { kind: "missing" } },
+      { index: 4, current: { kind: "stale", reason: {
+        kind: "snapshot-changed", previousSnapshot: snapshotId("c".repeat(40)), currentSnapshot: snapshotId("d".repeat(40)),
+      } } },
+    ] }],
+    after: [{ contractId: contractId("kei/prerequisite"), state: "abandoned" }],
+    workspace: { kind: "unavailable", path },
+    issue: { kind: "unavailable", diagnostic: "checkout read failed" },
+    roster: [{ id: "aku/worker/11112222" }],
+  });
+  const expectedFacts = [
+    "holder  unavailable",
+    "candidate  aaaaaaa",
+    "integration result  bbbbbbb",
+    "verification 1 · current · satisfied",
+    "verification 2 · current · unsatisfied",
+    "verification 3 · missing",
+    "verification 4 · stale · snapshot changed ccccccc -> ddddddd",
+    "blocked by  kei/prerequisite · abandoned",
+    `worktree  ${path}`,
+    "workspace  unavailable",
+    "checkout unavailable · checkout read failed",
+    "akuma  aku/worker/11112222",
+    "verification 1 summary  “First check passed”",
+    "verification 2 summary  “Second check failed”",
+  ];
+  for (const phase of ["bound", "claimed", "abandoned"] as const) {
+    const text = renderKanshiText({ ...report, phase }, { columns: 80, color: false });
+    let previous = -1;
+    for (const fact of expectedFacts) {
+      const position = text.indexOf(fact);
+      assert.ok(position > previous, `${phase} retains ordered fact: ${fact}`);
+      assert.equal(text.split(fact).length - 1, 1, `${fact} appears once`);
+      previous = position;
+    }
+    assert.equal(JSON.parse(JSON.stringify({ ...report, phase })).workspace.path, path);
+  }
 });
 
 test("dirty refusal describes available capture without asserting a current unmerged index", () => {
@@ -301,16 +328,16 @@ const staleGate = {
   ],
 };
 
-test("catalogue retains acceptance progress while terminal Kanshi cards foreground the settled outcome", () => {
+test("catalogue and selected terminal status retain their supplied gate facts", () => {
   const row = verifiedSummary();
   const catalog = contractCatalog([row]);
   const catalogText = renderContractCatalogue(catalog);
-  assert.match(catalogText, /\[✓\] verification/u);
+  assert.match(catalogText, /verification satisfied/u);
   assert.doesNotMatch(catalogText, /candidate|integration result/u);
 
   const report = kanshiReport({ kind: "present", rows: [row] });
   const selected = contractReport(contractDetail({ phase: "claimed", gates: [verifiedGate] }));
-  assert.doesNotMatch(renderKanshiText(selected, { columns: 80, color: false }), /verification|candidate/u);
+  assert.match(renderKanshiText(selected, { columns: 80, color: false }), /verification 1 · current · satisfied/u);
 
   const bareSelected = renderKanshiText(contractReport(contractDetail({ phase: "claimed" })), {
     columns: 80,
@@ -318,7 +345,7 @@ test("catalogue retains acceptance progress while terminal Kanshi cards foregrou
   });
   assert.doesNotMatch(bareSelected, /candidate|verification|integration result/u);
   const world = renderKanshiText(report, { columns: 80, color: false });
-  assert.match(world, /\[✓\] verification/u);
+  assert.match(world, /verification satisfied/u);
   assert.doesNotMatch(world, /candidate|integration result/u);
 });
 
@@ -335,16 +362,17 @@ test("selected delivered Kanshi keeps requirement evidence separate from the int
   });
   const catalogText = renderContractCatalogue(contractCatalog([summary]));
   assert.doesNotMatch(catalogText, /integration result|predecessor/u);
-  assert.match(catalogText, /\[✓\] verification/u);
+  assert.match(catalogText, /delivery present · verification satisfied/u);
   const selected = renderKanshiText(contractReport(detail), { columns: 120, color: false });
   assert.equal((selected.match(/^  integration result  4444444$/gmu) ?? []).length, 1);
-  assert.match(selected, /✓ verification 1/u);
+  assert.match(selected, /verification 1 · current · satisfied/u);
   assert.doesNotMatch(selected, /predecessor|verification satisfied · on 4444444/u);
   const world = renderKanshiText(kanshiReport({ kind: "present", rows: [summary] }), {
     columns: 120,
     color: false,
   });
-  assert.doesNotMatch(world, /integration result|verification satisfied/u);
+  assert.match(world, /verification satisfied/u);
+  assert.doesNotMatch(world, /integration result/u);
 });
 
 test("selected delivered Kanshi keeps stale delivery verification independent", () => {
@@ -360,10 +388,10 @@ test("selected delivered Kanshi keeps stale delivery verification independent", 
   });
   const catalogText = renderContractCatalogue(contractCatalog([summary]));
   assert.doesNotMatch(catalogText, /integration result/u);
-  assert.match(catalogText, /\[✓\] delivery  \[ \] verification/u);
+  assert.match(catalogText, /delivery present · verification stale/u);
   const selected = renderKanshiText(contractReport(detail), { columns: 120, color: false });
   assert.match(selected, /(?:^|\n)  integration result  4444444$/mu);
-  assert.match(selected, /(?:^|\n)  ! verification 1 · stale$/mu);
+  assert.match(selected, /(?:^|\n)  verification 1 · stale$/mu);
   assert.doesNotMatch(selected, /integration result  4444444 · verification satisfied/u);
   const world = renderKanshiText(kanshiReport({ kind: "present", rows: [summary] }), {
     columns: 120,
@@ -380,7 +408,7 @@ test("stale snapshot evidence keeps native identities across observations, recei
   };
   const current = { kind: "stale" as const, reason };
   assert.deepEqual(gateRequirementFacts({ gate: "verified", requirements: [{ index: 2, current }] }),
-    ["! verification 2 · stale · snapshot changed abcdef01 -> abcdef02"]);
+    ["verification 2 · stale · snapshot changed abcdef01 -> abcdef02"]);
   const requirement = requirementId("verification:sha256:historical-check");
   const problem = { gate: "verified", requirement, state: "stale" as const, reason };
   const receipt = unmetRequirementLines([problem], 400).join("\n");

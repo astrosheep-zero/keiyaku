@@ -74,8 +74,8 @@ test("contextual verify accumulates selected checks and completes an already del
   assert.match(text, /✓ check 1\s+satisfied · recorded/u);
   assert.match(text, /awaiting verification/u);
   const status = await runCli(["-C", raw.path, "status", id], { environment: {} });
-  assert.match(status.stdout, /✓ verification 1/u);
-  assert.match(status.stdout, /○ verification 2 · missing/u);
+  assert.match(status.stdout, /verification 1 · current · satisfied/u);
+  assert.match(status.stdout, /verification 2 · missing/u);
   const history = await runCli(["-C", raw.path, "history", id], { environment: {} });
   assert.ok(history.stdout.includes(value.checks[0]!.requirement));
   const second = accepted(
