@@ -10,9 +10,11 @@ their identities, never a decoded body, section tree, or Markdown grammar.
 A Contract document communicates its context, objective, design, intended
 write Region, acceptance criteria, and optional Verification declarations.
 Those required terms must be structurally valid and nonempty where meaningful;
-invalid documents are rejected before a lifecycle attempt. Independent
-structural failures are refused together in one attempt, while validation whose
-input depends on a well-formed structure keeps its order after them. Extensions
+invalid documents are rejected before a lifecycle attempt. Refusal is
+deterministic and reports one failure: independent structural problems are not
+aggregated in a single attempt, and repairing the reported failure exposes the
+next one. A document still needs full validation by its section owners before
+it reaches admission, so no partially valid document is admitted. Extensions
 may carry additional author terms without becoming core vocabulary. Binding
 persists the canonical rendering of the decoded terms rather than the caller's
 literal byte stream: layout-only authorship is normalized at admission and

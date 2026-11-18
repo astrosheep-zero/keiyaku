@@ -80,8 +80,8 @@ test("contract Markdown rejects frontmatter, duplicate sections, and missing str
   );
 });
 
-test("contract Markdown reports independent structural diagnostics together", () => {
-  const malformed = [
+test("contract Markdown reports the first structural failure and the next one after repair", () => {
+  const source = [
     "# Broken",
     "",
     "## Context",
@@ -105,23 +105,52 @@ test("contract Markdown reports independent structural diagnostics together", ()
     "## Gates",
     "reserved",
   ].join("\n");
-  assert.throws(
-    () => decodeContractDocument(malformed),
-    (error: unknown) => {
-      if (!(error instanceof KeiyakuError) || error.category !== "invalid-input") return false;
-      assert.equal(
-        error.message,
-        [
-          "contract document is missing ## Design",
-          "gates is not a contract Markdown section",
-          "Region may not contain a heading block",
-          "Criteria must contain one or more H3 entries",
-          "Verification must contain one or more fenced executor declarations",
-        ].join("\n"),
-      );
-      return true;
-    },
-  );
+  const withDesign = source.replace("## Region", "## Design\nKeep one adapter.\n\n## Region");
+  const withoutReserved = withDesign.replace("\n\n## Gates\nreserved", "");
+  const withoutRegionHeading = withoutReserved.replace("### Region heading\n", "");
+  const withCriteriaEntry = withoutRegionHeading.replace("- flat criterion", "### Entry\nbody");
+  const declared = withCriteriaEntry.replace("prose instead of a fence", "```bash\ntrue\n```");
+
+  const firstFailure = (markdown: string): string => {
+    try {
+      decodeContractDocument(markdown);
+    } catch (error) {
+      assert.ok(error instanceof KeiyakuError);
+      assert.equal(error.category, "invalid-input");
+      return error.message;
+    }
+    return "accepted";
+  };
+
+  assert.equal(firstFailure(source), "contract document is missing ## Design");
+  assert.equal(firstFailure(withDesign), "gates is not a contract Markdown section");
+  assert.equal(firstFailure(withoutReserved), "Region may not contain a heading block");
+  assert.equal(firstFailure(withoutRegionHeading), "Criteria must contain one or more H3 entries");
+  assert.equal(firstFailure(withCriteriaEntry), "Verification must contain one or more fenced executor declarations");
+  const repaired = decodeContractDocument(declared);
+  assert.deepEqual(repaired.region, ["src/**"]);
+  assert.deepEqual(repaired.criteria, [{ title: "Entry", body: "body\n\n" }]);
+  assert.deepEqual(repaired.verification, [{ executor: "bash", script: "true" }]);
+});
+
+test("contract Markdown refuses an empty required term and an empty extension", () => {
+  const valid = {
+    Context: "facts.",
+    Objective: "ship.",
+    Design: "adapter.",
+    Region: "src/**",
+    Criteria: "### one\nbody",
+  };
+  assert.throws(() => decodeContractDocument(contractMarkdown("Empty", { ...valid, Design: "  " })), {
+    name: "KeiyakuError",
+    category: "invalid-input",
+    message: "contract section 'Design' is empty",
+  });
+  assert.throws(() => decodeContractDocument(contractMarkdown("Empty", { ...valid, Notes: "   " })), {
+    name: "KeiyakuError",
+    category: "invalid-input",
+    message: "extension 'Notes' is empty",
+  });
 });
 
 test("Verification uses direct fenced executors and reserved H2s are refused", () => {

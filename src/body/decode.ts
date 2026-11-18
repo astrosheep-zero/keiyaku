@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import { KeiyakuError } from "../errors.js";
 import type { ContractBody, DecodedContractDocument } from "./types.js";
 import { decodeDocumentEnvelope } from "./envelope.js";
-import { criteriaStructure, decodeCriteria } from "./criteria.js";
-import { directChildren, rawSlice, sectionContent } from "../markdown/query.js";
+import { decodeCriteria } from "./criteria.js";
+import { sectionContent } from "../markdown/query.js";
 import type { DocumentNode, SectionNode, SourceSpan } from "../markdown/types.js";
 import { documentKey, documentSegmentKey, type DocumentKey, type DocumentSegmentKey } from "../core/facts/types.js";
 import { CONTRACT_SECTIONS, RESERVED_SECTIONS, type ContractSectionName } from "./shape.js";
-import { decodeRegionOrRefusal, regionStructure } from "./region.js";
+import { decodeRegionOrRefusal } from "./region.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import type { VerificationDefinition } from "../verification/declaration.js";
 
@@ -31,47 +31,14 @@ function mintDocumentSegmentKey(source: string, span: SourceSpan): DocumentSegme
   return documentSegmentKey(`segment:sha256:${digest(source.slice(span.start, span.end))}`);
 }
 
-function requireSections(sections: ReadonlyMap<string, SectionNode>): string[] {
-  const diagnostics: string[] = [];
+function requireSections(sections: ReadonlyMap<string, SectionNode>): void {
   for (const [name, spec] of Object.entries(CONTRACT_SECTIONS)) {
-    if (spec.required && !sections.has(name)) diagnostics.push(`contract document is missing ## ${spec.title}`);
+    if (spec.required && !sections.has(name)) refusal(`contract document is missing ## ${spec.title}`);
   }
-  return diagnostics;
 }
 
 function requiredSection(sections: ReadonlyMap<string, SectionNode>, name: RequiredSectionName): SectionNode {
   return sections.get(name)!;
-}
-
-function verificationStructure(document: DocumentNode, section: SectionNode): string | null {
-  const blocks = directChildren(section, "code_block");
-  if (blocks.length === 0) return "Verification must contain one or more fenced executor declarations";
-  const other = section.children.filter(
-    (node) => node.type !== "code_block" && rawSlice(document, node.span).trim().length > 0,
-  );
-  return other.length === 0 ? null : "Verification may contain only fenced executor declarations";
-}
-
-// Independent structural rules collect together; each predicate mirrors the
-// fence, heading, or reserved-name check its decoder already enforces so a
-// document with several violations is refused once with every diagnostic.
-function structuralDiagnostics(document: DocumentNode, sections: ReadonlyMap<string, SectionNode>): string[] {
-  const diagnostics = requireSections(sections);
-  for (const name of RESERVED_SECTIONS) {
-    if (sections.has(name)) diagnostics.push(`${name} is not a contract Markdown section`);
-  }
-  const checks = [
-    ["region", (_document: DocumentNode, section: SectionNode) => regionStructure(section)],
-    ["criteria", criteriaStructure],
-    ["verification", verificationStructure],
-  ] as const;
-  for (const [name, check] of checks) {
-    const section = sections.get(name);
-    if (section === undefined) continue;
-    const diagnostic = check(document, section);
-    if (diagnostic !== null) diagnostics.push(diagnostic);
-  }
-  return diagnostics;
 }
 
 function prose(document: DocumentNode, section: SectionNode): string {
@@ -100,16 +67,12 @@ export function decodeContractDocument(
     refusal(error instanceof Error ? error.message : String(error));
   }
   const { document, title, sections, sectionNodes } = envelope;
-  const structural = structuralDiagnostics(document, sections);
-  if (structural.length > 0) refusal(structural.join("\n"));
+  requireSections(sections);
+  // sections keeps authored order, so the first reserved heading in the source is refused first.
+  for (const name of sections.keys()) {
+    if (RESERVED_SECTIONS.has(name)) refusal(`${name} is not a contract Markdown section`);
+  }
   const verificationSection = sections.get("verification");
-  const extensions = [...sections.entries()]
-    .filter(([name]) => !Object.hasOwn(CONTRACT_SECTIONS, name))
-    .map(([, section]) => {
-      const content = sectionContent(document, section);
-      if (content.trim().length === 0) refusal(`extension '${section.title}' is empty`);
-      return { title: section.title, content };
-    });
   const body: ContractBody = {
     title: title.title,
     context: prose(document, requiredSection(sections, "context")),
@@ -118,7 +81,13 @@ export function decodeContractDocument(
     region: decodeRegionOrRefusal(document, requiredSection(sections, "region")),
     criteria: decodeCriteria(document, requiredSection(sections, "criteria")),
     verification: verificationSection === undefined ? [] : verification(document, verificationSection, options),
-    extensions,
+    extensions: [...sections.entries()]
+      .filter(([name]) => !Object.hasOwn(CONTRACT_SECTIONS, name))
+      .map(([, section]) => {
+        const content = sectionContent(document, section);
+        if (content.trim().length === 0) refusal(`extension '${section.title}' is empty`);
+        return { title: section.title, content };
+      }),
   };
   const segments = sectionNodes.map((section) => mintDocumentSegmentKey(document.source, section.span));
   return {
