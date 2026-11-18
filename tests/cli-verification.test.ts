@@ -3,11 +3,17 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import {
+  Kanshi,
   Keis,
+  Keiyaku,
   Repo,
+  World,
   type BindOutcome,
+  type ContractCatalogue,
+  type ContractKanshiDetail,
   type DeliveryPreviewOutcome,
   type DeliverOutcome,
+  type KanshiReport,
   type VerifyOutcome,
 } from "../src/index.js";
 import { renderAccepted } from "../src/cli/render/contract.js";
@@ -18,6 +24,7 @@ import { cliJson, runCli } from "./support/cli-fixtures.js";
 import { accepted } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { temporaryDirectory } from "./support/process.js";
+import { assertWireRoundTrip } from "./support/schema-parity.js";
 
 function markdown(scripts: readonly string[]): string {
   return contractMarkdown("CLI verification", {
@@ -115,6 +122,81 @@ test("pre-delivery verify always executes and distinguishes admission reuse from
   assert.equal(delivered.placement?.kind, "placed");
   assert.equal(delivered.integration, first.snapshot);
   assert.equal(readFileSync(runs, "utf8"), "run\nrun\n", "delivery consumes standing evidence");
+});
+
+test("pre-delivery reads separate recorded verdicts from pending applicability and known mismatches", async (t) => {
+  const runs = resolve(temporaryDirectory(t, "cli-pending-applicability-"), "runs");
+  const { raw, id, repository } = await bindCandidate(
+    [`echo green >> '${runs}'`, `echo red >> '${runs}'; exit 1`],
+    ["reviewed", "verified"],
+  );
+  raw.run(["branch", "other", "main"]);
+  const args = ["-C", raw.path];
+  const env = { environment: {} };
+  const repo = await Repo.at({ path: raw.path });
+  const keis = Keis.of(repo);
+  const contract = keis.kei({ id });
+  const verify = () => contract.verify().then(accepted);
+  const review = () => contract.review({ verdict: "satisfied", summary: "Candidate reviewed" }).then(accepted);
+  const status = async () => (await cliJson<ContractKanshiDetail>([...args, "status", id], env)).value;
+  const evidence = (detail: Pick<ContractKanshiDetail, "gates">, gate: string) =>
+    detail.gates?.find((report) => report.gate === gate)?.requirements.map(({ current }) => current);
+
+  const verified = await verify();
+  await review();
+  const before = await observeContract(repository, id);
+  const first = await status();
+  assertWireRoundTrip(Keiyaku.verbs.status.normal, first);
+  assert.equal(first.delivery, undefined);
+  const pending = (priorVerdict: "satisfied" | "unsatisfied") => ({ kind: "applicability-pending", priorVerdict });
+  const reviewPending = [pending("satisfied")];
+  const checksPending = [pending("satisfied"), pending("unsatisfied")];
+  assert.deepEqual(evidence(first, "reviewed"), reviewPending);
+  assert.deepEqual(evidence(first, "verified"), checksPending);
+  const native = await keis.observe({ id });
+  const selected = await Kanshi.of({ repo, world: await World.at(raw.path) }).contract(id);
+  assert.equal(native.kind, "present");
+  assert.equal(selected.kind, "contract");
+  assert.deepEqual([first.gates, selected.gates], [native.row.gates, native.row.gates]);
+  const exactText = (await runCli([...args, "status", id], env)).stdout;
+  assert.match(exactText, /verification 2 · recorded unsatisfied · applicability pending/u);
+
+  const { value: catalogue } = await cliJson<ContractCatalogue>([...args, "ls", "kei/"], env);
+  const { value: world } = await cliJson<KanshiReport>([...args, "kanshi"], env);
+  assertWireRoundTrip(Keiyaku.verbs.ls.normal, catalogue);
+  assert.equal(world.contracts.kind, "present");
+  const row = catalogue.rows?.find((row) => row.id === id);
+  assert.deepEqual(row?.gates, ["reviewed", "verified"].map((name) => ({ name, verdict: "applicability-pending" })));
+  assert.deepEqual(world.contracts.rows?.find((row) => row.id === id)?.gates, row?.gates);
+  assert.match((await runCli([...args, "ls", "kei/"], env)).stdout, /verification applicability pending/u);
+
+  const preview = await contract.previewDelivery();
+  assert.equal(preview.kind, "ready");
+  assert.deepEqual(preview.unmetGates?.map(({ requirement, state }) => [requirement, state]), [
+    [verified.checks[1]!.requirement, "unsatisfied"],
+  ]);
+  assert.equal(before.state?.delivery, null);
+  assert.deepEqual(await observeContract(repository, id), before);
+  assert.equal(readFileSync(runs, "utf8"), "green\nred\n");
+
+  accepted(await contract.amend({ target: "other" }));
+  const retargeted = await status();
+  assert.deepEqual(evidence(retargeted, "verified"), [
+    { kind: "stale", priorVerdict: "satisfied" },
+    { kind: "stale", priorVerdict: "unsatisfied" },
+  ]);
+  assert.deepEqual(evidence(retargeted, "reviewed"), reviewPending);
+  await verify();
+  accepted(await contract.amend({ edits: "## Replace: Objective\n\nSame candidate, revised author intent.\n" }));
+  const amended = await status();
+  assert.deepEqual(evidence(amended, "reviewed"), [{ kind: "stale", priorVerdict: "satisfied" }]);
+  assert.deepEqual(evidence(amended, "verified"), checksPending);
+
+  await review();
+  const delivery = accepted(await contract.deliver());
+  assert.equal(delivery.placement?.kind, "gates-unsatisfied");
+  assert.deepEqual(delivery.placement.unmet, preview.unmetGates);
+  assert.equal(readFileSync(runs, "utf8"), "green\nred\ngreen\nred\n");
 });
 
 test("full verify exposes mixed verdicts, independent scratches, and requirement-scoped retention", async () => {

@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { decodeJournal, encodeEntry, validateEntry } from "../src/core/facts/codec.js";
 import { foldJournal } from "../src/core/facts/fold.js";
-import { gateReports, latestCurrentAttestations } from "../src/core/facts/gate.js";
+import { gateReports } from "../src/core/facts/gate.js";
 import {
   changeId,
   contractId,
   documentKey,
+  documentSegmentKey,
   gate,
   requirementId,
   snapshotId,
@@ -14,7 +15,7 @@ import {
   type ContractState,
   type JournalEntry,
 } from "../src/core/facts/types.js";
-import { currentSubjectPredicate, dependencyKeySet } from "../src/core/subject.js";
+import { dependencyKeySet } from "../src/core/subject.js";
 import { unmetGateProblems, requirementProblemSchema } from "../src/protocol/completion.js";
 import { gateCurrentSchema } from "../src/protocol/result-leaves.js";
 import { decidePlacement } from "../src/core/verbs/placement.js";
@@ -96,10 +97,11 @@ test("generic requirements accumulate independently and latest current failure s
   const complete = delivered(attestation(first), attestation(second));
   assert.equal(gateReports(complete).satisfied, true);
   const failed = delivered(attestation(first), attestation(second), attestation(first, "unsatisfied"));
-  const current = latestCurrentAttestations(failed, new Set([selectedGate])).get(selectedGate)!;
-  assert.equal(current.get(first)!.data.verdict, "unsatisfied");
-  assert.equal(current.get(second)!.data.verdict, "satisfied");
-  assert.equal(gateReports(failed).satisfied, false);
+  const failedReport = gateReports(failed);
+  assert.deepEqual(failedReport.reports[0]!.requirements.map(({ current }) => current.kind === "attested" && current.verdict), [
+    "unsatisfied", "satisfied",
+  ]);
+  assert.equal(failedReport.satisfied, false);
   const placement = (state: ContractState) =>
     decidePlacement({
       input: { contractId: id, at: "2026-08-07T00:01:00Z" },
@@ -130,7 +132,6 @@ test("stale explanations preserve currentness, content precedence, and unknown c
   const state = delivered(old);
   const report = gateReports(state);
   const reason = { kind: "snapshot-changed", previousSnapshot, currentSnapshot: snapshotId("candidate") };
-  assert.equal(currentSubjectPredicate(state)(old.subject), false);
   assert.equal(report.satisfied, false);
   assert.deepEqual(report.reports[0]!.requirements[0]!.current, {
     kind: "stale", priorVerdict: "satisfied", reason,
@@ -151,11 +152,27 @@ test("stale explanations preserve currentness, content precedence, and unknown c
   assert.deepEqual(unmetGateProblems(gateReports(content).reports)[0], {
     gate: selectedGate, requirement: first, state: "stale", previousContentId: "old-patch", currentContentId: "patch",
   });
-  const unavailable = { ...state, delivery: null, currentIntegration: null };
-  assert.equal(currentSubjectPredicate(unavailable)(old.subject), false);
-  assert.deepEqual(gateReports(unavailable).reports[0]!.requirements[0]!.current, { kind: "stale", priorVerdict: "satisfied" });
   const unrelated = delivered({ ...old, subject: dependencyKeySet([{ kind: "document", value: documentKey("old-document") }]) });
   assert.deepEqual(gateReports(unrelated).reports[0]!.requirements[0]!.current, { kind: "stale", priorVerdict: "satisfied" });
+});
+
+test("pending applicability neither satisfies a gate nor conceals stronger unmet requirements", () => {
+  const checks = (...others: AttestationData[]) => gateReports(foldJournal(id, [
+    bind(), entry("attestation", attestation(first), 1),
+    ...others.map((other, index) => entry("attestation", other, index + 2)),
+  ])).reports[0]!;
+  assert.equal(checks(attestation(second)).satisfied, false);
+  assert.equal(checks().current.kind, "missing");
+  const segmentMismatch = checks({
+    ...attestation(second),
+    subject: dependencyKeySet([
+      { kind: "snapshot", value: snapshotId("candidate") },
+      { kind: "segment", value: documentSegmentKey("old-segment") },
+    ]),
+  });
+  assert.equal(segmentMismatch.requirements[1]!.current.kind, "stale");
+  assert.equal(segmentMismatch.current.kind, "stale");
+  assert.equal(checks({ ...attestation(second, "unsatisfied"), subject: dependencyKeySet([]) }).current.kind, "attested");
 });
 
 test("changing current obligations preserves matching evidence and removes only the removed obligation", () => {

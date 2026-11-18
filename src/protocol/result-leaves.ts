@@ -59,6 +59,7 @@ export const gateCurrentSchema = z.union([
       reason: gateStaleReasonSchema.exactOptional(),
     })
     .readonly(),
+  z.strictObject({ kind: z.literal("applicability-pending"), priorVerdict: verdictSchema }).readonly(),
 ]);
 export const requirementIdSchema = z
   .string()

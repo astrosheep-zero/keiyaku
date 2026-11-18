@@ -1,4 +1,4 @@
-import { dependencyKeys, currentSubjectPredicate } from "../subject.js";
+import { dependencyKeys, subjectApplicabilityFor, type SubjectApplicability } from "../subject.js";
 import {
   targetName,
   type AttestationEntry,
@@ -25,6 +25,7 @@ export type GateStaleReason =
 export type GateCurrent =
   | Readonly<{ kind: "attested"; verdict: "satisfied" | "unsatisfied"; summary?: string; at: string }>
   | Readonly<{ kind: "stale"; priorVerdict: "satisfied" | "unsatisfied"; reason?: GateStaleReason }>
+  | Readonly<{ kind: "applicability-pending"; priorVerdict: "satisfied" | "unsatisfied" }>
   | Readonly<{ kind: "missing" }>;
 
 export type RequirementReport = Readonly<{ requirement: RequirementId; current: GateCurrent }>;
@@ -58,23 +59,32 @@ export type GateReports = Readonly<{
   satisfied: boolean;
 }>;
 
-/** Resolve latest current testimony independently for each gate and requirement. */
-export function latestCurrentAttestations(
-  state: ContractState,
-  requested: ReadonlySet<Gate>,
-): ReadonlyMap<Gate, ReadonlyMap<RequirementId, AttestationEntry>> {
-  const attestations = new Map<Gate, Map<RequirementId, AttestationEntry>>();
-  const subjectIsCurrent = currentSubjectPredicate(state);
+type LatestTestimony = {
+  prior: AttestationEntry;
+  priorApplicability: SubjectApplicability;
+  current?: AttestationEntry;
+};
+
+/** Retain the latest current testimony, falling back to the latest record for explanation. */
+function latestTestimony(state: ContractState): ReadonlyMap<Gate, ReadonlyMap<RequirementId, LatestTestimony>> {
+  const attestations = new Map<Gate, Map<RequirementId, LatestTestimony>>();
+  const requested = new Set(state.terms.gates);
+  const applicabilityFor = subjectApplicabilityFor(state);
   for (let index = state.attestations.length - 1; index >= 0; index -= 1) {
-    const attestation = state.attestations[index]!;
-    const { gate, requirement, subject } = attestation.data;
-    if (!requested.has(gate) || !subjectIsCurrent(subject)) continue;
+    const entry = state.attestations[index]!;
+    const { gate, requirement, subject } = entry.data;
+    if (!requested.has(gate)) continue;
     let requirements = attestations.get(gate);
     if (requirements === undefined) {
       requirements = new Map();
       attestations.set(gate, requirements);
     }
-    if (!requirements.has(requirement)) requirements.set(requirement, attestation);
+    const testimony = requirements.get(requirement);
+    if (testimony?.current !== undefined) continue;
+    const applicability = applicabilityFor(subject);
+    const latest = testimony ?? { prior: entry, priorApplicability: applicability };
+    if (applicability === "current") latest.current = entry;
+    requirements.set(requirement, latest);
   }
   return attestations;
 }
@@ -83,11 +93,9 @@ export function gatesSatisfied(state: ContractState): boolean {
   return gateReports(state).satisfied;
 }
 
-function requirementCurrent(
-  state: ContractState,
-  current: AttestationEntry | undefined,
-  previous: AttestationEntry | undefined,
-): GateCurrent {
+function requirementCurrent(state: ContractState, testimony: LatestTestimony | undefined): GateCurrent {
+  if (testimony === undefined) return { kind: "missing" };
+  const { current, prior, priorApplicability } = testimony;
   if (current !== undefined) {
     return {
       kind: "attested",
@@ -96,11 +104,12 @@ function requirementCurrent(
       at: current.at,
     };
   }
-  if (previous === undefined) return { kind: "missing" };
-  const reason = staleReason(state, previous);
+  const priorVerdict = prior.data.verdict;
+  if (priorApplicability === "applicability-pending") return { kind: "applicability-pending", priorVerdict };
+  const reason = staleReason(state, prior);
   return {
     kind: "stale",
-    priorVerdict: previous.data.verdict,
+    priorVerdict,
     ...(reason === undefined ? {} : { reason }),
   };
 }
@@ -112,6 +121,7 @@ function aggregateCurrent(requirements: readonly RequirementReport[]): GateCurre
     currents.find((current) => current.kind === "attested" && current.verdict === "unsatisfied") ??
     currents.find((current) => current.kind === "missing") ??
     currents.find((current) => current.kind === "stale") ??
+    currents.find((current) => current.kind === "applicability-pending") ??
     currents.reduce((latest, current) =>
       current.kind === "attested" && latest.kind === "attested" && current.at > latest.at ? current : latest,
     )
@@ -120,22 +130,13 @@ function aggregateCurrent(requirements: readonly RequirementReport[]): GateCurre
 
 /** Project every declared requirement without allowing consumers to reimplement currency. */
 export function gateReports(state: ContractState): GateReports {
-  const current = latestCurrentAttestations(state, new Set(state.terms.gates));
-  const prior = new Map<Gate, Map<RequirementId, AttestationEntry>>();
-  for (let index = state.attestations.length - 1; index >= 0; index -= 1) {
-    const entry = state.attestations[index]!;
-    let requirements = prior.get(entry.data.gate);
-    if (requirements === undefined) {
-      requirements = new Map();
-      prior.set(entry.data.gate, requirements);
-    }
-    if (!requirements.has(entry.data.requirement)) requirements.set(entry.data.requirement, entry);
-  }
+  const testimony = latestTestimony(state);
   const reports = state.terms.gates.map((gate): GateReport => {
+    const requirementsTestimony = testimony.get(gate);
     const requirements = state.terms.requirements[gate]!.map(
       (requirement): RequirementReport => ({
         requirement,
-        current: requirementCurrent(state, current.get(gate)?.get(requirement), prior.get(gate)?.get(requirement)),
+        current: requirementCurrent(state, requirementsTestimony?.get(requirement)),
       }),
     );
     return {

@@ -124,7 +124,10 @@ observation needed by a caller, but are neither lifecycle authority nor a second
 eligibility judge. A targeted observation does
 not pretend to know the world-wide reverse-dependency view. Text rendering may
 shorten physical Git identities only when unambiguous; product identities remain
-complete.
+complete. Ordinary reads do not prepare a candidate to judge testimony. Exact
+reads retain each recorded verdict whose applicability is pending; compact rows
+summarize the unmet gate without implying a combined verdict or obscuring a
+known failure, stale testimony, or missing testimony.
 
 Contract listing defaults to active work and may select settled work or both,
 using the lifecycle owner's classification before bounding. It preserves complete

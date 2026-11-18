@@ -44,7 +44,7 @@ export function contractLifecycle(phase: ContractPhase): "active" | "settled" {
 const summaryGateSchema = z
   .strictObject({
     name: gateSchema,
-    verdict: z.enum(["missing", "stale", "satisfied", "unsatisfied"]),
+    verdict: z.enum(["missing", "stale", "satisfied", "unsatisfied", "applicability-pending"]),
   })
   .readonly();
 export type ContractSummaryGate = z.output<typeof summaryGateSchema>;
@@ -275,9 +275,7 @@ function lastJournalAtFor(entries: readonly Pick<JournalEntry, "at">[]): string 
 }
 
 function summaryVerdict(current: GateCurrent): ContractSummaryGate["verdict"] {
-  if (current.kind === "missing") return "missing";
-  if (current.kind === "stale") return "stale";
-  return current.verdict;
+  return current.kind === "attested" ? current.verdict : current.kind;
 }
 
 export function summaryFor({ state, bindAt }: Pick<SelectedContractState, "state" | "bindAt">): ContractSummary {

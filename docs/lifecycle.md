@@ -96,6 +96,13 @@ previous and current identities. A snapshot mismatch does not establish why it
 changed; absent integration supplies no such explanation. These reasons describe
 unmet evidence, not failed execution, and leave currentness and selection unchanged.
 
+For an active Contract without a delivery or integration to judge, otherwise
+matching testimony whose candidate or integration dependency cannot yet be
+compared retains its verdict with applicability pending. Known dependency
+mismatches still make testimony stale. Pending applicability is unmet evidence,
+not a missing or failed check, and cannot satisfy a requirement. Preview can
+judge the same testimony against a prospective integration without admitting it.
+
 Producer methodology for `verified` belongs to
 [verification.md](verification.md). Selection makes its current requirements
 placement obligations. Without `verified`, explicit execution still returns its

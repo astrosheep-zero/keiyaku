@@ -108,8 +108,10 @@ export function dependencyKeys(value: DependencyKeySet): readonly DependencyKey[
   return decodeDependencyKeySet(value).keys;
 }
 
-function currentKeys(state: ContractState): ReadonlySet<string> {
-  const integration = state.currentIntegration ?? state.delivery?.data.integration;
+function currentKeys(
+  state: ContractState,
+  integration: NonNullable<ContractState["currentIntegration"]> | undefined,
+): ReadonlySet<string> {
   return new Set([
     encodeKey({ kind: "document", value: state.terms.document.key }),
     ...state.terms.segments.map((value) => encodeKey({ kind: "segment", value })),
@@ -123,24 +125,38 @@ function currentKeys(state: ContractState): ReadonlySet<string> {
   ]);
 }
 
-/** Build one memoized currentness test for a folded contract snapshot. */
-export function currentSubjectPredicate(state: ContractState): (subject: DependencyKeySet) => boolean {
-  const available = currentKeys(state);
-  const current = new Map<DependencyKeySet, boolean>();
+export type SubjectApplicability = "current" | "stale" | "applicability-pending";
+
+/** Judge dependencies against one folded Contract observation. */
+export function subjectApplicabilityFor(state: ContractState): (subject: DependencyKeySet) => SubjectApplicability {
+  const integration = state.currentIntegration ?? state.delivery?.data.integration;
+  const available = currentKeys(state, integration);
+  const canBePending = state.terminal === null && state.delivery === null && integration === undefined;
+  const observed = new Map<DependencyKeySet, SubjectApplicability>();
+  function classify(subject: DependencyKeySet): SubjectApplicability {
+    const { keys } = decodeDependencyKeySet(subject);
+    // A retained snapshot still carries the target fence even when content determines currency.
+    if (
+      state.targetRevision !== undefined &&
+      keys.some((key) => key.kind === "snapshot") &&
+      !keys.some((key) => key.kind === "target" && key.value === state.targetRevision)
+    ) {
+      return "stale";
+    }
+    const hasChange = keys.some((key) => key.kind === "change");
+    let applicability: SubjectApplicability = "current";
+    for (const key of keys) {
+      if ((hasChange && key.kind === "snapshot") || available.has(encodeKey(key))) continue;
+      if (!canBePending || (key.kind !== "snapshot" && key.kind !== "change")) return "stale";
+      applicability = "applicability-pending";
+    }
+    return applicability;
+  }
   return (subject) => {
-    const known = current.get(subject);
+    const known = observed.get(subject);
     if (known !== undefined) return known;
-    const decoded = decodeDependencyKeySet(subject);
-    // Snapshot testimony cannot cross a target change, even when the new target has the same head.
-    const snapshotTargetCurrent =
-      state.targetRevision === undefined ||
-      !decoded.keys.some((key) => key.kind === "snapshot") ||
-      decoded.keys.some((key) => key.kind === "target" && key.value === state.targetRevision);
-    const hasChange = decoded.keys.some((key) => key.kind === "change");
-    const value =
-      snapshotTargetCurrent &&
-      decoded.keys.every((key) => (hasChange && key.kind === "snapshot") || available.has(encodeKey(key)));
-    current.set(subject, value);
+    const value = classify(subject);
+    observed.set(subject, value);
     return value;
   };
 }

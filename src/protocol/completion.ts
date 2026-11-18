@@ -72,6 +72,9 @@ export function unmetGateProblems(reports: readonly GateReport[]): readonly Requ
                   ...(current.summary === undefined ? {} : { summary: current.summary }),
                 },
               ];
+        if (current.kind === "applicability-pending") {
+          throw new Error("integration-based gate judgment cannot have pending applicability");
+        }
         return [
           {
             ...coordinate,

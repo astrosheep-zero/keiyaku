@@ -35,7 +35,10 @@ export function lifecycleWord(phase: ContractDetail["phase"]): string {
 export function progressStrip(row: Pick<ContractSummary, "delivered" | "gates">): string {
   return [
     `delivery ${row.delivered === true ? "present" : "absent"}`,
-    ...(row.gates ?? []).map((gate) => `${gateDisplayName(gate.name)} ${gate.verdict}`),
+    ...(row.gates ?? []).map(
+      (gate) =>
+        `${gateDisplayName(gate.name)} ${gate.verdict === "applicability-pending" ? "applicability pending" : gate.verdict}`,
+    ),
   ].join(" · ");
 }
 
@@ -90,7 +93,12 @@ export function staleReasonFact(reason: GateStaleReason): string {
 export function gateRequirementFacts(report: ContractGateReport): readonly string[] {
   return report.requirements.map((requirement) => {
     const current = requirement.current;
-    const state = current.kind === "attested" ? `current · ${current.verdict}` : current.kind;
+    const state =
+      current.kind === "attested"
+        ? `current · ${current.verdict}`
+        : current.kind === "applicability-pending"
+          ? `recorded ${current.priorVerdict} · applicability pending (no delivery)`
+          : current.kind;
     const reason =
       current.kind === "stale" && current.reason !== undefined ? ` · ${staleReasonFact(current.reason)}` : "";
     return `${requirementDisplayName(report.gate, requirement)} · ${state}${reason}`;
