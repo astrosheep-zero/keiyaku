@@ -11,7 +11,8 @@ export class BodySupervisor {
   private readonly controller = new AbortController();
   private readonly finished = new AbortController();
   private readonly observer: Promise<void>;
-  private waiter: ((snapshot: BodyControlSnapshot) => void) | undefined;
+  private waiter: { resolve(snapshot: BodyControlSnapshot): void; reject(error: unknown): void } | undefined;
+  private failure?: { error: unknown };
   private observation: BodyControlSnapshot;
   private stopping?: "control" | "heart-gone" | "launch";
   private readonly cancelLaunch = (): void => this.cancel("launch");
@@ -27,7 +28,7 @@ export class BodySupervisor {
     this.observation = observation;
     launchSignal?.addEventListener("abort", this.cancelLaunch, { once: true });
     if (launchSignal?.aborted) this.cancelLaunch();
-    this.observer = this.observe();
+    this.observer = this.observe().catch((error: unknown) => this.failObservation(error));
   }
 
   static async open(
@@ -51,6 +52,7 @@ export class BodySupervisor {
     return this.stopping;
   }
   current(): BodyControlSnapshot {
+    if (this.failure !== undefined) throw this.failure.error;
     return this.observation;
   }
 
@@ -59,19 +61,24 @@ export class BodySupervisor {
   }
 
   async refresh(): Promise<BodyControlSnapshot> {
-    const snapshot = await this.reader.read();
-    if (!isDeepStrictEqual(snapshot, this.observation)) {
+    this.current();
+    const snapshot = await this.reader.read().catch((error: unknown) => {
+      this.failObservation(error);
+      throw error;
+    });
+    if (!isDeepStrictEqual(snapshot, this.current())) {
       this.observation = snapshot;
-      this.waiter?.(snapshot);
+      this.waiter?.resolve(snapshot);
       this.waiter = undefined;
     }
     return this.observation;
   }
 
   next(after: BodyControlSnapshot): Promise<BodyControlSnapshot> {
+    if (this.failure !== undefined) return Promise.reject(this.failure.error);
     if (this.observation !== after) return Promise.resolve(this.observation);
-    return new Promise((resolve) => {
-      this.waiter = resolve;
+    return new Promise((resolve, reject) => {
+      this.waiter = { resolve, reject };
     });
   }
 
@@ -79,7 +86,7 @@ export class BodySupervisor {
     if (this.stopping !== undefined) return;
     this.stopping = reason;
     this.controller.abort(new Error(reason === "heart-gone" ? "Akuma Heart disappeared" : "Akuma Body interrupted"));
-    this.waiter?.(this.observation);
+    this.waiter?.resolve(this.observation);
     this.waiter = undefined;
   }
 
@@ -94,9 +101,16 @@ export class BodySupervisor {
     }
   }
 
+  private failObservation(error: unknown): void {
+    if (this.failure !== undefined) return;
+    this.failure = { error };
+    this.waiter?.reject(error);
+    this.waiter = undefined;
+  }
+
   private async observe(): Promise<void> {
     for (;;) {
-      const snapshot = this.observation;
+      const snapshot = this.current();
       if (snapshot.soul === null) return this.cancel("heart-gone");
       if (snapshot.stop?.bodySequence === this.body.sequence || snapshot.pause?.bodySequence === this.body.sequence) {
         return this.cancel("control");

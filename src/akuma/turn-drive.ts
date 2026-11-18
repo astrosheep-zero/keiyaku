@@ -1,5 +1,4 @@
-import { abortable, abortableDelay } from "./abort.js";
-/* eslint-disable max-lines-per-function -- Turn setup and consumption each preserve one ordered lifecycle transaction. */
+import { abortableDelay } from "./abort.js";
 import {
   appendActivity,
   beginTurn,
@@ -33,7 +32,7 @@ import { BodySupervisor, CONTROL_RESPONSE_MS } from "./body-supervisor.js";
 
 type EffectSerializer = {
   <T>(effect: () => Promise<T> | T): Promise<T>;
-  drain(): Promise<void>;
+  drain(seal: () => void): Promise<void>;
 };
 
 function serializeEffects(): EffectSerializer {
@@ -51,9 +50,16 @@ function serializeEffects(): EffectSerializer {
     );
     return await result;
   };
-  serialize.drain = async () => {
-    await tail;
-    if (failed) throw failure;
+  serialize.drain = async (seal: () => void) => {
+    // A receipt can enter the serializer while an earlier effect is still draining.
+    for (;;) {
+      const admitted = tail;
+      await admitted;
+      if (admitted !== tail) continue;
+      seal();
+      if (failed) throw failure;
+      return;
+    }
   };
   return serialize;
 }
@@ -101,15 +107,6 @@ export type DriveTurnInput = Readonly<{
   now(): string;
 }>;
 
-type ActiveTurn = Readonly<{
-  turnSequence: number;
-  attempt: ProviderAttempt<Session>;
-  drive: Session;
-  cwd: string;
-  options: Soul["options"];
-  resume?: ResumeCoordinate;
-}>;
-
 type TurnWriters = Readonly<{
   input: DriveTurnInput;
   turnSequence: number;
@@ -119,13 +116,11 @@ type TurnWriters = Readonly<{
 }>;
 
 type Retirement = Readonly<{ kind: "retired" }> | Readonly<{ kind: "hung" }>;
-type StartTurnResult =
-  | ActiveTurn
+type TurnDriveResult =
+  | (DrivenTurn & Readonly<{ turnSequence: number }>)
   | Readonly<{ kind: "stopped" }>
   | Readonly<{ kind: "hung" }>
-  | Readonly<{ kind: "resume-unsupported" }>
-  | (Extract<DrivenTurn, { kind: "failed" }> & Readonly<{ turnSequence: number }>);
-type TurnDriveResult = DrivenTurn | Readonly<{ kind: "stopped" }> | Readonly<{ kind: "hung" }>;
+  | Readonly<{ kind: "resume-unsupported" }>;
 
 /**
  * The runtime model one attempt has already observed. Equal observations
@@ -136,18 +131,18 @@ type ModelWitness = { written: boolean; model: string | undefined };
 
 async function writeProviderEvent(
   input: DriveTurnInput,
-  active: ActiveTurn,
+  turnSequence: number,
+  recipe: Pick<Soul, "cwd" | "options">,
   event: AgentEvent,
   witness: ModelWitness,
-): Promise<void> {
-  if (input.supervisor.signal.aborted) return;
+): Promise<ResumeCoordinate | undefined> {
   const at = input.now();
   if (event.type === "session") {
     await recordSession(input.paths, {
       provider: input.soul.provider.name,
       coordinate: event.coordinate,
-      cwd: active.cwd,
-      options: active.options,
+      cwd: recipe.cwd,
+      options: recipe.options,
       admittedAt: at,
     });
   }
@@ -160,7 +155,9 @@ async function writeProviderEvent(
     await recordCurrentModel(input.paths, { bodySequence: input.bodySequence, model: event.model });
     return;
   }
-  await appendActivity(input.paths, { turnSequence: active.turnSequence, event: encodeAgentEvent(event), at });
+  if (!input.supervisor.signal.aborted)
+    await appendActivity(input.paths, { turnSequence, event: encodeAgentEvent(event), at });
+  return event.type === "session" ? event.coordinate : undefined;
 }
 
 function startProviderAttempt(
@@ -190,103 +187,6 @@ function startProviderAttempt(
   return session === undefined
     ? input.adapter.start({ ...driveInput, session: { kind: "fresh" } })
     : input.adapter.resume!({ ...driveInput, session: { kind: "resume", coordinate: session } });
-}
-
-async function startTurnDrive(input: DriveTurnInput): Promise<StartTurnResult> {
-  if (input.supervisor.signal.aborted) return { kind: "stopped" };
-  const recipe = await turnRecipe(input.paths, input.soul);
-  const { session } = recipe;
-  if (session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
-  const runtimeInstructions = keiyakuExecutionInstructions(
-    input.soul,
-    input.soul.bare !== false ? undefined : await input.executionAssociation?.(),
-  );
-  const boundTells = drainPendingTells(input.launchTells);
-  const schemaJson = input.schemaJson ?? boundTells.find((tell) => tell.schemaJson !== undefined)?.schemaJson;
-  const initiator = input.call === undefined ? boundTells[0]?.initiator : input.initiator;
-  const turn = await beginTurn(input.paths, {
-    ...(initiator === undefined ? {} : { initiator }),
-    bodySequence: input.bodySequence,
-    startedAt: input.now(),
-    ...(input.call === undefined ? {} : { call: input.call }),
-    ...(schemaJson === undefined ? {} : { schemaJson }),
-  });
-  if (boundTells.length > 0) {
-    await bindTellsToTurn(input.paths, {
-      turnSequence: turn.sequence,
-      tellIds: boundTells.map((tell) => tell.id),
-      boundAt: input.now(),
-    });
-  }
-  await input.turnStarted.emit(turn.sequence);
-  if (input.supervisor.signal.aborted) return { kind: "stopped" };
-  return await establishTurnDrive(input, turn.sequence, {
-    ...recipe,
-    boundTells,
-    ...(schemaJson === undefined ? {} : { schemaJson }),
-    ...(runtimeInstructions === undefined ? {} : { runtimeInstructions }),
-  });
-}
-
-async function establishTurnDrive(
-  input: DriveTurnInput,
-  turnSequence: number,
-  recipe: Awaited<ReturnType<typeof turnRecipe>> &
-    Readonly<{
-      boundTells: readonly TellFact[];
-      schemaJson?: string;
-      runtimeInstructions?: string;
-    }>,
-): Promise<StartTurnResult> {
-  const { cwd, options, session, boundTells, schemaJson, runtimeInstructions } = recipe;
-  let attempt: ProviderAttempt<Session>;
-  try {
-    attempt = startProviderAttempt(input, {
-      recipe,
-      tells: boundTells,
-      signal: input.supervisor.signal,
-      schemaJson,
-      runtimeInstructions,
-    });
-  } catch (error) {
-    return { kind: "failed", turnSequence, diagnostic: error instanceof Error ? error.message : String(error) };
-  }
-  const custodyFailure = observeFailure(attempt.closed);
-  try {
-    const selected = await abortable(Promise.race([attempt.result, custodyFailure]), input.supervisor.signal);
-    if (input.supervisor.signal.aborted) {
-      const retirement = await retireProviderCustody(input, turnSequence, attempt);
-      if (retirement.kind === "hung") return retirement;
-      return { kind: "stopped" };
-    }
-    if (boundTells.length > 0)
-      await recordTellDeliveries(
-        input.paths,
-        boundTells.map((tell) => ({
-          tellId: tell.id,
-          route: "launch" as const,
-          turnSequence,
-          fence: selected.admission.fence,
-          deliveredAt: input.now(),
-        })),
-      );
-    return {
-      turnSequence,
-      attempt,
-      drive: selected,
-      cwd,
-      options,
-      ...(session === undefined ? {} : { resume: session }),
-    };
-  } catch (error) {
-    const retirement = await retireProviderCustody(input, turnSequence, attempt);
-    if (retirement.kind === "hung") return retirement;
-    if (input.supervisor.signal.aborted) {
-      if (input.supervisor.reason === "heart-gone") throw error;
-      return { kind: "stopped" };
-    }
-    return { kind: "failed", turnSequence, diagnostic: error instanceof Error ? error.message : String(error) };
-  }
 }
 
 async function retireProviderCustody(
@@ -332,8 +232,8 @@ async function retireProviderCustody(
     } catch {
       /* Undisposed provider custody still owns the leash. */
     }
+    await breakBody(input.paths, { sequence: input.bodySequence, end: "broke-off", at: input.now() });
   }
-  await breakBody(input.paths, { sequence: input.bodySequence, end: "broke-off", at: input.now() });
   return { kind: "hung" };
 }
 
@@ -356,13 +256,6 @@ function pumpReceipts(writers: TurnWriters): Promise<void> {
   })();
 }
 
-function observeFailure(settlement: Promise<unknown>): Promise<never> {
-  return settlement.then(
-    () => new Promise<never>(() => {}),
-    (error: unknown) => Promise.reject(error),
-  );
-}
-
 async function submitPendingLiveTells(
   writers: TurnWriters,
   pending: readonly TellFact[],
@@ -372,9 +265,12 @@ async function submitPendingLiveTells(
   const { input, turnSequence, drive, writeWitness, mayWrite } = writers;
   for (const tell of pending) {
     if (attempted.has(tell.id) || tell.schemaJson !== undefined) continue;
+    if (!mayWrite()) return "turn-ended";
     attempted.add(tell.id);
     const outcome = await writeWitness(async () => {
+      if (!mayWrite()) return "turn-ended" as const;
       await bindTellsToTurn(input.paths, { turnSequence, tellIds: [tell.id], boundAt: input.now() });
+      if (!mayWrite()) return "turn-ended" as const;
       const submission = await tellLive({ id: tell.id, text: tell.body });
       if (!mayWrite() || submission.kind === "turn-ended") return "turn-ended" as const;
       await recordTellDeliveries(input.paths, [
@@ -394,89 +290,69 @@ async function submitPendingLiveTells(
   return "live";
 }
 
-type TurnWakeup =
-  | Readonly<{ kind: "event"; event: IteratorResult<AgentEvent> }>
-  | Readonly<{ kind: "heart"; observation: BodyControlSnapshot }>
-  | Readonly<{ kind: "tell"; result: "live" | "turn-ended" }>
-  | Readonly<{ kind: "completion"; result: TurnResult }>
-  | Readonly<{ kind: "closed" }>
-  | Readonly<{ kind: "drained" }>
-  | Readonly<{ kind: "failed"; error: unknown }>;
+type TurnSources = {
+  admission: Session;
+  event: IteratorResult<AgentEvent>;
+  heart: BodyControlSnapshot;
+  tell: "live" | "turn-ended";
+  completion: TurnResult;
+  closed: void;
+  drained: void;
+  "receipt-failure": void;
+};
+type TurnSource = keyof TurnSources;
+type TurnWake = { [S in TurnSource]: { kind: S; value: TurnSources[S] } }[TurnSource];
+type TurnWakeup = TurnWake | { kind: "failed"; source: TurnSource; error: unknown };
+type TurnArm = { [S in TurnSource]: [kind: S, source: Promise<TurnSources[S]>] }[TurnSource];
 
-/**
- * One bounded wake slot per live Turn source.
- *
- * A stalled provider leaves its current event pull pending, so attaching a fresh reaction to that
- * pull on every control observation retains a reaction and a derived promise per tick. Here each
- * source registers exactly one reaction and is re-armed only after the wake it produced has been
- * consumed; terminal sources settle once and are never re-armed. The queue therefore holds at most
- * one wake per source. A new Heart observation is armed only after the prior observation is
- * consumed, so the wait never falls back to an older snapshot. Stop clears the queue and its
- * waiter; later notifications are ignored rather than written, though the one reaction already
- * registered on a source that never settled stays attached until that source settles.
- */
-function createTurnWakeups(observeHeart: (after: BodyControlSnapshot) => Promise<BodyControlSnapshot>) {
+/** Keep a stalled pull's original reaction, not one reaction per intervening Heart observation. */
+function createTurnWakeups(signal: AbortSignal) {
   const queue: TurnWakeup[] = [];
-  let waiter: ((wakeup: TurnWakeup) => void) | undefined;
+  const armed = new Set<TurnSource>();
+  let waiter: (() => void) | undefined;
+  let failedSource: TurnSource | undefined;
   let stopped = false;
-  const publish = (wakeup: TurnWakeup): void => {
+  let writesOpen = true;
+  const publish = (wake: TurnWakeup): void => {
     if (stopped) return;
-    const waiting = waiter;
+    queue.push(wake);
+    waiter?.();
     waiter = undefined;
-    if (waiting === undefined) queue.push(wakeup);
-    else waiting(wakeup);
   };
   return {
-    event: (pull: Promise<IteratorResult<AgentEvent>>): void => {
-      void pull.then(
-        (event) => publish({ kind: "event", event }),
-        (error: unknown) => publish({ kind: "failed", error }),
-      );
-    },
-    heart: (after: BodyControlSnapshot): void => {
-      void observeHeart(after).then(
-        (observation) => publish({ kind: "heart", observation }),
-        (error: unknown) => publish({ kind: "failed", error }),
-      );
-    },
-    tell: (submission: Promise<"live" | "turn-ended">): void => {
-      void submission.then(
-        (result) => publish({ kind: "tell", result }),
-        (error: unknown) => publish({ kind: "failed", error }),
-      );
-    },
-    failure: (source: Promise<unknown>): void => {
+    arm(...[kind, source]: TurnArm): void {
+      if (armed.has(kind)) throw new Error(`Turn source already armed: ${kind}`);
+      armed.add(kind);
       void source.then(
-        () => undefined,
-        (error: unknown) => publish({ kind: "failed", error }),
+        (value) => {
+          // The tuple checks the source/value pairing before this callback.
+          if (kind !== "receipt-failure") publish({ kind, value } as TurnWake);
+        },
+        (error: unknown) => publish({ kind: "failed", source: kind, error }),
       );
     },
-    completion: (source: Promise<TurnResult>): void => {
-      void source.then(
-        (result) => publish({ kind: "completion", result }),
-        (error: unknown) => publish({ kind: "failed", error }),
-      );
+    async next(): Promise<TurnWake> {
+      if (queue.length === 0)
+        await new Promise<void>((resolve) => {
+          waiter = resolve;
+        });
+      const wake = queue.shift()!;
+      if (wake.kind === "failed") {
+        failedSource = wake.source;
+        throw wake.error;
+      }
+      armed.delete(wake.kind);
+      return wake;
     },
-    closure: (source: Promise<void>): void => {
-      void source.then(
-        () => publish({ kind: "closed" }),
-        (error: unknown) => publish({ kind: "failed", error }),
-      );
+    get failedSource() {
+      return failedSource;
     },
-    drained: (source: Promise<void>): void => {
-      void source.then(
-        () => publish({ kind: "drained" }),
-        (error: unknown) => publish({ kind: "failed", error }),
-      );
+    mayWrite: (): boolean => writesOpen && !signal.aborted,
+    closeWrites(): void {
+      writesOpen = false;
     },
-    next: (): Promise<TurnWakeup> => {
-      const ready = queue.shift();
-      if (ready !== undefined) return Promise.resolve(ready);
-      return new Promise<TurnWakeup>((resolve) => {
-        waiter = resolve;
-      });
-    },
-    stop: (): void => {
+    stop(): void {
+      writesOpen = false;
       stopped = true;
       waiter = undefined;
       queue.length = 0;
@@ -484,154 +360,173 @@ function createTurnWakeups(observeHeart: (after: BodyControlSnapshot) => Promise
   };
 }
 
-async function consumeTurnDrive(input: DriveTurnInput, active: ActiveTurn): Promise<TurnDriveResult> {
-  const { turnSequence, drive, resume } = active;
-  let heart = input.supervisor.current();
-  let turnSession = resume;
-  const attempted = new Set(drainPendingTells(input.launchTells).map((tell) => tell.id));
-  const writeWitness = serializeEffects();
-  let writesOpen = true;
-  const mayWrite = (): boolean => writesOpen && !input.supervisor.signal.aborted;
-  const writers: TurnWriters = { input, turnSequence, drive, writeWitness, mayWrite };
-  const receiptFailure = observeFailure(pumpReceipts(writers));
+async function prepareTurn(input: DriveTurnInput) {
+  const runtimeInstructions = keiyakuExecutionInstructions(
+    input.soul,
+    input.soul.bare !== false ? undefined : await input.executionAssociation?.(),
+  );
+  const tells = drainPendingTells(input.launchTells);
+  const schemaJson = input.schemaJson ?? tells.find((tell) => tell.schemaJson !== undefined)?.schemaJson;
+  const initiator = input.call === undefined ? tells[0]?.initiator : input.initiator;
+  const { sequence: turnSequence } = await beginTurn(input.paths, {
+    ...(initiator === undefined ? {} : { initiator }),
+    bodySequence: input.bodySequence,
+    startedAt: input.now(),
+    ...(input.call === undefined ? {} : { call: input.call }),
+    ...(schemaJson === undefined ? {} : { schemaJson }),
+  });
+  const tellIds = tells.map((tell) => tell.id);
+  if (tellIds.length > 0) await bindTellsToTurn(input.paths, { turnSequence, tellIds, boundAt: input.now() });
+  await input.turnStarted.emit(turnSequence);
+  return { turnSequence, tells, tellIds, schemaJson, runtimeInstructions };
+}
+
+async function openAdmittedSession(
+  writers: TurnWriters,
+  tellIds: readonly string[],
+  wakeups: ReturnType<typeof createTurnWakeups>,
+): Promise<AsyncIterator<AgentEvent> | undefined> {
+  const { input, turnSequence, drive, mayWrite } = writers;
+  wakeups.arm("completion", drive.completion);
+  if (tellIds.length > 0)
+    await recordTellDeliveries(
+      input.paths,
+      tellIds.map((tellId) => ({
+        tellId,
+        route: "launch",
+        turnSequence,
+        fence: drive.admission.fence,
+        deliveredAt: input.now(),
+      })),
+    );
+  if (!mayWrite()) return undefined;
+  wakeups.arm("receipt-failure", pumpReceipts(writers));
   const iterator = drive.events[Symbol.asyncIterator]();
+  wakeups.arm("event", iterator.next());
+  return iterator;
+}
+
+async function consumeTurn(
+  input: DriveTurnInput,
+  { turnSequence, tellIds }: Awaited<ReturnType<typeof prepareTurn>>,
+  recipe: Awaited<ReturnType<typeof turnRecipe>>,
+  heart: BodyControlSnapshot,
+  wakeups: ReturnType<typeof createTurnWakeups>,
+): Promise<(DrivenTurn & { turnSequence: number }) | undefined> {
+  const { supervisor } = input;
+  const { mayWrite, closeWrites } = wakeups;
+  let turnSession = recipe.session;
+  let writers: TurnWriters | undefined;
+  let iterator: AsyncIterator<AgentEvent> | undefined;
+  const attempted = new Set(tellIds);
+  const writeWitness = serializeEffects();
   const witness: ModelWitness = { written: false, model: undefined };
-  let tellLive = input.schemaJson === undefined ? drive.tell : undefined;
-  let tellPump: Promise<"live" | "turn-ended"> | null = null;
+  let tellLive: Session["tell"];
+  let submitting = false;
   let eventsEnded = false;
   let result: TurnResult | undefined;
-  let attemptClosed = false;
-  let effectsDrained = false;
-  let drainArmed = false;
-  let drainingEffects: Promise<void> | undefined;
-  const wakeups = createTurnWakeups((after) => input.supervisor.next(after));
+  let closed = false;
+  let draining = false;
+  const submitIfReady = (): void => {
+    if (writers === undefined || tellLive === undefined || submitting) return;
+    const pending = drainPendingTells(heart.pending);
+    if (!pending.some((tell) => !attempted.has(tell.id) && tell.schemaJson === undefined)) return;
+    submitting = true;
+    wakeups.arm("tell", submitPendingLiveTells(writers, pending, attempted, tellLive));
+  };
+  const drainIfReady = (): void => {
+    if (draining || !eventsEnded || result === undefined || !closed || submitting || !mayWrite()) return;
+    draining = true;
+    wakeups.arm("drained", writeWitness.drain(closeWrites));
+  };
 
-  /**
-   * Consumes exactly one wake. A replaced Heart snapshot rearms its own observation, a settled Tell
-   * pump releases that source, and a provider event keeps its order: end, write, coordinate, next pull.
-   */
-  const reduceWakeup = async (next: TurnWakeup): Promise<void> => {
-    switch (next.kind) {
-      case "failed":
-        throw next.error;
-      case "heart":
-        heart = next.observation;
-        wakeups.heart(heart);
-        return;
-      case "tell":
-        tellPump = null;
-        if (next.result === "turn-ended") tellLive = undefined;
-        return;
-      case "completion":
-        result = next.result;
-        tellLive = undefined;
-        return;
-      case "closed":
-        attemptClosed = true;
-        return;
-      case "drained":
-        effectsDrained = true;
-        drainArmed = false;
-        return;
-      case "event":
+  while (!supervisor.signal.aborted) {
+    submitIfReady();
+    const wake = await wakeups.next();
+    if (supervisor.signal.aborted) break;
+    switch (wake.kind) {
+      case "admission":
+        writers = { input, turnSequence, drive: wake.value, writeWitness, mayWrite };
+        iterator = await openAdmittedSession(writers, tellIds, wakeups);
+        if (input.schemaJson === undefined) tellLive = wake.value.tell;
         break;
-    }
-    if (next.event.done) {
-      eventsEnded = true;
-      return;
-    }
-    await writeProviderEvent(input, active, next.event.value, witness);
-    if (next.event.value.type === "session") turnSession = next.event.value.coordinate;
-    wakeups.event(iterator.next());
-  };
-
-  /** Completion waits for ended events, an outcome, a closed attempt, and no live Tell pump. */
-  const ready = (): boolean => eventsEnded && result !== undefined && attemptClosed && tellPump === null;
-
-  /** Controlled stop settles only after provider custody retires. */
-  const stopAndReturn = async (): Promise<TurnDriveResult> => {
-    const retirement = await retireProviderCustody(input, turnSequence, active.attempt);
-    return retirement.kind === "hung" ? retirement : { kind: "stopped" };
-  };
-
-  wakeups.event(iterator.next());
-  wakeups.heart(heart);
-  wakeups.failure(receiptFailure);
-  wakeups.completion(drive.completion);
-  wakeups.closure(active.attempt.closed);
-  try {
-    for (;;) {
-      if (input.supervisor.signal.aborted) {
-        writesOpen = false;
-        return await stopAndReturn();
-      }
-      if (tellLive !== undefined && tellPump === null) {
-        const pending = drainPendingTells(heart.pending);
-        if (pending.some((tell) => !attempted.has(tell.id) && tell.schemaJson === undefined)) {
-          tellPump = submitPendingLiveTells(writers, pending, attempted, tellLive);
-          wakeups.tell(tellPump);
+      case "event":
+        if (wake.value.done) {
+          eventsEnded = true;
+          break;
         }
-      }
-      await reduceWakeup(await wakeups.next());
-      if (ready() && !drainArmed) {
-        drainingEffects ??= writeWitness.drain();
-        drainArmed = true;
-        wakeups.drained(drainingEffects);
-      }
-      if (ready() && effectsDrained) {
-        writesOpen = false;
-        return result!.kind === "answered"
-          ? { ...result!, ...(turnSession === undefined ? {} : { session: turnSession }) }
-          : result!;
+        turnSession = (await writeProviderEvent(input, turnSequence, recipe, wake.value.value, witness)) ?? turnSession;
+        if (mayWrite()) wakeups.arm("event", iterator!.next());
+        break;
+      case "heart":
+        heart = wake.value;
+        if (mayWrite()) wakeups.arm("heart", supervisor.next(heart));
+        break;
+      case "tell":
+        submitting = false;
+        if (wake.value === "turn-ended") tellLive = undefined;
+        break;
+      case "completion":
+        result = wake.value;
+        tellLive = undefined;
+        break;
+      case "closed":
+        closed = true;
+        break;
+      case "drained": {
+        const outcome = result!; // Arming the drain requires a provider result.
+        return outcome.kind === "answered" && turnSession !== undefined
+          ? { ...outcome, turnSequence, session: turnSession }
+          : { ...outcome, turnSequence };
       }
     }
+    drainIfReady();
+  }
+  return undefined;
+}
+
+export async function driveTurn(input: DriveTurnInput): Promise<TurnDriveResult> {
+  const { supervisor } = input;
+  if (supervisor.signal.aborted) return { kind: "stopped" };
+  const wakeups = createTurnWakeups(supervisor.signal);
+  let startingTurn: number | undefined;
+  let owned: { attempt: ProviderAttempt<Session>; turnSequence: number } | undefined;
+  let ending: TurnDriveResult = { kind: "stopped" };
+  try {
+    const recipe = await turnRecipe(input.paths, input.soul);
+    if (recipe.session !== undefined && input.adapter.resume === undefined) return { kind: "resume-unsupported" };
+    const prepared = await prepareTurn(input);
+    if (supervisor.signal.aborted) return ending;
+    const heart = supervisor.current();
+    startingTurn = prepared.turnSequence;
+    const attempt = startProviderAttempt(input, { ...prepared, recipe, signal: supervisor.signal });
+    owned = { attempt, turnSequence: startingTurn };
+    wakeups.arm("admission", attempt.result);
+    wakeups.arm("closed", attempt.closed);
+    wakeups.arm("heart", supervisor.next(heart));
+    const outcome = await consumeTurn(input, prepared, recipe, heart, wakeups);
+    if (outcome !== undefined) return outcome;
   } catch (error) {
-    writesOpen = false;
-    if (error instanceof BodyControlledError) input.supervisor.cancel("control");
-    if (input.supervisor.signal.aborted) return await stopAndReturn();
-    const retirement = await retireProviderCustody(input, turnSequence, active.attempt);
-    if (retirement.kind === "hung") return retirement;
-    return { kind: "failed", diagnostic: error instanceof Error ? error.message : String(error) };
+    wakeups.closeWrites();
+    const diagnostic = error instanceof Error ? error.message : String(error);
+    if (owned === undefined && startingTurn !== undefined)
+      return { kind: "failed", turnSequence: startingTurn, diagnostic };
+    if (
+      wakeups.failedSource !== "heart" &&
+      !supervisor.signal.aborted &&
+      !(await heartExists(input.paths).catch(() => true))
+    )
+      supervisor.cancel("heart-gone");
+    if (owned === undefined) {
+      if (supervisor.reason === "heart-gone") return ending;
+      throw error;
+    }
+    if (error instanceof BodyControlledError) supervisor.cancel("control");
+    // Later control cannot turn an adjudicated failure into cancellation.
+    if (!supervisor.signal.aborted) ending = { kind: "failed", turnSequence: owned.turnSequence, diagnostic };
   } finally {
     wakeups.stop();
   }
-}
-
-export async function driveTurn(
-  input: DriveTurnInput,
-): Promise<
-  | (DrivenTurn & Readonly<{ turnSequence: number }>)
-  | Readonly<{ kind: "stopped" }>
-  | Readonly<{ kind: "hung" }>
-  | Readonly<{ kind: "resume-unsupported" }>
-> {
-  let active: ActiveTurn;
-  try {
-    const started = await startTurnDrive(input);
-    if ("kind" in started) return started;
-    active = started;
-  } catch (error) {
-    if (!(await heartExists(input.paths))) {
-      input.supervisor.cancel("heart-gone");
-      return { kind: "stopped" };
-    }
-    throw error;
-  }
-  try {
-    const result = await consumeTurnDrive(input, active);
-    return result.kind === "stopped" || result.kind === "hung"
-      ? result
-      : { ...result, turnSequence: active.turnSequence };
-  } catch (error) {
-    if (await heartExists(input.paths)) {
-      return {
-        kind: "failed",
-        diagnostic: error instanceof Error ? error.message : String(error),
-        turnSequence: active.turnSequence,
-      };
-    }
-    input.supervisor.cancel("heart-gone");
-    const retirement = await retireProviderCustody(input, active.turnSequence, active.attempt);
-    return retirement.kind === "hung" ? retirement : { kind: "stopped" };
-  }
+  const retirement = await retireProviderCustody(input, owned.turnSequence, owned.attempt);
+  return retirement.kind === "hung" ? retirement : ending;
 }

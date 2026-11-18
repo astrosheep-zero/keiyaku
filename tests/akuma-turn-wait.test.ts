@@ -2,6 +2,7 @@ import { bornDirectAkuma } from "./support/akuma-fixtures.js";
 import { deferred, temporaryDirectory, waitForCondition } from "./support/process.js";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import test, { type TestContext } from "node:test";
 import { BodySupervisor, CONTROL_RESPONSE_MS } from "../src/akuma/body-supervisor.js";
 import {
@@ -10,6 +11,7 @@ import {
   readHeart,
   readTell,
   recordTell,
+  requestStop,
   type HeartSnapshot,
   type Soul,
 } from "../src/akuma/heart/index.js";
@@ -71,6 +73,7 @@ type ProviderFixture = Readonly<{
 function turnProvider(input: {
   events: AsyncIterable<AgentEvent>;
   completion?: Promise<TurnResult>;
+  closure?: Promise<void>;
   receipts?: AsyncIterable<TellReceipt>;
 }): ProviderFixture {
   const submissions: Array<Readonly<{ id: string; text: string }>> = [];
@@ -86,7 +89,7 @@ function turnProvider(input: {
           () => closed.resolve(),
         );
         custody.own({
-          closed: closed.promise,
+          closed: input.closure ?? closed.promise,
           abort: async () => {
             aborts += 1;
             closed.resolve();
@@ -241,7 +244,10 @@ test("a Tell admitted mid-stall is submitted live once and recorded with its bin
     );
     const tell = await readTell(fixture.paths, "tell-live");
     assert.deepEqual(provider.submissions, [{ id: "tell-live", text: "keep going" }]);
-    assert.deepEqual(tell?.deliveries.map((delivery) => delivery.route), ["live"]);
+    assert.deepEqual(
+      tell?.deliveries.map((delivery) => delivery.route),
+      ["live"],
+    );
     assert.equal(tell?.state, "told");
     assert.ok(tell?.binding !== undefined && tell.binding.turnSequence > 0);
     supervisor.cancel("control");
@@ -252,36 +258,49 @@ test("a Tell admitted mid-stall is submitted live once and recorded with its bin
   }
 });
 
-test("provider events are serialized in order before an ordered completion answers", async (context) => {
+test("provider events are serialized in order and the answer waits for physical closure", async (context) => {
   const fixture = await turnFixture(context, "kei-turn-wait-order-");
   const supervisor = await fixture.control();
+  const closure = deferred<void>();
+  const events: readonly AgentEvent[] = [
+    { type: "session", coordinate: { sessionId: "first-session" } },
+    { type: "assistant", text: "first" },
+    { type: "note", text: "second" },
+    { type: "session", coordinate: { sessionId: "last-session" } },
+  ];
   const provider = turnProvider({
-    events: narratedEvents([
-      { type: "session", coordinate: { sessionId: "ordered-session" } },
-      { type: "assistant", text: "first" },
-      { type: "note", text: "second" },
-    ]),
+    events: narratedEvents(events),
     completion: Promise.resolve({ kind: "answered", answer: "done" }),
+    closure: closure.promise,
+  });
+  let answered = false;
+  const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor)).then((outcome) => {
+    answered = true;
+    return outcome;
   });
   try {
-    const result = await driveTurn(driveInput(fixture, provider.adapter, supervisor));
-    assert.deepEqual(result, {
+    await waitForCondition("the last provider event to persist", async () => {
+      const activity = (await activitySlice(fixture.paths)).rows.filter((fact) => fact.kind === "activity");
+      return activity.length === events.length;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(answered, false, "event exhaustion and completion do not prove closure");
+    closure.resolve();
+    assert.deepEqual(await settlement, {
       kind: "answered",
       answer: "done",
       turnSequence: 1,
-      session: { sessionId: "ordered-session" },
+      session: { sessionId: "last-session" },
     });
-    assert.deepEqual((await readHeart(fixture.paths)).latestSession?.coordinate, { sessionId: "ordered-session" });
+    assert.deepEqual((await readHeart(fixture.paths)).latestSession?.coordinate, { sessionId: "last-session" });
     const activity = (await activitySlice(fixture.paths)).rows.filter((fact) => fact.kind === "activity");
     assert.deepEqual(
       activity.map((fact) => fact.event),
-      [
-        { type: "session", coordinate: { sessionId: "ordered-session" } },
-        { type: "assistant", text: "first" },
-        { type: "note", text: "second" },
-      ],
+      events,
     );
   } finally {
+    closure.resolve();
+    supervisor.cancel("control");
     await supervisor.close();
   }
 });
@@ -300,6 +319,72 @@ test("provider completion failure preserves its diagnostic and retires the stall
     assert.equal(provider.aborts(), 1);
     assert.equal(pull.registrations, 1);
   } finally {
+    await supervisor.close();
+  }
+});
+
+test("control during retirement does not erase an already observed provider failure", async (context) => {
+  const fixture = await turnFixture(context, "kei-turn-wait-failure-control-");
+  const supervisor = await fixture.control();
+  const completion = deferred<TurnResult>();
+  const closure = deferred<void>();
+  const pull = new PendingProviderPull();
+  const provider = turnProvider({
+    events: stalledEvents(pull),
+    completion: completion.promise,
+    closure: closure.promise,
+  });
+  let settled = false;
+  const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor)).finally(() => {
+    settled = true;
+  });
+  try {
+    await armedWait(pull);
+    const diagnostic = "provider failed before control";
+    completion.reject(new Error(diagnostic));
+    await waitForCondition("retirement to begin before control", () => provider.aborts() === 1);
+    assert.equal(supervisor.signal.aborted, false);
+    assert.equal((await requestStop(fixture.paths, AT)).kind, "requested");
+    await waitForCondition("BodySupervisor to observe the stop", () => supervisor.signal.aborted);
+    assert.equal(settled, false, "abort acknowledgement is not closure proof");
+    closure.resolve();
+    assert.deepEqual(await settlement, { kind: "failed", diagnostic, turnSequence: 1 });
+  } finally {
+    closure.resolve();
+    supervisor.cancel("control");
+    await supervisor.close();
+  }
+});
+
+test("a failed Heart read fails the stalled Turn and retires its provider", async (context) => {
+  const fixture = await turnFixture(context, "kei-turn-wait-observation-failure-");
+  const supervisor = await fixture.control();
+  const lastGood = supervisor.current();
+  const pull = new PendingProviderPull();
+  const provider = turnProvider({ events: stalledEvents(pull) });
+  const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor));
+  try {
+    await armedWait(pull);
+    // Keep the Heart present. Its real background reader must reject, not see disappearance.
+    const database = new DatabaseSync(fixture.paths.heart);
+    try {
+      database.exec("PRAGMA ignore_check_constraints=ON; UPDATE akuma_schema SET version = -1");
+    } finally {
+      database.close();
+    }
+    const failure = await readHeart(fixture.paths).catch((error: unknown) => error);
+    assert.ok(failure instanceof Error, "corrupt Heart must fail a direct read");
+    const diagnostic = failure.message;
+    await waitForCondition("the failed observation to retire the provider", () => provider.aborts() === 1, {
+      budgetMs: 5_000,
+    });
+    assert.deepEqual(await settlement, { kind: "failed", diagnostic, turnSequence: 1 });
+    assert.equal(supervisor.signal.aborted, false);
+    assert.equal(pull.registrations, 1);
+    assert.throws(() => supervisor.current(), { message: diagnostic });
+    await assert.rejects(supervisor.next(lastGood), { message: diagnostic });
+  } finally {
+    supervisor.cancel("control");
     await supervisor.close();
   }
 });
@@ -329,13 +414,17 @@ test("stop is responsive and later control observations write nothing", async (c
 test("Heart loss ends the stalled wait, retires custody, and leaves no later evidence", async (context) => {
   const fixture = await turnFixture(context, "kei-turn-wait-heart-");
   const supervisor = await fixture.control();
-  const pull = new PendingProviderPull();
+  const late = deferred<IteratorResult<AgentEvent>>();
+  const pull = new PendingProviderPull((resolve) => resolve(late.promise));
   const provider = turnProvider({ events: stalledEvents(pull) });
   const settlement = driveTurn(driveInput(fixture, provider.adapter, supervisor));
   try {
     await armedWait(pull);
     rmSync(fixture.paths.heart, { force: true });
     assert.deepEqual(await settlement, { kind: "stopped" });
+    late.resolve({ done: false, value: { type: "note", text: "late provider event" } });
+    await late.promise;
+    await supervisor.refresh();
     assert.equal(await heartExists(fixture.paths), false);
     assert.equal(provider.aborts(), 1);
     assert.equal(pull.registrations, 1);
