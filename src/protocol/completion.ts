@@ -6,17 +6,11 @@ import { requirementIdSchema, gateSchema, snapshotChangeSchema } from "./result-
 import type { GateReport } from "../core/facts/gate.js";
 import type { GitRepository } from "../git/process.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import {
-  admitPlacement,
-  observeTargetPlacement,
-  observeIntegrationTargetMovement,
-  type PlacementProtocolResult,
-} from "./placement.js";
+import { admitPlacement, observeIntegrationTargetMovement, type PlacementProtocolResult } from "./placement.js";
 import { reintegrateOperation, type ReintegrationResult } from "./reintegrate.js";
 import {
   contractCheckpoint,
   executionIssue,
-  isOperationalFailure,
   isOperationalStop,
   type ContractCheckpoint,
   type ProtocolProgress,
@@ -248,24 +242,6 @@ type CompletionInput = Readonly<{
 
 type CompletionResult = Readonly<{ checkpoint: ContractCheckpoint; placement: Placement }>;
 
-async function observeCandidateTarget(input: CompletionInput, state: ContractState) {
-  const { target } = state.coordinates;
-  const integration = state.currentIntegration;
-  if (target === undefined || integration === null) return undefined;
-  try {
-    const observed = await observeTargetPlacement(input.repository, {
-      contractId: state.id,
-      coordinates: { ...state.coordinates, target },
-      predecessor: integration.predecessor,
-      candidate: integration.snapshot,
-    });
-    return observed.kind === "refused" ? placementConclusion(observed) : undefined;
-  } catch (error) {
-    if (!isOperationalFailure(error)) throw error;
-    return placementConclusion({ kind: "placement-failed", diagnostic: error.message });
-  }
-}
-
 function confirmPlacement(progress: ProtocolProgress, state: ContractState): Placed {
   const {
     currentIntegration,
@@ -311,15 +287,9 @@ export async function completeCandidate(input: CompletionInput): Promise<Complet
     progress.recordCandidate(id, undefined);
     for (let cycles = 0; ; cycles += 1) {
       input.signal?.throwIfAborted();
-      let attempt: PlacementProtocolResult | undefined = await observeIntegrationTargetMovement(
-        input.repository,
-        checkpoint.state,
-      );
-      if (attempt === undefined) {
-        const stop = await observeCandidateTarget(input, checkpoint.state);
-        if (stop !== undefined) return stopped(stop);
-        attempt = await placeCurrentCandidate(input, checkpoint.state);
-      }
+      const attempt =
+        (await observeIntegrationTargetMovement(input.repository, checkpoint.state)) ??
+        (await placeCurrentCandidate(input, checkpoint.state));
       if (attempt.kind === "accepted") {
         checkpoint = contractCheckpoint(attempt);
         const placement = confirmPlacement(progress, checkpoint.state);

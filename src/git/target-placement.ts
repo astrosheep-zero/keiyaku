@@ -1,19 +1,16 @@
-import { contractIdSchema, snapshotIdSchema } from "./identity.js";
+import { isUtf8 } from "node:buffer";
+import type { BigIntStats } from "node:fs";
+import { lstat, readdir, realpath } from "node:fs/promises";
+import { basename, dirname, resolve } from "node:path";
 import { z } from "zod";
-import { StringDecoder } from "node:string_decoder";
-import { lstat } from "node:fs/promises";
-import { resolve } from "node:path";
 import {
   acquireSqliteTransactionLock,
   type HeldSqliteTransactionLock,
 } from "../coordination/sqlite-transaction-lock.js";
-import {
-  targetName,
-  type ContractId,
-  type ContractState,
-  type ContractTarget,
-  type SnapshotId,
-} from "../core/facts/types.js";
+import { targetName, type ContractState, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
+import { contractIdSchema, gitObjectId, gitRefLocator, mintSnapshotId, snapshotIdSchema } from "./identity.js";
+import { executeGit, GitPlumbingError, withPrivateGitIndex, type GitRepository } from "./process.js";
+import { commonGitDirectory, decodeGitNameOnly, readRef, registeredWorktrees } from "./repository.js";
 import {
   resolveContractTarget,
   targetRef,
@@ -21,11 +18,7 @@ import {
   targetWorkspaceRefusalSchema,
   type TargetWorkspaceRefusal,
 } from "./target.js";
-import type { RefOperation } from "../core/facts/offer.js";
-import { gitObjectId, gitObjectIdForSnapshot, gitRefLocator, mintSnapshotId, type GitObjectId } from "./identity.js";
-import { commonGitDirectory, decodeGitNameOnly, readRef, registeredWorktrees } from "./repository.js";
-import { consumeGitStdout, GitPlumbingError, executeGit, type GitRepository } from "./process.js";
-import { captureWorkspaceTree } from "./workspace.js";
+import { workspaceMergeStatePresent } from "./workspace.js";
 
 export const checkoutNotFollowableRefusalSchema = z
   .object({
@@ -36,8 +29,7 @@ export const checkoutNotFollowableRefusalSchema = z
   })
   .strict()
   .readonly();
-type CheckoutNotFollowableRefusal = z.infer<typeof checkoutNotFollowableRefusalSchema>;
-export type TargetPlacementRefusal = CheckoutNotFollowableRefusal | TargetWorkspaceRefusal;
+export type TargetPlacementRefusal = z.infer<typeof checkoutNotFollowableRefusalSchema> | TargetWorkspaceRefusal;
 export const targetCheckoutEffectSchema = z
   .object({
     kind: z.literal("target-checkout"),
@@ -46,7 +38,6 @@ export const targetCheckoutEffectSchema = z
   })
   .strict()
   .readonly();
-type TargetCheckoutEffect = z.infer<typeof targetCheckoutEffectSchema>;
 export const targetCheckoutLagSchema = z
   .object({
     kind: z.literal("target-checkout-retained"),
@@ -56,7 +47,6 @@ export const targetCheckoutLagSchema = z
   })
   .strict()
   .readonly();
-type TargetCheckoutLag = z.infer<typeof targetCheckoutLagSchema>;
 export const targetWorkspaceLagSchema = z
   .object({
     kind: z.literal("target-workspace-retained"),
@@ -66,45 +56,20 @@ export const targetWorkspaceLagSchema = z
   .strict()
   .readonly();
 type TargetPlacementPhysicalResult = Readonly<{
-  effects: readonly TargetCheckoutEffect[];
-  lag: readonly (TargetCheckoutLag | z.infer<typeof targetWorkspaceLagSchema>)[];
+  effects: readonly z.infer<typeof targetCheckoutEffectSchema>[];
+  lag: readonly (z.infer<typeof targetCheckoutLagSchema> | z.infer<typeof targetWorkspaceLagSchema>)[];
 }>;
 
-type FollowArm = Readonly<{ kind: "ordinary"; path: string }>;
-
-export type PreparedTargetPlacement = Readonly<{
-  target: RefOperation;
-  arms: readonly FollowArm[];
-}>;
-
-type TargetPlacementPreparation =
-  | Readonly<{ kind: "prepared"; placement: PreparedTargetPlacement }>
-  | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
+type Movement = Readonly<{ target: ContractTarget; predecessor: SnapshotId; candidate: SnapshotId }>;
 
 export async function observeTargetHead(repository: GitRepository, target: ContractTarget): Promise<SnapshotId | null> {
   const value = await readRef(targetRepository(repository, target), targetRef(target));
   return value === null ? null : mintSnapshotId(value);
 }
 
-function diagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-async function gitPaths(repository: GitRepository, path: string, args: readonly string[]): Promise<readonly string[]> {
-  return [...new Set(decodeGitNameOnly(await executeGit(repository, ["-C", path, ...args])))].sort();
-}
-
-function literalPath(path: string): string {
-  return `:(literal)${path}`;
-}
-
-async function commitTree(repository: GitRepository, snapshot: SnapshotId): Promise<GitObjectId> {
-  return gitObjectId(
-    (await executeGit(repository, ["show", "-s", "--format=%T", gitObjectIdForSnapshot(snapshot)]))
-      .toString("utf8")
-      .trim(),
-    "commit tree",
-  );
+async function commitTree(repository: GitRepository, snapshot: SnapshotId) {
+  const output = await executeGit(repository, ["show", "-s", "--format=%T", snapshot]);
+  return gitObjectId(output.toString("ascii").trim(), "commit tree");
 }
 
 export async function observedTreeEqualsCandidate(
@@ -112,206 +77,262 @@ export async function observedTreeEqualsCandidate(
   observed: SnapshotId | null,
   snapshot: SnapshotId,
 ) {
-  if (observed === null) return false;
-  return (await commitTree(repository, observed)) === (await commitTree(repository, snapshot));
+  return observed !== null && (await commitTree(repository, observed)) === (await commitTree(repository, snapshot));
 }
 
-function checkoutRefusal(target: RefOperation, path: string, paths: readonly string[]): CheckoutNotFollowableRefusal {
-  return { kind: "checkout-not-followable", target: targetName(target.target), path, paths };
-}
-
-type CheckoutObservation = Readonly<{
-  repository: GitRepository;
-  contractId: ContractId;
-  target: RefOperation;
-  path: string;
-  predecessor: GitObjectId;
-  candidate: GitObjectId;
-  changes: TargetPlacementChanges;
-}>;
-
-export type TargetPlacementChanges = Readonly<{
-  predecessor: SnapshotId;
-  candidate: SnapshotId;
-  paths: readonly string[];
-  writes: readonly Readonly<{ path: string; blob: boolean }>[];
-}>;
-
-/** Only immutable commit contents are prepared outside the publication seat. */
-export async function prepareTargetPlacementChanges(
-  repository: GitRepository,
-  target: RefOperation,
-): Promise<TargetPlacementChanges> {
-  const records = (
-    await executeGit(repository, [
-      "diff",
-      "--raw",
-      "--no-renames",
-      "--no-abbrev",
-      "-z",
-      gitObjectIdForSnapshot(target.expectedOid),
-      gitObjectIdForSnapshot(target.newOid),
-      "--",
-    ])
-  )
-    .toString("utf8")
-    .split("\0");
-  const paths: string[] = [];
-  const writes: { path: string; blob: boolean }[] = [];
-  if (records.pop() !== "" || records.length % 2 !== 0) throw new Error("malformed target change records");
-  for (let index = 0; index < records.length; index += 2) {
-    const fields = records[index]!.split(" ");
-    const path = records[index + 1]!;
-    const mode = fields[1];
-    const status = fields[4];
-    if (
-      fields.length !== 5 ||
-      !/^:[0-7]{6}$/.test(fields[0]!) ||
-      !/^[0-7]{6}$/.test(mode ?? "") ||
-      !/^[ACDMT]$/.test(status ?? "") ||
-      path.length === 0
-    )
-      throw new Error("malformed target change record");
-    paths.push(path);
-    if (status !== "D") writes.push({ path, blob: mode !== "160000" });
+async function resolveTargetCheckouts(repository: GitRepository, target: ContractTarget) {
+  if (typeof target !== "string") {
+    const resolved = await resolveContractTarget(repository, target.contractId, target);
+    return resolved.kind === "refused" ? resolved : { kind: "resolved" as const, paths: [resolved.path] };
   }
-  paths.sort();
-  writes.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
-  return { predecessor: target.expectedOid, candidate: target.newOid, paths, writes };
-}
-
-type PhysicalScope = Readonly<{
-  path: string;
-  kind: "leaf" | "directory";
-}>;
-
-async function physicalScope(
-  candidatePath: string,
-  metadata: (path: string) => Promise<Awaited<ReturnType<typeof lstat>> | null>,
-): Promise<PhysicalScope | null> {
-  const components = candidatePath.split("/");
-  for (let index = 0; index < components.length; index += 1) {
-    const scope = components.slice(0, index + 1).join("/");
-    const stat = await metadata(scope);
-    if (stat === null) return null;
-    if (!stat.isDirectory()) return { path: scope, kind: "leaf" };
-    if (index + 1 === components.length) return { path: scope, kind: "directory" };
-  }
-  return null;
-}
-
-async function destructionScopes(
-  worktree: string,
-  writes: TargetPlacementChanges["writes"],
-): Promise<readonly PhysicalScope[]> {
-  const scopes = new Map<string, PhysicalScope>();
-  const metadata = new Map<string, Promise<Awaited<ReturnType<typeof lstat>> | null>>();
-  const read = (path: string) => {
-    let result = metadata.get(path);
-    if (result === undefined) {
-      result = lstat(resolve(worktree, path)).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT" || error.code === "ENOTDIR") return null;
-        throw error;
-      });
-      metadata.set(path, result);
-    }
-    return result;
+  return {
+    kind: "resolved" as const,
+    paths: (await registeredWorktrees(repository))
+      .filter((worktree) => worktree.branch === target)
+      .map((worktree) => worktree.path)
+      .sort((left, right) => left.localeCompare(right)),
   };
-  for (const write of writes) {
-    const scope = await physicalScope(write.path, read);
-    if (scope === null || (scope.kind === "directory" && !write.blob)) continue;
-    scopes.set(scope.path, scope);
-  }
-  return [...scopes.values()].sort((left, right) => left.path.localeCompare(right.path));
 }
 
-function untrackedArgs(): readonly string[] {
-  return ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "--no-empty", "-z"];
+async function movementTrees(repository: GitRepository, movement: Movement) {
+  const before = await commitTree(repository, movement.predecessor);
+  const after = await commitTree(repository, movement.candidate);
+  const changes = await executeGit(repository, [
+    "diff",
+    "--name-only",
+    "--no-renames",
+    "--ignore-submodules=none",
+    "-z",
+    before,
+    after,
+    "--",
+  ]);
+  return { ...movement, before, after, changes: isUtf8(changes) ? decodeGitNameOnly(changes) : null };
 }
 
-async function untrackedRefusalWithinScopes(
-  input: Pick<CheckoutObservation, "repository" | "target" | "path">,
-  scopes: readonly PhysicalScope[],
-): Promise<CheckoutNotFollowableRefusal | null> {
-  const { repository, target, path } = input;
-  const args = untrackedArgs();
-  const leaves = scopes.filter((scope) => scope.kind === "leaf");
-  if (leaves.length > 0) {
-    const collisions = await gitPaths(repository, path, [
-      ...args,
-      "--",
-      ...leaves.map((scope) => literalPath(scope.path)),
-    ]);
-    if (collisions.length > 0) return checkoutRefusal(target, path, collisions);
-  }
+function checkoutReadTree(path: string, { predecessor, candidate }: Movement, dryRun = false) {
+  return ["-C", path, "read-tree", "-m", "-u", ...(dryRun ? ["--dry-run"] : []), predecessor, candidate];
+}
 
-  const directories = scopes.filter((scope) => scope.kind === "directory");
-  if (directories.length === 0) return null;
-  const selected = new Set(directories.map((scope) => scope.path));
-  const found = new Set<string>();
-  const decoder = new StringDecoder("utf8");
-  let pending = "";
-  await consumeGitStdout(
-    repository,
-    ["-C", path, ...args, "--", ...directories.map((scope) => literalPath(scope.path))],
-    (chunk) => {
-      const records = (pending + decoder.write(chunk)).split("\0");
-      pending = records.pop()!;
-      for (const record of records) {
-        let ancestor = record.replace(/\/$/, "");
-        for (;;) {
-          if (selected.has(ancestor)) found.add(ancestor);
-          const slash = ancestor.lastIndexOf("/");
-          if (slash < 0) break;
-          ancestor = ancestor.slice(0, slash);
-        }
+async function ignoredContact(
+  repository: GitRepository,
+  root: string,
+  changes: readonly string[] | null,
+): Promise<string | undefined> {
+  if (changes?.length === 0) return;
+  const ignored = await executeGit(repository, [
+    "-C",
+    root,
+    "ls-files",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+    "-z",
+  ]);
+  if (ignored.length === 0) return;
+  if (changes === null || !isUtf8(ignored)) return "target checkout cannot prove ignored paths safe to follow";
+
+  const probes = new Map<string, Promise<BigIntStats | undefined>>();
+  async function* livePrefixes(path: string) {
+    let parent = "";
+    let directory = "";
+    const parts = path.split("/");
+    for (const [index, name] of parts.entries()) {
+      const prefix = directory === "" ? name : `${directory}/${name}`;
+      let probe = probes.get(prefix);
+      if (probe === undefined) {
+        probe = lstat(resolve(root, prefix), { bigint: true }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === "ENOENT") return undefined;
+          throw error;
+        });
+        probes.set(prefix, probe);
       }
-    },
-  );
-  if (pending + decoder.end() !== "") throw new Error("unterminated untracked path");
-  const first = directories.find((scope) => found.has(scope.path));
-  return first === undefined ? null : checkoutRefusal(target, path, [first.path]);
-}
-
-/** Compare the index or a workspace tree against another tree over the given paths. */
-async function matchesTreeOnPaths(
-  repository: GitRepository,
-  path: string,
-  command: readonly string[],
-  trees: readonly GitObjectId[],
-  paths: readonly string[],
-): Promise<boolean> {
-  const args = [...command, "--name-only", "-z", ...trees, "--", ...paths.map(literalPath)];
-  return (await gitPaths(repository, path, args)).length === 0;
-}
-
-type CheckoutPrecheck =
-  | Readonly<{ kind: "followable" }>
-  | Readonly<{ kind: "not-followable"; diagnostic: string }>
-  | Readonly<{ kind: "refused"; refusal: CheckoutNotFollowableRefusal }>;
-
-/**
- * Retain the single dry-run's followability observation separately from ref-placement legality.
- * Only a candidate write that silently destroys an ignored entry refuses placement here.
- */
-async function ordinaryPrecheck(
-  repository: GitRepository,
-  target: RefOperation,
-  path: string,
-  changes: TargetPlacementChanges,
-): Promise<CheckoutPrecheck> {
-  const predecessor = gitObjectIdForSnapshot(target.expectedOid);
-  const candidate = gitObjectIdForSnapshot(target.newOid);
-  const observation = { repository, target, path, predecessor, candidate, changes };
-  try {
-    await executeGit(repository, ["-C", path, "read-tree", "--dry-run", "-m", "-u", predecessor, candidate]);
-  } catch (error) {
-    if (!(error instanceof GitPlumbingError) || repository.signal?.aborted === true) throw error;
-    return { kind: "not-followable", diagnostic: error.message };
+      const entry = await probe;
+      if (entry === undefined) return;
+      const identity = `${entry.dev}:${entry.ino}`;
+      yield { key: `${parent}/${identity}`, name, directory, entry, leaf: index === parts.length - 1 };
+      if (!entry.isDirectory()) return;
+      parent = identity;
+      directory = prefix;
+    }
   }
-  const scopes = await destructionScopes(path, changes.writes);
-  const refusal = await untrackedRefusalWithinScopes(observation, scopes);
-  return refusal === null ? { kind: "followable" } : { kind: "refused", refusal };
+
+  // An identity match under the same parent finds aliases without normalizing names.
+  const touched = new Map<string, Map<string, boolean>>();
+  for (const path of changes) {
+    for await (const { key, name, leaf } of livePrefixes(path)) {
+      let names = touched.get(key);
+      if (names === undefined) touched.set(key, (names = new Map()));
+      names.set(name, leaf || names.get(name) === true);
+    }
+  }
+  if (touched.size === 0) return;
+  async function distinctEntries(directory: string, left: string, right: string, shared: BigIntStats) {
+    const parent = resolve(root, directory);
+    const names = await readdir(parent, { encoding: "buffer" });
+    const present = (value: string) => {
+      const name = Buffer.from(value);
+      return names.some((entry) => entry.equals(name));
+    };
+    if (present(left) && present(right)) return true;
+    // A symlink is a leaf; using realpath to resolve its alias would dereference it.
+    if (shared.isSymbolicLink()) return false;
+    // Some filesystems return the lookup spelling unchanged; require enumerated entries.
+    const a = await realpath(resolve(parent, left), { encoding: "buffer" });
+    const b = await realpath(resolve(parent, right), { encoding: "buffer" });
+    if (a.equals(b) || !isUtf8(a) || !isUtf8(b)) return false;
+    const aPath = a.toString("utf8");
+    const bPath = b.toString("utf8");
+    return dirname(aPath) === dirname(bPath) && present(basename(aPath)) && present(basename(bPath));
+  }
+
+  for (const record of decodeGitNameOnly(ignored)) {
+    const path = record.endsWith("/") ? record.slice(0, -1) : record;
+    for await (const { key, name, directory, entry, leaf } of livePrefixes(path)) {
+      const matches = touched.get(key);
+      if (matches === undefined) break;
+      for (const [spelling, changed] of matches) {
+        if (!leaf && !changed) continue;
+        if (entry.ino === 0n || (name !== spelling && !entry.isDirectory() && entry.nlink !== 1n)) {
+          if (entry.ino !== 0n && (await distinctEntries(directory, name, spelling, entry))) continue;
+          return `target checkout cannot rule out contact with ignored entry: ${path}`;
+        }
+        return `target checkout would overwrite ignored local entry: ${path}`;
+      }
+    }
+  }
+  return undefined;
+}
+
+async function noDiff(repository: GitRepository, args: readonly string[], env: NodeJS.ProcessEnv): Promise<boolean> {
+  try {
+    await executeGit(repository, args, undefined, env);
+    return true;
+  } catch (error) {
+    if (error instanceof GitPlumbingError && error.status === 1 && !repository.signal?.aborted) return false;
+    throw error;
+  }
+}
+
+type CheckoutShape = Readonly<{ kind: "complete" | "followable" }> | Readonly<{ kind: "retained"; diagnostic: string }>;
+
+async function classifyCheckout(
+  repository: GitRepository,
+  path: string,
+  movement: Awaited<ReturnType<typeof movementTrees>>,
+): Promise<CheckoutShape> {
+  const { before, after, changes } = movement;
+  if (await workspaceMergeStatePresent(repository, path))
+    return { kind: "retained", diagnostic: "target checkout has a Git operation or an unmerged index" };
+  const sparseDiagnostic = { kind: "retained", diagnostic: "target checkout has a sparse checkout or index" } as const;
+  const sparse = await executeGit(repository, [
+    "-C",
+    path,
+    "config",
+    "--type=bool",
+    "--default=false",
+    "--get",
+    "core.sparseCheckout",
+  ]);
+  if (sparse.toString("ascii").trim() === "true") return sparseDiagnostic;
+  const entries = await executeGit(repository, [
+    "-C",
+    path,
+    "ls-files",
+    "--others",
+    "--exclude-standard",
+    "--cached",
+    "--sparse",
+    "-t",
+    "-z",
+  ]);
+  const tagged = (tag: string) => entries[0] === tag.charCodeAt(0) || entries.includes(`\0${tag} `);
+  if (tagged("S")) return sparseDiagnostic;
+  if (tagged("?")) return { kind: "retained", diagnostic: "target checkout has untracked files" };
+  const unchanged = (tree: string) =>
+    noDiff(
+      repository,
+      [
+        "-C",
+        path,
+        "diff-index",
+        "--cached",
+        "--quiet",
+        "--ita-invisible-in-index",
+        "--ignore-submodules=none",
+        tree,
+        "--",
+      ],
+      { GIT_OPTIONAL_LOCKS: "0" },
+    );
+  const tree = (await unchanged(after)) ? after : (await unchanged(before)) ? before : undefined;
+  if (tree === undefined) return { kind: "retained", diagnostic: "target index matches neither complete tree" };
+
+  // A fresh index seeded from the matching tree sees final bytes, not caller stat or skip flags.
+  const exact = await withPrivateGitIndex(async (env) => {
+    const git = [
+      "-C",
+      path,
+      "-c",
+      "core.splitIndex=false",
+      "-c",
+      "core.sparseCheckout=false",
+      "-c",
+      "index.sparse=false",
+    ];
+    await executeGit(repository, [...git, "read-tree", tree], undefined, env);
+    await executeGit(repository, [...git, "add", "--all"], undefined, env);
+    const captured = await executeGit(repository, [...git, "write-tree"], undefined, env);
+    return (
+      captured.toString("ascii").trim() === tree &&
+      // Gitlink equality alone misses modifications and untracked files inside a submodule.
+      (await noDiff(repository, [...git, "diff-files", "--quiet", "--ignore-submodules=none", "--"], {
+        ...env,
+        GIT_OPTIONAL_LOCKS: "0",
+      }))
+    );
+  });
+  if (!exact) return { kind: "retained", diagnostic: "target worktree does not match its index tree" };
+  if (tree === after) return { kind: "complete" };
+  const ignored = await ignoredContact(repository, path, changes);
+  if (ignored !== undefined) return { kind: "retained", diagnostic: ignored };
+  // Exact content and ignored custody do not prove that Git will accept the real index's stat data.
+  try {
+    await executeGit(repository, checkoutReadTree(path, movement, true));
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError)) throw error;
+    repository.signal?.throwIfAborted();
+    return { kind: "retained", diagnostic: error.stderr.toString("utf8").trim() || error.message };
+  }
+  return { kind: "followable" };
+}
+
+function checkoutDiagnostic(repository: GitRepository, error: unknown): string {
+  if (error instanceof GitPlumbingError) {
+    repository.signal?.throwIfAborted();
+    return error.message;
+  }
+  if (
+    error instanceof Error &&
+    !(error instanceof TypeError) &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    /^E[A-Z0-9]+$/u.test(error.code)
+  )
+    return error.message;
+  throw error;
+}
+
+async function inspectCheckout(
+  repository: GitRepository,
+  path: string,
+  trees: Awaited<ReturnType<typeof movementTrees>>,
+): Promise<CheckoutShape> {
+  try {
+    return await classifyCheckout(repository, path, trees);
+  } catch (error) {
+    return { kind: "retained", diagnostic: checkoutDiagnostic(repository, error) };
+  }
 }
 
 export async function acquireTargetPlacementFence(
@@ -327,115 +348,51 @@ export async function acquireTargetPlacementFence(
   });
 }
 
-type TargetedContractCoordinates = ContractState["coordinates"] & Readonly<{ target: ContractTarget }>;
+export const previewTargetMovedSchema = z
+  .strictObject({
+    kind: z.literal("moved"),
+    ref: z.string().refine((value) => value.trim() !== ""),
+    expected: snapshotIdSchema,
+    observed: snapshotIdSchema.nullable(),
+  })
+  .readonly();
+export const previewTargetFailedSchema = z
+  .strictObject({ kind: z.literal("failed"), diagnostic: z.string().refine((value) => value.trim() !== "") })
+  .readonly();
+type CheckoutObservation =
+  | Readonly<{ kind: "followable"; path: string }>
+  | Readonly<{ kind: "not-followable"; path: string; diagnostic: string }>;
+type PreviewTargetAnswer =
+  | Readonly<{ kind: "placeable"; ref: string; head: SnapshotId; checkouts: readonly CheckoutObservation[] }>
+  | Readonly<{ kind: "refused"; refusal: TargetWorkspaceRefusal }>
+  | z.infer<typeof previewTargetMovedSchema>
+  | z.infer<typeof previewTargetFailedSchema>;
 
-type TargetPlacementObservationInput = Readonly<{
-  contractId: ContractId;
-  coordinates: TargetedContractCoordinates;
-  predecessor: SnapshotId;
-  candidate: SnapshotId;
-}>;
-
-const targetCheckoutObservationSchema = z.union([
-  z
-    .object({ kind: z.literal("followable"), path: z.string().min(1) })
-    .strict()
-    .readonly(),
-  z
-    .object({ kind: z.literal("not-followable"), path: z.string().min(1), diagnostic: z.string().min(1) })
-    .strict()
-    .readonly(),
-]);
-type TargetCheckoutObservation = z.infer<typeof targetCheckoutObservationSchema>;
-type TargetPlacementObservation =
-  | Readonly<{ kind: "ready"; arms: readonly FollowArm[]; checkouts: readonly TargetCheckoutObservation[] }>
-  | Readonly<{ kind: "refused"; refusal: TargetPlacementRefusal }>;
-
-/** Observe whether registered target checkouts can follow a predecessor-to-candidate movement. */
-export async function observeTargetPlacement(
-  repository: GitRepository,
-  input: TargetPlacementObservationInput,
-  changes?: TargetPlacementChanges,
-): Promise<TargetPlacementObservation> {
-  const target: RefOperation = {
-    target: input.coordinates.target,
-    expectedOid: input.predecessor,
-    newOid: input.candidate,
-  };
-  changes ??= await prepareTargetPlacementChanges(repository, target);
-  if (changes.predecessor !== target.expectedOid || changes.candidate !== target.newOid)
-    throw new Error("target changes do not match the observed movement");
-  const destination = target.target;
-  let worktrees: readonly Readonly<{ path: string }>[];
-  if (typeof destination === "string") {
-    worktrees = (await registeredWorktrees(repository))
-      .filter((worktree) => worktree.branch === destination)
-      .sort((left, right) => left.path.localeCompare(right.path));
-  } else {
-    const resolved = await resolveContractTarget(repository, destination.contractId, destination);
-    if (resolved.kind === "refused") return resolved;
-    worktrees = [{ path: resolved.path }];
-  }
-  const arms: FollowArm[] = [];
-  const checkouts: TargetCheckoutObservation[] = [];
-  for (const worktree of worktrees) {
-    const precheck = await ordinaryPrecheck(repository, target, worktree.path, changes);
-    if (precheck.kind === "refused") return precheck;
-    checkouts.push({ ...precheck, path: worktree.path });
-    arms.push({ kind: "ordinary", path: worktree.path });
-  }
-  return { kind: "ready", arms, checkouts };
-}
-
-export const previewTargetAnswerSchema = z.union([
-  z
-    .object({
-      kind: z.literal("placeable"),
-      ref: z.string().refine((value) => value.trim() !== ""),
-      head: snapshotIdSchema,
-      checkouts: z.array(targetCheckoutObservationSchema).readonly(),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal("moved"),
-      ref: z.string().refine((value) => value.trim() !== ""),
-      expected: snapshotIdSchema,
-      observed: snapshotIdSchema.nullable(),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({
-      kind: z.literal("refused"),
-      refusal: z.union([checkoutNotFollowableRefusalSchema, targetWorkspaceRefusalSchema]),
-    })
-    .strict()
-    .readonly(),
-  z
-    .object({ kind: z.literal("failed"), diagnostic: z.string().refine((value) => value.trim() !== "") })
-    .strict()
-    .readonly(),
-]);
-type PreviewTargetAnswer = z.infer<typeof previewTargetAnswerSchema>;
-/** Adjudicate prospective target followability without placing or running Verification. */
 export async function adjudicatePreviewTarget(
   repository: GitRepository,
-  input: TargetPlacementObservationInput,
+  movement: Movement,
 ): Promise<PreviewTargetAnswer> {
-  const destination = input.coordinates.target;
-  const ref = targetName(destination);
-  const expected = input.predecessor;
+  const { target, predecessor: expected } = movement;
+  const ref = targetName(target);
   try {
-    const head = await observeTargetHead(repository, destination);
+    const head = await observeTargetHead(repository, target);
     if (head !== expected) return { kind: "moved", ref, expected, observed: head };
-    const follow = await observeTargetPlacement(repository, input);
-    const observed = await observeTargetHead(repository, destination);
+    const resolved = await resolveTargetCheckouts(repository, target);
+    const checkouts: CheckoutObservation[] = [];
+    if (resolved.kind === "resolved" && resolved.paths.length > 0) {
+      const trees = await movementTrees(repository, movement);
+      for (const path of resolved.paths) {
+        const shape = await inspectCheckout(repository, path, trees);
+        checkouts.push(
+          shape.kind === "retained"
+            ? { kind: "not-followable", path, diagnostic: shape.diagnostic }
+            : { kind: "followable", path },
+        );
+      }
+    }
+    const observed = await observeTargetHead(repository, target);
     if (observed !== expected) return { kind: "moved", ref, expected, observed };
-    return follow.kind === "refused"
-      ? { kind: "refused", refusal: follow.refusal }
-      : { kind: "placeable", ref, head: expected, checkouts: follow.checkouts };
+    return resolved.kind === "refused" ? resolved : { kind: "placeable", ref, head, checkouts };
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
     repository.signal?.throwIfAborted();
@@ -443,242 +400,82 @@ export async function adjudicatePreviewTarget(
   }
 }
 
-export async function prepareTargetPlacement(
-  repository: GitRepository,
-  state: ContractState,
-  target: RefOperation,
-  changes?: TargetPlacementChanges,
-): Promise<TargetPlacementPreparation> {
-  if (state.coordinates.target !== target.target || state.currentIntegration?.snapshot !== target.newOid) {
-    throw new Error("placement state does not match its offered target movement");
-  }
-  const observation = await observeTargetPlacement(
-    repository,
-    {
-      contractId: state.id,
-      coordinates: { ...state.coordinates, target: target.target },
-      predecessor: target.expectedOid,
-      candidate: target.newOid,
-    },
-    changes,
-  );
-  return observation.kind === "refused"
-    ? observation
-    : { kind: "prepared", placement: { target, arms: observation.arms } };
-}
-
-export async function followTargetPlacement(
-  repository: GitRepository,
-  prepared: PreparedTargetPlacement,
-  onPhysical?: (report: TargetPlacementPhysicalResult) => void,
-): Promise<TargetPlacementPhysicalResult> {
-  const effects: TargetCheckoutEffect[] = [];
-  const lag: TargetCheckoutLag[] = [];
-  const predecessor = gitObjectIdForSnapshot(prepared.target.expectedOid);
-  const candidate = gitObjectIdForSnapshot(prepared.target.newOid);
-  for (const arm of prepared.arms) {
-    const beforeEffects = effects.length,
-      beforeLag = lag.length;
-    try {
-      await executeGit(repository, ["-C", arm.path, "read-tree", "-m", "-u", predecessor, candidate]);
-      effects.push({
-        kind: "target-checkout",
-        path: arm.path,
-        target: targetName(prepared.target.target),
-      });
-    } catch (error) {
-      if (!(error instanceof GitPlumbingError)) throw error;
-      lag.push({
-        kind: "target-checkout-retained",
-        path: arm.path,
-        target: targetName(prepared.target.target),
-        diagnostic: diagnostic(error),
-      });
-    }
-    onPhysical?.({ effects: effects.slice(beforeEffects), lag: lag.slice(beforeLag) });
-  }
-  return { effects, lag };
-}
-
-function recoveryLag(path: string, target: string, detail: string): TargetCheckoutLag {
-  return { kind: "target-checkout-retained", path, target, diagnostic: detail };
-}
-
-type CheckoutInput = Readonly<{
-  repository: GitRepository;
-  path: string;
-  predecessor: SnapshotId;
-  candidate: SnapshotId;
-  predecessorTree: GitObjectId;
-  candidateTree: GitObjectId;
-}>;
-type CheckoutClassification =
-  | Readonly<{ kind: "complete" }>
-  | Readonly<{ kind: "retained" }>
-  | Readonly<{ kind: "recoverable"; action: "index-merge" | "worktree-merge" }>;
-
-async function classifyCheckout(input: CheckoutInput): Promise<CheckoutClassification> {
-  const { repository, path, predecessorTree, candidateTree } = input;
-  const changedPaths = await gitPaths(repository, path, ["diff", "--name-only", "-z", predecessorTree, candidateTree]);
-  if (changedPaths.length === 0) return { kind: "complete" };
-  const workspaceTree = (await captureWorkspaceTree(repository, path)).tree;
-  const candidateIndex = await matchesTreeOnPaths(
-    repository,
-    path,
-    ["diff-index", "--cached"],
-    [candidateTree],
-    changedPaths,
-  );
-  const candidateWorkspace = await matchesTreeOnPaths(
-    repository,
-    path,
-    ["diff"],
-    [candidateTree, workspaceTree],
-    changedPaths,
-  );
-  if (candidateIndex && candidateWorkspace) return { kind: "complete" };
-  const predecessorIndex = await matchesTreeOnPaths(
-    repository,
-    path,
-    ["diff-index", "--cached"],
-    [predecessorTree],
-    changedPaths,
-  );
-  if (predecessorIndex && candidateWorkspace) return { kind: "recoverable", action: "index-merge" };
-  return !predecessorIndex ||
-    !(await matchesTreeOnPaths(repository, path, ["diff"], [predecessorTree, workspaceTree], changedPaths))
-    ? { kind: "retained" }
-    : { kind: "recoverable", action: "worktree-merge" };
-}
-
-/** Judge the target-checkout shape without mutating refs, worktrees, or indexes. */
+/** Selected read projection for the current accepted movement. */
 export async function observeTargetCheckoutShape(
   repository: GitRepository,
-  input: Readonly<{ path: string; predecessor: SnapshotId; candidate: SnapshotId }>,
-): Promise<"complete" | "recoverable" | "retained"> {
-  const [predecessorTree, candidateTree] = await Promise.all([
-    commitTree(repository, input.predecessor),
-    commitTree(repository, input.candidate),
-  ]);
-  return (await classifyCheckout({ repository, ...input, predecessorTree, candidateTree })).kind;
-}
-
-type CheckoutRecovery =
-  | Readonly<{ kind: "complete" | "recovered" }>
-  | Readonly<{ kind: "retained"; diagnostic: string }>;
-
-async function recoverCheckout(
-  input: CheckoutInput & Pick<CheckoutObservation, "target" | "changes">,
-): Promise<CheckoutRecovery> {
-  const classified = await classifyCheckout(input);
-  if (classified.kind === "complete") return { kind: "complete" };
-  if (classified.kind === "retained")
-    return { kind: "retained", diagnostic: "target checkout entries are neither predecessor nor candidate" };
-  const { repository, path, predecessor, candidate } = input;
-  if (classified.action === "index-merge") {
-    await executeGit(repository, [
-      "-C",
-      path,
-      "read-tree",
-      "-i",
-      "-m",
-      gitObjectIdForSnapshot(predecessor),
-      gitObjectIdForSnapshot(candidate),
-    ]);
-    return { kind: "recovered" };
+  movement: Movement,
+): Promise<CheckoutShape["kind"]> {
+  const resolved = await resolveTargetCheckouts(repository, movement.target);
+  if (resolved.kind === "refused") return "retained";
+  if (resolved.paths.length === 0) return "complete";
+  const trees = await movementTrees(repository, movement);
+  let kind: "complete" | "followable" = "complete";
+  for (const path of resolved.paths) {
+    const shape = await inspectCheckout(repository, path, trees);
+    if (shape.kind === "retained") return "retained";
+    if (shape.kind === "followable") kind = "followable";
   }
-  const scopes = await destructionScopes(path, input.changes.writes);
-  const refusal = await untrackedRefusalWithinScopes(input, scopes);
-  if (refusal !== null)
-    return {
-      kind: "retained",
-      diagnostic: `target checkout would overwrite ignored local entries: ${refusal.paths.join(", ")}`,
-    };
-  await executeGit(repository, [
-    "-C",
-    path,
-    "read-tree",
-    "-m",
-    "-u",
-    gitObjectIdForSnapshot(predecessor),
-    gitObjectIdForSnapshot(candidate),
-  ]);
-  return { kind: "recovered" };
+  return kind;
 }
 
+/** Follow only the exact durable movement, under the caller's target fence. */
 export async function recoverTargetPlacement(
   repository: GitRepository,
   state: ContractState,
   onPhysical?: (report: TargetPlacementPhysicalResult) => void,
 ): Promise<TargetPlacementPhysicalResult> {
-  const target = state.coordinates.target;
-  const delivery = state.delivery;
-  if (state.terminal?.kind !== "claimed" || target === undefined || delivery === null) return { effects: [], lag: [] };
+  const { target } = state.coordinates;
   const integration = state.currentIntegration;
-  if (integration === null) return { effects: [], lag: [] };
-  const resolved =
-    typeof target === "string" ? undefined : await resolveContractTarget(repository, target.contractId, target);
-  if (resolved?.kind === "refused") {
-    return {
-      effects: [],
-      lag: [
-        {
-          kind: "target-workspace-retained",
-          targetContractId: resolved.refusal.contractId,
-          reason: resolved.refusal.reason,
-        },
-      ],
+  const effects: TargetPlacementPhysicalResult["effects"][number][] = [];
+  const lag: TargetPlacementPhysicalResult["lag"][number][] = [];
+  if (state.terminal?.kind !== "claimed" || target === undefined || integration === null) return { effects, lag };
+  const { predecessor, snapshot: candidate } = integration;
+  // If the ref is unavailable, still distinguish an unavailable Contract destination from branch drift.
+  const current = await observeTargetHead(repository, target);
+  if (typeof target === "string" && current !== candidate) return { effects, lag };
+  const resolved = await resolveTargetCheckouts(repository, target);
+  if (resolved.kind === "refused") {
+    const issue = {
+      kind: "target-workspace-retained" as const,
+      targetContractId: resolved.refusal.contractId,
+      reason: resolved.refusal.reason,
     };
+    onPhysical?.({ effects: [], lag: [issue] });
+    return { effects, lag: [issue] };
   }
-  if ((await readRef(targetRepository(repository, target), targetRef(target))) !== integration.snapshot)
-    return { effects: [], lag: [] };
-
-  const movement: RefOperation = {
-    target,
-    expectedOid: integration.predecessor,
-    newOid: integration.snapshot,
-  };
-  const changes = await prepareTargetPlacementChanges(repository, movement);
-  const candidateTree = await commitTree(repository, integration.snapshot);
-  const predecessorTree = await commitTree(repository, integration.predecessor);
-  let worktrees: readonly Readonly<{ path: string }>[];
-  if (typeof target === "string") {
-    worktrees = (await registeredWorktrees(repository))
-      .filter((worktree) => worktree.branch === target)
-      .sort((left, right) => left.path.localeCompare(right.path));
-  } else {
-    if (resolved === undefined || resolved.kind !== "resolved") throw new Error("missing resolved target workspace");
-    worktrees = [{ path: resolved.path }];
-  }
-  const effects: TargetCheckoutEffect[] = [];
-  const lag: TargetCheckoutLag[] = [];
-  for (const worktree of worktrees) {
-    const beforeEffects = effects.length,
-      beforeLag = lag.length;
+  if (current !== candidate || resolved.paths.length === 0) return { effects, lag };
+  const trees = movementTrees(repository, { target, predecessor, candidate });
+  for (const path of resolved.paths) {
+    let issue: string | undefined;
     try {
-      const recovery = await recoverCheckout({
-        repository,
-        target: movement,
-        changes,
-        path: worktree.path,
-        predecessor: integration.predecessor,
-        candidate: integration.snapshot,
-        predecessorTree,
-        candidateTree,
-      });
-      if (recovery.kind === "retained") {
-        lag.push(recoveryLag(worktree.path, targetName(target), recovery.diagnostic));
-        onPhysical?.({ effects: [], lag: lag.slice(beforeLag) });
-        continue;
-      }
-      if (recovery.kind === "recovered") {
-        effects.push({ kind: "target-checkout", path: worktree.path, target: targetName(target) });
+      const movement = await trees;
+      let shape = await classifyCheckout(repository, path, movement);
+      if (shape.kind === "followable") shape = await classifyCheckout(repository, path, movement);
+      if (shape.kind === "complete") continue;
+      if (shape.kind === "retained") issue = shape.diagnostic;
+      else {
+        await executeGit(repository, checkoutReadTree(path, movement));
+        const followed = await classifyCheckout(repository, path, movement);
+        if (followed.kind !== "complete")
+          issue = followed.kind === "retained" ? followed.diagnostic : "target checkout did not follow the candidate";
       }
     } catch (error) {
-      if (!(error instanceof GitPlumbingError)) throw error;
-      lag.push(recoveryLag(worktree.path, targetName(target), diagnostic(error)));
+      issue = checkoutDiagnostic(repository, error);
     }
-    onPhysical?.({ effects: effects.slice(beforeEffects), lag: lag.slice(beforeLag) });
+    if (issue !== undefined) {
+      const retained = {
+        kind: "target-checkout-retained" as const,
+        path,
+        target: targetName(target),
+        diagnostic: issue,
+      };
+      lag.push(retained);
+      onPhysical?.({ effects: [], lag: [retained] });
+    } else {
+      const followed = { kind: "target-checkout" as const, path, target: targetName(target) };
+      effects.push(followed);
+      onPhysical?.({ effects: [followed], lag: [] });
+    }
   }
   return { effects, lag };
 }

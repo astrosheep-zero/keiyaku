@@ -359,7 +359,7 @@ test("cancelling invocation dry-run preserves native abort and partial preview i
   const before = custodySnapshot(repository, worktree);
   const history = await bound.kei.history();
   await withGitShim([
-    'if [ "$3" = "read-tree" ] && [ "$4" = "--dry-run" ]; then',
+    'if [ "$3" = "ls-files" ] && [ "$4" = "--others" ] && [ "$5" = "--exclude-standard" ]; then',
     '  : > "$KEIYAKU_TEST_BARRIER"',
     '  exec sleep 30',
     'fi',
@@ -414,31 +414,13 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   writeFileSync(join(repository.path, "delivered.txt"), dirty);
   const before = custodySnapshot(repository, worktree);
   const history = await bound.kei.history();
-  const probes = join(repository.path, ".git", "preview-probes");
-  // Count the existing probe; reporting followability must not introduce a second one.
-  const preview = await withGitShim(
-    [
-      'if [ "$3" = "read-tree" ] && [ "$4" = "--dry-run" ]; then',
-      '  printf "probe\\n" >> "$KEIYAKU_TEST_PROBES"',
-      "fi",
-      'exec "$KEIYAKU_REAL_GIT" "$@"',
-    ].join("\n"),
-    { KEIYAKU_TEST_PROBES: probes },
-    async (gitPath) => {
-      const native = Keis.of(await Repo.at({ path: repository.path, gitPath })).kei({
-        id: bound.contractId,
-      });
-      const result = await native.previewDelivery();
-      assert.ok(result.kind === "ready");
-      return result;
-    },
-  );
-  assert.equal(readFileSync(probes, "utf8"), "probe\n");
+  const preview = await bound.kei.previewDelivery();
+  assert.equal(preview.kind, "ready");
   assert.ok(preview.target?.kind === "placeable");
   assert.equal(preview.target.checkouts?.length, 1);
   const checkout = preview.target.checkouts![0]!;
   assert.equal(checkout.path, repository.path);
-  assert.match(checkout.diagnostic, /delivered\.txt.*not uptodate|not uptodate.*delivered\.txt/su);
+  assert.match(checkout.diagnostic, /worktree does not match its index tree/u);
   const text = renderVerb("deliver", { contract: bound.contractId, dryRun: true },
     { kind: "returned", value: preview }, { columns: 200, color: false });
   // The receipt hard-wraps a long payload at the column boundary, even mid-word, so the human-facing text is judged
@@ -446,7 +428,7 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   const displayed = text.replace(/\s+/gu, "");
   assert.match(text, /target {2}placeable/u);
   assert.ok(text.includes(`checkout cannot follow  ${repository.path}`));
-  assert.ok(displayed.includes("notuptodate"), `preview must render the checkout diagnostic; got:\n${text}`);
+  assert.ok(displayed.includes(checkout.diagnostic.replace(/\s+/gu, "")), `preview must render the checkout diagnostic; got:\n${text}`);
 
   assert.deepEqual(custodySnapshot(repository, worktree), before);
   assert.deepEqual(await bound.kei.history(), history);
@@ -463,6 +445,6 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   const retained = (delivered.issues ?? []).find((effect) => effect.kind === "target-checkout-retained");
   assert.ok(retained?.kind === "target-checkout-retained");
   assert.equal(retained.path, repository.path);
-  assert.match(retained.diagnostic, /not uptodate/u);
+  assert.equal(retained.diagnostic, checkout.diagnostic);
   assert.equal(readFileSync(join(repository.path, "delivered.txt"), "utf8"), dirty);
 });

@@ -8,7 +8,7 @@ import { withGitShim } from "./support/git.js";
 import { cliJson } from "./support/cli-fixtures.js";
 
 test("a child lands into the appointed parent without changing parent authority or main", async () => {
-  const raw = repositoryWithMain({ files: { "base.txt": "base\n" } });
+  const raw = repositoryWithMain({ files: { "base.txt": "base\n", ".gitignore": "local.txt\n" } });
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
   const parentBound = accepted(
@@ -32,6 +32,8 @@ test("a child lands into the appointed parent without changing parent authority 
   raw.run(["-C", childPath, "commit", "--quiet", "-m", "child"]);
   const delivered = accepted(await child.deliver());
   assert.equal(present(await child.state()).terminal?.kind, "claimed", JSON.stringify(delivered));
+  assert.equal(delivered.placement?.kind, "placed");
+  assert.equal(raw.run(["-C", parentPath, "rev-parse", "HEAD"]).trim(), delivered.integration);
   assert.equal(raw.run(["rev-parse", "main"]).trim(), mainBefore);
   assert.equal(readFileSync(join(parentPath, "child.txt"), "utf8"), "landed\n");
   assert.equal(readFileSync(join(parentPath, "local.txt"), "utf8"), "untouched\n");
@@ -179,7 +181,7 @@ test("recovery refuses to adopt a replacement even when its HEAD matches the acc
   assert.equal(raw.run(["-C", parentPath, "rev-parse", "HEAD"]).trim(), integration);
 });
 
-test("ignored parent bytes refuse overwrite before child acceptance", async () => {
+test("ignored parent bytes lag after child acceptance without changing the checkout", async () => {
   const raw = repositoryWithMain({ files: { ".gitignore": "ignored.txt\n" } });
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
@@ -192,11 +194,16 @@ test("ignored parent bytes refuse overwrite before child acceptance", async () =
   raw.run(["-C", childPath, "add", "-f", "ignored.txt"]);
   raw.run(["-C", childPath, "commit", "--quiet", "-m", "child"]);
   writeFileSync(join(parentPath, "ignored.txt"), "keep me\n");
-  const before = raw.run(["-C", parentPath, "rev-parse", "HEAD"]).trim();
+  const indexPath = raw.run(["-C", parentPath, "rev-parse", "--path-format=absolute", "--git-path", "index"]).trim();
+  const index = readFileSync(indexPath);
   const result = accepted(await child.kei.deliver());
-  assert.ok(JSON.stringify(result).includes("checkout-not-followable"));
-  assert.equal(present(await child.kei.state()).terminal, null);
-  assert.equal(raw.run(["-C", parentPath, "rev-parse", "HEAD"]).trim(), before);
+  assert.equal(result.placement?.kind, "placed");
+  assert.equal(present(await child.kei.state()).terminal?.kind, "claimed");
+  assert.equal(raw.run(["-C", parentPath, "rev-parse", "HEAD"]).trim(), result.integration);
+  const retained = result.issues?.find((issue) => issue.kind === "target-checkout-retained");
+  assert.equal(retained?.path, parentPath);
+  assert.match(retained.diagnostic, /ignored.*ignored\.txt/u);
+  assert.deepEqual(readFileSync(indexPath), index);
   assert.equal(readFileSync(join(parentPath, "ignored.txt"), "utf8"), "keep me\n");
 });
 
@@ -371,6 +378,7 @@ test("parent cleanup waits for an already admitted child follow and retains its 
   await withGitShim(
     [
       'case " $* " in',
+      '  *" read-tree -m -u --dry-run "*) ;;',
       '  *" read-tree -m -u "*)',
       '    touch "$FOLLOW_STARTED"',
       '    i=0; while [ ! -e "$FOLLOW_RELEASE" ]; do i=$((i + 1)); if [ "$i" -ge 3000 ]; then exit 1; fi; sleep 0.01; done ;;',

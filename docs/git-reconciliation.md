@@ -62,15 +62,16 @@ state is retained unchanged. The same proof permits explicit rematerialization
 to retire a prior handoff; neither conflict resolution completeness nor tree
 equality is an ownership test.
 
-Target-checkout recovery can complete only the current accepted
-predecessor-to-candidate movement while the checkout state proves it can carry
-that movement. It never adopts an older ancestor, retries a pre-publication
-refusal, recaptures a candidate, or overwrites incompatible concurrent state.
-A successful recovery is an observed physical effect; incompatible state is
-retained unchanged. For a Contract destination, recovery proves the same
-appointed incarnation and exact already-published movement even if the
-destination has since become terminal; it never creates an appointment or
-adopts a replacement. Workspace replacement, dependent following, and terminal
+Target-checkout recovery uses the same conservative follower as immediate
+placement, only while the destination still names the exact accepted candidate.
+A whole predecessor checkout can follow; a whole candidate is inert. Local or
+mixed states and ignored collisions are retained unchanged. A later explicit
+reconcile can follow once eligibility is restored; there is no index-only
+repair, older-ancestor adoption, or candidate recapture. Each checkout that
+actually follows reports one physical movement. For a Contract destination,
+recovery proves the same appointed incarnation and exact already-published
+movement even if the destination has since become terminal; it never creates an
+appointment or adopts a replacement. Workspace replacement, dependent following, and terminal
 cleanup share the incoming destination fence with placement and follow.
 Outgoing recovery finishes before incoming workspace repair begins. Git closes
 that custody before the Library gives Settlement its opportunity. Terminal

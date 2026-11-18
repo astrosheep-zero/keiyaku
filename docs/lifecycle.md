@@ -38,6 +38,9 @@ preparation, reintegration, and placement. It is not a prerequisite or a parent
 lifecycle: landing changes the child's authority and the destination worktree,
 not the destination Contract's terms, candidate, testimony, or terminal state.
 Concurrent terminal admission and child landing are ordered by journal admission.
+Once destination legality is proved, checkout followability does not govern
+placement eligibility. An accepted movement may leave its checkout behind,
+including on an ignored collision; that lag does not change the Contract's claim.
 
 Delivery captures a candidate and frozen placement policy. After that leading
 fact is admitted, a later delivery with the same worktree-content identity

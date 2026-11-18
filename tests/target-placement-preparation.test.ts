@@ -4,19 +4,27 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import { singletonRequirement } from "../src/verification/declaration.js";
-import { gate } from "../src/core/facts/types.js";
+import { gate, type ContractId } from "../src/core/facts/types.js";
+import { decideAbandon } from "../src/core/verbs/abandon.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
 import { tryAcquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
-import { privateStatePublicationSeatPath } from "../src/git/private-state-seat.js";
+import { privateStatePublicationSeatPath, withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
+import { observeContractsAt } from "../src/git/observe.js";
+import type { GitRepository } from "../src/git/process.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
+import { admitDecidedOffer, mintAttempts } from "../src/protocol/attempt.js";
 import { admitIntent } from "../src/protocol/intent.js";
 import { admitPlacement } from "../src/protocol/placement.js";
-import { cachedRepositoryAt, waitForFile, withGitShim } from "./support/git.js";
+import { cachedRepositoryAt, withGitShim } from "./support/git.js";
 import { managedCandidate, repositoryWithMain, TARGET_PLACEMENT_FILES } from "./support/library-verbs.js";
+import { deferred, waitForFixtureFile } from "./support/process.js";
 
 async function readyPlacementFixture() {
-  const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
+  const repository = repositoryWithMain({ files: { ...TARGET_PLACEMENT_FILES, ".gitignore": "collision.txt\n" } });
   const value = { repository, ...(await managedCandidate(repository, ["reviewed"])) };
+  writeFileSync(resolve(value.path, "collision.txt"), "candidate\n");
+  repository.run(["-C", value.path, "add", "-f", "collision.txt"]);
+  repository.run(["-C", value.path, "commit", "--quiet", "-m", "add candidate path"]);
   await value.contract.deliver();
   await value.contract.review({ verdict: "unsatisfied", summary: "Placement review found an issue" });
   const git = await cachedRepositoryAt(value.repository.path);
@@ -45,70 +53,102 @@ async function readyPlacementFixture() {
   return { ...value, git };
 }
 
-test("placement preparation leaves the publication seat free and rechecks journal authority", async () => {
-  for (const mutation of ["checkout", "authority"] as const) {
-    const value = await readyPlacementFixture();
-    const { repository, git, id, contract } = value;
-    const before = repository.run(["rev-parse", "refs/heads/main"]);
-    const marker = resolve(repository.path, ".git", "shape-started");
-    const release = resolve(repository.path, ".git", "shape-release");
-    await withGitShim(
-      [
-        'case " $* " in',
-        '  *" --no-renames "*)',
-        '    if [ ! -e "$SHAPE_STARTED" ]; then',
-        '      touch "$SHAPE_STARTED"',
-        '      i=0; while [ ! -e "$SHAPE_RELEASE" ]; do i=$((i + 1)); if [ "$i" -ge 6000 ]; then echo "fixture wait for $SHAPE_RELEASE expired after 60s" >&2; exit 1; fi; sleep 0.01; done',
-        "    fi ;;",
-        "esac",
-        'exec "$KEIYAKU_REAL_GIT" "$@"',
-      ].join("\n"),
-      { SHAPE_STARTED: marker, SHAPE_RELEASE: release },
-      async (gitPath) => {
-        const observedGit = await cachedRepositoryAt(repository.path, gitPath);
-        const placing = withGitDecodeChannel(observedGit, (channel) =>
-          admitPlacement({
-            channel,
-            repository: observedGit,
-            target: "refs/heads/main",
-            placement: { contractId: id, at: new Date().toISOString() },
-          }),
-        );
-        void placing.catch(() => undefined);
-        try {
-          await waitForFile(marker);
-          const otherWriter = await tryAcquireSqliteTransactionLock({
-            path: privateStatePublicationSeatPath(git),
-            mode: "immediate",
-          });
-          assert.ok(otherWriter, "immutable diff preparation held the shared publication seat");
-          otherWriter.close();
-          if (mutation === "checkout")
-            writeFileSync(resolve(repository.path, "delivered.txt"), "local edit during preparation\n");
-          else await contract.abandon();
-        } finally {
-          writeFileSync(release, "release");
-          await placing.catch(() => undefined);
-        }
-        const result = await placing;
-        if (mutation === "checkout") {
-          assert.equal(result.kind, "accepted", "a dirty checkout must not veto placement");
-          if (result.kind !== "accepted") return;
-          assert.equal(present(await contract.state()).terminal?.kind, "claimed");
-          assert.ok(result.physical?.lag.some((lag) => lag.kind === "target-checkout-retained"));
-          assert.notEqual(repository.run(["rev-parse", "refs/heads/main"]), before);
-          assert.equal(
-            readFileSync(resolve(repository.path, "delivered.txt"), "utf8"),
-            "local edit during preparation\n",
-          );
-        } else {
-          assert.equal(result.kind, "refused");
-          if (result.kind !== "refused") assert.fail("stale preparation was accepted");
-          assert.equal(result.refusal.kind, "terminal");
-          assert.equal(present(await contract.state()).terminal?.kind, "abandoned");
-          assert.equal(repository.run(["rev-parse", "refs/heads/main"]), before);
-        }
-      },
-    );
-  }
+function place(git: GitRepository, contractId: ContractId) {
+  return withGitDecodeChannel(git, (channel) =>
+    admitPlacement({
+      channel,
+      repository: git,
+      target: "refs/heads/main",
+      placement: { contractId, at: new Date().toISOString() },
+    }),
+  );
+}
+
+test("checkout probing begins after atomic admission and outside the publication seat", async () => {
+  const { repository, git, id, contract } = await readyPlacementFixture();
+  const before = present(await contract.state());
+  const marker = resolve(repository.path, ".git", "shape-started");
+  const release = resolve(repository.path, ".git", "shape-release");
+  await withGitShim(
+    [
+      'case " $* " in',
+      '  *" ls-files --others --ignored --exclude-standard -z "*)',
+      '    if [ ! -e "$SHAPE_STARTED" ]; then',
+      '      "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+      '      touch "$SHAPE_STARTED"',
+      '      i=0; while [ ! -e "$SHAPE_RELEASE" ]; do i=$((i + 1)); if [ "$i" -ge 6000 ]; then echo "fixture wait for $SHAPE_RELEASE expired after 60s" >&2; exit 1; fi; sleep 0.01; done',
+      "      exit 0",
+      "    fi ;;",
+      "esac",
+      'exec "$KEIYAKU_REAL_GIT" "$@"',
+    ].join("\n"),
+    { SHAPE_STARTED: marker, SHAPE_RELEASE: release },
+    async (gitPath) => {
+      const placing = place({ ...git, gitPath }, id);
+      void placing.catch(() => undefined);
+      const file = resolve(repository.path, "collision.txt");
+      const indexPath = resolve(repository.path, ".git", "index");
+      const index = readFileSync(indexPath);
+      try {
+        await waitForFixtureFile(marker, 30_000);
+        const writer = await tryAcquireSqliteTransactionLock({
+          path: privateStatePublicationSeatPath(git),
+          mode: "immediate",
+        });
+        assert.ok(writer, "checkout probe held the shared publication seat");
+        writer.close();
+        assert.equal(present(await contract.state()).terminal?.kind, "claimed");
+        assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), before.currentIntegration?.snapshot);
+        writeFileSync(file, "ignored bytes after first classification\n");
+      } finally {
+        writeFileSync(release, "release");
+        await placing.catch(() => undefined);
+      }
+      const result = await placing;
+      assert.equal(result.kind, "accepted");
+      const lag = result.physical?.lag.find((issue) => issue.kind === "target-checkout-retained");
+      assert.match(lag?.diagnostic ?? "", /ignored.*collision\.txt/u);
+      assert.deepEqual(readFileSync(indexPath), index);
+      assert.equal(readFileSync(file, "utf8"), "ignored bytes after first classification\n");
+    },
+  );
+});
+
+test("queued placement decides from the journal after an earlier terminal publication", async () => {
+  const { repository, git, id, contract } = await readyPlacementFixture();
+  const before = repository.run(["rev-parse", "refs/heads/main"]);
+  const holding = deferred();
+  const contended = deferred();
+  const writer = withPrivateStatePublicationSeat(git, async (seat) => {
+    holding.resolve();
+    await contended.promise;
+    return await withGitDecodeChannel(git, async (channel) => {
+      const observation = await observeContractsAt(git, channel, [id]);
+      const attempt = mintAttempts({ entryCount: 1 })[0]!;
+      const decision = decideAbandon({
+        input: { contractId: id, at: new Date().toISOString() },
+        attempt,
+        observation: observation.decision,
+      });
+      assert.equal(decision.kind, "offer");
+      return admitDecidedOffer({
+        scope: git,
+        channel,
+        contractId: id,
+        seat,
+        observation,
+        attempt,
+        offer: decision.offer,
+      });
+    });
+  });
+  await holding.promise;
+  const placing = place({ ...git, onPrivateStateSeatContention: contended.resolve }, id);
+  void placing.finally(contended.resolve).catch(() => undefined);
+  const [publication, result] = await Promise.all([writer, placing]);
+  assert.equal(publication.value.kind, "accepted");
+  assert.equal(result.kind, "refused");
+  assert.equal(result.refusal.kind, "terminal");
+  assert.equal(present(await contract.state()).terminal?.kind, "abandoned");
+  assert.equal(repository.run(["rev-parse", "refs/heads/main"]), before);
 });

@@ -640,7 +640,7 @@ test("a pre-admission finite read failure keeps its native cause without claimin
   assert.equal(readFileSync(join(bound.worktreePath, "dirty.txt"), "utf8"), "unadmitted bytes\n");
 });
 
-test("native delivery retains an earlier completed checkout follow when a later arm throws", async () => {
+test("native delivery retains an earlier completed checkout follow when a later checkout throws", async () => {
   const { rmSync } = await import("node:fs");
   const repository = repositoryWithMain();
   const sibling = `${repository.path}-other-checkout`;
@@ -652,41 +652,41 @@ test("native delivery retains an earlier completed checkout follow when a later 
     commitCandidate(repository, bound.worktreePath);
     const base = scopeForRepo(repo);
     const original = new TypeError("later checkout program failure");
-    let follows = 0;
-    const scope = {
-      ...base,
-      get gitPath(): string {
-        if (new Error().stack?.includes("followTargetPlacement") && ++follows === 2) throw original;
-        return base.gitPath;
+    const [first, second] = [repository.path, sibling].sort((a, b) => a.localeCompare(b)) as [string, string];
+    const reachedSecond = join(repository.path, ".git", "reached-second-checkout");
+    await withGitShim(
+      [
+        'if [ "$1" = "-C" ] && [ "$2" = "$KEIYAKU_TEST_SECOND" ]; then',
+        '  : > "$KEIYAKU_TEST_REACHED_SECOND"',
+        "fi",
+        'exec "$KEIYAKU_REAL_GIT" "$@"',
+      ].join("\n"),
+      { KEIYAKU_TEST_SECOND: second, KEIYAKU_TEST_REACHED_SECOND: reachedSecond },
+      async (gitPath) => {
+        const scope = {
+          ...base,
+          get gitPath(): string {
+            if (existsSync(reachedSecond)) throw original;
+            return gitPath;
+          },
+        };
+        const native = createKeiHandle(bound.contractId, scope, captureLocalContractComposition());
+        await assert.rejects(native.deliver(), (error: unknown) => {
+          assert.ok(error instanceof KeiyakuError);
+          assert.equal(error.cause, original);
+          assert.equal(error.category, "internal");
+          assert.ok(error.outcome?.kind === "contract");
+          assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "claimed"));
+          const followed = error.outcome.effects?.filter((movement) => movement.kind === "target-checkout");
+          assert.deepEqual(followed, [{ kind: "target-checkout", path: first, target: "refs/heads/main" }]);
+          assert.equal(readFileSync(join(first, "candidate.txt"), "utf8"), "candidate\n");
+          assert.ok(error.outcome.placement?.kind === "placed");
+          assert.equal(repository.run(["-C", first, "rev-parse", "HEAD"]).trim(), error.outcome.placement.integration);
+          assert.ok(!error.outcome.issues?.some((effect) => effect.kind === "target-checkout-retained"));
+          return true;
+        });
       },
-    };
-    const native = createKeiHandle(bound.contractId, scope, captureLocalContractComposition());
-    await assert.rejects(native.deliver(), (error: unknown) => {
-      assert.ok(error instanceof KeiyakuError);
-      assert.equal(error.cause, original);
-      assert.equal(error.category, "internal");
-      assert.ok(error.outcome?.kind === "contract");
-      assert.ok(error.outcome.admitted?.some((fact) => fact.kind === "claimed"));
-      const followed = error.outcome.effects?.filter((movement) => movement.kind === "target-checkout");
-      assert.deepEqual(followed, [
-        {
-          kind: "target-checkout",
-          path: [repository.path, sibling].sort()[0],
-          target: "refs/heads/main",
-        },
-      ]);
-      assert.ok(error.outcome.placement?.kind === "placed");
-      assert.equal(
-        repository.run(["-C", followed![0]!.path, "rev-parse", "HEAD"]).trim(),
-        error.outcome.placement.integration,
-      );
-      assert.equal(
-        (error.outcome.issues ?? []).some((effect) => effect.kind === "target-checkout-retained"),
-        false,
-      );
-      return true;
-    });
-    assert.equal(follows, 2);
+    );
   } finally {
     repository.run(["worktree", "remove", "--force", sibling]);
     rmSync(sibling, { recursive: true, force: true });

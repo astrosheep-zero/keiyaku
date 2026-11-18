@@ -172,7 +172,33 @@ marker. Replacement, an attached head, or an unsupported operation is not the
 admitted destination. Its logical identity is the Contract, not a branch or
 private Git path.
 
-Targeted placement is serialized per target and claims only when its persisted predecessor still matches. Uncommitted checkout state never vetoes a landed placement: the journal admits, the reference advances, and each registered target checkout follows when Git can carry the movement without touching uncommitted state. A checkout Git cannot carry stays behind, named on the terminal receipt and carried forward later by [git-reconciliation.md](git-reconciliation.md). Contact, not cleanliness, decides: uncommitted state the movement does not touch neither blocks nor lags, and automatic merging of uncommitted state never happens. The one collision Git reports by silently destroying an ignored worktree entry is refused before the journal admits rather than followed. `conflict` is integration-only. Target lag names the appointed worktree against the frozen target. ContractHead and journal blob custody identifiers remain private to ordinary text.
+Targeted placement is serialized per target and claims only when its persisted
+predecessor still matches. Once the destination is proved, checkout followability
+is not a condition of atomic journal admission and reference movement. Physical
+following happens afterward under the target fence, outside the publication
+seat. Preview, following, and recovery judge the same exact movement.
+
+A checkout whose index and working content already match the candidate needs
+no movement. Following requires both to match the entire predecessor and Git
+must allow the unforced movement with that checkout's current index and
+worktree. Preview, following, and recovery observe the native preconditions
+without refreshing the caller's index. Equal content does not override a
+native refusal; that diagnostic belongs to the checkout, not the ref. Sparse
+checkouts and indexes are retained unchanged even when all predecessor files
+are present; following never expands them. Local tracked edits, untracked
+content, unmerged entries, dirty submodule internals, foreign operations, and
+mixed predecessor and candidate states are retained, not carried or partially
+repaired. Git success alone is not proof that the entire checkout followed.
+Ignored entries that overlap changed paths also cause retained checkout lag
+after admission, including on deletions.
+Overlap protects the actual destination entry and its ancestors, including
+aliases resolved by that destination. Distinct hard-linked directory entries
+are not the same entry, and spelling alone does not establish their identity.
+The follower retains a checkout when it cannot establish that ignored bytes are
+safe. Unrelated ignored runtime and cache files do not cause lag. Checkout
+retention is not an integration conflict or reversal of placement. Target lag
+names the checkout against the frozen target. ContractHead and journal blob
+custody identifiers remain private to ordinary text.
 
 ## Custody And Cleanup
 
@@ -216,7 +242,10 @@ an archive promise. This does not exempt authored content from the seal or
 expand deletion authority beyond the managed worktree.
 
 Target-placement fence acquisition is bounded and cancellable without breaking
-its current holder. Cancellation does not replace the expected-reference proof
+its current holder. Following rechecks checkout eligibility before letting Git
+apply the movement without force. The fence is not a barrier against external
+filesystem writers, and observations cannot reserve caller bytes against them.
+Cancellation does not replace the expected-reference proof
 or undo a confirmed publication. Resolving an uncertain publication uses its
 original fact identities and independent bounded observation, not the cancelled
 execution channel. A successful readback confirms only the original offer; it

@@ -8,7 +8,11 @@ import {
   compactReason,
   compactPreparationReason,
 } from "./result-reasons.js";
-import { previewTargetAnswerSchema, adjudicatePreviewTarget } from "../git/target-placement.js";
+import {
+  adjudicatePreviewTarget,
+  previewTargetFailedSchema,
+  previewTargetMovedSchema,
+} from "../git/target-placement.js";
 import { readDeliveryDiff, readDeliveryScope } from "../git/integration.js";
 import { contractJournal, observeContractsAt } from "../git/observe.js";
 import { activeContract, targetContractRefusal } from "../core/facts/observation.js";
@@ -28,7 +32,6 @@ import type {
   RepositoryScope,
 } from "./operations.js";
 
-const rawTargetOptions = previewTargetAnswerSchema.options;
 const placeableTargetSchema = z
   .strictObject({
     kind: z.literal("placeable"),
@@ -48,7 +51,12 @@ const refusedTargetSchema = z
     reason: z.union([checkoutCollisionSchema, targetWorkspaceReasonSchema]),
   })
   .readonly();
-const targetSchema = z.union([placeableTargetSchema, rawTargetOptions[1], refusedTargetSchema, rawTargetOptions[3]]);
+const targetSchema = z.union([
+  placeableTargetSchema,
+  previewTargetMovedSchema,
+  refusedTargetSchema,
+  previewTargetFailedSchema,
+]);
 const readySchema = z
   .strictObject({
     kind: z.literal("ready"),
@@ -109,8 +117,7 @@ async function targetAnswer(
   const target = state.coordinates.target;
   if (target === undefined) return undefined;
   const answer = await adjudicatePreviewTarget(repository, {
-    contractId: state.id,
-    coordinates: { ...state.coordinates, target },
+    target,
     predecessor: candidate.integration.predecessor,
     candidate: candidate.integration.snapshot,
   });
