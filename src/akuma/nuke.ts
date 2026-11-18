@@ -1,14 +1,16 @@
 import { lstat, readdir } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { nukeAliases } from "../alias/index.js";
 import type { WorldRoot } from "../world.js";
 import { knownAkuma, type KnownAkuma } from "./akuma.js";
-import { akumaLineageCachePath } from "./lineage-cache.js";
 import { settleAkumaKill } from "./akuma-owner.js";
 import { acquireLeash } from "./control.js";
 import { AkumaResetStopError, removeAkumaCustody, removeEmptyDirectory, removeKnownRegularFile } from "./custody.js";
 import { classifyHeartSchema, readHeart, type HeldAkumaLeash } from "./heart/index.js";
 import { akumaRunRoot, type AkumaPaths } from "./identity.js";
+
+/** Retired caller-lineage record bytes remain known reset custody, never adoption. */
+const LEGACY_LINEAGE_FILES = ["lineage-cache.sqlite", "lineage-cache.sqlite-wal", "lineage-cache.sqlite-shm"];
 
 export { AkumaResetStopError } from "./custody.js";
 
@@ -30,8 +32,7 @@ async function stopRunningAkuma(entry: KnownAkuma): Promise<HeldAkumaLeash> {
 
 async function removeEmptyAkumaRunRoot(world: WorldRoot): Promise<void> {
   const runRoot = akumaRunRoot(world);
-  const cache = basename(akumaLineageCachePath(world));
-  const custody = new Set([".gitignore", cache, `${cache}-wal`, `${cache}-shm`]);
+  const custody = new Set([".gitignore", ...LEGACY_LINEAGE_FILES]);
   let names: readonly string[];
   try {
     names = await readdir(runRoot);

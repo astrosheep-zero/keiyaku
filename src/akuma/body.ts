@@ -26,7 +26,6 @@ import {
   type TurnOutcome,
 } from "./heart/index.js";
 import { worldRootForAkumaPaths, type AkumaPaths } from "./identity.js";
-import { recordAkumaLineage } from "./lineage-cache.js";
 import type { TellResult, TellWake } from "./call-initial-tell.js";
 export type { TellResult, TellWake } from "./call-initial-tell.js";
 import { emitPluginSignal } from "../plugin/akuma-signals.js";
@@ -237,8 +236,6 @@ async function prepareBodyExecution(
   const birth = await bornSoul(launch, leash, runtime.now());
   runtime.signal?.throwIfAborted();
   if (birth === null) return null;
-  // The immutable caller edge refreshes after Soul durability, best-effort.
-  if (birth.created) void recordAkumaLineage(runtime.world, birth.soul);
   const { soul } = birth;
   if (!(await prepareBodyStart(launch.paths, leash))) return null;
   if (launch.seed === undefined && launch.initialBody === undefined) {

@@ -219,7 +219,10 @@ entry. Its optional caller selection narrows that one World's roster to the
 selected caller's directly and transitively descended Akumas; the caller
 closure is completed across akumaNames before any akumaName filter, activity
 order, and bound, and it never aggregates Worlds or consults a user-home index.
-Caller selection follows the frozen birth attribution; visible Akuma lineage
+Caller selection observes frozen Souls across the recognized World for each
+answer rather than consulting a stored ancestry index, so an unreadable Soul
+leaves membership unproven rather than absent. Caller selection follows the
+frozen birth attribution; visible Akuma lineage
 names the immediate parent independently of that selection. The lower
 roster supplies that native membership, order, and extent. The composition owns
 the sole public instance catalogue, retaining immediate parent lineage and native

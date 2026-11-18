@@ -155,16 +155,16 @@ erase it. Home supplies akumaName configuration only, never runtime authority.
 The accepted risk of force-cleaning repository-local management state is not
 hidden by a second store or automatic defense.
 
-A disposable World-local lineage record may cache each born Akuma's frozen
-caller edge beside Heart custody, so a caller-scoped roster need not open every
-Heart to learn known edges. It stores no identity or lifecycle fact of its own, is reconstructible from Hearts alone, and is never a second
-authority: an offered edge only proposes a candidate, and every returned
-member's caller chain is rechecked against its born Souls before that member is
-accepted. Any disagreement discards the record for an answer built from direct
-Soul evidence rather than an empty result. A record row whose Akuma directory no
-longer exists is pruned before the closure and never resurrects an identity.
-Pruning that record never deletes Heart or Akuma data, and confirmed World reset
-removes it with the rest of known Akuma custody.
+Caller ancestry is observed directly from frozen Souls for the answer that needs
+it; no persistent lineage record stands beside Heart custody. A caller-scoped
+answer therefore costs one Soul observation per recognized identity in its World,
+and no file timestamp or stored edge substitutes for that evidence. An absent
+Soul is unborn evidence, an unreadable Soul is uncertainty rather than absence,
+and a readable downstream edge cannot bridge an unreadable one above it. The
+observation neither repairs nor rewrites Heart or Soul bytes. Confirmed World
+reset still recognizes the retired lineage-record file names as known custody
+and removes them with the rest of known Akuma custody; unknown bytes remain
+foreign.
 
 Confirmed World reset stops and retains each recognized Akuma's leash through
 deletion of its known custody. It removes only known management material and

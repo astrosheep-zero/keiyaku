@@ -124,7 +124,7 @@ export const capabilityPolicy = {
     },
     {
       module: "node:sqlite",
-      owners: [{ source: "akuma/heart/**" }, { source: "akuma/lineage-cache.ts" }, { source: "coordination/**" }],
+      owners: [{ source: "akuma/heart/**" }, { source: "coordination/**" }],
     },
     { module: "crypto", owners: [] },
   ],

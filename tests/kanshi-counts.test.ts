@@ -5,7 +5,6 @@ import { join } from "node:path";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { breakBody, finishBodyIfIdle, readSoul, recordTell } from "../src/akuma/heart/index.js";
-import { recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { Debts, Kanshi, Keis, KeiyakuError, Repo, World } from "../src/index.js";
 import type { AkumaCaller, KanshiCountsOptions, KanshiScopeInput } from "../src/index.js";
 import { bornDirectAkuma } from "./support/akuma-fixtures.js";
@@ -103,7 +102,7 @@ test("absence, explicit Repo and crossing validation remain independent", async 
   assert.deepEqual(unavailable.debts, { kind: "present", value: 0 });
 });
 
-test("caller running count preserves readable ancestry without trusting the cache or display bound", async (context) => {
+test("caller running count preserves readable ancestry beyond the display bound", async (context) => {
   const world = await World.at(temporaryDirectory(context, "counts-caller-"));
   const root: AkumaCaller = { kind: "external", integration: "pi", id: "flagship" };
   const kanshi = Kanshi.of({ world });
@@ -142,8 +141,6 @@ test("caller running count preserves readable ancestry without trusting the cach
     diagnostic: "cannot retire",
     at: hung.soul.createdAt,
   });
-  await recordAkumaLineage(world, { id: unrelated.id, caller: root });
-  await recordAkumaLineage(world, { id: branch.id });
   assert.deepEqual((await selected()).akuma, { kind: "present", value: 13 });
   assert.deepEqual((await kanshi.counts({ akumaCaller: ancestor.caller })).akuma, { kind: "present", value: 13 });
   // A life failure must not erase the readable Soul edge to its descendants.

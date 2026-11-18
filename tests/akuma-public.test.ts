@@ -12,7 +12,7 @@ import {
   turnEndFact,
 } from "./support/akuma-fixtures.js";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { waitForFixtureFile as waitForFile } from "./support/process.js";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -40,12 +40,12 @@ import {
   HeldAkumaLeash,
   probeLeash,
   readHeart,
+  readSoul,
   recordTell,
   recordTellDeliveries,
   type TimelineFact,
 } from "../src/akuma/heart/index.js";
 import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId } from "../src/akuma/identity.js";
-import { akumaLineageCachePath, readAkumaLineage, recordAkumaLineage } from "../src/akuma/lineage-cache.js";
 import { createProviderAttempt, type ProviderAdapter, type ToolCall } from "../src/akuma/provider.js";
 import { claudeProvider } from "../src/akuma/providers/claude/index.js";
 import { Settings } from "../src/settings.js";
@@ -1414,13 +1414,24 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   );
   assert.equal(bounded.more, true, "the remaining matching members are reported honestly");
 
-  const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
-  assert.equal(existsSync(cache), true, "the optional lineage cache stays inside this World");
-  unlinkSync(cache);
+  // A fresh file timestamp is not semantic recency: every readable Heart is
+  // observed and its retained evidence decides the order.
+  const ahead = new Date("2030-01-01T00:00:00.000Z");
+  const behind = new Date("2000-01-01T00:00:00.000Z");
+  utimesSync(direct.paths.heart, ahead, ahead);
+  utimesSync(delegation.paths.heart, behind, behind);
   assert.deepEqual(
     (await world.list({ caller: rootCaller, selection: "all" })).rows?.map((row) => row.id),
     listedRows.map((row) => row.id),
-    "an unavailable cache falls back to direct Soul reads",
+    "misleading file timestamps do not reorder semantic activity",
+  );
+
+  const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
+  assert.equal(existsSync(cache), false, "caller selection keeps no ancestry record beside Heart custody");
+  assert.deepEqual(
+    (await world.list({ caller: rootCaller, selection: "all" })).rows?.map((row) => row.id),
+    listedRows.map((row) => row.id),
+    "the same frozen Souls answer every caller-scoped observation",
   );
   await assert.rejects(
     world.list({ caller: { kind: "elsewhere" } } as never),
@@ -1428,8 +1439,8 @@ test("caller roster follows frozen Soul edges across archetypes before its bound
   );
 });
 
-test("birth refreshes the World-local caller lineage cache", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-cache-");
+test("birth records the frozen caller edge only in Soul", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-birth-");
   const world = Akumas.of(await World.at(root));
   const caller = { kind: "external", integration: "test", id: "birth" } as const;
   const allocated = await allocatedHeart(root, "claude", "ca110010");
@@ -1440,23 +1451,21 @@ test("birth refreshes the World-local caller lineage cache", async (context) => 
     provider,
     { now: () => "2026-08-08T00:00:00.000Z" },
   );
-  const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
-  await waitForFile(cache);
-  assert.deepEqual(
-    (await world.list({ caller, selection: "all" })).rows?.map((row) => row.id),
-    [allocated.id],
-    "the recorded edge answers the caller-scoped query",
+  assert.deepEqual((await readHeart(allocated.paths)).soul?.caller, caller);
+  assert.equal(
+    existsSync(join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite")),
+    false,
+    "birth writes no caller record beside Soul",
   );
-  unlinkSync(cache);
   assert.deepEqual(
     (await world.list({ caller, selection: "all" })).rows?.map((row) => row.id),
     [allocated.id],
-    "the same birth remains discoverable without its cache",
+    "the frozen Soul edge answers the caller-scoped query",
   );
 });
 
-test("a wrong lineage cache edge cannot fabricate members or their ancestor chain", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-tamper-");
+test("legacy ancestry bytes are ignored and never repaired or rewritten", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-legacy-");
   const proved = await World.at(root);
   const world = Akumas.of(proved);
   const rootCaller = { kind: "external", integration: "test", id: "root" } as const;
@@ -1491,105 +1500,117 @@ test("a wrong lineage cache edge cannot fabricate members or their ancestor chai
     caller: akumaCaller(stranger.id),
   });
   const unborn = await allocatedHeart(proved, "intern", "ca110015");
-
-  // Forged edges: an unrelated worker looks like a direct child, its real child
-  // keeps a true edge (so only full-chain verification exposes the forgery), and
-  // an unborn identity is given a born caller edge.
-  await recordAkumaLineage(proved, { id: stranger.id, caller: rootCaller });
-  await recordAkumaLineage(proved, { id: strangerChild.id, caller: akumaCaller(stranger.id) });
-  await recordAkumaLineage(proved, { id: unborn.id, caller: rootCaller });
-
-  const listed = await world.list({ caller: rootCaller, selection: "all" });
-  assert.deepEqual(
-    listed.rows?.map((row) => row.id),
-    [descendant.id, direct.id],
-    "only Soul-proven members survive the forged record",
-  );
+  const cache = join(root, ".keiyaku", "akuma", "run", "lineage-cache.sqlite");
+  writeFileSync(cache, "not a SQLite database");
   assert.deepEqual(
     (await world.list({ caller: rootCaller, selection: "all" })).rows?.map((row) => row.id),
     [descendant.id, direct.id],
-    "the discarded record is rebuilt from Souls and stays correct",
+    "a corrupt legacy record neither changes nor suppresses the answer",
+  );
+  assert.equal(readFileSync(cache, "utf8"), "not a SQLite database", "observation never rewrites legacy bytes");
+
+  // A legacy record can propose anything; only frozen Souls decide.
+  unlinkSync(cache);
+  const forged = new DatabaseSync(cache);
+  try {
+    forged.exec("CREATE TABLE lineage (aku_id TEXT PRIMARY KEY, caller_json TEXT) STRICT");
+    const insert = forged.prepare("INSERT INTO lineage VALUES (?, ?)");
+    insert.run(stranger.id, JSON.stringify(rootCaller));
+    insert.run(strangerChild.id, JSON.stringify(akumaCaller(stranger.id)));
+    insert.run(direct.id, JSON.stringify({ kind: "external", integration: "test", id: "hijacked" }));
+    insert.run(unborn.id, JSON.stringify(rootCaller));
+  } finally {
+    forged.close();
+  }
+  const forgedBytes = readFileSync(cache);
+  assert.deepEqual(
+    (await world.list({ caller: rootCaller, selection: "all" })).rows?.map((row) => row.id),
+    [descendant.id, direct.id],
+    "a forged legacy edge cannot add or reattribute a member",
   );
   assert.deepEqual(
     (await world.list({ caller: akumaCaller(stranger.id), selection: "all" })).rows?.map((row) => row.id),
     [strangerChild.id],
-    "the real child remains a child of its real caller",
+    "real Souls remain the only ancestry authority",
   );
   assert.deepEqual(
     (await world.list({ caller: rootCaller, akumaName: "intern", selection: "all" })).rows?.map((row) => row.id),
     [descendant.id],
+    "an unborn allocation never joins the caller tree through a legacy edge",
   );
+  assert.equal(
+    (await world.list({ selection: "all" })).rows?.find((row) => row.id === unborn.id)?.life,
+    "unborn",
+    "the unborn allocation remains visible outside caller selection",
+  );
+  assert.deepEqual(readFileSync(cache), forgedBytes, "a disagreeing legacy record is left untouched");
+  assert.equal(existsSync(`${cache}-wal`), false, "observation opens no writer over legacy bytes");
+  assert.equal(existsSync(`${cache}-shm`), false);
 });
 
-test("caller lineage prunes obsolete nonmembers and repairs only missing or invalid current edges", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-stale-");
+test("an unreadable ancestor Soul leaves only its readable peers proven", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-unreadable-");
   const proved = await World.at(root);
   const world = Akumas.of(proved);
-  const rootCaller = { kind: "external", integration: "test", id: "root" } as const;
+  const caller = { kind: "external", integration: "test", id: "root" } as const;
+  const akumaCaller = (akumaId: string): AkumaCaller =>
+    ({ kind: "akuma", world: proved, akumaId: akumaId as never }) as AkumaCaller;
   const direct = await bornLineageAkuma({
     root,
     akumaName: "worker",
     draw: "ca110016",
     createdAt: "2026-08-08T00:00:01.000Z",
-    caller: rootCaller,
+    caller,
   });
   const sibling = await bornLineageAkuma({
     root,
     akumaName: "intern",
     draw: "ca110017",
     createdAt: "2026-08-08T00:00:02.000Z",
-    caller: rootCaller,
+    caller,
   });
-  const unattributed = await bornLineageAkuma({
+  const grandchild = await bornLineageAkuma({
     root,
-    akumaName: "worker",
+    akumaName: "intern",
     draw: "ca110018",
     createdAt: "2026-08-08T00:00:03.000Z",
+    caller: akumaCaller(direct.id),
   });
-  const members = [direct, sibling, unattributed];
-  await readAkumaLineage(proved, members);
-  const database = new DatabaseSync(akumaLineageCachePath(proved));
+  const heart = new DatabaseSync(direct.paths.heart);
+  const original = heart.prepare("SELECT soul_json FROM soul").get()!.soul_json as string;
   try {
-    const obsolete = JSON.stringify({ kind: "akuma", world: proved, akuId: direct.id });
-    database.prepare("INSERT INTO lineage VALUES (?, ?)").run("aku/ghost/deadbeef", obsolete);
-    database.prepare("UPDATE lineage SET caller_json = ? WHERE aku_id = ?").run(obsolete, direct.id);
-    database.prepare("DELETE FROM lineage WHERE aku_id = ?").run(sibling.id);
+    heart.prepare("UPDATE soul SET soul_json = ?").run("{}");
   } finally {
-    database.close();
+    heart.close();
   }
-  const prepare = DatabaseSync.prototype.prepare;
-  let soulReads = 0;
-  const spy = context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
-    if (sql.includes("FROM soul")) soulReads += 1;
-    return prepare.call(this, sql);
-  });
-  const repaired = await readAkumaLineage(proved, members);
-  assert.equal(repaired.skipped, 0);
+  const incomplete = await world.list({ caller, selection: "all" });
   assert.deepEqual(
-    [...repaired.edges],
-    [
-      [unattributed.id, null],
-      [direct.id, rootCaller],
-      [sibling.id, rootCaller],
-    ],
+    incomplete.rows?.map((row) => row.id),
+    [sibling.id],
+    "a readable downstream edge cannot bridge the unreadable Soul above it",
   );
-  assert.equal(soulReads, 2, "obsolete nonmembers do not force readable peers through Soul fallback");
-  soulReads = 0;
-  assert.deepEqual(await readAkumaLineage(proved, members), repaired);
-  assert.equal(soulReads, 0, "both missing and invalid current edges were repaired, not compatibility-decoded");
-  spy.mock.restore();
+  assert.equal(incomplete.more, true, "an unreadable recognized Soul leaves the extent uncertain");
+  assert.equal((await world.list({ caller, akumaName: "worker", selection: "all" })).rows, undefined);
+  const restore = new DatabaseSync(direct.paths.heart);
+  try {
+    restore.prepare("UPDATE soul SET soul_json = ?").run(original);
+  } finally {
+    restore.close();
+  }
   assert.deepEqual(
-    (await world.list({ caller: rootCaller, selection: "all" })).rows?.map((row) => row.id),
-    [sibling.id, direct.id],
-    "the vanished identity stays pruned and absent caller attribution stays absent",
+    (await world.list({ caller, selection: "all" })).rows?.map((row) => row.id),
+    [grandchild.id, sibling.id, direct.id],
+    "restored Soul evidence proves the whole tree without a repair write",
   );
 });
 
-test("an unreadable lineage cache recovers after complete Soul evidence, not an unreadable Soul", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-recovery-");
+test("a failed lifecycle read never erases the proven Soul edge beneath it", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-life-failure-");
   const proved = await World.at(root);
   const world = Akumas.of(proved);
-  const caller = { kind: "external", integration: "test", id: "recovery" } as const;
+  const caller = { kind: "external", integration: "test", id: "life" } as const;
+  const akumaCaller = (akumaId: string): AkumaCaller =>
+    ({ kind: "akuma", world: proved, akumaId: akumaId as never }) as AkumaCaller;
   const direct = await bornLineageAkuma({
     root,
     akumaName: "worker",
@@ -1597,51 +1618,85 @@ test("an unreadable lineage cache recovers after complete Soul evidence, not an 
     createdAt: "2026-08-08T00:00:01.000Z",
     caller,
   });
-  const unattributed = await bornLineageAkuma({
+  const descendant = await bornLineageAkuma({
     root,
-    akumaName: "worker",
+    akumaName: "intern",
     draw: "ca110020",
     createdAt: "2026-08-08T00:00:02.000Z",
+    caller: akumaCaller(direct.id),
   });
-  const cache = akumaLineageCachePath(proved);
-  writeFileSync(cache, "not a SQLite database");
   const heart = new DatabaseSync(direct.paths.heart);
-  const original = heart.prepare("SELECT soul_json FROM soul").get()!.soul_json as string;
   try {
-    heart.prepare("UPDATE soul SET soul_json = ?").run("{}");
-    const incomplete = await world.list({ caller, selection: "all" });
-    assert.equal(incomplete.rows, undefined);
-    assert.equal(incomplete.more, true, "a failed Soul read cannot claim there are no matching members");
-    assert.equal(
-      readFileSync(cache, "utf8"),
-      "not a SQLite database",
-      "partial evidence cannot rebuild the whole cache",
-    );
-    heart.prepare("UPDATE soul SET soul_json = ?").run(original);
+    heart.exec("DROP TABLE bodies");
   } finally {
     heart.close();
   }
+  assert.equal((await readSoul(direct.paths))?.id, direct.id, "its frozen Soul remains readable");
+  const listed = await world.list({ caller, selection: "all" });
   assert.deepEqual(
-    (await world.list({ caller, selection: "all" })).rows?.map((row) => row.id),
-    [direct.id],
+    listed.rows?.map((row) => row.id),
+    [descendant.id],
+    "the descendant stays proven through the readable Soul edge",
   );
-  const prepare = DatabaseSync.prototype.prepare;
-  let soulReads = 0;
-  const spy = context.mock.method(DatabaseSync.prototype, "prepare", function (this: DatabaseSync, sql: string) {
-    if (sql.includes("FROM soul")) soulReads += 1;
-    return prepare.call(this, sql);
+  assert.equal(listed.more, true, "the unreadable row leaves the extent uncertain");
+  const bounded = await world.list({ caller, selection: "all", limit: 1 });
+  assert.deepEqual(bounded.rows?.map((row) => row.id), [descendant.id]);
+  assert.equal(bounded.more, true);
+});
+
+test("a member reclaimed between Soul and lifecycle reads is omitted with uncertain extent", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-akuma-lineage-reclaimed-");
+  const proved = await World.at(root);
+  const world = Akumas.of(proved);
+  const caller = { kind: "external", integration: "test", id: "reclaimed" } as const;
+  const akumaCaller = (akumaId: string): AkumaCaller =>
+    ({ kind: "akuma", world: proved, akumaId: akumaId as never }) as AkumaCaller;
+  const parent = await bornLineageAkuma({
+    root,
+    akumaName: "worker",
+    draw: "ca110021",
+    createdAt: "2026-08-08T00:00:01.000Z",
+    caller,
   });
-  const recovered = await readAkumaLineage(proved, [direct, unattributed]);
-  assert.equal(recovered.skipped, 0);
-  assert.deepEqual(
-    [...recovered.edges],
-    [
-      [direct.id, caller],
-      [unattributed.id, null],
-    ],
-  );
-  assert.equal(soulReads, 0, "the next read reuses the repaired cache, including known absent caller attribution");
-  spy.mock.restore();
+  const child = await bornLineageAkuma({
+    root,
+    akumaName: "intern",
+    draw: "ca110022",
+    createdAt: "2026-08-08T00:00:02.000Z",
+    caller: akumaCaller(parent.id),
+  });
+  const prepare = DatabaseSync.prototype.prepare;
+  let reclaimed = false;
+  DatabaseSync.prototype.prepare = function (this: DatabaseSync, sql: string) {
+    const statement = prepare.call(this, sql);
+    if (!sql.includes("FROM soul WHERE singleton = 1")) return statement;
+    const get = statement.get.bind(statement);
+    statement.get = ((...args: Parameters<typeof get>) => {
+      const row = get(...args) as { soul_json?: unknown } | undefined;
+      if (!reclaimed && typeof row?.soul_json === "string" && row.soul_json.includes(parent.id)) {
+        reclaimed = true;
+        // Its frozen Soul proved the edge; the Heart is reclaimed before the
+        // lifecycle observation reads it.
+        for (const file of [parent.paths.heart, `${parent.paths.heart}-wal`, `${parent.paths.heart}-shm`]) {
+          rmSync(file, { force: true });
+        }
+      }
+      return row;
+    }) as typeof statement.get;
+    return statement;
+  };
+  try {
+    const listed = await world.list({ caller, selection: "all" });
+    assert.equal(reclaimed, true, "the fixture reclaimed the member after its frozen Soul read");
+    assert.deepEqual(
+      listed.rows?.map((row) => row.id),
+      [child.id],
+      "the reclaimed member is omitted, not returned as unborn, and its proven descendant remains",
+    );
+    assert.equal(listed.more, true, "the vanished member leaves the observed extent uncertain");
+  } finally {
+    DatabaseSync.prototype.prepare = prepare;
+  }
 });
 
 test("public kill witnesses its exact stopped Body without launching or settling queued input", async (context) => {

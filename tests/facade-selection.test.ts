@@ -1044,12 +1044,13 @@ test("Akumas catalogue preserves readable rows through corrupt Alias authority",
   assert.equal(catalogue.rows?.[0]?.aliases, undefined);
 });
 
-test("recent Akuma page prunes physical reads and preserves complete membership", async (t) => {
+test("recent Akuma page keeps complete membership without timestamp pruning", async (t) => {
   const root = fixtureRoot(t, "keiyaku-facade-akuma-page-scale-");
   const old = new Date("2000-01-01T00:00:00.000Z");
   const originalPrepare = DatabaseSync.prototype.prepare;
   let template: Parameters<typeof initializeHeart>[0] | undefined;
-  // Pagination limits are asserted at the owner below; physical pruning needs a small mixed catalogue.
+  // Pagination limits are asserted at the owner below; a mixed catalogue keeps
+  // the semantic order observable under deliberately misleading mtimes.
   const oldCount = PAGE_POOL_SIZE;
   try {
     const oldIds = [];
@@ -1118,8 +1119,8 @@ test("recent Akuma page prunes physical reads and preserves complete membership"
         .map((row) => row.id),
     );
     assert.ok(
-      pagePrepares < completePrepares,
-      `pruned page ${pagePrepares} must read less than complete ${completePrepares}`,
+      pagePrepares === completePrepares,
+      `bounded page ${pagePrepares} observes the same candidates as complete ${completePrepares}`,
     );
   } finally {
     DatabaseSync.prototype.prepare = originalPrepare;

@@ -252,23 +252,24 @@ World — it returns the directly spawned Akumas and their transitively descende
 Akumas. Only frozen Soul caller edges are followed; fork origin is not a caller
 edge, and absent attribution is never inferred. The complete caller closure is
 computed across every akumaName before a requested akumaName narrows it, then
-presented in the same semantic activity order and bound. Any World-local
-candidate index is verified against born Souls before returning a member and
-falls back to direct Soul evidence on disagreement; unprovable or deleted
-members are omitted honestly without claiming there is nothing more, and unborn
-or stillborn allocations never enter a caller-scoped set. Disposable index reads
-ignore departed members before interpreting their caller evidence and repair
-missing or invalid current edges from Souls without discarding useful peers.
-An unavailable index is reconstructed best-effort after a complete successful
-direct observation; an unreadable Soul is not absence and cannot justify a
-complete reconstruction. Index persistence failure never changes the native
-answer, and births outside an observed membership set remain discoverable by
-later enumeration.
+presented in the same semantic activity order and bound. Each answer observes
+frozen caller edges directly from Souls; no persistent ancestry record stands
+beside Heart custody, so observation neither repairs nor writes one. An absent
+Soul is unborn evidence, an unreadable Soul is uncertainty rather than absence,
+and a readable downstream edge cannot bridge an unreadable one above it.
+Unprovable members are omitted honestly without claiming there is nothing more,
+and unborn or stillborn allocations never enter a caller-scoped set. A failed
+lifecycle read is uncertainty about that row alone and never erases the already
+proven Soul edge beneath its descendants. A member whose Heart is reclaimed
+after its Soul proved the edge is omitted rather than reported as unborn, and
+leaves the observed extent uncertain. An unreadable recognized Soul leaves
+the observed extent uncertain because it could be a missing part of the selected
+tree.
 
 A caller-selected running count follows the same unbounded tree. Only proven
 Soul ancestry and readable running life increment it. Sleeping or life-unreadable
 ancestors still connect descendants through readable Souls; unreadable Souls
-block only unproven paths. Direct Souls, never an index, prove membership.
+block only unproven paths. Direct Souls, never a stored record, prove membership.
 Zero may include skipped entries; failed enumeration is unavailable.
 
 ## Boundary

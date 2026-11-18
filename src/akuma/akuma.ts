@@ -1,6 +1,6 @@
 import { KeiyakuError } from "../errors.js";
 import { akumaBirthSchema, akumaCallerKey, decodeAkumaCaller, type AkumaCaller } from "./caller.js";
-import { readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { z } from "zod";
 import { projectBoundedList, lifecycleSelection, type LifecycleSelection } from "../bounded-list.js";
 import { akumaLifecycle } from "./heart/facts.js";
@@ -14,21 +14,13 @@ import {
   akumaPaths,
   akumaRunRoot,
   parseAkumaId,
-  pathsForAkumaId,
   type AkumaId,
   type AkumaPaths,
 } from "./identity.js";
 import { validateAkumaName } from "../identity/normalize.js";
-import {
-  readAkumaLineage,
-  readDirectAkumaLineage,
-  invalidateAkumaLineage,
-  rebuildAkumaLineage,
-  type AkumaLineage,
-} from "./lineage-cache.js";
 import { activityRowSchema, reportedFileChangeSchema } from "./projection.js";
 import { currentWorkSchema } from "./status-projection.js";
-import { PAGE_POOL_SIZE, boundedMap } from "./read-pool.js";
+import { boundedMap } from "./read-pool.js";
 
 type BornLife = AkumaStatus["life"];
 
@@ -91,8 +83,6 @@ export type AkumaStatus = z.output<typeof akumaStatusSchema>;
 /** One recognized Akuma directory under this World's run root. */
 export type KnownAkuma = Readonly<{ id: AkumaId; paths: AkumaPaths }>;
 
-type ActivityCandidate = KnownAkuma & Readonly<{ bound: number }>;
-
 function activityAt(row: AkumaRosterRow): string | null {
   if (row.kind === "unborn") return null;
   const lifeAt = row.lifeAt ?? null;
@@ -113,17 +103,6 @@ function compareRows(left: AkumaRosterRow, right: AkumaRosterRow): number {
   const activity = compareActivity(activityAt(left), activityAt(right));
   if (activity !== 0) return activity;
   return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
-}
-
-async function mtimeBound(paths: AkumaPaths): Promise<number> {
-  const read = async (path: string): Promise<number> => {
-    try {
-      return (await stat(path)).mtimeMs;
-    } catch (error) {
-      return (error as NodeJS.ErrnoException).code === "ENOENT" ? 0 : Number.POSITIVE_INFINITY;
-    }
-  };
-  return Math.max(await read(paths.heart), await read(`${paths.heart}-wal`));
 }
 
 /** Enumerate the recognized Akuma directories under this World's run root. */
@@ -160,14 +139,57 @@ export async function knownAkuma(
   return { runRoot, rows };
 }
 
-/** Preorder candidates by their freshest Heart mtime so paging reads changed rows first. */
-async function freshnessOrdered(rows: readonly KnownAkuma[]): Promise<readonly ActivityCandidate[]> {
-  const bounded = await boundedMap(rows, async (row) => ({ ...row, bound: await mtimeBound(row.paths) }));
-  return [...bounded].sort((left, right) => right.bound - left.bound);
+/**
+ * One recognized coordinate's frozen caller edge, observed directly from Soul.
+ * Absence is unborn evidence and unreadability is uncertainty, never absence.
+ */
+type SoulEdge =
+  | Readonly<{ kind: "born"; caller: AkumaCaller | null }>
+  | Readonly<{ kind: "absent" }>
+  | Readonly<{ kind: "unreadable" }>;
+
+async function observeSoulEdge({ id, paths }: KnownAkuma): Promise<SoulEdge> {
+  try {
+    const soul = await readSoul(paths);
+    if (soul !== null && soul.id !== id) throw new Error("Akuma soul does not match its coordinate");
+    return soul === null ? { kind: "absent" } : { kind: "born", caller: soul.caller ?? null };
+  } catch {
+    return { kind: "unreadable" };
+  }
 }
 
-async function readableRows(
+/**
+ * One operation-local direct observation of every recognized caller edge. Soul
+ * absence is unborn evidence, unreadability stays uncertainty, and nothing here
+ * outlives the answer it serves.
+ */
+async function observeCallerEdges(
+  members: readonly KnownAkuma[],
+): Promise<Readonly<{ edges: ReadonlyMap<AkumaId, AkumaCaller | null>; unreadable: number }>> {
+  const observed = await boundedMap(members, observeSoulEdge);
+  const edges = new Map<AkumaId, AkumaCaller | null>();
+  let unreadable = 0;
+  observed.forEach((edge, index) => {
+    const { id } = members[index]!;
+    if (edge.kind === "born") edges.set(id, edge.caller);
+    else if (edge.kind === "unreadable") unreadable += 1;
+  });
+  return { edges, unreadable };
+}
+
+/**
+ * Read lifecycle rows for the given candidates in semantic activity order.
+ * Every candidate is observed before the public bound applies: no file
+ * timestamp proves semantic recency, so nothing is preordered or cut short.
+ * `expectBorn` marks candidates whose Soul already proved birth in this
+ * operation: an unborn-shaped lifecycle row then means the Heart was reclaimed
+ * between those reads, so the row is omitted and leaves the extent uncertain
+ * rather than being reported as a birth state.
+ */
+async function observeRows(
   rows: readonly KnownAkuma[],
+  selection: LifecycleSelection,
+  expectBorn = false,
 ): Promise<Readonly<{ rows: readonly AkumaRosterRow[]; skipped: number; failure?: unknown }>> {
   const loaded = await boundedMap(rows, async ({ id, paths }) => {
     try {
@@ -176,18 +198,28 @@ async function readableRows(
       return { error };
     }
   });
-  const values = loaded.flatMap((item) => (item.row === undefined ? [] : [item.row]));
+  const readable = loaded.flatMap((item) => (item.row === undefined ? [] : [item.row]));
+  const selected: AkumaRosterRow[] = [];
+  let skipped = loaded.length - readable.length;
+  for (const row of readable) {
+    if (expectBorn && row.kind === "unborn") {
+      skipped += 1;
+      continue;
+    }
+    if (selection === "all" || akumaLifecycle(row.life) === selection) selected.push(row);
+  }
+  selected.sort(compareRows);
   const failed = loaded.find((item) => item.row === undefined);
   return {
-    rows: values,
-    skipped: loaded.length - values.length,
+    rows: selected,
+    skipped,
     ...(failed === undefined ? {} : { failure: failed.error }),
   };
 }
 
 /** Exact running count requires every recognized coordinate to be readable. */
 export async function countRunningAkuma(path: WorldRoot): Promise<number> {
-  const observed = await readableRows((await knownAkuma(path)).rows);
+  const observed = await observeRows((await knownAkuma(path)).rows, "all");
   if (observed.skipped > 0) throw new Error("Cannot classify every recognized Akuma", { cause: observed.failure });
   return observed.rows.filter((row) => row.life === "running").length;
 }
@@ -195,7 +227,7 @@ export async function countRunningAkuma(path: WorldRoot): Promise<number> {
 /** Readable running subset of the same frozen caller tree used by listing. */
 export async function countCallerRunningAkuma(path: WorldRoot, caller: AkumaCaller): Promise<number> {
   const known = await knownAkuma(path);
-  const { edges } = await readDirectAkumaLineage(known.rows);
+  const { edges } = await observeCallerEdges(known.rows);
   const members = callerClosure(edges, caller, path);
   const running = await boundedMap(
     known.rows.filter(({ id }) => members.has(id)),
@@ -233,7 +265,11 @@ export function rosterInput(
  * then Akuma coordinates inside this selected World. Fork origin is not an edge.
  * Known identities deduplicate repeated and cyclic edges.
  */
-function callerClosure(lineage: AkumaLineage, root: AkumaCaller, world: WorldRoot): ReadonlySet<AkumaId> {
+function callerClosure(
+  lineage: ReadonlyMap<AkumaId, AkumaCaller | null>,
+  root: AkumaCaller,
+  world: WorldRoot,
+): ReadonlySet<AkumaId> {
   if (root.kind === "akuma" && root.world !== world) return new Set();
   const children = new Map<string, AkumaId[]>();
   for (const [akumaId, caller] of lineage) {
@@ -260,180 +296,42 @@ function callerClosure(lineage: AkumaLineage, root: AkumaCaller, world: WorldRoo
   return included;
 }
 
-type MemberVerdict = "included" | "excluded" | "unknown" | "invalid-cache";
-
-type SoulEdge =
-  | Readonly<{ kind: "born"; caller: AkumaCaller | null }>
-  | Readonly<{ kind: "absent" }>
-  | Readonly<{ kind: "unreadable" }>;
-
-function sameCallerEvidence(left: AkumaCaller | null, right: AkumaCaller | null): boolean {
-  if (left === null || right === null) return left === right;
-  return akumaCallerKey(left) === akumaCallerKey(right);
-}
-
-async function readCallerSoul(world: WorldRoot, akumaId: AkumaId): Promise<SoulEdge> {
-  try {
-    const soul = await readSoul(pathsForAkumaId(world, akumaId));
-    return soul === null ? { kind: "absent" } : { kind: "born", caller: soul.caller ?? null };
-  } catch {
-    return { kind: "unreadable" };
-  }
-}
-
-type CallerVerification = Readonly<{
-  world: WorldRoot;
-  root: AkumaCaller;
-  lineage: AkumaLineage;
-  souls: Map<AkumaId, Promise<SoulEdge>>;
-}>;
-
-async function soulEdgeFor(verification: CallerVerification, akumaId: AkumaId): Promise<SoulEdge> {
-  const observed = verification.souls.get(akumaId);
-  if (observed !== undefined) return await observed;
-  const pending = readCallerSoul(verification.world, akumaId);
-  verification.souls.set(akumaId, pending);
-  return await pending;
-}
-
 /**
- * The cache may propose a member; only the born Soul chain can justify it. Each
- * returned member's own edge is compared with its born Soul, and every parent
- * link on that chain is proven the same way back to the exact query root.
- * Any disagreement means the record cannot be trusted for this answer.
- */
-async function verifyCallerMember(
-  verification: CallerVerification,
-  id: AkumaId,
-  observedCaller: AkumaCaller | undefined,
-): Promise<MemberVerdict> {
-  const { lineage, root } = verification;
-  const rowCaller = observedCaller ?? null;
-  const cached = lineage.get(id);
-  if (cached === undefined) return "invalid-cache";
-  if (!sameCallerEvidence(cached, rowCaller)) return "invalid-cache";
-  const rootKey = akumaCallerKey(root);
-  const seen = new Set<string>();
-  let current = rowCaller;
-  for (;;) {
-    if (current === null) return "excluded";
-    const key = akumaCallerKey(current);
-    if (key === rootKey) return "included";
-    if (seen.has(key)) return "excluded";
-    seen.add(key);
-    if (current.kind === "external") return "excluded";
-    if (current.world !== verification.world) return "excluded";
-    const parentId = current.akumaId;
-    const parentCached = lineage.get(parentId);
-    const edge = await soulEdgeFor(verification, parentId);
-    if (edge.kind === "unreadable") return "unknown";
-    // A cached parent that has no born Soul cannot seed a real chain.
-    if (edge.kind === "absent") return "invalid-cache";
-    if (parentCached === undefined) return "excluded";
-    if (!sameCallerEvidence(parentCached, edge.caller)) return "invalid-cache";
-    current = edge.caller;
-  }
-}
-
-type CallerPage = Readonly<{ rows: readonly AkumaRosterRow[]; skipped: number; invalid: boolean }>;
-
-/**
- * Read only the matching candidates needed for the requested page and its
- * lookahead. `admit` proves each readable member; without it the selected
- * closure's own born Soul edges are the proof. Unprovable members are skipped
- * honestly instead of reported as no more.
- */
-async function pageCallerRows(
-  candidates: readonly ActivityCandidate[],
-  limit: number,
-  admit?: (row: AkumaRosterRow) => Promise<MemberVerdict>,
-  selection: LifecycleSelection = "all",
-): Promise<CallerPage> {
-  const rows: AkumaRosterRow[] = [];
-  let skipped = 0;
-  let cursor = 0;
-  while (cursor < candidates.length) {
-    const batch = candidates.slice(cursor, cursor + PAGE_POOL_SIZE);
-    const observed = await readableRows(batch);
-    cursor += batch.length;
-    skipped += observed.skipped;
-    for (const row of observed.rows) {
-      const verdict = admit === undefined ? "included" : await admit(row);
-      if (verdict === "invalid-cache") return { rows, skipped, invalid: true };
-      if (verdict === "included" && (selection === "all" || akumaLifecycle(row.life) === selection)) rows.push(row);
-      else if (verdict === "unknown") skipped += 1;
-    }
-    rows.sort(compareRows);
-    const lookahead = rows[limit];
-    const activity = lookahead === undefined ? null : activityAt(lookahead);
-    const unreadBound = candidates[cursor]?.bound;
-    if (
-      lookahead !== undefined &&
-      activity !== null &&
-      unreadBound !== undefined &&
-      Number.isFinite(unreadBound) &&
-      Number.isFinite(Date.parse(activity)) &&
-      unreadBound < Date.parse(activity)
-    ) {
-      break;
-    }
-  }
-  return { rows: rows.sort(compareRows), skipped, invalid: false };
-}
-
-/**
- * The caller closure across every Archetype, before the requested one narrows
- * it, ordered so paging reads freshly changed members first.
+ * The caller closure across every Akuma name, before the requested one narrows
+ * it. Only proven Soul edges join the tree; an unreadable recognized identity
+ * stays separate uncertainty rather than guessed membership.
  */
 async function callerCandidates(
   rows: readonly KnownAkuma[],
-  lineage: AkumaLineage,
   root: AkumaCaller,
   world: WorldRoot,
   selected: string | undefined,
-): Promise<readonly ActivityCandidate[]> {
-  const closure = callerClosure(lineage, root, world);
-  return await freshnessOrdered(
-    rows.filter(
+): Promise<Readonly<{ rows: readonly KnownAkuma[]; unreadable: number }>> {
+  const { edges, unreadable } = await observeCallerEdges(rows);
+  const closure = callerClosure(edges, root, world);
+  return {
+    unreadable,
+    rows: rows.filter(
       (row) => closure.has(row.id) && (selected === undefined || parseAkumaId(row.id).akumaName === selected),
     ),
-  );
+  };
 }
 
 /**
- * One caller-scoped page. The World-local record only proposes members: each is
- * re-proven against its born Soul chain, and one disagreement discards the
- * record and answers from direct Soul evidence instead of an empty success.
+ * One caller-scoped answer from the same direct Soul evidence the running count
+ * uses. A failed lifecycle read never erases a proven Soul edge, and unreadable
+ * Souls leave honest extent uncertainty instead of an empty success.
  */
 async function readCallerPage(
   path: WorldRoot,
-  limit: number,
-  selected: string | undefined,
   caller: AkumaCaller,
+  selected: string | undefined,
   selection: LifecycleSelection = "all",
-): Promise<CallerPage> {
+): Promise<Readonly<{ rows: readonly AkumaRosterRow[]; skipped: number }>> {
   const known = await knownAkuma(path);
-  const cached = await readAkumaLineage(path, known.rows);
-  const verification: CallerVerification = { world: path, root: caller, lineage: cached.edges, souls: new Map() };
-  const attempted = await pageCallerRows(
-    await callerCandidates(known.rows, cached.edges, caller, path, selected),
-    limit,
-    // A cache-proposed identity without a born Soul cannot justify inclusion.
-    async (row) => (row.kind === "born" ? await verifyCallerMember(verification, row.id, row.caller) : "invalid-cache"),
-    selection,
-  );
-  if (!attempted.invalid) return { ...attempted, skipped: attempted.skipped + cached.skipped };
-  // One wrong edge makes the whole disposable record untrustworthy.
-  await invalidateAkumaLineage(path);
-  const direct = await readDirectAkumaLineage(known.rows);
-  const repaired = await pageCallerRows(
-    await callerCandidates(known.rows, direct.edges, caller, path, selected),
-    limit,
-    undefined,
-    selection,
-  );
-  if (direct.skipped === 0) await rebuildAkumaLineage(path, direct.edges);
-  return { ...repaired, skipped: repaired.skipped + direct.skipped };
+  const candidates = await callerCandidates(known.rows, caller, path, selected);
+  const observed = await observeRows(candidates.rows, selection, true);
+  return { rows: observed.rows, skipped: observed.skipped + candidates.unreadable };
 }
 
 /** One roster answer: empty rows and known completeness are both omissions. */
@@ -459,13 +357,13 @@ export async function observeAkumaRoster(
 ): Promise<AkumaRosterPage> {
   const observedAt = new Date().toISOString();
   if (caller !== undefined) {
-    const page = await readCallerPage(path, limit, selected, caller, selection);
+    const page = await readCallerPage(path, caller, selected, selection);
     const bounded = projectBoundedList(page.rows, limit);
     return rosterResult(observedAt, bounded.rows, bounded.hasMore || page.skipped > 0);
   }
   const known = await knownAkuma(path, selected);
-  const ranked = await pageCallerRows(await freshnessOrdered(known.rows), limit, undefined, selection);
-  const bounded = projectBoundedList(ranked.rows, limit);
+  const observed = await observeRows(known.rows, selection);
+  const bounded = projectBoundedList(observed.rows, limit);
   return rosterResult(observedAt, bounded.rows, bounded.hasMore);
 }
 
@@ -477,14 +375,14 @@ export async function readAkumaCompleteRoster(
   const selection = rosterInput(input, false);
   const observedAt = new Date().toISOString();
   if (selection.caller !== undefined) {
-    const page = await readCallerPage(path, Number.POSITIVE_INFINITY, selection.akumaName, selection.caller);
+    const page = await readCallerPage(path, selection.caller, selection.akumaName);
     return { kind: "akumas", observedAt, rows: page.rows };
   }
   const known = await knownAkuma(path, selection.akumaName);
   return {
     kind: "akumas",
     observedAt,
-    rows: [...(await readableRows(known.rows)).rows].sort(compareRows),
+    rows: (await observeRows(known.rows, "all")).rows,
   };
 }
 
