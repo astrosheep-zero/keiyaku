@@ -87,11 +87,18 @@ must never submit input or invoke execution controls.
 
 The shipped Square observer posts finished notification cards directly to the
 host delivery ledger. It owns no Square participant, notification artifact,
-session attachment, or route. Existing World artifacts are unrelated custody
-and are never read, migrated, rewritten, or deleted by this integration. The
-host alone attaches, detaches, and deletes delivery sessions; unknown or deleted
-recipients remain undeliverable. Missing attribution stays silent, and optional
-integration failure never refuses a native operation.
+session attachment, or route for these notices. Existing World artifacts are
+unrelated custody and are never read, migrated, rewritten, or deleted by this
+integration. Missing attribution stays silent, and optional integration failure
+never refuses a native operation.
+
+Confirmed inactive retirement may notify observers after removal and release of
+retention custody. The Square observer may end only that exact Akuma's existing
+delivery owner, using Square's public identity and captured-generation deletion.
+It creates no delivery session and touches no participant seat. An absent
+integration or owner does nothing. This is a diagnostic-only opportunity, not a
+crash-proof notification, and Body ending, kill, or failed Tell supplies no
+retirement evidence.
 
 The submitting integration edge selects an opaque host Owner as optional
 initiator attribution. An explicit environment redirect wins, followed by the

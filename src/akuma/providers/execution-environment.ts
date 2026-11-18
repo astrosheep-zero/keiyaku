@@ -15,9 +15,14 @@ const PARENT_HARNESS_IDENTITY_KEYS = [
   "SQUARE_PARTICIPANT_NAME",
   "KEIYAKU_INITIATOR",
   "KEIYAKU_EXTERNAL_CALLER",
+  "KEIYAKU_CLAUDE_ACTOR_SESSION",
 ] as const;
 
 type Environment = Readonly<Record<string, string | undefined>>;
+
+export function akumaActorEnvironment(execution: ExecutionCoordinate) {
+  return { KEIYAKU_ACTOR_ID: execution.akumaId, KEIYAKU_ACTOR_WORLD: execution.world };
+}
 
 /** Construct the environment for one isolated Akuma execution or native child. */
 export function akumaExecutionEnvironment(
@@ -29,17 +34,12 @@ export function akumaExecutionEnvironment(
   const preserved = Object.fromEntries(
     nativeIdentity.flatMap((key) => (inherited[key] === undefined ? [] : [[key, inherited[key]] as const])),
   );
+  const { KEIYAKU_ACTOR_ID: _id, KEIYAKU_ACTOR_WORLD: _world, ...base } = inherited;
   const environment = Object.fromEntries(
-    Object.entries({ ...inherited, ...overrides }).flatMap(([key, value]) =>
-      value === undefined ? [] : [[key, value]],
-    ),
+    Object.entries({ ...base, ...overrides }).flatMap(([key, value]) => (value === undefined ? [] : [[key, value]])),
   ) as Record<string, string>;
   for (const key of PARENT_HARNESS_IDENTITY_KEYS) delete environment[key];
   Object.assign(environment, preserved);
-  if (execution !== undefined)
-    Object.assign(environment, {
-      KEIYAKU_ACTOR_ID: execution.akumaId,
-      KEIYAKU_ACTOR_WORLD: execution.world,
-    });
+  if (execution !== undefined) Object.assign(environment, akumaActorEnvironment(execution));
   return environment;
 }

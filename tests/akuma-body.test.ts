@@ -23,6 +23,7 @@ import { bodyLaunchSchema, type BodyLaunch, type LiveBodyLaunch } from "../src/a
 import { bodyProcessInput, spawnAkumaBody } from "../src/akuma/detached-body.js";
 import { createClaudeProvider } from "../src/akuma/providers/claude/index.js";
 import { akumaExecutionEnvironment } from "../src/akuma/providers/execution-environment.js";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import {
   HeldAkumaLeash,
@@ -167,6 +168,7 @@ const PARENT_HARNESS_ENVIRONMENT = {
   PASEO_AGENT_ID: "parent-paseo",
   SQUARE_PARTICIPANT_NAME: "Parent",
   KEIYAKU_EXTERNAL_CALLER: "outer:parent",
+  KEIYAKU_CLAUDE_ACTOR_SESSION: "parent-claimed-session",
 } as const;
 
 const PARENT_HARNESS_KEYS = Object.keys(PARENT_HARNESS_ENVIRONMENT) as Array<keyof typeof PARENT_HARNESS_ENVIRONMENT>;
@@ -187,15 +189,19 @@ test("Body launch and provider setup isolate parent harness identity without mut
     PROVIDER_SENTINEL: "provider-survives",
   };
   const [first, second] = await Promise.all([
-    Promise.resolve().then(() => akumaExecutionEnvironment(parent, overrides)),
+    Promise.resolve().then(() => akumaExecutionEnvironment(parent, overrides, [], {
+      akumaId: "aku/child/abcdef12", world: "/child/world",
+    })),
     Promise.resolve().then(() => akumaExecutionEnvironment(parent, overrides)),
   ]);
-  assert.deepEqual(first, second);
   for (const key of PARENT_HARNESS_KEYS) {
     assert.equal(first[key], undefined);
+    assert.equal(second[key], undefined);
   }
-  assert.equal(first.KEIYAKU_ACTOR_ID, "aku/body/1234abcd");
-  assert.equal(first.KEIYAKU_ACTOR_WORLD, "/body/world");
+  assert.equal(first.KEIYAKU_ACTOR_ID, "aku/child/abcdef12");
+  assert.equal(first.KEIYAKU_ACTOR_WORLD, "/child/world");
+  assert.equal(second.KEIYAKU_ACTOR_ID, undefined);
+  assert.equal(second.KEIYAKU_ACTOR_WORLD, undefined);
   assert.equal(first.PATH, parent.PATH);
   assert.equal(first.API_TOKEN, "provider-credential");
   assert.equal(first.SQUARE_LOCATION, parent.SQUARE_LOCATION);
@@ -1010,6 +1016,7 @@ test("Pi native steer evidence keeps a Tell in its current Body and Turn", async
     };
     const sdk = {
       createAgentSessionFromServices: async () => ({ session }),
+      createEventBus,
       createAgentSessionServices: async () => ({ resourceLoader: { getExtensions: () => ({ errors: [] }) } }),
       createBashToolDefinition: () => ({}),
       getAgentDir: () => "/agent",
@@ -1062,6 +1069,7 @@ test("Pi native end without steer evidence carries the pending Tell to the next 
     let sessions = 0;
     const manager = { getLeafId: () => `pi-answer-${sessions}` };
     const sdk = {
+      createEventBus,
       createAgentSessionFromServices: async () => {
         sessions += 1;
         const first = sessions === 1;

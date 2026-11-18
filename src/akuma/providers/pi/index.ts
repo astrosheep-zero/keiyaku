@@ -8,6 +8,7 @@ import type {
   CreateAgentSessionOptions,
   CreateAgentSessionFromServicesOptions,
   AgentSessionServices,
+  createEventBus,
   LoadExtensionsResult,
 } from "@earendil-works/pi-coding-agent";
 
@@ -37,6 +38,7 @@ export type PiSdk = Readonly<{
   createAgentSessionFromServices: typeof createAgentSessionFromServices;
   createAgentSessionServices: typeof createAgentSessionServices;
   createBashToolDefinition: typeof createBashToolDefinition;
+  createEventBus: typeof createEventBus;
   getAgentDir: typeof getAgentDir;
   SessionManager: typeof SessionManager;
 }>;
@@ -102,6 +104,7 @@ type PiCreatedSession = Awaited<ReturnType<PiSdk["createAgentSessionFromServices
 type PiSessionSetup = Readonly<{
   created: PiCreatedSession;
   extensionErrors: readonly LoadExtensionsResult["errors"][number][];
+  stopActorRequests(): void;
 }>;
 type PiNativeSession = PiCreatedSession["session"];
 type PiNativeMessage = Parameters<PiNativeSession["agent"]["steer"]>[0];
@@ -117,27 +120,42 @@ async function createPiSession(sdk: PiSdk, execution: ProviderExecution, input: 
     ...(input.options.systemPromptMode === "append" && personality !== undefined ? [personality] : []),
     ...(input.runtimeInstructions === undefined ? [] : [input.runtimeInstructions]),
   ];
-  const services = await sdk.createAgentSessionServices({
-    cwd: input.cwd,
-    agentDir: sdk.getAgentDir(),
-    modelRuntimeSignal: input.signal,
-    resourceLoaderOptions: {
-      ...(personality === undefined || input.options.systemPromptMode === "append"
-        ? {}
-        : { systemPromptOverride: () => personality }),
-      appendSystemPromptOverride: (base: string[]) => [...base, ...append],
-    },
+  const eventBus = sdk.createEventBus();
+  const coordinate = input.execution;
+  const stopActorRequests = eventBus.on("keiyaku:actor:request", (request: unknown) => {
+    if (
+      coordinate !== undefined &&
+      typeof request === "object" &&
+      request !== null &&
+      "reply" in request &&
+      typeof request.reply === "function"
+    )
+      request.reply({ world: coordinate.world, akuId: coordinate.akumaId });
   });
-  const extensionErrors = services.resourceLoader.getExtensions().errors ?? [];
-  for (const failure of extensionErrors) console.error(`Pi extension load failed: ${failure.path}\n${failure.error}`);
+  let services: AgentSessionServices | undefined;
   try {
+    services = await sdk.createAgentSessionServices({
+      cwd: input.cwd,
+      agentDir: sdk.getAgentDir(),
+      modelRuntimeSignal: input.signal,
+      resourceLoaderOptions: {
+        eventBus,
+        ...(personality === undefined || input.options.systemPromptMode === "append"
+          ? {}
+          : { systemPromptOverride: () => personality }),
+        appendSystemPromptOverride: (base: string[]) => [...base, ...append],
+      },
+    });
+    const extensionErrors = services.resourceLoader.getExtensions().errors ?? [];
+    for (const failure of extensionErrors) console.error(`Pi extension load failed: ${failure.path}\n${failure.error}`);
     input.signal?.throwIfAborted();
     const created = await sdk.createAgentSessionFromServices(piCreateOptions(sdk, input, services));
-    return { created, extensionErrors };
+    return { created, extensionErrors, stopActorRequests };
   } catch (error) {
+    stopActorRequests();
     // Before a session owns the extension runtime, failed selection/setup must
     // retire registrations and event-bus subscriptions loaded by the services.
-    services.resourceLoader.getExtensions().runtime.invalidate();
+    services?.resourceLoader.getExtensions().runtime.invalidate();
     throw error;
   }
 }
@@ -175,7 +193,7 @@ async function drivePi(
   custody: AttemptCustody,
 ): Promise<Session> {
   const { signal } = custody;
-  const { created, extensionErrors } = await createPiSession(sdk, execution, input);
+  const { created, extensionErrors, stopActorRequests } = await createPiSession(sdk, execution, input);
   const { session: native } = created;
   const { agent } = native;
   const events = new AgentEventChannel();
@@ -208,6 +226,7 @@ async function drivePi(
     try {
       await retirePiSession(native);
     } finally {
+      stopActorRequests();
       await prompting;
     }
     await aborting;
@@ -327,6 +346,7 @@ async function loadPiSdk(): Promise<PiSdk> {
     createAgentSessionFromServices: sdk.createAgentSessionFromServices,
     createAgentSessionServices: sdk.createAgentSessionServices,
     createBashToolDefinition: sdk.createBashToolDefinition,
+    createEventBus: sdk.createEventBus,
     getAgentDir: sdk.getAgentDir,
     SessionManager: sdk.SessionManager,
   };

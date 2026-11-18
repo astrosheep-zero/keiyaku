@@ -20,6 +20,7 @@ import { parseAkumaId } from "../akuma/identity.js";
 import type { DispatchAssociation } from "../akuma/dispatch-association.js";
 import { World, type WorldRoot } from "../world.js";
 import { sweepInactiveAkumas } from "./akuma-retention.js";
+import { emitPluginSignal, stderrPluginDiagnostic } from "../plugin/akuma-signals.js";
 import type { AkumaAddressInput, AkumaWorldScopeRefusal } from "./address.js";
 import type { ForkInput, ForkResult, SpawnInput, SpawnResult, SpawnWaitHead } from "./akuma-creation.js";
 import { callAkumas, forkAkumas } from "./akuma-creation.js";
@@ -179,7 +180,9 @@ class AkumasHandle {
 
   private async sweep(world: WorldRoot): Promise<void> {
     try {
-      await sweepInactiveAkumas(world);
+      const retired = await sweepInactiveAkumas(world);
+      const emission = { world, reportDiagnostic: this.#reportDiagnostic ?? stderrPluginDiagnostic };
+      await Promise.all(retired.map((akumaId) => emitPluginSignal(emission, { kind: "akuma.retired", akumaId })));
     } catch (error) {
       try {
         this.#reportDiagnostic?.(

@@ -1,7 +1,35 @@
+import { stat } from "node:fs/promises";
+import * as square from "@astrosheep/square";
 import { DeliveryLedger, deliveryLedgerLocation, harnessOwner, requireOwner, postAndDispatch, dispatchEligibleCards, } from "@astrosheep/square";
 const TURN_HISTORY = /^turn\/[1-9]\d*$/u;
 const WAIT_TTL_MS = 5 * 60_000;
 const WAIT_RENEW_MS = 2 * 60_000;
+const { akumaDeliveryOwner } = square;
+async function retireDeliveryOwner(world, akuId, location, signal) {
+    if (typeof akumaDeliveryOwner !== "function")
+        return;
+    const owner = akumaDeliveryOwner({ world, akuId });
+    try {
+        await stat(location);
+    }
+    catch (error) {
+        if (error.code === "ENOENT")
+            return;
+        throw error;
+    }
+    signal?.throwIfAborted();
+    const ledger = await DeliveryLedger.open({ location, ...(signal === undefined ? {} : { signal }) });
+    try {
+        const session = await ledger.session(owner, signal);
+        if (session !== undefined && session.state !== "deleted") {
+            signal?.throwIfAborted();
+            await ledger.markDeleted({ owner, generation: session.generation }, signal);
+        }
+    }
+    finally {
+        await ledger.close();
+    }
+}
 function localOwner(environment) {
     const explicit = environment.KEIYAKU_INITIATOR?.trim();
     if (explicit)
@@ -271,6 +299,9 @@ const plugin = {
         return {
             waitDeferral,
             signals: {
+                async "akuma.retired"(signal, cancellation) {
+                    await retireDeliveryOwner(world, signal.akumaId, location, cancellation);
+                },
                 async "akuma.reported"(signal, cancellation) {
                     if (signal.initiator === undefined)
                         return;

@@ -1,3 +1,5 @@
+import { stat } from "node:fs/promises";
+import * as square from "@astrosheep/square";
 import {
   DeliveryLedger,
   deliveryLedgerLocation,
@@ -14,6 +16,32 @@ import type { KeiyakuPlugin, PluginInstance, PluginSignalMap } from "@astrosheep
 const TURN_HISTORY = /^turn\/[1-9]\d*$/u;
 const WAIT_TTL_MS = 5 * 60_000;
 const WAIT_RENEW_MS = 2 * 60_000;
+
+const { akumaDeliveryOwner } = square as typeof square & {
+  akumaDeliveryOwner?: (actor: Readonly<{ world: string; akuId: string }>) => Owner;
+};
+
+async function retireDeliveryOwner(world: string, akuId: string, location: string, signal?: AbortSignal): Promise<void> {
+  if (typeof akumaDeliveryOwner !== "function") return;
+  const owner = akumaDeliveryOwner({ world, akuId });
+  try {
+    await stat(location);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  signal?.throwIfAborted();
+  const ledger = await DeliveryLedger.open({ location, ...(signal === undefined ? {} : { signal }) });
+  try {
+    const session = await ledger.session(owner, signal);
+    if (session !== undefined && session.state !== "deleted") {
+      signal?.throwIfAborted();
+      await ledger.markDeleted({ owner, generation: session.generation }, signal);
+    }
+  } finally {
+    await ledger.close();
+  }
+}
 
 function localOwner(environment: NodeJS.ProcessEnv): Owner | undefined {
   const explicit = environment.KEIYAKU_INITIATOR?.trim();
@@ -301,6 +329,9 @@ const plugin: KeiyakuPlugin = {
     return {
       waitDeferral,
       signals: {
+        async "akuma.retired"(signal, cancellation) {
+          await retireDeliveryOwner(world, signal.akumaId, location, cancellation);
+        },
         async "akuma.reported"(signal, cancellation) {
           if (signal.initiator === undefined) return;
           await sendNotice(

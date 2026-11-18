@@ -42,9 +42,13 @@ wait owner creates no custody and manufactures no provider outcome.
 
 A Body begins with ordinary host configuration and establishes an isolated
 execution identity before provider or plugin setup. Native setup may then
-establish that Body's own session coordinate; a parent execution's harness
+establish that Body's own session coordinate. A parent execution's harness
 identity never attributes child work. A Body establishes its own Akuma and
-World identity for deeper delegation and removes inherited external attribution. Providers retain that Body identity.
+World identity for deeper delegation and removes inherited external attribution.
+An ordinary tool process launched for that Body receives the pair through the
+private launcher's native environment forwarding unless its authored
+configuration deliberately replaces the reserved variables; that replacement
+is outside the guarantee and is not corrected.
 
 Normal birth execution attempts its optional birth observation only when that
 invocation created Soul and subsequently recorded its Body, before Turn work.

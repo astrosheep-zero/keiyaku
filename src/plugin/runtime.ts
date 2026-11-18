@@ -276,6 +276,7 @@ async function writablePaths(
 // Exhaustive over the public payload map: a new signal must be admitted here too.
 const SIGNAL_KINDS: { readonly [K in keyof PluginSignalMap]: K } = {
   "akuma.born": "akuma.born",
+  "akuma.retired": "akuma.retired",
   "akuma.outcome-observed": "akuma.outcome-observed",
   "akuma.reported": "akuma.reported",
   "akuma.turn-started": "akuma.turn-started",

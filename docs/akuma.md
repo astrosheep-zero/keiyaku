@@ -111,9 +111,12 @@ spawn or fork has made its new Akuma durable. It runs outside the birth
 transaction and never changes, rolls back, or replaces that birth result. List,
 status, history, wait, tell, ask, and every other observation path never retire
 bytes. One sweep removes only recognized per-entry custody, never signals or
-kills an Akuma, and a failure in one candidate never affects another candidate
-or the operation that triggered the pass. If no later successful spawn or fork
-occurs, eligible entries simply remain.
+kills an execution process, and a candidate failure never affects another
+candidate or the operation that triggered the pass. Without a later successful
+spawn or fork, eligible entries simply remain. Only positively confirmed inactive
+retirement supplies an optional retirement observation. It is not inferred from
+Body settlement, kill, a missing World, or failed input, and failure to notify
+neither restores nor changes Akuma custody.
 
 ## akumaName And Placement
 

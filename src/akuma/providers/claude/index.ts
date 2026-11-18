@@ -51,6 +51,17 @@ function claudeSessionId(coordinate: ResumeCoordinate): string {
   return coordinate.sessionId;
 }
 
+function claudeSessionBinding(input: ClaudeDriveInput, config: Options | undefined) {
+  const resume = input.session.kind === "resume" ? claudeSessionId(input.session.coordinate) : config?.resume;
+  // The bundled hook checks this intended coordinate against the exact
+  // top-level tool call. Continue and unspecified native fork IDs are unknown.
+  const sessionId =
+    config?.sessionId ??
+    (resume === undefined && !config?.continue && input.execution !== undefined ? randomUUID() : undefined);
+  const expectedSession = config?.forkSession ? sessionId : (resume ?? (config?.continue ? undefined : sessionId));
+  return { resume, sessionId, expectedSession };
+}
+
 function claudeQueryOptions(
   input: ClaudeDriveInput,
   execution: ClaudeExecution,
@@ -59,12 +70,17 @@ function claudeQueryOptions(
   const instructions = [input.options.systemPrompt, input.runtimeInstructions]
     .filter((part): part is string => part !== undefined && part.length > 0)
     .join("\n\n");
+  const { resume, sessionId, expectedSession } = claudeSessionBinding(input, execution.config as Options | undefined);
+  const env = akumaExecutionEnvironment(process.env, execution.env, [], input.execution);
+  if (input.execution !== undefined && expectedSession !== undefined)
+    env.KEIYAKU_CLAUDE_ACTOR_SESSION = expectedSession;
   return {
     ...(execution.config ?? {}),
     cwd: input.cwd,
     abortController,
     ...(execution.executable === undefined ? {} : { pathToClaudeCodeExecutable: execution.executable }),
-    env: akumaExecutionEnvironment(process.env, execution.env, [], input.execution),
+    env,
+    ...(sessionId === undefined ? {} : { sessionId }),
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     settingSources: ["user", "project", "local"],
@@ -78,7 +94,7 @@ function claudeQueryOptions(
               ? instructions
               : { type: "preset", preset: "claude_code", append: instructions },
         }),
-    ...(input.session.kind === "fresh" ? {} : { resume: claudeSessionId(input.session.coordinate) }),
+    ...(resume === undefined ? {} : { resume }),
     ...(input.schemaJson === undefined
       ? {}
       : {

@@ -165,6 +165,8 @@ async function loadNativeOpencode(input: LoadOpencodeInput): Promise<OpencodeRun
   const owned = await spawnDetachedProcess({
     argv: [execution.executable ?? "opencode", "serve", "--hostname", "127.0.0.1", "--port", String(port)],
     cwd,
+    // Private serve owns its configured local MCP processes. OpenCode's local
+    // stdio spawner extends this environment rather than filtering its keys.
     env: akumaExecutionEnvironment(
       process.env,
       {

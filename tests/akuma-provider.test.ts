@@ -40,6 +40,7 @@ import {
   OPENCODE_SDK_PROVIDER,
   type OpencodeSdkLoader,
 } from "../src/akuma/providers/opencode-sdk/session.js";
+import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
 import { createAcpProvider, decodeAcpConfig } from "../src/akuma/providers/acp/index.js";
 import { createGrokBuildProvider, interpretGrokTool } from "../src/akuma/providers/grok-build/index.js";
@@ -1832,6 +1833,7 @@ function fakePiSdk(
   return {
     seen,
     sdk: {
+      createEventBus,
       createBashToolDefinition: (cwd, options) => {
         // Opaque SDK value: the adapter must forward it, not execute or reconstruct it.
         const tool = Object.freeze({ name: "fixture-bash" }) as ReturnType<PiSdk["createBashToolDefinition"]>;
@@ -1926,7 +1928,7 @@ test("OpenCode always carries the headless permission base layer into the spawne
     ].join("\n"),
   );
   chmodSync(executable, 0o755);
-  const spawnedEnvironment = async (env?: Readonly<Record<string, string>>) => {
+  const spawnedEnvironment = async (env?: Readonly<Record<string, string>>, executionCoordinate?: { akumaId: string; world: string }) => {
     rmSync(recorded, { force: true });
     const controller = new AbortController();
     const loading = loadOpencode({
@@ -1938,6 +1940,7 @@ test("OpenCode always carries the headless permission base layer into the spawne
       },
       cwd: root,
       signal: controller.signal,
+      ...(executionCoordinate === undefined ? {} : { executionCoordinate }),
     });
     await waitForFixtureFile(recorded);
     controller.abort();
@@ -1947,9 +1950,15 @@ test("OpenCode always carries the headless permission base layer into the spawne
 
   const base = await spawnedEnvironment();
   assert.deepEqual(JSON.parse(base.OPENCODE_CONFIG_CONTENT ?? "null"), composeHeadlessPermissionConfig());
-  const literal = '{"permissions":[{"action":"question","resource":"*","effect":"allow"}]}';
-  const overridden = await spawnedEnvironment({ OPENCODE_CONFIG_CONTENT: literal });
+  const literal = '{"mcp":{"square":{"type":"local","command":["square","mcp-server"]}}}';
+  const overridden = await spawnedEnvironment({
+    OPENCODE_CONFIG_CONTENT: literal,
+    KEIYAKU_ACTOR_WORLD: "/wrong",
+    KEIYAKU_ACTOR_ID: "aku/parent/1234abcd",
+  }, { akumaId: "aku/worker/4321abcd", world: root });
   assert.equal(overridden.OPENCODE_CONFIG_CONTENT, literal);
+  assert.equal(overridden.KEIYAKU_ACTOR_WORLD, root);
+  assert.equal(overridden.KEIYAKU_ACTOR_ID, "aku/worker/4321abcd");
 });
 
 test("OpenCode start and resume reject closed when readiness cleanup fails", async () => {
@@ -2874,6 +2883,7 @@ function fakeCodex(
     | "rpc-reject"
     | "missing-turn-id"
     | "steer-hung-terminal" = "complete",
+  mcpServers: Record<string, unknown> = {},
 ): Readonly<{
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
@@ -2915,6 +2925,7 @@ function fakeCodex(
       "  const message=JSON.parse(line); fs.appendFileSync(log,JSON.stringify(message)+'\\n');",
       "  if(message.method==='initialize') return reply(message,{userAgent:'codex-cli/0.146.0'});",
       "  if(message.method==='initialized') return;",
+      `  if(message.method==='config/read') return reply(message,{config:{mcp_servers:${JSON.stringify(mcpServers)}}});`,
       "  if(message.method==='thread/start'){",
       "    if(mode==='exit-before-admit') process.exit(7);",
       "    return reply(message,{thread:{id:'thread-fresh'},...(mode==='model-evidence'?{model:'gpt-5-codex'}:{})});",
@@ -3279,9 +3290,15 @@ test("Claude preserves execution config and uses its ordinary permission mode", 
     }),
     { config: { sandbox: { enabled: true } } },
   );
-  const drive = await provider.start(freshInput("inspect", { cwd: "/work" })).result;
+  const execution = { world: "/actor-world", akumaId: "aku/claude/1234abcd" };
+  const drive = await provider.start(freshInput("inspect", { cwd: "/work", execution })).result;
   await drive.completion;
 
+  assert.match(String(seen?.sessionId), /^[0-9a-f-]{36}$/u);
+  const env = seen?.env as NodeJS.ProcessEnv;
+  assert.equal(env.KEIYAKU_CLAUDE_ACTOR_SESSION, seen?.sessionId);
+  assert.equal(env.KEIYAKU_ACTOR_WORLD, execution.world);
+  assert.equal(env.KEIYAKU_ACTOR_ID, execution.akumaId);
   assert.deepEqual(seen?.sandbox, { enabled: true });
   assert.equal(seen?.permissionMode, "bypassPermissions");
   assert.equal(seen?.allowDangerouslySkipPermissions, true);
@@ -3780,6 +3797,36 @@ test("Codex maps provider-neutral schema JSON to turn/start outputSchema", async
   await drive.completion;
   const turn = fake.requests().find((request) => request.method === "turn/start")?.params as Record<string, unknown>;
   assert.deepEqual(turn.outputSchema, { type: "object", properties: { ok: { type: "boolean" } } });
+});
+
+test("Codex forwards the Body pair through native env_vars without rewriting explicit MCP environment", async (t) => {
+  const root = temporaryDirectory(t, "keiyaku-codex-mcp-actor-");
+  const fake = fakeCodex(root, "complete", {
+    square: { command: "square", args: ["mcp-server"], env: { HOME_FLAG: "kept by native" }, env_vars: ["EXISTING"] },
+    remote: { url: "https://example.com/mcp" },
+    workspace: { command: "tools", environment_id: "workspace" },
+    disabled: { command: "disabled", enabled: false },
+  });
+  const config = { mcp_servers: { square: { env: {
+    CUSTOM: "kept",
+    KEIYAKU_ACTOR_ID: "aku/authored/author",
+  } } }, approval_policy: "never" };
+  const provider = createCodexAppServerProvider({
+    name: "configured", kind: "codex-app-server", executable: fake.executable, config,
+  });
+  const attempt = provider.start(freshInput("work", { cwd: root, execution: { akumaId: "aku/worker/1234abcd", world: "/world" } }));
+  assert.equal((await (await attempt.result).completion).kind, "answered");
+  await attempt.closed;
+  assert.equal(fake.environment().KEIYAKU_ACTOR_ID, "aku/worker/1234abcd");
+  assert.equal(fake.environment().KEIYAKU_ACTOR_WORLD, "/world");
+  const request = fake.requests().find((entry) => entry.method === "thread/start");
+  assert.deepEqual(request?.params, {
+    cwd: root,
+    config: { ...config, mcp_servers: { square: {
+      env: { CUSTOM: "kept", KEIYAKU_ACTOR_ID: "aku/authored/author" },
+      env_vars: ["EXISTING", "KEIYAKU_ACTOR_ID", "KEIYAKU_ACTOR_WORLD"],
+    } } },
+  });
 });
 
 test("Codex leaves sandbox policy to native configuration", async (context) => {

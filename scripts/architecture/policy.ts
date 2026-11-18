@@ -535,7 +535,13 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
     },
     {
       source: "library/akumas.ts",
-      allow: [...libraryOwner.allow, boundedList, any("library/akuma-creation.ts"), any("body-host.ts")],
+      allow: [
+        ...libraryOwner.allow,
+        boundedList,
+        any("library/akuma-creation.ts"),
+        any("body-host.ts"),
+        any("plugin/akuma-signals.ts", ["emitPluginSignal", "stderrPluginDiagnostic"]),
+      ],
       deny: [
         ...invocationFacet,
         any("git/target-placement.ts"),

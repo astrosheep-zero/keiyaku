@@ -152,9 +152,14 @@ not disable fork. Unsupported native capabilities remain explicit; no adapter
 silently discards requested context or invents a system channel.
 
 The OpenCode adapter uses the matching native client and checks native readiness,
-not a successful response from the server's web application. Its live event feed
-is volatile: disconnect or stream failure ends observation honestly without
-reconnection, prompt replay, or an inferred answer. An observed foreign input
+not a successful response from the server's web application. A private serve
+carries the Body's actor through its native launch environment; an ordinary
+configured local MCP process that does not author those reserved variables
+inherits the current pair. Keiyaku does not parse, rewrite, or supplement
+authored native configuration; effective
+commands, unrelated configuration, and remote servers retain native semantics.
+Its live event feed is volatile. A disconnect or stream failure ends observation
+without reconnection, prompt replay, or an inferred answer. An observed foreign input
 consumed during the same execution makes exact attribution unavailable; the
 adapter fails rather than adopting that writer's answer.
 
@@ -282,8 +287,11 @@ retry, or lifecycle transition; a compaction error may be narrated separately
 when the provider supplies an error detail.
 
 Native filesystem policy and configuration precedence belong to the selected
-provider. Codex forwards authored opaque configuration unchanged; Keiyaku adds
-no shared root admission, additive grant mapping, or pre-birth sandbox probe.
+provider. Codex leaves authored configuration to the native loader; the
+execution actor adds only the pair's forwarding names to already-configured
+local stdio targets, leaving explicit environment entries authoritative.
+Keiyaku adds no shared root admission, additive grant mapping, or pre-birth
+sandbox probe.
 Native execution judges configuration validity and enforcement, so setup may
 fail after birth under ordinary execution semantics. The retained
 recipe preserves explicit configuration, including previously retained policy,
@@ -310,11 +318,20 @@ resumed native session. Missing choices and unconfirmed selections fail that
 attempt rather than silently running with the agent's default.
 
 Each drive receives the Body's exact execution actor and World independently of
-the host process environment. Adapters supply those explicit coordinates to
-their tool children without mutating process-global identity or working
-directory. A shared host's outer attribution cannot identify a Body's work.
-Native services and extension runtimes remain attempt-scoped; arbitrary
-extensions that consult or mutate globals are not isolated by in-process hosting. New provider
+the host process environment. The pair identifies the canonical World and full
+Akuma identity, never the execution directory, an Alias, a native session, or a
+Turn recipient. A shared Pi host exposes the pair through a synchronous request
+on the invoking session's own bus, before native tools run and only until that
+session is disposed. No responder leaves the native caller unchanged. A private
+single-actor launcher supplies the complete pair through its native environment
+forwarding to its already configured local tool process; it does not install or
+enable an MCP server. A shared native MCP server
+needs positive correlation to the exact call, and a nested Claude agent
+without its own proof never inherits the outer actor. No adapter records this
+transport context as a Turn initiator or mutates process-global identity or
+working directory. Native services and extension runtimes remain attempt-scoped;
+arbitrary extensions that consult or mutate globals are not isolated by
+in-process hosting. New provider
 behavior must fit an existing provider-neutral capability or receive a new owner
 ruling; there is no dialect passthrough, generic extension bag, or second
 provider protocol.

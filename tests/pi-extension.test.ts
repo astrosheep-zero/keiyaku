@@ -36,7 +36,7 @@ const { default: keiyakuExtension } = (await import(new URL(piExtension[0], root
   default: (pi: ExtensionAPI) => void;
 };
 
-async function extensionSdk(root: string, fixture: ExtensionFactory, eventBus: sdk.EventBus): Promise<PiSdk> {
+async function extensionSdk(root: string, fixture: ExtensionFactory, eventBus: sdk.EventBusController): Promise<PiSdk> {
   const modelRuntime = await sdk.ModelRuntime.create({
     credentials: {
       read: async () => undefined,
@@ -54,6 +54,7 @@ async function extensionSdk(root: string, fixture: ExtensionFactory, eventBus: s
   });
   return {
     ...sdk,
+    createEventBus: () => eventBus,
     getAgentDir: () => root,
     SessionManager: {
       create: (cwd: string) => sdk.SessionManager.create(cwd, join(root, "sessions")),
@@ -66,7 +67,6 @@ async function extensionSdk(root: string, fixture: ExtensionFactory, eventBus: s
         settingsManager: sdk.SettingsManager.inMemory({}),
         resourceLoaderOptions: {
           ...options.resourceLoaderOptions,
-          eventBus,
           noExtensions: true,
           noSkills: true,
           noPromptTemplates: true,
@@ -94,6 +94,12 @@ test("Pi native extensions finish session start and discover resources before fr
     let context: ExtensionContext | undefined;
     let probe = 0;
     const eventBus = sdk.createEventBus();
+    const actor = { world: root, akuId: "aku/pi/1234abcd" };
+    const requestActor = () => {
+      let received: unknown;
+      eventBus.emit("keiyaku:actor:request", { reply: (pair: unknown) => { received = pair; } });
+      return received;
+    };
     const nativeSdk = await extensionSdk(
       root,
       (pi) => {
@@ -142,6 +148,7 @@ test("Pi native extensions finish session start and discover resources before fr
       launchTells: [{ id: "tell-1", text: "also check" }],
       cwd: root,
       options: {},
+      execution: { world: actor.world, akumaId: actor.akuId },
       signal: new AbortController().signal,
     };
     assert.ok(!resumed || sessionFile);
@@ -150,6 +157,7 @@ test("Pi native extensions finish session start and discover resources before fr
       : provider.start({ ...input, session: { kind: "fresh" } });
     try {
       await started.promise;
+      assert.deepEqual(requestActor(), actor);
       assert.deepEqual(calls, ["session_start"]);
       assert.equal(context?.cwd, root);
       assert.equal(context?.hasUI, false);
@@ -178,6 +186,7 @@ test("Pi native extensions finish session start and discover resources before fr
       assert.ok(native.systemPrompt.includes("bind-fixture"));
       assert.throws(() => context!.cwd, /stale/u);
       assert.throws(() => native!.resourceLoader.getExtensions().runtime.assertActive(), /stale/u);
+      assert.equal(requestActor(), undefined);
       eventBus.emit("binding-probe", undefined);
       assert.equal(probe, 1);
     } finally {

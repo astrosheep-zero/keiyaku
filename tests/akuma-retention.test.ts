@@ -4,6 +4,7 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
+  readFileSync,
   symlinkSync,
   unlinkSync,
   utimesSync,
@@ -14,7 +15,7 @@ import test, { type TestContext } from "node:test";
 import { moveAlias, readAliases, tryAcquireAliasCustody } from "../src/alias/index.js";
 import { driveAkumaBody } from "../src/akuma/body.js";
 import { HeldAkumaLeash, initializeHeart, recordTell } from "../src/akuma/heart/index.js";
-import { akumaRunRoot, allocateAkumaDirectory, type AllocatedAkuma } from "../src/akuma/identity.js";
+import { akumaRunRoot, allocateAkumaDirectory, parseAkumaId, pathsForAkumaId, type AllocatedAkuma } from "../src/akuma/identity.js";
 import { readRetentionCandidate, retireInactiveAkuma } from "../src/akuma/retention.js";
 import { contractId } from "../src/core/facts/types.js";
 import { publishDispatch } from "../src/dispatch/index.js";
@@ -122,6 +123,7 @@ async function callSettings(root: string) {
       "  const message = JSON.parse(line);",
       "  if (message.method === 'initialize') return reply(message, {});",
       "  if (message.method === 'initialized') return;",
+      "  if (message.method === 'config/read') return reply(message, { config: {} });",
       "  if (message.method === 'thread/start') return reply(message, { thread: { id: 'thread-1' } });",
       "  if (message.method !== 'turn/start') return;",
       "  reply(message, { turn: { id: 'turn-1' } });",
@@ -151,9 +153,23 @@ async function claimedContract(raw: ReturnType<typeof makeGitRepository>) {
   return state.id;
 }
 
-test("a successful call runs the maintenance pass while read-only observations never retire", async () => {
+test("a successful call signals confirmed retirement only, after custody is removed", async () => {
   const raw = repositoryFixture();
   const world = await World.at(raw.path);
+  const trace = join(world, "retired.jsonl");
+  mkdirSync(join(world, ".keiyaku"), { recursive: true });
+  writeFileSync(join(world, ".keiyaku", "settings.json"), JSON.stringify({
+    plugins: { fixture: { package: "./retirement.mjs" } },
+  }));
+  const oldDirectory = pathsForAkumaId(world, parseAkumaId("aku/claude/a0000001").id).directory;
+  writeFileSync(join(world, "retirement.mjs"), `
+    import { appendFileSync, existsSync } from "node:fs";
+    export default { manifest: {id: "fixture", apiVersion: 1}, activate() {
+      return { signals: { "akuma.retired": ({akumaId}) => appendFileSync(
+        ${JSON.stringify(trace)}, JSON.stringify({akumaId, exists: existsSync(${JSON.stringify(oldDirectory)})}) + "\\n"
+      ) } };
+    } };
+  `);
   const settingsFixture = await callSettings(raw.path);
   const old = await oldAkuma(world, "a0000001");
   const recent = await oldAkuma(world, "a0000002", new Date().toISOString());
@@ -164,6 +180,7 @@ test("a successful call runs the maintenance pass while read-only observations n
   await Akumas.of(world).history({ akuma: old.id });
   await Akumas.of(world).wait({ akuma: [old.id] });
   assert.equal(existsSync(old.paths.heart), true, "read-only observations must not retire");
+  assert.equal(existsSync(trace), false);
 
   const called = await Akumas.of(world).spawn({
     akumaName: "worker",
@@ -174,6 +191,9 @@ test("a successful call runs the maintenance pass while read-only observations n
     settings: settingsFixture.value,
   });
   assert.equal(called.kind, "spawned");
+  assert.deepEqual(readFileSync(trace, "utf8").trim().split("\n").map((line) => JSON.parse(line)), [
+    { akumaId: old.id, exists: false },
+  ]);
   assert.equal(existsSync(old.paths.directory), false);
   assert.equal(existsSync(recent.paths.heart), true);
   assert.deepEqual(await sweepInactiveAkumas(world), [], "removal is idempotent and the recent entry survives");

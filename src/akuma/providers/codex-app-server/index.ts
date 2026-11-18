@@ -9,7 +9,7 @@ import {
   type ProviderAdapter,
   type TurnResult,
 } from "../../provider.js";
-import { akumaExecutionEnvironment } from "../execution-environment.js";
+import { akumaActorEnvironment, akumaExecutionEnvironment } from "../execution-environment.js";
 import { providerLifecycle } from "../lifecycle.js";
 import { providerTurn } from "../turn.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
@@ -72,6 +72,57 @@ async function steerTurn(
   return { kind: "accepted", fence: `${accepted}:${tell.id}` };
 }
 
+function isLocalMcpServer(config: Readonly<Record<string, unknown>>): boolean {
+  return (
+    typeof config.command === "string" &&
+    config.url === undefined &&
+    config.enabled !== false &&
+    (config.environment_id === undefined || config.environment_id === "local")
+  );
+}
+
+function forwardedEnvVars(
+  declared: Readonly<Record<string, unknown>> | undefined,
+  resolved: Readonly<Record<string, unknown>> | undefined,
+  identity: Readonly<Record<string, string>>,
+): readonly unknown[] | undefined {
+  const declaredVars = declared?.env_vars;
+  const vars = declaredVars !== undefined ? declaredVars : resolved?.env_vars;
+  if (vars !== undefined && !Array.isArray(vars)) return undefined;
+  const names = new Set(
+    (vars ?? []).flatMap((entry) => {
+      if (typeof entry === "string") return [entry];
+      const name = codexObject(entry)?.name;
+      return typeof name === "string" ? [name] : [];
+    }),
+  );
+  const additions = Object.keys(identity).filter((name) => !names.has(name));
+  return additions.length === 0 ? undefined : [...(vars ?? []), ...additions];
+}
+
+async function codexThreadConfig(
+  server: LineRpcProcess,
+  input: StartInput,
+  config?: Readonly<Record<string, unknown>>,
+): Promise<Readonly<Record<string, unknown>> | undefined> {
+  if (input.execution === undefined) return config;
+  const authored = codexObject(config?.mcp_servers);
+  if (config?.mcp_servers !== undefined && authored === undefined) return config;
+  const resolved = codexObject(codexObject(await server.request("config/read", { cwd: input.cwd }))?.config);
+  const existing = codexObject(resolved?.mcp_servers);
+  const overlays = new Map(Object.entries(authored ?? {}));
+  const identity = akumaActorEnvironment(input.execution);
+  for (const name of Object.keys({ ...existing, ...authored })) {
+    const declared = codexObject(overlays.get(name));
+    if (overlays.has(name) && declared === undefined) continue;
+    if (!isLocalMcpServer({ ...codexObject(existing?.[name]), ...declared })) continue;
+    const envVars = forwardedEnvVars(declared, codexObject(existing?.[name]), identity);
+    if (envVars === undefined) continue;
+    overlays.set(name, { ...declared, env_vars: envVars });
+  }
+  return overlays.size === 0 ? config : { ...config, mcp_servers: Object.fromEntries(overlays) };
+}
+
 async function admitTurn(
   server: LineRpcProcess,
   input: StartInput,
@@ -80,10 +131,11 @@ async function admitTurn(
   config?: Readonly<Record<string, unknown>>,
 ): Promise<void> {
   await initializeCodex(server);
+  const threadConfig = await codexThreadConfig(server, input, config);
   input.signal?.throwIfAborted();
   const threadParams = {
     cwd: input.cwd,
-    ...(config === undefined ? {} : { config }),
+    ...(threadConfig === undefined ? {} : { config: threadConfig }),
     ...(input.options.model === undefined ? {} : { model: input.options.model }),
     ...(input.options.systemPrompt === undefined || input.options.systemPrompt.length === 0
       ? {}

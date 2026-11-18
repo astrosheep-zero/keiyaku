@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import type { CreateAgentSessionOptions, ExtensionAPI, ExtensionToolContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
+import { createEventBus, type CreateAgentSessionOptions, type ExtensionAPI, type ExtensionToolContext, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { harnessOwner } from "@astrosheep/square";
 import { deliveryOwner } from "../src/library/keiyaku-attribution.js";
 import { createPiProvider, type PiSdk } from "../src/akuma/providers/pi/index.js";
@@ -51,6 +51,7 @@ async function nativePiSdk(): Promise<{ sdk: PiSdk; options: () => Record<string
   return {
     options: () => captured,
     sdk: {
+      createEventBus,
       createBashToolDefinition: (await import("@earendil-works/pi-coding-agent")).createBashToolDefinition,
       createAgentSessionFromServices: async (options) => {
         captured = options as unknown as Record<string, unknown>;

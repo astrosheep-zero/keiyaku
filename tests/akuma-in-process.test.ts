@@ -40,7 +40,9 @@ export default function(pi) {
     },
   });
   for (const event of ["session_start", "session_shutdown"]) pi.on(event, (_event, ctx) => {
-    appendFileSync(join(ctx.cwd, "native.jsonl"), JSON.stringify({ event, pid: process.pid, session: ctx.sessionManager.getSessionId() }) + "\\n");
+    let actor;
+    pi.events.emit("keiyaku:actor:request", { reply: pair => { actor = pair; } });
+    appendFileSync(join(ctx.cwd, "native.jsonl"), JSON.stringify({ event, actor, pid: process.pid, session: ctx.sessionManager.getSessionId() }) + "\\n");
   });
   pi.on("before_agent_start", (event, ctx) => {
     appendFileSync(join(ctx.cwd, "runtime.jsonl"), JSON.stringify({ session: ctx.sessionManager.getSessionId(), prompt: event.systemPrompt }) + "\\n");
@@ -115,7 +117,7 @@ function holdingCommand(world: string, name: string): string {
   return [process.execPath, "-e", script].map(quote).join(" ");
 }
 
-function nativeEvents(world: string): { event: string; pid: number; session: string }[] {
+function nativeEvents(world: string): { event: string; pid: number; session: string; actor?: { world: string; akuId: string } }[] {
   return readFileSync(join(world, "native.jsonl"), "utf8")
     .trim()
     .split("\n")
@@ -182,6 +184,11 @@ test(
       assert.equal(new Set(events.map((event) => event.pid)).size, 1);
       assert.ok(events.every((event) => event.pid === process.pid));
       assert.equal(new Set(events.map((event) => event.session)).size, 2);
+      assert.deepEqual(new Set(events.map(({ actor }) => actor?.akuId)), new Set([first.id, second.akumaId]));
+      for (const { session, actor } of events) {
+        assert.equal(actor?.world, world);
+        assert.equal(actor?.akuId, events.find((event) => event.session === session)?.actor?.akuId);
+      }
       const changed = [...new Set([...Object.keys(before), ...Object.keys(process.env)])].filter(
         (key) => before[key] !== process.env[key],
       );

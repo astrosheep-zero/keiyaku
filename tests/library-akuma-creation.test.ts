@@ -111,6 +111,7 @@ async function directArchetypeSettings(root: string, answerReleasePath?: string)
       "  const message = JSON.parse(line);",
       "  if (message.method === 'initialize') return reply(message, {});",
       "  if (message.method === 'initialized') return;",
+      "  if (message.method === 'config/read') return reply(message, { config: {} });",
       "  if (message.method === 'thread/resume') turnId = 'turn-resumed';",
       "  if (message.method === 'thread/start' || message.method === 'thread/resume') return reply(message, { thread: { id: 'thread-1' } });",
       "  if (message.method === 'thread/fork') return reply(message, { thread: { id: 'thread-child' } });",
