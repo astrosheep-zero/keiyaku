@@ -19,7 +19,6 @@ import {
   type ProviderAdapter,
   type ProviderOptionAdmission,
   type Session,
-  type TurnResult,
 } from "../../provider.js";
 import type { ResumeCoordinate } from "../../coordinate.js";
 import type { ProviderExecution, ProviderOptions } from "../../provider-recipe.js";
@@ -231,14 +230,13 @@ async function applyOptions(
 }
 
 class PaseoDrive {
-  readonly closed: Promise<void>;
   readonly turn = new PaseoTurn(randomUUID());
-  private proveClosed!: () => void;
-  private failClosed!: (error: unknown) => void;
+  private retainClosure!: (operation: Promise<void>) => void;
   private closure: Promise<void> | undefined;
   private removeConnectionListener: () => void = () => undefined;
   private agentId: string | undefined;
   private submitted = false;
+  private admitted = false;
   private sequence: number | undefined;
   private epoch: string | undefined;
 
@@ -248,15 +246,15 @@ class PaseoDrive {
     private readonly environment: Readonly<Record<string, string | undefined>>,
     private readonly sockets: PaseoSockets,
   ) {
-    this.closed = new Promise((resolve, reject) => {
-      this.proveClosed = resolve;
-      this.failClosed = reject;
+    const closed = new Promise<void>((resolve) => {
+      this.retainClosure = resolve;
     });
-    custody.own({ closed: this.closed, abort: () => this.retire(true), forceDispose: () => this.retire(true) });
+    const stop = () => this.retire("requested");
+    custody.own({ closed, abort: stop, forceDispose: stop });
     this.removeConnectionListener = client.subscribeConnectionStatus((state) => {
       if (this.closure !== undefined) return;
       if (state.status === "disconnected" || state.status === "disposed")
-        this.turn.fail(new Error("Paseo connection lost before own turn completion"));
+        this.fail(new Error("Paseo connection lost before own turn completion"));
     });
   }
 
@@ -283,10 +281,12 @@ class PaseoDrive {
     input.signal.throwIfAborted();
     const subscription = this.client.subscribeAgentTimeline(agent.id, (message) => this.receive(message));
     await abortable(subscription.ready, input.signal);
-    this.turn.events.emit({ type: "session", coordinate: { sessionId: agent.id } });
-    if (startupModel !== undefined) this.turn.events.emit(modelEvent(startupModel));
+    const { events, completion } = this.turn.outcome;
+    events.emit({ type: "session", coordinate: { sessionId: agent.id } });
+    if (startupModel !== undefined) events.emit(modelEvent(startupModel));
     // Native steer may still replace work if a human wins the check/send race.
     input.signal.throwIfAborted();
+    if (this.turn.outcome.terminal) await completion;
     const prompt = launchPrompt(input.body, input.launchTells, input.schemaJson);
     await setup(input.signal, () => {
       this.submitted = true;
@@ -297,13 +297,9 @@ class PaseoDrive {
       if (input.signal.aborted) throw error;
       throw new Error("Paseo canonical native admission was not observed", { cause: error });
     });
-    const completion = this.finish();
-    void completion.catch(() => undefined);
-    return {
-      admission: { fence },
-      events: this.turn.events,
-      completion,
-    };
+    this.admitted = true;
+    this.retireSettledTurn();
+    return { admission: { fence }, events, completion };
   }
 
   private async existingAgent(coordinate: ResumeCoordinate, signal: AbortSignal): Promise<AgentSnapshotPayload> {
@@ -315,21 +311,26 @@ class PaseoDrive {
   }
 
   private receive(message: TimelineMessage): void {
-    if (this.closure !== undefined || message.payload.agentId !== this.agentId) return;
+    if (this.turn.outcome.terminal || message.payload.agentId !== this.agentId) return;
     if (message.type === "agent_stream") {
       const { seq, epoch, event } = message.payload;
       if (this.epoch !== undefined && epoch !== undefined && epoch !== this.epoch)
-        return this.turn.fail(new Error("Paseo timeline epoch changed before own turn completion"));
+        return this.fail(new Error("Paseo timeline epoch changed before own turn completion"));
       if (epoch !== undefined) this.epoch = epoch;
       if (seq !== undefined) {
         if (this.sequence !== undefined && seq > this.sequence + 1)
-          return this.turn.fail(new Error("Paseo timeline delivery gap before own turn completion"));
+          return this.fail(new Error("Paseo timeline delivery gap before own turn completion"));
         if (this.sequence !== undefined && seq <= this.sequence) return;
         this.sequence = seq;
       }
-      this.turn.receive(event);
+      try {
+        this.turn.receive(event);
+      } catch (error) {
+        return this.fail(error);
+      }
+      this.retireSettledTurn();
     } else
-      this.turn.fail(
+      this.fail(
         new Error(
           message.type === "agent.timeline.error"
             ? `Paseo timeline failed: ${message.payload.error}`
@@ -338,49 +339,47 @@ class PaseoDrive {
       );
   }
 
-  private async finish(): Promise<TurnResult> {
-    try {
-      const result = await this.turn.completion;
-      await this.retire(false);
-      return result;
-    } catch (error) {
-      try {
-        await this.retire(true);
-      } catch {
-        // Attempt closure retains the control or client-retirement failure independently.
-      }
-      throw error;
-    }
+  private fail(error: unknown): void {
+    if (this.turn.fail(error)) void this.retire("observation-lost").catch(() => undefined);
   }
 
-  retire(cancel: boolean): Promise<void> {
-    return (this.closure ??= this.close(cancel));
+  private retireSettledTurn(): void {
+    // A terminal broadcast may precede the native send acknowledgement.
+    if (this.admitted && this.turn.outcome.terminal) void this.retire().catch(() => undefined);
   }
 
-  private async close(cancel: boolean): Promise<void> {
-    this.removeConnectionListener();
-    try {
-      const errors: unknown[] = [];
-      try {
-        if (cancel && this.submitted && !this.turn.terminal && this.agentId !== undefined)
-          await this.client.cancelAgent(this.agentId);
-      } catch (error) {
-        errors.push(error);
-      }
-      try {
-        await this.sockets.retire(this.client);
-      } catch (error) {
-        errors.push(error);
-      }
-      failures(errors, "Paseo native control and retirement failed");
-      this.proveClosed();
-    } catch (error) {
-      this.failClosed(error);
-      throw error;
-    } finally {
-      this.turn.fail(new Error("Paseo client retired"));
-      this.turn.events.end();
+  private retire(control?: "requested" | "observation-lost"): Promise<void> {
+    if (this.closure === undefined) {
+      this.closure = Promise.resolve().then(() => this.close(control));
+      this.retainClosure(this.closure);
     }
+    return this.closure;
+  }
+
+  private async close(control?: "requested" | "observation-lost"): Promise<void> {
+    const errors: unknown[] = [];
+    try {
+      this.removeConnectionListener();
+    } catch (error) {
+      errors.push(error);
+    }
+    try {
+      if (
+        this.submitted &&
+        this.agentId !== undefined &&
+        (control === "observation-lost" || (control === "requested" && !this.turn.outcome.terminal))
+      )
+        await this.client.cancelAgent(this.agentId);
+    } catch (error) {
+      errors.push(error);
+    }
+    this.turn.fail(new Error("Paseo client retired"));
+    try {
+      await this.sockets.retire(this.client);
+    } catch (error) {
+      errors.push(error);
+    }
+    failures(errors, "Paseo native control and retirement failed");
   }
 }
 

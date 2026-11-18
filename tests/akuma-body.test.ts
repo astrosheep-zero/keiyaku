@@ -1858,6 +1858,89 @@ test("provider closure failure enters Body supervision before session completion
   }
 });
 
+test("Claude SDK startup exit retains its native failure and releases Body custody", { skip: !existsSync("/usr/bin/false"), timeout: 15_000 }, async () => {
+  const root = bodyTestDirectory("keiyaku-claude-startup-exit-");
+  try {
+    const allocated = await allocatedHeart(root, "claude", "c0ffee09");
+    const body = driveAkumaBody(
+      claudeBodyLaunch(allocated, root, "work"),
+      createClaudeProvider({ executable: "/usr/bin/false" }),
+    );
+    await expectBodySettles(body, "Body did not settle failed Claude startup");
+    const heart = await readHeart(allocated.paths);
+    assert.equal(heart.latestBody?.hung, undefined);
+    const outcome = (await readLatestTurnForBody(allocated.paths, heart.latestBody!.sequence))?.end?.outcome;
+    assert.equal(outcome?.kind, "failed");
+    assert.match(outcome.diagnostic, /Claude Code process exited with code 1/u);
+    assert.equal(await probeLeash(allocated.paths), "free");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("Body withholds a Claude SDK answer when its native child fails retirement", { timeout: 15_000 }, async () => {
+  const root = bodyTestDirectory("keiyaku-claude-failed-retirement-");
+  try {
+    const allocated = await allocatedHeart(root, "claude", "c0ffee08");
+    const executable = join(root, "claude.mjs");
+    const release = join(root, "release-child");
+    writeFileSync(executable, `
+import { existsSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+const lines = createInterface({ input: process.stdin });
+const send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');
+lines.on('line', (line) => {
+  const message = JSON.parse(line);
+  if (message.type === 'control_request') {
+    send({ type: 'control_response', response: {
+      subtype: 'success', request_id: message.request_id, response: {},
+    } });
+  }
+  if (message.type === 'user') {
+    send({ type: 'assistant', uuid: 'native-assistant', session_id: 'proof', parent_tool_use_id: null,
+      message: { content: [{ type: 'text', text: 'native answer' }] } });
+    send({ type: 'result', subtype: 'success', session_id: 'proof', result: 'native answer' });
+  }
+});
+lines.on('close', () => {
+  const timer = setInterval(() => {
+    if (!existsSync(${JSON.stringify(release)})) return;
+    clearInterval(timer);
+    console.error('native teardown failed');
+    process.exitCode = 7;
+  }, 5);
+});
+`);
+    const admitted = promiseBarrier<Session>();
+    const provider = createClaudeProvider({ executable });
+    const body = driveAkumaBody(claudeBodyLaunch(allocated, root, "work"), scenarioProvider((input) => {
+      const attempt = provider.start(input);
+      void attempt.result.then(admitted.resolve, admitted.reject);
+      return attempt;
+    }));
+    try {
+      assert.deepEqual(await (await admitted.promise).completion, {
+        kind: "answered", answer: "native answer", historyId: "native-assistant",
+      });
+      const current = (await readHeart(allocated.paths)).latestBody!;
+      assert.equal(current.end, undefined);
+      const turn = await readLatestTurnForBody(allocated.paths, current.sequence);
+      assert.ok(turn !== null);
+      assert.equal(turn.end, undefined, "the independent native result alone does not commit the Turn");
+    } finally {
+      writeFileSync(release, "");
+      await expectBodySettles(body, "Body did not supervise failed retirement");
+    }
+    const heart = await readHeart(allocated.paths);
+    assert.match(heart.latestBody?.hung?.diagnostic ?? "", /code 7.*native teardown failed/su);
+    assert.equal(heart.latestBody?.end, "broke-off");
+    assert.equal((await readLatestTurnForBody(allocated.paths, heart.latestBody!.sequence))?.end, undefined);
+    assert.equal(await probeLeash(allocated.paths), "free");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a stalled Tell is fenced by Body cancellation before leash release", async () => {
   const root = bodyTestDirectory("keiyaku-akuma-violating-tell-");
   let releaseTell: (() => void) | undefined;

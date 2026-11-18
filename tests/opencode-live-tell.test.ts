@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createOpencodeProvider } from "../src/akuma/providers/opencode-sdk/index.js";
 import { opencodeFixture, until } from "./support/opencode-v2.js";
+import { deferred } from "./support/process.js";
 
 test("OpenCode v2 submits distinct native message identities and correlates enqueue, delivery, assistant and terminal", async () => {
   const native = opencodeFixture();
@@ -106,17 +107,44 @@ test("OpenCode v2 terminal errors and feed loss fail honestly", async () => {
   });
 });
 
-test("OpenCode v2 cancellation interrupts once and retires queued live admissions", async () => {
+test("OpenCode v2 cancellation fences queued Tells and waits for its native interrupt", { timeout: 5_000 }, async () => {
   const native = opencodeFixture();
-  const attempt = createOpencodeProvider({ loader: native.loader }).start(native.input);
+  const sent = deferred<void>();
+  const response = deferred<void>();
+  const session = {
+    ...native.session,
+    async interrupt(input: Parameters<typeof native.session.interrupt>[0]) {
+      const result = await native.session.interrupt(input);
+      sent.resolve();
+      await response.promise;
+      return result;
+    },
+  };
+  const provider = createOpencodeProvider({ loader: async (...args) => {
+    const loaded = await native.loader(...args);
+    return { ...loaded, client: { ...loaded.client, session } };
+  } });
+  const attempt = provider.start(native.input);
   const drive = await attempt.result;
+  native.admitted(drive.admission.fence);
   const pending = drive.tell!({ id: "tell", text: "queued" });
-  await attempt.abort();
-  await attempt.closed;
-  assert.deepEqual(await pending, { kind: "turn-ended" });
-  assert.deepEqual(native.calls.at(-1), { method: "interrupt", value: { id: native.id } });
+  await until(() => native.prompts.length === 2);
+  const aborting = attempt.abort();
+  await sent.promise;
+  const forcing = attempt.forceDispose();
+  try {
+    assert.equal((await drive.completion).kind, "failed");
+    assert.deepEqual(await pending, { kind: "turn-ended" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(native.closed(), 0, "terminal result and force disposal must not drop the control response");
+  } finally {
+    response.resolve();
+    await Promise.all([aborting, forcing, attempt.closed]);
+  }
   assert.equal(native.closed(), 1);
-  assert.equal((await drive.completion).kind, "failed");
+  assert.deepEqual(native.calls.filter(({ method }) => method === "interrupt"), [
+    { method: "interrupt", value: { id: native.id } },
+  ]);
 });
 
 test("OpenCode v2 resume selects the model before its first prompt, never freshens a native promise", async () => {

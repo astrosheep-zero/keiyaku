@@ -29,7 +29,7 @@ export class LineRpcProcess {
   private readonly requestTimeoutMs: number;
   private nextId = 1;
   private stdout = "";
-  private closed = false;
+  private state: "open" | "draining" | "closed" = "open";
 
   constructor(
     input: Readonly<{
@@ -48,7 +48,7 @@ export class LineRpcProcess {
     this.process.output.setEncoding("utf8");
     this.process.output.on("data", (chunk: string) => this.consume(chunk));
     void this.process.exited.then((exit) => {
-      this.closed = true;
+      this.state = "closed";
       this.fail(new Error(`line RPC process exited${exit.code === null ? "" : ` with code ${exit.code}`}`));
     });
   }
@@ -77,7 +77,7 @@ export class LineRpcProcess {
       offset = newline + 1;
       const line = rawLine.trim();
       if (line.length > 0) this.receive(line);
-      if (this.closed) return;
+      if (this.state !== "open") return;
     }
   }
 
@@ -121,8 +121,8 @@ export class LineRpcProcess {
   }
 
   private failAndClose(error: unknown): void {
-    if (this.closed) return;
-    this.closed = true;
+    if (this.state !== "open") return;
+    this.state = "closed";
     this.fail(error);
     void this.process.close(true).catch(() => undefined);
   }
@@ -132,7 +132,7 @@ export class LineRpcProcess {
     params?: Readonly<Record<string, unknown>>,
     options: Readonly<{ timeoutMs?: number }> = {},
   ): Promise<unknown> {
-    if (this.closed) return Promise.reject(new Error("line RPC process is closed"));
+    if (this.state !== "open") return Promise.reject(new Error("line RPC process is closed"));
     const timeoutMs = options.timeoutMs ?? this.requestTimeoutMs;
     if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
       return Promise.reject(
@@ -162,25 +162,26 @@ export class LineRpcProcess {
   }
 
   notify(method: string): void {
-    if (!this.closed) this.process.input.write(`${JSON.stringify({ method })}\n`);
+    if (this.state === "open") this.process.input.write(`${JSON.stringify({ method })}\n`);
   }
 
   async endInputAndDrain(timeoutMs?: number): Promise<void> {
-    if (this.closed) {
+    if (this.state !== "open") {
       await this.process.exited;
       return;
     }
-    this.closed = true;
+    this.state = "draining";
     this.fail(new Error("line RPC process is closed"));
     await this.process.endInputAndDrain(timeoutMs);
   }
 
   async close(force = false): Promise<void> {
-    if (this.closed) {
-      await this.process.exited;
+    if (this.state !== "open") {
+      if (this.state === "draining" && force) await this.process.close(true);
+      else await this.process.exited;
       return;
     }
-    this.closed = true;
+    this.state = "closed";
     this.fail(new Error("line RPC process is closed"));
     await this.process.close(force);
   }

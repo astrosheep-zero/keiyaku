@@ -2,12 +2,13 @@ import { opencodeFixture } from "./support/opencode-v2.js";
 import { temporaryDirectory } from "./support/process.js";
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough, Readable, Writable } from "node:stream";
 import test from "node:test";
-import type { Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Query, SDKMessage, SDKUserMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import * as acp from "@agentclientprotocol/sdk";
 import { z } from "zod";
 import {
@@ -52,8 +53,9 @@ import {
 import type { LineRpcNotification } from "../src/runtime/proc/line-rpc.js";
 import { translatePiEvent, piSessionModel, type PiEventState } from "../src/akuma/providers/pi/events.js";
 import { createEventState, mapEvent } from "../src/akuma/providers/opencode-sdk/events.js";
-import type { StdioProcess } from "../src/runtime/proc/stdio.js";
-import { waitForCondition, waitForFixtureFile } from "./support/process.js";
+import { spawnStdioProcess, type StdioProcess } from "../src/runtime/proc/stdio.js";
+import { providerTurn } from "../src/akuma/providers/turn.js";
+import { processExists, waitForCondition, waitForFixtureFile } from "./support/process.js";
 
 const DRIVE_DEFAULTS = {
   signal: new AbortController().signal,
@@ -869,6 +871,19 @@ function fakeOpencode() {
   return { loader, closed: native.closed, executions, prompts: native.prompts };
 }
 
+test("a throwing terminal flush fences duplicates, ends narration, and still wins retirement", async () => {
+  const events = new AgentEventChannel();
+  const failure = new Error("terminal flush failed");
+  const turn = providerTurn(events, () => {
+    events.emit({ type: "assistant", text: "final narration" });
+    throw failure;
+  });
+  assert.equal(turn.finish({ kind: "answered", answer: "final narration" }), true);
+  assert.equal(turn.fail(new Error("late failure")), false);
+  await assert.rejects(turn.completion, (error) => error === failure);
+  assert.deepEqual(await drainChannel(events), [{ type: "assistant", text: "final narration" }]);
+});
+
 test("provider answered results may omit an exact fork point", () => {
   const result: TurnResult = { kind: "answered", answer: "complete answer" };
   assert.deepEqual(result, { kind: "answered", answer: "complete answer" });
@@ -1338,15 +1353,13 @@ function controlledAcpProcess(
   resolveInterject(): void;
   emitInterjection(value: ControlledInterject): Promise<void>;
   resolveCleanup(): void;
-  rejectCleanup(error: Error): void;
   readonly sessionNew: unknown;
   readonly sessionLoad: unknown;
 }> {
   const inbound = new PassThrough();
   const outbound = new PassThrough();
   const { promise: cleanupStarted, resolve: startCleanup } = promiseBarrier<void>();
-  let resolveCleanup!: () => void;
-  let rejectCleanup!: (error: Error) => void;
+  const { promise: cleanup, resolve: resolveCleanup } = promiseBarrier<void>();
   let forcedCleanup = 0;
   const { promise: initializeStarted, resolve: startInitialize } = promiseBarrier<void>();
   const { promise: prompt, resolve: finishPrompt } = promiseBarrier<void>();
@@ -1358,10 +1371,6 @@ function controlledAcpProcess(
   let emitInterjection!: (value: ControlledInterject) => Promise<void>;
   let sessionNew: unknown;
   let sessionLoad: unknown;
-  const cleanup = new Promise<void>((resolve, reject) => {
-    resolveCleanup = resolve;
-    rejectCleanup = reject;
-  });
   const { promise: exited, resolve: resolveExited } =
     promiseBarrier<Readonly<{ code: number | null; signal: NodeJS.Signals | null; stderr: string }>>();
   const app = acp
@@ -1443,7 +1452,6 @@ function controlledAcpProcess(
     resolveInterject: finishInterject,
     emitInterjection: async (value) => await emitInterjection(value),
     resolveCleanup,
-    rejectCleanup,
     get sessionNew() {
       return sessionNew;
     },
@@ -1559,14 +1567,66 @@ test("Grok Build returns turn-ended when completion wins before interject acknow
   assert.deepEqual(await drive.completion, { kind: "answered", answer: "" });
 });
 
-test("ACP cleanup failure settles a typed failed Turn", async () => {
-  const controlled = controlledAcpProcess();
-  const drive = await createAcpProvider(controlledAcpExecution, { spawnProcess: () => controlled.process }).start(
-    freshInput("build"),
-  ).result;
-  await controlled.cleanupStarted;
-  controlled.rejectCleanup(new Error("drain failed"));
-  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: "ACP cleanup failed: drain failed" });
+test("ACP retains an answered Turn and a drain failure even after its child exits", async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-acp-drain-failure-");
+  const drain = deferred<void>();
+  const error = new Error("drain failed");
+  let child!: StdioProcess;
+  const attempt = createAcpProvider(fakeAcp(root).execution, {
+    spawnProcess(input) {
+      child = spawnStdioProcess(input);
+      return {
+        ...child,
+        async endInputAndDrain() {
+          await drain.promise;
+          await child.endInputAndDrain();
+          throw error;
+        },
+      };
+    },
+  }).start(freshInput("build", { cwd: root }));
+  try {
+    const drive = await attempt.result;
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "complete answer" });
+  } finally {
+    drain.resolve();
+    await assert.rejects(attempt.closed, (actual) => actual === error);
+  }
+  assert.equal((await child.exited).code, 0);
+});
+
+test("ACP retains a failed cancel write in custody when a native answer wins", { timeout: 5_000 }, async () => {
+  const controlled = controlledAcpProcess({ assistant: "answer", stallPrompt: true });
+  const cancelWrite = deferred<(error: Error) => void>();
+  const error = new Error("ACP cancel transport rejected the write");
+  const input = new Writable({
+    highWaterMark: 1,
+    write(chunk: Buffer, _encoding, done) {
+      const message = JSON.parse(chunk.toString()) as { method?: string };
+      if (message.method === "session/cancel") cancelWrite.resolve(done);
+      else controlled.process.input.write(chunk, done);
+    },
+  });
+  const attempt = createAcpProvider(controlledAcpExecution, {
+    spawnProcess: () => ({ ...controlled.process, input }),
+  }).start(freshInput("build"));
+  const drive = await attempt.result;
+  const abort = attempt.abort();
+  void abort.catch(() => undefined);
+  const failWrite = await cancelWrite.promise;
+  const answer = { kind: "answered", answer: "answer" };
+  try {
+    controlled.resolvePrompt();
+    assert.deepEqual(await drive.completion, answer);
+    failWrite(error);
+    const original = (actual: unknown) => actual === error;
+    await assert.rejects(abort, original);
+    await assert.rejects(attempt.closed, original);
+    await controlled.process.exited;
+  } finally {
+    controlled.resolveCleanup();
+    await attempt.forceDispose().catch(() => undefined);
+  }
 });
 
 test("ACP setup abort closes a child stalled during initialization", async () => {
@@ -2016,13 +2076,15 @@ test("OpenCode v2 rejects failed prompt admission and cleans up", async () => {
 
 test("OpenCode v2 fails terminal observation without native assistant evidence", async () => {
   const native = opencodeFixture();
-  const drive = await createOpencodeProvider({ loader: native.loader }).start(freshInput("idle")).result;
+  const attempt = createOpencodeProvider({ loader: native.loader }).start(freshInput("idle"));
+  const drive = await attempt.result;
   native.admitted(native.prompts[0]!.body.id);
   native.delivered(native.prompts[0]!.body.id);
   native.push("session.execution.succeeded");
   assert.deepEqual(await drive.completion, {
     kind: "failed", diagnostic: "OpenCode completed without an assistant for the admitted input",
   });
+  await attempt.closed;
   assert.equal(native.closed(), 1);
 });
 
@@ -2816,12 +2878,14 @@ function fakeCodex(
   executable: string;
   requests(): readonly Readonly<Record<string, unknown>>[];
   environment(): NodeJS.ProcessEnv;
+  pid(): number;
   /** Creating this file releases the fixture's model reroute. */
   rerouteRelease: string;
 }> {
   const executable = join(root, "codex");
   const log = join(root, "requests.jsonl");
   const environment = join(root, "request-environment.txt");
+  const pid = join(root, "codex.pid");
   const rerouteRelease = join(root, "model-reroute-release");
   writeFileSync(
     executable,
@@ -2831,8 +2895,10 @@ function fakeCodex(
       "const readline=require('node:readline');",
       `const log=${JSON.stringify(log)};`,
       `fs.writeFileSync(${JSON.stringify(environment)},JSON.stringify(process.env));`,
+      `fs.writeFileSync(${JSON.stringify(pid)},String(process.pid));`,
       `const mode=${JSON.stringify(mode)};`,
       `const rerouteRelease=${JSON.stringify(rerouteRelease)};`,
+      `const terminalEof=${JSON.stringify(join(root, "terminal-eof"))};`,
       "const send=(value)=>process.stdout.write(JSON.stringify(value)+'\\n');",
       "const reply=(message,result)=>send({id:message.id,result});",
       "const hang=mode==='terminal-hang'?setInterval(()=>{},1000):null;",
@@ -2842,7 +2908,7 @@ function fakeCodex(
       "    send({method:'item/completed',params:{item:{id:'command-terminal',type:'commandExecution',command:'npm test',status:'completed',exitCode:0}}});",
       "    process.exit(0);",
       "  },350);",
-      "  if(mode==='terminal-hang') return;",
+      "  if(mode==='terminal-hang') return fs.writeFileSync(terminalEof,'');",
       "  process.exit(0);",
       "});",
       "lines.on('line',(line)=>{",
@@ -2933,6 +2999,7 @@ function fakeCodex(
       }
     },
     environment: () => JSON.parse(readFileSync(environment, "utf8")) as NodeJS.ProcessEnv,
+    pid: () => Number(readFileSync(pid, "utf8")),
     rerouteRelease,
   };
 }
@@ -3230,9 +3297,11 @@ test("Claude refuses an unsupported network option", () => {
   });
 });
 
-test("Claude closes the terminal gate before a delayed Query iterator tail", async () => {
+test("Claude settles the Turn before its Query tail fails retirement", { timeout: 5_000 }, async (context) => {
   const late = deferred<void>();
-  const iteratorEnded = deferred<void>();
+  const failure = new Error("native query tail failed during retirement");
+  let closeRequested = false;
+  context.after(() => late.resolve());
   const provider = createClaudeProvider(async () => ({
     query({ prompt }) {
       void (async () => {
@@ -3240,59 +3309,101 @@ test("Claude closes the terminal gate before a delayed Query iterator tail", asy
           /* pull the streaming input */
         }
       })();
-      return (async function* () {
-        try {
-          yield { type: "system", subtype: "init", session_id: "session-terminal-gate" } as unknown as SDKMessage;
-          yield {
-            type: "assistant",
-            uuid: "assistant-before-terminal",
-            session_id: "session-terminal-gate",
-            parent_tool_use_id: null,
-            message: { content: [{ type: "text", text: "before" }] },
-          } as unknown as SDKMessage;
-          yield {
-            type: "result",
-            subtype: "success",
-            session_id: "session-terminal-gate",
-            result: "done",
-          } as unknown as SDKMessage;
-          await late.promise;
-          yield {
-            type: "assistant",
-            uuid: "assistant-after-terminal",
-            session_id: "session-terminal-gate",
-            parent_tool_use_id: null,
-            message: { content: [{ type: "tool_use", id: "late-tool", name: "Bash", input: { command: "late" } }] },
-          } as unknown as SDKMessage;
-          yield {
-            type: "user",
-            session_id: "session-terminal-gate",
-            parent_tool_use_id: null,
-            message: { content: [{ type: "tool_result", tool_use_id: "late-tool", content: "late result" }] },
-          } as unknown as SDKMessage;
-        } finally {
-          iteratorEnded.resolve();
-        }
+      const query = (async function* () {
+        yield { type: "system", subtype: "init", session_id: "session-live" } as unknown as SDKMessage;
+        yield* claudeResult(1);
+        await late.promise;
+        yield claudeResult(2)[0];
+        throw failure;
       })() as unknown as Query;
+      query.close = () => { closeRequested = true; };
+      return query;
     },
   }));
-  const drive = await provider.start(freshInput("initial", { cwd: "/work" })).result;
-
-  const completion = await Promise.race([
-    drive.completion,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error("Claude completion waited for Query tail")), 500),
-    ),
+  const attempt = provider.start(freshInput("initial", { cwd: "/work" }));
+  const drive = await attempt.result;
+  let closed = false;
+  void attempt.closed.finally(() => { closed = true; }).catch(() => undefined);
+  assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
+  assert.deepEqual(await collectEvents(drive.events), [
+    { type: "session", coordinate: { sessionId: "session-live" } },
+    { type: "assistant", text: "answer 1" },
   ]);
-  assert.deepEqual(completion, { kind: "answered", answer: "done", historyId: "assistant-before-terminal" });
-  const events = await collectEvents(drive.events);
-  assert.deepEqual(events, [
-    { type: "session", coordinate: { sessionId: "session-terminal-gate" } },
-    { type: "assistant", text: "before" },
-  ]);
-
+  assert.deepEqual(await drive.tell!({ id: "late", text: "too late" }), { kind: "turn-ended" });
+  assert.equal(closeRequested, true);
+  assert.equal(closed, false, "logical Query close is not retirement of its consumer");
   late.resolve();
-  await iteratorEnded.promise;
+  await assert.rejects(attempt.closed, (error) => error === failure);
+});
+
+test("Claude owns the hook's spawned process after result and Query retirement", { timeout: 10_000 }, async (context) => {
+  const cwd = temporaryDirectory(context, "keiyaku-claude-child-");
+  const diagnostic = deferred<string>();
+  let child!: SpawnedProcess;
+  const provider = createClaudeProvider(async () => ({
+    query(input) {
+      child = input.options!.spawnClaudeCodeProcess!({
+        command: process.execPath,
+        args: ["-e", "console.error(process.env.NATIVE_DIAGNOSTIC); process.stdin.resume()"],
+        cwd,
+        env: { ...process.env, NATIVE_DIAGNOSTIC: "native stderr" },
+        signal: new AbortController().signal,
+      });
+      return fakeQuery(claudeResult(1), input.prompt as AsyncIterable<SDKUserMessage>);
+    },
+  }), { config: { stderr: diagnostic.resolve } });
+  const attempt = provider.start(freshInput("work", { cwd }));
+  try {
+    const drive = await attempt.result;
+    assert.equal(await diagnostic.promise, "native stderr\n");
+    assert.deepEqual(await drive.completion, { kind: "answered", answer: "done 1", historyId: "assistant-live-1" });
+    let closed = false;
+    void attempt.closed.then(() => { closed = true; });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(closed, false, "the process still holds its stdio independently of Query");
+    assert.equal(child.exitCode, null);
+  } finally {
+    await attempt.forceDispose();
+    await attempt.closed;
+  }
+  assert.equal(child.signalCode, "SIGKILL");
+});
+
+test("Claude retains a delegated native spawn that arrives after setup cancellation", { timeout: 10_000 }, async (context) => {
+  const cwd = temporaryDirectory(context, "keiyaku-claude-late-child-");
+  const started = deferred<void>();
+  const closing = deferred<void>();
+  const request = {
+    command: process.execPath,
+    args: ["-e", "process.stdin.resume()"],
+    cwd,
+    env: { ...process.env },
+    signal: new AbortController().signal,
+  };
+  let child: SpawnedProcess | undefined;
+  const provider = createClaudeProvider(async () => ({
+    query(input) {
+      const query = (async function* () {
+        started.resolve();
+        await closing.promise;
+        const handedBack = input.options!.spawnClaudeCodeProcess!(request);
+        assert.equal(handedBack, child, "the SDK gets the original delegated process handle");
+      })() as unknown as Query;
+      query.close = closing.resolve;
+      return query;
+    },
+  }), { config: { spawnClaudeCodeProcess: (actual: typeof request) => {
+    assert.equal(actual, request, "the hook receives the SDK's unchanged spawn request");
+    child = spawn(actual.command, actual.args, { cwd: actual.cwd, env: actual.env, stdio: "pipe" });
+    return child;
+  } } });
+  const attempt = provider.start(freshInput("work", { cwd }));
+  const rejected = assert.rejects(attempt.result, /provider attempt retired/u);
+  await started.promise;
+  await attempt.forceDispose();
+  await rejected;
+  await attempt.closed;
+  assert.equal(child?.signalCode, "SIGKILL");
 });
 
 test("Claude live tell waits for a post-yield source pull and shares one Query", async (context) => {
@@ -3365,7 +3476,7 @@ test("Claude rejects unacknowledged input with the original transport failure", 
   const rejection = assert.rejects(submission, (error) => error === nativeError);
   harness.fail(nativeError);
   await rejection;
-  assert.deepEqual(await drive.completion, { kind: "failed", diagnostic: nativeError.message });
+  await assert.rejects(drive.completion, (error) => error === nativeError);
 });
 
 test("Codex app-server maps admitted options, native session, answer, and exact turn history", async (context) => {
@@ -3911,15 +4022,36 @@ test("Codex ignores notifications from a spawned child thread", async (context) 
   });
 });
 
-test("Codex terminal drain has a bounded fallback for a hung producer", async (context) => {
-  const root = temporaryDirectory(context, "keiyaku-codex-terminal-hang-");
-  const drive = await createCodexAppServerProvider(fakeCodex(root, "terminal-hang").executable).start(
-    freshInput("observe", { cwd: root }),
-  ).result;
-  const started = performance.now();
-  assert.deepEqual(await drive.completion, { kind: "answered", answer: "", historyId: "turn-1" });
-  assert.ok(performance.now() - started < 2_000);
-  await collectEvents(drive.events);
+test("Codex force disposal retires a hung producer during terminal drain", { timeout: 10_000 }, async (context) => {
+  const root = temporaryDirectory(context, "keiyaku-codex-force-during-drain-");
+  const fake = fakeCodex(root, "terminal-hang");
+  const attempt = createCodexAppServerProvider(fake.executable).start(freshInput("observe", { cwd: root }));
+  const drive = await attempt.result;
+  const result = { kind: "answered", answer: "", historyId: "turn-1" };
+  const nativePid = fake.pid();
+  const deadline = new AbortController();
+  try {
+    await Promise.race([
+      (async () => {
+        assert.deepEqual(await drive.completion, result);
+        await collectEvents(drive.events);
+        await waitForFixtureFile(join(root, "terminal-eof"), 750);
+        assert.equal(processExists(nativePid), true, "the child is still alive after stdin EOF");
+        await attempt.forceDispose();
+        await attempt.closed;
+        assert.equal(await processGone(nativePid), true);
+      })(),
+      new Promise<void>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error("force disposal waited for the terminal drain fallback")), 750);
+        deadline.signal.addEventListener("abort", () => clearTimeout(timer), { once: true });
+      }),
+    ]);
+  } finally {
+    deadline.abort();
+    await attempt.forceDispose();
+    await attempt.closed;
+  }
+  assert.deepEqual(await drive.completion, result);
 });
 
 test("Codex admission failures preserve the original diagnostic", async () => {

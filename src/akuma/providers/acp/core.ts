@@ -1,6 +1,6 @@
 import type * as AcpSdk from "@agentclientprotocol/sdk";
 import { Readable, Writable } from "node:stream";
-import { spawnStdioProcess, type StdioProcess } from "../../../runtime/proc/stdio.js";
+import { spawnStdioProcess } from "../../../runtime/proc/stdio.js";
 import { abortable } from "../../abort.js";
 import {
   AgentEventChannel,
@@ -11,6 +11,7 @@ import {
   type TurnResult,
 } from "../../provider.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
+import { providerTurn } from "../turn.js";
 import {
   EMPTY_ACP_EVENT_STATE,
   flushAcpEvents,
@@ -63,25 +64,13 @@ function diagnostic(acp: AcpModule, error: unknown): string {
   return data.length === 0 ? `${error.message} [${error.code}]` : `${error.message} [${error.code}]: ${data}`;
 }
 
-function createAcpClient(
-  acp: AcpModule,
-  onUpdate: (notification: AcpSdk.SessionNotification) => void,
-  configure?: (client: AcpSdk.ClientApp) => void,
-): AcpSdk.ClientApp {
-  const client = acp
-    .client({ name: "keiyaku" })
-    .onNotification(acp.methods.client.session.update, ({ params }) => onUpdate(params));
-  configure?.(client);
-  return client;
-}
-
-function promptResult(response: AcpSdk.PromptResponse): TurnResult {
+function promptResult(response: AcpSdk.PromptResponse, answer: string): TurnResult {
   if (
     response.stopReason === "end_turn" ||
     response.stopReason === "max_tokens" ||
     response.stopReason === "max_turn_requests"
   ) {
-    return { kind: "answered", answer: "" };
+    return { kind: "answered", answer };
   }
   return { kind: "failed", diagnostic: `ACP prompt ended ${response.stopReason}` };
 }
@@ -147,161 +136,156 @@ async function establishSession(
   return sessionId;
 }
 
-function createAcpTurn(
+function ownAcpTransport(
   acp: AcpModule,
-  connection: AcpSdk.ClientConnection,
-  interpret?: AcpToolInterpreter,
-  onTerminal?: () => void,
+  child: ReturnType<typeof spawnStdioProcess>,
+  custody: AttemptCustody,
+  turn: ReturnType<typeof providerTurn>,
+  cancel: () => Promise<void> | undefined,
 ) {
-  const events = new AgentEventChannel();
-  let state = EMPTY_ACP_EVENT_STATE;
-  let terminal = false;
-  let resolveCompletion!: (result: TurnResult) => void;
-  const completion = new Promise<TurnResult>((resolve) => {
-    resolveCompletion = resolve;
+  let retainRetirement!: (operation: Promise<void>) => void;
+  const retired = new Promise<void>((resolve) => {
+    retainRetirement = resolve;
   });
-  const update = (next: AcpSdk.SessionUpdate): void => {
-    if (terminal) return;
-    const mapped = mapAcpUpdate(next, state, interpret);
-    state = mapped.state;
-    for (const event of mapped.events) events.emit(event);
-  };
-  const finish = async (result: TurnResult, cleanup: () => Promise<void>): Promise<void> => {
-    if (terminal) return;
-    terminal = true;
-    onTerminal?.();
-    let completionResult = result;
-    const failCleanup = (error: unknown): void => {
-      completionResult = { kind: "failed", diagnostic: `ACP cleanup failed: ${diagnostic(acp, error)}` };
-    };
-    try {
-      await cleanup();
-    } catch (error) {
-      failCleanup(error);
+  let connection: AcpSdk.ClientConnection | undefined;
+  let closing: Promise<void> | undefined;
+  let forcing: Promise<void> | undefined;
+  let cancelling: Promise<void> | undefined;
+  const close = (force: boolean): Promise<void> => {
+    if (force) forcing ??= Promise.resolve().then(() => child.close(true));
+    if (closing === undefined) {
+      closing = (forcing ?? Promise.resolve().then(() => child.endInputAndDrain())).finally(async () => {
+        connection?.close();
+        await connection?.closed;
+      });
+      retainRetirement(closing);
     }
-    try {
-      connection.close();
-    } catch (error) {
-      failCleanup(error);
-    }
-    const flushed = flushAcpEvents(state);
-    for (const event of flushed.events) events.emit(event);
-    events.end();
-    resolveCompletion(
-      completionResult.kind === "answered" ? { ...completionResult, answer: flushed.state.answer } : completionResult,
-    );
+    return force ? Promise.all([closing, forcing]).then(() => undefined) : closing;
   };
+  const stop = (diagnostic: string): Promise<void> => {
+    turn.finish({ kind: "failed", diagnostic });
+    return close(true);
+  };
+  custody.own({
+    async abort() {
+      try {
+        await (cancelling = cancel());
+      } finally {
+        await stop("ACP turn cancelled");
+      }
+    },
+    forceDispose: () => stop("ACP turn force-disposed"),
+    closed: retired.finally(async () => {
+      await child.exited;
+      await Promise.all([forcing, cancelling]);
+    }),
+  });
   return {
-    events,
-    completion,
-    update,
-    finish,
-    open: () => !terminal,
+    connect(
+      onUpdate: (notification: AcpSdk.SessionNotification) => void,
+      configure?: AcpDependencies["configureClient"],
+    ): AcpSdk.ClientContext {
+      const client = acp
+        .client({ name: "keiyaku" })
+        .onNotification(acp.methods.client.session.update, ({ params }) => onUpdate(params));
+      configure?.(client);
+      connection = client.connect(
+        acp.ndJsonStream(
+          Writable.toWeb(child.input) as WritableStream<Uint8Array>,
+          Readable.toWeb(child.output) as ReadableStream<Uint8Array>,
+        ),
+      );
+      return connection.agent;
+    },
+    close,
   };
 }
 
-function beginAcpPrompt(
-  context: Readonly<{ acp: AcpModule; agent: AcpSdk.ClientContext }>,
-  child: StdioProcess,
-  turn: ReturnType<typeof createAcpTurn>,
-  sessionId: string,
-  input: AcpStartInput,
-): Session {
-  const { acp, agent } = context;
-  void agent
-    .request<AcpSdk.PromptResponse, AcpSdk.PromptRequest>(acp.methods.agent.session.prompt, {
-      sessionId,
-      prompt: [{ type: "text", text: launchPrompt(input.body, input.launchTells, input.schemaJson) }],
-    })
-    .then(
-      (response) => turn.finish(promptResult(response), () => child.endInputAndDrain()),
-      (error: unknown) =>
-        turn.finish({ kind: "failed", diagnostic: diagnostic(acp, error) }, () => child.endInputAndDrain()),
-    );
-  void child.exited.then((exit) =>
-    turn.finish(
-      {
-        kind: "failed",
-        diagnostic: exit.stderr || `ACP process exited${exit.code === null ? "" : ` with code ${exit.code}`}`,
-      },
-      () => child.endInputAndDrain(),
-    ),
-  );
+function acpNarration(events: AgentEventChannel, interpretTool?: AcpToolInterpreter) {
+  let state = EMPTY_ACP_EVENT_STATE;
   return {
-    admission: { fence: sessionId },
-    events: turn.events,
-    completion: turn.completion,
+    get answer() {
+      return state.answer;
+    },
+    update(notification: AcpSdk.SessionNotification) {
+      const mapped = mapAcpUpdate(notification.update, state, interpretTool);
+      state = mapped.state;
+      for (const event of mapped.events) events.emit(event);
+    },
+    flush() {
+      for (const event of flushAcpEvents(state).events) events.emit(event);
+    },
   };
 }
 
 export async function startAcpSession(
   launch: AcpLaunch,
   input: AcpStartInput,
-  dependencies: AcpDependencies = {},
-  custody?: AttemptCustody,
+  dependencies: AcpDependencies,
+  custody: AttemptCustody,
 ): Promise<AcpLiveSession> {
   const acp = await import("@agentclientprotocol/sdk");
-  const signal = input.signal ?? new AbortController().signal;
+  const { signal } = custody;
   signal.throwIfAborted();
+  const events = new AgentEventChannel();
+  const narration = acpNarration(events, dependencies.interpretTool);
+  const turn = providerTurn(events, () => {
+    dependencies.onTerminal?.();
+    narration.flush();
+  });
   const child = (dependencies.spawnProcess ?? spawnStdioProcess)({
     argv: launch.argv,
     cwd: input.cwd,
     env: akumaExecutionEnvironment(globalThis.process.env, launch.env, [], input.execution),
   });
-  let abortOwned = async (): Promise<void> => await child.close(true);
-  let forceDisposeOwned = async (): Promise<void> => await child.close(true);
-  custody?.own({
-    closed: child.exited.then(() => undefined),
-    abort: () => abortOwned(),
-    forceDispose: () => forceDisposeOwned(),
-  });
+  let agent: AcpSdk.ClientContext | undefined;
   let sessionId: string | undefined;
-  let turn!: ReturnType<typeof createAcpTurn>;
-  const connection = createAcpClient(
-    acp,
-    (notification) => {
-      if (notification.sessionId === sessionId) turn.update(notification.update);
-    },
-    dependencies.configureClient,
-  ).connect(
-    acp.ndJsonStream(
-      Writable.toWeb(child.input) as WritableStream<Uint8Array>,
-      Readable.toWeb(child.output) as ReadableStream<Uint8Array>,
-    ),
+  const finish = (result: TurnResult): void => {
+    if (turn.finish(result)) void transport.close(false);
+  };
+  const transport = ownAcpTransport(acp, child, custody, turn, () =>
+    sessionId === undefined || turn.terminal
+      ? undefined
+      : agent!.notify(acp.methods.agent.session.cancel, { sessionId }),
   );
-  turn = createAcpTurn(acp, connection, dependencies.interpretTool, dependencies.onTerminal);
   try {
-    sessionId = await abortable(
-      establishSession(acp, connection.agent, input, dependencies, launch.sessionOptions ?? []),
-      signal,
-    );
-    turn.events.emit({ type: "session", coordinate: { sessionId } });
-    abortOwned = async () => {
-      let result: TurnResult = { kind: "failed", diagnostic: "ACP turn cancelled" };
+    agent = transport.connect((notification) => {
+      if (turn.terminal || notification.sessionId !== sessionId) return;
       try {
-        await connection.agent.notify(acp.methods.agent.session.cancel, { sessionId: sessionId! });
+        narration.update(notification);
       } catch (error) {
-        result = { kind: "failed", diagnostic: diagnostic(acp, error) };
+        if (turn.fail(error)) void transport.close(false);
       }
-      if (!turn.open()) await child.close(true);
-      else await turn.finish(result, () => child.close(true));
+    }, dependencies.configureClient);
+    sessionId = await abortable(establishSession(acp, agent, input, dependencies, launch.sessionOptions ?? []), signal);
+    signal.throwIfAborted();
+    events.emit({ type: "session", coordinate: { sessionId } });
+    void agent
+      .request(acp.methods.agent.session.prompt, {
+        sessionId,
+        prompt: [{ type: "text", text: launchPrompt(input.body, input.launchTells, input.schemaJson) }],
+      })
+      .then(
+        (response) => finish(promptResult(response, narration.answer)),
+        (error: unknown) => {
+          if (error instanceof acp.RequestError) finish({ kind: "failed", diagnostic: diagnostic(acp, error) });
+          else if (turn.fail(error)) void transport.close(false);
+        },
+      );
+    void child.exited.then((exit) =>
+      finish({
+        kind: "failed",
+        diagnostic: exit.stderr || `ACP process exited${exit.code === null ? "" : ` with code ${exit.code}`}`,
+      }),
+    );
+    return {
+      session: { admission: { fence: sessionId }, events, completion: turn.completion },
+      agent,
+      sessionId,
+      open: () => !turn.terminal,
     };
-    forceDisposeOwned = async () => {
-      if (!turn.open()) await child.close(true);
-      else await turn.finish({ kind: "failed", diagnostic: "ACP turn force-disposed" }, () => child.close(true));
-    };
-    const session = beginAcpPrompt({ acp, agent: connection.agent }, child, turn, sessionId, input);
-    return { session, agent: connection.agent, sessionId, open: turn.open };
   } catch (error) {
-    connection.close(error);
-    if (custody === undefined) {
-      try {
-        await child.close(true);
-      } catch (cleanup) {
-        throw new Error(`${diagnostic(acp, error)}; ACP cleanup failed: ${diagnostic(acp, cleanup)}`, { cause: error });
-      }
-    }
-    turn.events.end();
+    turn.fail(error);
     throw error;
   }
 }

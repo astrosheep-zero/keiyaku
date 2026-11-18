@@ -398,20 +398,23 @@ test("Paseo start and resume retain native id and complete only the admitted tur
   assistant(fake, "world", "answer-a");
   const closing = deferred<void>();
   fake.closeBarrier = closing.promise;
+  const closure = settlementProbe(attempt.closed, () => "closed");
   complete(fake);
-  await new Promise<void>((resolve) => setImmediate(resolve));
-  assert.equal(finished, false, "completion waits for owned client closure");
-  complete(fake, "later-human-turn");
-  const aborting = attempt.abort();
+  try {
+    assert.deepEqual(await session.completion, {
+      kind: "answered",
+      answer: "hello secondworld",
+      historyId: "own-turn",
+    });
+    assert.equal(closure(), null, "native outcome does not prove owned client closure");
+    complete(fake, "later-human-turn");
+  } finally {
+    const aborting = attempt.abort();
+    closing.resolve();
+    await aborting;
+    await attempt.closed;
+  }
   assert.equal(fake.calls.includes("cancel"), false, "normal completion must not cancel later human work");
-  closing.resolve();
-  await aborting;
-  assert.deepEqual(await session.completion, {
-    kind: "answered",
-    answer: "hello secondworld",
-    historyId: "own-turn",
-  });
-  await attempt.closed;
   assert.deepEqual(await narration(session.events), [
     { type: "session", coordinate: { sessionId: "native-agent" } },
     { type: "model", model: "native-model" },
@@ -572,7 +575,7 @@ test("Paseo cancellation retires setup and cancels current native execution with
   const broken = provider(retiring).start({ ...drive(), session: { kind: "fresh" } });
   const brokenSession = await broken.result;
   complete(retiring);
-  await assert.rejects(brokenSession.completion, /native client retirement failed/u);
+  assert.deepEqual(await brokenSession.completion, { kind: "answered", answer: "", historyId: "own-turn" });
   await assert.rejects(broken.closed, /native client retirement failed/u);
 });
 

@@ -11,12 +11,12 @@ import {
 } from "../../provider.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { providerLifecycle } from "../lifecycle.js";
+import { providerTurn } from "../turn.js";
 import type { ProviderExecution } from "../../provider-recipe.js";
 import { codexNotificationResult, codexObject, codexText, type CodexTurnState } from "./events.js";
 
 type StartInput = Parameters<ProviderAdapter["start"]>[0] | Parameters<NonNullable<ProviderAdapter["resume"]>>[0];
 type ForkInput = Parameters<NonNullable<ProviderAdapter["fork"]>>[0];
-type Finish = (result: TurnResult) => void;
 
 async function initializeCodex(server: LineRpcProcess): Promise<void> {
   await server.request("initialize", {
@@ -57,7 +57,6 @@ async function steerTurn(
   state: CodexTurnState,
   tell: Readonly<{ id: string; text: string }>,
 ): ReturnType<NonNullable<Session["tell"]>> {
-  if (state.settled) return { kind: "turn-ended" };
   if (state.threadId === undefined || state.turnId === undefined)
     throw new Error("codex app-server turn is not admitted");
   const request = server.request("turn/steer", {
@@ -81,6 +80,7 @@ async function admitTurn(
   config?: Readonly<Record<string, unknown>>,
 ): Promise<void> {
   await initializeCodex(server);
+  input.signal?.throwIfAborted();
   const threadParams = {
     cwd: input.cwd,
     ...(config === undefined ? {} : { config }),
@@ -101,6 +101,7 @@ async function admitTurn(
     state.threadId = threadId(admitted, resumed);
     emitAdmittedModel(admitted, events);
   }
+  input.signal?.throwIfAborted();
   events.emit({ type: "session", coordinate: { sessionId: state.threadId } });
   state.turnId = turnId(
     await server.request("turn/start", {
@@ -154,11 +155,6 @@ async function forkCodex(
   }
 }
 
-async function abortTurn(server: LineRpcProcess, state: CodexTurnState, settle: Finish): Promise<void> {
-  if (!state.settled) settle({ kind: "failed", diagnostic: "codex app-server interrupted" });
-  await server.close(true);
-}
-
 function codexServer(execution: ProviderExecution, input: StartInput): LineRpcProcess {
   return new LineRpcProcess({
     argv: [execution.executable ?? "codex", "app-server", "--listen", "stdio://"],
@@ -168,39 +164,45 @@ function codexServer(execution: ProviderExecution, input: StartInput): LineRpcPr
 }
 
 async function startCodex(execution: ProviderExecution, input: StartInput, custody: AttemptCustody): Promise<Session> {
-  const signal = input.signal ?? new AbortController().signal;
+  const { signal } = custody;
   if (input.session.kind === "resume" && !("sessionId" in input.session.coordinate))
     throw new Error("Codex app-server resume requires sessionId");
-  const events = new AgentEventChannel();
+  signal.throwIfAborted();
+  const turn = providerTurn(new AgentEventChannel());
   const server = codexServer(execution, input);
-  const closed = new Promise<void>((resolve) => server.onExit(() => resolve()));
-  const state: CodexTurnState = { settled: false, tools: new Map() };
-  let settle!: (result: TurnResult) => void;
-  const completion = new Promise<TurnResult>((resolve) => {
-    settle = resolve;
+  let retainRetirement!: (operation: Promise<void>) => void;
+  const retired = new Promise<void>((resolve) => {
+    retainRetirement = resolve;
   });
-  let terminal: TurnResult | undefined;
-  const finish: Finish = (result) => {
-    if (terminal !== undefined) return;
-    terminal = result;
-    state.settled = true;
-    const done = () => {
-      events.end();
-      settle(result);
-    };
-    void server.endInputAndDrain().then(done, done);
+  const exited = new Promise<void>((resolve) => server.onExit(() => resolve()));
+  const state: CodexTurnState = {
+    get settled() {
+      return turn.terminal;
+    },
+    tools: new Map(),
+  };
+  const finish = (result: TurnResult): void => {
+    if (turn.finish(result)) retainRetirement(server.endInputAndDrain());
+  };
+  const stop = (diagnostic: string): Promise<void> => {
+    const won = turn.finish({ kind: "failed", diagnostic });
+    const closing = server.close(true);
+    if (won) retainRetirement(closing);
+    return closing;
   };
   custody.own({
-    closed,
-    abort: async () => await abortTurn(server, state, finish),
-    forceDispose: async () => {
-      if (!state.settled) settle({ kind: "failed", diagnostic: "codex app-server force-disposed" });
-      await server.close(true);
-    },
+    closed: retired.finally(() => exited),
+    abort: () => stop("codex app-server interrupted"),
+    forceDispose: () => stop("codex app-server force-disposed"),
   });
   server.onNotification((notification) => {
-    const result = codexNotificationResult(notification, state, events);
-    if (result !== undefined) finish(result);
+    if (turn.terminal) return;
+    try {
+      const result = codexNotificationResult(notification, state, turn.events);
+      if (result !== undefined) finish(result);
+    } catch (error) {
+      if (turn.fail(error)) retainRetirement(server.endInputAndDrain());
+    }
   });
   server.onExit(({ code, signal, stderr }) =>
     finish({
@@ -214,34 +216,19 @@ async function startCodex(execution: ProviderExecution, input: StartInput, custo
       diagnostic: `codex app-server made forbidden interactive request ${request.method}`,
     }),
   );
-  const abortSetup = () => {
-    void server.close(true);
-  };
-  signal.addEventListener("abort", abortSetup, { once: true });
   try {
+    await admitTurn(server, input, state, turn.events, execution.config);
     signal.throwIfAborted();
-    await admitTurn(server, input, state, events, execution.config);
   } catch (error) {
-    if (signal.aborted) {
-      await server.close(true);
-      throw signal.reason;
-    }
-    const message = diagnostic(error);
-    finish({ kind: "failed", diagnostic: message });
-    await server.close(true);
-    throw error instanceof Error ? error : new Error(message);
-  } finally {
-    signal.removeEventListener("abort", abortSetup);
-  }
-  if (state.turnId === undefined) {
-    if (terminal?.kind === "failed" && terminal.diagnostic.length > 0) throw new Error(terminal.diagnostic);
-    throw new Error("codex app-server did not admit a turn");
+    if (turn.fail(error)) retainRetirement(server.close(true));
+    if (signal.aborted) throw signal.reason;
+    throw error instanceof Error ? error : new Error(diagnostic(error));
   }
   return {
-    admission: { fence: state.turnId },
-    events,
-    completion,
-    tell: (tell) => steerTurn(server, state, tell),
+    admission: { fence: state.turnId! },
+    events: turn.events,
+    completion: turn.completion,
+    tell: (tell) => (turn.terminal ? Promise.resolve({ kind: "turn-ended" }) : steerTurn(server, state, tell)),
   };
 }
 

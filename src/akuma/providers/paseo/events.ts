@@ -1,7 +1,8 @@
 import type { AgentStreamEventPayload } from "@getpaseo/protocol/messages";
 import type { AgentRuntimeInfo, AgentTimelineItem } from "@getpaseo/protocol/agent-types";
-import { AgentEventChannel, otherToolCall, type AgentEvent, type ToolCall, type TurnResult } from "../../provider.js";
+import { AgentEventChannel, otherToolCall, type AgentEvent, type ToolCall } from "../../provider.js";
 import { stringValue } from "../decode.js";
+import { providerTurn } from "../turn.js";
 
 /**
  * The runtime's own confirmation at establishment, reported as a native
@@ -105,45 +106,35 @@ function timelineNarration(item: AgentTimelineItem, calls: Map<string, ToolCall>
 
 /** Live fragments belong to a canonical admitted turn, not agent-wide status. */
 export class PaseoTurn {
-  readonly events = new AgentEventChannel();
+  readonly outcome = providerTurn(new AgentEventChannel());
   readonly admission: Promise<string>;
-  readonly completion: Promise<TurnResult>;
   private admit!: (turnId: string) => void;
   private rejectAdmission!: (error: unknown) => void;
-  private finish!: (result: TurnResult) => void;
-  private rejectCompletion!: (error: unknown) => void;
   private turnId: string | undefined;
   private readonly messages: Array<{ id?: string; text: string }> = [];
   private readonly messagesById = new Map<string, { text: string }>();
   private readonly calls = new Map<string, ToolCall>();
   private answer = "";
   private assistantContiguous = false;
-  settled = false;
-  terminal = false;
 
   constructor(readonly messageId: string) {
     this.admission = new Promise((resolve, reject) => {
       this.admit = resolve;
       this.rejectAdmission = reject;
     });
-    this.completion = new Promise((resolve, reject) => {
-      this.finish = resolve;
-      this.rejectCompletion = reject;
-    });
     void this.admission.catch(() => undefined);
-    void this.completion.catch(() => undefined);
   }
 
   receive(event: AgentStreamEventPayload): void {
-    if (this.settled) return;
+    if (this.outcome.terminal) return;
     if (
       event.type === "timeline" &&
       event.item.type === "user_message" &&
       event.item.clientMessageId === this.messageId
     ) {
-      if (event.turnId === undefined) return this.fail(new Error("Paseo native admission omitted turnId"));
+      if (event.turnId === undefined) throw new Error("Paseo native admission omitted turnId");
       if (this.turnId !== undefined) {
-        if (this.turnId !== event.turnId) this.fail(new Error("Paseo canonical admission changed native turn"));
+        if (this.turnId !== event.turnId) throw new Error("Paseo canonical admission changed native turn");
         return;
       }
       this.turnId = event.turnId;
@@ -156,22 +147,15 @@ export class PaseoTurn {
       else {
         this.assistantContiguous = false;
         const narration = timelineNarration(event.item, this.calls);
-        if (narration !== undefined) this.events.emit(narration);
+        if (narration !== undefined) this.outcome.events.emit(narration);
       }
-    } else if (event.type === "turn_completed") {
-      this.settled = true;
-      this.finish({
-        kind: "answered",
-        answer: this.answer,
-        historyId: this.turnId,
-      });
-    } else if (event.type === "turn_failed" || event.type === "turn_canceled") {
-      this.settled = true;
-      this.finish({ kind: "failed", diagnostic: event.type === "turn_failed" ? event.error : event.reason });
-    }
-    if (this.settled) {
-      this.terminal = true;
-      for (const message of this.messages) this.events.emit({ type: "assistant", text: message.text });
+    } else if (event.type === "turn_completed" || event.type === "turn_failed" || event.type === "turn_canceled") {
+      for (const message of this.messages) this.outcome.events.emit({ type: "assistant", text: message.text });
+      this.outcome.finish(
+        event.type === "turn_completed"
+          ? { kind: "answered", answer: this.answer, historyId: this.turnId }
+          : { kind: "failed", diagnostic: event.type === "turn_failed" ? event.error : event.reason },
+      );
     }
   }
 
@@ -193,10 +177,9 @@ export class PaseoTurn {
     }
   }
 
-  fail(error: unknown): void {
-    if (this.settled) return;
-    this.settled = true;
+  fail(error: unknown): boolean {
+    if (!this.outcome.fail(error)) return false;
     this.rejectAdmission(error);
-    this.rejectCompletion(error);
+    return true;
   }
 }

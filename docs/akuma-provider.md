@@ -26,8 +26,10 @@ without making that promise a closure precondition. A failed cancellation or
 client retirement remains visible independently of the Turn result.
 Native shutdown hooks finish before an owned session is disposed, and
 in-flight extension setup must finish before that retirement can prove closure.
-Turn completion does not substitute for this proof; cleanup failure remains visible. The Body
-signal is notification, never a custody key or proof. No pid, host, registry,
+Exact native terminal evidence settles the Turn without waiting for retirement.
+Cleanup cannot revise that outcome, and a failed or unproven retirement
+independently prevents ordinary Body completion. The Body signal is
+notification, never a custody key or proof. No pid, host, registry,
 or reconstructed OS identity crosses this boundary.
 
 An admitted Session has one native execution. It supplies provider narration and

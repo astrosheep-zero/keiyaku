@@ -1,21 +1,23 @@
 import { randomUUID } from "node:crypto";
+import spawn from "cross-spawn";
 import { abortable } from "../../abort.js";
-import type { Options, Query, SDKMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
+import type { Options, Query, SDKMessage, SDKUserMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import {
   AgentEventChannel,
   createProviderAttempt,
   launchPrompt,
   type AttemptCustody,
   type ProviderAdapter,
+  type ResumeCoordinate,
   type Session,
   type TurnResult,
 } from "../../provider.js";
 import { akumaExecutionEnvironment } from "../execution-environment.js";
 import { providerLifecycle } from "../lifecycle.js";
+import { providerTurn } from "../turn.js";
 import type { ProviderOptions } from "../../provider-recipe.js";
 import { emitClaudeMessage, type ClaudeObservationState } from "./events.js";
 import { claudeUserMessage, createClaudeInput, isClaudeTurnEnded, type ClaudeInput } from "./input.js";
-import type { ResumeCoordinate } from "../../provider.js";
 
 type ClaudeExecution = Readonly<{
   executable?: string;
@@ -103,127 +105,159 @@ async function forkClaude(
   return { session: { sessionId: forked.sessionId } };
 }
 
-type Observation = Readonly<{
-  admission: Promise<void>;
-  rejectAdmission(error: unknown): void;
-  completion: Promise<TurnResult>;
-}>;
+type ClaudeQueryEvidence = { nativeResult: boolean; stderr: string };
 
-function successfulResult(message: Extract<SDKMessage, { type: "result" }>, historyId?: string): TurnResult {
-  return {
-    kind: "answered",
-    answer: message.subtype === "success" ? message.result : "",
-    ...(historyId === undefined ? {} : { historyId }),
+function claudeSpawn(
+  options: Options,
+  custody: AttemptCustody,
+  evidence: ClaudeQueryEvidence,
+): NonNullable<Options["spawnClaudeCodeProcess"]> {
+  return (request) => {
+    const { command, args, cwd, env, signal } = request;
+    const custom = options.spawnClaudeCodeProcess;
+    const local =
+      custom === undefined ? spawn(command, args, { cwd, env, signal, stdio: "pipe", windowsHide: true }) : undefined;
+    // The piped stdio above supplies the streams required by the native hook.
+    const child = local === undefined ? custom!(request) : (local as SpawnedProcess);
+    let failure: Error | undefined;
+    let stderr = "";
+    child.on("error", (error) => {
+      if (evidence.nativeResult && (!signal.aborted || error.name !== "AbortError")) failure ??= error;
+      evidence.stderr = (evidence.stderr + error.message).slice(-4_000);
+    });
+    local?.stderr!.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr = (stderr + chunk).slice(-4_000);
+      evidence.stderr = (evidence.stderr + chunk).slice(-4_000);
+      options.stderr?.(chunk);
+    });
+    let departed = false;
+    let exitedAfterResult = false;
+    let forced = false;
+    const closed = new Promise<void>((resolve, reject) => {
+      const confirm = (code: number | null, exitSignal: NodeJS.Signals | null) => {
+        if (failure !== undefined) return reject(failure);
+        const expectedSignal = (exitSignal === "SIGKILL" && forced) || (exitSignal === "SIGTERM" && signal.aborted);
+        if (exitedAfterResult && code !== 0 && !expectedSignal) {
+          const status = code === null ? (exitSignal ?? "unknown status") : `code ${code}`;
+          return reject(new Error(`Claude process exited with ${status}${stderr.trim() ? `: ${stderr.trim()}` : ""}`));
+        }
+        resolve();
+      };
+      // Exit establishes order. For a local child, close additionally proves stdio retirement.
+      child.once("exit", (code, exitSignal) => {
+        departed = true;
+        exitedAfterResult = evidence.nativeResult;
+        if (local === undefined) confirm(code, exitSignal);
+      });
+      local?.once("close", confirm);
+    });
+    custody.own({
+      closed,
+      abort: () => closed, // Query owns the SDK's graceful shutdown and forwarded signal.
+      async forceDispose() {
+        if (!departed && child.exitCode === null && child.signalCode == null) forced = child.kill("SIGKILL");
+        await closed;
+      },
+    });
+    return child;
   };
 }
 
-type ConsumeClaudeContext = Readonly<{
-  query: Query;
-  input: ClaudeInput;
-  events: AgentEventChannel;
-  observation: ClaudeObservationState;
-  admit: () => boolean;
-  rejectAdmission: (error: unknown) => void;
-  settle: (result: TurnResult) => void;
-}>;
-
-type ConsumeClaudeState = {
-  admitted: boolean;
-  terminal: TurnResult | null;
-  historyId?: string;
-};
-
-function consumeClaudeMessage(context: ConsumeClaudeContext, state: ConsumeClaudeState, message: SDKMessage): void {
-  const { input, events, observation, admit, rejectAdmission, settle } = context;
-  if (state.terminal !== null) return;
-  if (message.type === "result") input.end();
-  if (!state.admitted && "session_id" in message && typeof message.session_id === "string" && admit()) {
-    state.admitted = true;
-    events.emit({ type: "session", coordinate: { sessionId: message.session_id } });
-  }
-  emitClaudeMessage(message, events, observation);
-  if (
-    message.type === "assistant" &&
-    message.parent_tool_use_id === null &&
-    typeof message.uuid === "string" &&
-    message.uuid.length > 0
-  )
-    state.historyId = message.uuid;
-  if (message.type !== "result") return;
-  state.terminal =
-    message.subtype === "success"
-      ? successfulResult(message, state.historyId)
-      : { kind: "failed", diagnostic: message.errors.join("; ") || message.subtype };
-  if (!state.admitted)
-    rejectAdmission(
-      new Error(
-        state.terminal.kind === "failed" ? state.terminal.diagnostic : "Claude query ended before session admission",
-      ),
-    );
-  events.end();
-  settle(state.terminal);
+function claudeResult(message: Extract<SDKMessage, { type: "result" }>, historyId?: string): TurnResult {
+  return message.subtype === "success"
+    ? { kind: "answered", answer: message.result, ...(historyId === undefined ? {} : { historyId }) }
+    : { kind: "failed", diagnostic: message.errors.join("; ") || message.subtype };
 }
 
-async function consumeClaudeQuery(context: ConsumeClaudeContext): Promise<void> {
-  const { query, input, events, rejectAdmission, settle } = context;
-  const state: ConsumeClaudeState = { admitted: false, terminal: null };
-  try {
-    for await (const message of query) consumeClaudeMessage(context, state, message);
-    if (state.terminal !== null) return;
-    input.end();
-    const diagnostic = "Claude query ended without a result";
-    if (!state.admitted) rejectAdmission(new Error(diagnostic));
-    settle({ kind: "failed", diagnostic });
-  } catch (error) {
-    if (state.terminal !== null) return;
-    input.fail(error);
-    const failure = error instanceof Error ? error : new Error(String(error));
-    if (!state.admitted) rejectAdmission(failure);
-    settle({ kind: "failed", diagnostic: failure.message });
-  } finally {
-    events.end();
-  }
-}
-
-function claudeTell(input: ClaudeInput, run: string): NonNullable<Session["tell"]> {
-  let submission = 0;
-  return async (tell) => {
-    if (input.closed) return { kind: "turn-ended" };
-    const fence = `claude:${run}:${++submission}`;
-    try {
-      await input.push(claudeUserMessage(tell.text));
-      return { kind: "accepted", fence };
-    } catch (error) {
-      if (isClaudeTurnEnded(error)) return { kind: "turn-ended" };
-      throw error;
-    }
-  };
-}
-
-function observeClaudeQuery(query: Query, input: ClaudeInput, events: AgentEventChannel): Observation {
+async function consumeClaudeQuery(
+  query: Query,
+  turn: ReturnType<typeof providerTurn>,
+  admit: () => void,
+  finish: (result?: TurnResult) => void,
+): Promise<void> {
   const observation: ClaudeObservationState = { tools: new Map() };
-  let admit!: () => boolean;
+  let admitted = false;
+  let historyId: string | undefined;
+  for await (const message of query) {
+    if (turn.terminal) continue;
+    if (!admitted && "session_id" in message && typeof message.session_id === "string") {
+      admitted = true;
+      turn.events.emit({ type: "session", coordinate: { sessionId: message.session_id } });
+      admit();
+    }
+    emitClaudeMessage(message, turn.events, observation);
+    if (
+      message.type === "assistant" &&
+      message.parent_tool_use_id === null &&
+      typeof message.uuid === "string" &&
+      message.uuid.length > 0
+    )
+      historyId = message.uuid;
+    if (message.type === "result") finish(claudeResult(message, historyId));
+  }
+  finish();
+}
+
+function ownClaudeQuery(
+  query: Query,
+  input: ClaudeInput,
+  turn: ReturnType<typeof providerTurn>,
+  execution: { abortController: AbortController; custody: AttemptCustody; evidence: ClaudeQueryEvidence },
+) {
+  const { abortController, custody, evidence } = execution;
+  let admit!: () => void;
   let rejectAdmission!: (error: unknown) => void;
-  let admissionOpen = true;
-  const admission = new Promise<void>((resolve, reject) => {
-    admit = () => {
-      if (!admissionOpen) return false;
-      admissionOpen = false;
-      resolve();
-      return true;
-    };
-    rejectAdmission = (error) => {
-      if (!admissionOpen) return;
-      admissionOpen = false;
-      reject(error);
-    };
+  const ready = new Promise<void>((resolve, reject) => {
+    admit = resolve;
+    rejectAdmission = reject;
   });
-  let settle!: (result: TurnResult) => void;
-  const completion = new Promise<TurnResult>((resolve) => {
-    settle = resolve;
+  let startRetirement!: () => void;
+  const retired = new Promise<void>((resolve) => {
+    startRetirement = resolve;
+  }).then(async () => {
+    const close = Promise.resolve().then(() => query.close?.());
+    const [request, consumer] = await Promise.allSettled([close, consuming]);
+    if (request.status === "rejected" && consumer.status === "rejected") {
+      throw new AggregateError([request.reason, consumer.reason], "Claude Query close and consumer failed");
+    }
+    if (request.status === "rejected") throw request.reason;
+    if (consumer.status === "rejected") throw consumer.reason;
   });
-  void consumeClaudeQuery({ query, input, events, observation, admit, rejectAdmission, settle });
-  return { admission, rejectAdmission, completion };
+  const retire = (): Promise<void> => {
+    startRetirement();
+    return retired;
+  };
+  const finish = (result?: TurnResult): void => {
+    const outcome = result ?? { kind: "failed", diagnostic: "Claude query ended without a result" };
+    if (!turn.finish(outcome)) return;
+    evidence.nativeResult = result !== undefined;
+    rejectAdmission(
+      new Error(outcome.kind === "failed" ? outcome.diagnostic : "Claude query ended before session admission"),
+    );
+    void retire();
+  };
+  const consuming = consumeClaudeQuery(query, turn, admit, finish).catch((error: unknown) => {
+    if (turn.terminal) {
+      const cancelled =
+        abortController.signal.aborted &&
+        (error === abortController.signal.reason || (error instanceof Error && error.name === "AbortError"));
+      if (!cancelled) throw error;
+      return;
+    }
+    const diagnostic = evidence.stderr.trim();
+    if (diagnostic) turn.events.emit({ type: "note", text: diagnostic });
+    input.fail(error);
+    if (turn.fail(error)) rejectAdmission(error);
+    void retire();
+  });
+  const abort = (): Promise<void> => {
+    abortController.abort(custody.signal.reason);
+    input.fail(custody.signal.reason);
+    if (turn.fail(custody.signal.reason)) rejectAdmission(custody.signal.reason);
+    return retire();
+  };
+  custody.own({ closed: retired, abort, forceDispose: abort });
+  return { ready, retire };
 }
 
 async function driveClaude(
@@ -232,56 +266,59 @@ async function driveClaude(
   drive: ClaudeDriveInput,
   custody: AttemptCustody,
 ): Promise<Session> {
-  if (drive.session.kind === "resume") claudeSessionId(drive.session.coordinate);
-  const signal = drive.signal ?? new AbortController().signal;
+  const { signal } = custody;
   signal.throwIfAborted();
   const sdk = await abortable(load(), signal);
   signal.throwIfAborted();
   const events = new AgentEventChannel();
   const input = createClaudeInput();
   const abortController = new AbortController();
+  const options = claudeQueryOptions(drive, execution, abortController);
   const run = randomUUID();
-  const launchAcknowledged = input.push(claudeUserMessage(launchPrompt(drive.body, drive.launchTells)));
-  const query = sdk.query({
-    prompt: input.iterable,
-    options: claudeQueryOptions(drive, execution, abortController),
-  });
-  const shutDown = (error: unknown): void => {
-    abortController.abort(error);
-    input.fail(error);
-    query.close();
-  };
-  let observed: Observation | undefined;
-  const abortSetup = () => {
-    shutDown(signal.reason);
-    observed?.rejectAdmission(signal.reason);
-  };
-  signal.addEventListener("abort", abortSetup, { once: true });
-  observed = observeClaudeQuery(query, input, events);
-  custody.own({
-    closed: observed.completion.then(() => undefined),
-    abort: async () => {
-      shutDown(new Error("Claude query aborted"));
-      await observed!.completion;
-    },
-    forceDispose: async () => {
-      shutDown(new Error("Claude query force-disposed"));
-      await observed!.completion;
-    },
-  });
-  if (signal.aborted) abortSetup();
+  let submission = 0;
+  const evidence: ClaudeQueryEvidence = { stderr: "", nativeResult: false };
+  const turn = providerTurn(events, input.end);
+  const launch = input.push(claudeUserMessage(launchPrompt(drive.body, drive.launchTells)));
+  void launch.catch(() => undefined);
+  let query: Query;
   try {
-    await Promise.all([launchAcknowledged, observed.admission]);
-    signal.throwIfAborted();
-  } finally {
-    signal.removeEventListener("abort", abortSetup);
+    query = sdk.query({
+      prompt: input.iterable,
+      options: {
+        ...options,
+        spawnClaudeCodeProcess: claudeSpawn(options, custody, evidence),
+      },
+    });
+  } catch (error) {
+    input.fail(error);
+    turn.fail(error);
+    throw error;
   }
-
+  const { ready, retire } = ownClaudeQuery(query, input, turn, { abortController, custody, evidence });
+  try {
+    await Promise.all([launch, ready]);
+    signal.throwIfAborted();
+  } catch (error) {
+    // Keep ownership open for native spawn/setup until Query retirement.
+    turn.fail(error);
+    await retire().catch(() => undefined);
+    throw error;
+  }
   return {
     admission: { fence: `claude:${run}:0` },
     events,
-    completion: observed.completion,
-    tell: claudeTell(input, run),
+    completion: turn.completion,
+    async tell(tell) {
+      if (turn.terminal || input.closed) return { kind: "turn-ended" };
+      const fence = `claude:${run}:${++submission}`;
+      try {
+        await input.push(claudeUserMessage(tell.text));
+        return { kind: "accepted", fence };
+      } catch (error) {
+        if (isClaudeTurnEnded(error)) return { kind: "turn-ended" };
+        throw error;
+      }
+    },
   };
 }
 

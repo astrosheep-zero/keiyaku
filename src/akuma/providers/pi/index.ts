@@ -29,6 +29,8 @@ import {
   type TellSubmission,
   type TurnResult,
 } from "../../provider.js";
+import { providerLifecycle } from "../lifecycle.js";
+import { providerTurn } from "../turn.js";
 import { piSessionModel, piTerminalFailure, translatePiEvent, type PiEventState } from "./events.js";
 
 export type PiSdk = Readonly<{
@@ -42,10 +44,6 @@ export type PiSdk = Readonly<{
 type PiThinkingLevel = NonNullable<CreateAgentSessionOptions["thinkingLevel"]>;
 const PI_THINKING_LEVELS = new Set<PiThinkingLevel>(["minimal", "low", "medium", "high", "xhigh", "max"]);
 const MODEL_PATTERN = /^[^/\s]+\/[^\s]+$/u;
-
-function diagnostic(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function admitPiOptions(options: ProviderOptions): ReturnType<ProviderAdapter["admitOptions"]> {
   if (options.network !== undefined)
@@ -107,12 +105,6 @@ type PiSessionSetup = Readonly<{
 }>;
 type PiNativeSession = PiCreatedSession["session"];
 type PiNativeMessage = Parameters<PiNativeSession["agent"]["steer"]>[0];
-type PiDriveState = {
-  terminalFailure: string | null;
-  aborting: boolean;
-  settled: boolean;
-};
-
 async function createPiSession(sdk: PiSdk, execution: ProviderExecution, input: PiDriveInput): Promise<PiSessionSetup> {
   if (execution.config !== undefined) {
     throw new KeiyakuError(
@@ -150,38 +142,6 @@ async function createPiSession(sdk: PiSdk, execution: ProviderExecution, input: 
   }
 }
 
-async function runPiPrompt(
-  native: PiNativeSession,
-  input: PiDriveInput,
-  events: PiEventState,
-  state: PiDriveState,
-  settle: (result: TurnResult) => void,
-): Promise<void> {
-  try {
-    await native.prompt(launchPrompt(input.body, input.launchTells, input.schemaJson));
-    let result: TurnResult;
-    if (state.aborting) result = { kind: "failed", diagnostic: "Pi session aborted" };
-    else if (state.terminalFailure !== null) result = { kind: "failed", diagnostic: state.terminalFailure };
-    else if (!events.assistantSeen)
-      result = { kind: "failed", diagnostic: "Pi completed without a native assistant answer" };
-    else {
-      const historyId = native.sessionManager.getLeafId();
-      result = {
-        kind: "answered",
-        answer: events.answer,
-        ...(historyId === null ? {} : { historyId }),
-      };
-    }
-    settle(result);
-  } catch (error) {
-    settle(
-      state.aborting
-        ? { kind: "failed", diagnostic: "Pi session aborted" }
-        : { kind: "failed", diagnostic: diagnostic(error) },
-    );
-  }
-}
-
 async function retirePiSession(native: PiNativeSession): Promise<void> {
   let failure: unknown;
   let unsubscribe: (() => void) | undefined;
@@ -212,129 +172,125 @@ async function drivePi(
   sdk: PiSdk,
   execution: ProviderExecution,
   input: PiDriveInput,
-  signal: AbortSignal,
-  custody?: AttemptCustody,
+  custody: AttemptCustody,
 ): Promise<Session> {
+  const { signal } = custody;
   const { created, extensionErrors } = await createPiSession(sdk, execution, input);
-  const native = created.session;
-  let settleRetired!: () => void;
-  let failRetired!: (error: unknown) => void;
-  const closed = new Promise<void>((resolve, reject) => {
-    settleRetired = resolve;
-    failRetired = reject;
-  });
+  const { session: native } = created;
+  const { agent } = native;
   const events = new AgentEventChannel();
   const eventState: PiEventState = { answer: "", assistantSeen: false, tools: new Map() };
-  const state: PiDriveState = {
-    terminalFailure: null,
-    aborting: false,
-    settled: false,
-  };
   const tells = tellRegistry<PiNativeMessage>((id) => `${native.sessionId}:${id}`);
-  let settleCompletion!: (result: TurnResult) => void;
-  const completion = new Promise<TurnResult>((resolve) => {
-    settleCompletion = resolve;
-  });
-  const agent = native.agent;
-  // Tells are harness input, not interactive typing: deliver every queued one at
-  // the next boundary regardless of the user's interactive Pi setting.
-  agent.steeringMode = "all";
-  let unsubscribeAgent: (() => void) | undefined;
-  let unsubscribe: (() => void) | undefined;
+  const subscriptions: Array<() => void> = [];
+  let terminalFailure: string | null = null;
+  let aborting: Promise<void> | undefined;
+  let cleanupFailure: unknown;
   let binding: Promise<void> | undefined;
   let prompting: Promise<void> | undefined;
-  const settle = (result: TurnResult): Promise<void> => {
-    if (state.settled) return closed;
-    state.settled = true;
+  let retainRetirement!: (operation: Promise<void>) => void;
+  const retired = new Promise<void>((resolve) => {
+    retainRetirement = resolve;
+  });
+  const turn = providerTurn(events, () => {
     tells.end();
-    let failure: unknown;
-    try {
-      unsubscribe?.();
-    } catch (error) {
-      failure = error;
-    }
-    try {
-      unsubscribeAgent?.();
-    } catch (error) {
-      failure ??= error;
-    }
-    events.end();
-    settleCompletion(result);
-    void (async () => {
-      // Binding can create extension resources after cancellation. Shutdown must
-      // run after that work, while its contexts are still valid.
-      await binding?.catch(() => undefined);
+    for (const unsubscribe of subscriptions) {
       try {
-        await retirePiSession(native);
+        unsubscribe();
       } catch (error) {
-        failure ??= error;
+        cleanupFailure ??= error;
       }
-      // dispose() only requests abort. Owned tool/prompt work must actually
-      // finish before this attempt can certify retirement. The prompt callback
-      // initiates settlement without awaiting closed, so this cannot await itself.
-      await prompting;
-      if (failure !== undefined) throw failure;
-    })().then(settleRetired, failRetired);
-    return closed;
-  };
-  const abort = async (): Promise<void> => {
-    if (state.settled) return;
-    state.aborting = true;
-    try {
-      await native.abort();
-    } catch {
-      /* prompt settlement still proves local cleanup */
     }
-    await settle({ kind: "failed", diagnostic: "Pi session aborted" });
+  });
+  const retire = async (): Promise<void> => {
+    // Binding may acquire extension resources; dispose only requests abort of
+    // outstanding tool work. Both binding and the prompt itself must retire.
+    await binding?.catch(() => undefined);
+    try {
+      await retirePiSession(native);
+    } finally {
+      await prompting;
+    }
+    await aborting;
+    if (cleanupFailure !== undefined) throw cleanupFailure;
   };
-  const forceDispose = async (): Promise<void> => {
-    if (!state.settled) state.aborting = true;
-    await settle({ kind: "failed", diagnostic: "Pi session force-disposed" });
+  const finish = (result: TurnResult): void => {
+    if (turn.finish(result)) retainRetirement(retire());
   };
-  custody?.own({ closed, abort, forceDispose });
-  try {
-    unsubscribeAgent = agent.subscribe((event) => {
-      if (event.type === "message_end") tells.accept(event.message);
-    });
-    unsubscribe = native.subscribe((event) => {
-      if (event.type === "agent_end" && !event.willRetry) {
-        state.terminalFailure = piTerminalFailure(event.messages);
+  const fail = (error: unknown): void => {
+    if (turn.fail(error)) retainRetirement(retire());
+  };
+  const aborted: TurnResult = { kind: "failed", diagnostic: "Pi session aborted" };
+  custody.own({
+    closed: retired,
+    async abort() {
+      if (!turn.terminal) {
+        aborting = Promise.resolve().then(() => native.abort());
+        await aborting.catch(() => undefined);
+        finish(aborted);
       }
-      for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
+      await retired;
+    },
+    forceDispose() {
+      finish({ kind: "failed", diagnostic: "Pi session force-disposed" });
+      return retired;
+    },
+  });
+  try {
+    // Deliver every queued Tell at the next native boundary, not one per Turn.
+    agent.steeringMode = "all";
+    subscriptions.push(
+      agent.subscribe((event) => {
+        if (!turn.terminal && event.type === "message_end") tells.accept(event.message);
+      }),
+    );
+    subscriptions.push(
+      native.subscribe((event) => {
+        if (turn.terminal) return;
+        if (event.type === "agent_end" && !event.willRetry) terminalFailure = piTerminalFailure(event.messages);
+        for (const translated of translatePiEvent(event, eventState)) events.emit(translated);
+      }),
+    );
+    signal.throwIfAborted();
+    if (native.sessionFile === undefined || native.sessionFile.trim().length === 0)
+      throw new Error("Pi session admitted without sessionFile");
+    binding = Promise.resolve().then(() => {
+      signal.throwIfAborted();
+      return native.bindExtensions({});
     });
+    await abortable(binding, signal);
+    signal.throwIfAborted();
+    events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
+    for (const failure of extensionErrors) {
+      events.emit(noteEvent(`Pi extension load failed: ${failure.path}: ${failure.error}`));
+    }
+    const sessionModel = piSessionModel(native.model);
+    if (sessionModel !== undefined) events.emit(modelEvent(sessionModel));
   } catch (error) {
-    await settle({ kind: "failed", diagnostic: diagnostic(error) });
+    fail(error);
     throw error;
   }
-  if (signal.aborted) {
-    await settle({ kind: "failed", diagnostic: "Pi session aborted" });
-    signal.throwIfAborted();
-  }
-  if (native.sessionFile === undefined || native.sessionFile.trim().length === 0) {
-    await settle({ kind: "failed", diagnostic: "Pi session admitted without sessionFile" });
-    throw new Error("Pi session admitted without sessionFile");
-  }
-  binding = Promise.resolve().then(() => native.bindExtensions({}));
-  await abortable(binding, signal);
-  signal.throwIfAborted();
-  events.emit({ type: "session", coordinate: { sessionFile: native.sessionFile, sessionId: native.sessionId } });
-  for (const failure of extensionErrors) {
-    events.emit(noteEvent(`Pi extension load failed: ${failure.path}: ${failure.error}`));
-  }
-  const sessionModel = piSessionModel(native.model);
-  if (sessionModel !== undefined) events.emit(modelEvent(sessionModel));
   prompting = Promise.resolve().then(async () => {
-    if (signal.aborted || state.settled) return;
-    await runPiPrompt(native, input, eventState, state, (result) => {
-      void settle(result).catch(() => undefined);
-    });
+    if (signal.aborted || turn.terminal) return;
+    try {
+      await native.prompt(launchPrompt(input.body, input.launchTells, input.schemaJson));
+      if (turn.terminal) return;
+      if (aborting) return finish(aborted);
+      if (terminalFailure !== null) return finish({ kind: "failed", diagnostic: terminalFailure });
+      if (!eventState.assistantSeen)
+        return finish({ kind: "failed", diagnostic: "Pi completed without a native assistant answer" });
+      const historyId = native.sessionManager.getLeafId();
+      finish({ kind: "answered", answer: eventState.answer, ...(historyId === null ? {} : { historyId }) });
+    } catch (error) {
+      if (aborting) finish(aborted);
+      else fail(error);
+    }
   });
   return {
     admission: { fence: native.sessionId },
     events,
-    completion,
+    completion: turn.completion,
     tell: (tell: Readonly<{ id: string; text: string }>): Promise<TellSubmission> => {
-      if (state.settled) return Promise.resolve({ kind: "turn-ended" });
+      if (turn.terminal) return Promise.resolve({ kind: "turn-ended" });
       const message: PiNativeMessage = {
         role: "user",
         content: [{ type: "text", text: tell.text }],
@@ -385,20 +341,15 @@ export function createPiProvider(
   if (execution.env !== undefined && Object.keys(execution.env).length > 0) {
     throw new KeiyakuError("invalid-input", "env injection not supported for provider pi");
   }
-  const drive = async (input: PiDriveInput, custody: AttemptCustody): Promise<Session> => {
-    custody.signal.throwIfAborted();
-    const sdk = await abortable(load(), custody.signal);
-    custody.signal.throwIfAborted();
-    return await drivePi(sdk, execution, { ...input, signal: custody.signal }, custody.signal, custody);
-  };
   return {
     admitOptions: admitPiOptions,
-    start: (input) => createProviderAttempt(input.signal, async (custody) => await drive(input, custody)),
-    resume: (input) =>
-      createProviderAttempt(input.signal, async (custody) => {
-        piSessionFile(input.session.coordinate);
-        return await drive(input, custody);
-      }),
+    ...providerLifecycle(async (input, custody) => {
+      if (input.session.kind === "resume") piSessionFile(input.session.coordinate);
+      custody.signal.throwIfAborted();
+      const sdk = await abortable(load(), custody.signal);
+      custody.signal.throwIfAborted();
+      return await drivePi(sdk, execution, input, custody);
+    }),
     fork: (input) =>
       createProviderAttempt(new AbortController().signal, async () => {
         piSessionFile(input.session);
