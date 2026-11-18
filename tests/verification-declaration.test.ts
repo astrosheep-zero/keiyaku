@@ -62,6 +62,30 @@ test("document requirements preserve independent declarations through reorder, a
   ]);
 });
 
+test("an unrelated amendment preserves Verification bytes, segment and requirement identities", () => {
+  const current = decodeContractDocument(
+    renderContractBody(body).replace("## Verification\n\n", "## Verification\r\n\r\n\r\n"),
+  );
+  const result = prepareAmendDocument("## Append: Objective\nKeep earlier evidence.\n")(current);
+  const amended = decodeContractDocument(result.document);
+  const verificationStart = current.document.bytes.indexOf("## Verification");
+  assert.equal(
+    result.document.slice(result.document.indexOf("## Verification")),
+    current.document.bytes.slice(verificationStart),
+  );
+  assert.notEqual(amended.document.key, current.document.key);
+  assert.equal(amended.verificationSegment, current.verificationSegment);
+  assert.deepEqual(amended.verification, current.verification);
+  assert.deepEqual(
+    amended.segments.filter((segment) => current.segments.includes(segment)),
+    current.segments.filter((_, index) => index !== 1),
+  );
+  assert.deepEqual(
+    contractTerms(amended, [gate("verified")], []).requirements,
+    contractTerms(current, [gate("verified")], []).requirements,
+  );
+});
+
 test("exact duplicate declarations collapse obligations without losing their invocation indexes", () => {
   const decoded = document({ verification: [first, second, first] });
   assert.deepEqual(contractTerms(decoded, [gate("verified")], []).requirements.verified, [

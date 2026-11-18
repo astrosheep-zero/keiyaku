@@ -123,7 +123,7 @@ test("amend requires a timeout for new Verification declarations", () => {
 });
 
 test("amend keeps criteria and extension collections coherent across ordered mutations", () => {
-  const indexedBody: ContractBodyValue = {
+  const collectionBody: ContractBodyValue = {
     ...body,
     extensions: [...body.extensions, { title: "Archive", content: "archive\n" }],
   };
@@ -161,7 +161,7 @@ test("amend keeps criteria and extension collections coherent across ordered mut
       "## Remove: Extra",
       "",
     ].join("\n"),
-    indexedBody,
+    collectionBody,
   );
 
   assert.deepEqual(
@@ -178,11 +178,64 @@ test("amend keeps criteria and extension collections coherent across ordered mut
   );
 });
 
+test("extension removal and re-addition put the new section after surviving extensions", () => {
+  const current = decodeContractDocument(
+    renderContractBody({ ...body, extensions: [...body.extensions, { title: "Archive", content: "kept\n" }] }),
+  );
+  const before = structuredClone(current);
+  Object.freeze(current.criteria);
+  current.extensions.forEach(Object.freeze);
+  Object.freeze(current.extensions);
+  Object.freeze(current);
+  const result = prepareAmendDocument("## Remove: Notes\n\n## Add: Notes\nnew\n\n## Append: Notes\nlast\n")(current);
+  assert.deepEqual(
+    decodeContractDocument(result.document).extensions.map(({ title, content }) => ({
+      title,
+      content: content.trim(),
+    })),
+    [
+      { title: "Archive", content: "kept" },
+      { title: "Notes", content: "new\n\nlast" },
+    ],
+  );
+  assert.deepEqual([...result.changedSections], ["notes"]);
+  assert.deepEqual(current, before);
+});
+
+test("extensions require exact authored targets after normalized lookup, including bare Set", () => {
+  for (const kind of ["Update", "Replace", "Append", "Remove", "Add", "Set"]) {
+    const heading = kind === "Set" ? "notes" : `${kind}: notes`;
+    const content = kind === "Remove" ? "" : "changed\n";
+    assert.throws(() => applyAmendOperations(`## ${heading}\n${content}`, body), {
+      name: "KeiyakuError",
+      category: "invalid-input",
+      message: kind === "Add" || kind === "Set" ? "extension already exists 'notes'" : "unknown extension 'notes'",
+    });
+  }
+});
+
+test("failed ordered application leaves the supplied document and its collections intact", () => {
+  const current = decodeContractDocument(renderContractBody(body));
+  const before = structuredClone(current);
+  current.criteria.forEach(Object.freeze);
+  current.extensions.forEach(Object.freeze);
+  Object.freeze(current.criteria);
+  Object.freeze(current.extensions);
+  Object.freeze(current);
+  const apply = prepareAmendDocument(
+    "## Update: Notes\nchanged\n\n## Add: Criteria\n### Added\nadded\n\n## Remove: Notes\n\n## Append: Criteria\n### ADDED\ncollision\n",
+  );
+  assert.throws(() => apply(current), /Append Criteria targets an existing criterion/);
+  assert.deepEqual(current, before);
+});
+
 test("amend has no criterion-level remove operation", () => {
   assert.throws(
     () => applyAmendOperations("## Remove: Criterion Keep\n", body),
     (error: unknown) =>
-      error instanceof KeiyakuError && error.category === "invalid-input" && error.message === "unknown extension 'Criterion Keep'",
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message === "unknown extension 'Criterion Keep'",
   );
 });
 
@@ -202,7 +255,9 @@ test("amend rejects a normalized extension-title collision at the operation boun
   assert.throws(
     () => applyAmendOperations("## Add: notes\nsecond notes\n", body),
     (error: unknown) =>
-      error instanceof KeiyakuError && error.category === "invalid-input" && error.message === "extension already exists 'notes'",
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message === "extension already exists 'notes'",
   );
 });
 
@@ -210,7 +265,9 @@ test("explicit Replace still refuses a missing extension", () => {
   assert.throws(
     () => applyAmendOperations("## Replace: Fresh notes\nnew extension\n", body),
     (error: unknown) =>
-      error instanceof KeiyakuError && error.category === "invalid-input" && error.message === "unknown extension 'Fresh notes'",
+      error instanceof KeiyakuError &&
+      error.category === "invalid-input" &&
+      error.message === "unknown extension 'Fresh notes'",
   );
 });
 
@@ -256,6 +313,9 @@ test("prepared amendments refuse duplicates before application and preserve unto
     category: "invalid-input",
     message: "duplicate amend operation 'Append:Context'",
   });
+  assert.doesNotThrow(() =>
+    prepareAmendDocument("# Optional amendment title\n\n## Append: Context\nfirst\n\n## Append: context\nsecond\n"),
+  );
   const current = decodeContractDocument(renderContractBody(body).replace("current\n", "current  \r\n"));
   assert.match(current.document.bytes, /current  \r\n/u);
   const prepared = prepareAmendDocument("## Append: Criteria\n### Added\nadded\n");

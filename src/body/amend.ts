@@ -1,6 +1,5 @@
 import { KeiyakuError } from "../errors.js";
-import type { ContractBody, ContractCriterion, ContractExtension, DecodedContractDocument } from "./types.js";
-import type { VerificationDeclaration } from "../verification/declaration.js";
+import type { ContractBody, DecodedContractDocument } from "./types.js";
 import { decodeVerificationDeclarations, VerificationDocumentError } from "./verification.js";
 import { parseToAST } from "../markdown/parse.js";
 import { indexDocument, indexedHeadings, normalizeTitle, sectionContent } from "../markdown/query.js";
@@ -14,20 +13,15 @@ import { decodeCriteria } from "./criteria.js";
 type Operation = Readonly<{
   kind: "Add" | "Update" | "Replace" | "Append" | "Remove" | "Set";
   target: string;
+  name: ReturnType<typeof contractSectionName>;
+  normalized: string;
   section: SectionNode;
 }>;
 
-type MutableBody = {
-  title: string;
-  context: string;
-  objective: string;
-  design: string;
-  region: readonly string[];
-  criteria: ContractCriterion[];
-  verification: readonly VerificationDeclaration[];
-  extensions: Array<ContractExtension | undefined>;
-  criterionIndexes: Map<string, number>;
-  extensionIndexes: Map<string, number>;
+type WorkingBody = {
+  -readonly [Key in keyof ContractBody]: Key extends "criteria" | "extensions"
+    ? Array<ContractBody[Key][number]>
+    : ContractBody[Key];
 };
 
 function refusal(message: string): never {
@@ -46,9 +40,14 @@ function operationSections(document: DocumentNode): readonly Operation[] {
   return sections(document).map((section) => {
     const title = section.title.trim();
     const match = /^(Add|Update|Replace|Append|Remove):[ ]+(.+)$/.exec(title);
-    return match
-      ? { kind: match[1] as Operation["kind"], target: match[2]!.trim(), section }
-      : { kind: "Set", target: title, section };
+    const target = match ? match[2]!.trim() : title;
+    return {
+      kind: match ? (match[1] as Operation["kind"]) : "Set",
+      target,
+      name: contractSectionName(target),
+      normalized: normalizeTitle(target),
+      section,
+    };
   });
 }
 
@@ -58,7 +57,7 @@ function prose(document: DocumentNode, section: SectionNode, label: string): str
   return value;
 }
 
-function verification(document: DocumentNode, section: SectionNode): readonly VerificationDeclaration[] {
+function verification(document: DocumentNode, section: SectionNode): ContractBody["verification"] {
   try {
     return decodeVerificationDeclarations(document, section, { requireTimeout: true });
   } catch (error) {
@@ -67,183 +66,30 @@ function verification(document: DocumentNode, section: SectionNode): readonly Ve
   }
 }
 
-function cloneBody(body: ContractBody): MutableBody {
-  const criteria = body.criteria.map((criterion) => ({ ...criterion }));
-  const extensions = body.extensions.map((extension) => ({ ...extension }));
-  const criterionIndexes = new Map<string, number>();
-  criteria.forEach((criterion, index) => {
-    const key = normalizeTitle(criterion.title);
-    if (!criterionIndexes.has(key)) criterionIndexes.set(key, index);
-  });
-  const extensionIndexes = new Map<string, number>();
-  extensions.forEach((extension, index) => {
-    const key = normalizeTitle(extension.title);
-    if (!extensionIndexes.has(key)) extensionIndexes.set(key, index);
-  });
-  return {
-    title: body.title,
-    context: body.context,
-    objective: body.objective,
-    design: body.design,
-    region: [...body.region],
-    criteria,
-    verification: body.verification.map((declaration) => ({ ...declaration })),
-    extensions,
-    criterionIndexes,
-    extensionIndexes,
-  };
-}
-
-function completeBody(body: MutableBody): ContractBody {
-  return {
-    title: body.title,
-    context: body.context,
-    objective: body.objective,
-    design: body.design,
-    region: body.region,
-    criteria: body.criteria,
-    verification: body.verification,
-    extensions: body.extensions.filter((extension): extension is ContractExtension => extension !== undefined),
-  };
-}
-
-function extensionIndex(body: MutableBody, target: string): number {
-  const index = body.extensionIndexes.get(normalizeTitle(target));
-  return index !== undefined && body.extensions[index]?.title === target ? index : -1;
-}
-
-function criterionIndex(body: MutableBody, target: string): number {
-  const key = normalizeTitle(target);
-  return body.criterionIndexes.get(key) ?? -1;
-}
-
 function appendText(current: string, addition: string): string {
   return `${current.trimEnd()}\n\n${addition.trim()}\n`;
 }
 
-function requireEmpty(document: DocumentNode, section: SectionNode): void {
-  if (sectionContent(document, section).trim().length > 0) refusal("Remove operation must not have a body");
-}
-
-function applyRemove(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  requireEmpty(document, operation.section);
-  const index = extensionIndex(body, operation.target);
-  if (index < 0) refusal(`unknown extension '${operation.target}'`);
-  body.extensions[index] = undefined;
-  body.extensionIndexes.delete(normalizeTitle(operation.target));
-}
-
-function applyUpdate(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  const index = extensionIndex(body, operation.target);
-  if (index < 0) refusal(`unknown extension '${operation.target}'`);
-  const extension = body.extensions[index]!;
-  body.extensions[index] = { ...extension, content: prose(document, operation.section, "extension") };
-}
-
-function addedCriteria(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  const added = decodeCriteria(document, operation.section, "amend");
-  if (added.some((candidate) => criterionIndex(body, candidate.title) >= 0)) {
-    refusal(`${operation.kind} Criteria targets an existing criterion`);
-  }
-  for (const criterion of added) {
-    const index = body.criteria.length;
-    body.criteria.push(criterion);
-    body.criterionIndexes.set(normalizeTitle(criterion.title), index);
-  }
-}
-
-function applyAdd(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  const target = contractSectionName(operation.target);
-  if (target === "criteria") {
-    addedCriteria(body, operation, document);
+function applyExtension(body: WorkingBody, operation: Operation, document: DocumentNode): void {
+  const { kind, target, normalized, section } = operation;
+  const index = body.extensions.findIndex((entry) => normalizeTitle(entry.title) === normalized);
+  const extension = body.extensions[index];
+  if (kind === "Add" || (kind === "Set" && extension?.title !== target)) {
+    if (RESERVED_SECTIONS.has(normalized)) refusal(`${normalized} is not a contract Markdown section`);
+    if (extension !== undefined) refusal(`extension already exists '${target}'`);
+    body.extensions.push({ title: target, content: prose(document, section, "extension") });
     return;
   }
-  if (target !== null) refusal(`Add does not support ${operation.target}`);
-  const normalized = normalizeTitle(operation.target);
-  if (RESERVED_SECTIONS.has(normalized)) refusal(`${normalized} is not a contract Markdown section`);
-  if (body.extensionIndexes.has(normalized)) refusal(`extension already exists '${operation.target}'`);
-  const index = body.extensions.length;
-  body.extensions.push({ title: operation.target, content: prose(document, operation.section, "extension") });
-  body.extensionIndexes.set(normalized, index);
-}
-
-function applyAppend(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  const target = contractSectionName(operation.target);
-  if (target === "criteria") {
-    addedCriteria(body, operation, document);
+  if (extension === undefined || extension.title !== target) refusal(`unknown extension '${target}'`);
+  if (kind === "Remove") {
+    body.extensions.splice(index, 1);
     return;
   }
-  if (target === "context" || target === "objective" || target === "design") {
-    body[target] = appendText(body[target], prose(document, operation.section, operation.target));
-    return;
-  }
-  if (target !== null) refusal(`Append does not support ${operation.target}`);
-  const index = extensionIndex(body, operation.target);
-  if (index < 0) refusal(`unknown extension '${operation.target}'`);
-  const extension = body.extensions[index]!;
+  const content = prose(document, section, "extension");
   body.extensions[index] = {
     ...extension,
-    content: appendText(extension.content, prose(document, operation.section, "extension")),
+    content: kind === "Append" ? appendText(extension.content, content) : content,
   };
-}
-
-function applyReplace(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  const target = contractSectionName(operation.target);
-  if (target === "verification") {
-    body.verification = verification(document, operation.section);
-    return;
-  }
-  if (target === "context" || target === "objective" || target === "design") {
-    body[target] = prose(document, operation.section, operation.target);
-    return;
-  }
-  if (target === "region") {
-    body.region = decodeRegionOrRefusal(document, operation.section);
-    return;
-  }
-  if (target === "criteria") {
-    const replacement = decodeCriteria(document, operation.section, "amend");
-    body.criteria = [...replacement];
-    body.criterionIndexes = new Map(replacement.map((criterion, index) => [normalizeTitle(criterion.title), index]));
-    return;
-  }
-  if (target !== null) refusal(`Replace does not support ${operation.target}`);
-  applyUpdate(body, operation, document);
-}
-
-function applySet(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  if (contractSectionName(operation.target) !== null || extensionIndex(body, operation.target) >= 0) {
-    applyReplace(body, operation, document);
-    return;
-  }
-  applyAdd(body, operation, document);
-}
-
-function applyOperation(body: MutableBody, operation: Operation, document: DocumentNode): void {
-  switch (operation.kind) {
-    case "Add":
-      applyAdd(body, operation, document);
-      return;
-    case "Update":
-      applyUpdate(body, operation, document);
-      return;
-    case "Replace":
-      applyReplace(body, operation, document);
-      return;
-    case "Append":
-      applyAppend(body, operation, document);
-      return;
-    case "Remove":
-      applyRemove(body, operation, document);
-      return;
-    case "Set":
-      applySet(body, operation, document);
-      return;
-  }
-}
-
-function operationKey(operation: Operation): string {
-  return `${operation.kind}:${operation.target}`;
 }
 
 function apply(
@@ -251,13 +97,45 @@ function apply(
   operations: readonly Operation[],
   current: ContractBody,
 ): Readonly<{ body: ContractBody; changed: ReadonlySet<string> }> {
+  const body: WorkingBody = { ...current, criteria: [...current.criteria], extensions: [...current.extensions] };
   const changed = new Set<string>();
-  const body = cloneBody(current);
   for (const operation of operations) {
-    changed.add(normalizeTitle(operation.target));
-    applyOperation(body, operation, document);
+    const { kind, target, name, normalized, section } = operation;
+    if (kind === "Remove" && sectionContent(document, section).trim().length > 0)
+      refusal("Remove operation must not have a body");
+    changed.add(normalized);
+    if (name === null) {
+      applyExtension(body, operation, document);
+      continue;
+    }
+    if (kind === "Update" || kind === "Remove") refusal(`unknown extension '${target}'`);
+    if (kind === "Add" && name !== "criteria") refusal(`Add does not support ${target}`);
+    if (name === "criteria") {
+      const criteria = decodeCriteria(document, section, "amend");
+      if (kind === "Replace" || kind === "Set") {
+        body.criteria = [...criteria];
+        continue;
+      }
+      for (const criterion of criteria) {
+        const title = normalizeTitle(criterion.title);
+        if (body.criteria.some((entry) => normalizeTitle(entry.title) === title))
+          refusal(`${kind} Criteria targets an existing criterion`);
+        body.criteria.push(criterion);
+      }
+    } else if (name === "region" || name === "verification") {
+      if (kind === "Append") refusal(`Append does not support ${target}`);
+      if (name === "region") body.region = decodeRegionOrRefusal(document, section);
+      else body.verification = verification(document, section);
+    } else {
+      const content = prose(document, section, target);
+      body[name] = kind === "Append" ? appendText(body[name], content) : content;
+    }
   }
-  return { body: completeBody(body), changed };
+  return { body, changed };
+}
+
+function operationKey(operation: Operation): string {
+  return `${operation.kind}:${operation.target}`;
 }
 
 /** Caller syntax is decoded before any repository observation; current-dependent application stays pure. */
