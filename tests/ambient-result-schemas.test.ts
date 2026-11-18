@@ -130,7 +130,7 @@ test("Kanshi schemas cover live Contract, Debt, Akuma, Alias, region and absent 
   const world = await WorldValue.at(repository.path);
   const bound = await Keis.of(repo).bind({
     target: "main",
-    gates: [],
+    gates: ["reviewed"],
     terms: contractMarkdown("Wire contract", {
       Context: "context",
       Objective: "observe",
@@ -159,7 +159,12 @@ test("Kanshi schemas cover live Contract, Debt, Akuma, Alias, region and absent 
   const report = await Kanshi.of({ world, repo }).board();
   assertWireRoundTrip(resultSchema, report);
   assertWireRoundTrip(reportSchema, report);
-  assertWireRoundTrip(contractReportSchema, await Kanshi.of({ world, repo }).contract(bound.contractId));
+  const selected = await Kanshi.of({ world, repo }).contract(bound.contractId);
+  assertWireRoundTrip(contractReportSchema, selected);
+  const native = await Keis.of(repo).observe({ id: bound.contractId });
+  assert.ok(selected.kind === "contract" && native.kind === "present");
+  assert.ok(native.row.gates?.length);
+  assert.deepEqual(selected.gates, native.row.gates);
   assertWireRoundTrip(observationSchema, await observeComposite({ world, repo }));
   const declarations = [{ id: bound.contractId, patterns: ["src/**"] }];
   assertWireRoundTrip(

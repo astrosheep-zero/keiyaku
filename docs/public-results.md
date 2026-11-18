@@ -65,7 +65,10 @@ than validators or a schema implementation. Transports consuming untrusted wire
 values own their local structural admission without acquiring product authority.
 Trusted local results are not parsed again. Shared semantic declarations remain
 shared in composed answers rather than expanding a separate vocabulary for each
-use. Core does not depend on a schema implementation. The nearest
+use. Addressed Contract status preserves the native gate judgment and complete
+current evidence for each requirement, including its stable identity. A current
+Verification position is additional display information, not evidence identity.
+Core does not depend on a schema implementation. The nearest
 schema-using owner projecting a core fact owns its declaration; shared
 declarations live below their consumers without cycles. Caller values are
 validated once at their Library boundary. Invocation discovery describes directly

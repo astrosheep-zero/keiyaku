@@ -331,8 +331,10 @@ export const KEIYAKU_ARCHITECTURE_POLICY = {
         runtime("protocol/result-leaves.ts", [
           "contractTargetSchema",
           "gateCurrentSchema",
+          "gateReportSchema",
           "gateSchema",
           "gateStaleReasonSchema",
+          "requirementReportSchema",
         ]),
         any("verification/declaration.ts", ["verificationRequirement"]),
         any("workspace-place.ts"),

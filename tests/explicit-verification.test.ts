@@ -5,7 +5,8 @@ import test from "node:test";
 import { Keis, Keiyaku, KeiyakuError, Repo, Settings } from "../src/index.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
-import { assertWireConformance } from "./support/schema-parity.js";
+import { assertWireConformance, assertWireRoundTrip } from "./support/schema-parity.js";
+import { contractObservationSchema } from "../src/protocol/read/status.js";
 import { InvocationAccumulator } from "../src/library/invocation.js";
 import { project } from "../src/library/outcome.js";
 import { gateReports } from "../src/core/facts/gate.js";
@@ -16,9 +17,8 @@ import { accepted, commitCandidate, document, present, repositoryWithMain } from
 
 const verifyNormalOutcomeSchema = Keiyaku.verbs.verify.normal;
 
-function declarations(scripts: readonly string[]): string {
-  return document() + "\n## Verification\n\n" +
-    scripts.map((script) => `\`\`\`bash timeout=1m\n${script}\n\`\`\``).join("\n\n") + "\n";
+function verificationFences(scripts: readonly string[]): string {
+  return scripts.map((script) => `\`\`\`bash timeout=1m\n${script}\n\`\`\``).join("\n\n") + "\n";
 }
 
 async function fixture(scripts: readonly string[], gates = ["reviewed", "verified"], mode?: "optimistic" | "strict") {
@@ -29,7 +29,7 @@ async function fixture(scripts: readonly string[], gates = ["reviewed", "verifie
   }
   const settings = mode === undefined ? undefined : await Settings.load({ cwd: repository.path, home: join(repository.path, ".git", "home") });
   const contract = accepted(await Keis.of(await Repo.at({ path: repository.path }), settings === undefined ? undefined : { settings }).bind({
-    terms: declarations(scripts), gates, target: "refs/heads/main",
+    terms: `${document()}\n## Verification\n\n${verificationFences(scripts)}`, gates, target: "refs/heads/main",
   })).kei;
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), present(await contract.state()).id);
   commitCandidate(repository, worktree);
@@ -213,19 +213,22 @@ test("strict currency keeps prior checks tied to their tested snapshot after tar
   repository.run(["commit", "--quiet", "-m", "advance target"]);
   const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Verification review passed" }));
   assert.ok(reviewed.placement?.kind === "gates-unsatisfied");
-  const gate = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
-  assert.equal(gate.current.kind, "stale");
   const currentSnapshot = present(await contract.state()).currentIntegration!.snapshot;
   const reason = { kind: "snapshot-changed", previousSnapshot: original.snapshot, currentSnapshot };
-  assert.deepEqual(gate.current, { kind: "stale", priorVerdict: "satisfied", reason });
   assert.ok(original.checks.every((check) => check.kind === "terminal" && check.verdict === "satisfied"));
   assert.deepEqual(reviewed.placement.unmet.map((problem) => problem.state === "stale" ? problem.reason : undefined), [reason, reason]);
   const receipt = renderAccepted("review", reviewed, { columns: 400, color: false }, { verdict: "satisfied" });
   assert.ok(receipt.includes(`stale  snapshot changed ${original.snapshot.slice(0, 7)} -> ${currentSnapshot.slice(0, 7)}`));
   const detail = await Keis.of(await Repo.at({ path: repository.path })).observe({ id: reviewed.contractId });
+  assertWireRoundTrip(contractObservationSchema, detail);
   assert.ok(detail.kind === "present");
-  assert.deepEqual(detail.row.gates?.find(({ gate }) => gate === "verified")?.requirements.map(({ current }) => current),
-    [{ kind: "stale", reason }, { kind: "stale", reason }]);
+  const stale = { kind: "stale", priorVerdict: "satisfied", reason };
+  assert.deepEqual(detail.row.gates?.find(({ gate }) => gate === "verified"), {
+    gate: "verified",
+    satisfied: false,
+    current: stale,
+    requirements: original.checks.map(({ requirement, index }) => ({ requirement, index, current: stale })),
+  });
   const next = accepted(await contract.verify({ index: 1 }));
   assert.notEqual(next.snapshot, original.snapshot);
   assert.equal(next.placement?.kind, "gates-unsatisfied");
@@ -370,20 +373,48 @@ test("changed failure testimony admits a new attestation while identical testimo
   await contract.abandon();
 });
 
-test("declaration changes preserve independent requirements while reordering preserves all evidence", async () => {
-  const { contract } = await fixture(["true", "test -f candidate.txt"]);
-  await contract.deliver();
-  accepted(await contract.verify());
-  const original = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
-  assert.equal(original.satisfied, true);
-  accepted(await contract.amend({ edits:
-    "## Replace: Verification\n\n```bash timeout=1m\ntest -f candidate.txt\n```\n\n```bash timeout=1m\ntrue\n```\n" }));
-  const reordered = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
-  assert.equal(reordered.satisfied, true);
-  assert.deepEqual(reordered.requirements.map(({ requirement }) => requirement), original.requirements.map(({ requirement }) => requirement).reverse());
-  accepted(await contract.amend({ edits:
-    "## Replace: Verification\n\n```bash timeout=1m\ntest -f candidate.txt\n```\n\n```bash timeout=1m\necho changed\n```\n" }));
-  const changed = gateReports(present(await contract.state())).reports.find((gate) => gate.gate === "verified")!;
-  assert.deepEqual(changed.requirements.map(({ current }) => current.kind), ["attested", "missing"]);
-  await contract.abandon();
+test("addressed status keeps native Verification evidence as declarations reorder and change", async () => {
+  const passing = "test -f candidate.txt";
+  const failing = "echo failed; exit 1";
+  const { repository, contract } = await fixture([passing, failing]);
+  const contracts = Keis.of(await Repo.at({ path: repository.path }));
+  accepted(await contract.deliver());
+  const { checks: [pass, fail] } = accepted(await contract.verify());
+  assert.ok(pass?.kind === "terminal" && pass.verdict === "satisfied");
+  assert.ok(fail?.kind === "terminal" && fail.verdict === "unsatisfied");
+  const [passAttestation, failAttestation] = present(await contract.state()).attestations;
+  assert.ok(passAttestation && failAttestation);
+  const passed = { kind: "attested", verdict: "satisfied", at: passAttestation.at };
+  const failed = { kind: "attested", verdict: "unsatisfied", at: failAttestation.at, summary: fail.summary };
+  const checked = { gate: "verified", satisfied: false, current: failed };
+  const passedRequirement = { requirement: pass.requirement, current: passed };
+  const failedRequirement = { requirement: fail.requirement, current: failed };
+  const amend = async (...scripts: string[]) =>
+    accepted(await contract.amend({ edits: `## Replace: Verification\n\n${verificationFences(scripts)}` }));
+  const readGate = async (checkWire = false) => {
+    const detail = await contracts.observe({ id: contract.id });
+    if (checkWire) assertWireRoundTrip(contractObservationSchema, detail);
+    assert.ok(detail.kind === "present");
+    return detail.row.gates?.find(({ gate }) => gate === "verified");
+  };
+
+  assert.deepEqual(await readGate(true), {
+    ...checked,
+    requirements: [{ ...passedRequirement, index: 1 }, { ...failedRequirement, index: 2 }],
+  });
+  await amend(failing, passing);
+  assert.deepEqual(await readGate(), {
+    ...checked,
+    requirements: [{ ...failedRequirement, index: 1 }, { ...passedRequirement, index: 2 }],
+  });
+  await amend(passing, "echo changed");
+  assert.deepEqual((await readGate())?.requirements.map(({ current }) => current.kind), ["attested", "missing"]);
+  await amend(passing);
+  assert.deepEqual(await readGate(), {
+    gate: "verified",
+    satisfied: true,
+    current: passed,
+    requirements: [{ ...passedRequirement, index: 1 }],
+  });
+  accepted(await contract.abandon());
 });

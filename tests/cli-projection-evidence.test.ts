@@ -170,14 +170,16 @@ test("settings text retains shadow provenance and exact configuration names", ()
 
 test("selected Contract status preserves every supplied requirement and workspace fact across phases", () => {
   const path = `/repo/${"long-directory/".repeat(10)}`;
+  const at = "2026-08-12T00:00:00.000Z";
+  const failed = { kind: "attested", verdict: "unsatisfied", summary: "Second check failed", at } as const;
   const report = contractDetail({
     holder: { kind: "unavailable" },
     delivery: { candidate: snapshotId("a".repeat(40)), integration: snapshotId("b".repeat(40)) },
-    gates: [{ gate: "verified", requirements: [
-      { index: 1, current: { kind: "attested", verdict: "satisfied", summary: "First check passed" } },
-      { index: 2, current: { kind: "attested", verdict: "unsatisfied", summary: "Second check failed" } },
-      { index: 3, current: { kind: "missing" } },
-      { index: 4, current: { kind: "stale", reason: {
+    gates: [{ gate: "verified", satisfied: false, current: failed, requirements: [
+      { index: 1, requirement: requirementId("check-pass"), current: { kind: "attested", verdict: "satisfied", summary: "First check passed", at } },
+      { index: 2, requirement: requirementId("check-fail"), current: failed },
+      { index: 3, requirement: requirementId("check-missing"), current: { kind: "missing" } },
+      { index: 4, requirement: requirementId("check-stale"), current: { kind: "stale", priorVerdict: "satisfied", reason: {
         kind: "snapshot-changed", previousSnapshot: snapshotId("c".repeat(40)), currentSnapshot: snapshotId("d".repeat(40)),
       } } },
     ] }],
@@ -308,6 +310,7 @@ const verifiedSummary = (): ContractSummary =>
 
 const verifiedGate = {
   gate: gate("verified"),
+  satisfied: true,
   current: { kind: "attested" as const, verdict: "satisfied" as const, at: "2026-08-12T00:00:00.000Z" },
   requirements: [
     {
@@ -320,6 +323,7 @@ const verifiedGate = {
 
 const staleGate = {
   gate: gate("verified"),
+  satisfied: false,
   current: { kind: "stale" as const, priorVerdict: "satisfied" as const },
   requirements: [
     {
@@ -408,10 +412,11 @@ test("stale snapshot evidence keeps native identities across observations, recei
     previousSnapshot: snapshotId("abcdef01" + "1".repeat(32)),
     currentSnapshot: snapshotId("abcdef02" + "2".repeat(32)),
   };
-  const current = { kind: "stale" as const, reason };
-  assert.deepEqual(gateRequirementFacts({ gate: "verified", requirements: [{ index: 2, current }] }),
-    ["verification 2 · stale · snapshot changed abcdef01 -> abcdef02"]);
+  const current = { kind: "stale", priorVerdict: "satisfied", reason } as const;
   const requirement = requirementId("verification:sha256:historical-check");
+  assert.deepEqual(gateRequirementFacts({
+    gate: "verified", satisfied: false, current, requirements: [{ requirement, index: 2, current }],
+  }), ["verification 2 · stale · snapshot changed abcdef01 -> abcdef02"]);
   const problem = { gate: "verified", requirement, state: "stale" as const, reason };
   const receipt = unmetRequirementLines([problem], 400).join("\n");
   assert.ok(receipt.includes(`verification ${requirement}`), "unmapped historical requirements keep a stable coordinate");

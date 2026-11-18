@@ -41,7 +41,15 @@ test("Contract read, wait and terminal mutation wire projections", async () => {
   const kei = bound.kei;
   const state = present(await kei.state());
   assertWireRoundTrip(contractCatalogueSchema, await contracts.list());
-  assertWireRoundTrip(contractObservationSchema, await contracts.observe({ id: state.id }));
+  const observation = await contracts.observe({ id: state.id });
+  assertWireRoundTrip(contractObservationSchema, observation);
+  assert.ok(observation.kind === "present");
+  assert.deepEqual(observation.row.gates, [{
+    gate: "reviewed",
+    satisfied: false,
+    current: { kind: "missing" },
+    requirements: [{ requirement: "gate:reviewed", current: { kind: "missing" } }],
+  }]);
   const missingId = contractId("kei/missing");
   const missing = contracts.kei({ id: missingId });
   const missingObservation = await contracts.observe({ id: missingId });

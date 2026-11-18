@@ -35,7 +35,7 @@ import { renderVerb } from "../src/cli/render/verbs.js";
 import { liveStatusObservationSchema } from "../src/akuma/akuma-selection-execution.js";
 import type { LiveStatusObservation } from "../src/akuma/akuma-observe.js";
 import { type ActivityRow, type OutcomeRow, type ToolRow } from "../src/akuma/projection.js";
-import type { AkumaObservation, DeliverOutcome, Placement, Placed, RequirementProblem } from "../src/index.js";
+import type { AkumaObservation, ContractGateCurrent, DeliverOutcome, Placement, Placed, RequirementProblem } from "../src/index.js";
 import { renderAkumaBoard } from "../src/cli/render/kanshi-akuma.js";
 import { renderKanshiText } from "../src/cli/render/kanshi.js";
 import {
@@ -741,15 +741,17 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
   const integration = snapshotId("a".repeat(40));
   const tender = snapshotId("b".repeat(40));
   const long = "👩‍💻".repeat(120);
+  const reviewGate = (current: ContractGateCurrent) => ({
+    gate: "reviewed",
+    satisfied: current.kind === "attested" && current.verdict === "satisfied",
+    current,
+    requirements: [{ requirement: requirementId("gate:reviewed"), current }],
+  });
+  const at = "2026-08-12T00:00:00.000Z";
   const base = contractDetail({
     phase: "bound",
     title: "Verified commit",
-    gates: [
-      {
-        gate: "reviewed",
-        requirements: [{ requirement: "gate:reviewed", current: { kind: "missing" } }],
-      },
-    ],
+    gates: [reviewGate({ kind: "missing" })],
   });
   const show = (detail: Parameters<typeof contractReport>[0]) =>
     renderKanshiText(contractReport(detail), { columns: 60, color: false });
@@ -771,21 +773,7 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
   const denied = show({
     ...base,
     delivery: { candidate: tender, integration },
-    gates: [
-      {
-        gate: "reviewed",
-        requirements: [
-          {
-            requirement: "gate:reviewed",
-            current: {
-              kind: "attested",
-              verdict: "unsatisfied",
-              summary: "Fix missing coverage",
-            },
-          },
-        ],
-      },
-    ],
+    gates: [reviewGate({ kind: "attested", verdict: "unsatisfied", at, summary: "Fix missing coverage" })],
   });
   assert.match(denied, /review summary  “Fix missing coverage”/u);
   assert.match(denied, /review · current · unsatisfied/u);
@@ -794,12 +782,7 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
   const stale = show({
     ...base,
     delivery: { candidate: tender, integration },
-    gates: [
-      {
-        gate: "reviewed",
-        requirements: [{ requirement: "gate:reviewed", current: { kind: "stale" } }],
-      },
-    ],
+    gates: [reviewGate({ kind: "stale", priorVerdict: "satisfied" })],
   });
   assert.match(stale, /review · stale/u);
   const blocked = show({
@@ -832,21 +815,7 @@ test("Contract status preserves ordered native facts and bounded testimony in ev
     ...base,
     phase: "claimed",
     delivery: { candidate: tender, integration },
-    gates: [
-      {
-        gate: "reviewed",
-        requirements: [
-          {
-            requirement: "gate:reviewed",
-            current: {
-              kind: "attested",
-              verdict: "satisfied",
-              summary: long,
-            },
-          },
-        ],
-      },
-    ],
+    gates: [reviewGate({ kind: "attested", verdict: "satisfied", at, summary: long })],
     targetLag: { kind: "counted", behind: 5 },
   });
   assert.match(claimed, /integration result  aaaaaaa/u);

@@ -55,9 +55,10 @@ to explain. Selected status retains supplied holder, delivery, requirement,
 prerequisite, workspace, physical issue, and association facts across every
 phase; terminal lifecycle does not erase available evidence or establish
 placement from gate testimony. The World Contract section retains the owner's
-concise catalogue facts. Contract evidence retains the owner's per-requirement
-currentness and verdicts without a second copy of aggregate testimony,
-recomputing currentness, or inferring a producer run. An association outside
+concise catalogue facts. Addressed Contract evidence retains each requirement's
+stable identity and full native judgment. Current Verification positions
+supplement those identities for display. Kanshi does not manufacture aggregate
+testimony, recompute currentness, or infer a producer run. An association outside
 that aperture is unavailable rather than missing; Kanshi uses missing only
 when the Contract observation is complete enough to establish absence.
 

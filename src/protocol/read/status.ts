@@ -2,7 +2,7 @@ import { errorCategory } from "../../errors.js";
 import { z } from "zod";
 import { contractIdSchema, contractJournalPaths, snapshotIdSchema } from "../../git/identity.js";
 import { type ContractTargetLag as GitContractTargetLag } from "../../git/workspace.js";
-import { gateSchema, gateStaleReasonSchema } from "../result-leaves.js";
+import { gateCurrentSchema, gateReportSchema, gateSchema, requirementReportSchema } from "../result-leaves.js";
 import {
   contractJournal,
   countActiveContractJournals,
@@ -114,29 +114,13 @@ export const contractCatalogueSchema = z
   .readonly();
 export type ContractCatalogue = z.output<typeof contractCatalogueSchema>;
 
-const detailCurrentSchema = z.union([
-  z.strictObject({ kind: z.literal("missing") }).readonly(),
-  z.strictObject({ kind: z.literal("stale"), reason: gateStaleReasonSchema.exactOptional() }).readonly(),
-  z
-    .strictObject({
-      kind: z.literal("attested"),
-      verdict: z.enum(["satisfied", "unsatisfied"]),
-      summary: z.string().exactOptional(),
-    })
-    .readonly(),
-]);
-const rowRequirementSchema = z
-  .strictObject({
-    requirement: z.string().exactOptional(),
-    current: detailCurrentSchema,
-    index: z.number().int().positive().exactOptional(),
-  })
+const indexedRequirementSchema = requirementReportSchema
+  .unwrap()
+  .extend({ index: z.number().int().positive().exactOptional() })
   .readonly();
-const rowGateSchema = z
-  .strictObject({
-    gate: z.string(),
-    requirements: z.array(rowRequirementSchema).readonly(),
-  })
+const statusGateSchema = gateReportSchema
+  .unwrap()
+  .extend({ requirements: z.array(indexedRequirementSchema).readonly() })
   .readonly();
 const workspaceCountsSchema = z
   .strictObject({
@@ -187,7 +171,7 @@ export const contractDetailSchema = z
     targetLag: contractDetailTargetLagSchema.exactOptional(),
     delivery: z.strictObject({ candidate: snapshotIdSchema, integration: snapshotIdSchema }).readonly().exactOptional(),
     targetObservation: contractDetailTargetObservationSchema.exactOptional(),
-    gates: z.array(rowGateSchema).min(1).readonly().exactOptional(),
+    gates: z.array(statusGateSchema).min(1).readonly().exactOptional(),
     after: z
       .array(
         z.strictObject({ contractId: contractIdSchema, state: z.enum(["active", "abandoned", "missing"]) }).readonly(),
@@ -211,8 +195,8 @@ export const contractObservationSchema = z.union([
   z.strictObject({ kind: z.literal("present"), row: contractDetailSchema }).readonly(),
 ]);
 
-export type ContractGateCurrent = z.output<typeof detailCurrentSchema>;
-export type ContractGateReport = z.output<typeof rowGateSchema>;
+export type ContractGateCurrent = z.output<typeof gateCurrentSchema>;
+export type ContractGateReport = z.output<typeof statusGateSchema>;
 export type ContractTargetLag = ContractDetailTargetLag;
 export type { ContractWorkspaceObservation };
 export type ContractAfterEdge = NonNullable<ContractDetail["after"]>[number];
@@ -472,30 +456,14 @@ export async function readContractObservation(
     if (!indexes.has(requirement)) indexes.set(requirement, index + 1);
   });
   const facts = await managedWorkspaceFacts(repository, state, workspace, rawTargetObservation);
-  const gates = gateReports(state).reports.map((report) => ({
-    gate: report.gate,
-    requirements: report.requirements.map((requirement) => {
-      const index = report.gate === "verified" ? indexes.get(requirement.requirement) : undefined;
-      const current = requirement.current;
-      return {
-        ...(index !== undefined
-          ? { index }
-          : requirement.requirement === `gate:${report.gate}`
-            ? {}
-            : { requirement: requirement.requirement }),
-        current:
-          current.kind === "attested"
-            ? {
-                kind: "attested" as const,
-                verdict: current.verdict,
-                ...(current.summary === undefined ? {} : { summary: current.summary }),
-              }
-            : current.kind === "stale"
-              ? { kind: current.kind, ...(current.reason === undefined ? {} : { reason: current.reason }) }
-              : { kind: current.kind },
-      };
-    }),
-  }));
+  const gates = gateReports(state).reports.map((report) => {
+    if (report.gate !== "verified") return report;
+    const requirements = report.requirements.map((requirement) => {
+      const index = indexes.get(requirement.requirement);
+      return index === undefined ? requirement : { ...requirement, index };
+    });
+    return { ...report, requirements };
+  });
   const title = titleFor(document);
   const targetObservation = detailTargetObservation(rawTargetObservation, state);
   const row = {

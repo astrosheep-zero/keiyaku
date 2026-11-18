@@ -134,8 +134,11 @@ additional matching rows. Active rows retain compact actionable physical attenti
 and explicit unknown availability from the existing workspace and target observers;
 only selected active rows receive physical observation. Settled rows come from
 existing terminal journals, retain their terminal phase, and carry no workspace
-or target attention. They never observe retired workspaces or physical targets. Exact addressed observation owns full physical
-workspace and per-requirement detail. Contract selector resolution is a read-only, invocation-scoped capability. A
+or target attention. They never observe retired workspaces or physical targets.
+Exact addressed observation owns full physical workspace detail and preserves
+native per-requirement evidence and stable identities. A current Verification
+position supplements that identity for display; it never replaces it.
+Contract selector resolution is a read-only, invocation-scoped capability. A
 complete identity is validated without consulting repository authority or proving
 existence; the requested operation owns absence. Short selectors use exact
 short-name equality among active Contracts with a managed, appointed worktree.
