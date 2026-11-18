@@ -237,7 +237,7 @@ function parseLs(parts: ContractTokens): VerbRequest<"ls"> {
   if (all && settled) refuse("ls", "--all and --settled are mutually exclusive");
   if ((all || settled) && (selector === "aku" || selector === "aku/"))
     refuse("ls", "--all and --settled select Contract, Debt, or Akuma-instance lifecycles only");
-  if (["debt", "debt/", "kei", "kei/", "aku", "aku/"].includes(selector)) {
+  if (["debt", "debt/", "debt/*", "kei", "kei/", "kei/*", "aku", "aku/"].includes(selector)) {
     if (mine) refuse("ls", "--mine selects Akuma instances only");
   } else validateInstanceCatalogue(selector);
   return {

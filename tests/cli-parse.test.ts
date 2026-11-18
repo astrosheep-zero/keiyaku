@@ -23,7 +23,7 @@ test("show routes complete Debt addresses to the native Debt operation", () => {
 });
 
 test("root listings select active by default, settled or all for lifecycle catalogues", () => {
-  for (const selector of ["debt/", "kei/", "aku/*"]) {
+  for (const selector of ["debt/", "debt/*", "kei/", "kei/*", "aku/*"]) {
     assert.deepEqual(command(["ls", selector]), { name: "ls", output: "text", input: { selector } });
     for (const selection of ["settled", "all"]) {
       assert.deepEqual(command(["ls", selector, `--${selection}`]), {

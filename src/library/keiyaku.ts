@@ -386,11 +386,11 @@ export class Keiyaku {
     ls: async (input) => {
       const bound = input.limit === undefined ? {} : { limit: input.limit };
       const lifecycle = input.lifecycle === undefined ? {} : { selection: input.lifecycle };
-      if (input.selector === "kei" || input.selector === "kei/") {
+      if (input.selector === "kei" || input.selector === "kei/" || input.selector === "kei/*") {
         const at = await this.#coordinates("required");
         return Keis.of(at.repo!).list({ ...bound, ...lifecycle });
       }
-      if (input.selector === "debt" || input.selector === "debt/")
+      if (input.selector === "debt" || input.selector === "debt/" || input.selector === "debt/*")
         return debt.debtLs(this.#input, {
           ...bound,
           ...lifecycle,

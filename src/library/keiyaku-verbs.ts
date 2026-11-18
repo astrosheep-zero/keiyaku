@@ -112,11 +112,11 @@ const catalogueSelection = lifecycleSelectionSchema
     'Lifecycle selection for Contract, Debt, and Akuma-instance catalogues: "active" (still in play, default), "settled" (at rest), or "all". Not valid for akumaName values (aku/).',
   );
 const catalogueSelector =
-  'Catalogue path selector: "kei"/"kei/", "debt"/"debt/", "aku"/"aku/" (akumaName values), or "aku/*" / "aku/*/*" / "aku/<name>" / "aku/<name>/*" (instances).';
+  'Catalogue path selector: "kei"/"kei/"/"kei/*", "debt"/"debt/"/"debt/*", "aku"/"aku/" (akumaName values), or "aku/*" / "aku/*/*" / "aku/<name>" / "aku/<name>/*" (instances).';
 const lsInputSchema = z
   .strictObject({
     selector: text
-      .regex(/^(?:kei|debt|aku)\/?$|^aku\/(?:\*(?:\/\*)?|[^/*]+(?:\/\*|\/)?)$/u)
+      .regex(/^(?:kei|debt)(?:\/\*?)?$|^aku\/?$|^aku\/(?:\*(?:\/\*)?|[^/*]+(?:\/\*|\/)?)$/u)
       .describe(catalogueSelector),
     limit: positive.exactOptional().describe("Maximum rows to return (positive integer)."),
     lifecycle: catalogueSelection,

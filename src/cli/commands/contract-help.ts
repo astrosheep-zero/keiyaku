@@ -257,6 +257,7 @@ export const CONTRACT_COMMAND_SPECS = {
     purpose: "List debts (ls debt), contracts (ls kei), or akumas (ls aku).",
     details: [
       "Contract, Debt, and Akuma-instance lists select active work by default; --settled selects work at rest and --all selects both.",
+      'ls "kei/*" lists Contracts and ls "debt/*" lists Debts, with the same filters as ls kei and ls debt.',
       "Contracts are active while bound; accepted and abandoned Contracts are settled. Open Debts are active; done and dropped Debts are settled.",
       "Asleep, killed, and stillborn Akumas are settled; running, unborn, stranded, hung, and untidy Akumas remain active.",
       "ls aku/ lists the spawnable Akuma-name catalog; ls aku/<name> lists recent retained Akuma instances under one name.",
