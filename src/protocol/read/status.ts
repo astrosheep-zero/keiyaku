@@ -12,7 +12,7 @@ import {
 } from "../../git/observe.js";
 import { decodeContractDocument } from "../../body/decode.js";
 import { observeTargetLag, observeWorkspace, worktreePath } from "../../git/workspace.js";
-import { appointmentFor, readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
+import { readPlaceRegister, type PlaceRegister } from "../../workspace-place.js";
 import type { ContractWorkspaceObservation, HandoffReceiptCoordinate } from "../../git/workspace.js";
 import type { GitRepository } from "../../git/process.js";
 import {
@@ -319,10 +319,8 @@ function appointedWorkspace(
   register: PlaceRegister,
   state: ContractState,
 ): HandoffReceiptCoordinate | undefined {
-  const appointed = appointmentFor(register, state.id);
-  return appointed === undefined
-    ? undefined
-    : { contractId: state.id, place: appointed.place, workspace: worktreePath(repository, appointed.place) };
+  const place = register.get(state.id);
+  return place === undefined ? undefined : { contractId: state.id, place, workspace: worktreePath(repository, place) };
 }
 
 function detailCounts(

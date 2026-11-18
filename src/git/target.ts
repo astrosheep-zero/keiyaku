@@ -3,7 +3,7 @@ import { z } from "zod";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import { contractId, type ContractId, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
-import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
+import { readPlaceRegister } from "../workspace-place.js";
 import { contractIdSchema, mintSnapshotId } from "./identity.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
 import { commonGitDirectory, currentBranch, registeredWorktrees, worktreeGitDirectory } from "./repository.js";
@@ -48,9 +48,9 @@ export async function resolveContractTarget(
     kind: "refused",
     refusal: { kind: "target-workspace-unavailable", contractId: id, reason },
   });
-  const place = appointmentFor(await readPlaceRegister(repository), contractId(id));
+  const place = (await readPlaceRegister(repository)).get(contractId(id));
   if (place === undefined) return refuse("unappointed");
-  const path = worktreePath(repository, place.place);
+  const path = worktreePath(repository, place);
   try {
     const root = await realpath(path);
     if (root !== resolve(path)) return refuse("association");

@@ -180,7 +180,7 @@ async function appointForContract(
 ): Promise<Readonly<{ place?: string; register?: PlaceRegister } | { lag: ContractFileLag }>> {
   try {
     const register = await appointPlaces(scope, [state]);
-    const place = register.byContract.get(state.id)?.place;
+    const place = register.get(state.id);
     if (place === undefined) {
       if (state.terminal !== null) return { register };
       throw new Error(`Place appointment was not recorded: ${state.id}`);
@@ -341,22 +341,21 @@ async function reconcileWorldWork(input: ReconcileOptions): Promise<RepoReconcil
       })),
     };
   }
-  const places = new Map(appointed.appointments.map((appointment) => [appointment.contract, appointment.place]));
   const retained = await reconcileAllOperation({
     ...input,
     states,
     retainTerminalWorktree: true,
-    places,
+    places: appointed,
   });
   const { projections, settlements } = await projectAndSettleWorld(input, retained, appointed);
   const cleanup = retained.contracts.some((contract) => isManagedTerminal(contract.state))
-    ? await reconcileAllOperation({ ...input, states, places })
+    ? await reconcileAllOperation({ ...input, states, places: appointed })
     : null;
   const later =
     cleanup === null ? null : new Map(cleanup.contracts.map((contract) => [contract.contractId, contract.report]));
   const released: ContractId[] = retained.contracts
     .filter((contract) =>
-      releaseEligible(contract.state, later?.get(contract.contractId), places.has(contract.contractId)),
+      releaseEligible(contract.state, later?.get(contract.contractId), appointed.has(contract.contractId)),
     )
     .map((contract) => contract.contractId);
   const contracts: RepoReconcileContracts[number][] = [];
@@ -385,7 +384,7 @@ async function projectAndSettleWorld(
   const projections: ContractWorktreeResult[] = [];
   const settlements: SettlementReport[] = [];
   for (const contract of retained.contracts) {
-    const place = appointed.byContract.get(contract.contractId)?.place;
+    const place = appointed.get(contract.contractId);
     const projection = realizedOrRetainedManagedWorktree(input.scope, contract.report, place)
       ? await projectContractWorktree(input.scope, contract.state, appointed)
       : { effects: [], lag: [] };

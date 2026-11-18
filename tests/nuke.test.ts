@@ -63,8 +63,8 @@ async function gitNukeFixture() {
   const repository = await repositoryAt(world);
   const managed = contractId("kei/nuke-managed");
   await appointManagedWorktrees(repository, [managed]);
-  const place = (await readPlaceRegister(repository)).byContract.get(managed)!;
-  const managedPath = worktreePath(repository, place.place);
+  const place = (await readPlaceRegister(repository)).get(managed)!;
+  const managedPath = worktreePath(repository, place);
   raw.run(["worktree", "add", "--detach", managedPath, "HEAD"]);
   raw.run(["branch", "business-branch"]);
   raw.run(["update-ref", "refs/keiyaku/delivery/nuke-managed", "HEAD"]);
@@ -495,7 +495,7 @@ test("Git nuke retains an attached appointed worktree while clearing independent
   const repository = await repositoryAt(world);
   const contract = contractId("kei/nuke-attached");
   const register = await appointManagedWorktrees(repository, [contract]);
-  const path = worktreePath(repository, register.byContract.get(contract)!.place);
+  const path = worktreePath(repository, register.get(contract)!);
   raw.run(["worktree", "add", "--quiet", "-b", "nuke-attached-branch", path, "HEAD"]);
   raw.run(["update-ref", "refs/heads/keiyaku-state", "HEAD"]);
   try {
@@ -518,7 +518,7 @@ test("Git nuke retains an unregistered appointed path whose admin is foreign", a
   const repository = await repositoryAt(world);
   const contract = contractId("kei/nuke-foreign-admin");
   const register = await appointManagedWorktrees(repository, [contract]);
-  const path = worktreePath(repository, register.byContract.get(contract)!.place);
+  const path = worktreePath(repository, register.get(contract)!);
   const foreign = makeGitRepository();
   foreign.run(["commit", "--allow-empty", "--quiet", "-m", "foreign"]);
   foreign.run(["worktree", "add", "--quiet", "--detach", path, "HEAD"]);
@@ -544,7 +544,7 @@ test("Git nuke removes proven unregistered appointed residue", async () => {
   const repository = await repositoryAt(world);
   const contract = contractId("kei/nuke-residue");
   const register = await appointManagedWorktrees(repository, [contract]);
-  const path = worktreePath(repository, register.byContract.get(contract)!.place);
+  const path = worktreePath(repository, register.get(contract)!);
   const admin = join(commonGitDirectory(repository), "worktrees", "nuke-residue");
   mkdirSync(path, { recursive: true });
   mkdirSync(admin, { recursive: true });

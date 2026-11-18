@@ -28,13 +28,16 @@ turn a selected check's success into whole-gate satisfaction.
 
 Place is the sole durable local appointment for a managed Contract worktree. It
 is neither a Git identity, a journal field, nor a second product. The workspace
-owner maintains one canonical appointment register and its coordination boundary;
-the register gives each Contract at most one current Place and allows each Place
-to serve at most one Contract. Its allocation is deterministic and stable once
-written. A physically existing candidate path is unavailable for a new
-allocation even when it is absent from the register and Git topology; allocation
-skips it and never adopts it. Derived lookup indexes, filesystem occupancy, Git
-registration, and guidance do not replace the register's appointment authority.
+owner maintains one canonical Contract-to-Place appointment relation and its
+coordination boundary; the relation gives each Contract at most one current
+Place and allows each Place to serve at most one Contract. Its allocation is
+deterministic and stable once written. Contract lookup and the occupied-Place
+evidence used by one allocation batch are derived from that relation for the
+call that needs them, never a second persisted or retained index. A physically
+existing candidate path is unavailable for a new allocation even when it is
+absent from the relation and Git topology; allocation skips it and never adopts
+it. Filesystem occupancy, Git registration, and guidance do not replace the
+relation's appointment authority.
 
 Writers serialize a fresh read and durable replacement; corrupt or unavailable state is an appointment failure. Only active Contracts receive missing appointments; terminal ones retain an existing Place for cleanup.
 

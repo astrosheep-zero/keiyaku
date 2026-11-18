@@ -38,10 +38,7 @@ type ManagedEntry = Readonly<{ contract: ContractId; path: string }>;
 async function managedCustody(repository: GitRepository): Promise<Readonly<{ entries: readonly ManagedEntry[] }>> {
   const register = await readPlaceRegister(repository);
   return {
-    entries: register.appointments.map((appointment) => ({
-      contract: appointment.contract,
-      path: worktreePath(repository, appointment.place),
-    })),
+    entries: [...register].map(([contract, place]) => ({ contract, path: worktreePath(repository, place) })),
   };
 }
 

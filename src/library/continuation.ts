@@ -22,7 +22,7 @@ import {
 import { observeContractAt } from "../git/observe.js";
 import type { RepositoryScope } from "../protocol/operations.js";
 import { contractIdSchema } from "../protocol/operations.js";
-import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
+import { readPlaceRegister } from "../workspace-place.js";
 import { z } from "zod";
 
 function continuationSchema<Stop extends z.ZodType>(stop: Stop) {
@@ -92,14 +92,9 @@ async function continueCandidate(
       kind: "stopped-before-node",
       stop: { kind: "contract-missing" },
     };
-  const appointment = appointmentFor(await readPlaceRegister(input.scope), id);
-  if (appointment !== undefined) {
-    const physical = await reconcileDependentWorktree(
-      input.scope,
-      id,
-      worktreePath(input.scope, appointment.place),
-      predecessor,
-    );
+  const place = (await readPlaceRegister(input.scope)).get(id);
+  if (place !== undefined) {
+    const physical = await reconcileDependentWorktree(input.scope, id, worktreePath(input.scope, place), predecessor);
     input.progress.recordPhysical(id, physical);
     if (physical.lag.length > 0) return { kind: "stopped-before-node", stop: { kind: "physical-lag" } };
   }

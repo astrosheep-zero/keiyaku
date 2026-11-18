@@ -194,11 +194,7 @@ declare const placeBrand: unique symbol;
 
 export type PlaceAppointment = Readonly<{ place: Place; contract: ContractId }>;
 export type ContractWorkspaceLocation = Readonly<{ kind: "worktree"; path: string }>;
-export type PlaceRegister = Readonly<{
-  appointments: readonly PlaceAppointment[];
-  byPlace: ReadonlyMap<Place, PlaceAppointment>;
-  byContract: ReadonlyMap<ContractId, PlaceAppointment>;
-}>;
+export type PlaceRegister = ReadonlyMap<ContractId, Place>;
 export type ManagedWorktreeAppointment =
   | Readonly<{ kind: "appointed"; place: Place; path: string }>
   | Readonly<{ kind: "unappointed" }>
@@ -214,14 +210,6 @@ function placePaths(repository: GitRepository): Readonly<{ authority: string; lo
 
 export function placeRegisterPath(repository: GitRepository): string {
   return placePaths(repository).authority;
-}
-
-function indexedRegister(appointments: readonly PlaceAppointment[]): PlaceRegister {
-  return {
-    appointments,
-    byPlace: new Map(appointments.map((appointment) => [appointment.place, appointment])),
-    byContract: new Map(appointments.map((appointment) => [appointment.contract, appointment])),
-  };
 }
 
 function parsedPlace(value: string): Readonly<{ base: string; generation: bigint }> | undefined {
@@ -246,12 +234,8 @@ export function place(value: string): Place {
 }
 
 export function canonicalPlaceRegister(register: PlaceRegister): string {
-  const appointments = Object.fromEntries(
-    register.appointments
-      .slice()
-      .sort((left, right) => Buffer.compare(Buffer.from(left.place), Buffer.from(right.place)))
-      .map((appointment) => [appointment.place, appointment.contract]),
-  );
+  const entries = [...register].sort(([, left], [, right]) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
+  const appointments = Object.fromEntries(entries.map(([contract, place]) => [place, contract]));
   return `${JSON.stringify({ version: PLACE_VERSION, appointments })}\n`;
 }
 
@@ -281,27 +265,25 @@ export function decodePlaceRegister(path: string, bytes: string): PlaceRegister 
   if (typeof record.appointments !== "object" || record.appointments === null || Array.isArray(record.appointments)) {
     placeCorruption(path, "Place appointments must be an object");
   }
-  const appointments: PlaceAppointment[] = [];
+  const relation = new Map<ContractId, Place>();
   const contracts = new Set<ContractId>();
   for (const [rawPlace, rawContract] of Object.entries(record.appointments as Record<string, unknown>)) {
     if (typeof rawContract !== "string") placeCorruption(path, "Place appointment must be a ContractId");
     try {
-      const appointed = { place: place(rawPlace), contract: contractId(rawContract) };
-      if (contracts.has(appointed.contract)) placeCorruption(path, "Place file has duplicate Contract appointment");
-      contracts.add(appointed.contract);
-      appointments.push(appointed);
+      const appointed = contractId(rawContract);
+      if (contracts.has(appointed)) placeCorruption(path, "Place file has duplicate Contract appointment");
+      contracts.add(appointed);
+      relation.set(appointed, place(rawPlace));
     } catch (error) {
       return placeCorruption(path, "Place appointment is invalid", error);
     }
   }
-  appointments.sort((left, right) => Buffer.compare(Buffer.from(left.place), Buffer.from(right.place)));
-  const register = indexedRegister(appointments);
-  if (canonicalPlaceRegister(register) !== bytes) placeCorruption(path, "Place bytes are not canonical");
-  return register;
+  if (canonicalPlaceRegister(relation) !== bytes) placeCorruption(path, "Place bytes are not canonical");
+  return relation;
 }
 
 export function emptyPlaceRegister(): PlaceRegister {
-  return indexedRegister([]);
+  return new Map();
 }
 
 export async function readPlaceRegister(repository: GitRepository): Promise<PlaceRegister> {
@@ -315,7 +297,8 @@ export async function readPlaceRegister(repository: GitRepository): Promise<Plac
 }
 
 export function appointmentFor(register: PlaceRegister, contract: ContractId): PlaceAppointment | undefined {
-  return register.byContract.get(contract);
+  const place = register.get(contract);
+  return place === undefined ? undefined : { place, contract };
 }
 
 export async function withPlaceAuthorityFence<T>(
@@ -363,17 +346,16 @@ async function withAppointments(
   register: PlaceRegister,
   contracts: readonly ContractId[],
 ): Promise<PlaceRegister> {
-  const additions: PlaceAppointment[] = [];
-  const occupied = new Set(register.byPlace.keys());
-  const known = new Set(register.byContract.keys());
+  let next: Map<ContractId, Place> | undefined;
+  const occupied = new Set(register.values());
   for (const contract of contracts) {
-    if (known.has(contract)) continue;
+    if ((next ?? register).has(contract)) continue;
     const candidate = await firstUnoccupiedPlace(repository, contract, occupied);
-    additions.push({ place: candidate, contract });
+    next ??= new Map(register);
+    next.set(contract, candidate);
     occupied.add(candidate);
-    known.add(contract);
   }
-  return additions.length === 0 ? register : indexedRegister([...register.appointments, ...additions]);
+  return next ?? register;
 }
 
 function stableStartIndex(contract: ContractId): number {
@@ -419,8 +401,10 @@ export async function releaseManagedWorktrees(
   await mutatePlaceRegister(
     repository,
     (current) => {
-      const kept = current.appointments.filter((appointment) => !drop.has(appointment.contract));
-      return kept.length === current.appointments.length ? current : indexedRegister(kept);
+      if (!contracts.some((contract) => current.has(contract))) return current;
+      const next = new Map(current);
+      for (const contract of drop) next.delete(contract);
+      return next;
     },
     fence,
   );
@@ -443,7 +427,7 @@ export async function nukeEmptyPlaceAuthority(repository: GitRepository, fence?:
 
   const nuke = async () => {
     const current = await readPlaceRegister(repository);
-    if (current.appointments.length !== 0) throw new Error("Place authority still has managed worktree appointments");
+    if (current.size !== 0) throw new Error("Place authority still has managed worktree appointments");
     if (await regularFile(location.authority)) await unlink(location.authority);
   };
   if (fence !== undefined) await nuke();

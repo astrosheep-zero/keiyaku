@@ -86,7 +86,7 @@ test("guidance repair replaces read-only bytes, preserves protection, and retrie
   const git = await repositoryAt(repository.path);
   const current = state(undefined);
   const register = await appointManagedWorktrees(git, [current.id]);
-  const worktree = worktreePath(git, register.byContract.get(current.id)!.place);
+  const worktree = worktreePath(git, register.get(current.id)!);
   repository.run(["worktree", "add", "--detach", worktree, "HEAD"]);
   const path = join(worktree, ".keiyaku", "KEIYAKU.md");
   assert.deepEqual((await projectContractWorktree(git, current, register)).lag, []);
@@ -110,7 +110,7 @@ test("failed replacement reports lag and restores read-only protection", {
   const git = await repositoryAt(repository.path);
   const current = state(undefined);
   const register = await appointManagedWorktrees(git, [current.id]);
-  const worktree = worktreePath(git, register.byContract.get(current.id)!.place);
+  const worktree = worktreePath(git, register.get(current.id)!);
   repository.run(["worktree", "add", "--detach", worktree, "HEAD"]);
   const directory = join(worktree, ".keiyaku");
   const path = join(directory, "KEIYAKU.md");
@@ -134,7 +134,7 @@ test("guidance repair leaves symlink targets alone and reports lag", { skip: pro
   const git = await repositoryAt(repository.path);
   const current = state(undefined);
   const register = await appointManagedWorktrees(git, [current.id]);
-  const worktree = worktreePath(git, register.byContract.get(current.id)!.place);
+  const worktree = worktreePath(git, register.get(current.id)!);
   repository.run(["worktree", "add", "--detach", worktree, "HEAD"]);
   const path = join(worktree, ".keiyaku", "KEIYAKU.md");
   await projectContractWorktree(git, current, register);
@@ -154,7 +154,7 @@ test("projection batches each index as generated files grow and preserves bytes 
   const git = await repositoryAt(repository.path);
   const current = state(undefined);
   const register = await appointManagedWorktrees(git, [current.id]);
-  const worktree = worktreePath(git, register.byContract.get(current.id)!.place);
+  const worktree = worktreePath(git, register.get(current.id)!);
   repository.run(["worktree", "add", "--detach", worktree, "HEAD"]);
   const skills = [
     ["keiyaku-onboarding", CONTRACT_ONBOARDING_SKILL],

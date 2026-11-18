@@ -54,7 +54,7 @@ import { decideDeliver, type DeliverInput, type DeliverRefusal } from "../core/v
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import type { LeadingOutcome } from "./outcome.js";
 
-import { appointmentFor, readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
+import { readPlaceRegister, type ManagedWorktreeAppointment } from "../workspace-place.js";
 import type {
   AttemptDecision,
   DeliverConflictRefusal,
@@ -157,16 +157,16 @@ async function captureAuthorizedDeliveryTender(
   | { kind: "refused"; refusal: MechanicalPreparationRefusal }
 > {
   const { contractId, coordinates } = stage;
-  const appointed =
+  const place =
     coordinates.workspace === "worktree"
       ? stage.appointment === undefined
-        ? appointmentFor(await readPlaceRegister(repository), contractId)
-        : { contract: contractId, place: stage.appointment.place }
+        ? (await readPlaceRegister(repository)).get(contractId)
+        : stage.appointment.place
       : undefined;
   const tender = await captureTender(repository, {
     contractId,
     coordinates,
-    ...(appointed === undefined ? {} : { place: appointed.place }),
+    ...(place === undefined ? {} : { place }),
     captureMergeState: true,
   });
   if (tender.kind === "refused") return tender;
@@ -639,12 +639,12 @@ async function appointedDeliverWorkspace(
   const observation = await observeContractsForAdmissionAt(input.scope, input.channel, [input.contractId]);
   const state = contractState(observation.decision, input.contractId);
   if (state === null) return { kind: "refused", refusal: { kind: "worktree-missing" } };
-  const appointment = appointmentFor(await readPlaceRegister(input.scope), input.contractId);
-  if (appointment === undefined) {
+  const place = (await readPlaceRegister(input.scope)).get(input.contractId);
+  if (place === undefined) {
     return { kind: "refused", refusal: { kind: "worktree-missing" } };
   }
   return {
-    workspace: { kind: "worktree", path: worktreePath(input.scope, appointment.place) },
+    workspace: { kind: "worktree", path: worktreePath(input.scope, place) },
     coordinates: state.coordinates,
     state,
   };
@@ -655,11 +655,11 @@ async function materializationMergeStateRefusal(
 ): Promise<DeliveryPreparationRefusal | undefined> {
   const appointed = await appointedDeliverWorkspace(input);
   if ("kind" in appointed) return appointed.refusal;
-  const appointment = appointmentFor(await readPlaceRegister(input.scope), input.contractId);
-  if (appointment === undefined) return { kind: "worktree-missing" };
+  const place = (await readPlaceRegister(input.scope)).get(input.contractId);
+  if (place === undefined) return { kind: "worktree-missing" };
   const retirement = await retireConflictHandoff(input.scope, {
     contractId: input.contractId,
-    place: appointment.place,
+    place,
     workspace: appointed.workspace.path,
     consume: true,
   });
@@ -683,14 +683,14 @@ async function materializeDeliverConflict(
   const appointed = await appointedDeliverWorkspace(input);
   if ("kind" in appointed) return appointed;
   const { workspace, coordinates } = appointed;
-  const appointment = appointmentFor(await readPlaceRegister(input.scope), input.contractId);
-  if (appointment === undefined) return { kind: "refused", refusal: { kind: "worktree-missing" } };
+  const place = (await readPlaceRegister(input.scope)).get(input.contractId);
+  if (place === undefined) return { kind: "refused", refusal: { kind: "worktree-missing" } };
   const mergeState = await mergeStatePresentRefusal(input, workspace);
   if (mergeState !== undefined) return { kind: "refused", refusal: mergeState };
   const tender = await captureTender(input.scope, {
     contractId: input.contractId,
     coordinates,
-    place: appointment.place,
+    place,
   });
   if (tender.kind === "refused") return tender;
   if (tender.data.changes.submodules.length > 0 || (tender.data.dirty && input.includeDirty !== true)) {
@@ -711,7 +711,7 @@ async function materializeDeliverConflict(
   }
   await recordConflictHandoff(input.scope, {
     contractId: input.contractId,
-    place: appointment.place,
+    place,
     workspace: workspace.path,
     head: handoffHead,
     mergeHead: refusal.targetHead,

@@ -22,7 +22,7 @@ import { singletonRequirement } from "../verification/declaration.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
 import { admitDecidedOffer, mintAttempts } from "./attempt.js";
 import type { LeadingOutcome } from "./outcome.js";
-import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
+import { readPlaceRegister } from "../workspace-place.js";
 import type { AttemptContext } from "../core/decide.js";
 import type { AttemptDecision, MutationOperationInput, RepositoryScope } from "./operations.js";
 import { timestamp } from "./operations.js";
@@ -73,20 +73,20 @@ async function captureReviewableWorktree(
     }
   | { kind: "refused"; refusal: ReviewPreparationRefusal }
 > {
-  const appointed =
+  const place =
     stage.coordinates.workspace === "worktree"
-      ? appointmentFor(await readPlaceRegister(repository), stage.contractId)
+      ? (await readPlaceRegister(repository)).get(stage.contractId)
       : undefined;
   const tender = await captureTender(repository, {
     ...stage,
-    ...(appointed === undefined ? {} : { place: appointed.place }),
+    ...(place === undefined ? {} : { place }),
   });
   if (tender.kind === "refused") return { kind: "refused", refusal: tender.refusal };
   if (tender.data.changes.submodules.length > 0) {
     return { kind: "refused", refusal: { kind: "dirty-submodules", paths: tender.data.changes.submodules } };
   }
   const { staged, unstaged, untracked } = tender.data.changes;
-  const workspacePath = appointed === undefined ? undefined : worktreePath(repository, appointed.place);
+  const workspacePath = place === undefined ? undefined : worktreePath(repository, place);
   const unmergedPaths = workspacePath === undefined ? [] : await unmergedWorkspacePaths(repository, workspacePath);
   const worktreeChanges =
     staged.length === 0 && unstaged.length === 0 && untracked.length === 0 && unmergedPaths.length === 0

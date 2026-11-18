@@ -11,7 +11,7 @@ import {
 } from "./contract-guidance.js";
 import { executeGit, type GitRepository } from "./git/process.js";
 import { worktreePath } from "./git/workspace.js";
-import { appointmentFor, placeRegisterPath, type PlaceRegister } from "./workspace-place.js";
+import { placeRegisterPath, type PlaceRegister } from "./workspace-place.js";
 
 const IGNORE_BYTES = ".gitignore\nKEIYAKU.md\n";
 const PRIMARY_IGNORE_BYTES = "*\n!settings.json\n!akumas/\n!akumas/*.md\n";
@@ -195,8 +195,8 @@ export async function projectContractWorktree(
   _onConflict?: (diagnostic: string) => never,
 ): Promise<ContractWorktreeResult> {
   if (state === null || state.terminal) return { lag: [] };
-  const appointed = register === undefined ? undefined : appointmentFor(register, state.id);
-  if (appointed === undefined) {
+  const place = register?.get(state.id);
+  if (place === undefined) {
     return {
       lag: [
         {
@@ -207,5 +207,5 @@ export async function projectContractWorktree(
       ],
     };
   }
-  return await materialize(repository, worktreePath(repository, appointed.place), renderContractGuidance(state));
+  return await materialize(repository, worktreePath(repository, place), renderContractGuidance(state));
 }

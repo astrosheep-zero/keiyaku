@@ -138,9 +138,9 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     await appointManagedWorktrees(repository, first);
     await Promise.all([releaseManagedWorktrees(repository, first), appointManagedWorktrees(repository, second)]);
     const register = await readPlaceRegister(repository);
-    assert.equal(register.appointments.length, second.length);
-    assert.deepEqual(new Set(register.appointments.map((appointment) => appointment.contract)), new Set(second));
-    assert.equal(new Set(register.appointments.map((appointment) => appointment.place)).size, second.length);
+    assert.equal(register.size, second.length);
+    assert.deepEqual(new Set(register.keys()), new Set(second));
+    assert.equal(new Set(register.values()).size, second.length);
     assert.equal(
       readFileSync(join(repository.commonDirectory, "keiyaku", "places.json"), "utf8"),
       canonicalPlaceRegister(register),
@@ -150,19 +150,19 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
   test("appointment after a concurrent release uses the locked on-disk register", async () => {
     const repository = await repositoryAt(repositoryWithCommit().path);
     const firstRegister = await appointManagedWorktrees(repository, [EXAMPLE]);
-    const first = firstRegister.byContract.get(EXAMPLE)!;
+    const first = firstRegister.get(EXAMPLE)!;
     const snapshot = await readPlaceRegister(repository);
     await releaseManagedWorktrees(repository, [EXAMPLE]);
     const reusedRegister = await appointManagedWorktrees(repository, [OTHER]);
-    const reused = reusedRegister.byContract.get(OTHER)!;
+    const reused = reusedRegister.get(OTHER)!;
     const appointed = await appointManagedWorktrees(repository, [EXAMPLE]);
-    assert.equal(snapshot.byContract.get(EXAMPLE)?.place, first.place);
-    assert.equal(reused.place, expectedForwardAllocation(OTHER_START_INDEX, new Set()));
+    assert.equal(snapshot.get(EXAMPLE), first);
+    assert.equal(reused, expectedForwardAllocation(OTHER_START_INDEX, new Set()));
     assert.equal(
-      appointed.byContract.get(EXAMPLE)?.place,
-      expectedForwardAllocation(EXAMPLE_START_INDEX, new Set([reused.place])),
+      appointed.get(EXAMPLE),
+      expectedForwardAllocation(EXAMPLE_START_INDEX, new Set([reused])),
     );
-    assert.deepEqual((await readPlaceRegister(repository)).byContract, appointed.byContract);
+    assert.deepEqual(await readPlaceRegister(repository), appointed);
   });
 
   test("physical unregistered Place paths are occupied without being adopted", async () => {
@@ -171,11 +171,11 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     mkdirSync(worktreePath(repository, expected), { recursive: true });
 
     const register = await appointManagedWorktrees(repository, [EXAMPLE]);
-    const appointed = register.byContract.get(EXAMPLE)!;
+    const appointed = register.get(EXAMPLE)!;
 
-    assert.notEqual(appointed.place, expected);
+    assert.notEqual(appointed, expected);
     assert.equal(existsSync(worktreePath(repository, expected)), true);
-    assert.equal(register.byPlace.has(place(expected)), false);
+    assert.equal([...register.values()].includes(expected), false);
   });
 
   test("a 10000-appointment observation decodes the register once", async () => {
@@ -184,19 +184,20 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
       place: placeAt(index),
       contract: contractId(`kei/bulk-${index}`),
     }));
-    const bytes = canonicalPlaceRegister({ appointments, byPlace: new Map(), byContract: new Map() });
+    const bytes = canonicalPlaceRegister(
+      new Map(appointments.map(({ contract, place: appointed }) => [contract, appointed])),
+    );
     const path = join(git.commonDirectory, "keiyaku", "places.json");
     mkdirSync(join(git.commonDirectory, "keiyaku"), { recursive: true });
     writeFileSync(path, bytes);
     const register = decodePlaceRegister(path, bytes);
     const next = await appointManagedWorktrees(git, [BULK_NEXT.contract]);
     writeFileSync(path, "not-canonical\n");
-    assert.equal(register.byPlace.size, 10_000);
-    assert.equal(register.byContract.size, 10_000);
-    assert.equal(register.byContract.get(appointments[0]!.contract)?.place, appointments[0]!.place);
-    assert.equal(register.byPlace.get(appointments[9_999]!.place)?.contract, appointments[9_999]!.contract);
+    assert.equal(register.size, 10_000);
+    assert.equal(register.get(appointments[0]!.contract), appointments[0]!.place);
+    assert.equal(register.get(appointments[9_999]!.contract), appointments[9_999]!.place);
     assert.equal(
-      next.byContract.get(BULK_NEXT.contract)?.place,
+      next.get(BULK_NEXT.contract),
       expectedForwardAllocation(BULK_NEXT.startIndex, new Set(appointments.map((appointment) => appointment.place))),
     );
     for (const appointment of appointments) {
@@ -256,7 +257,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), appointment);
     const other = await appointManagedWorktrees(git, [OTHER]);
     assert.equal(
-      other.byContract.get(OTHER)?.place,
+      other.get(OTHER),
       expectedForwardAllocation(OTHER_START_INDEX, new Set([appointment.place])),
     );
     writeFileSync(ready, "ready\n");

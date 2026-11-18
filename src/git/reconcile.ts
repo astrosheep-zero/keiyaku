@@ -19,7 +19,7 @@ import {
 } from "./repository.js";
 import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
 import { targetName, type ContractId, type ContractState, type SnapshotId } from "../core/facts/types.js";
-import { appointmentFor, readPlaceRegister } from "../workspace-place.js";
+import { readPlaceRegister } from "../workspace-place.js";
 import { contractLocator, contractPhysicalName, gitObjectIdForSnapshot } from "./identity.js";
 import { observeContractAt } from "./observe.js";
 import { GitPrivateStateSeatContentionError, withPrivateStatePublicationSeat } from "./private-state-seat.js";
@@ -430,7 +430,7 @@ async function reconcileFreshEffects(input: ReconcileInput, cursor: ReconcileCur
       const state = (await observeContractAt(input.repository, input.channel, input.contractId)).state;
       if (state?.head !== before?.head) continue;
       const topology = await acquireWorktreeTopology(input.repository);
-      const place = appointmentFor(await readPlaceRegister(input.repository), input.contractId)?.place;
+      const place = (await readPlaceRegister(input.repository)).get(input.contractId);
       const { place: _previousPlace, ...base } = input;
       const result = await reconcileWithTopology(
         { ...base, ...(place === undefined ? {} : { place }) },
@@ -504,8 +504,8 @@ export async function reconcileDependentWorktree(
   try {
     const incoming = await acquireTargetPlacementFence(repository, contractId);
     try {
-      const appointed = appointmentFor(await readPlaceRegister(repository), contractId);
-      if (appointed === undefined || worktreePath(repository, appointed.place) !== path)
+      const place = (await readPlaceRegister(repository)).get(contractId);
+      if (place === undefined || worktreePath(repository, place) !== path)
         throw new WorktreeCustodyError(`dependent Contract workspace appointment changed: ${contractId}`);
       const follow = await followDependentManagedWorktree(repository, path, target);
       if (follow.kind === "followed") {
