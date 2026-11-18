@@ -30,14 +30,19 @@ Place is the sole durable local appointment for a managed Contract worktree. It
 is neither a Git identity, a journal field, nor a second product. The workspace
 owner maintains one canonical Contract-to-Place appointment relation and its
 coordination boundary; the relation gives each Contract at most one current
-Place and allows each Place to serve at most one Contract. Its allocation is
-deterministic and stable once written. Contract lookup and the occupied-Place
-evidence used by one allocation batch are derived from that relation for the
-call that needs them, never a second persisted or retained index. A physically
-existing candidate path is unavailable for a new allocation even when it is
-absent from the relation and Git topology; allocation skips it and never adopts
-it. Filesystem occupancy, Git registration, and guidance do not replace the
-relation's appointment authority.
+Place and allows each Place to serve at most one Contract. Contract lookup and
+the occupied-Place evidence used by one allocation batch are derived from that
+relation for the call that needs them, never a second persisted or retained index.
+
+New candidate names derive deterministically from Contract identity and try
+successive suffixes on collision. Place labels must be portable basenames.
+Generated names carry no appointment authority: an existing appointment keeps
+its exact path, even if its name would no longer be generated. Allocation skips
+names held in the relation and paths Git considers equivalent to retained
+registrations, even when the checkout is absent. Independently, it skips any
+existing filesystem entry, including a dangling link. It never adopts those
+paths or treats an observation failure as vacancy. Filesystem occupancy, Git
+registration, and guidance do not replace the relation's appointment authority.
 
 Writers serialize a fresh read and durable replacement; corrupt or unavailable state is an appointment failure. Only active Contracts receive missing appointments; terminal ones retain an existing Place for cleanup.
 

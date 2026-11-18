@@ -1,6 +1,6 @@
 import { KeiyakuError } from "../errors.js";
-import { isAbsolute, resolve } from "node:path";
 import { lstat, realpath } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { AuthorityCorruptionError } from "../core/facts/errors.js";
 import { gitObjectId } from "./identity.js";
 import { executeGit, GitPlumbingError, withPrivateGitIndex, type GitRepository } from "./process.js";
@@ -51,7 +51,8 @@ export class NoGitWorldError extends KeiyakuError {
 type RegisteredWorktree = Readonly<{ path: string; branch: string | null }>;
 type PorcelainWorktree = RegisteredWorktree & Readonly<{ prunable: boolean }>;
 
-function worktreesFromPorcelain(output: Buffer): readonly PorcelainWorktree[] {
+async function readWorktreeTopology(repository: GitRepository): Promise<readonly PorcelainWorktree[]> {
+  const output = await executeGit(repository, ["worktree", "list", "--porcelain", "-z"]);
   const fields = output.toString("utf8").split("\0");
   const worktrees: PorcelainWorktree[] = [];
   let record: string[] = [];
@@ -88,22 +89,47 @@ function worktreesFromPorcelain(output: Buffer): readonly PorcelainWorktree[] {
 
 export async function registeredWorktrees(repository: GitRepository): Promise<readonly RegisteredWorktree[]> {
   return await Promise.all(
-    worktreesFromPorcelain(await executeGit(repository, ["worktree", "list", "--porcelain", "-z"])).map(
-      async (worktree) => {
-        const { prunable, ...registered } = worktree;
-        try {
-          return { ...registered, path: await realpath(registered.path) };
-        } catch (error) {
-          if (prunable || (error as NodeJS.ErrnoException).code === "ENOENT") return registered;
-          throw error;
-        }
-      },
-    ),
+    (await readWorktreeTopology(repository)).map(async ({ prunable, ...registered }) => {
+      try {
+        return { ...registered, path: await realpath(registered.path) };
+      } catch (error) {
+        if (prunable || (error as NodeJS.ErrnoException).code === "ENOENT") return registered;
+        throw error;
+      }
+    }),
   );
 }
 
 export async function registeredWorktreePaths(repository: GitRepository): Promise<readonly string[]> {
   return (await registeredWorktrees(repository)).map((worktree) => worktree.path);
+}
+
+async function registrationPath(repository: GitRepository, path: string): Promise<string> {
+  const parent = dirname(path);
+  // Git permits a missing leaf; reconstruct any absent ancestors before worktree creation.
+  if (parent !== path && !(await pathExists(parent)))
+    return join(await registrationPath(repository, parent), basename(path));
+  const args = [`--work-tree=${path}`, "rev-parse", "--show-toplevel"];
+  return resolve((await executeGit(repository, args)).toString("utf8").slice(0, -1));
+}
+
+/** Names Git treats as registered in this directory, even when a checkout is missing. */
+export async function registeredWorktreeNames(repository: GitRepository, directory: string): Promise<string[]> {
+  const args = ["config", "--type=bool", "--default=false", "--get", "core.ignoreCase"];
+  const ignoreCase = (await executeGit(repository, args)).toString("utf8").trim() === "true";
+  const key = (path: string) => (ignoreCase ? path.replace(/[A-Z]/gu, (letter) => letter.toLowerCase()) : path);
+  const parent = key(await registrationPath(repository, directory));
+  const names: string[] = [];
+  for (const { path } of await readWorktreeTopology(repository)) {
+    const entry = await pathExists(path).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOTDIR") return null;
+      throw error;
+    });
+    if (entry === null) continue;
+    const canonical = await registrationPath(repository, path);
+    if (key(dirname(canonical)) === parent) names.push(key(basename(canonical)));
+  }
+  return names;
 }
 
 /** Absence is ENOENT on the path entry itself: a dangling symlink is present residue, not a missing path. */

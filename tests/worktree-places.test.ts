@@ -2,22 +2,27 @@ import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { projectSettings } from "../src/settings.js";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync, rmSync,
-  writeFileSync
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test, { describe } from "node:test";
 import {
   appointManagedWorktrees,
+  appointmentFor,
   canonicalPlaceRegister,
-  CONTRACT_PLACES,
   decodePlaceRegister,
   emptyPlaceRegister,
   nukeEmptyPlaceAuthority,
@@ -29,6 +34,7 @@ import {
 } from "../src/workspace-place.js";
 import { AuthorityCorruptionError } from "../src/core/facts/errors.js";
 import { contractId } from "../src/core/facts/types.js";
+import { contractLocator } from "../src/git/identity.js";
 import { worktreePath } from "../src/git/workspace.js";
 import { cliJson } from "./support/cli-fixtures.js";
 import { Keis, KeiyakuError, Repo } from "../src/index.js";
@@ -41,9 +47,8 @@ const repositoryAt = cachedRepositoryAt;
 const EXAMPLE = contractId("kei/example");
 const OTHER = contractId("kei/other");
 const EMPTY = '{"version":1,"appointments":{}}\n';
-const EXAMPLE_START_INDEX = 15;
-const OTHER_START_INDEX = 86;
-const BULK_NEXT = { contract: contractId("kei/bulk-next"), startIndex: 28 } as const;
+const EXAMPLE_PLACE = "w-6c56a4cd5854176ebf341f0731837916caaac309215095407d50d5e262f6330e";
+const OTHER_PLACE = "w-0c842e11b43cefd6da37c6639bd3cf4004d9a7bfdaaff8c11720f60fca8ee6d7";
 
 function repositoryWithCommit() {
   const repository = makeGitRepository();
@@ -53,27 +58,6 @@ function repositoryWithCommit() {
   return repository;
 }
 
-
-
-
-function expectedForwardAllocation(
-  startIndex: number,
-  occupied: ReadonlySet<ReturnType<typeof place>>,
-): ReturnType<typeof place> {
-  for (let generation = 1n; ; generation += 1n) {
-    for (let offset = 0; offset < CONTRACT_PLACES.length; offset += 1) {
-      const base = CONTRACT_PLACES[(startIndex + offset) % CONTRACT_PLACES.length]!;
-      const candidate = place(generation === 1n ? base : `${base}${generation.toString()}`);
-      if (!occupied.has(candidate)) return candidate;
-    }
-  }
-}
-
-function placeAt(index: number) {
-  const generation = Math.floor(index / CONTRACT_PLACES.length) + 1;
-  const base = CONTRACT_PLACES[index % CONTRACT_PLACES.length]!;
-  return place(generation === 1 ? base : `${base}${String(generation)}`);
-}
 
 function contractBody(title: string): string {
   return contractMarkdown(title, {
@@ -87,16 +71,15 @@ function contractBody(title: string): string {
 
 // Each case owns its repository, fault injector and cleanup; no process-global mocks.
 describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
-  test("Place allocation preserves catalog vocabulary and suffix arithmetic", () => {
-    assert.equal(CONTRACT_PLACES.length, 173);
-    assert.equal(CONTRACT_PLACES[0], "atlantis");
-    assert.equal(CONTRACT_PLACES[1], "hogwarts");
-    assert.equal(CONTRACT_PLACES[172], "clawmachine");
-    assert.throws(() => place("a"), TypeError);
-    assert.throws(() => place("Atlantis"), TypeError);
-    assert.throws(() => place("atlantis1"), TypeError);
-    assert.throws(() => place("atlantis01"), TypeError);
-    assert.throws(() => place("not-a-place"), TypeError);
+  test("Place labels are portable lowercase basenames, not a named vocabulary", () => {
+    for (const label of ["a", "litterbox2", "not-a-place", EXAMPLE_PLACE]) {
+      assert.equal(place(label), label);
+    }
+    const unsafe = ["", "2place", "Atlantis", "\u00e9", "a/../b", "a\\b", "a.b", "a b", "a\n", "a\0"];
+    const devices = ["con", "prn", "aux", "nul", "com1", "lpt9"];
+    for (const label of [...unsafe, ...devices]) {
+      assert.throws(() => place(label), TypeError, JSON.stringify(label));
+    }
   });
 
   test("missing Place file is empty and written empty remains canonical", async () => {
@@ -129,6 +112,10 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
         decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example","hogwarts":"kei/example"}}\n'),
       AuthorityCorruptionError,
     );
+    assert.throws(
+      () => decodePlaceRegister(path, '{"version":1,"appointments":{"atlantis":"kei/example","atlantis":"kei/other"}}\n'),
+      AuthorityCorruptionError,
+    );
   });
 
   test("concurrent appoint and release preserve every mapping", async () => {
@@ -157,31 +144,160 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const reused = reusedRegister.get(OTHER)!;
     const appointed = await appointManagedWorktrees(repository, [EXAMPLE]);
     assert.equal(snapshot.get(EXAMPLE), first);
-    assert.equal(reused, expectedForwardAllocation(OTHER_START_INDEX, new Set()));
-    assert.equal(
-      appointed.get(EXAMPLE),
-      expectedForwardAllocation(EXAMPLE_START_INDEX, new Set([reused])),
-    );
+    assert.equal(reused, OTHER_PLACE);
+    assert.equal(appointed.get(EXAMPLE), EXAMPLE_PLACE);
     assert.deepEqual(await readPlaceRegister(repository), appointed);
   });
 
-  test("physical unregistered Place paths are occupied without being adopted", async () => {
-    const repository = await repositoryAt(repositoryWithCommit().path);
-    const expected = expectedForwardAllocation(EXAMPLE_START_INDEX, new Set());
-    mkdirSync(worktreePath(repository, expected), { recursive: true });
+  test("allocation skips occupied candidates in order and publishes two appointments in one batch", async () => {
+    const fixture = repositoryWithCommit();
+    const git = await repositoryAt(fixture.path);
+    const held = contractId("kei/held");
+    mkdirSync(join(git.commonDirectory, "keiyaku"), { recursive: true });
+    writeFileSync(placeRegisterPath(git), `{"version":1,"appointments":{"${EXAMPLE_PLACE}":"${held}"}}\n`);
 
-    const register = await appointManagedWorktrees(repository, [EXAMPLE]);
-    const appointed = register.get(EXAMPLE)!;
+    const registered = worktreePath(git, `${EXAMPLE_PLACE}-2`);
+    fixture.run(["worktree", "add", "--quiet", "--detach", registered]);
+    rmSync(registered, { recursive: true });
+    const directory = worktreePath(git, `${EXAMPLE_PLACE}-3`);
+    const file = worktreePath(git, `${EXAMPLE_PLACE}-4`);
+    const link = worktreePath(git, `${EXAMPLE_PLACE}-5`);
+    mkdirSync(directory);
+    writeFileSync(file, "foreign\n");
+    symlinkSync(join(directory, "missing"), link, "file");
+    const topology = fixture.run(["worktree", "list", "--porcelain"]);
 
-    assert.notEqual(appointed, expected);
-    assert.equal(existsSync(worktreePath(repository, expected)), true);
-    assert.equal([...register.values()].includes(expected), false);
+    await appointManagedWorktrees(git, [EXAMPLE, OTHER, EXAMPLE]);
+    const register = await readPlaceRegister(git);
+    assert.equal(appointmentFor(register, held)?.place, EXAMPLE_PLACE);
+    assert.equal(appointmentFor(register, EXAMPLE)?.place, `${EXAMPLE_PLACE}-6`);
+    assert.equal(appointmentFor(register, OTHER)?.place, OTHER_PLACE);
+    assert.equal(existsSync(worktreePath(git, EXAMPLE_PLACE)), false);
+    assert.equal(existsSync(registered), false);
+    assert.equal(fixture.run(["worktree", "list", "--porcelain"]), topology);
+    assert.equal(lstatSync(directory).isDirectory(), true);
+    assert.equal(readFileSync(file, "utf8"), "foreign\n");
+    assert.equal(lstatSync(link).isSymbolicLink(), true);
+  });
+
+  for (const parentAlias of [false, true]) {
+    const scenario = parentAlias ? "aliased parent" : "case-variant leaf";
+    test(`new appointments honor native Git equality for a missing foreign registration: ${scenario}`, async () => {
+      const fixture = repositoryWithCommit();
+      const git = await repositoryAt(fixture.path);
+      const keis = Keis.of(await Repo.at({ path: fixture.path }));
+      const bound = accepted(await keis.bind({ terms: contractBody("Missing foreign registration") }));
+      const { id } = present(await bound.kei.state());
+      const stem = `w-${contractLocator(id)}`;
+      const candidate = worktreePath(git, stem);
+      fixture.run(["worktree", "remove", candidate]);
+      await releaseManagedWorktrees(git, [id]);
+
+      const foreign = parentAlias
+        ? join(fixture.path, "foreign-parent", stem)
+        : worktreePath(git, stem.toUpperCase());
+      fixture.run(["worktree", "add", "--quiet", "--detach", foreign]);
+      const moved = join(fixture.path, "moved-checkout");
+      renameSync(foreign, moved);
+      if (parentAlias) {
+        rmdirSync(dirname(foreign));
+        if (process.platform === "win32") {
+          symlinkSync(dirname(candidate), dirname(foreign), "junction");
+        } else {
+          // Git must follow the pivot before interpreting '..'. A lexical realpath
+          // would land under the primary checkout instead of the managed root.
+          const inside = join(dirname(candidate), "inside");
+          mkdirSync(inside);
+          symlinkSync(inside, join(fixture.path, "pivot"), "dir");
+          symlinkSync("pivot/..", dirname(foreign), "dir");
+        }
+      }
+      // An unrelated registration below a non-directory likewise stays untouched.
+      const blockedParent = join(fixture.path, "replaced-parent");
+      fixture.run(["worktree", "add", "--quiet", "--detach", join(blockedParent, "foreign")]);
+      renameSync(blockedParent, join(fixture.path, "moved-parent"));
+      writeFileSync(blockedParent, "foreign file\n");
+      const topology = () => fixture.run(["worktree", "list", "--porcelain", "-z"]);
+      const originalTopology = topology();
+      assert.equal(existsSync(candidate), false);
+
+      // Probe Git itself; where the spellings are distinct the control add succeeds and is retired.
+      const native = spawnSync(git.gitPath, ["worktree", "add", "--quiet", "--detach", candidate], {
+        cwd: fixture.path,
+        encoding: "utf8",
+      });
+      const expected = native.status === 0 ? stem : `${stem}-2`;
+      if (native.status === 0) {
+        assert.equal(parentAlias, false, "Git must follow the registered parent alias");
+        fixture.run(["worktree", "remove", candidate]);
+      } else {
+        assert.equal(native.status, 128, native.error?.message ?? native.stderr);
+        assert.match(native.stderr, /missing but already registered/u);
+      }
+      assert.equal(topology(), originalTopology);
+
+      const path = worktreePath(git, expected);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        const reconciled = await keis.reconcile({ contract: id });
+        assert.ok(reconciled.kind === "contract");
+        assert.equal((await readPlaceRegister(git)).get(id), expected);
+        assert.deepEqual(reconciled.issues ?? [], []);
+        assert.equal(resolve(fixture.run(["-C", path, "rev-parse", "--show-toplevel"]).trim()), path);
+      }
+      const registrations = originalTopology.split("\0\0").slice(1, -1);
+      assert.equal(registrations.length, 2);
+      const finalTopology = topology().split("\0\0");
+      for (const registration of registrations) assert.ok(finalTopology.includes(registration));
+      assert.equal(existsSync(join(moved, ".git")), true);
+    });
+  }
+
+  test("an lstat observation failure aborts allocation without a register or Git effects", async () => {
+    const fixture = repositoryWithCommit();
+    const git = await repositoryAt(fixture.path);
+    const parent = join(git.primaryWorktree, ".keiyaku");
+    mkdirSync(parent);
+    const file = join(parent, "wt");
+    writeFileSync(file, "foreign\n");
+    const refs = fixture.run(["show-ref"]);
+    const topology = fixture.run(["worktree", "list", "--porcelain"]);
+
+    await assert.rejects(appointManagedWorktrees(git, [EXAMPLE]), { code: "ENOTDIR" });
+    assert.equal(existsSync(placeRegisterPath(git)), false);
+    assert.equal(fixture.run(["show-ref"]), refs);
+    assert.equal(fixture.run(["worktree", "list", "--porcelain"]), topology);
+    assert.equal(readFileSync(file, "utf8"), "foreign\n");
+  });
+
+  test("reconciliation keeps an existing catalog appointment and its exact path", async () => {
+    const fixture = repositoryWithCommit();
+    const git = await repositoryAt(fixture.path);
+    const keis = Keis.of(await Repo.at({ path: fixture.path }));
+    const bound = accepted(await keis.bind({ terms: contractBody("Legacy appointment") }));
+    const { id } = present(await bound.kei.state());
+    const original = await readManagedWorktreeAppointment(git, id);
+    assert.ok(original.kind === "appointed");
+    const legacy = "litterbox2";
+    const path = worktreePath(git, legacy);
+    fixture.run(["worktree", "move", original.path, path]);
+    const bytes = `{"version":1,"appointments":{"${legacy}":"${id}"}}\n`;
+    writeFileSync(placeRegisterPath(git), bytes);
+    writeFileSync(join(path, "authored.txt"), "keep my edits\n");
+    const topology = fixture.run(["worktree", "list", "--porcelain"]);
+
+    const reconciled = await keis.reconcile({ contract: id });
+    assert.ok(reconciled.kind === "contract");
+    assert.deepEqual(reconciled.issues ?? [], []);
+    assert.deepEqual(await readManagedWorktreeAppointment(git, id), { kind: "appointed", place: legacy, path });
+    assert.equal(readFileSync(placeRegisterPath(git), "utf8"), bytes);
+    assert.equal(fixture.run(["worktree", "list", "--porcelain"]), topology);
+    assert.equal(readFileSync(join(path, "authored.txt"), "utf8"), "keep my edits\n");
   });
 
   test("a 10000-appointment observation decodes the register once", async () => {
     const git = await repositoryAt(repositoryWithCommit().path);
     const appointments = Array.from({ length: 10_000 }, (_, index) => ({
-      place: placeAt(index),
+      place: place(`sample-${index}`),
       contract: contractId(`kei/bulk-${index}`),
     }));
     const bytes = canonicalPlaceRegister(
@@ -191,15 +307,13 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     mkdirSync(join(git.commonDirectory, "keiyaku"), { recursive: true });
     writeFileSync(path, bytes);
     const register = decodePlaceRegister(path, bytes);
-    const next = await appointManagedWorktrees(git, [BULK_NEXT.contract]);
+    const bulkNext = contractId("kei/bulk-next");
+    const next = await appointManagedWorktrees(git, [bulkNext]);
     writeFileSync(path, "not-canonical\n");
     assert.equal(register.size, 10_000);
     assert.equal(register.get(appointments[0]!.contract), appointments[0]!.place);
     assert.equal(register.get(appointments[9_999]!.contract), appointments[9_999]!.place);
-    assert.equal(
-      next.get(BULK_NEXT.contract),
-      expectedForwardAllocation(BULK_NEXT.startIndex, new Set(appointments.map((appointment) => appointment.place))),
-    );
+    assert.equal(next.get(bulkNext), `w-${contractLocator(bulkNext)}`);
     for (const appointment of appointments) {
       assert.deepEqual(await readManagedWorktreeAppointment(git, appointment.contract, register), {
         kind: "appointed",
@@ -256,10 +370,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(existsSync(appointment.path), true);
     assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), appointment);
     const other = await appointManagedWorktrees(git, [OTHER]);
-    assert.equal(
-      other.get(OTHER),
-      expectedForwardAllocation(OTHER_START_INDEX, new Set([appointment.place])),
-    );
+    assert.equal(other.get(OTHER), OTHER_PLACE);
     writeFileSync(ready, "ready\n");
     const released = await Keis.of(repo, { settings }).reconcile({ contract: (present(await bound.kei.state())).id, retryHooks: true });
     assert.ok(released.kind === "contract");
@@ -412,24 +523,24 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
   test("appoint write failure causes no Git ref or worktree effect", async () => {
     const repository = repositoryWithCommit();
     const git = await repositoryAt(repository.path);
+    const keis = Keis.of(await Repo.at({ path: repository.path }));
     const directory = join(git.commonDirectory, "keiyaku");
-    mkdirSync(directory, { recursive: true });
-    const target = placeRegisterPath(git);
-    mkdirSync(target);
+    await releaseManagedWorktrees(git, [EXAMPLE]);
     const worktrees = repository.run(["worktree", "list", "--porcelain"]);
+    chmodSync(directory, 0o555);
+    let bound;
     try {
-      const bound = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
-        terms: contractBody("Unrealized"),
-        }));
-      assert.ok((bound.issues ?? []).some((issue) => issue.kind === "contract-file-failed"));
-      assert.equal(existsSync(worktreePath(git, "atlantis")), false);
-      assert.equal(repository.run(["worktree", "list", "--porcelain"]), worktrees);
-      assert.doesNotMatch(repository.run(["show-ref"]), /refs\/keiyaku\/delivery\//u);
-      rmSync(target, { recursive: true });
-      assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), { kind: "unappointed" });
+      bound = accepted(await keis.bind({ terms: contractBody("Unrealized") }));
     } finally {
-      rmSync(target, { recursive: true, force: true });
+      chmodSync(directory, 0o755);
     }
+    assert.ok((bound.issues ?? []).some((issue) => issue.kind === "contract-file-failed"));
+    const { id } = present(await bound.kei.state());
+    assert.equal(existsSync(worktreePath(git, `w-${contractLocator(id)}`)), false);
+    assert.equal(repository.run(["worktree", "list", "--porcelain"]), worktrees);
+    assert.doesNotMatch(repository.run(["show-ref"]), /refs\/keiyaku\/delivery\//u);
+    assert.equal(readFileSync(placeRegisterPath(git), "utf8"), EMPTY);
+    assert.deepEqual(await readManagedWorktreeAppointment(git, id), { kind: "unappointed" });
   });
 
   test("release write failure keeps the appointment after physical removal", async () => {

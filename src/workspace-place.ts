@@ -1,192 +1,17 @@
-import { createHash } from "node:crypto";
 import { lstat, mkdir, readFile, unlink } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { replaceFileDurably } from "./coordination/durable-file.js";
 import { acquireSqliteTransactionLock } from "./coordination/sqlite-transaction-lock.js";
 import { AuthorityCorruptionError } from "./core/facts/errors.js";
 import { contractId, type ContractId } from "./core/facts/types.js";
+import { contractLocator } from "./git/identity.js";
 import type { GitRepository } from "./git/process.js";
+import { pathExists, registeredWorktreeNames } from "./git/repository.js";
 import { worktreePath } from "./git/workspace.js";
 
-export const CONTRACT_PLACES = Object.freeze([
-  "atlantis",
-  "hogwarts",
-  "narnia",
-  "neverland",
-  "mordor",
-  "shire",
-  "olympus",
-  "valhalla",
-  "asgard",
-  "hades",
-  "camelot",
-  "avalon",
-  "utopia",
-  "azkaban",
-  "konoha",
-  "namek",
-  "laputa",
-  "tatooine",
-  "stomach",
-  "eyeball",
-  "braincell",
-  "appendix",
-  "nostril",
-  "armpit",
-  "chineseroom",
-  "catbox",
-  "babel",
-  "teapot",
-  "blackhole",
-  "wormhole",
-  "devnull",
-  "localhost",
-  "recyclebin",
-  "bikeshed",
-  "serverroom",
-  "spawnpoint",
-  "bossroom",
-  "hiddenlevel",
-  "warpzone",
-  "styx",
-  "limbo",
-  "purgatory",
-  "penglai",
-  "longgong",
-  "nantianmen",
-  "guimenguan",
-  "naiheqiao",
-  "backrooms",
-  "bermuda",
-  "upsidedown",
-  "mindpalace",
-  "pandorabox",
-  "friendzone",
-  "comfortzone",
-  "echochamber",
-  "rabbithole",
-  "ivorytower",
-  "doghouse",
-  "panicroom",
-  "shoebox",
-  "snowglobe",
-  "dollhouse",
-  "donuthole",
-  "dumpster",
-  "blanketfort",
-  "kotatsu",
-  "fishbowl",
-  "pokeball",
-  "pineapple",
-  "titanic",
-  "disneyland",
-  "ikea",
-  "costco",
-  "warppipe",
-  "tetris",
-  "minecraft",
-  "ufo",
-  "catbus",
-  "timemachine",
-  "moonbox",
-  "huaguoshan",
-  "pansidong",
-  "bellybutton",
-  "sock",
-  "spam",
-  "downloads",
-  "toilet",
-  "blender",
-  "toaster",
-  "litterbox",
-  "kiddiepool",
-  "beanbag",
-  "vacuum",
-  "elevator",
-  "glovebox",
-  "attic",
-  "cloud",
-  "wall",
-  "can",
-  "cup",
-  "wc",
-  "bean",
-  "bus",
-  "helicopter",
-  "commandroom",
-  "box",
-  "jar",
-  "pot",
-  "wok",
-  "bowl",
-  "bucket",
-  "drawer",
-  "sofa",
-  "fridge",
-  "microwave",
-  "well",
-  "ditch",
-  "puddle",
-  "tent",
-  "cave",
-  "shed",
-  "garage",
-  "basement",
-  "balcony",
-  "corner",
-  "pigpen",
-  "henhouse",
-  "excavator",
-  "tank",
-  "submarine",
-  "treehouse",
-  "igloo",
-  "phonebooth",
-  "mailbox",
-  "doormat",
-  "bathtub",
-  "wardrobe",
-  "quicksand",
-  "tarpit",
-  "haystack",
-  "manhole",
-  "chimney",
-  "dryer",
-  "fittingroom",
-  "lazysusan",
-  "revolvingdoor",
-  "minibar",
-  "casino",
-  "karaoke",
-  "pinball",
-  "funhouse",
-  "burrito",
-  "dumpling",
-  "hotpot",
-  "bento",
-  "teabag",
-  "fortunecookie",
-  "airlock",
-  "escapepod",
-  "hammock",
-  "legroom",
-  "sidequest",
-  "lootbox",
-  "gutter",
-  "pawnshop",
-  "hermitcrab",
-  "couchgap",
-  "dumbwaiter",
-  "petridish",
-  "baggageclaim",
-  "morgue",
-  "ballpit",
-  "clawmachine",
-]);
-
-const PLACE_INDEX = new Map(CONTRACT_PLACES.map((base, index) => [base, index]));
 const PLACE_VERSION = 1;
-const GENERATION_SUFFIX = /^(?:[2-9]|[1-9][0-9]+)$/u;
+const PORTABLE_PLACE = /^[a-z][a-z0-9-]*$/u;
+const WINDOWS_RESERVED = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])$/u;
 const placeAuthorityFence: unique symbol = Symbol("place-authority-fence");
 
 export type Place = string & { readonly [placeBrand]: "Place" };
@@ -212,24 +37,9 @@ export function placeRegisterPath(repository: GitRepository): string {
   return placePaths(repository).authority;
 }
 
-function parsedPlace(value: string): Readonly<{ base: string; generation: bigint }> | undefined {
-  if (PLACE_INDEX.has(value)) return { base: value, generation: 1n };
-  for (let end = value.length - 1; end > 0; end -= 1) {
-    const base = value.slice(0, end);
-    const suffix = value.slice(end);
-    if (PLACE_INDEX.has(base) && GENERATION_SUFFIX.test(suffix)) {
-      return { base, generation: BigInt(suffix) };
-    }
-  }
-  return undefined;
-}
-
-function composePlace(base: string, generation: bigint): Place {
-  return (generation === 1n ? base : `${base}${generation.toString()}`) as Place;
-}
-
 export function place(value: string): Place {
-  if (parsedPlace(value) === undefined) throw new TypeError(`Place is not canonical: ${value}`);
+  if (!PORTABLE_PLACE.test(value) || WINDOWS_RESERVED.test(value))
+    throw new TypeError(`Place is not canonical: ${value}`);
   return value as Place;
 }
 
@@ -341,54 +151,28 @@ async function mutatePlaceRegister(
   return await withPlaceAuthorityFence(repository, async () => await mutatePlaceRegisterInFence(repository, mutate));
 }
 
-async function withAppointments(
-  repository: GitRepository,
-  register: PlaceRegister,
-  contracts: readonly ContractId[],
-): Promise<PlaceRegister> {
-  let next: Map<ContractId, Place> | undefined;
-  const occupied = new Set(register.values());
-  for (const contract of contracts) {
-    if ((next ?? register).has(contract)) continue;
-    const candidate = await firstUnoccupiedPlace(repository, contract, occupied);
-    next ??= new Map(register);
-    next.set(contract, candidate);
-    occupied.add(candidate);
-  }
-  return next ?? register;
-}
-
-function stableStartIndex(contract: ContractId): number {
-  const digest = createHash("sha256").update(contract, "utf8").digest("hex");
-  return Number(BigInt(`0x${digest}`) % BigInt(CONTRACT_PLACES.length));
-}
-
-async function firstUnoccupiedPlace(
-  repository: GitRepository,
-  contract: ContractId,
-  occupied: ReadonlySet<Place>,
-): Promise<Place> {
-  const start = stableStartIndex(contract);
-  for (let generation = 1n; ; generation += 1n) {
-    for (let offset = 0; offset < CONTRACT_PLACES.length; offset += 1) {
-      const base = CONTRACT_PLACES[(start + offset) % CONTRACT_PLACES.length]!;
-      const candidate = composePlace(base, generation);
-      if (occupied.has(candidate)) continue;
-      try {
-        await lstat(worktreePath(repository, candidate));
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") return candidate;
-        throw error;
-      }
-    }
-  }
-}
-
 export async function appointManagedWorktrees(
   repository: GitRepository,
   contracts: readonly ContractId[],
 ): Promise<PlaceRegister> {
-  return await mutatePlaceRegister(repository, (current) => withAppointments(repository, current, contracts));
+  return await mutatePlaceRegister(repository, async (register) => {
+    if (contracts.every((contract) => register.has(contract))) return register;
+    const directory = worktreePath(repository, "");
+    const occupied = new Set([...register.values(), ...(await registeredWorktreeNames(repository, directory))]);
+    const next = new Map(register);
+    for (const contract of contracts) {
+      if (next.has(contract)) continue;
+      const stem = `w-${contractLocator(contract)}`;
+      for (let suffix = 1; ; suffix += 1) {
+        const candidate = place(suffix === 1 ? stem : `${stem}-${suffix}`);
+        if (occupied.has(candidate) || (await pathExists(join(directory, candidate)))) continue;
+        next.set(contract, candidate);
+        occupied.add(candidate);
+        break;
+      }
+    }
+    return next;
+  });
 }
 
 export async function releaseManagedWorktrees(
