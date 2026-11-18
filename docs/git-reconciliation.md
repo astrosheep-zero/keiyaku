@@ -18,8 +18,9 @@ Contract authority and current topology under that Contract's custody boundary,
 then applies the effects that remain necessary. Ordinary admission does not use
 this boundary; target placement uses the separate target fence from [git.md](git.md).
 Different Contracts need no shared effect lock. A mutation that admitted newer
-authority triggers reconciliation from that newer state, so a prior replay
-cannot establish a competing terminal physical meaning.
+authority triggers reconciliation from that newer state. If authority moves
+between outgoing and incoming custody, that attempt reports retryable lag
+rather than restarting with the newer head.
 
 Reconciliation reports meaningful completed physical movement and resource
 retirement, plus typed issues for work it could not safely complete. Completed
@@ -27,8 +28,9 @@ Debt settlement remains visible even if releasing its association later fails.
 Ephemeral recovery snapshots retain their identities at the invocation that
 produced them. Unchanged observations and successful internal hook inventories
 are not receipt content; a complete world pass omits Contracts with no effect or
-issue. It does not claim the outcome of an unreported effect. Authority corruption remains an exception. A lag is safe to retry:
-every replay begins from durable facts and fresh topology, never a process-local
+issue. Unchanged topology can authorize local work but is not an effect.
+Authority corruption remains an exception. A lag is safe to retry: every
+replay begins from durable facts and fresh topology, never a process-local
 receipt, progress marker, frozen hook list, detached runner, or recovery queue.
 Confirmed reset is a separate Git-owned operation, not reconciliation.
 
@@ -70,14 +72,24 @@ appointed incarnation and exact already-published movement even if the
 destination has since become terminal; it never creates an appointment or
 adopts a replacement. Workspace replacement, dependent following, and terminal
 cleanup share the incoming destination fence with placement and follow.
-Outgoing recovery finishes before incoming workspace custody begins, and
-cleanup observes its seal and topology afresh under that custody.
+Outgoing recovery finishes before incoming workspace repair begins. Git closes
+that custody before the Library gives Settlement its opportunity. Terminal
+cleanup reacquires custody and requires the same terminal authority that had
+that opportunity. It proves the current topology and seal afresh, refusing
+stale authority rather than removing a newly terminal workspace.
 
 Pending delivery keeps the required tender and integration custody. Terminal
 cleanup applies Git's sealed-byte and surviving-custodian law from
 [git.md](git.md); reconciliation owns only the fresh topology observation and
 physical replay. A worktree is removed before its appointment or redundant refs
-are released. Retention is a lag, not a changed acceptance result.
+are released. An appointment left after physical removal does not renew custody
+that a surviving custodian still proves redundant. Reconciliation restores
+missing refs when the recorded delivery lacks the required surviving custody.
+Failure to restore one ref does not stop independent custody repair for the
+other snapshot. Unavailable object evidence does not establish redundancy. It
+can leave a ref custody diagnostic without blocking release of an appointment
+whose physical absence is independently proved. Retention does not change
+acceptance.
 
 Successful Git removal alone does not prove that the filesystem path is gone.
 Cleanup confirms physical absence before reporting removal and releasing
@@ -131,12 +143,12 @@ another's.
 A world reconcile first obtains one complete frozen Contract-world observation.
 It either discovers the whole world, including an empty world, or reports
 observation failure before selecting any Contract. There is no synthetic or
-partial discovery result. It then returns each Contract's independent observed
-effects and lags; one Contract's lag neither discards another's report nor
-becomes a world-wide exception. Contract and world reports expose meaningful effects that
-actually occurred and actionable issues, without inventing lifecycle state or
-a second cleanup report. Known-empty reports remain distinct from failed world
-observation.
+partial discovery result. Addressed repair, post-admission repair, and the
+world pass give each Contract the same fresh reconciliation opportunity. In
+discovery order, the world pass finishes one Contract's repair, projection,
+Settlement, and eligible cleanup before starting the next. One Contract's lag
+neither discards another's report nor becomes a world-wide exception.
+Known-empty reports remain distinct from failed world observation.
 
 Only an owner-recognized operational failure becomes reconciliation lag.
 Programming failures and corrupt authority remain exceptional; an invocation

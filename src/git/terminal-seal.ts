@@ -16,7 +16,6 @@ type UnsealedBytes = z.infer<typeof unsealedBytesSchema>;
 export type TerminalSealExpectations = Readonly<{
   heads: readonly SnapshotId[];
   trees: readonly GitObjectId[];
-  treeBySnapshot: ReadonlyMap<SnapshotId, GitObjectId>;
 }>;
 type TerminalSealObject = Readonly<{ kind: "present"; type: string; bytes: Buffer }> | Readonly<{ kind: "missing" }>;
 type CommitMetadata = Readonly<{ tree: GitObjectId; parents: readonly SnapshotId[] }>;
@@ -65,6 +64,10 @@ function commitMetadata(snapshot: SnapshotId, result: TerminalSealObject | undef
   };
 }
 
+export function observedSnapshotTree(snapshot: SnapshotId, object: TerminalSealObject | undefined): GitObjectId | null {
+  return object?.kind === "missing" ? null : commitMetadata(snapshot, object).tree;
+}
+
 export function terminalSealExpectations(
   state: ContractState,
   objects: ReadonlyMap<GitOid, TerminalSealObject>,
@@ -73,10 +76,8 @@ export function terminalSealExpectations(
   const metadata = new Map(
     snapshots.map((snapshot) => [snapshot, commitMetadata(snapshot, objects.get(gitObjectIdForSnapshot(snapshot)))]),
   );
-  const treeBySnapshot = new Map([...metadata].map(([snapshot, commit]) => [snapshot, commit.tree]));
-  if (state.delivery === null) {
-    return { heads: [state.coordinates.start], trees: [...treeBySnapshot.values()], treeBySnapshot };
-  }
+  const trees = [...metadata.values()].map((commit) => commit.tree);
+  if (state.delivery === null) return { heads: [state.coordinates.start], trees };
   const tender = state.delivery.data.tenderSnapshot;
   const tenderMetadata = metadata.get(tender);
   if (tenderMetadata === undefined) throw new Error(`terminal seal metadata was not resolved: ${tender}`);
@@ -90,8 +91,7 @@ export function terminalSealExpectations(
         state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot,
       ]),
     ],
-    trees: [...treeBySnapshot.values()],
-    treeBySnapshot,
+    trees,
   };
 }
 

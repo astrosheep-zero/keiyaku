@@ -131,8 +131,13 @@ export async function removeCollectableScratchWorktrees(
   repository: GitRepository,
   paths: Set<string>,
   terminalContract?: ContractId,
+  onRemoval?: (removal: CollectableScratchRemoval) => void,
 ): Promise<readonly CollectableScratchRemoval[]> {
   const removals: CollectableScratchRemoval[] = [];
+  const record = (removal: CollectableScratchRemoval): void => {
+    removals.push(removal);
+    onRemoval?.(removal);
+  };
   const terminalPrefix =
     terminalContract === undefined ? undefined : retainedScratchPrefix(repository, terminalContract);
   for await (const scratch of collectableScratchWorktrees(paths, terminalPrefix)) {
@@ -140,12 +145,12 @@ export async function removeCollectableScratchWorktrees(
     try {
       const leak = await removeScratch(repository, scratch.path);
       if (leak !== null) {
-        removals.push({ path: scratch.path, retained: true, diagnostic: leak.diagnostic });
+        record({ path: scratch.path, retained: true, diagnostic: leak.diagnostic });
         continue;
       }
       paths.delete(scratch.path);
       removed = true;
-      removals.push({ path: scratch.path, retained: false });
+      record({ path: scratch.path, retained: false });
     } finally {
       scratch.release();
       if (removed && basename(scratch.path).length === SCRATCH_PREFIX.length + 24)

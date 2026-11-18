@@ -188,9 +188,10 @@ Terminal cleanup removes a managed worktree only when its bytes and head are
 sealed by the Contract's recorded custody. Unsealed accepted bytes are retained.
 For abandoned unsealed bytes, Git may produce ephemeral, ref-free recovery
 evidence before removal; it is not a journal fact, retention promise, or source
-of later lifecycle authority. Physical removal precedes Place release and ref
-cleanup. A retained path or nonredundant ref is visible lag, never reversal of
-an accepted outcome.
+of later lifecycle authority. Confirmed physical absence permits Place release
+independently of any remaining ref custody. Ref cleanup still requires its own
+surviving-custodian proof. A retained path or nonredundant ref never reverses an
+accepted outcome.
 
 The seal protects tracked and non-ignored candidate content. Ignored,
 worktree-local runtime artifacts are incidental to the disposable checkout:

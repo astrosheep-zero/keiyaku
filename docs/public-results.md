@@ -242,8 +242,10 @@ truncated output. They add no journal fact and supply no cleanup or
 reconciliation authority. Optional residue does not change the exit judgment;
 a required operational stop remains actionable.
 
-Resource problems accumulate across attempts and dependents. Newer candidate
-conclusions cannot overwrite an earlier resource problem. A failure during
+Reconciliation retains each confirmed physical effect once, in the order it
+was observed, including effects that precede a later failure. Resource problems
+accumulate across attempts and dependents. Newer candidate conclusions cannot
+overwrite an earlier resource problem. A failure during
 retirement keeps every previously confirmed admission and effect, including when
 an earlier exceptional receipt was already attached to the native cause. Merging
 evidence creates a fresh error with immutable receipt properties and preserves

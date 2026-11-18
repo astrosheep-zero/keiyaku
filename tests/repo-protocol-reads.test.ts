@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { appointManagedWorktrees } from "../src/workspace-place.js";
-import { appointedWorktreePath, type TestGitRepository } from "./support/git.js";
+import { appointManagedWorktrees, readPlaceRegister } from "../src/workspace-place.js";
+import { appointedWorktreePath, withGitShim, type TestGitRepository } from "./support/git.js";
 import { repositoryWithMain } from "./support/library-verbs.js";
 import {
   GIT_FORMAT_PATH,
@@ -18,7 +18,7 @@ import {
 } from "../src/git/repository.js";
 import { withGitDecodeChannel, withGitReadObservation } from "../src/git/read-observation.js";
 import { readContractCount, readContractMembership, readContractObservation } from "../src/protocol/read/status.js";
-import { Keis, Repo, Kanshi } from "../src/index.js";
+import { Keis, KeiyakuError, Repo, Kanshi } from "../src/index.js";
 import { decodeContractDocument } from "../src/body/decode.js";
 import { decodeJournal, encodeEntry } from "../src/core/facts/codec.js";
 import { observeNamedAddress, resolveNamedAddress } from "../src/library/address.js";
@@ -306,6 +306,77 @@ test("counts and selection observe only their membership authority", async () =>
   await assert.rejects(library.resolve({ cwd }));
   await publish(GIT_FORMAT_PATH, "corrupt membership format\n");
   assert.equal((await Kanshi.of({ world: null, repo }).counts()).contracts.kind, "failed");
+});
+
+test("world reconcile distinguishes empty from failed discovery and starts no repair on incomplete authority", async () => {
+  const repository = repositoryWithMain();
+  const repo = await Repo.at({ path: repository.path });
+  const contracts = Keis.of(repo);
+  assert.deepEqual(await contracts.reconcile({}), { kind: "world" });
+  const missing = protocolContractId("Missing");
+  assert.deepEqual(await contracts.reconcile({ contract: missing }), { kind: "missing", contractId: missing });
+  const first = await bind(repository, "Unrealized first");
+  const second = await bind(repository, "Unrealized second");
+  const git = await repositoryAt(repository.path);
+  const shim = [
+    'if [ "$1 $2 $3 $4" = "rev-parse --verify --quiet refs/heads/keiyaku-state" ]; then',
+    '  echo "discovery read unavailable" >&2',
+    "  exit 2",
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+  const unavailable = await withGitShim(shim, {}, async (gitPath) =>
+    Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({}),
+  );
+  assert.equal(unavailable.kind, "world-observation-failed");
+  assert.match(unavailable.diagnostic, /discovery read unavailable/u);
+  const before = await readGitPaths(git, contractJournalPaths(second));
+  const corrupt = await writeBlob(git, "corrupt later journal\n");
+  const tree = await updateGitTree(git, before.tree, new Map([[contractJournalPath(second), { oid: corrupt }]]));
+  const commit = await writeCommit({ repository: git, tree, parent: before.commit });
+  repository.run(["update-ref", GIT_REF, commit, before.commit!]);
+  await assert.rejects(contracts.reconcile({}), { category: "authority-corruption" });
+  assert.equal((await readPlaceRegister(git)).has(first), false);
+  assert.equal(existsSync(join(repository.path, ".keiyaku", "wt")), false);
+});
+
+test("world reconcile preserves earlier Contract effects when later authority is corrupt", async () => {
+  const repository = repositoryWithMain();
+  const ids = [await bind(repository, "First repair"), await bind(repository, "Second repair")];
+  const git = await repositoryAt(repository.path);
+  const blob = await writeBlob(git, "not a state commit");
+  const marker = join(git.commonDirectory, "worktree-created");
+  const shim = [
+    'if [ "$1 $2" = "worktree add" ]; then',
+    '  "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+    '  : > "$KEIYAKU_MARKER"',
+    "  exit 0",
+    "fi",
+    'if [ "$1 $2 $3 $4" = "rev-parse --verify --quiet refs/heads/keiyaku-state" ] && [ -e "$KEIYAKU_MARKER" ]; then',
+    '  printf "%s\\n" "$KEIYAKU_BLOB"',
+    "  exit 0",
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+  await withGitShim(shim, { KEIYAKU_MARKER: marker, KEIYAKU_BLOB: blob }, async (gitPath) => {
+    const repo = await Repo.at({ path: repository.path, gitPath });
+    await assert.rejects(Keis.of(repo).reconcile({}), (error: unknown) => {
+      assert.ok(error instanceof KeiyakuError);
+      assert.equal(error.category, "authority-corruption");
+      const outcome = error.outcome;
+      assert.ok(outcome?.kind === "world");
+      assert.equal(outcome.contracts?.length, 1);
+      const first = outcome.contracts?.[0];
+      assert.ok(first?.contractId && ids.includes(first.contractId));
+      const repaired = first.effects?.filter((effect) => effect.kind === "worktree-created");
+      assert.equal(repaired?.length, 1);
+      const creation = repaired?.[0];
+      assert.ok(creation?.kind === "worktree-created");
+      assert.ok(existsSync(join(creation.path, ".keiyaku", "KEIYAKU.md")));
+      return true;
+    });
+  });
+  assert.equal((await readPlaceRegister(git)).size, 1);
 });
 
 test("repo reconcile leaves a refused foreign worktree untouched until recovery realizes it", async () => {

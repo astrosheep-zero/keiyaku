@@ -6,9 +6,9 @@ durable cross-product association. Forking creates no holder, lineage, sibling
 registry, or comparison outcome.
 
 No other module joins Contract write-side facts to Debt writes. Library composes
-holder changes with Contract admission and invokes settlement after Git
-reconciliation. CLI never settles directly, and Kanshi may only consume the
-read projection.
+holder changes with Contract admission and gives Settlement its opportunity
+outside Git custody. CLI never settles directly, and Kanshi may only consume
+the read projection.
 
 ## DebtHolder
 
@@ -45,11 +45,11 @@ Only explicit current DebtHolder facts establish Contract-to-Debt association.
 Contract names and identity spelling carry no association authority. Settlement
 has no Akuma rule, configurable lifecycle hook, event bus, or generic cross-product registry.
 
-Admission is irreversible. The public sequence is admission, Git reconciliation,
-active workspace projection, Settlement, then result projection. Git, workspace,
-or Settlement lag cannot reject an accepted fact, manufacture abandonment, or
-hide the Contract. Terminal managed worktree removal waits until this
-invocation's settlement opportunity ends.
+Admission is irreversible. A Contract's Settlement opportunity follows Git
+repair and any active workspace projection, and precedes terminal cleanup.
+Settlement receives the authority repair observed, not a terminal conclusion
+inferred from later physical effects. Git, workspace, or Settlement lag cannot
+reject an accepted fact, manufacture abandonment, or hide the Contract.
 
 Settlement derives desired work anew from current Contract, holder, Debt, and
 Git observations on every invocation. It stores no completion bit, replay queue,

@@ -110,12 +110,14 @@ async function reconcileKeiyaku(
     throw new KeiyakuError("invalid-input", "contract must be a string");
   if (values.retryHooks !== undefined && typeof values.retryHooks !== "boolean")
     throw new KeiyakuError("invalid-input", "retryHooks must be a boolean");
-  const options = { scope, hooks: derivedHooks(composition), retryHooks: values.retryHooks ?? false };
+  // Reconciliation can retire the worktree that supplied the Repo coordinate.
+  const primary = { ...scope, effectiveCwd: scope.primaryWorktree };
+  const options = { scope: primary, hooks: derivedHooks(composition), retryHooks: values.retryHooks ?? false };
   const accumulator = new InvocationAccumulator();
   const id = contract === undefined ? undefined : callerContractId(contract);
   try {
     return await withGitDecodeChannel<ReconcileCompletion | RepoReconcileReport>(
-      scope,
+      primary,
       (channel) =>
         id === undefined
           ? completeRepoReconcile({ ...options, channel, accumulator })

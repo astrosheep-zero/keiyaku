@@ -1,11 +1,16 @@
 import { accepted, present } from "./support/library-verbs.js";
 import assert from "node:assert/strict";
-import { readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
 import { Keis, Repo, type ContractId } from "../src/index.js";
 import { snapshotId } from "../src/core/facts/types.js";
 import { readRef, repositoryAt } from "../src/git/repository.js";
+import { withGitDecodeChannel } from "../src/git/read-observation.js";
+import { abandonOperation } from "../src/protocol/abandon.js";
+import { cleanupTerminalOperation } from "../src/protocol/reconcile.js";
+import { worktreePath } from "../src/git/workspace.js";
+import { placeRegisterPath, readManagedWorktreeAppointment } from "../src/workspace-place.js";
 import {
   appointedWorktreePath,
   candidatePinRefFor,
@@ -83,6 +88,206 @@ async function projectionFixture() {
   const id = present(await bound.kei.state()).id;
   const worktree = await appointedWorktreePath(await repositoryAt(repository.path), id);
   return { repository, repo, id, worktree };
+}
+
+test("head movement spends repair once; stale cleanup cannot remove a newly terminal worktree", async () => {
+  const { repository, repo, id, worktree } = await projectionFixture();
+  const scope = await repositoryAt(repository.path);
+  const head = present(await Keis.of(repo).kei({ id }).state()).head;
+  const reads = join(scope.commonDirectory, "state-reads");
+  const shim = [
+    'if [ "$1 $2 $3 $4" = "rev-parse --verify --quiet refs/heads/keiyaku-state" ]; then',
+    '  printf "read\\n" >> "$KEIYAKU_READS"',
+    '  if [ "$(wc -l < "$KEIYAKU_READS" | tr -d " ")" = 2 ]; then',
+    '    frozen=$("$KEIYAKU_REAL_GIT" "$@") || exit $?',
+    '    "$KEIYAKU_REAL_GIT" update-ref refs/heads/keiyaku-state "$KEIYAKU_TERMINAL" "$frozen" || exit $?',
+    '    printf "%s\\n" "$frozen"',
+    "    exit 0",
+    "  fi",
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+  const before = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
+  const terminal = await withGitDecodeChannel(scope, (channel) => abandonOperation({ scope, channel, contractId: id }));
+  assert.equal(terminal.kind, "accepted");
+  const after = repository.run(["rev-parse", "refs/heads/keiyaku-state"]).trim();
+  repository.run(["update-ref", "refs/heads/keiyaku-state", before, after]);
+  const report = await withGitShim(shim, { KEIYAKU_READS: reads, KEIYAKU_TERMINAL: after }, async (gitPath) =>
+    Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({ contract: id }),
+  );
+  assert.equal(report.kind, "contract");
+  assert.equal(report.effects, undefined);
+  assert.deepEqual(report.issues, [
+    { kind: "reconcile-failed", severity: "required", diagnostic: `Contract moved during reconciliation: ${id}` },
+  ]);
+  assert.equal(readFileSync(reads, "utf8"), "read\nread\nread\n");
+  assert.equal(existsSync(worktree), true);
+
+  const cleanup = await withGitDecodeChannel(scope, (channel) =>
+    cleanupTerminalOperation({
+      scope,
+      channel,
+      contractId: id,
+      expectedHead: head,
+      handoffSafe: true,
+      retryHooks: false,
+      hooks: { create: [], destroy: [] },
+    }),
+  );
+  assert.equal(cleanup.appointedPathAbsent, false);
+  assert.equal(cleanup.report.lag[0]?.kind, "reconcile-failed");
+  assert.equal(existsSync(worktree), true);
+  const retried = await Keis.of(repo).reconcile({ contract: id });
+  assert.equal(retried.kind, "contract");
+  assert.equal(retried.issues, undefined);
+  assert.equal(existsSync(worktree), false);
+});
+
+test("recovery and confirmed removal survive a later ref custody failure without retaining Place", async () => {
+  const { repository, id, worktree } = await projectionFixture();
+  writeFileSync(join(worktree, "abandoned.txt"), "recover these bytes\n");
+  const scope = await repositoryAt(repository.path);
+  const terminal = await withGitDecodeChannel(scope, (channel) => abandonOperation({ scope, channel, contractId: id }));
+  assert.equal(terminal.kind, "accepted");
+  const shim = [
+    'if [ "$1" = "for-each-ref" ]; then',
+    '  echo "ref custody observation failed" >&2',
+    "  exit 2",
+    "fi",
+    'exec "$KEIYAKU_REAL_GIT" "$@"',
+  ].join("\n");
+  const report = await withGitShim(shim, {}, async (gitPath) =>
+    Keis.of(await Repo.at({ path: repository.path, gitPath })).reconcile({ contract: id }),
+  );
+  assert.equal(report.kind, "contract");
+  const [recovery, removal] = report.effects ?? [];
+  assert.equal(report.effects?.length, 2);
+  assert.equal(recovery?.kind, "recovery-snapshot");
+  assert.equal(repository.run(["show", `${recovery.snapshot}:abandoned.txt`]), "recover these bytes\n");
+  assert.deepEqual(removal, { kind: "worktree-removed", path: worktree });
+  assert.equal(report.issues?.length, 1);
+  const issue = report.issues?.[0];
+  assert.equal(issue?.kind, "reconcile-failed");
+  assert.match(issue.diagnostic, /ref custody observation failed/u);
+  assert.deepEqual(await readManagedWorktreeAppointment(scope, id), { kind: "unappointed" });
+  assert.notEqual(await readRef(scope, deliveryRefFor(id)), null);
+  const replay = await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: id });
+  assert.equal(replay.kind, "contract");
+  assert.equal(replay.issues, undefined);
+  assert.equal(await readRef(scope, deliveryRefFor(id)), null);
+});
+
+async function withPlaceWritesBlocked<T>(git: Awaited<ReturnType<typeof repositoryAt>>, run: () => Promise<T>) {
+  const directory = join(git.commonDirectory, "keiyaku");
+  chmodSync(directory, 0o555);
+  try {
+    return await run();
+  } finally {
+    chmodSync(directory, 0o755);
+  }
+}
+
+async function terminalLegacyPlaceFixture(retainTender = false) {
+  const repository = repositoryWithMain();
+  const scope = await repositoryAt(repository.path);
+  const keis = Keis.of(await Repo.at({ path: repository.path }));
+  const { kei } = accepted(await keis.bind({ terms: document(), target: "refs/heads/main", gates: [] }));
+  const { id } = present(await kei.state());
+  const place = "litterbox2";
+  const path = worktreePath(scope, place);
+  const register = placeRegisterPath(scope);
+  repository.run(["worktree", "move", await appointedWorktreePath(scope, id), path]);
+  writeFileSync(register, `{"version":1,"appointments":{"${place}":"${id}"}}\n`);
+  writeFileSync(join(path, "candidate.txt"), "candidate\n");
+  repository.run(["-C", path, "add", "candidate.txt"]);
+  repository.run(["-C", path, "commit", "--quiet", "-m", "candidate"]);
+  if (retainTender) {
+    writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
+    repository.run(["add", "target-only.txt"]);
+    repository.run(["commit", "--quiet", "-m", "target only"]);
+  }
+
+  const receipt = accepted(await withPlaceWritesBlocked(scope, () => kei.deliver()));
+  assert.equal(receipt.placement?.kind, "placed");
+  assert.ok(receipt.issues?.some((issue) => issue.kind === "contract-file-failed" && issue.path === register));
+  const tender = present(present(await kei.state()).delivery).data.tenderSnapshot;
+  const integration = receipt.integration;
+  assert.notEqual(tender, integration);
+  assert.equal(
+    repository.run(["rev-parse", `${tender}^{tree}`]) === repository.run(["rev-parse", `${integration}^{tree}`]),
+    !retainTender,
+  );
+  const refs = [deliveryRefFor(id), candidatePinRefFor(id)] as const;
+  const pinValues = () => Promise.all(refs.map((ref) => readRef(scope, ref)));
+  assert.equal(existsSync(path), false);
+  assert.deepEqual(await pinValues(), [retainTender ? tender : null, null]);
+  assert.deepEqual(await readManagedWorktreeAppointment(scope, id), { kind: "appointed", place, path });
+  assert.equal(await readRef(scope, "refs/heads/main"), integration);
+  return { repository, scope, keis, id, tender, integration, refs, pinValues };
+}
+
+function pruneUnreachableCommits(repository: TestGitRepository) {
+  repository.run(["reflog", "expire", "--expire=now", "--expire-unreachable=now", "--all"]);
+  repository.run(["gc", "--prune=now"]);
+}
+
+for (const scenario of ["retired", "pruned", "lost"] as const) {
+  test(`release-only retry at a legacy Place with a ${scenario} tender`, async () => {
+    const { repository, scope, keis, id, tender, refs, pinValues } = await terminalLegacyPlaceFixture(
+      scenario === "lost",
+    );
+    if (scenario === "lost") repository.run(["update-ref", "-d", refs[0], tender]);
+    if (scenario !== "retired") {
+      pruneUnreachableCommits(repository);
+      assert.throws(() => repository.run(["cat-file", "-e", tender]));
+    }
+    const retry = await keis.reconcile({ contract: id });
+    assert.equal(retry.kind, "contract");
+    assert.equal(retry.effects, undefined);
+    assert.deepEqual(await readManagedWorktreeAppointment(scope, id), { kind: "unappointed" });
+    assert.deepEqual(await pinValues(), [null, null]);
+    if (scenario === "retired") assert.equal(retry.issues, undefined);
+    else {
+      assert.equal(retry.issues?.length, 1);
+      assert.equal(retry.issues?.[0]?.kind, "reconcile-failed");
+      assert.match(retry.issues[0].diagnostic, /missing|nonexistent/u);
+      assert.ok(retry.issues[0].diagnostic.includes(tender));
+    }
+  });
+}
+
+for (const missing of ["tender", "integration"] as const) {
+  test(`terminal retry repairs the surviving ref when the ${missing} commit was pruned`, async () => {
+    const { repository, scope, keis, id, tender, integration, refs, pinValues } = await terminalLegacyPlaceFixture();
+    const target = "refs/heads/main";
+    const hold = "refs/heads/retain-tender-for-prune";
+    const tree = repository.run(["rev-parse", `${integration}^{tree}`]).trim();
+    if (missing === "tender") pruneUnreachableCommits(repository);
+    else repository.run(["update-ref", hold, tender]);
+    const rewritten = repository.run(["commit-tree", tree, "-m", "rewrite target without the integration"]).trim();
+    repository.run(["update-ref", target, rewritten, integration]);
+    if (missing === "integration") {
+      pruneUnreachableCommits(repository);
+      repository.run(["update-ref", "-d", hold, tender]);
+    }
+    const unavailable = missing === "tender" ? tender : integration;
+    const available = missing === "tender" ? integration : tender;
+    assert.throws(() => repository.run(["cat-file", "-e", unavailable]));
+    assert.equal(repository.run(["cat-file", "-t", available]).trim(), "commit");
+
+    const retry = await keis.reconcile({ contract: id });
+    assert.equal(retry.kind, "contract");
+    assert.deepEqual(await readManagedWorktreeAppointment(scope, id), { kind: "unappointed" });
+    assert.equal(await readRef(scope, target), rewritten);
+    assert.deepEqual(await pinValues(), missing === "tender" ? [null, integration] : [tender, null]);
+    assert.deepEqual(retry.effects, [
+      { kind: "ref", name: refs[missing === "tender" ? 1 : 0], before: null, after: available },
+    ]);
+    assert.equal(retry.issues?.length, 1);
+    assert.equal(retry.issues[0]?.kind, "reconcile-failed");
+    assert.match(retry.issues[0].diagnostic, /missing|nonexistent/u);
+    assert.ok(retry.issues[0].diagnostic.includes(unavailable));
+  });
 }
 
 // Each case owns its repository, fault injector and cleanup; no process-global mocks.
@@ -186,28 +391,36 @@ describe("git-reconciliation isolated fixtures", { concurrency: 3 }, () => {
     assert.equal(status.includes("keiyaku-review"), false);
   });
 
-  test("rewritten target history retains owned refs without reporting a movement", async () => {
-    const { contract, repository, repo } = await deliveredReviewGatedTargetFixture();
+  test("rewritten target history repairs missing custody without reporting target movement", async () => {
+    const { contract, repository, repo, worktree } = await deliveredReviewGatedTargetFixture();
     writeFileSync(join(repository.path, "target-only.txt"), "target only\n");
     repository.run(["add", "target-only.txt"]);
     repository.run(["commit", "--quiet", "-m", "target only"]);
-    await contract.review({ verdict: "satisfied", summary: "Reconciliation review passed" });
+    const git = await repositoryAt(repository.path);
+    await withPlaceWritesBlocked(git, () =>
+      contract.review({ verdict: "satisfied", summary: "Reconciliation review passed" }),
+    );
     const state = present(await contract.state());
     assert.equal(state.terminal?.kind, "claimed");
+    assert.equal(existsSync(worktree), false);
+    assert.equal((await readManagedWorktreeAppointment(git, state.id)).kind, "appointed");
     const tender = state.delivery?.data.tenderSnapshot;
     const integration = state.currentIntegration?.snapshot ?? state.delivery?.data.integration.snapshot;
     assert.ok(tender);
     assert.ok(integration);
     assert.notEqual(tender, integration);
-    await restoreOwnedRefs(repository, state.id, tender, integration);
+    repository.run(["update-ref", "-d", deliveryRefFor(state.id)]);
+    repository.run(["update-ref", "-d", candidatePinRefFor(state.id)]);
     const tree = repository.run(["rev-parse", "HEAD^{tree}"]).trim();
     const rewritten = repository.run(["commit-tree", tree, "-m", "rewritten target"]).trim();
     repository.run(["update-ref", "refs/heads/main", rewritten]);
 
     const report = await Keis.of(repo).reconcile({ contract: state.id });
     assert.ok(report.kind === "contract");
-    const git = await repositoryAt(repository.path);
-
+    assert.deepEqual(report.effects, [
+      { kind: "ref", name: deliveryRefFor(state.id), before: null, after: tender },
+      { kind: "ref", name: candidatePinRefFor(state.id), before: null, after: integration },
+    ]);
     assert.equal(await readRef(git, deliveryRefFor(state.id)), tender);
     assert.equal(await readRef(git, candidatePinRefFor(state.id)), integration);
     assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), rewritten);

@@ -568,6 +568,7 @@ describe("worktree-places isolated fixtures", { concurrency: 3 }, () => {
     const repaired = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
     assert.ok(repaired.kind === "contract");
     assert.equal((repaired.issues ?? []).length, 0, JSON.stringify(repaired));
+    assert.equal(repaired.effects, undefined, "release-only retry must not recreate or remove worktree custody again");
     assert.deepEqual(await readManagedWorktreeAppointment(git, (present(await bound.kei.state())).id), { kind: "unappointed" });
     const again = await Keis.of(repo).reconcile({ contract: (present(await bound.kei.state())).id });
     assert.ok(again.kind === "contract");

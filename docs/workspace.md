@@ -50,7 +50,11 @@ A Contract used as a destination must already have its appointed live Place;
 selection does not allocate, recreate, or substitute a workspace. Its
 incarnation is immutable for callers that bind to it.
 
-After admission, composition appoints before Git realizes the worktree and retries use that Place. Release waits for Git to prove the path absent; failures retain the appointment, so no reusable Place hides managed bytes. Bind returns the appointed path, and target lag identifies that worktree subject.
+After admission, composition appoints before Git realizes the worktree and
+retries use that Place. Release waits for Git to prove the path absent, not for
+unrelated ref cleanup. Failure to release leaves the appointment for fresh
+reconciliation. Bind returns the appointed path, and target lag identifies that
+worktree subject.
 
 ## Derived Files And Cleanup
 
@@ -68,7 +72,7 @@ All workspace reads, writes, protection, and cleanup are awaited. There is no
 synchronous appointment surface or deferred cleanup queue. A derived-file
 failure is a typed post-admission lag and preserves accepted facts and completed
 Git effects. Git reconciliation does not parse guidance or invoke a projection
-callback; it completes Git effects first, then active workspace projection runs
-as the separate owner step. Terminal cleanup runs after the settlement
-opportunity and may remove the managed worktree. Terminal byte custody and
-recovery remain owned by [git-reconciliation.md](git-reconciliation.md).
+callback. The workspace owner projects guidance only after Git repair has
+observed an available active managed workspace. A terminal workspace is not
+projected as active. Terminal byte custody and recovery remain owned by
+[git-reconciliation.md](git-reconciliation.md).

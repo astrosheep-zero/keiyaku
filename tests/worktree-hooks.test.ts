@@ -5,8 +5,9 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { acquireSqliteTransactionLock } from "../src/coordination/sqlite-transaction-lock.js";
 import { contractLocator, mintSnapshotId } from "../src/git/identity.js";
 import {
@@ -484,19 +485,27 @@ test("reconcile acquires a death-released scratch lock and preserves an actively
   assert.equal(existsSync(orphan), true);
 
   const active = await materializeScratchCandidate(git, mintSnapshotId(snapshot), id, requirement);
+  const orphanLock = join(dirname(orphan), `.${basename(orphan)}.owner.sqlite`);
+  const close = DatabaseSync.prototype.close;
+  DatabaseSync.prototype.close = function () {
+    const failed = this.location() === orphanLock && !existsSync(orphan);
+    close.call(this);
+    if (failed) throw new Error("scratch ownership close failed after removal");
+  };
   try {
     const report = await Keis.of(repo).reconcile({ contract: id });
     assert.ok(report.kind === "contract");
-    assert.equal(
-      (report.effects ?? []).some(
-        (effect) => effect.kind === "worktree-removed" && effect.path === orphan,
-      ),
-      true,
-    );
+    assert.deepEqual(report.effects, [{ kind: "worktree-removed", path: orphan }]);
+    assert.equal(report.issues?.length, 1);
+    const issue = report.issues?.[0];
+    assert.equal(issue?.kind, "reconcile-failed");
+    assert.match(issue.diagnostic, /scratch ownership close failed after removal/u);
     assert.equal(existsSync(orphan), false);
     assert.equal(existsSync(active.cwd), true);
     assert.equal(existsSync(commandRan), false);
   } finally {
+    DatabaseSync.prototype.close = close;
+    if (!existsSync(orphan)) rmSync(orphanLock, { force: true });
     const leak = await active.dispose();
     if (leak !== null) throw new Error(leak.diagnostic);
   }

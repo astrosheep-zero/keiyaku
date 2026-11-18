@@ -1,11 +1,4 @@
-import {
-  CANDIDATE_PIN_REF_NAMESPACE,
-  isKeiyakuOwnedRef,
-  pathExists,
-  readRef,
-  writeCommit,
-  type GitOid,
-} from "./repository.js";
+import { CANDIDATE_PIN_REF_NAMESPACE, isKeiyakuOwnedRef, pathExists, readRef, writeCommit } from "./repository.js";
 import { contractPhysicalName, gitObjectIdForSnapshot, mintSnapshotId } from "./identity.js";
 import type { ContractState, SnapshotId } from "../core/facts/types.js";
 import { withGitReadObservation, type GitDecodeChannel } from "./read-observation.js";
@@ -16,138 +9,97 @@ import {
   terminalSealExpectations as decodeTerminalSealExpectations,
   terminalSealSnapshots,
   observeTerminalWorkspace,
+  observedSnapshotTree,
   type TerminalSealExpectations,
   type TerminalWorkspace,
 } from "./terminal-seal.js";
 import { GitPlumbingError, executeGit, type GitRepository } from "./process.js";
-import { worktreePath } from "./workspace.js";
-import type { Effect, ReconcileAccumulation, ReconcileLag, ReconcileResult, WorktreeTopology } from "./reconcile.js";
+import type { ReconcileAccumulation } from "./reconcile.js";
 
-type TerminalReconcileInput = Readonly<{
-  repository: GitRepository;
-  channel: GitDecodeChannel;
-  hooks: WorktreeHooks;
-  retryHooks: boolean;
-  retainTerminalWorktree?: boolean;
-  place?: string;
-}>;
+type Custodian = Readonly<{ ref: string; oid: SnapshotId }>;
 
-type EphemeralRecovery = Readonly<{ snapshot: SnapshotId; workspace: TerminalWorkspace }>;
 type TerminalWorktreeCleanup = Readonly<{
   repository: GitRepository;
   channel: GitDecodeChannel;
-  topology: WorktreeTopology;
+  paths: ReadonlySet<string>;
   path: string;
   state: ContractState;
-  expected: TerminalSealExpectations;
   hooks: WorktreeHooks;
   acc: ReconcileAccumulation;
 }>;
-type TerminalCustody = Readonly<{
-  repository: GitRepository;
-  state: ContractState;
-  resolveSeal: () => Promise<TerminalSealExpectations>;
-  ref: string;
-  pin: string;
-  acc: ReconcileAccumulation;
-}>;
-type TerminalCustodyRefs = Readonly<{ ref: string; pin: string }>;
 
-type TerminalWorktreeRemoval = Readonly<{ effect?: Effect; retainedLag?: ReconcileLag }>;
-
-/** Attempt removal once. Retention is a lag carrying its reason; no effect claims the worktree state after it. */
-async function removeTerminalWorktree(
-  repository: GitRepository,
-  topology: WorktreeTopology,
-  path: string,
-): Promise<TerminalWorktreeRemoval> {
-  const registered = topology.paths.has(path);
-  if (!registered) {
-    return (await pathExists(path)) ? { retainedLag: { kind: "worktree-retained", path } } : {};
-  }
+/** Attempt removal once, and report it only after observing absence. */
+export async function removeSealedTerminalWorktree({
+  repository,
+  channel,
+  paths,
+  path,
+  state,
+  hooks,
+  acc,
+}: TerminalWorktreeCleanup): Promise<boolean> {
+  const registered = paths.has(path);
   const present = await pathExists(path);
+  const retain = (diagnostic?: string): false => {
+    acc.recordLag({ kind: "worktree-retained", path, ...(diagnostic === undefined ? {} : { diagnostic }) });
+    return false;
+  };
+  if (!registered) return !present || retain();
+  if (present && !(await sealThroughDestroyHook({ repository, channel, path, state, hooks, acc }))) return false;
   try {
     await executeGit(repository, ["worktree", "remove", ...(present ? ["--force"] : []), path]);
   } catch (error) {
     if (!(error instanceof GitPlumbingError)) throw error;
-    return { retainedLag: { kind: "worktree-retained", path, diagnostic: error.message } };
+    return retain(error.message);
   }
-  topology.paths.delete(path);
-  if (await pathExists(path)) {
-    return {
-      retainedLag: {
-        kind: "worktree-retained",
-        path,
-        diagnostic: `Git reported worktree removal but the path remains: ${path}`,
-      },
-    };
-  }
-  return { effect: { kind: "worktree", path, action: "removed" } };
+  if (await pathExists(path)) return retain(`Git reported worktree removal but the path remains: ${path}`);
+  acc.recordEffect({ kind: "worktree", path, action: "removed" });
+  return true;
 }
 
-export async function updateRef(repository: GitRepository, ref: string, desired: SnapshotId): Promise<Effect> {
+export async function updateRef(
+  repository: GitRepository,
+  ref: string,
+  desired: SnapshotId | null,
+  acc: ReconcileAccumulation,
+): Promise<void> {
   const before = await readRef(repository, ref);
-  if (before === desired) return { kind: "ref", name: ref, before, after: desired };
-  await executeGit(repository, [
-    "update-ref",
-    "--no-deref",
-    ref,
-    gitObjectIdForSnapshot(desired),
-    before ?? "0".repeat(desired.length),
-  ]);
-  return { kind: "ref", name: ref, before, after: desired };
-}
-
-export async function removeRef(repository: GitRepository, ref: string): Promise<Effect> {
-  const before = await readRef(repository, ref);
-  if (before === null) return { kind: "ref", name: ref, before: null, after: null };
-  await executeGit(repository, ["update-ref", "--no-deref", "-d", ref, before]);
-  return { kind: "ref", name: ref, before, after: null };
+  if (before === desired) return;
+  if (desired === null) {
+    await executeGit(repository, ["update-ref", "--no-deref", "-d", ref, before!]);
+  } else {
+    await executeGit(repository, [
+      "update-ref",
+      "--no-deref",
+      ref,
+      gitObjectIdForSnapshot(desired),
+      before ?? "0".repeat(desired.length),
+    ]);
+  }
+  acc.recordEffect({ kind: "ref", name: ref, before, after: desired });
 }
 
 async function removeRefWithCustody(
   repository: GitRepository,
   ref: string,
-  custodian: string,
-  expectedCustodian: SnapshotId,
-): Promise<Effect> {
+  custodian: Custodian,
+  acc: ReconcileAccumulation,
+): Promise<void> {
   const before = await readRef(repository, ref);
-  if (before === null) return { kind: "ref", name: ref, before: null, after: null };
-  if ((await readRef(repository, custodian)) !== expectedCustodian) {
-    return { kind: "ref", name: ref, before, after: before };
-  }
+  if (before === null || (await readRef(repository, custodian.ref)) !== custodian.oid) return;
   await executeGit(
     repository,
     ["update-ref", "--stdin", "--no-deref"],
     [
       "start",
-      `verify ${custodian} ${gitObjectIdForSnapshot(expectedCustodian)}`,
+      `verify ${custodian.ref} ${gitObjectIdForSnapshot(custodian.oid)}`,
       `delete ${ref} ${before}`,
       "prepare",
       "commit",
       "",
     ].join("\n"),
   );
-  return { kind: "ref", name: ref, before, after: null };
-}
-
-function retainedRefEffect(ref: string, snapshot: GitOid): Effect {
-  return { kind: "ref", name: ref, before: snapshot, after: snapshot };
-}
-
-async function refRows(repository: GitRepository): Promise<readonly Readonly<{ ref: string; oid: string }>[]> {
-  const output = (await executeGit(repository, ["for-each-ref", "--format=%(refname)%00%(objectname)"])).toString(
-    "utf8",
-  );
-  if (output.length === 0) return [];
-  return output
-    .trimEnd()
-    .split("\n")
-    .map((row) => {
-      const [ref, oid, extra] = row.split("\0");
-      if (ref === undefined || oid === undefined || extra !== undefined) throw new Error("Git ref row is malformed");
-      return { ref, oid };
-    });
+  acc.recordEffect({ kind: "ref", name: ref, before, after: null });
 }
 
 async function commitIsAncestor(repository: GitRepository, ancestor: SnapshotId, descendant: string): Promise<boolean> {
@@ -160,13 +112,16 @@ async function commitIsAncestor(repository: GitRepository, ancestor: SnapshotId,
   }
 }
 
-async function snapshotCustodian(
-  repository: GitRepository,
-  snapshot: SnapshotId,
-): Promise<Readonly<{ ref: string; oid: SnapshotId }> | null> {
-  for (const row of await refRows(repository)) {
-    if (isKeiyakuOwnedRef(row.ref)) continue;
-    if (await commitIsAncestor(repository, snapshot, row.oid)) return { ref: row.ref, oid: mintSnapshotId(row.oid) };
+async function snapshotCustodian(repository: GitRepository, snapshot: SnapshotId): Promise<Custodian | null> {
+  const output = (await executeGit(repository, ["for-each-ref", "--format=%(refname)%00%(objectname)"])).toString(
+    "utf8",
+  );
+  for (const row of output.trimEnd().split("\n")) {
+    if (row === "") continue;
+    const [ref, oid, extra] = row.split("\0");
+    if (ref === undefined || oid === undefined || extra !== undefined) throw new Error("Git ref row is malformed");
+    if (isKeiyakuOwnedRef(ref)) continue;
+    if (await commitIsAncestor(repository, snapshot, oid)) return { ref, oid: mintSnapshotId(oid) };
   }
   return null;
 }
@@ -198,140 +153,129 @@ async function hasIncomingLanding(
   return false;
 }
 
-function fromPrimaryWorktree(repository: GitRepository): GitRepository {
-  return { ...repository, effectiveCwd: repository.primaryWorktree };
-}
-
-function complete(effects: readonly Effect[] = [], lag: readonly ReconcileLag[] = []): ReconcileResult {
-  return { effects, lag };
-}
-
-function retainTerminalWorktree(path: string, retainedLag: ReconcileLag, acc: ReconcileAccumulation): ReconcileResult {
-  acc.recordEffect({ kind: "worktree", path, action: "unchanged" });
-  acc.recordLag(retainedLag);
-  return complete(acc.effects, acc.lag);
-}
-
 async function terminalSealExpectations(
   channel: GitDecodeChannel,
   state: ContractState,
 ): Promise<TerminalSealExpectations> {
-  const snapshots = terminalSealSnapshots(state);
-  const objects = await channel.readObjects(snapshots.map(gitObjectIdForSnapshot));
+  const objects = await channel.readObjects(terminalSealSnapshots(state).map(gitObjectIdForSnapshot));
   return decodeTerminalSealExpectations(state, objects);
 }
 
-async function mustRetainUnsealed(
-  repository: GitRepository,
-  channel: GitDecodeChannel,
-  state: ContractState,
-  canRecover: boolean,
-  workspace: TerminalWorkspace,
-): Promise<boolean> {
-  return (
-    !canRecover ||
-    workspace.submodules.length > 0 ||
-    (await hasIncomingLanding(repository, channel, state, workspace.head))
-  );
-}
-
-async function removeSealedTerminalWorktree({
+async function sealThroughDestroyHook({
   repository,
   channel,
-  topology,
   path,
   state,
-  expected,
   hooks,
   acc,
-}: TerminalWorktreeCleanup): Promise<ReconcileResult | null> {
-  if (topology.paths.has(path) && (await pathExists(path))) {
-    const terminal = state.terminal;
-    if (terminal === null) throw new Error(`terminal worktree cleanup received active Contract ${state.id}`);
-    const canRecover = terminal.kind === "abandoned";
-    let recovery: EphemeralRecovery | null = null;
+}: Omit<TerminalWorktreeCleanup, "paths">): Promise<boolean> {
+  const terminal = state.terminal;
+  if (terminal === null) throw new Error(`terminal worktree cleanup received active Contract ${state.id}`);
+  const canRecover = terminal.kind === "abandoned";
+  const expected = await terminalSealExpectations(channel, state);
+  const mustRetain = (workspace: TerminalWorkspace): boolean | Promise<boolean> =>
+    !canRecover || workspace.submodules.length > 0 || hasIncomingLanding(repository, channel, state, workspace.head);
+  let recovery: SnapshotId | undefined;
+  const recordRecovery = async (workspace: TerminalWorkspace): Promise<void> => {
+    recovery = mintSnapshotId(
+      await writeCommit({
+        repository,
+        tree: workspace.tree,
+        parent: gitObjectIdForSnapshot(recovery ?? workspace.head),
+        message: `${state.id}: ephemeral abandoned-workspace recovery\n\nKeiyaku-Contract: ${state.id}`,
+        actor: "Keiyaku Recovery",
+        at: terminal.at,
+      }),
+    );
+    acc.recordEffect({ kind: "recovery-snapshot", snapshot: recovery });
+  };
 
-    const recordRecovery = async (workspace: TerminalWorkspace): Promise<EphemeralRecovery> => {
-      const snapshot = mintSnapshotId(
-        await writeCommit({
-          repository,
-          tree: workspace.tree,
-          parent: gitObjectIdForSnapshot(recovery?.snapshot ?? workspace.head),
-          message: `${state.id}: ephemeral abandoned-workspace recovery\n\nKeiyaku-Contract: ${state.id}`,
-          actor: "Keiyaku Recovery",
-          at: terminal.at,
-        }),
-      );
-      const effect = {
-        kind: "recovery-snapshot" as const,
-        snapshot,
-      };
-      acc.recordEffect(effect);
-      return { snapshot, workspace };
-    };
-
-    const before = await observeTerminalWorkspace(repository, path, expected);
-    const beforeWorkspace = before.workspace;
-    const beforeHooks = before.unsealed;
-    if (beforeHooks !== null) {
-      if (await mustRetainUnsealed(repository, channel, state, canRecover, beforeWorkspace)) {
-        return retainTerminalWorktree(path, beforeHooks, acc);
-      }
-      recovery = await recordRecovery(beforeWorkspace);
+  const before = await observeTerminalWorkspace(repository, path, expected);
+  if (before.unsealed !== null) {
+    if (await mustRetain(before.workspace)) {
+      acc.recordLag(before.unsealed);
+      return false;
     }
-    const hookRun = await runDestroyHooks(path, hooks);
-    if (hookRun.lag !== null) return retainTerminalWorktree(path, hookRun.lag, acc);
-    const after = await observeTerminalWorkspace(repository, path, expected);
-    const afterWorkspace = after.workspace;
-    const afterHooks = after.unsealed;
-    if (afterHooks !== null) {
-      if (await mustRetainUnsealed(repository, channel, state, canRecover, afterWorkspace)) {
-        return retainTerminalWorktree(path, afterHooks, acc);
-      }
-    }
-    if (
-      canRecover &&
-      (recovery === null ||
-        recovery.workspace.head !== afterWorkspace.head ||
-        recovery.workspace.tree !== afterWorkspace.tree) &&
-      (recovery !== null ||
-        beforeWorkspace.head !== afterWorkspace.head ||
-        beforeWorkspace.tree !== afterWorkspace.tree)
-    ) {
-      recovery = await recordRecovery(afterWorkspace);
-    }
+    await recordRecovery(before.workspace);
   }
-  const removal = await removeTerminalWorktree(repository, topology, path);
-  if (removal.retainedLag !== undefined) {
-    acc.recordLag(removal.retainedLag);
-    return complete(acc.effects, acc.lag);
+  const hook = await runDestroyHooks(path, hooks);
+  if (hook.lag !== null) {
+    acc.recordLag(hook.lag);
+    return false;
   }
-  if (removal.effect !== undefined) acc.recordEffect(removal.effect);
-  return null;
+  const after = await observeTerminalWorkspace(repository, path, expected);
+  if (after.unsealed !== null && (await mustRetain(after.workspace))) {
+    acc.recordLag(after.unsealed);
+    return false;
+  }
+  if (
+    canRecover &&
+    (before.workspace.head !== after.workspace.head || before.workspace.tree !== after.workspace.tree)
+  ) {
+    await recordRecovery(after.workspace);
+  }
+  return true;
 }
 
 async function targetCustodyForClaimedIntegration(
   repository: GitRepository,
+  channel: GitDecodeChannel,
   state: ContractState,
   integration: SnapshotId,
-): Promise<Readonly<{ ref: string; oid: SnapshotId }> | null> {
+): Promise<Custodian | null> {
   if (state.terminal?.kind !== "claimed" || typeof state.coordinates.target !== "string") return null;
   const target = await readRef(repository, state.coordinates.target);
   if (target === null) return null;
+  const exact = gitObjectIdForSnapshot(integration);
+  if ((await channel.readObjects([exact])).get(exact)?.kind === "missing") return null;
   const oid = mintSnapshotId(target);
   return (await commitIsAncestor(repository, integration, oid)) ? { ref: state.coordinates.target, oid } : null;
 }
 
-function sealedTree(expected: TerminalSealExpectations, snapshot: SnapshotId): GitOid {
-  const tree = expected.treeBySnapshot.get(snapshot);
-  if (tree === undefined) throw new Error(`terminal seal tree was not resolved: ${snapshot}`);
-  return tree;
+type TerminalCustody = Readonly<{
+  repository: GitRepository;
+  channel: GitDecodeChannel;
+  state: ContractState;
+  ref: string;
+  pin: string;
+  acc: ReconcileAccumulation;
+}>;
+
+async function provesSameTenderBytes(
+  channel: GitDecodeChannel,
+  tender: SnapshotId,
+  integration: SnapshotId,
+): Promise<boolean> {
+  if (tender === integration) return true;
+  const tenderOid = gitObjectIdForSnapshot(tender);
+  const integrationOid = gitObjectIdForSnapshot(integration);
+  const objects = await channel.readObjects([tenderOid, integrationOid]);
+  const tenderTree = observedSnapshotTree(tender, objects.get(tenderOid));
+  const integrationTree = observedSnapshotTree(integration, objects.get(integrationOid));
+  return tenderTree !== null && tenderTree === integrationTree;
 }
 
-async function releaseTerminalCustody({
+/** A retained Place alone does not renew custody already carried elsewhere. */
+export async function repairDetachedTerminalCustody({ repository, channel, state, ref, pin, acc }: TerminalCustody) {
+  if (state.delivery === null) return;
+  const tender = state.delivery.data.tenderSnapshot;
+  const integration = state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot;
+  const [deliveryRef, candidatePin] = await Promise.all([readRef(repository, ref), readRef(repository, pin)]);
+  if (deliveryRef === tender && candidatePin === integration) return;
+  const target = await targetCustodyForClaimedIntegration(repository, channel, state, integration);
+  const carriesTender =
+    deliveryRef !== tender && target !== null && (await provesSameTenderBytes(channel, tender, integration));
+  const carriesIntegration = target !== null && (await readRef(repository, target.ref)) === target.oid;
+  if (deliveryRef !== tender && !(carriesIntegration && carriesTender))
+    await updateRef(repository, ref, tender, acc).catch(acc.recordFailure);
+  if (candidatePin !== integration && !carriesIntegration && integration !== tender)
+    await updateRef(repository, pin, integration, acc);
+}
+
+export async function releaseTerminalCustody({
   repository,
+  channel,
   state,
-  resolveSeal,
   ref,
   pin,
   acc,
@@ -339,86 +283,20 @@ async function releaseTerminalCustody({
   const [deliveryRef, candidatePin] = await Promise.all([readRef(repository, ref), readRef(repository, pin)]);
   if (deliveryRef === null && candidatePin === null) return;
   if (state.delivery === null) {
-    const custodian = await snapshotCustodian(repository, state.coordinates.start);
     if (deliveryRef !== null) {
-      acc.recordEffect(
-        custodian === null
-          ? retainedRefEffect(ref, deliveryRef)
-          : await removeRefWithCustody(repository, ref, custodian.ref, custodian.oid),
-      );
+      const custodian = await snapshotCustodian(repository, state.coordinates.start);
+      if (custodian !== null) await removeRefWithCustody(repository, ref, custodian, acc);
     }
-    if (candidatePin !== null) acc.recordEffect(await removeRef(repository, pin));
+    if (candidatePin !== null) await updateRef(repository, pin, null, acc);
     return;
   }
   const tender = state.delivery.data.tenderSnapshot;
   const integration = state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot;
-  const target = await targetCustodyForClaimedIntegration(repository, state, integration);
-  if (deliveryRef !== null && target !== null) {
-    if (tender === integration) {
-      acc.recordEffect(await removeRefWithCustody(repository, ref, target.ref, target.oid));
-    } else {
-      const expected = await resolveSeal();
-      if (sealedTree(expected, tender) === sealedTree(expected, integration)) {
-        acc.recordEffect(await removeRefWithCustody(repository, ref, target.ref, target.oid));
-      } else {
-        acc.recordEffect(retainedRefEffect(ref, deliveryRef));
-      }
-    }
-  } else if (deliveryRef !== null) {
-    acc.recordEffect(retainedRefEffect(ref, deliveryRef));
-  }
+  const target = await targetCustodyForClaimedIntegration(repository, channel, state, integration);
+  if (deliveryRef !== null && target !== null && (await provesSameTenderBytes(channel, tender, integration)))
+    await removeRefWithCustody(repository, ref, target, acc);
   if (candidatePin !== null) {
-    if (target !== null || (tender === integration && deliveryRef !== null)) {
-      acc.recordEffect(
-        target !== null
-          ? await removeRefWithCustody(repository, pin, target.ref, target.oid)
-          : await removeRefWithCustody(repository, pin, ref, tender),
-      );
-    } else {
-      acc.recordEffect(retainedRefEffect(pin, candidatePin));
-    }
+    const custodian = target ?? (tender === integration && deliveryRef !== null ? { ref, oid: tender } : null);
+    if (custodian !== null) await removeRefWithCustody(repository, pin, custodian, acc);
   }
-}
-
-export async function reconcileTerminalManagedWorktree(
-  { repository, channel, hooks, retainTerminalWorktree, place }: TerminalReconcileInput,
-  state: ContractState,
-  topology: WorktreeTopology,
-  acc: ReconcileAccumulation,
-  { ref, pin }: TerminalCustodyRefs,
-): Promise<ReconcileResult> {
-  const primary = fromPrimaryWorktree(repository);
-  const path = place === undefined ? undefined : worktreePath(repository, place);
-  const resolveSeal = async () => await terminalSealExpectations(channel, state);
-  if (path === undefined) {
-    if (retainTerminalWorktree === true) return complete(acc.effects, acc.lag);
-    await releaseTerminalCustody({ repository: primary, state, resolveSeal, ref, pin, acc });
-    return complete(acc.effects, acc.lag);
-  }
-  const expected = await resolveSeal();
-  acc.recordEffect(await updateRef(primary, ref, state.delivery?.data.tenderSnapshot ?? state.coordinates.start));
-  if (state.delivery !== null) {
-    acc.recordEffect(
-      await updateRef(primary, pin, state.currentIntegration?.snapshot ?? state.delivery.data.integration.snapshot),
-    );
-  }
-  if (retainTerminalWorktree === true) {
-    if (topology.paths.has(path) && (await pathExists(path))) {
-      acc.recordEffect({ kind: "worktree", path, action: "unchanged" });
-    }
-    return complete(acc.effects, acc.lag);
-  }
-  const retained = await removeSealedTerminalWorktree({
-    repository: primary,
-    channel,
-    topology,
-    path,
-    state,
-    expected,
-    hooks,
-    acc,
-  });
-  if (retained !== null) return retained;
-  await releaseTerminalCustody({ repository: primary, state, resolveSeal: async () => expected, ref, pin, acc });
-  return complete(acc.effects, acc.lag);
 }

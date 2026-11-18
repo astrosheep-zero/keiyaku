@@ -1,22 +1,20 @@
 /** @architectureCompositionRoot */
 import { z } from "zod";
-import { projectContractWorktree, type ContractFileLag, type ContractWorktreeResult } from "../contract-worktree.js";
+import { projectContractWorktree } from "../contract-worktree.js";
 import type { ContractId, ContractState } from "../core/facts/types.js";
 import type { WorktreeHooks } from "../git/hooks.js";
 import type { GitDecodeChannel } from "../git/read-observation.js";
-import type { ReconcileResult } from "../git/reconcile.js";
-import { reconcileObservationFailure } from "../git/reconcile.js";
 import { contractIdSchema } from "../git/identity.js";
 import { worktreePath } from "../git/workspace.js";
 import { stateOperation, type RepositoryScope } from "../protocol/operations.js";
-import { isOperationalFailure, isOperationalStop, executionStop, type ProtocolProgress } from "../protocol/progress.js";
-import { reconcileAllOperation, reconcileOperation, worldContractStates } from "../protocol/reconcile.js";
-import { settle, type SettlementReport } from "../settlement/settle.js";
+import { isOperationalFailure, isOperationalStop, executionStop } from "../protocol/progress.js";
+import { cleanupTerminalOperation, repairContractOperation, worldContractIds } from "../protocol/reconcile.js";
+import { settle } from "../settlement/settle.js";
 import {
   appointManagedWorktrees,
   placeRegisterPath,
+  readPlaceRegister,
   releaseManagedWorktrees,
-  type PlaceRegister,
 } from "../workspace-place.js";
 import type { InvocationAccumulator } from "./invocation.js";
 import {
@@ -69,205 +67,87 @@ export type ReconcileCompletion = z.output<typeof reconcileCompletionSchema>;
 export type RepoContractReconcileReport = z.output<typeof contractReconcileSchema>;
 export type RepoReconcileReport = z.output<typeof repoReconcileReportSchema>;
 
-// Physical custody remains local to reconciliation and the invocation accumulator.
-type ReconcileWork = Readonly<{
-  effects: ReconcileResult["effects"];
-  lag: readonly (ReconcileResult["lag"][number] | ContractFileLag)[];
-  settlement: SettlementReport;
-  missing?: true;
-}>;
-type RepoReconcileContracts = readonly Readonly<{ contractId: ContractId; report: ReconcileWork }>[];
-type RepoReconcileWork =
-  | Readonly<{ kind: "completed"; contracts: RepoReconcileContracts }>
-  | Readonly<{ kind: "world-observation-failed"; diagnostic: string }>;
-
-type ReconcileProgress = ProtocolProgress &
-  Readonly<{
-    recordSettlement(contractId: ContractId, report: SettlementReport): void;
-    recordReconciliation(
-      contractId: ContractId,
-      report: Readonly<{
-        effects?: ReconcileResult["effects"];
-        lag?: readonly (ReconcileResult["lag"][number] | ContractFileLag)[];
-      }>,
-    ): void;
-  }>;
-
 type ReconcileOptions = Readonly<{
   scope: RepositoryScope;
   channel: GitDecodeChannel;
   hooks: WorktreeHooks;
   retryHooks: boolean;
-  progress: ReconcileProgress;
+  accumulator: InvocationAccumulator;
 }>;
 
-function registerLag(scope: RepositoryScope, error: unknown): ContractFileLag {
-  return {
-    kind: "contract-file-failed",
-    path: placeRegisterPath(scope),
-    diagnostic: error instanceof Error ? error.message : String(error),
+function diagnostic(error: unknown): string {
+  return (error instanceof Error ? error.message : String(error)).trim();
+}
+
+async function reconcileContractWork(input: ReconcileOptions & { contractId: ContractId }): Promise<"missing" | void> {
+  const { accumulator, channel, contractId, scope } = input;
+  scope.signal?.throwIfAborted();
+  let state: ContractState | null;
+  try {
+    state = await stateOperation(input);
+  } catch (error) {
+    if (!isOperationalFailure(error)) throw error;
+    accumulator.recordReconciliation(contractId, {
+      lag: [{ kind: "reconcile-failed", diagnostic: diagnostic(error) }],
+    });
+    return;
+  }
+  if (state === null) return "missing";
+
+  const recordFileLag = (path: string, error: unknown): void => {
+    if (!isOperationalFailure(error) || (scope.signal?.aborted && error === scope.signal.reason)) throw error;
+    accumulator.recordReconciliation(contractId, {
+      lag: [{ kind: "contract-file-failed", path, diagnostic: diagnostic(error) }],
+    });
   };
-}
-
-function emptySettlement(): SettlementReport {
-  return { actions: [], lags: [] };
-}
-
-function isManagedTerminal(state: ContractState | null): boolean {
-  return state !== null && state.terminal !== null;
-}
-
-function appointableManagedContracts(states: readonly ContractState[]): readonly ContractId[] {
-  return states.filter((state) => state.terminal === null).map((state) => state.id);
-}
-
-async function appointPlaces(scope: RepositoryScope, states: readonly ContractState[]): Promise<PlaceRegister> {
-  return await appointManagedWorktrees(scope, appointableManagedContracts(states));
-}
-
-function realizedOrRetainedManagedWorktree(
-  scope: RepositoryScope,
-  report: ReconcileResult,
-  place: string | undefined,
-): boolean {
-  if (place === undefined) return false;
-  const path = worktreePath(scope, place);
-  return report.effects.some(
-    (effect) =>
-      effect.kind === "worktree" &&
-      effect.path === path &&
-      (effect.action === "created" || effect.action === "unchanged" || effect.action === "followed"),
-  );
-}
-
-function releaseEligible(
-  state: ContractState | null,
-  cleanup: ReconcileResult | undefined,
-  appointed: boolean,
-): boolean {
-  return cleanup !== undefined && cleanup.lag.length === 0 && isManagedTerminal(state) && appointed;
-}
-
-async function releaseAppointments(
-  scope: RepositoryScope,
-  contracts: readonly ContractId[],
-): Promise<ContractFileLag | undefined> {
   try {
-    await releaseManagedWorktrees(scope, contracts);
-    return undefined;
-  } catch (error) {
-    if (!isOperationalFailure(error)) throw error;
-    return registerLag(scope, error);
-  }
-}
-
-async function observeState(
-  scope: RepositoryScope,
-  channel: GitDecodeChannel,
-  contractId: ContractId,
-): Promise<Readonly<{ state: ContractState | null } | { failed: ReconcileResult }>> {
-  try {
-    return { state: await stateOperation({ scope, channel, contractId }) };
-  } catch (error) {
-    if (!isOperationalFailure(error)) throw error;
-    return { failed: reconcileObservationFailure(error) };
-  }
-}
-
-async function appointForContract(
-  scope: RepositoryScope,
-  state: ContractState,
-): Promise<Readonly<{ place?: string; register?: PlaceRegister } | { lag: ContractFileLag }>> {
-  try {
-    const register = await appointPlaces(scope, [state]);
-    const place = register.get(state.id);
-    if (place === undefined) {
-      if (state.terminal !== null) return { register };
-      throw new Error(`Place appointment was not recorded: ${state.id}`);
+    if (state.terminal === null && !(await readPlaceRegister(scope)).has(contractId)) {
+      await appointManagedWorktrees(scope, [contractId]);
     }
-    return { place, register };
   } catch (error) {
-    if (!isOperationalFailure(error)) throw error;
-    return { lag: registerLag(scope, error) };
+    recordFileLag(placeRegisterPath(scope), error);
+    return;
   }
-}
 
-type TerminalReconcilePhase = Readonly<{
-  cleanup: ReconcileResult | null;
-  release: ContractFileLag | undefined;
-}>;
-
-async function finishTerminalReconcile(
-  input: ReconcileOptions & Readonly<{ contractId: ContractId }>,
-  retained: Awaited<ReturnType<typeof reconcileOperation>>,
-  appointed: Readonly<{ place?: string }>,
-): Promise<TerminalReconcilePhase> {
-  const cleanup = isManagedTerminal(retained.state) ? await reconcileOperation({ ...input, ...appointed }) : null;
-  if (cleanup !== null) input.progress.recordPhysical(input.contractId, cleanup.report);
-  const release = releaseEligible(retained.state, cleanup?.report, appointed.place !== undefined)
-    ? await releaseAppointments(input.scope, [input.contractId])
-    : undefined;
-  if (release !== undefined) input.progress.recordReconciliation(input.contractId, { lag: [release] });
-  return { cleanup: cleanup?.report ?? null, release };
-}
-
-function assembleReconcile(
-  retained: ReconcileResult,
-  settlement: SettlementReport,
-  terminal: TerminalReconcilePhase,
-): ReconcileWork {
-  const { cleanup, release } = terminal;
-  return {
-    effects: [...retained.effects, ...(cleanup?.effects ?? [])],
-    lag: [...retained.lag, ...(cleanup?.lag ?? []), ...(release === undefined ? [] : [release])],
-    settlement,
-  };
-}
-
-async function reconcileContractWork(
-  input: ReconcileOptions &
-    Readonly<{
-      contractId: ContractId;
-    }>,
-): Promise<ReconcileWork> {
-  const observed = await observeState(input.scope, input.channel, input.contractId);
-  if ("failed" in observed) {
-    input.progress.recordPhysical(input.contractId, observed.failed);
-    return { effects: observed.failed.effects, lag: observed.failed.lag, settlement: emptySettlement() };
+  const phase = { ...input, progress: accumulator };
+  const repair = await repairContractOperation(phase);
+  if (repair.state === undefined) return;
+  scope.signal?.throwIfAborted();
+  if (repair.workspace !== undefined) {
+    try {
+      accumulator.recordReconciliation(
+        contractId,
+        await projectContractWorktree(scope, repair.state, repair.workspace),
+      );
+    } catch (error) {
+      recordFileLag(worktreePath(scope, repair.workspace.get(contractId)!), error);
+    }
   }
-  // A legitimately absent Contract has nothing to reconcile.
-  if (observed.state === null) return { effects: [], lag: [], settlement: emptySettlement(), missing: true };
-  const appointment = await appointForContract(input.scope, observed.state);
-  if ("lag" in appointment) {
-    input.progress.recordReconciliation(input.contractId, { lag: [appointment.lag] });
-    return { effects: [], lag: [appointment.lag], settlement: emptySettlement() };
-  }
-  const appointed = appointment.place === undefined ? {} : { place: appointment.place };
-  const retained = await reconcileOperation({
-    ...input,
-    retainTerminalWorktree: true,
-    ...appointed,
+  scope.signal?.throwIfAborted();
+  await settle({
+    repository: scope,
+    channel,
+    state: repair.state,
+    effects: repair.report.effects,
+    progress: accumulator,
   });
-  input.progress.recordPhysical(input.contractId, retained.report);
-  const projection = realizedOrRetainedManagedWorktree(input.scope, retained.report, appointment.place)
-    ? await projectContractWorktree(input.scope, retained.state, appointment.register)
-    : { effects: [], lag: [] };
-  input.progress.recordReconciliation(input.contractId, { lag: projection.lag });
-  const settlement = await settle({
-    repository: input.scope,
-    channel: input.channel,
-    state: retained.state,
-    effects: retained.report.effects,
-    progress: input.progress,
+  if (repair.state.terminal === null) return;
+
+  const cleanup = await cleanupTerminalOperation({
+    ...phase,
+    expectedHead: repair.state.head,
+    handoffSafe: repair.handoffSafe,
   });
-  const terminal = await finishTerminalReconcile(input, retained, appointed);
-  return assembleReconcile(retained.report, settlement, terminal);
+  if (cleanup.appointedPathAbsent) {
+    try {
+      await releaseManagedWorktrees(scope, [contractId]);
+    } catch (error) {
+      recordFileLag(placeRegisterPath(scope), error);
+    }
+  }
 }
 
-/**
- * The one post-admission reconciliation walk: every affected Contract is observed afresh, and an
- * operational stop is recorded rather than thrown.
- */
+/** Post-admission reconciliation observes each affected Contract afresh. */
 export async function reconcileAffectedContracts(
   accumulator: InvocationAccumulator,
   contractId: ContractId,
@@ -280,14 +160,7 @@ export async function reconcileAffectedContracts(
       scope.signal?.throwIfAborted();
       accumulator.observe({ kind: "stage", contractId: contract, stage: "reconciliation", state: "started" });
       try {
-        await reconcileContractWork({
-          scope,
-          channel,
-          contractId: contract,
-          hooks,
-          retryHooks: false,
-          progress: accumulator,
-        });
+        await reconcileContractWork({ scope, channel, contractId: contract, hooks, retryHooks: false, accumulator });
       } finally {
         accumulator.observe({ kind: "stage", contractId: contract, stage: "reconciliation", state: "finished" });
       }
@@ -298,148 +171,33 @@ export async function reconcileAffectedContracts(
   }
 }
 
-function attachReleaseLag(
-  contracts: RepoReconcileContracts,
-  released: readonly ContractId[],
-  lag: ContractFileLag,
-): Extract<RepoReconcileWork, { kind: "completed" }> {
-  const affected = new Set(released);
-  return {
-    kind: "completed",
-    contracts: contracts.map((contract) =>
-      affected.has(contract.contractId)
-        ? { ...contract, report: { ...contract.report, lag: [...contract.report.lag, lag] } }
-        : contract,
-    ),
-  };
-}
-
-function worldObservationDiagnostic(error: unknown): string {
-  return (error instanceof Error ? error.message : String(error)).trim();
-}
-
-async function reconcileWorldWork(input: ReconcileOptions): Promise<RepoReconcileWork> {
-  let states: readonly ContractState[];
-  try {
-    states = await worldContractStates(input);
-  } catch (error) {
-    if (!isOperationalFailure(error)) throw error;
-    return { kind: "world-observation-failed", diagnostic: worldObservationDiagnostic(error) };
-  }
-  let appointed: PlaceRegister;
-  try {
-    appointed = await appointPlaces(input.scope, states);
-  } catch (error) {
-    if (!isOperationalFailure(error)) throw error;
-    const lag = registerLag(input.scope, error);
-    for (const state of states) input.progress.recordReconciliation(state.id, { lag: [lag] });
-    return {
-      kind: "completed",
-      contracts: states.map((state) => ({
-        contractId: state.id,
-        report: { effects: [], lag: [lag], settlement: emptySettlement() },
-      })),
-    };
-  }
-  const retained = await reconcileAllOperation({
-    ...input,
-    states,
-    retainTerminalWorktree: true,
-    places: appointed,
+function compactReconcile(contractId: ContractId, records: readonly InvocationEffect[]): RepoContractReconcileReport {
+  const issues = invocationIssues(records, contractId).map((issue) => {
+    if (issue.kind === "worktree-follow-retained" || issue.kind === "execution-stopped")
+      throw new Error(`unreachable explicit reconcile issue: ${issue.kind}`);
+    return issue;
   });
-  const { projections, settlements } = await projectAndSettleWorld(input, retained, appointed);
-  const cleanup = retained.contracts.some((contract) => isManagedTerminal(contract.state))
-    ? await reconcileAllOperation({ ...input, states, places: appointed })
-    : null;
-  const later =
-    cleanup === null ? null : new Map(cleanup.contracts.map((contract) => [contract.contractId, contract.report]));
-  const released: ContractId[] = retained.contracts
-    .filter((contract) =>
-      releaseEligible(contract.state, later?.get(contract.contractId), appointed.has(contract.contractId)),
-    )
-    .map((contract) => contract.contractId);
-  const contracts: RepoReconcileContracts[number][] = [];
-  for (const [index, contract] of retained.contracts.entries()) {
-    const report = later?.get(contract.contractId);
-    const projection = projections[index]!;
-    contracts.push({
-      contractId: contract.contractId,
-      report: {
-        effects: [...contract.report.effects, ...(report?.effects ?? [])],
-        lag: [...contract.report.lag, ...projection.lag, ...(report?.lag ?? [])],
-        settlement: settlements[index]!,
-      },
-    });
-  }
-  const lag = await releaseAppointments(input.scope, released);
-  if (lag !== undefined) for (const id of released) input.progress.recordReconciliation(id, { lag: [lag] });
-  return lag === undefined ? { kind: "completed", contracts } : attachReleaseLag(contracts, released, lag);
-}
-
-async function projectAndSettleWorld(
-  input: ReconcileOptions,
-  retained: Awaited<ReturnType<typeof reconcileAllOperation>>,
-  appointed: PlaceRegister,
-) {
-  const projections: ContractWorktreeResult[] = [];
-  const settlements: SettlementReport[] = [];
-  for (const contract of retained.contracts) {
-    const place = appointed.get(contract.contractId);
-    const projection = realizedOrRetainedManagedWorktree(input.scope, contract.report, place)
-      ? await projectContractWorktree(input.scope, contract.state, appointed)
-      : { effects: [], lag: [] };
-    projections.push(projection);
-    input.progress.recordReconciliation(contract.contractId, { lag: projection.lag });
-    settlements.push(
-      await settle({
-        repository: input.scope,
-        channel: input.channel,
-        state: contract.state,
-        effects: contract.report.effects,
-        progress: input.progress,
-      }),
-    );
-  }
-  return { projections, settlements };
-}
-
-function compactReconcile(
-  contractId: ContractId,
-  records: readonly InvocationEffect[],
-  completed = false,
-): RepoContractReconcileReport {
-  const own = records.filter((record) => record.contract === contractId);
-  const issues = invocationIssues(own, contractId).map((issue) => {
-    switch (issue.kind) {
-      case "worktree-follow-retained":
-      case "execution-stopped":
-        throw new Error(`unreachable explicit reconcile issue: ${issue.kind}`);
-      default:
-        return issue;
-    }
-  });
-  const movements = own.flatMap((record): MeaningfulEffect[] => {
+  const movements = records.flatMap((record): MeaningfulEffect[] => {
     if (record.kind !== "movement") return [];
     if (record.effect.kind === "worktree-followed") throw new Error("explicit reconcile cannot follow a dependent");
     return [record.effect];
   });
-  // Completed receipts retain their established physical-before-settlement order.
-  if (completed)
-    movements.sort((left, right) => Number(left.kind === "debt-settled") - Number(right.kind === "debt-settled"));
   return {
     contractId,
-    ...(movements.length === 0
-      ? {}
-      : { effects: [...new Map(movements.map((effect) => [JSON.stringify(effect), effect])).values()] }),
+    ...(movements.length === 0 ? {} : { effects: movements }),
     ...(issues.length === 0 ? {} : { issues }),
   };
 }
 
-export function observedReconcileContracts(accumulator: InvocationAccumulator): readonly RepoContractReconcileReport[] {
-  const snapshot = accumulator.snapshot();
-  const ids = new Set(snapshot.effects.map((effect) => effect.contract));
-  return [...ids]
-    .map((id) => compactReconcile(id, snapshot.effects))
+function observedReconcileContracts(accumulator: InvocationAccumulator): readonly RepoContractReconcileReport[] {
+  const grouped = new Map<ContractId, InvocationEffect[]>();
+  for (const record of accumulator.snapshot().effects) {
+    const own = grouped.get(record.contract);
+    if (own === undefined) grouped.set(record.contract, [record]);
+    else own.push(record);
+  }
+  return [...grouped]
+    .map(([id, records]) => compactReconcile(id, records))
     .filter((row) => row.effects !== undefined || row.issues !== undefined);
 }
 
@@ -454,20 +212,21 @@ export function reconcileException(error: unknown, accumulator: InvocationAccumu
 }
 
 export async function completeReconcile(
-  input: Omit<ReconcileOptions, "progress"> & Readonly<{ contractId: ContractId; accumulator: InvocationAccumulator }>,
+  input: ReconcileOptions & { contractId: ContractId },
 ): Promise<ReconcileCompletion> {
-  const report = await reconcileContractWork({ ...input, progress: input.accumulator });
-  if (report.missing === true) return { kind: "missing", contractId: input.contractId };
-  return { kind: "contract", ...compactReconcile(input.contractId, input.accumulator.snapshot().effects, true) };
+  if ((await reconcileContractWork(input)) === "missing") return { kind: "missing", contractId: input.contractId };
+  return { kind: "contract", ...compactReconcile(input.contractId, input.accumulator.snapshot().effects) };
 }
 
-export async function completeRepoReconcile(
-  input: Omit<ReconcileOptions, "progress"> & Readonly<{ accumulator: InvocationAccumulator }>,
-): Promise<RepoReconcileReport> {
-  const report = await reconcileWorldWork({ ...input, progress: input.accumulator });
-  if (report.kind === "world-observation-failed") return report;
-  const contracts = report.contracts
-    .map(({ contractId }) => compactReconcile(contractId, input.accumulator.snapshot().effects, true))
-    .filter((row) => row.effects !== undefined || row.issues !== undefined);
+export async function completeRepoReconcile(input: ReconcileOptions): Promise<RepoReconcileReport> {
+  let ids: readonly ContractId[];
+  try {
+    ids = await worldContractIds(input);
+  } catch (error) {
+    if (!isOperationalFailure(error)) throw error;
+    return { kind: "world-observation-failed", diagnostic: diagnostic(error) };
+  }
+  for (const contractId of ids) await reconcileContractWork({ ...input, contractId });
+  const contracts = observedReconcileContracts(input.accumulator);
   return { kind: "world", ...(contracts.length === 0 ? {} : { contracts }) };
 }

@@ -63,8 +63,13 @@ async function attemptDependent(input: ContinuationInput, id: ContractId, predec
     if (observed.state === null) return { kind: "contract-missing" };
     const place = (await readPlaceRegister(input.scope)).get(id);
     if (place !== undefined) {
-      const physical = await reconcileDependentWorktree(input.scope, id, worktreePath(input.scope, place), predecessor);
-      input.progress.recordPhysical(id, physical);
+      const physical = await reconcileDependentWorktree(
+        input.scope,
+        id,
+        worktreePath(input.scope, place),
+        predecessor,
+        (delta) => input.progress.recordPhysical(id, delta),
+      );
       if (physical.lag.length > 0) return { kind: "physical-lag" };
     }
     const { placement } = await completeCandidate({
