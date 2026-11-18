@@ -131,12 +131,15 @@ export function currentSubjectPredicate(state: ContractState): (subject: Depende
     const known = current.get(subject);
     if (known !== undefined) return known;
     const decoded = decodeDependencyKeySet(subject);
-    // Snapshot-only testimony cannot cross a target change, even when the new target has the same head.
+    // Snapshot testimony cannot cross a target change, even when the new target has the same head.
     const snapshotTargetCurrent =
       state.targetRevision === undefined ||
       !decoded.keys.some((key) => key.kind === "snapshot") ||
       decoded.keys.some((key) => key.kind === "target" && key.value === state.targetRevision);
-    const value = snapshotTargetCurrent && decoded.encodedKeys.every((key) => available.has(key));
+    const hasChange = decoded.keys.some((key) => key.kind === "change");
+    const value =
+      snapshotTargetCurrent &&
+      decoded.keys.every((key) => (hasChange && key.kind === "snapshot") || available.has(encodeKey(key)));
     current.set(subject, value);
     return value;
   };

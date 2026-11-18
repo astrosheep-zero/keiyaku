@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keis, Keiyaku, KeiyakuError, Repo } from "../src/index.js";
+import { Keis, Keiyaku, KeiyakuError, Repo, Settings } from "../src/index.js";
 import { verifyOutcomeSchema } from "../src/library/contract-outcomes.js";
 import { classifyVerb } from "../src/library/keiyaku-classify.js";
 import { assertWireConformance } from "./support/schema-parity.js";
@@ -21,9 +21,14 @@ function declarations(scripts: readonly string[]): string {
     scripts.map((script) => `\`\`\`bash timeout=1m\n${script}\n\`\`\``).join("\n\n") + "\n";
 }
 
-async function fixture(scripts: readonly string[], gates = ["reviewed", "verified"]) {
+async function fixture(scripts: readonly string[], gates = ["reviewed", "verified"], mode?: "optimistic" | "strict") {
   const repository = repositoryWithMain();
-  const contract = accepted(await Keis.of(await Repo.at({ path: repository.path })).bind({
+  if (mode !== undefined) {
+    mkdirSync(join(repository.path, ".keiyaku"), { recursive: true });
+    writeFileSync(join(repository.path, ".keiyaku", "settings.json"), JSON.stringify({ verification: { mode } }));
+  }
+  const settings = mode === undefined ? undefined : await Settings.load({ cwd: repository.path, home: join(repository.path, ".git", "home") });
+  const contract = accepted(await Keis.of(await Repo.at({ path: repository.path }), settings === undefined ? undefined : { settings }).bind({
     terms: declarations(scripts), gates, target: "refs/heads/main",
   })).kei;
   const worktree = await appointedWorktreePath(await cachedRepositoryAt(repository.path), present(await contract.state()).id);
@@ -199,8 +204,8 @@ test("the last selected check completes a delivered and reviewed candidate", asy
   assert.equal(present(await contract.state()).terminal?.kind, "claimed");
 });
 
-test("target movement cannot retarget prior check evidence", async () => {
-  const { repository, contract } = await fixture(["true", "test -f candidate.txt"]);
+test("strict currency keeps prior checks tied to their tested snapshot after target movement", async () => {
+  const { repository, contract } = await fixture(["true", "test -f candidate.txt"], undefined, "strict");
   accepted(await contract.deliver());
   const original = accepted(await contract.verify());
   writeFileSync(join(repository.path, "target-only.txt"), "moved\n");
@@ -226,6 +231,45 @@ test("target movement cannot retarget prior check evidence", async () => {
   assert.equal(next.placement?.kind, "gates-unsatisfied");
   const completed = accepted(await contract.verify({ index: 2 }));
   assert.equal(completed.placement?.kind, "placed");
+});
+
+test("optimistic currency preserves testimony across clean reintegration without executing checks again", async () => {
+  const { repository, contract } = await fixture(["test -f candidate.txt"]);
+  const original = accepted(await contract.verify());
+  accepted(await contract.deliver());
+  const before = present(await contract.state()).attestations;
+  writeFileSync(join(repository.path, "target-only.txt"), "moved\n");
+  repository.run(["add", "target-only.txt"]);
+  repository.run(["commit", "--quiet", "-m", "advance target"]);
+  const preview = await contract.previewDelivery();
+  assert.ok(preview.kind === "ready");
+  assert.notEqual(preview.integration, original.snapshot);
+  assert.deepEqual(preview.unmetGates?.map(({ gate }) => gate), ["reviewed"]);
+  const reviewed = accepted(await contract.review({ verdict: "satisfied", summary: "Unchanged candidate after target movement" }));
+  assert.ok(reviewed.placement?.kind === "placed");
+  assert.notEqual(reviewed.placement.integration, original.snapshot);
+  const final = present(await contract.state());
+  assert.deepEqual(final.attestations.filter(({ data }) => data.gate === "verified"), before);
+  assert.equal(final.terminal?.kind, "claimed");
+});
+
+test("optimistic currency reports candidate-content-changed when delivered content changes", async () => {
+  const { repository, contract, worktree } = await fixture(["true"]);
+  accepted(await contract.verify());
+  accepted(await contract.deliver());
+  const previousChange = present(await contract.state()).currentIntegration!.changeId;
+  writeFileSync(join(worktree, "candidate.txt"), "revised candidate\n");
+  repository.run(["-C", worktree, "add", "candidate.txt"]);
+  repository.run(["-C", worktree, "commit", "--quiet", "-m", "change candidate"]);
+  accepted(await contract.deliver());
+  const state = present(await contract.state());
+  const currentChange = state.currentIntegration!.changeId;
+  assert.notEqual(currentChange, previousChange);
+  const verified = gateReports(state).reports.find(({ gate }) => gate === "verified")!;
+  assert.deepEqual(verified.current, { kind: "stale", priorVerdict: "satisfied", reason: {
+    kind: "candidate-content-changed", target: "refs/heads/main", previousChange, currentChange,
+  } });
+  await contract.abandon();
 });
 
 test("verify after target movement reuses its prospective snapshot during ordinary completion", async () => {

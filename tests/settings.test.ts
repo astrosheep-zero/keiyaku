@@ -14,6 +14,7 @@ import { projectSettings, Settings, settingsSchema } from "../src/settings.js";
 import { z } from "zod";
 import { Keis, Repo, type ContractId } from "../src/index.js";
 import { KeiyakuError } from "../src/library/outcome.js";
+import { derivedVerificationMode } from "../src/library/contract-settings.js";
 import { accepted, present } from "./support/library-verbs.js";
 import { contractMarkdown } from "./support/markdown.js";
 import { makeGitRepository } from "./support/git.js";
@@ -1023,6 +1024,57 @@ test("a broken gates namespace is scoped to omitted and word-selected bind or am
   } finally {
     rmSync(repository.path, { recursive: true, force: true });
   }
+});
+
+test("Verification currency defaults optimistically and accepts only its selected mode", async () => {
+  const value = fixture();
+  try {
+    assert.equal(derivedVerificationMode({}), "optimistic");
+    for (const [configuration, expected] of [
+      [{}, "optimistic"],
+      [{ verification: {} }, "optimistic"],
+      [{ verification: { mode: "optimistic" } }, "optimistic"],
+      [{ verification: { mode: "strict" } }, "strict"],
+    ] as const) {
+      writeProjectSettings(value.project, configuration);
+      const settings = await Settings.load({ cwd: value.project, home: value.home });
+      assert.equal(derivedVerificationMode({ settings }), expected);
+    }
+  } finally { value.close(); }
+});
+
+test("invalid Verification settings fail verify before admission without contaminating other verbs", async () => {
+  const repository = makeGitRepository();
+  try {
+    repository.run(["commit", "--allow-empty", "--quiet", "-m", "initial"]);
+    const repo = await Repo.at({ path: repository.path });
+    writeProjectSettings(repository.path, { verification: [] });
+    const settings = await Settings.load({ cwd: repository.path, home: join(repository.path, ".git", "home") });
+    const contracts = Keis.of(repo, { settings });
+    const { kei } = accepted(await contracts.bind({ terms: contractDocument("Verification isolation", "true"), gates: ["reviewed", "verified"] }));
+    accepted(await kei.amend({ edits: "## Replace: Objective\n\nKeep Verification settings isolated.\n" }));
+    accepted(await kei.arc({ body: "# Namespace isolation\n" }));
+    assert.ok((await contracts.list({})).rows?.length);
+    const before = await kei.history();
+    const id = present(await kei.state()).id;
+    for (const verification of [[], null, "strict", { unknown: true }, { mode: "loose" }, { mode: null }, { mode: false }]) {
+      writeProjectSettings(repository.path, { verification });
+      const selected = Keis.of(repo, { settings: await Settings.load({ cwd: repository.path, home: join(repository.path, ".git", "home") }) }).kei({ id });
+      await assert.rejects(selected.verify(), (error: unknown) => {
+        assert.ok(invalidInputFromSettings(error));
+        if (verification !== null && typeof verification === "object" && "mode" in verification)
+          assert.equal((error as Error).message, 'verification.mode must be "optimistic" or "strict"');
+        if (verification !== null && typeof verification === "object" && "unknown" in verification)
+          assert.equal((error as Error).message, "verification has unknown entry: unknown");
+        return true;
+      });
+      assert.deepEqual(await selected.history(), before);
+    }
+    assert.equal((await kei.previewDelivery()).kind, "ready");
+    assert.equal(accepted(await kei.deliver()).placement?.kind, "gates-unsatisfied");
+    assert.equal(accepted(await kei.review({ verdict: "satisfied", summary: "Broken Verification settings do not affect review" })).placement?.kind, "gates-unsatisfied");
+    accepted(await kei.abandon());
+  } finally { rmSync(repository.path, { recursive: true, force: true }); }
 });
 
 test("hooks and freshness derive only at the operation that consumes them", async () => {

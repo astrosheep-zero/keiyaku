@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { snapshotIdSchema } from "../git/identity.js";
-import type { AttestationData, ContractState, SnapshotId } from "../core/facts/types.js";
+import type { AttestationData, ChangeId, ContractState, SnapshotId } from "../core/facts/types.js";
 import { activeContract, targetContractRefusal, type ActiveContractRefusal } from "../core/facts/observation.js";
 import { dependencyKeySet } from "../core/subject.js";
 import { decideAttestation, type AttestationInput } from "../core/verbs/attestation.js";
@@ -107,11 +107,14 @@ type VerifyRefusal =
   | z.infer<typeof deliverRefusalSchema>
   | MechanicalPreparationRefusal
   | z.infer<typeof verificationDeclarationRefusalSchema>;
+export type VerificationMode = "optimistic" | "strict";
+
 type VerifyOperationInput = MutationOperationInput &
   Readonly<{
     deriveDocument(state: ContractState): DocumentDerivation;
     includeDirty: boolean;
     index?: number;
+    verificationMode?: VerificationMode;
     requireBranchesToBeUpToDate: boolean;
     signal?: AbortSignal;
   }>;
@@ -124,6 +127,7 @@ type PreparedVerification = Readonly<{
   checkpoint: ContractCheckpoint;
   definition: VerificationDefinition;
   snapshot: SnapshotId;
+  changeId: ChangeId;
 }>;
 
 async function prepareVerification(
@@ -163,7 +167,13 @@ async function prepareVerification(
     },
   );
   if (prepared.kind === "refused") return prepared;
-  return { kind: "prepared", checkpoint: { state, journal }, definition, snapshot: prepared.data.integration.snapshot };
+  return {
+    kind: "prepared",
+    checkpoint: { state, journal },
+    definition,
+    snapshot: prepared.data.integration.snapshot,
+    changeId: prepared.data.integration.changeId,
+  };
 }
 
 function admitVerificationTestimony(
@@ -202,12 +212,13 @@ function admitVerificationTestimony(
 export async function verifyOperation(input: VerifyOperationInput): Promise<VerifyOperationResult> {
   const prepared = await prepareVerification(input);
   if (prepared.kind === "refused") return prepared;
-  const { snapshot, definition } = prepared;
+  const { snapshot, changeId, definition } = prepared;
   let checkpoint = prepared.checkpoint;
   const { state, journal } = checkpoint;
   const checks: VerificationCheck[] = [];
   const subject = dependencyKeySet([
     { kind: "snapshot", value: snapshot },
+    ...(input.verificationMode === "strict" ? [] : [{ kind: "change" as const, value: changeId }]),
     ...(state.targetRevision === undefined ? [] : [{ kind: "target" as const, value: state.targetRevision }]),
   ]);
   // This observation carries no new fact. It supplies the exact head even when every admission reuses testimony.

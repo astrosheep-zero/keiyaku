@@ -172,7 +172,11 @@ With `verified` selected, it admits each terminal check independently, then
 requests ordinary completion using current generic requirement evidence. Only an
 already-delivered Contract can place. Without that gate, it returns execution
 results without recording testimony or requesting completion. Verification remains
-independent of review and delivery.
+independent of review and delivery. Only verify selects Verification currency
+from captured Settings. By default, unchanged candidate content survives clean
+target reintegration; strict currency requires the tested integration. Both
+invalidate on explicit retargeting. Results identify the snapshot actually tested;
+Settings edits never rewrite testimony.
 
 Delivery preview observes a prospective candidate through a dedicated native handle
 operation, separate from delivery admission. CLI and other adapters consume that
@@ -229,7 +233,10 @@ explicit shared resource captured once at Contract construction. Contract
 operations retain derived values, not a live Settings
 observation, and read a namespace only at the operation that consumes it.
 Omitted Settings selects no bind gates by default, accepts only built-in gate
-names, keeps hooks empty, and leaves branch freshness false. Supplied Settings
+names, keeps hooks empty, leaves branch freshness false, and uses optimistic
+Verification currency even when its namespace or selection is absent. Malformed
+verification configuration fails only verify as caller-invalid input with its
+native Settings cause, before observation or admission. Supplied Settings
 selects product behavior: omitted bind gates use the configured default bundle
 or the built-in review obligation when no default exists. Explicit selections
 accept built-in names and configured bundles with first-seen deduplication;

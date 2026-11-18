@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
-import { Keis, Repo } from "../src/index.js";
+import { Keis, Repo, Settings } from "../src/index.js";
 import { accepted, document, present, repositoryWithMain } from "./support/library-verbs.js";
 import { withGitShim } from "./support/git.js";
 import { cliJson } from "./support/cli-fixtures.js";
@@ -83,7 +83,7 @@ test("a parent delivers combined content while the child's exact integration rem
   assert.ok(raw.run(["for-each-ref", "--contains", integration, "--format=%(refname)"]).trim());
 });
 
-test("siblings reintegrate against a moved parent without losing reviewed content", async () => {
+test("siblings reintegrate against a moved parent without losing reviewed or optimistic verified content", async () => {
   const raw = repositoryWithMain();
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
@@ -111,19 +111,10 @@ test("siblings reintegrate against a moved parent without losing reviewed conten
   assert.equal(present(await firstBind.kei.state()).terminal, null);
   accepted(await secondBind.kei.deliver());
   const reviewed = accepted(await firstBind.kei.review({ verdict: "satisfied", summary: "Landing review passed" }));
-  assert.equal(reviewed.placement?.kind, "gates-unsatisfied");
-  if (reviewed.placement?.kind !== "gates-unsatisfied") assert.fail("missing unmet requirements");
-  assert.equal(reviewed.placement.unmet.find(({ gate }) => gate === "verified")?.state, "stale");
-  assert.equal(present(await firstBind.kei.state()).terminal, null);
-  assert.equal(
-    present(await firstBind.kei.state()).attestations.filter((entry) => entry.data.gate === "verified")
-      .length,
-    1,
-  );
-  accepted(await firstBind.kei.verify());
+  assert.equal(reviewed.placement?.kind, "placed");
   const firstState = present(await firstBind.kei.state());
   assert.equal(firstState.terminal?.kind, "claimed");
-  assert.equal(firstState.attestations.filter((entry) => entry.data.gate === "verified").length, 2);
+  assert.equal(firstState.attestations.filter((entry) => entry.data.gate === "verified").length, 1);
   assert.equal(firstState.attestations.filter((entry) => entry.data.gate === "reviewed").length, 1);
   assert.equal(readFileSync(join(parentPath, "first.txt"), "utf8"), "first\n");
   assert.equal(readFileSync(join(parentPath, "second.txt"), "utf8"), "second\n");
@@ -234,9 +225,15 @@ test("fork inherits the exact target incarnation and refuses a replacement", asy
 });
 
 test("explicit retarget recovers a child of an accepted or abandoned parent with fresh verification", async (t) => {
-  for (const disposition of ["accepted", "abandoned"] as const) await t.test(disposition, async () => {
+  for (const [mode, disposition] of [
+    ["optimistic", "accepted"], ["optimistic", "abandoned"],
+    ["strict", "accepted"], ["strict", "abandoned"],
+  ] as const) await t.test(`${mode}: ${disposition}`, async () => {
     const raw = repositoryWithMain();
-    const contracts = Keis.of(await Repo.at({ path: raw.path }));
+    mkdirSync(join(raw.path, ".keiyaku"), { recursive: true });
+    writeFileSync(join(raw.path, ".keiyaku", "settings.json"), JSON.stringify({ verification: { mode } }));
+    const settings = await Settings.load({ cwd: raw.path, home: join(raw.path, ".git", "home") });
+    const contracts = Keis.of(await Repo.at({ path: raw.path }), { settings });
     const parent = accepted(await contracts.bind({ terms: document(), target: "main", gates: [] }));
     const parentId = present(await parent.kei.state()).id;
     const child = accepted(await contracts.bind({

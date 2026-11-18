@@ -62,6 +62,7 @@ import {
   derivedFreshness,
   derivedGates,
   derivedHooks,
+  derivedVerificationMode,
   gateNames,
 } from "./contract-settings.js";
 import {
@@ -382,6 +383,7 @@ export class Kei {
     const signal = validated(() => optionalSignal(values?.signal));
     const observer = validated(() => observationOptions(options));
     const { hooks, requireBranchesToBeUpToDate } = derivedContractPolicy(this.composition);
+    const verificationMode = derivedVerificationMode(this.composition);
     return await this.local(
       "verify",
       async (accumulator, localChannel, scope): Promise<VerifyOutcome> => {
@@ -393,6 +395,7 @@ export class Kei {
           deriveDocument: derivedDocument,
           includeDirty,
           requireBranchesToBeUpToDate,
+          verificationMode,
           ...(index === undefined ? {} : { index }),
           ...(signal === undefined ? {} : { signal }),
         });

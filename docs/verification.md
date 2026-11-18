@@ -31,14 +31,24 @@ Verify captures the appointed worktree and prepares the same prospective target
 integration as delivery, under the same clean-worktree rule and explicit dirty
 capture authorization. Preparation admits no candidate, delivery, review, or
 reintegration. Conflicts and unavailable preparation are typed non-admission,
-never conflict handoff. Each check's subject is that exact captured integration
-snapshot. Reuse of an already-recorded integration with matching tree and
-predecessor permits evidence before or after delivery to apply to an unchanged
-delivery. Changed target or candidate cannot retarget earlier testimony.
-Explicit target amendment requires fresh Verification even when the new
-destination has the same head and prospective integration bytes. The captured
-snapshot includes its target-change dependency, so testimony arriving after a
-concurrent retarget still speaks only for its original capture.
+never conflict handoff. Every check executes against that exact captured
+integration snapshot. By default, its testimony depends on captured candidate
+content, so clean reintegration after target advancement preserves currency,
+including sibling placement and prerequisite continuation. Testimony also retains
+the tested snapshot so later preparation can reuse that exact integration before
+or after delivery. A repository may
+instead select strict currency, binding testimony to the exact tested integration
+snapshot; changed integration then requires fresh Verification. Neither policy
+claims that a later integration was executed by an earlier check.
+
+Candidate content changes invalidate either policy. Explicit target amendment
+requires fresh Verification under either policy even when the new destination
+has the same head and prospective integration bytes. Captured testimony carries
+its target-change dependency, so a check finishing after a concurrent retarget
+still speaks only for its original capture. Currency policy is selected from
+captured Settings by explicit verify alone, not persisted as Contract policy.
+Each attestation retains its own dependencies; later configuration edits never
+rewrite standing testimony.
 
 Each selected declaration executes in its own independent clean scratch with
 project-configured setup and cleanup, including cleanup after setup or
@@ -168,11 +178,11 @@ completion. Package and CLI readers render adjudicated reports without parsing
 process output or creating a timeline, rework count, elapsed-time authority, or
 derived aggregate attestation.
 
-Each check's evidence remains tied to the invocation's captured snapshot and its
-stable requirement. Completion never executes a replacement check after
-reintegration. It judges the evidence
-applicable to its final integration; an older verdict is never attached merely
-because it ran earlier in the invocation.
+Each check reports its executed snapshot and retains its stable requirement
+and captured currency dependencies. Completion never executes a replacement
+check after reintegration. It judges the evidence applicable to its final
+integration through those recorded dependencies, never merely because a check
+ran earlier in the invocation.
 
 Scratch retirement uses bounded custody independent of caller cancellation.
 Resource problems from successive attempts and dependent Contracts accumulate

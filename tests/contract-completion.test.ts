@@ -1,9 +1,9 @@
 import { deferred as promiseBarrier } from "./support/process.js";
 import assert from "node:assert/strict";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test, { describe } from "node:test";
-import { Keis, Repo } from "../src/index.js";
+import { Keis, Repo, type Kei } from "../src/index.js";
 import {
   appointedWorktreePath,
   cachedRepoAt,
@@ -246,7 +246,7 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     assert.deepEqual(present(await contract.state()).attestations, before.attestations);
   });
 
-  test("Verification of a moved target supplies the exact snapshot for completion reintegration", async () => {
+  test("Verification of a moved target executes refreshed bytes while retaining optimistic testimony", async () => {
     const repository = repositoryWithMain();
     const contract = accepted(
       await Keis.of(await Repo.at({ path: repository.path })).bind({
@@ -274,6 +274,47 @@ describe("contract-completion isolated repositories", { concurrency: 4 }, () => 
     const attestations = present(await contract.state()).attestations.filter((entry) => entry.data.gate === "verified");
     assert.equal(attestations.length, 2);
     assert.notEqual(attestations[0]?.data.subject, attestations[1]?.data.subject);
+  });
+
+  test("optimistic Verification survives target movement through an automatic after continuation cascade", async () => {
+    const repository = repositoryWithMain();
+    const contracts = Keis.of(await Repo.at({ path: repository.path }));
+    const chain: { kei: Kei; id: ContractId; marker: string; snapshot: string }[] = [];
+    for (const name of ["primary", "middle", "leaf"]) {
+      const marker = join(repository.path, ".git", `${name}-checks`);
+      const previous = chain.at(-1);
+      const bound = accepted(await contracts.bind({
+        terms: document(`printf x >> '${marker}'`),
+        target: "main",
+        gates: name === "primary" ? ["reviewed", "verified"] : ["verified"],
+        after: previous === undefined ? [] : [previous.id],
+      }));
+      if (name === "primary") {
+        const path = bound.worktreePath!;
+        writeFileSync(join(path, "primary.txt"), "primary\n");
+        repository.run(["-C", path, "add", "primary.txt"]);
+        repository.run(["-C", path, "commit", "--quiet", "-m", name]);
+      }
+      // Sequencing-only dependents can fast-forward their clean worktrees as prerequisites land.
+      const verified = accepted(await bound.kei.verify());
+      accepted(await bound.kei.deliver());
+      chain.push({ kei: bound.kei, id: present(await bound.kei.state()).id, marker, snapshot: verified.snapshot });
+    }
+    const [primary, middle, leaf] = chain;
+    assert.ok(primary && middle && leaf);
+    const reviewed = accepted(await primary.kei.review({ verdict: "satisfied", summary: "Release the verified cascade" }));
+    assert.equal(reviewed.placement?.kind, "placed");
+    assert.deepEqual(reviewed.continuation?.claimed, [middle.id, leaf.id], JSON.stringify(reviewed));
+    assert.equal(reviewed.continuation?.stopped, undefined);
+    for (const entry of chain) {
+      const state = present(await entry.kei.state());
+      assert.equal(state.terminal?.kind, "claimed");
+      assert.equal(state.attestations.filter(({ data }) => data.gate === "verified").length, 1);
+      assert.equal(readFileSync(entry.marker, "utf8"), "x", "continuation never executes Verification");
+    }
+    assert.notEqual(present(await middle.kei.state()).currentIntegration?.snapshot, middle.snapshot);
+    assert.notEqual(present(await leaf.kei.state()).currentIntegration?.snapshot, leaf.snapshot);
+    assert.equal(repository.run(["show", "main:primary.txt"]), "primary\n");
   });
 
   test("dirty targetless pre-delivery Verification survives a later delivery note", async () => {

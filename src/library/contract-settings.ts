@@ -1,6 +1,8 @@
 /** @architectureCompositionRoot */
 import { gate, gateWord, type Gate } from "../core/facts/types.js";
 import { EMPTY_WORKTREE_HOOKS, worktreeHooksFrom, type WorktreeHooks } from "../git/hooks.js";
+import type { VerificationMode } from "../protocol/verify.js";
+export type { VerificationMode };
 import { SettingsError, type Settings } from "../settings.js";
 import type { KeisOptions } from "./contract-types.js";
 import { requireInput } from "./input.js";
@@ -45,6 +47,25 @@ export function derivedFreshness(composition: LocalContractCompositionCapture): 
     if (selected === undefined) return false;
     if (typeof selected.value !== "boolean") {
       throw new SettingsError("git.requireBranchesToBeUpToDate must be a boolean");
+    }
+    return selected.value;
+  } catch (error) {
+    return settingsScopedFailure(error);
+  }
+}
+
+export function derivedVerificationMode(composition: LocalContractCompositionCapture): VerificationMode {
+  if (composition.settings === undefined) return "optimistic";
+  try {
+    const view = composition.settings.namespace("verification");
+    if (view.kind === "failed") namespaceFailure(composition.settings, view);
+    for (const name of Object.keys(view.entries ?? {})) {
+      if (name !== "mode") throw new SettingsError(`verification has unknown entry: ${name}`);
+    }
+    const selected = view.entries?.mode;
+    if (selected === undefined) return "optimistic";
+    if (selected.value !== "optimistic" && selected.value !== "strict") {
+      throw new SettingsError('verification.mode must be "optimistic" or "strict"');
     }
     return selected.value;
   } catch (error) {
