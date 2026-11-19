@@ -1,7 +1,5 @@
 import { isUtf8 } from "node:buffer";
-import type { BigIntStats } from "node:fs";
-import { lstat, readdir, realpath } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { z } from "zod";
 import {
   acquireSqliteTransactionLock,
@@ -9,7 +7,7 @@ import {
 } from "../coordination/sqlite-transaction-lock.js";
 import { targetName, type ContractState, type ContractTarget, type SnapshotId } from "../core/facts/types.js";
 import { contractIdSchema, gitObjectId, gitRefLocator, mintSnapshotId, snapshotIdSchema } from "./identity.js";
-import { executeGit, GitPlumbingError, withPrivateGitIndex, type GitRepository } from "./process.js";
+import { executeGit, GitPlumbingError, type GitRepository } from "./process.js";
 import { commonGitDirectory, decodeGitNameOnly, readRef, registeredWorktrees } from "./repository.js";
 import {
   resolveContractTarget,
@@ -114,98 +112,6 @@ function checkoutReadTree(path: string, { predecessor, candidate }: Movement, dr
   return ["-C", path, "read-tree", "-m", "-u", ...(dryRun ? ["--dry-run"] : []), predecessor, candidate];
 }
 
-async function* livePrefixes(root: string, path: string, probes: Map<string, Promise<BigIntStats | undefined>>) {
-  let parent = "";
-  let directory = "";
-  const parts = path.split("/");
-  for (const [index, name] of parts.entries()) {
-    const prefix = directory === "" ? name : `${directory}/${name}`;
-    let probe = probes.get(prefix);
-    if (probe === undefined) {
-      probe = lstat(resolve(root, prefix), { bigint: true }).catch((error: NodeJS.ErrnoException) => {
-        if (error.code === "ENOENT") return undefined;
-        throw error;
-      });
-      probes.set(prefix, probe);
-    }
-    const entry = await probe;
-    if (entry === undefined) return;
-    const identity = `${entry.dev}:${entry.ino}`;
-    yield { key: `${parent}/${identity}`, name, directory, entry, leaf: index === parts.length - 1 };
-    if (!entry.isDirectory()) return;
-    parent = identity;
-    directory = prefix;
-  }
-}
-
-async function distinctEntries(root: string, directory: string, left: string, right: string, shared: BigIntStats) {
-  if (shared.ino === 0n) return false;
-  const parent = resolve(root, directory);
-  const names = await readdir(parent, { encoding: "buffer" });
-  const present = (value: string) => names.some((entry) => entry.equals(Buffer.from(value)));
-  if (present(left) && present(right)) return true;
-  // A symlink is a leaf; using realpath to resolve its alias would dereference it.
-  if (shared.isSymbolicLink()) return false;
-  // Some filesystems return the lookup spelling unchanged; require enumerated entries.
-  const a = await realpath(resolve(parent, left), { encoding: "buffer" });
-  const b = await realpath(resolve(parent, right), { encoding: "buffer" });
-  if (a.equals(b) || !isUtf8(a) || !isUtf8(b)) return false;
-  const aPath = a.toString("utf8");
-  const bPath = b.toString("utf8");
-  return dirname(aPath) === dirname(bPath) && present(basename(aPath)) && present(basename(bPath));
-}
-
-function ignoredContactEntry(entry: BigIntStats, name: string, spelling: string): boolean {
-  return entry.ino === 0n || (name !== spelling && !entry.isDirectory() && entry.nlink !== 1n);
-}
-
-async function ignoredContact(
-  repository: GitRepository,
-  root: string,
-  changes: readonly string[] | null,
-): Promise<string | undefined> {
-  if (changes?.length === 0) return;
-  const ignored = await executeGit(repository, [
-    "-C",
-    root,
-    "ls-files",
-    "--others",
-    "--ignored",
-    "--exclude-standard",
-    "-z",
-  ]);
-  if (ignored.length === 0) return;
-  if (changes === null || !isUtf8(ignored)) return "target checkout cannot prove ignored paths safe to follow";
-
-  const probes = new Map<string, Promise<BigIntStats | undefined>>();
-  // An identity match under the same parent finds aliases without normalizing names.
-  const touched = new Map<string, Map<string, boolean>>();
-  for (const path of changes) {
-    for await (const { key, name, leaf } of livePrefixes(root, path, probes)) {
-      let names = touched.get(key);
-      if (names === undefined) touched.set(key, (names = new Map()));
-      names.set(name, leaf || names.get(name) === true);
-    }
-  }
-  if (touched.size === 0) return;
-  for (const record of decodeGitNameOnly(ignored)) {
-    const path = record.endsWith("/") ? record.slice(0, -1) : record;
-    for await (const prefix of livePrefixes(root, path, probes)) {
-      const matches = touched.get(prefix.key);
-      if (matches === undefined) break;
-      for (const [spelling, changed] of matches) {
-        const { entry, name, directory, leaf } = prefix;
-        if (!leaf && !changed) continue;
-        const contact = ignoredContactEntry(entry, name, spelling);
-        if (!contact) return `target checkout would overwrite ignored local entry: ${path}`;
-        if (await distinctEntries(root, directory, name, spelling, entry)) continue;
-        return `target checkout cannot rule out contact with ignored entry: ${path}`;
-      }
-    }
-  }
-  return undefined;
-}
-
 async function noDiff(repository: GitRepository, args: readonly string[], env: NodeJS.ProcessEnv): Promise<boolean> {
   try {
     await executeGit(repository, args, undefined, env);
@@ -218,14 +124,143 @@ async function noDiff(repository: GitRepository, args: readonly string[], env: N
 
 type CheckoutShape = Readonly<{ kind: "complete" | "followable" }> | Readonly<{ kind: "retained"; diagnostic: string }>;
 
-async function checkoutFlags(repository: GitRepository, path: string): Promise<"sparse" | "untracked" | undefined> {
+async function sparseCheckout(repository: GitRepository, path: string): Promise<boolean> {
   const git = (...args: string[]) => executeGit(repository, ["-C", path, ...args]);
   const sparse = await git("config", "--type=bool", "--default=false", "--get", "core.sparseCheckout");
-  if (sparse.toString("ascii").trim() === "true") return "sparse";
-  const entries = await git("ls-files", "--others", "--exclude-standard", "--cached", "--sparse", "-t", "-z");
-  const tagged = (tag: string) => entries[0] === tag.charCodeAt(0) || entries.includes(`\0${tag} `);
-  if (tagged("S")) return "sparse";
-  return tagged("?") ? "untracked" : undefined;
+  if (sparse.toString("ascii").trim() === "true") return true;
+  const entries = await git("ls-files", "--cached", "--sparse", "-t", "-z");
+  return entries[0] === 0x53 || entries.includes("\0S ");
+}
+
+async function changedPathIndexState(
+  repository: GitRepository,
+  path: string,
+  tree: string,
+  changes: readonly string[],
+): Promise<boolean> {
+  return await noDiff(
+    repository,
+    [
+      "-C",
+      path,
+      "--literal-pathspecs",
+      "diff-index",
+      "--cached",
+      "--quiet",
+      "--ita-invisible-in-index",
+      "--ignore-submodules=none",
+      tree,
+      "--",
+      ...changes,
+    ],
+    { GIT_OPTIONAL_LOCKS: "0" },
+  );
+}
+
+async function changedGitlinks(
+  repository: GitRepository,
+  path: string,
+  tree: string,
+  changes: readonly string[],
+): Promise<readonly string[] | null> {
+  const output = await executeGit(repository, [
+    "-C",
+    path,
+    "--literal-pathspecs",
+    "ls-tree",
+    "-z",
+    tree,
+    "--",
+    ...changes,
+  ]);
+  const paths: string[] = [];
+  let start = 0;
+  while (start < output.length) {
+    const end = output.indexOf(0, start);
+    if (end < 0) return null;
+    const record = output.subarray(start, end);
+    if (record.subarray(0, 7).toString("ascii") === "160000 ") {
+      const tab = record.indexOf(0x09);
+      if (tab < 0) return null;
+      const name = record.subarray(tab + 1);
+      if (!isUtf8(name)) return null;
+      paths.push(name.toString("utf8"));
+    }
+    start = end + 1;
+  }
+  return paths;
+}
+
+async function dirtyChangedGitlinks(
+  repository: GitRepository,
+  path: string,
+  trees: readonly string[],
+  changes: readonly string[],
+): Promise<boolean | null> {
+  const gitlinks = new Set<string>();
+  for (const tree of trees) {
+    const paths = await changedGitlinks(repository, path, tree, changes);
+    if (paths === null) return null;
+    for (const name of paths) gitlinks.add(name);
+  }
+  if (gitlinks.size === 0) return false;
+  // Gitlink equality alone misses modifications and untracked files inside a submodule.
+  return !(await noDiff(
+    repository,
+    ["-C", path, "--literal-pathspecs", "diff-files", "--quiet", "--ignore-submodules=none", "--", ...gitlinks],
+    { GIT_OPTIONAL_LOCKS: "0" },
+  ));
+}
+
+async function changedPathWorktreeClean(
+  repository: GitRepository,
+  path: string,
+  changes: readonly string[],
+): Promise<boolean> {
+  const output = await executeGit(
+    repository,
+    [
+      "-C",
+      path,
+      "--literal-pathspecs",
+      "--no-optional-locks",
+      "status",
+      "--porcelain=v1",
+      "-z",
+      "--no-renames",
+      "--ignore-submodules=none",
+      "--untracked-files=no",
+      "--",
+      ...changes,
+    ],
+    undefined,
+    { GIT_OPTIONAL_LOCKS: "0" },
+  );
+  // The index column is already proven equal to the candidate; only the second, worktree-vs-index
+  // column decides. Status keeps its native content recheck; staged bytes alone are not dirt.
+  let start = 0;
+  while (start < output.length) {
+    const end = output.indexOf(0, start);
+    if (end < 0) return false;
+    if (output[start + 1] !== 0x20) return false;
+    start = end + 1;
+  }
+  return true;
+}
+
+async function nativeCheckoutRefusal(
+  repository: GitRepository,
+  path: string,
+  movement: Awaited<ReturnType<typeof movementTrees>>,
+): Promise<string | undefined> {
+  try {
+    await executeGit(repository, checkoutReadTree(path, movement, true));
+    return undefined;
+  } catch (error) {
+    if (!(error instanceof GitPlumbingError)) throw error;
+    repository.signal?.throwIfAborted();
+    return error.stderr.toString("utf8").trim() || error.message;
+  }
 }
 
 async function classifyCheckout(
@@ -236,65 +271,28 @@ async function classifyCheckout(
   const { before, after, changes } = movement;
   if (await workspaceMergeStatePresent(repository, path))
     return { kind: "retained", diagnostic: "target checkout has a Git operation or an unmerged index" };
-  const flags = await checkoutFlags(repository, path);
-  if (flags === "sparse") return { kind: "retained", diagnostic: "target checkout has a sparse checkout or index" };
-  if (flags === "untracked") return { kind: "retained", diagnostic: "target checkout has untracked files" };
-  const unchanged = (tree: string) =>
-    noDiff(
-      repository,
-      [
-        "-C",
-        path,
-        "diff-index",
-        "--cached",
-        "--quiet",
-        "--ita-invisible-in-index",
-        "--ignore-submodules=none",
-        tree,
-        "--",
-      ],
-      { GIT_OPTIONAL_LOCKS: "0" },
-    );
-  const tree = (await unchanged(after)) ? after : (await unchanged(before)) ? before : undefined;
-  if (tree === undefined) return { kind: "retained", diagnostic: "target index matches neither complete tree" };
-
-  // A fresh index seeded from the matching tree sees final bytes, not caller stat or skip flags.
-  const exact = await withPrivateGitIndex(async (env) => {
-    const git = [
-      "-C",
-      path,
-      "-c",
-      "core.splitIndex=false",
-      "-c",
-      "core.sparseCheckout=false",
-      "-c",
-      "index.sparse=false",
-    ];
-    await executeGit(repository, [...git, "read-tree", tree], undefined, env);
-    await executeGit(repository, [...git, "add", "--all"], undefined, env);
-    const captured = await executeGit(repository, [...git, "write-tree"], undefined, env);
-    return (
-      captured.toString("ascii").trim() === tree &&
-      // Gitlink equality alone misses modifications and untracked files inside a submodule.
-      (await noDiff(repository, [...git, "diff-files", "--quiet", "--ignore-submodules=none", "--"], {
-        ...env,
-        GIT_OPTIONAL_LOCKS: "0",
-      }))
-    );
-  });
-  if (!exact) return { kind: "retained", diagnostic: "target worktree does not match its index tree" };
-  if (tree === after) return { kind: "complete" };
-  const ignored = await ignoredContact(repository, path, changes);
-  if (ignored !== undefined) return { kind: "retained", diagnostic: ignored };
-  // Exact content and ignored custody do not prove that Git will accept the real index's stat data.
-  try {
-    await executeGit(repository, checkoutReadTree(path, movement, true));
-  } catch (error) {
-    if (!(error instanceof GitPlumbingError)) throw error;
-    repository.signal?.throwIfAborted();
-    return { kind: "retained", diagnostic: error.stderr.toString("utf8").trim() || error.message };
+  if (await sparseCheckout(repository, path))
+    return { kind: "retained", diagnostic: "target checkout has a sparse checkout or index" };
+  if (changes === null) return { kind: "retained", diagnostic: "target checkout cannot prove changed path bytes" };
+  if (changes.length === 0) return { kind: "complete" };
+  // Changed paths must cohere at one end of the movement; anything else is mixed caller state.
+  const atPredecessor = await changedPathIndexState(repository, path, before, changes);
+  if (!atPredecessor) {
+    if (!(await changedPathIndexState(repository, path, after, changes)))
+      return { kind: "retained", diagnostic: "target checkout has mixed or local state on changed paths" };
+    if (!(await changedPathWorktreeClean(repository, path, changes)))
+      return { kind: "retained", diagnostic: "target checkout has local state on changed paths" };
   }
-  return { kind: "followable" };
+  if (atPredecessor) {
+    const dirtyGitlinks = await dirtyChangedGitlinks(repository, path, [before, after], changes);
+    if (dirtyGitlinks === null)
+      return { kind: "retained", diagnostic: "target checkout cannot prove changed submodule paths" };
+    if (dirtyGitlinks) return { kind: "retained", diagnostic: "target checkout has dirty changed submodule internals" };
+  }
+  // Native Git alone decides real worktree contact; its refusal retains the whole checkout.
+  const refusal = await nativeCheckoutRefusal(repository, path, movement);
+  if (refusal !== undefined) return { kind: "retained", diagnostic: refusal };
+  return { kind: atPredecessor ? "followable" : "complete" };
 }
 
 function checkoutDiagnostic(repository: GitRepository, error: unknown): string {

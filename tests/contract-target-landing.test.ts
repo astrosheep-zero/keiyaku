@@ -181,7 +181,7 @@ test("recovery refuses to adopt a replacement even when its HEAD matches the acc
   assert.equal(raw.run(["-C", parentPath, "rev-parse", "HEAD"]).trim(), integration);
 });
 
-test("ignored parent bytes lag after child acceptance without changing the checkout", async () => {
+test("ignored parent bytes follow the child candidate without changing main", async () => {
   const raw = repositoryWithMain({ files: { ".gitignore": "ignored.txt\n" } });
   const repo = await Repo.at({ path: raw.path });
   const contracts = Keis.of(repo);
@@ -194,17 +194,16 @@ test("ignored parent bytes lag after child acceptance without changing the check
   raw.run(["-C", childPath, "add", "-f", "ignored.txt"]);
   raw.run(["-C", childPath, "commit", "--quiet", "-m", "child"]);
   writeFileSync(join(parentPath, "ignored.txt"), "keep me\n");
-  const indexPath = raw.run(["-C", parentPath, "rev-parse", "--path-format=absolute", "--git-path", "index"]).trim();
-  const index = readFileSync(indexPath);
+  const mainBefore = raw.run(["rev-parse", "main"]).trim();
   const result = accepted(await child.kei.deliver());
   assert.equal(result.placement?.kind, "placed");
   assert.equal(present(await child.kei.state()).terminal?.kind, "claimed");
   assert.equal(raw.run(["-C", parentPath, "rev-parse", "HEAD"]).trim(), result.integration);
-  const retained = result.issues?.find((issue) => issue.kind === "target-checkout-retained");
-  assert.equal(retained?.path, parentPath);
-  assert.match(retained.diagnostic, /ignored.*ignored\.txt/u);
-  assert.deepEqual(readFileSync(indexPath), index);
-  assert.equal(readFileSync(join(parentPath, "ignored.txt"), "utf8"), "keep me\n");
+  assert.ok(!result.issues?.some((issue) => issue.kind === "target-checkout-retained"));
+  assert.equal(raw.run(["-C", parentPath, "show", ":ignored.txt"]).trim(), "candidate");
+  assert.equal(raw.run(["-C", parentPath, "status", "--porcelain"]), "");
+  assert.equal(readFileSync(join(parentPath, "ignored.txt"), "utf8"), "candidate\n");
+  assert.equal(raw.run(["rev-parse", "main"]).trim(), mainBefore);
 });
 
 test("fork inherits the exact target incarnation and refuses a replacement", async () => {

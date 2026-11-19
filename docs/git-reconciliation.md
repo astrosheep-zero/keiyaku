@@ -64,10 +64,12 @@ equality is an ownership test.
 
 Target-checkout recovery uses the same conservative follower as immediate
 placement, only while the destination still names the exact accepted candidate.
-A whole predecessor checkout can follow; a whole candidate is inert. Local or
-mixed states and ignored collisions are retained unchanged. A later explicit
-reconcile can follow once eligibility is restored; there is no index-only
-repair, older-ancestor adoption, or candidate recapture. Each checkout that
+A predecessor checkout can follow past disjoint staged, unstaged, and untracked
+work; a whole candidate is inert. Only real contact, mixed state on the
+movement's changed paths, or another unsupported checkout condition is retained
+unchanged. A later explicit reconcile can follow once
+eligibility is restored; there is no index-only repair, older-ancestor adoption,
+or candidate recapture. Each checkout that
 actually follows reports one physical movement. For a Contract destination,
 recovery proves the same appointed incarnation and exact already-published
 movement even if the destination has since become terminal; it never creates an

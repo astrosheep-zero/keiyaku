@@ -1,8 +1,9 @@
 import { present } from "./support/library-verbs.js";
 import { captureWorktreeFiles, restoreWorktreeFiles, type WorktreeFixtureFile } from "./support/git.js";
 import assert from "node:assert/strict";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test, { describe } from "node:test";
 import { Keis, Repo } from "../src/index.js";
 import { decideAttestation } from "../src/core/verbs/attestation.js";
@@ -14,8 +15,6 @@ import { admitIntent } from "../src/protocol/intent.js";
 import { observeContractsAt } from "../src/git/observe.js";
 import { withPrivateStatePublicationSeat } from "../src/git/private-state-seat.js";
 
-import { mintSnapshotId } from "../src/git/identity.js";
-import { observeTargetCheckoutShape } from "../src/git/target-placement.js";
 import { withGitDecodeChannel } from "../src/git/read-observation.js";
 import {
   appointedWorktreePath,
@@ -32,6 +31,18 @@ import {
   repositoryWithMain,
   TARGET_PLACEMENT_FILES,
 } from "./support/library-verbs.js";
+
+const caseInsensitiveCheckout = (() => {
+  const directory = mkdtempSync(join(tmpdir(), "keiyaku-case-probe-"));
+  try {
+    writeFileSync(join(directory, "probe"), "x");
+    return lstatSync(join(directory, "PROBE")).isFile();
+  } catch {
+    return false;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+})();
 
 type ManagedCandidateTemplate = Readonly<{
   repository: TestGitRepository;
@@ -287,66 +298,6 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
   });
 
-  test("reconcile preserves ignored directory contents until target recovery can follow safely", async () => {
-    const repository = repositoryWithMain({
-      files: {
-        ...TARGET_PLACEMENT_FILES,
-        ".gitignore": "artifact/local-secret\n",
-        "artifact/tracked.txt": "tracked\n",
-      },
-    });
-    const candidate = await managedCandidate(repository, []);
-    repository.run(["-C", candidate.path, "rm", "-r", "artifact"]);
-    writeFileSync(resolve(candidate.path, "artifact"), "candidate file\n");
-    repository.run(["-C", candidate.path, "add", "artifact"]);
-    repository.run(["-C", candidate.path, "commit", "--quiet", "-m", "replace directory"]);
-    const repo = await Repo.at({ path: repository.path });
-    const git = await cachedRepositoryAt(repository.path);
-    const index = readFileSync(resolve(repository.path, ".git", "index"));
-    const secret = Buffer.from([0, 255, 10, 115, 101, 99, 114, 101, 116]);
-    const secretPath = resolve(repository.path, "artifact", "local-secret");
-    writeFileSync(secretPath, secret);
-
-    const preview = await candidate.contract.previewDelivery();
-    assert.equal(preview.kind, "ready");
-    assert.equal(preview.target?.kind, "placeable");
-    const diagnostic = preview.target.checkouts?.find((checkout) => checkout.path === repository.path)?.diagnostic;
-    assert.match(diagnostic ?? "", /ignored.*artifact\/local-secret/u);
-    const delivered = acceptedDelivery(await candidate.contract.deliver());
-    assert.equal(delivered.placement?.kind, "placed");
-    assert.equal(delivered.issues?.find((issue) => issue.kind === "target-checkout-retained")?.diagnostic, diagnostic);
-    assert.deepEqual(readFileSync(secretPath), secret);
-    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
-    const integration = delivered.integration;
-    const journal = repository.run(["rev-parse", "refs/heads/keiyaku-state"]);
-    const retained = await Keis.of(repo).reconcile({ contract: candidate.id });
-    assert.ok(retained.kind === "contract");
-
-    assert.deepEqual(readFileSync(secretPath), secret);
-    assert.equal(readFileSync(resolve(repository.path, "artifact", "tracked.txt"), "utf8"), "tracked\n");
-    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), integration);
-    assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]), journal);
-    assert.equal((await observeContract(git, candidate.id)).state?.terminal?.kind, "claimed");
-    const lag = (retained.issues ?? []).find((issue) => issue.kind === "target-checkout-retained");
-    assert.ok(lag?.kind === "target-checkout-retained");
-    assert.equal(lag.path, repository.path);
-    assert.equal(lag.target, "refs/heads/main");
-    assert.match(lag.diagnostic, /ignored.*artifact/);
-    assert.ok(!(retained.effects ?? []).some((effect) => effect.kind === "target-checkout"));
-
-    rmSync(secretPath);
-    const recovered = await Keis.of(repo).reconcile({ contract: candidate.id });
-    assert.ok(recovered.kind === "contract");
-
-    assert.equal((recovered.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"), false);
-    assert.equal(readFileSync(resolve(repository.path, "artifact"), "utf8"), "candidate file\n");
-    assert.equal(repository.run(["status", "--porcelain"]), "");
-    assert.ok((recovered.effects ?? []).some((effect) => effect.kind === "target-checkout"));
-    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), integration);
-    assert.equal(repository.run(["rev-parse", "refs/heads/keiyaku-state"]), journal);
-  });
-
   test("mixed candidate bytes are inert until the entire predecessor is restored", async () => {
     const { repository, id, contract } = await claimedUnfollowedCandidateFixture();
     const integration = present(await contract.state()).currentIntegration!;
@@ -437,24 +388,192 @@ describe("target-checkout-reconcile isolated repositories", { concurrency: 4 }, 
     assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
   });
 
-  test("the ignored guard uses literal filenames, not pathspec expressions", async () => {
-    const names = process.platform === "win32" ? ["[a].txt"] : ["[a].txt", "*.txt", ":(exclude)literal.txt"];
-    for (const name of names) {
-      const repository = repositoryWithMain({ files: { ".gitignore": "*.txt\n" } });
-      const predecessor = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
-      writeFileSync(resolve(repository.path, name), "candidate\n");
-      repository.run(["--literal-pathspecs", "add", "-f", "--", name]);
-      repository.run(["commit", "--quiet", "-m", "literal candidate"]);
-      const candidate = mintSnapshotId(repository.run(["rev-parse", "HEAD"]).trim());
-      const capability = await cachedRepositoryAt(repository.path);
-      const shape = () => observeTargetCheckoutShape(capability, { target: "refs/heads/main", predecessor, candidate });
+  test("disjoint untracked content does not retain an otherwise exact predecessor", async () => {
+    const { repository, contract, id } = await ordinaryCandidateFixture();
+    const predecessor = repository.run(["rev-parse", "refs/heads/main"]).trim();
+    writeFileSync(resolve(repository.path, "notes.txt"), "unrelated untracked\n");
 
-      repository.run(["reset", "--hard", predecessor]);
-      writeFileSync(resolve(repository.path, "a.txt"), "unrelated ignored bytes\n");
-      assert.equal(await shape(), "followable", `${name}: a glob must not match the ignored decoy`);
-      writeFileSync(resolve(repository.path, name), "ignored collision\n");
-      assert.equal(await shape(), "retained", `${name}: the literal ignored collision must be kept`);
-      assert.equal(readFileSync(resolve(repository.path, name), "utf8"), "ignored collision\n");
-    }
+    const preview = await contract.previewDelivery();
+    assert.equal(preview.kind, "ready");
+    assert.equal(preview.target?.kind, "placeable");
+    assert.equal(preview.target.checkouts, undefined);
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), predecessor);
+
+    const delivered = acceptedDelivery(await contract.deliver());
+    assert.equal(delivered.placement?.kind, "placed");
+    assert.ok(!(delivered.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
+    assert.equal(repository.run(["show", ":delivered.txt"]), "candidate\n");
+    assert.equal(readFileSync(resolve(repository.path, "notes.txt"), "utf8"), "unrelated untracked\n");
+    assert.equal(repository.run(["status", "--porcelain"]), "?? notes.txt\n");
+
+    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: id });
+    assert.ok(reconciled.kind === "contract");
+    assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
+    assert.ok(!(reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+    assert.equal(readFileSync(resolve(repository.path, "notes.txt"), "utf8"), "unrelated untracked\n");
   });
+
+  test("a native untracked collision keeps the whole predecessor until reconciliation follows", async () => {
+    const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
+    const { contract, id, path: candidatePath } = await managedCandidate(repository, []);
+    writeFileSync(resolve(candidatePath, "incoming.txt"), "candidate\n");
+    repository.run(["-C", candidatePath, "add", "incoming.txt"]);
+    repository.run(["-C", candidatePath, "commit", "--quiet", "-m", "add incoming"]);
+    const index = readFileSync(resolve(repository.path, ".git", "index"));
+    writeFileSync(resolve(repository.path, "incoming.txt"), "local untracked\n");
+
+    const preview = await contract.previewDelivery();
+    assert.equal(preview.kind, "ready");
+    assert.equal(preview.target?.kind, "placeable");
+    const diagnostic = preview.target.checkouts?.find((checkout) => checkout.path === repository.path)?.diagnostic;
+    assert.match(diagnostic ?? "", /incoming\.txt/u);
+
+    const delivered = acceptedDelivery(await contract.deliver());
+    assert.equal(delivered.placement?.kind, "placed");
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
+    assert.equal(delivered.issues?.find((issue) => issue.kind === "target-checkout-retained")?.diagnostic, diagnostic);
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
+    assert.equal(repository.run(["show", ":delivered.txt"]), "base\n");
+    assert.equal(readFileSync(resolve(repository.path, "incoming.txt"), "utf8"), "local untracked\n");
+    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
+
+    rmSync(resolve(repository.path, "incoming.txt"));
+    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: id });
+    assert.ok(reconciled.kind === "contract");
+    assert.ok(!(reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+    assert.deepEqual(
+      (reconciled.effects ?? []).filter((effect) => effect.kind === "target-checkout"),
+      [{ kind: "target-checkout", path: repository.path, target: "refs/heads/main" }],
+    );
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
+    assert.equal(readFileSync(resolve(repository.path, "incoming.txt"), "utf8"), "candidate\n");
+    assert.equal(repository.run(["status", "--porcelain"]), "");
+  });
+
+  test("disjoint staged and unstaged tracked edits survive following untouched", async () => {
+    const repository = repositoryWithMain({
+      files: { ...TARGET_PLACEMENT_FILES, "staged.txt": "base\n", "unstaged.txt": "base\n" },
+    });
+    const { contract, id } = await managedCandidate(repository, []);
+    writeFileSync(resolve(repository.path, "staged.txt"), "staged local\n");
+    repository.run(["add", "staged.txt"]);
+    writeFileSync(resolve(repository.path, "unstaged.txt"), "unstaged local\n");
+
+    const preview = await contract.previewDelivery();
+    assert.equal(preview.kind, "ready");
+    assert.equal(preview.target?.kind, "placeable");
+    assert.equal(preview.target.checkouts, undefined);
+
+    const delivered = acceptedDelivery(await contract.deliver());
+    assert.equal(delivered.placement?.kind, "placed");
+    assert.ok(!(delivered.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+    assert.equal(repository.run(["show", ":delivered.txt"]), "candidate\n");
+    assert.equal(repository.run(["show", ":staged.txt"]), "staged local\n");
+    assert.equal(repository.run(["show", ":unstaged.txt"]), "base\n");
+    assert.equal(readFileSync(resolve(repository.path, "staged.txt"), "utf8"), "staged local\n");
+    assert.equal(readFileSync(resolve(repository.path, "unstaged.txt"), "utf8"), "unstaged local\n");
+    assert.equal(repository.run(["status", "--porcelain"]), "M  staged.txt\n M unstaged.txt\n");
+
+    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: id });
+    assert.ok(reconciled.kind === "contract");
+    assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
+    assert.ok(!(reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+  });
+
+  test("mixed changed paths are retained whole instead of partially repaired", async () => {
+    const repository = repositoryWithMain({ files: { ...TARGET_PLACEMENT_FILES, "second.txt": "base\n" } });
+    const candidate = await managedCandidate(repository, ["reviewed"]);
+    writeFileSync(resolve(candidate.path, "second.txt"), "candidate\n");
+    repository.run(["-C", candidate.path, "add", "second.txt"]);
+    repository.run(["-C", candidate.path, "commit", "--quiet", "-m", "change second"]);
+    await admitClaimWithoutFollow(repository, candidate.contract);
+    const index = readFileSync(resolve(repository.path, ".git", "index"));
+    writeFileSync(resolve(repository.path, "delivered.txt"), "candidate\n");
+
+    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: candidate.id });
+    assert.ok(reconciled.kind === "contract");
+    assert.ok((reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+    assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
+    assert.equal(readFileSync(resolve(repository.path, "second.txt"), "utf8"), "base\n");
+    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
+  });
+
+  test("a checkout already staged at the candidate on changed paths is inert", async () => {
+    const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
+    const { contract, id } = await managedCandidate(repository, []);
+    writeFileSync(resolve(repository.path, "delivered.txt"), "candidate\n");
+    repository.run(["add", "delivered.txt"]);
+    assert.equal(repository.run(["status", "--porcelain"]), "M  delivered.txt\n");
+
+    const preview = await contract.previewDelivery();
+    assert.equal(preview.kind, "ready");
+    assert.equal(preview.target?.kind, "placeable");
+    assert.equal(preview.target.checkouts, undefined);
+
+    const delivered = acceptedDelivery(await contract.deliver());
+    assert.equal(delivered.placement?.kind, "placed");
+    assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), delivered.integration);
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "candidate\n");
+    assert.equal(repository.run(["status", "--porcelain"]), "");
+
+    const reconciled = await Keis.of(await Repo.at({ path: repository.path })).reconcile({ contract: id });
+    assert.ok(reconciled.kind === "contract");
+    assert.ok(!(reconciled.effects ?? []).some((effect) => effect.kind === "target-checkout"));
+    assert.ok(!(reconciled.issues ?? []).some((issue) => issue.kind === "target-checkout-retained"));
+  });
+
+  test("a changed worktree over staged candidate bytes is retained", async () => {
+    const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
+    const { contract } = await managedCandidate(repository, []);
+    writeFileSync(resolve(repository.path, "delivered.txt"), "candidate\n");
+    repository.run(["add", "delivered.txt"]);
+    writeFileSync(resolve(repository.path, "delivered.txt"), "local edit\n");
+    const index = readFileSync(resolve(repository.path, ".git", "index"));
+
+    const preview = await contract.previewDelivery();
+    assert.equal(preview.kind, "ready");
+    assert.equal(preview.target?.kind, "placeable");
+    const diagnostic = preview.target.checkouts?.find((checkout) => checkout.path === repository.path)?.diagnostic;
+    assert.match(diagnostic ?? "", /local state on changed paths/u);
+
+    const delivered = acceptedDelivery(await contract.deliver());
+    assert.equal(delivered.placement?.kind, "placed");
+    assert.equal(delivered.issues?.find((issue) => issue.kind === "target-checkout-retained")?.diagnostic, diagnostic);
+    assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "local edit\n");
+    assert.deepEqual(readFileSync(resolve(repository.path, ".git", "index")), index);
+  });
+
+  test(
+    "a case-insensitive untracked alias collision is retained by native movement",
+    {
+      skip: !caseInsensitiveCheckout && "fixture needs a case-insensitive filesystem",
+    },
+    async () => {
+      const repository = repositoryWithMain({ files: TARGET_PLACEMENT_FILES });
+      const candidate = await managedCandidate(repository, []);
+      writeFileSync(resolve(candidate.path, "Incoming.txt"), "candidate\n");
+      repository.run(["-C", candidate.path, "add", "Incoming.txt"]);
+      repository.run(["-C", candidate.path, "commit", "--quiet", "-m", "add incoming"]);
+      const untracked = "aliased untracked\n";
+      writeFileSync(resolve(repository.path, "incoming.txt"), untracked);
+
+      const preview = await candidate.contract.previewDelivery();
+      assert.equal(preview.kind, "ready");
+      assert.equal(preview.target?.kind, "placeable");
+      const diagnostic = preview.target.checkouts?.find((checkout) => checkout.path === repository.path)?.diagnostic;
+      assert.match(diagnostic ?? "", /Incoming\.txt/u);
+
+      const delivered = acceptedDelivery(await candidate.contract.deliver());
+      assert.equal(delivered.placement?.kind, "placed");
+      assert.equal(
+        delivered.issues?.find((issue) => issue.kind === "target-checkout-retained")?.diagnostic,
+        diagnostic,
+      );
+      assert.equal(readFileSync(resolve(repository.path, "incoming.txt"), "utf8"), untracked);
+      assert.equal(readFileSync(resolve(repository.path, "delivered.txt"), "utf8"), "base\n");
+    },
+  );
 });

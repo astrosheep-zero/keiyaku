@@ -359,7 +359,7 @@ test("cancelling invocation dry-run preserves native abort and partial preview i
   const before = custodySnapshot(repository, worktree);
   const history = await bound.kei.history();
   await withGitShim([
-    'if [ "$3" = "ls-files" ] && [ "$4" = "--others" ] && [ "$5" = "--exclude-standard" ]; then',
+    'if [ "$3" = "ls-files" ] && [ "$4" = "--cached" ] && [ "$5" = "--sparse" ]; then',
     '  : > "$KEIYAKU_TEST_BARRIER"',
     '  exec sleep 30',
     'fi',
@@ -420,7 +420,7 @@ test("preview names overlapping dirty target checkout while normal delivery stil
   assert.equal(preview.target.checkouts?.length, 1);
   const checkout = preview.target.checkouts![0]!;
   assert.equal(checkout.path, repository.path);
-  assert.match(checkout.diagnostic, /worktree does not match its index tree/u);
+  assert.match(checkout.diagnostic, /delivered\.txt.*not uptodate/u);
   const text = renderVerb("deliver", { contract: bound.contractId, dryRun: true },
     { kind: "returned", value: preview }, { columns: 200, color: false });
   // The receipt hard-wraps a long payload at the column boundary, even mid-word, so the human-facing text is judged

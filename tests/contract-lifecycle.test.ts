@@ -443,14 +443,13 @@ describe("dirty target checkout placement", () => {
     assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
   });
 
-  test("an uncommitted edit outside the movement retains the entire target checkout", async () => {
+  test("an uncommitted edit outside the movement follows while preserving the edit", async () => {
     const { repository, state } = await targetedCheckoutBinding(
       { "target.txt": "base\n", "other.txt": "base\n" },
       "target.txt",
     );
     writeFileSync(join(repository.path, "other.txt"), "unrelated local work\n");
-    const indexPath = join(repository.path, ".git", "index");
-    const index = readFileSync(indexPath);
+    const otherEntry = repository.run(["ls-files", "-s", "--", "other.txt"]);
 
     const reviewed = (
       await cliJsonAt<ReviewOutcome>(repository.path, ["review", state.id, "--satisfied", "--summary", "ok"])
@@ -458,13 +457,16 @@ describe("dirty target checkout placement", () => {
     assert.ok(reviewed.kind === "accepted", JSON.stringify(reviewed));
     if (reviewed.kind !== "accepted") throw new Error("review was refused");
     assert.equal(reviewed.placement?.kind, "placed");
-    assert.ok(reviewed.issues?.some((issue) => issue.kind === "target-checkout-retained"));
+    assert.ok(!reviewed.issues?.some((issue) => issue.kind === "target-checkout-retained"));
     const text = renderVerb("review", { contract: state.id, verdict: "satisfied", summary: "ok" },
       { kind: "returned", value: reviewed }, { columns: repository.path.length + 100, color: false });
-    assert.match(text, /^  issue {2}target checkout retained$/mu);
-    assert.ok(text.includes(`  path  ${repository.path}`), text);
-    assert.deepEqual(readFileSync(indexPath), index);
+    assert.match(text, /^  placement {2}placed$/mu);
+    assert.doesNotMatch(text, /target checkout retained/u);
+    assert.equal(repository.run(["ls-files", "-s", "--", "other.txt"]), otherEntry);
+    assert.equal(repository.run(["show", ":other.txt"]), "base\n");
+    assert.equal(repository.run(["show", ":target.txt"]), "candidate\n");
+    assert.equal(repository.run(["status", "--porcelain"]), " M other.txt\n");
     assert.equal(readFileSync(join(repository.path, "other.txt"), "utf8"), "unrelated local work\n");
-    assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "base\n");
+    assert.equal(readFileSync(join(repository.path, "target.txt"), "utf8"), "candidate\n");
   });
 });

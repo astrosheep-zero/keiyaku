@@ -226,8 +226,9 @@ observed target followability. Preparation refusals remain explicit. Candidate
 preparation does not establish prerequisite or gate satisfaction, and an
 unavailable or unobserved target never becomes implicitly followable. A placeable
 target may have a checkout that cannot follow the exact prospective movement.
-Local changes and ignored collisions appear as checkout diagnostics, not ref
-placement refusals; after acceptance they can appear as retained checkout lag.
+Inability to follow is a checkout diagnostic rather than a ref placement
+refusal; after acceptance it can appear as retained checkout lag. Disjoint
+local dirt alone is not checkout lag.
 
 Preview never executes declarations or hooks, admits facts, places, reconciles,
 settles, or continues dependents. A failed finite Git read preserves any preview

@@ -72,12 +72,13 @@ test("checkout probing begins after atomic admission and outside the publication
   await withGitShim(
     [
       'case " $* " in',
-      '  *" ls-files --others --ignored --exclude-standard -z "*)',
+      '  *" read-tree -m -u --dry-run "*)',
       '    if [ ! -e "$SHAPE_STARTED" ]; then',
-      '      "$KEIYAKU_REAL_GIT" "$@" || exit $?',
+      '      "$KEIYAKU_REAL_GIT" "$@"',
+      "      status=$?",
       '      touch "$SHAPE_STARTED"',
       '      i=0; while [ ! -e "$SHAPE_RELEASE" ]; do i=$((i + 1)); if [ "$i" -ge 6000 ]; then echo "fixture wait for $SHAPE_RELEASE expired after 60s" >&2; exit 1; fi; sleep 0.01; done',
-      "      exit 0",
+      "      exit $status",
       "    fi ;;",
       "esac",
       'exec "$KEIYAKU_REAL_GIT" "$@"',
@@ -99,7 +100,9 @@ test("checkout probing begins after atomic admission and outside the publication
         writer.close();
         assert.equal(present(await contract.state()).terminal?.kind, "claimed");
         assert.equal(repository.run(["rev-parse", "refs/heads/main"]).trim(), before.currentIntegration?.snapshot);
-        writeFileSync(file, "ignored bytes after first classification\n");
+        writeFileSync(resolve(repository.path, ".gitignore"), "");
+        writeFileSync(file, "unignored bytes after first classification\n");
+        assert.match(repository.run(["status", "--porcelain", "--", "collision.txt"]), /^\?\? collision\.txt$/mu);
       } finally {
         writeFileSync(release, "release");
         await placing.catch(() => undefined);
@@ -107,9 +110,9 @@ test("checkout probing begins after atomic admission and outside the publication
       const result = await placing;
       assert.equal(result.kind, "accepted");
       const lag = result.physical?.lag.find((issue) => issue.kind === "target-checkout-retained");
-      assert.match(lag?.diagnostic ?? "", /ignored.*collision\.txt/u);
+      assert.match(lag?.diagnostic ?? "", /Untracked working tree file 'collision\.txt' would be overwritten/u);
       assert.deepEqual(readFileSync(indexPath), index);
-      assert.equal(readFileSync(file, "utf8"), "ignored bytes after first classification\n");
+      assert.equal(readFileSync(file, "utf8"), "unignored bytes after first classification\n");
     },
   );
 });

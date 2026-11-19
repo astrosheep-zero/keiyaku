@@ -178,27 +178,29 @@ is not a condition of atomic journal admission and reference movement. Physical
 following happens afterward under the target fence, outside the publication
 seat. Preview, following, and recovery judge the same exact movement.
 
-A checkout whose index and working content already match the candidate needs
-no movement. Following requires both to match the entire predecessor and Git
-must allow the unforced movement with that checkout's current index and
-worktree. Preview, following, and recovery observe the native preconditions
-without refreshing the caller's index. Equal content does not override a
-native refusal; that diagnostic belongs to the checkout, not the ref. Sparse
-checkouts and indexes are retained unchanged even when all predecessor files
-are present; following never expands them. Local tracked edits, untracked
-content, unmerged entries, dirty submodule internals, foreign operations, and
-mixed predecessor and candidate states are retained, not carried or partially
-repaired. Git success alone is not proof that the entire checkout followed.
-Ignored entries that overlap changed paths also cause retained checkout lag
-after admission, including on deletions.
-Overlap protects the actual destination entry and its ancestors, including
-aliases resolved by that destination. Distinct hard-linked directory entries
-are not the same entry, and spelling alone does not establish their identity.
-The follower retains a checkout when it cannot establish that ignored bytes are
-safe. Unrelated ignored runtime and cache files do not cause lag. Checkout
-retention is not an integration conflict or reversal of placement. Target lag
-names the checkout against the frozen target. ContractHead and journal blob
-custody identifiers remain private to ordinary text.
+Following observes the movement's changed paths rather than whole-checkout
+cleanliness, and the unforced native movement is the sole judge of real
+contact. A checkout whose index and worktree on those paths already match the
+candidate needs no movement. Otherwise they must match the predecessor on the
+changed paths before that movement decides; a real staged, unstaged, untracked,
+directory or file, or other native obstruction retains the whole checkout.
+State outside the changed paths -- staged, unstaged, untracked, or ignored
+runtime -- is not evidence against following and survives untouched. Mixed or
+locally changed state on the movement's changed paths is retained, never
+partially repaired. Preview, following, and recovery observe the native
+preconditions without refreshing the caller's index. Equal content does not
+override a native refusal; that diagnostic belongs to the checkout, not the
+ref. After movement, following confirms the candidate on the changed paths;
+command success alone does not establish completion. Sparse checkouts and
+indexes are retained unchanged even when all predecessor files are present;
+following never expands them. Foreign worktree
+operations and dirty submodule internals that contact a changed gitlink path
+are retained. Git alone adjudicates whether ignored or aliased physical entries
+obstruct the movement; Keiyaku keeps no separate contact matcher. Unrelated
+ignored runtime and cache files do not cause lag. Checkout retention is not an
+integration conflict or reversal of placement. Target lag names the checkout
+against the frozen target. ContractHead and journal blob custody identifiers
+remain private to ordinary text.
 
 ## Custody And Cleanup
 
