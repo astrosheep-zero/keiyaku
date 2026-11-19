@@ -59,6 +59,28 @@ export type PiEventState = {
   tools: ToolObservations;
 };
 
+type PiMessageEnd = Extract<AgentSessionEvent, { type: "message_end" }>;
+
+function reportPiMessage(event: PiMessageEnd, state: PiEventState, emit: (event: AgentEvent) => void): void {
+  const message = event.message;
+  if (message.role !== "assistant") return;
+  const model = piModel(message.provider, message.model);
+  if (model !== undefined) emit(modelEvent(model));
+  const error = message.stopReason === "error" ? nonblank(message.errorMessage) : undefined;
+  if (error !== undefined) emit(noteEvent(error));
+  for (const block of message.content) {
+    if (block.type === "thinking" && block.redacted !== true && nonblank(block.thinking) !== undefined)
+      emit({ type: "thought", text: block.thinking });
+  }
+  const observed = observedTextContent(message.content);
+  const text = observed ?? "";
+  if (message.stopReason !== "toolUse") Object.assign(state, { assistantSeen: true, answer: text });
+  // A blank tool-use text block is transport scaffolding. A terminal empty
+  // answer remains public evidence.
+  if (observed !== undefined && !(message.stopReason === "toolUse" && text.trim().length === 0))
+    emit({ type: "assistant", text });
+}
+
 export function translatePiEvent(
   event: AgentSessionEvent,
   state: PiEventState,
@@ -97,31 +119,9 @@ export function translatePiEvent(
       );
       return;
     }
-    case "message_end": {
-      const message = event.message;
-      if (message.role !== "assistant") return;
-      const model = piModel(message.provider, message.model);
-      if (model !== undefined) emit(modelEvent(model));
-      const error = message.stopReason === "error" ? nonblank(message.errorMessage) : undefined;
-      if (error !== undefined) emit(noteEvent(error));
-      for (const block of message.content) {
-        if (block.type === "thinking" && block.redacted !== true && nonblank(block.thinking) !== undefined) {
-          emit({ type: "thought", text: block.thinking });
-        }
-      }
-      const observed = observedTextContent(message.content);
-      const text = observed ?? "";
-      if (message.stopReason !== "toolUse") {
-        state.assistantSeen = true;
-        state.answer = text;
-      }
-      // A blank tool-use text block is transport scaffolding. A terminal empty
-      // answer remains public evidence.
-      if (observed !== undefined && !(message.stopReason === "toolUse" && text.trim().length === 0)) {
-        emit({ type: "assistant", text });
-      }
+    case "message_end":
+      reportPiMessage(event, state, emit);
       return;
-    }
     default:
       return;
   }

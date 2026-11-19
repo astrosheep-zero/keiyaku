@@ -114,6 +114,51 @@ function checkoutReadTree(path: string, { predecessor, candidate }: Movement, dr
   return ["-C", path, "read-tree", "-m", "-u", ...(dryRun ? ["--dry-run"] : []), predecessor, candidate];
 }
 
+async function* livePrefixes(root: string, path: string, probes: Map<string, Promise<BigIntStats | undefined>>) {
+  let parent = "";
+  let directory = "";
+  const parts = path.split("/");
+  for (const [index, name] of parts.entries()) {
+    const prefix = directory === "" ? name : `${directory}/${name}`;
+    let probe = probes.get(prefix);
+    if (probe === undefined) {
+      probe = lstat(resolve(root, prefix), { bigint: true }).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === "ENOENT") return undefined;
+        throw error;
+      });
+      probes.set(prefix, probe);
+    }
+    const entry = await probe;
+    if (entry === undefined) return;
+    const identity = `${entry.dev}:${entry.ino}`;
+    yield { key: `${parent}/${identity}`, name, directory, entry, leaf: index === parts.length - 1 };
+    if (!entry.isDirectory()) return;
+    parent = identity;
+    directory = prefix;
+  }
+}
+
+async function distinctEntries(root: string, directory: string, left: string, right: string, shared: BigIntStats) {
+  if (shared.ino === 0n) return false;
+  const parent = resolve(root, directory);
+  const names = await readdir(parent, { encoding: "buffer" });
+  const present = (value: string) => names.some((entry) => entry.equals(Buffer.from(value)));
+  if (present(left) && present(right)) return true;
+  // A symlink is a leaf; using realpath to resolve its alias would dereference it.
+  if (shared.isSymbolicLink()) return false;
+  // Some filesystems return the lookup spelling unchanged; require enumerated entries.
+  const a = await realpath(resolve(parent, left), { encoding: "buffer" });
+  const b = await realpath(resolve(parent, right), { encoding: "buffer" });
+  if (a.equals(b) || !isUtf8(a) || !isUtf8(b)) return false;
+  const aPath = a.toString("utf8");
+  const bPath = b.toString("utf8");
+  return dirname(aPath) === dirname(bPath) && present(basename(aPath)) && present(basename(bPath));
+}
+
+function ignoredContactEntry(entry: BigIntStats, name: string, spelling: string): boolean {
+  return entry.ino === 0n || (name !== spelling && !entry.isDirectory() && entry.nlink !== 1n);
+}
+
 async function ignoredContact(
   repository: GitRepository,
   root: string,
@@ -133,71 +178,28 @@ async function ignoredContact(
   if (changes === null || !isUtf8(ignored)) return "target checkout cannot prove ignored paths safe to follow";
 
   const probes = new Map<string, Promise<BigIntStats | undefined>>();
-  async function* livePrefixes(path: string) {
-    let parent = "";
-    let directory = "";
-    const parts = path.split("/");
-    for (const [index, name] of parts.entries()) {
-      const prefix = directory === "" ? name : `${directory}/${name}`;
-      let probe = probes.get(prefix);
-      if (probe === undefined) {
-        probe = lstat(resolve(root, prefix), { bigint: true }).catch((error: NodeJS.ErrnoException) => {
-          if (error.code === "ENOENT") return undefined;
-          throw error;
-        });
-        probes.set(prefix, probe);
-      }
-      const entry = await probe;
-      if (entry === undefined) return;
-      const identity = `${entry.dev}:${entry.ino}`;
-      yield { key: `${parent}/${identity}`, name, directory, entry, leaf: index === parts.length - 1 };
-      if (!entry.isDirectory()) return;
-      parent = identity;
-      directory = prefix;
-    }
-  }
-
   // An identity match under the same parent finds aliases without normalizing names.
   const touched = new Map<string, Map<string, boolean>>();
   for (const path of changes) {
-    for await (const { key, name, leaf } of livePrefixes(path)) {
+    for await (const { key, name, leaf } of livePrefixes(root, path, probes)) {
       let names = touched.get(key);
       if (names === undefined) touched.set(key, (names = new Map()));
       names.set(name, leaf || names.get(name) === true);
     }
   }
   if (touched.size === 0) return;
-  async function distinctEntries(directory: string, left: string, right: string, shared: BigIntStats) {
-    const parent = resolve(root, directory);
-    const names = await readdir(parent, { encoding: "buffer" });
-    const present = (value: string) => {
-      const name = Buffer.from(value);
-      return names.some((entry) => entry.equals(name));
-    };
-    if (present(left) && present(right)) return true;
-    // A symlink is a leaf; using realpath to resolve its alias would dereference it.
-    if (shared.isSymbolicLink()) return false;
-    // Some filesystems return the lookup spelling unchanged; require enumerated entries.
-    const a = await realpath(resolve(parent, left), { encoding: "buffer" });
-    const b = await realpath(resolve(parent, right), { encoding: "buffer" });
-    if (a.equals(b) || !isUtf8(a) || !isUtf8(b)) return false;
-    const aPath = a.toString("utf8");
-    const bPath = b.toString("utf8");
-    return dirname(aPath) === dirname(bPath) && present(basename(aPath)) && present(basename(bPath));
-  }
-
   for (const record of decodeGitNameOnly(ignored)) {
     const path = record.endsWith("/") ? record.slice(0, -1) : record;
-    for await (const { key, name, directory, entry, leaf } of livePrefixes(path)) {
-      const matches = touched.get(key);
+    for await (const prefix of livePrefixes(root, path, probes)) {
+      const matches = touched.get(prefix.key);
       if (matches === undefined) break;
       for (const [spelling, changed] of matches) {
+        const { entry, name, directory, leaf } = prefix;
         if (!leaf && !changed) continue;
-        if (entry.ino === 0n || (name !== spelling && !entry.isDirectory() && entry.nlink !== 1n)) {
-          if (entry.ino !== 0n && (await distinctEntries(directory, name, spelling, entry))) continue;
-          return `target checkout cannot rule out contact with ignored entry: ${path}`;
-        }
-        return `target checkout would overwrite ignored local entry: ${path}`;
+        const contact = ignoredContactEntry(entry, name, spelling);
+        if (!contact) return `target checkout would overwrite ignored local entry: ${path}`;
+        if (await distinctEntries(root, directory, name, spelling, entry)) continue;
+        return `target checkout cannot rule out contact with ignored entry: ${path}`;
       }
     }
   }
@@ -216,6 +218,16 @@ async function noDiff(repository: GitRepository, args: readonly string[], env: N
 
 type CheckoutShape = Readonly<{ kind: "complete" | "followable" }> | Readonly<{ kind: "retained"; diagnostic: string }>;
 
+async function checkoutFlags(repository: GitRepository, path: string): Promise<"sparse" | "untracked" | undefined> {
+  const git = (...args: string[]) => executeGit(repository, ["-C", path, ...args]);
+  const sparse = await git("config", "--type=bool", "--default=false", "--get", "core.sparseCheckout");
+  if (sparse.toString("ascii").trim() === "true") return "sparse";
+  const entries = await git("ls-files", "--others", "--exclude-standard", "--cached", "--sparse", "-t", "-z");
+  const tagged = (tag: string) => entries[0] === tag.charCodeAt(0) || entries.includes(`\0${tag} `);
+  if (tagged("S")) return "sparse";
+  return tagged("?") ? "untracked" : undefined;
+}
+
 async function classifyCheckout(
   repository: GitRepository,
   path: string,
@@ -224,31 +236,9 @@ async function classifyCheckout(
   const { before, after, changes } = movement;
   if (await workspaceMergeStatePresent(repository, path))
     return { kind: "retained", diagnostic: "target checkout has a Git operation or an unmerged index" };
-  const sparseDiagnostic = { kind: "retained", diagnostic: "target checkout has a sparse checkout or index" } as const;
-  const sparse = await executeGit(repository, [
-    "-C",
-    path,
-    "config",
-    "--type=bool",
-    "--default=false",
-    "--get",
-    "core.sparseCheckout",
-  ]);
-  if (sparse.toString("ascii").trim() === "true") return sparseDiagnostic;
-  const entries = await executeGit(repository, [
-    "-C",
-    path,
-    "ls-files",
-    "--others",
-    "--exclude-standard",
-    "--cached",
-    "--sparse",
-    "-t",
-    "-z",
-  ]);
-  const tagged = (tag: string) => entries[0] === tag.charCodeAt(0) || entries.includes(`\0${tag} `);
-  if (tagged("S")) return sparseDiagnostic;
-  if (tagged("?")) return { kind: "retained", diagnostic: "target checkout has untracked files" };
+  const flags = await checkoutFlags(repository, path);
+  if (flags === "sparse") return { kind: "retained", diagnostic: "target checkout has a sparse checkout or index" };
+  if (flags === "untracked") return { kind: "retained", diagnostic: "target checkout has untracked files" };
   const unchanged = (tree: string) =>
     noDiff(
       repository,
@@ -418,17 +408,24 @@ export async function observeTargetCheckoutShape(
   return kind;
 }
 
+function claimedMovement(state: ContractState) {
+  const { target } = state.coordinates;
+  const integration = state.currentIntegration;
+  if (state.terminal?.kind !== "claimed" || target === undefined || integration === null) return undefined;
+  return { target, integration };
+}
+
 /** Follow only the exact durable movement, under the caller's target fence. */
 export async function recoverTargetPlacement(
   repository: GitRepository,
   state: ContractState,
   onPhysical?: (report: TargetPlacementPhysicalResult) => void,
 ): Promise<TargetPlacementPhysicalResult> {
-  const { target } = state.coordinates;
-  const integration = state.currentIntegration;
+  const claimed = claimedMovement(state);
   const effects: TargetPlacementPhysicalResult["effects"][number][] = [];
   const lag: TargetPlacementPhysicalResult["lag"][number][] = [];
-  if (state.terminal?.kind !== "claimed" || target === undefined || integration === null) return { effects, lag };
+  if (claimed === undefined) return { effects, lag };
+  const { target, integration } = claimed;
   const { predecessor, snapshot: candidate } = integration;
   // If the ref is unavailable, still distinguish an unavailable Contract destination from branch drift.
   const current = await observeTargetHead(repository, target);

@@ -32,78 +32,65 @@ type Emit = (event: AgentEvent) => void;
  * text stays absent; a present empty string remains observed and empty.
  */
 function detailOutput(detail: ToolCallDetail): string | undefined {
-  switch (detail.type) {
-    case "shell":
-      return stringValue(detail.output);
-    case "read":
-    case "search":
-      return stringValue(detail.content);
-    case "fetch":
-      return stringValue(detail.result);
-    default:
-      return undefined;
-  }
+  if (detail.type === "shell") return stringValue(detail.output);
+  if (detail.type === "read" || detail.type === "search") return stringValue(detail.content);
+  if (detail.type === "fetch") return stringValue(detail.result);
+  return undefined;
 }
 
 function toolCall(item: ToolCallItem): ToolCall {
-  const detail = item.detail;
-  switch (detail.type) {
-    case "shell":
-      return { kind: "run", command: detail.command };
-    case "read":
-      return readToolCall(detail.filePath, detail.offset, detail.limit) ?? otherToolCall(item.name);
-    case "edit":
-    case "write":
-      return fileChangeToolCall("unspecified", detail.filePath) ?? otherToolCall(item.name);
-    case "search":
-      return (
-        searchToolCall(detail.query, detail.toolName === "web_search" ? "web" : "content") ?? otherToolCall(item.name)
-      );
-    case "unknown":
-      return otherToolCall(item.name, detail.input);
-    default:
-      return otherToolCall(item.name);
+  const { detail } = item;
+  if (detail.type === "shell") return { kind: "run", command: detail.command };
+  if (detail.type === "read")
+    return readToolCall(detail.filePath, detail.offset, detail.limit) ?? otherToolCall(item.name);
+  if (detail.type === "edit" || detail.type === "write")
+    return fileChangeToolCall("unspecified", detail.filePath) ?? otherToolCall(item.name);
+  if (detail.type === "search")
+    return (
+      searchToolCall(detail.query, detail.toolName === "web_search" ? "web" : "content") ?? otherToolCall(item.name)
+    );
+  return detail.type === "unknown" ? otherToolCall(item.name, detail.input) : otherToolCall(item.name);
+}
+
+function completedToolCall(
+  item: ToolCallItem,
+  detail: ToolCallDetail,
+  observed: ReturnType<ToolObservations["get"]>,
+  ambiguousEdit: boolean,
+): ToolCall {
+  const previous = observed?.call;
+  const change = previous?.kind === "fileChange" ? previous.changes[0] : undefined;
+  if (observed !== undefined && detail.type === "unknown") return otherToolCall(item.name, detail.input);
+  if (ambiguousEdit || detail.type !== "edit" || change?.path !== detail.filePath)
+    return previous ?? otherToolCall(item.name);
+  const patch = stringValue(detail.unifiedDiff);
+  return patch === undefined
+    ? (previous ?? otherToolCall(item.name))
+    : { kind: "fileChange", changes: [observedChange(change.op, change.path, patch)] };
+}
+
+function narrateToolCall(item: ToolCallItem, tools: ToolObservations): void {
+  const { detail } = item;
+  // The ACP mapper's edit/delete projection substitutes its display title
+  // for a missing path and puts ordinary result text in the patch field.
+  const ambiguousEdit = detail.type === "edit" && (item.metadata?.kind === "edit" || item.metadata?.kind === "delete");
+  if (item.status === "running") {
+    tools.start(item.callId, { name: item.name, call: ambiguousEdit ? otherToolCall(item.name) : toolCall(item) });
+    return;
   }
+  const observed = tools.get(item.callId);
+  if (observed?.phase === "completed") return;
+  tools.finish(
+    item.callId,
+    { name: item.name, call: completedToolCall(item, detail, observed, ambiguousEdit) },
+    toolResult(item.status === "completed" ? "ok" : "error", detailOutput(detail)),
+  );
 }
 
 function timelineNarration(item: AgentTimelineItem, tools: ToolObservations, emit: Emit): void {
-  switch (item.type) {
-    case "tool_call": {
-      const { detail } = item;
-      // The ACP mapper's edit/delete projection substitutes its display title
-      // for a missing path and puts ordinary result text in the patch field.
-      const ambiguousEdit = detail.type === "edit" && (item.metadata?.kind === "edit" || item.metadata?.kind === "delete");
-      if (item.status === "running") {
-        tools.start(item.callId, { name: item.name, call: ambiguousEdit ? otherToolCall(item.name) : toolCall(item) });
-        return;
-      }
-      const observed = tools.get(item.callId);
-      if (observed?.phase === "completed") return;
-      const previousCall = observed?.call;
-      const change = previousCall?.kind === "fileChange" ? previousCall.changes[0] : undefined;
-      let call = previousCall ?? otherToolCall(item.name);
-      if (observed !== undefined && detail.type === "unknown") {
-        call = otherToolCall(item.name, detail.input);
-      } else if (!ambiguousEdit && detail.type === "edit" && change?.path === detail.filePath) {
-        const patch = stringValue(detail.unifiedDiff);
-        if (patch !== undefined) call = { kind: "fileChange", changes: [observedChange(change.op, change.path, patch)] };
-      }
-      tools.finish(
-        item.callId,
-        { name: item.name, call },
-        toolResult(item.status === "completed" ? "ok" : "error", detailOutput(detail)),
-      );
-      return;
-    }
-    case "error":
-      emit({ type: "note", text: item.message });
-      return;
-    case "compaction":
-      if (item.status === "completed") emit({ type: "note", text: "Context compacted" });
-      return;
-    default:
-      return;
-  }
+  if (item.type === "tool_call") return narrateToolCall(item, tools);
+  if (item.type === "error") return emit({ type: "note", text: item.message });
+  if (item.type === "compaction" && item.status === "completed") emit({ type: "note", text: "Context compacted" });
 }
 
 /** Live fragments belong to a canonical admitted turn, not agent-wide status. */

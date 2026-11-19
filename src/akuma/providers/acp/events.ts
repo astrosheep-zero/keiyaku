@@ -50,11 +50,9 @@ function appendBlock(
 }
 
 function locationCall(locations: readonly ToolCallLocation[] | null | undefined): ToolCall | undefined {
-  for (const location of locations ?? []) {
-    const call = readToolCall(location.path, location.line);
-    if (call !== undefined) return call;
-  }
-  return undefined;
+  return (locations ?? [])
+    .map((location) => readToolCall(location.path, location.line))
+    .find((call) => call !== undefined);
 }
 
 /** Only native text blocks or a raw string are observed output. */
@@ -73,6 +71,14 @@ function standardCall(update: AcpToolUpdate): ToolCall | undefined {
   return command === undefined ? undefined : { kind: "run", command };
 }
 
+function toolContinuation(update: AcpToolUpdate, state: AcpEventState) {
+  const previous = state.tools.get(update.toolCallId);
+  if (previous?.phase === "completed") return undefined;
+  const finished = update.status === "completed" || update.status === "failed";
+  if (!finished && previous === undefined && update.sessionUpdate === "tool_call_update") return undefined;
+  return { previous, finished };
+}
+
 export function emitAcpUpdate(
   update: SessionUpdate,
   state: AcpEventState,
@@ -89,10 +95,9 @@ export function emitAcpUpdate(
       return;
     case "tool_call":
     case "tool_call_update": {
-      const previous = state.tools.get(update.toolCallId);
-      if (previous?.phase === "completed") return;
-      const finished = update.status === "completed" || update.status === "failed";
-      if (!finished && previous === undefined && update.sessionUpdate === "tool_call_update") return;
+      const continuation = toolContinuation(update, state);
+      if (continuation === undefined) return;
+      const { previous, finished } = continuation;
       const name = nonblank(update.name) ?? nonblank(update.title) ?? previous?.name ?? "ACP tool";
       const call = standardCall(update) ?? interpret?.(update) ?? otherToolCall(name, update.rawInput);
       const observed = { name, call };
@@ -100,9 +105,7 @@ export function emitAcpUpdate(
       if (finished) {
         const result = toolResult(update.status === "completed" ? "ok" : "error", verifiedToolOutput(update));
         state.tools.finish(update.toolCallId, observed, result);
-      } else {
-        state.tools.start(update.toolCallId, observed);
-      }
+      } else state.tools.start(update.toolCallId, observed);
       return;
     }
     case "user_message_chunk":
